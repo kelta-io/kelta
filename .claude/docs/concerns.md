@@ -891,6 +891,43 @@ Regression guard: `TenantAwareDataSourceTest` asserts tenant connections use tra
 
 ## Test Coverage Gaps
 
+- **FIXED (2026-09-09) — `kelta-ui/app`'s 223 test files / ~2,700 tests never ran, and could not
+  have.** Two independent failures stacked. (1) Neither workflow invoked `npm run test` for
+  `kelta-ui/app`: `ci.yml`'s `test-frontend` ran the full lint/typecheck/format/coverage set in
+  **`kelta-web`** (57 files) and then only `npm run typecheck` for `kelta-ui/app`, while the
+  deploy workflow's copy of the job did not touch `kelta-ui/app` **at all** — so the admin/builder
+  and end-user UI, the page builder, record shell, kanban/calendar/gallery, realtime client and
+  saved views were validated nowhere on `main`. (2) Even had it been invoked, `NODE_VERSION` was
+  pinned to **18**, where jsdom's `html-encoding-sniffer` `require()`s an ES module: all 223 files
+  die with `ERR_REQUIRE_ESM` during environment setup, reporting `Test Files no tests / Errors 223`
+  — zero tests executed. Verified by running the suite three ways: Node 18 → 223 errors, 0 tests;
+  Node 20.20.2 and Node 22 → **223 files passed, 2,684 passed / 34 skipped**. The suite was healthy
+  the whole time; nothing could run it.
+  Fix: `NODE_VERSION` 18 → **20** (matching `kelta-ui/Dockerfile`'s `node:20-alpine`, which CI was
+  *not* validating against), a `Test kelta-ui` step in both workflows, and `engines.node >= 20.19.0`
+  on `kelta-ui/app` so the floor is declared rather than implied. `test-frontend` is already in
+  `quality-gate` and `build-and-push`, so the new steps block on failure without extra wiring.
+  **Note this invalidated a safety net other entries lean on**: the page-builder action-runtime
+  note below cites Vitest coverage of `runtime/executeAction.ts` as the guard — those tests live in
+  `kelta-ui/app` and had never executed.
+  **Lesson, the second time this exact shape has appeared** (see the runtime-modules entry above):
+  a suite existing, compiling, and typechecking is not coverage. Check that some job actually runs
+  it, and that the runtime it runs under can start it.
+  **One test had to be fixed before the suite could be a gate.**
+  `ApprovalProcessesPage.test.tsx` failed 2 of 3 consecutive local runs — never Node-specific, just
+  a race. Its wait was decorative:
+  `waitFor(() => expect(screen.queryByLabelText(/loading/i)).not.toBeInTheDocument())` can never
+  match, because `LoadingSpinner` renders its `label` as visible **text**, not an `aria-label`. The
+  query returned null on the first tick, the assertion passed, and all four tests ran **while the
+  page was still loading**, racing the mocked fetch — winning on a fast machine, losing under
+  contention. Replaced with `await screen.findByTestId('add-approval-process-button')` (a wait that
+  actually waits) plus `findBy*` for every element that only mounts after a click. 6/6 green after.
+  The pattern was confined to this one file. **This is the "assertion that doesn't assert" family
+  again** — same shape as the credential-audit tests that verified a value reached a mocked
+  `JdbcTemplate` while Postgres rejected every row. A blocking gate has to be *reliably* green, not
+  green once: enabling a flaky suite trades "never runs" for "main goes red at random", which is a
+  deploy outage, not a test nuisance.
+
 - **FIXED — the runtime modules' tests never ran in CI.** Both `ci.yml` and
   `build-and-publish-containers.yml` built `kelta-platform/runtime/*` with **`-DskipTests`** and
   then ran `mvn verify` against `kelta-<service>` only. So ~1,900 tests across the seven runtime
