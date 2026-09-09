@@ -116,3 +116,4 @@ mvn clean install -DskipTests -f kelta-platform/pom.xml \
 - Mockito 5.21, Testcontainers 1.19.3, jqwik 1.8.2
 
 <!-- CI cache validation run 1 2026-09-09T03:39Z — do not merge -->
+<!-- warm-cache run 03:52:50Z -->
