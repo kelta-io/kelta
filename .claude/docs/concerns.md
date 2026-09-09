@@ -78,14 +78,30 @@ would notice, so the test fails on any change — update it deliberately, and co
 endpoint carries its own trust anchor, since an unauthenticated path also bypasses
 `TenantIpAllowlistFilter`.
 
-**`TenantContext.runAsPlatform`/`callAsPlatform` is a silent-data-loss trap (2026-07-04).**
-The javadoc claims a `platform_bypass` RLS policy grants access under the `__platform__`
-sentinel — **that policy does not exist in any migration**. `TenantAwareDataSource` binds the
-sentinel as a literal tenant id, so `tenant_isolation` matches nothing and `admin_bypass`
-(empty-string) doesn't apply: every RLS-scoped read returns zero rows and writes are dropped.
-The sandbox/promotion services deliberately use explicit `callWithTenant(<uuid>, …)` per hop
-instead. Do not introduce new `runAsPlatform` callers until a real `platform_bypass` policy is
-migrated onto every RLS table.
+**FIXED (2026-09-09) — `TenantContext.runAsPlatform`/`callAsPlatform` was a silent-data-loss
+trap, and `CLAUDE.md` Rule 3 recommended it.** The javadoc claimed a `platform_bypass` RLS
+policy granted access under the `__platform__` sentinel — **that policy existed in no
+migration**. The bypass is the opposite shape: every table carries
+`CREATE POLICY admin_bypass ... USING (current_setting('app.current_tenant_id', true) = '')`,
+i.e. it needs the setting **empty**, which `TenantAwareDataSourceConfig` issues only when *no*
+tenant is bound. Binding the sentinel therefore matched neither `admin_bypass` (needs `''`)
+nor `tenant_isolation` (no tenant owns that id): every RLS-scoped read returned zero rows and
+every write was silently dropped. **Binding a sentinel is what breaks the bypass** — the
+javadoc had the mechanism backwards.
+
+Nobody had been bitten because the methods had **zero production callers** (the only mentions
+were javadocs in `SandboxProvisioningService` / `MetadataPromotionService` explaining why they
+deliberately loop `callWithTenant(<uuid>, …)` instead) — while `CLAUDE.md` Critical Rule 3, the
+first thing an agent reads, said "Cross-tenant/system work uses `TenantContext.runAsPlatform(...)`".
+So the guide pointed at a loaded gun nobody had yet fired. Removed `runAsPlatform`,
+`callAsPlatform`, `PLATFORM_SENTINEL` and the dead `isPlatform()` (also zero callers, and
+unreachable once nothing binds the sentinel); rewrote the `TenantContext` class javadoc and
+Rule 3 to state the real mechanism. **Do not reintroduce a sentinel-binding helper without
+first migrating a policy that actually matches it.**
+
+**Lesson: zero callers is the cheapest moment to remove a trap, not a reason to leave it.**
+A dangerous API with no users costs nothing to delete and everything to keep — and this one
+was actively advertised by the project's primary guide.
 
 **Sandbox environments + metadata promotion are a destructive prod-config surface (V158).**
 Guardrails that MUST stay intact:

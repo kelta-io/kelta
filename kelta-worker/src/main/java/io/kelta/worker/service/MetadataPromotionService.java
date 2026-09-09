@@ -31,9 +31,9 @@ import java.util.*;
  * remain movable only via the explicit {@code /api/packages} surface.
  *
  * <p>Tenant-context discipline: all cross-tenant hops are explicit
- * {@code callWithTenant} with concrete tenant ids; {@code runAsPlatform} is
- * never used (no RLS policy matches its sentinel — reads under it return
- * zero rows).
+ * {@code callWithTenant} with concrete tenant ids — the only shape that works.
+ * A sentinel-binding {@code runAsPlatform} helper used to exist and matched no
+ * RLS policy (reads returned zero rows silently); it was removed 2026-09-09.
  */
 @Service
 public class MetadataPromotionService {

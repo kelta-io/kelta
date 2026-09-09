@@ -507,9 +507,11 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   (`CerbosPermissionResolver.getProfileId` + `BootstrapRepository.findProfileSystemPermissions`,
   fail-closed 403). Creator/approver/executor identity comes from the gateway-forwarded
   `X-User-Id` header — never from the request body. Cross-tenant work inside these services
-  uses explicit `TenantContext.callWithTenant(<uuid>, …)`; **never `runAsPlatform`** — no RLS
-  policy matches the `__platform__` sentinel, so reads under it silently return zero rows
-  (see concerns.md).
+  uses explicit `TenantContext.callWithTenant(<uuid>, …)`, once per tenant. There is no
+  "run as platform" helper — `runAsPlatform`/`callAsPlatform` were removed 2026-09-09 because
+  binding a sentinel matches no RLS policy and silently returned zero rows. The bypass is keyed
+  on an **empty** `app.current_tenant_id` (`admin_bypass`), which is what an unbound context
+  produces (see concerns.md).
 
 **Worker-side system-permission check — how (use the existing pattern, don't reinvent):**
 - Enforce a specific system permission **in the controller/service** with a DB lookup against

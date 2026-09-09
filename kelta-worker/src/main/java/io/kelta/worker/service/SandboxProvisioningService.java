@@ -31,9 +31,9 @@ import java.util.regex.Pattern;
  *
  * <p>Tenant-context discipline: cross-tenant hops are always explicit
  * {@link TenantContext#callWithTenant}/{@link TenantContext#runWithTenant} with
- * concrete tenant ids. The {@code __platform__} sentinel
- * ({@code runAsPlatform}) is never used here — no RLS policy matches it, so
- * reads under it silently return zero rows.
+ * concrete tenant ids — the only shape that works. A sentinel-binding
+ * {@code runAsPlatform} helper used to exist and matched no RLS policy (reads
+ * returned zero rows silently); it was removed 2026-09-09.
  */
 @Service
 public class SandboxProvisioningService {
