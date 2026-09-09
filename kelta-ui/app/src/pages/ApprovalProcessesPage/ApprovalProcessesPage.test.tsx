@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApprovalProcessesPage } from './ApprovalProcessesPage'
 import {
@@ -41,6 +41,15 @@ vi.mock('../../components/FieldExpressionPicker', () => ({
   ),
 }))
 
+// Waiting is done with findBy*, never waitFor(queryByLabelText(/loading/i)). That old guard
+// never waited: LoadingSpinner renders its `label` as visible TEXT, not an aria-label, so
+// getByLabelText matched nothing and the assertion passed on the first tick while the page
+// was still loading. Every test then raced the mocked fetch and lost under CPU contention.
+// Post-click elements are queried with findBy*, not getBy*. The picker and the
+// create-form fields mount as a result of the preceding userEvent.click, so a
+// synchronous getBy* asserts before React has committed and fails under CPU
+// contention — this file failed 2 of 3 consecutive local runs that way, the same
+// shape as the Chat.test.tsx starvation flake in concerns.md.
 describe('ApprovalProcessesPage – FieldExpressionPicker adoption', () => {
   beforeEach(() => {
     setupAuthMocks()
@@ -58,15 +67,10 @@ describe('ApprovalProcessesPage – FieldExpressionPicker adoption', () => {
       </Wrapper>
     )
 
-    // Wait for the page to load (no spinner)
-    await waitFor(() => expect(screen.queryByLabelText(/loading/i)).not.toBeInTheDocument(), {
-      timeout: 3000,
-    })
-
     // Open the create form
-    await userEvent.click(screen.getByTestId('add-approval-process-button'))
+    await userEvent.click(await screen.findByTestId('add-approval-process-button'))
 
-    expect(screen.getByTestId('entry-criteria-insert-field')).toBeInTheDocument()
+    expect(await screen.findByTestId('entry-criteria-insert-field')).toBeInTheDocument()
   })
 
   it('opens the picker with mode=expression when Insert field is clicked', async () => {
@@ -77,14 +81,10 @@ describe('ApprovalProcessesPage – FieldExpressionPicker adoption', () => {
       </Wrapper>
     )
 
-    await waitFor(() => expect(screen.queryByLabelText(/loading/i)).not.toBeInTheDocument(), {
-      timeout: 3000,
-    })
+    await userEvent.click(await screen.findByTestId('add-approval-process-button'))
+    await userEvent.click(await screen.findByTestId('entry-criteria-insert-field'))
 
-    await userEvent.click(screen.getByTestId('add-approval-process-button'))
-    await userEvent.click(screen.getByTestId('entry-criteria-insert-field'))
-
-    const picker = screen.getByTestId('approval-entry-criteria-picker')
+    const picker = await screen.findByTestId('approval-entry-criteria-picker')
     expect(picker).toBeInTheDocument()
     expect(picker).toHaveAttribute('data-mode', 'expression')
   })
@@ -97,20 +97,16 @@ describe('ApprovalProcessesPage – FieldExpressionPicker adoption', () => {
       </Wrapper>
     )
 
-    await waitFor(() => expect(screen.queryByLabelText(/loading/i)).not.toBeInTheDocument(), {
-      timeout: 3000,
-    })
-
-    await userEvent.click(screen.getByTestId('add-approval-process-button'))
+    await userEvent.click(await screen.findByTestId('add-approval-process-button'))
 
     // Type a collection id into the collection field
-    const collectionInput = screen.getByTestId('approval-process-collection-id-input')
+    const collectionInput = await screen.findByTestId('approval-process-collection-id-input')
     await userEvent.clear(collectionInput)
     await userEvent.type(collectionInput, 'col-invoices')
 
-    await userEvent.click(screen.getByTestId('entry-criteria-insert-field'))
+    await userEvent.click(await screen.findByTestId('entry-criteria-insert-field'))
 
-    expect(screen.getByTestId('approval-entry-criteria-picker')).toHaveAttribute(
+    expect(await screen.findByTestId('approval-entry-criteria-picker')).toHaveAttribute(
       'data-collection-id',
       'col-invoices'
     )
@@ -124,17 +120,13 @@ describe('ApprovalProcessesPage – FieldExpressionPicker adoption', () => {
       </Wrapper>
     )
 
-    await waitFor(() => expect(screen.queryByLabelText(/loading/i)).not.toBeInTheDocument(), {
-      timeout: 3000,
-    })
+    await userEvent.click(await screen.findByTestId('add-approval-process-button'))
+    await userEvent.click(await screen.findByTestId('entry-criteria-insert-field'))
+    await userEvent.click(await screen.findByText('Insert status'))
 
-    await userEvent.click(screen.getByTestId('add-approval-process-button'))
-    await userEvent.click(screen.getByTestId('entry-criteria-insert-field'))
-    await userEvent.click(screen.getByText('Insert status'))
-
-    const textarea = screen.getByTestId(
+    const textarea = (await screen.findByTestId(
       'approval-process-entry-criteria-input'
-    ) as HTMLTextAreaElement
+    )) as HTMLTextAreaElement
     expect(textarea.value).toBe('status')
   })
 })
