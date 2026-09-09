@@ -117,3 +117,4 @@ mvn clean install -DskipTests -f kelta-platform/pom.xml \
 
 <!-- CI cache validation run 1 2026-09-09T03:39Z — do not merge -->
 <!-- warm-cache run 03:52:50Z -->
+<!-- post-restart run 04:06:27Z -->
