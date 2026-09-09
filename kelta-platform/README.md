@@ -114,3 +114,5 @@ mvn clean install -DskipTests -f kelta-platform/pom.xml \
 - NATS (jnats), Spring Data Redis, Spring Data JDBC
 - PostgreSQL, Jackson
 - Mockito 5.21, Testcontainers 1.19.3, jqwik 1.8.2
+
+<!-- CI fabric exercise 2026-09-09T03:15Z — do not merge -->
