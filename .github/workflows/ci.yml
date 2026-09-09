@@ -11,7 +11,11 @@ concurrency:
 
 env:
   JAVA_VERSION: '25'
-  NODE_VERSION: '18'
+  # 20 to match kelta-ui/Dockerfile (node:20-alpine) — CI was validating against a Node
+  # the shipped image is not built with. It is also the floor for kelta-ui/app's vitest
+  # suite: on 18, jsdom's html-encoding-sniffer require()s an ES module, so all 223 test
+  # files fail to start (ERR_REQUIRE_ESM) before a single test runs.
+  NODE_VERSION: '20'
   MAVEN_VERSION: '3.9.9'
   # Survive transient Maven Central 429 / 503 / connection resets. Both the
   # legacy wagon HTTP transport and the newer Aether connector retry up to 10
@@ -362,6 +366,13 @@ jobs:
       - name: Type check kelta-ui
         working-directory: kelta-ui/app
         run: npm run typecheck
+
+      # kelta-ui/app carries 223 vitest files / ~2,700 tests — the admin+builder and
+      # end-user UI, the page builder, record shell, realtime client. Until this step
+      # existed the job only typechecked them, so none of it ever gated anything.
+      - name: Test kelta-ui
+        working-directory: kelta-ui/app
+        run: npm run test:run
 
       - name: Upload coverage report
         continue-on-error: true
