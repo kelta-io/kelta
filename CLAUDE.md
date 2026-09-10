@@ -58,9 +58,16 @@ Then run the **Definition of Done** check (in Task Workflow) before declaring do
 
 3. **Tenant isolation is mandatory.** Every data path runs under a tenant. Use
    `TenantContext.runWithTenant(...)` / `callWithTenant(...)` (ScopedValue, virtual-thread
-   safe). Cross-tenant/system work uses `TenantContext.runAsPlatform(...)`. Postgres RLS
-   enforces it via the transaction-scoped `app.current_tenant_id` (PgBouncer-safe).
-   Never bypass with raw queries that drop the tenant filter.
+   safe). Postgres RLS enforces it via the transaction-scoped `app.current_tenant_id`
+   (PgBouncer-safe). Never bypass with raw queries that drop the tenant filter.
+   **Cross-tenant work: loop `callWithTenant(<uuid>, …)` per tenant** — that is what
+   `SandboxProvisioningService` / `MetadataPromotionService` do. There is no
+   "run as platform" helper: the RLS bypass is keyed on an **empty** setting
+   (`admin_bypass` is `USING (current_setting('app.current_tenant_id', true) = '')`), which
+   `TenantAwareDataSourceConfig` issues only when **no** tenant is bound — so genuine
+   platform paths (Flyway, bootstrap) just leave the context unbound. Binding any sentinel
+   value matches no policy and silently returns zero rows; `runAsPlatform`/`callAsPlatform`
+   did exactly that and were removed (see `concerns.md`).
 
 4. **Never commit to `main`.** Feature branch + PR + `/verify` green before review.
 

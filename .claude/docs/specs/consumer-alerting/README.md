@@ -207,9 +207,9 @@ Every new stream gets its own `ensureStream(...)` in `JetStreamInitializer`; eve
 - **Injection guards:** `billing_entitlement_rule.count_filter` field names are validated
   against the collection field registry and values always bound as params. Never log payment
   payloads beyond ids.
-- **`runAsPlatform` is a known silent-data-loss trap** (no `platform_bypass` RLS policy) — the
-  webhook and matcher paths use explicit-tenantId repositories or `callWithTenant`, never
-  `runAsPlatform`.
+- **Cross-tenant access is per-tenant `callWithTenant`, never a sentinel.** The webhook and
+  matcher paths use explicit-tenantId repositories or `callWithTenant`. `runAsPlatform` was a
+  silent-data-loss trap (no matching RLS policy) and was removed 2026-09-09.
 
 ## Poller contract
 

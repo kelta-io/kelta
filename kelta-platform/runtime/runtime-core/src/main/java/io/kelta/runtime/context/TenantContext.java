@@ -12,21 +12,28 @@ package io.kelta.runtime.context;
  * <b>Legacy usage:</b> {@link #set}/{@link #clear} still work via ThreadLocal
  * but are deprecated and will be removed in a future release.
  * <p>
- * <b>Platform scope:</b> A small number of internal entry points — Flyway migrations,
- * bootstrap controllers, and scheduled cross-tenant jobs — legitimately need to bypass
- * tenant isolation. These paths use {@link #runAsPlatform} / {@link #callAsPlatform},
- * which binds the reserved {@value #PLATFORM_SENTINEL} value. The matching RLS policy
- * grants full access only when this sentinel is bound; any blank/unset context is
- * rejected by {@code TenantAwareDataSource} before a query can run.
+ * <b>Cross-tenant work:</b> there is no "platform scope" helper, and binding a sentinel
+ * tenant id is the one thing that will not work. The RLS bypass is keyed on an
+ * <em>empty</em> setting — every table's policy reads
+ * {@code USING (current_setting('app.current_tenant_id', true) = '')} — and
+ * {@code TenantAwareDataSourceConfig} issues {@code SET app.current_tenant_id = ''}
+ * precisely when no tenant is bound. So the two supported idioms are:
+ * <ul>
+ *   <li><b>Preferred:</b> {@link #callWithTenant}/{@link #runWithTenant} with a concrete
+ *       tenant id, once per tenant. {@code SandboxProvisioningService} and
+ *       {@code MetadataPromotionService} both do this deliberately.</li>
+ *   <li><b>Genuine platform paths</b> (Flyway, bootstrap) simply leave the context
+ *       <em>unbound</em>, which is what selects {@code admin_bypass}.</li>
+ * </ul>
+ * A {@code runAsPlatform}/{@code callAsPlatform} pair used to live here and bound a
+ * {@code "__platform__"} sentinel, documented as matching a {@code platform_bypass} policy.
+ * That policy was never migrated, and the sentinel matches neither {@code admin_bypass}
+ * (which needs the empty string) nor {@code tenant_isolation} (no tenant owns that id), so
+ * every RLS-scoped read returned zero rows and every write was silently dropped. Removed
+ * 2026-09-09 with no production callers; see {@code concerns.md}. Do not reintroduce a
+ * sentinel-binding helper without first migrating a policy that actually matches it.
  */
 public final class TenantContext {
-
-    /**
-     * Reserved tenant-ID value that identifies platform-internal execution. The
-     * database RLS policies explicitly match against this sentinel — an empty or
-     * null {@code current_tenant_id} does <em>not</em> grant access.
-     */
-    public static final String PLATFORM_SENTINEL = "__platform__";
 
     // ScopedValue-based (preferred, virtual-thread safe)
     public static final ScopedValue<String> CURRENT_TENANT = ScopedValue.newInstance();
@@ -50,13 +57,6 @@ public final class TenantContext {
      */
     public static String getSlug() {
         return CURRENT_TENANT_SLUG.isBound() ? CURRENT_TENANT_SLUG.get() : LEGACY_TENANT_SLUG.get();
-    }
-
-    /**
-     * Returns true if the current scope is running under the reserved platform sentinel.
-     */
-    public static boolean isPlatform() {
-        return PLATFORM_SENTINEL.equals(get());
     }
 
     // ── Modern ScopedValue API (preferred) ──────────────────────────────
@@ -92,23 +92,6 @@ public final class TenantContext {
         return ScopedValue.where(CURRENT_TENANT, tenantId)
                           .where(CURRENT_TENANT_SLUG, tenantSlug)
                           .call(operation);
-    }
-
-    /**
-     * Executes {@code operation} under the reserved platform sentinel, granting
-     * cross-tenant access via the {@code platform_bypass} RLS policy. Reserve this
-     * for Flyway, bootstrap, and scheduled jobs that genuinely operate across
-     * all tenants — never for code paths that receive a real tenant ID.
-     */
-    public static void runAsPlatform(Runnable operation) {
-        ScopedValue.where(CURRENT_TENANT, PLATFORM_SENTINEL).run(operation);
-    }
-
-    /**
-     * Callable variant of {@link #runAsPlatform}.
-     */
-    public static <T> T callAsPlatform(ScopedValue.CallableOp<T, RuntimeException> operation) {
-        return ScopedValue.where(CURRENT_TENANT, PLATFORM_SENTINEL).call(operation);
     }
 
     // ── Legacy ThreadLocal API (deprecated) ─────────────────────────────
