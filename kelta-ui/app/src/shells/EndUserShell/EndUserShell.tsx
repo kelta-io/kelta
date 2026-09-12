@@ -24,6 +24,7 @@ import { usePreferenceValue } from '@/hooks/usePreferenceStore'
 import { usePendingApprovalsCount } from '@/hooks/useMyApprovals'
 import { useUnreadChatCount } from '@/hooks/useChat'
 import { initPushNotifications } from '@/push/deviceRegistration'
+import { rememberTenant } from '@/lib/recentTenants'
 import { PageLoader } from '@/components/PageLoader'
 import { SkipLinks } from '@/components/SkipLinks'
 
@@ -43,6 +44,14 @@ export function EndUserShell(): React.ReactElement {
   useEffect(() => {
     void initPushNotifications(apiClient)
   }, [apiClient])
+
+  // Remember this tenant and user so the slug-less root can offer them next time. Runs again
+  // once branding loads so the workspace gets its display name rather than just its slug.
+  useEffect(() => {
+    if (tenantSlug) {
+      rememberTenant(tenantSlug, user ?? undefined, config?.branding?.applicationName)
+    }
+  }, [tenantSlug, user, config?.branding?.applicationName])
 
   // Apps (nav v2): an app IS a ui-menu. Render ONE active app's items; the
   // selection persists per user (server-backed preference, localStorage mirror).
