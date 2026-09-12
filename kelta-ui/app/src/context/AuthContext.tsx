@@ -505,6 +505,13 @@ export function AuthProvider({
           authUrl.searchParams.set('idp_hint', hint)
         }
 
+        // A remembered-user link from the slug-less root carries ?login_hint=<email>. Standard
+        // OIDC; the IdP may pre-fill the identifier or ignore it. Passed only when well-formed.
+        const loginHint = new URLSearchParams(window.location.search).get('login_hint')
+        if (loginHint && /^[^\s@]+@[^\s@]+$/.test(loginHint)) {
+          authUrl.searchParams.set('login_hint', loginHint)
+        }
+
         // If user just logged out, force the IdP to show the login form
         // instead of silently re-authenticating with the existing session
         if (sessionStorage.getItem(STORAGE_KEYS.JUST_LOGGED_OUT) === 'true') {
