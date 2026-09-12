@@ -566,6 +566,18 @@ public class MailboxAdminController {
         positive(attrs, "sla_first_response_minutes", "slaFirstResponseMinutes");
         positive(attrs, "sla_resolution_minutes", "slaResolutionMinutes");
         positive(attrs, "max_auto_replies_per_thread", "maxAutoRepliesPerThread");
+        positive(attrs, "max_auto_replies_per_day", "maxAutoRepliesPerDay");
+
+        // The denylist is the auto-reply kill switch per category. It must be a list of plain
+        // category names: a stray object or number in it would not fail the update — jsonb accepts
+        // anything — it would silently stop matching the category it was meant to block.
+        if (attrs.containsKey("auto_reply_blocked_categories")) {
+            Object raw = attrs.get("auto_reply_blocked_categories");
+            if (!(raw instanceof List<?> list)
+                    || list.stream().anyMatch(v -> !(v instanceof String str) || str.isBlank())) {
+                throw badRequest("autoReplyBlockedCategories must be a list of category names");
+            }
+        }
 
         if (attrs.get("sla_risk_threshold_pct") instanceof Number n
                 && (n.intValue() < 1 || n.intValue() > 99)) {
@@ -597,11 +609,18 @@ public class MailboxAdminController {
      * to go after, and nothing in the UI needs them — the hint and the rotation timestamp are
      * what an admin actually reads.
      */
+    /** jsonb columns that hold a list of strings and must be parsed, not passed through. */
+    private static final java.util.Set<String> JSON_LIST_COLUMNS =
+            java.util.Set.of("inbound_allowed_cidrs", "auto_reply_blocked_categories");
+
     private Map<String, Object> project(Map<String, Object> row) {
         Map<String, Object> out = new LinkedHashMap<>();
         COLUMN_TO_CAMEL.forEach((col, camel) -> {
             if (row.containsKey(col)) {
-                out.put(camel, row.get(col));
+                // The driver hands jsonb back as a PGobject; serialised as-is it leaks
+                // {"type":"jsonb","value":"[...]"} into the API instead of the list.
+                out.put(camel, JSON_LIST_COLUMNS.contains(col)
+                        ? parseChannels(row.get(col)) : row.get(col));
             }
         });
         return out;
@@ -680,6 +699,8 @@ public class MailboxAdminController {
         writable.put("auto_reply_enabled", "autoReplyEnabled");
         writable.put("auto_reply_min_confidence", "autoReplyMinConfidence");
         writable.put("max_auto_replies_per_thread", "maxAutoRepliesPerThread");
+        writable.put("max_auto_replies_per_day", "maxAutoRepliesPerDay");
+        writable.put("auto_reply_blocked_categories", "autoReplyBlockedCategories");
         writable.put("ai_draft_enabled", "aiDraftEnabled");
         writable.put("require_verified_sender_for_account_data", "requireVerifiedSenderForAccountData");
         writable.put("default_assignee_id", "defaultAssigneeId");
