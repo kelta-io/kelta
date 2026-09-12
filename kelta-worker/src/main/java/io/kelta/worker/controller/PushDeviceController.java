@@ -1,6 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.worker.service.push.DefaultPushService;
 import io.kelta.worker.service.push.WebPushProvider;
 import io.kelta.worker.interceptor.SelfScopedController;
@@ -32,22 +33,40 @@ public class PushDeviceController implements SelfScopedController {
     private final DefaultPushService pushService;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectProvider<WebPushProvider> webPushProvider;
+    private final UserIdResolver userIdResolver;
 
     public PushDeviceController(DefaultPushService pushService, JdbcTemplate jdbcTemplate,
-                                ObjectProvider<WebPushProvider> webPushProvider) {
+                                ObjectProvider<WebPushProvider> webPushProvider,
+                                UserIdResolver userIdResolver) {
         this.pushService = pushService;
         this.jdbcTemplate = jdbcTemplate;
         // Absent unless VAPID keys are configured.
         this.webPushProvider = webPushProvider;
+        this.userIdResolver = userIdResolver;
+    }
+
+    /**
+     * The gateway stamps {@code X-User-Id} with the user's EMAIL, not their id, while
+     * {@code push_device.user_id} is a foreign key to {@code platform_user(id)}. Storing the
+     * header verbatim was a constraint violation on every call — {@code POST /api/devices} had
+     * never once succeeded, and the table was empty. Resolve before any store or lookup.
+     */
+    private String requireUserId(String header, String tenantId) {
+        String userId = userIdResolver.resolve(header, tenantId);
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("unknown user");
+        }
+        return userId;
     }
 
     @PostMapping("/api/devices")
     public ResponseEntity<?> registerDevice(@RequestBody Map<String, String> body,
-                                             @RequestHeader("X-User-Id") String userId) {
+                                             @RequestHeader("X-User-Id") String userHeader) {
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 
         try {
+            String userId = requireUserId(userHeader, tenantId);
             String subscription = body.get("subscription");
             String deviceId;
             if (subscription != null && !subscription.isBlank()) {
@@ -95,10 +114,12 @@ public class PushDeviceController implements SelfScopedController {
     }
 
     @GetMapping("/api/devices")
-    public ResponseEntity<?> listMyDevices(@RequestHeader("X-User-Id") String userId) {
+    public ResponseEntity<?> listMyDevices(@RequestHeader("X-User-Id") String userHeader) {
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 
+        String userId = userIdResolver.resolve(userHeader, tenantId);
+        if (userId == null) return ResponseEntity.ok(Map.of("data", List.of()));
         List<Map<String, Object>> devices = pushService.listDevices(userId, tenantId);
         return ResponseEntity.ok(Map.of("data", devices));
     }
