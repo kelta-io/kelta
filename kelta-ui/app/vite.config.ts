@@ -29,29 +29,19 @@ export default defineConfig({
         'apple-touch-icon-180x180.png',
         'maskable-icon-192x192.png',
       ],
-      manifest: {
-        name: 'Kelta',
-        short_name: 'Kelta',
-        description: 'Kelta application platform',
-        theme_color: '#0f172a',
-        background_color: '#ffffff',
-        display: 'standalone',
-        start_url: '/',
-        // Raster PNG icons — Android/Chrome install requires PNG (an SVG-only `any maskable`
-        // icon does not reliably render on the home screen). `any` = transparent glyph;
-        // `maskable` = opaque-background + safe-zone padded so platform masks don't clip it.
-        icons: [
-          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-          {
-            src: 'maskable-icon-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'maskable',
-          },
-        ],
-      },
+      // The manifest is NOT generated here — it is the static public/manifest.webmanifest, and
+      // the <link rel="manifest"> is injected at runtime as /{tenantSlug}/manifest.webmanifest
+      // (see useTenantManifest in App.tsx). Relative URLs in a manifest resolve against the
+      // manifest's own URL, so one file yields a tenant-correct start_url for every tenant.
+      // A generated manifest with start_url '/' launched every Home Screen icon at the
+      // slug-less root — and a Home Screen app has its own storage container, so nothing but
+      // the URL can carry the tenant across.
+      manifest: false,
       workbox: {
+        // generateSW owns /sw.js, so push handling cannot live in a hand-written worker — a
+        // public/sw.js is silently overwritten by the build. The handlers are imported into
+        // the generated worker instead. See public/push-handlers.js.
+        importScripts: ['push-handlers.js'],
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         // Admin-only page chunks are emitted under assets/admin/ (see build.rollupOptions
         // below) and kept OUT of the precache — the installable end-user PWA shouldn't

@@ -36,6 +36,7 @@ import { TenantTranslationsBridge } from './components/TenantTranslationsBridge/
 import { PluginProvider } from './context/PluginContext'
 import { TenantProvider, useTenant, isCustomDomainHost } from './context/TenantContext'
 import { AppContextProvider } from './context/AppContext'
+import { useEffect } from 'react'
 import { useAuth } from './context/AuthContext'
 import { AiChatProvider, AiChatPanel, AiChatTrigger } from './components/AiChat'
 
@@ -640,8 +641,33 @@ function AdminPageRoute({
  * 8. ToastProvider - Toast notifications
  * 9. LiveRegionProvider - Screen reader announcements
  */
+/**
+ * Points the browser at a tenant-scoped web app manifest.
+ *
+ * The manifest file is one static asset, but its URLs are relative and resolve against the
+ * manifest's own URL — so serving it as /{slug}/manifest.webmanifest makes start_url "./app"
+ * mean /{slug}/app. That is the only way a Home Screen icon can remember its tenant: an
+ * installed iOS web app gets its own empty storage container, so nothing but the URL survives
+ * the install. On a custom domain the root manifest is right, since routes carry no slug.
+ */
+function useTenantManifest(tenantBasePath: string): void {
+  useEffect(() => {
+    const href = `${tenantBasePath}/manifest.webmanifest`
+    let link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]')
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = 'manifest'
+      document.head.appendChild(link)
+    }
+    if (link.getAttribute('href') !== href) {
+      link.setAttribute('href', href)
+    }
+  }, [tenantBasePath])
+}
+
 function TenantScopedApp({ plugins = [] }: { plugins?: Plugin[] }): React.ReactElement {
   const { tenantBasePath } = useTenant()
+  useTenantManifest(tenantBasePath)
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
   // tenantBasePath is "" on a custom domain, "/<slug>" on the platform host.
   // URLs follow the same rule: callbacks and API base both skip the slug

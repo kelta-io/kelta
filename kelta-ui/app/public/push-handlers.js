@@ -1,17 +1,15 @@
 /*
- * Kelta console service worker.
+ * Push handlers for the Kelta console service worker.
  *
- * Deliberately does NOT precache or intercept fetches. An admin console that serves a stale
- * shell after a deploy is worse than one with no offline mode, and nothing here needs offline.
- * This worker exists for exactly one reason: without a service worker there is no Web Push,
- * and without Web Push a support-mailbox escalation can only reach an agent by email — which
- * Gmail files under "Updates" and nobody sees for nine days.
+ * NOT a service worker of its own. vite-plugin-pwa generates /sw.js (Workbox precache, auto
+ * update) and imports this file into it via workbox.importScripts — a hand-written public/sw.js
+ * is silently overwritten by the build, which is how the first attempt shipped a worker with no
+ * push handler at all. No install/activate listeners here: the generated worker owns lifecycle.
  *
- * Served from /sw.js so its scope is the whole origin and covers every /{tenantSlug}/ route.
+ * This exists for one reason: without a push handler there is no Web Push, and without Web Push
+ * a support-mailbox escalation can only reach an agent by email — which Gmail files under
+ * "Updates" and nobody sees for nine days.
  */
-
-self.addEventListener('install', () => self.skipWaiting())
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
 
 self.addEventListener('push', (event) => {
   let title = 'Kelta'
