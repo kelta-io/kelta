@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { AlertTriangle, Inbox, Mail, Paperclip, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -88,7 +89,10 @@ function senderTrust(message: MailboxMessage | undefined): {
 export function MailboxConsolePage() {
   const [mailboxId, setMailboxId] = useState<string | undefined>(undefined)
   const [tab, setTab] = useState<MailboxView>('open')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // A push notification or escalation email links to ?thread=<id>. Honour it as the initial
+  // selection only — once the agent clicks elsewhere the URL should not drag them back.
+  const [searchParams] = useSearchParams()
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('thread'))
   const [showHtml, setShowHtml] = useState(false)
   const [draft, setDraft] = useState('')
   const [, forceTick] = useState(0)

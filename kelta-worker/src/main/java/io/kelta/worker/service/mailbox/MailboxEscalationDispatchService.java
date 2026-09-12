@@ -63,7 +63,11 @@ public class MailboxEscalationDispatchService {
                                             org.springframework.beans.factory.ObjectProvider<DefaultEmailService> emailServiceProvider,
                                             org.springframework.beans.factory.ObjectProvider<DefaultPushService> pushServiceProvider,
                                             ObjectMapper objectMapper,
-                                            @Value("${kelta.external-base-url:}") String appBaseUrl) {
+                                            // The APP host, not the API host. kelta.external-base-url is
+                                            // the gateway (https://api.kelta.io); a thread link built on it
+                                            // is a 404 with no tenant slug — which is what every
+                                            // escalation email sent before this carried.
+                                            @Value("${kelta.mailbox.app-base-url:${kelta.external-base-url:}}") String appBaseUrl) {
         this.escalationRepository = escalationRepository;
         this.jdbcTemplate = jdbcTemplate;
         // Both are optional beans: email is absent when kelta.email.enabled=false (the test
@@ -143,10 +147,13 @@ public class MailboxEscalationDispatchService {
                 if (pushService == null) {
                     throw new IllegalStateException("push delivery is not configured");
                 }
+                // The service worker opens data.url on tap. Without it the notification can only
+                // focus whatever tab happens to be open, which for a page at 3am is nothing.
                 pushService.sendToUser(userId, tenantId,
                         "[" + escalation.level() + "] " + context.get("mailboxName"),
                         subject,
-                        Map.of("threadId", escalation.threadId(), "kind", "support-escalation"));
+                        Map.of("threadId", escalation.threadId(), "kind", "support-escalation",
+                                "url", String.valueOf(context.getOrDefault("threadUrl", ""))));
             }
             // SMS is deliberately absent for now: it is billable, and nothing in this slice
             // resolves a per-tenant SMS entitlement. The channel CHECK permits it so adding the
@@ -163,15 +170,20 @@ public class MailboxEscalationDispatchService {
         vars.put("clockLabel", "FIRST_RESPONSE".equals(escalation.clock())
                 ? "first response" : "resolution");
         vars.put("dueAt", escalation.dueAt() == null ? "" : escalation.dueAt().toString());
-        vars.put("threadUrl", appBaseUrl.isBlank()
-                ? "" : appBaseUrl + "/app/mailbox?thread=" + escalation.threadId());
-
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-                SELECT t.subject, t.requester_email, m.name AS mailbox_name
+                SELECT t.subject, t.requester_email, m.name AS mailbox_name, tn.slug
                   FROM mailbox_thread t
                   JOIN mailbox m ON m.id = t.mailbox_id
+                  JOIN tenant tn ON tn.id = t.tenant_id
                  WHERE t.id = ? AND t.tenant_id = ?
                 """, escalation.threadId(), tenantId);
+
+        // Console routes are /{slug}/app/..., so a link without the slug lands nowhere.
+        String slug = rows.isEmpty() ? null : (String) rows.getFirst().get("slug");
+        vars.put("threadUrl", appBaseUrl.isBlank() || slug == null || slug.isBlank()
+                ? ""
+                : appBaseUrl.replaceAll("/+$", "") + "/" + slug
+                        + "/app/mailbox?thread=" + escalation.threadId());
 
         if (!rows.isEmpty()) {
             Map<String, Object> row = rows.getFirst();

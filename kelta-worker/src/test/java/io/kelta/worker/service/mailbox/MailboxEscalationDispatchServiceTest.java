@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -76,7 +77,8 @@ class MailboxEscalationDispatchServiceTest {
                 .thenReturn(List.of(Map.of(
                         "subject", "Booking question",
                         "requester_email", "alex@example.com",
-                        "name", "Support")));
+                        "mailbox_name", "Support",
+                        "slug", "acme")));
         // userEmail() uses the queryForList(sql, Class, args) overload, not queryForObject.
         when(jdbcTemplate.queryForList(anyString(), eq(String.class), any(Object[].class)))
                 .thenReturn(List.of("agent@example.com"));
@@ -94,6 +96,22 @@ class MailboxEscalationDispatchServiceTest {
         // sendByName matches on the name column, where this value does not exist.
         verify(emailService, never()).sendByName(anyString(), anyString(), anyString(), any(),
                 anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("The thread link is on the app host and carries the tenant slug")
+    @SuppressWarnings("unchecked")
+    void threadLinkIsUsable() {
+        // Built on kelta.external-base-url this was https://api.kelta.io/app/mailbox?thread=…:
+        // the gateway host, no slug, a 404 in every escalation email ever sent.
+        service.dispatch(escalation);
+
+        org.mockito.ArgumentCaptor<Map<String, Object>> vars =
+                org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(emailService).sendByKey(anyString(), anyString(), anyString(), vars.capture(),
+                anyString(), anyString());
+        assertThat(vars.getValue().get("threadUrl"))
+                .isEqualTo("https://app.example.com/acme/app/mailbox?thread=th-1");
     }
 
     @Test
