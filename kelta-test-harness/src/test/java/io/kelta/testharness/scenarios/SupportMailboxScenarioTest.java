@@ -76,6 +76,26 @@ class SupportMailboxScenarioTest extends ScenarioBase {
                 (Map<String, Object>) ((Map<String, Object>) reread.getBody().get("data")).get("attributes");
         assertThat(rereadAttrs).doesNotContainKey("inboundSecret");
 
+        // The auto-reply denylist is jsonb. A PATCH that binds a Java list to a plain placeholder
+        // returned 200 and persisted nothing — the kill switch could only be changed at a psql
+        // prompt. Only a real Postgres shows the difference between "accepted" and "stored".
+        ResponseEntity<Map> patched = gatewayClientWithToken(token)
+                .patch().uri("/" + slug + "/api/support/mailboxes/" + mailboxId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of(
+                        "autoReplyBlockedCategories", List.of("billing", "alert_quality"),
+                        "maxAutoRepliesPerDay", 7))
+                .retrieve().toEntity(Map.class);
+        assertThat(patched.getStatusCode()).isEqualTo(HttpStatus.OK);
+        Map<String, Object> afterPatch = (Map<String, Object>) ((Map<String, Object>)
+                gatewayClientWithToken(token)
+                        .get().uri("/" + slug + "/api/support/mailboxes/" + mailboxId)
+                        .retrieve().toEntity(Map.class).getBody().get("data")).get("attributes");
+        assertThat(afterPatch.get("autoReplyBlockedCategories"))
+                .as("the denylist must be read back as what was written, not the default")
+                .isEqualTo(List.of("billing", "alert_quality"));
+        assertThat(afterPatch.get("maxAutoRepliesPerDay")).isEqualTo(7);
+
         // A duplicate address is refused rather than silently creating a second mailbox that
         // would split one conversation stream in two.
         assertThat(postExpectingFailure(token, slug, Map.of(

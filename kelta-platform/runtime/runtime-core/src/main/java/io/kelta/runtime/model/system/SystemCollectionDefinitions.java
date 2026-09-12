@@ -1456,6 +1456,10 @@ public final class SystemCollectionDefinitions {
             .addField(FieldDefinition.string("relatedCollectionId")
                 .withColumnName("related_collection_id"))
             .addField(FieldDefinition.string("folder"))
+            // The stable key the platform resolves copy by (EmailRepository.findTemplateByKey,
+            // with tenant -> 'system' fallback). Support-mailbox templates reference their copy
+            // through it, so without this field their copy could only be authored by SQL.
+            .addField(FieldDefinition.string("templateKey").withColumnName("template_key"))
             .addField(FieldDefinition.bool("isActive").withColumnName("is_active"))
             // PR 5 — payload mapper integration
             .addField(FieldDefinition.json("variablesSchema").withColumnName("variables_schema"))

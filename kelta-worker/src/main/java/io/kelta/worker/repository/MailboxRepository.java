@@ -2,6 +2,7 @@ package io.kelta.worker.repository;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -34,13 +35,25 @@ public class MailboxRepository {
             "subject_threading_days", "sla_first_response_minutes", "sla_resolution_minutes",
             "sla_risk_threshold_pct", "business_timezone", "escalation_user_id",
             "escalation_group_id", "auto_reply_enabled", "auto_reply_min_confidence",
-            "max_auto_replies_per_thread", "ai_draft_enabled",
+            "max_auto_replies_per_thread", "max_auto_replies_per_day",
+            "auto_reply_blocked_categories", "ai_draft_enabled",
             "require_verified_sender_for_account_data", "default_assignee_id", "active");
 
-    private final JdbcTemplate jdbcTemplate;
+    /**
+     * Writable columns whose type is {@code jsonb}. A Java list bound to a plain {@code ?} is not
+     * something the driver can hand Postgres for a jsonb column, so these are serialised and bound
+     * with an explicit cast. Before this existed the PATCH returned 200 and the value was dropped —
+     * the kill-switch list for auto-reply could only be changed at a psql prompt.
+     */
+    private static final List<String> JSON_COLUMNS =
+            List.of("inbound_allowed_cidrs", "auto_reply_blocked_categories");
 
-    public MailboxRepository(JdbcTemplate jdbcTemplate) {
+    private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
+
+    public MailboxRepository(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -119,8 +132,13 @@ public class MailboxRepository {
 
         for (String col : WRITABLE) {
             if (attrs.containsKey(col)) {
-                set.append(", ").append(col).append(" = ?");
-                args.add(attrs.get(col));
+                if (JSON_COLUMNS.contains(col)) {
+                    set.append(", ").append(col).append(" = ?::jsonb");
+                    args.add(json(attrs.get(col)));
+                } else {
+                    set.append(", ").append(col).append(" = ?");
+                    args.add(attrs.get(col));
+                }
             }
         }
         if (args.size() == 1) {
@@ -130,6 +148,14 @@ public class MailboxRepository {
         args.add(tenantId);
         return jdbcTemplate.update(
                 "UPDATE mailbox SET " + set + " WHERE id = ? AND tenant_id = ?", args.toArray());
+    }
+
+    private String json(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value == null ? List.of() : value);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("value is not serialisable as JSON", e);
+        }
     }
 
     /**
