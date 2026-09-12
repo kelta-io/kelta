@@ -35,6 +35,7 @@ class MetadataPromotionServiceTest {
     private PackageRepository packageRepository;
     private RemotePromotionClient remotePromotionClient;
     private SetupAuditService setupAuditService;
+    private io.kelta.runtime.router.UserIdResolver userIdResolver;
     private PlatformEventPublisher eventPublisher;
     private MetadataPromotionService service;
 
@@ -49,12 +50,16 @@ class MetadataPromotionServiceTest {
         packageRepository = mock(PackageRepository.class);
         remotePromotionClient = mock(RemotePromotionClient.class);
         setupAuditService = mock(SetupAuditService.class);
+        userIdResolver = mock(io.kelta.runtime.router.UserIdResolver.class);
+        // Existing tests pass ids; only the audit case below exercises email resolution.
+        org.mockito.Mockito.lenient().when(userIdResolver.resolve(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
         eventPublisher = mock(PlatformEventPublisher.class);
 
         service = new MetadataPromotionService(promotionRepository, environmentRepository,
                 sandboxEnvironmentService, provisioningService, packageService, packageImportService,
                 packageRepository, remotePromotionClient, setupAuditService,
-                new ObjectMapper(), eventPublisher);
+                new ObjectMapper(), eventPublisher, userIdResolver);
     }
 
     private Map<String, Object> sandboxSource() {
@@ -505,6 +510,34 @@ class MetadataPromotionServiceTest {
                             && !opts.dryRun()
                             && "user-2".equals(opts.executingUserId())));
             verify(promotionRepository).markRolledBack("promo-1");
+        }
+
+        @Test
+        @DisplayName("audits under the resolved platform_user.id, not the X-User-Id email")
+        void auditsUnderResolvedId() {
+            // setup_audit_trail.user_id is a foreign key to platform_user(id). Passing the header's
+            // email violated it on every promotion; the catch logged a WARN and production held
+            // zero PROMOTION audit rows. The promotion's own promoted_by stays as the email.
+            Map<String, Object> promo = new java.util.HashMap<>();
+            promo.put("id", "promo-1");
+            promo.put("status", "COMPLETED");
+            promo.put("target_env_id", "env-t");
+            promo.put("target_snapshot_id", "snap-1");
+            when(promotionRepository.findByIdAndTenant("promo-1", TENANT)).thenReturn(Optional.of(promo));
+            when(environmentRepository.findByIdAndTenant("env-t", TENANT))
+                    .thenReturn(Optional.of(productionTarget()));
+            Map<String, Object> snapshotPkg = Map.of("items", List.of());
+            when(sandboxEnvironmentService.snapshotPackage("snap-1", TENANT)).thenReturn(snapshotPkg);
+            when(packageImportService.importPackage(eq(TENANT), eq(snapshotPkg), any()))
+                    .thenReturn(new PackageImportService.ImportReport(0, 0, 0, 0, List.of()));
+            when(userIdResolver.resolve("craig@example.com", TENANT)).thenReturn("uuid-craig");
+
+            service.rollbackPromotion("promo-1", TENANT, "craig@example.com");
+
+            verify(setupAuditService).log(eq(TENANT), eq("uuid-craig"), eq("UPDATED"),
+                    eq("environments"), eq("PROMOTION"), eq("promo-1"), any(), any(), any());
+            verify(setupAuditService, never()).log(any(), eq("craig@example.com"), any(), any(),
+                    any(), any(), any(), any(), any());
         }
     }
 

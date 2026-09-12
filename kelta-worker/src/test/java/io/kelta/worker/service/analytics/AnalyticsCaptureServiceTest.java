@@ -23,12 +23,17 @@ import static org.mockito.Mockito.*;
 class AnalyticsCaptureServiceTest {
 
     private AnalyticsEventRepository repository;
+    private io.kelta.runtime.router.UserIdResolver userIdResolver;
     private AnalyticsCaptureService service;
 
     @BeforeEach
     void setUp() {
         repository = mock(AnalyticsEventRepository.class);
-        service = new AnalyticsCaptureService(repository, new ObjectMapper());
+        userIdResolver = mock(io.kelta.runtime.router.UserIdResolver.class);
+        // Identity by default: existing tests pass ids and expect them stored as-is.
+        org.mockito.Mockito.lenient().when(userIdResolver.resolve(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
+        service = new AnalyticsCaptureService(repository, new ObjectMapper(), userIdResolver);
         TenantContext.set("tenant-1");
     }
 
@@ -141,5 +146,25 @@ class AnalyticsCaptureServiceTest {
 
         assertThat(accepted).isZero();
         verifyNoInteractions(repository);
+    }
+
+    @Test
+    @DisplayName("Resolves the X-User-Id email to platform_user.id before storing member_id")
+    @SuppressWarnings("unchecked")
+    void resolvesEmailToMemberId() {
+        // member_id is varchar(36) and means platform_user.id. Every row in production held an
+        // email — short enough to fit — and one over 36 characters failed the whole batch.
+        org.mockito.Mockito.when(userIdResolver.resolve("a-rather-long.address@example-company.com", "tenant-1"))
+                .thenReturn("uuid-9");
+        org.mockito.ArgumentCaptor<java.util.List<AnalyticsEventRepository.AnalyticsEvent>> rows =
+                org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+
+        service.capture(java.util.List.of(new AnalyticsCaptureService.IncomingEvent(
+                        "page_view", null, null, null, "/", null, null, null, null, null)),
+                "a-rather-long.address@example-company.com");
+
+        org.mockito.Mockito.verify(repository).insertAll(org.mockito.ArgumentMatchers.eq("tenant-1"),
+                org.mockito.ArgumentMatchers.eq("uuid-9"), rows.capture());
+        assertThat(rows.getValue().getFirst().memberId()).isEqualTo("uuid-9");
     }
 }

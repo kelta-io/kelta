@@ -55,6 +55,7 @@ public class MetadataPromotionService {
     private final SetupAuditService setupAuditService;
     private final ObjectMapper objectMapper;
     private final PlatformEventPublisher eventPublisher;
+    private final io.kelta.runtime.router.UserIdResolver userIdResolver;
 
     public MetadataPromotionService(EnvironmentPromotionRepository promotionRepository,
                                     EnvironmentRepository environmentRepository,
@@ -66,7 +67,8 @@ public class MetadataPromotionService {
                                     RemotePromotionClient remotePromotionClient,
                                     SetupAuditService setupAuditService,
                                     ObjectMapper objectMapper,
-                                    PlatformEventPublisher eventPublisher) {
+                                    PlatformEventPublisher eventPublisher,
+                                    io.kelta.runtime.router.UserIdResolver userIdResolver) {
         this.promotionRepository = promotionRepository;
         this.environmentRepository = environmentRepository;
         this.sandboxEnvironmentService = sandboxEnvironmentService;
@@ -78,6 +80,7 @@ public class MetadataPromotionService {
         this.setupAuditService = setupAuditService;
         this.objectMapper = objectMapper;
         this.eventPublisher = eventPublisher;
+        this.userIdResolver = userIdResolver;
     }
 
     /**
@@ -489,8 +492,19 @@ public class MetadataPromotionService {
         if (userId == null || userId.isBlank()) {
             return;
         }
+        // The controller hands us X-User-Id — an email. setup_audit_trail.user_id is a foreign
+        // key to platform_user(id), so the insert below violated it on every promotion, the
+        // catch swallowed it at WARN, and the audit trail held zero PROMOTION rows in
+        // production. approved_by / promoted_by on the promotion row stay as the email: they
+        // are display text, not keys.
+        String actorId = userIdResolver.resolve(userId, tenantId);
+        if (actorId == null || actorId.isBlank()) {
+            log.warn("Promotion {} not audited: actor '{}' does not resolve to a platform user",
+                    promotionId, userId);
+            return;
+        }
         try {
-            setupAuditService.log(tenantId, userId, "UPDATED", "environments", "PROMOTION",
+            setupAuditService.log(tenantId, actorId, "UPDATED", "environments", "PROMOTION",
                     promotionId, String.valueOf(targetEnv.get("name")),
                     null, objectMapper.writeValueAsString(Map.of("detail", detail)));
         } catch (Exception e) {
