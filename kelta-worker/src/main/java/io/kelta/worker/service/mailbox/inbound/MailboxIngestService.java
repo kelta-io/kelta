@@ -8,6 +8,7 @@ import io.kelta.worker.repository.MailboxThreadRepository;
 import io.kelta.worker.service.S3StorageService;
 import io.kelta.worker.service.mailbox.MailboxHtmlSanitizer;
 import io.kelta.worker.service.mailbox.SesInboundMailStore;
+import io.kelta.worker.service.mailbox.UnattendedAddress;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -153,6 +154,13 @@ public class MailboxIngestService {
 
         if (spam || infected) {
             threadRepository.markSpam(tenantId, resolution.threadId());
+        } else if (resolution.created() && unanswerable(mail)) {
+            // No clock. A first-response promise on mail the reply service will refuse to answer
+            // is one the system already knows it cannot keep: it breaches on schedule and pages a
+            // human about a DMARC report, a bounce, or a mailing-list digest. The thread still
+            // exists and is still visible; it just carries no deadline.
+            log.info("Thread {} opened by unanswerable mail from {} — no SLA clock started",
+                    resolution.threadId(), mail.fromAddress());
         } else if (resolution.created()) {
             // The clock starts once, on the thread, at creation — never on a follow-up message,
             // or a chatty customer would keep resetting their own deadline.
@@ -165,6 +173,21 @@ public class MailboxIngestService {
         eventRepository.markRouted(eventId, tenantId, messageId, rawKey);
         log.info("Ingested message {} into thread {} for mailbox {} (new thread: {})",
                 messageId, resolution.threadId(), mailboxId, resolution.created());
+    }
+
+    /**
+     * Mail nobody is waiting on a reply to. Mirrors the refusals in {@code MailboxReplyService}:
+     * an unattended sender, an auto-submitted message, a bounce, or bulk/list mail.
+     */
+    static boolean unanswerable(NormalizedInboundMail mail) {
+        if (UnattendedAddress.isUnattended(mail.fromAddress())) {
+            return true;
+        }
+        String auto = mail.autoSubmitted();
+        if (auto != null && !auto.isBlank() && !"no".equalsIgnoreCase(auto.trim())) {
+            return true;
+        }
+        return mail.bounce() || mail.bulk();
     }
 
     /**

@@ -38,11 +38,6 @@ public class MailboxReplyService {
 
     private static final Logger log = LoggerFactory.getLogger(MailboxReplyService.class);
 
-    /** Local parts that are conventionally unattended. Replying to one is shouting into a void. */
-    private static final List<String> UNATTENDED_LOCAL_PARTS = List.of(
-            "mailer-daemon", "postmaster", "no-reply", "noreply", "do-not-reply", "donotreply",
-            "bounce", "bounces");
-
     private final MailboxRepository mailboxRepository;
     private final MailboxThreadRepository threadRepository;
     private final MailboxMessageRepository messageRepository;
@@ -303,21 +298,13 @@ public class MailboxReplyService {
         return new Result(null, refusal);
     }
 
+    /** Shared with ingest, which declines to start an SLA clock for the same addresses. */
     static boolean isUnattended(String address) {
-        String local = localPart(address);
-        if (local == null) {
-            return false;
-        }
-        String normalized = local.toLowerCase(Locale.ROOT);
-        return UNATTENDED_LOCAL_PARTS.stream().anyMatch(normalized::equals);
+        return UnattendedAddress.isUnattended(address);
     }
 
     static String localPart(String address) {
-        if (address == null) {
-            return null;
-        }
-        int at = address.indexOf('@');
-        return at <= 0 ? null : address.substring(0, at);
+        return UnattendedAddress.localPart(address);
     }
 
     /** Adds one "Re: " and never a second — mail clients already stack them badly enough. */
