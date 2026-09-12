@@ -14,6 +14,7 @@ import {
   BellOff,
   BellRing,
   Globe,
+  Mail,
   Sun,
   Moon,
   Monitor,
@@ -192,6 +193,13 @@ export function UserMenu({
 
   const canViewAnalytics = hasPermission('VIEW_ANALYTICS')
 
+  // The support console is otherwise reachable only by URL. VIEW_SUPPORT_MAILBOX is the "may open
+  // the console" permission; which mailboxes appear inside it is decided by membership, server-side.
+  const canViewMailbox = hasPermission('VIEW_SUPPORT_MAILBOX')
+  const handleNavigateToMailbox = useCallback(() => {
+    navigate(`/${tenantSlug}/app/mailbox`)
+  }, [navigate, tenantSlug])
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -310,6 +318,13 @@ export function UserMenu({
           <CheckSquare className="mr-2 h-4 w-4" />
           {t('navigation.approvals', 'Approvals')}
         </DropdownMenuItem>
+        {/* Support mailbox (permission-gated) */}
+        {variant === 'app' && canViewMailbox && (
+          <DropdownMenuItem onClick={handleNavigateToMailbox} data-testid="mailbox-menu-item">
+            <Mail className="mr-2 h-4 w-4" />
+            {t('navigation.supportMailbox', 'Support mailbox')}
+          </DropdownMenuItem>
+        )}
         {/* Analytics hub (permission-gated) */}
         {variant === 'app' && canViewAnalytics && (
           <DropdownMenuItem onClick={handleNavigateToAnalytics} data-testid="analytics-menu-item">

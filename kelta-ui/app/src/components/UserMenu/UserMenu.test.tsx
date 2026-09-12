@@ -27,7 +27,9 @@ vi.mock('../../context/I18nContext', () => ({
   useI18n: () => ({
     locale: 'en',
     setLocale: mockSetLocale,
-    t: (key: string) => {
+    // Honour the fallback argument the real t() takes: items added with
+    // t('key', 'Fallback') render the fallback, not the key.
+    t: (key: string, fallback?: string) => {
       const translations: Record<string, string> = {
         'userMenu.language': 'Language',
         'userMenu.theme': 'Theme',
@@ -39,7 +41,7 @@ vi.mock('../../context/I18nContext', () => ({
         'userMenu.darkMode': 'Dark',
         'userMenu.systemMode': 'System',
       }
-      return translations[key] || key
+      return translations[key] || fallback || key
     },
     supportedLocales: ['en', 'ar', 'fr', 'de', 'es', 'pt'],
     getLocaleDisplayName: (code: string) => {
@@ -66,10 +68,12 @@ vi.mock('../../context/ThemeContext', () => ({
   }),
 }))
 
-// Mock useSystemPermissions
+// Mock useSystemPermissions. Tests that need a different grant mutate `granted`; the default
+// mirrors a plain app user who can reach Setup and nothing else.
+const granted = new Set<string>(['VIEW_SETUP'])
 vi.mock('../../hooks/useSystemPermissions', () => ({
   useSystemPermissions: () => ({
-    hasPermission: (perm: string) => perm === 'VIEW_SETUP',
+    hasPermission: (perm: string) => granted.has(perm),
   }),
 }))
 
@@ -330,6 +334,26 @@ describe('UserMenu', () => {
       render(<UserMenu {...defaultProps} variant="admin" />)
       expect(screen.getByTestId('back-to-app-menu')).toBeInTheDocument()
       expect(screen.getByTestId('back-to-app-menu')).toHaveTextContent('Back to App')
+    })
+
+    it('shows "Support mailbox" for the app variant only with VIEW_SUPPORT_MAILBOX', () => {
+      // Without the grant the item must be absent, not disabled: a visible entry to a console
+      // the user cannot open reads as a broken feature.
+      render(<UserMenu {...defaultProps} variant="app" />)
+      expect(screen.queryByTestId('mailbox-menu-item')).not.toBeInTheDocument()
+    })
+
+    it('navigates to the support console when the user holds VIEW_SUPPORT_MAILBOX', () => {
+      granted.add('VIEW_SUPPORT_MAILBOX')
+      try {
+        render(<UserMenu {...defaultProps} variant="app" />)
+        const item = screen.getByTestId('mailbox-menu-item')
+        expect(item).toHaveTextContent('Support mailbox')
+        fireEvent.click(item)
+        expect(mockNavigate).toHaveBeenCalledWith('/default/app/mailbox')
+      } finally {
+        granted.delete('VIEW_SUPPORT_MAILBOX')
+      }
     })
 
     it('should not show "Switch to Setup" for admin variant', () => {
