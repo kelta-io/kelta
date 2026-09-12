@@ -50,9 +50,13 @@ public class AnalyticsCaptureService {
     private final AnalyticsEventRepository repository;
     private final ObjectMapper objectMapper;
 
-    public AnalyticsCaptureService(AnalyticsEventRepository repository, ObjectMapper objectMapper) {
+    private final io.kelta.runtime.router.UserIdResolver userIdResolver;
+
+    public AnalyticsCaptureService(AnalyticsEventRepository repository, ObjectMapper objectMapper,
+                                   io.kelta.runtime.router.UserIdResolver userIdResolver) {
         this.repository = repository;
         this.objectMapper = objectMapper;
+        this.userIdResolver = userIdResolver;
     }
 
     /**
@@ -99,12 +103,18 @@ public class AnalyticsCaptureService {
         return captureInternal(events, memberId);
     }
 
-    private int captureInternal(List<IncomingEvent> incoming, String memberId) {
+    private int captureInternal(List<IncomingEvent> incoming, String memberHeader) {
         String tenantId = TenantContext.get();
         if (tenantId == null || tenantId.isBlank()) {
             log.debug("analytics capture skipped: no tenant in context");
             return 0;
         }
+        // Callers pass X-User-Id straight through, which is an email. member_id is
+        // varchar(36) and means platform_user.id: every stored value was an email (short enough
+        // to fit), and one longer than 36 characters failed the whole batch. Resolve once here;
+        // an unresolvable identity is recorded as anonymous rather than as a foreign string.
+        String memberId = memberHeader == null || memberHeader.isBlank()
+                ? null : userIdResolver.resolve(memberHeader, tenantId);
         String geoCountry = emptyToNull(GeoContext.currentCountry());
         String geoRegion = clamp(GeoContext.current().map(GeoStamp::region).orElse(null), MAX_REGION_LEN);
         Instant now = Instant.now();

@@ -33,6 +33,11 @@ class AnalyticsCaptureWiringTest {
             return mock(AnalyticsEventRepository.class);
         }
 
+        @org.springframework.context.annotation.Bean
+        io.kelta.runtime.router.UserIdResolver userIdResolver() {
+            return mock(io.kelta.runtime.router.UserIdResolver.class);
+        }
+
         /** The Jackson 3 ObjectMapper the platform actually exposes as a bean. */
         @Bean
         ObjectMapper objectMapper() {
