@@ -221,10 +221,14 @@ public class MailboxThreadRepository {
                 + "  count(*) FILTER (WHERE status NOT IN " + CLOSED_STATUSES + ") AS open,"
                 + "  count(*) FILTER (WHERE status NOT IN " + CLOSED_STATUSES
                 + "                     AND assigned_to IS NULL) AS unassigned,"
-                + "  count(*) FILTER (WHERE sla_first_response_state = 'AT_RISK'"
-                + "                      OR sla_resolution_state = 'AT_RISK') AS at_risk,"
-                + "  count(*) FILTER (WHERE sla_first_response_state = 'BREACHED'"
-                + "                      OR sla_resolution_state = 'BREACHED') AS breached"
+                // Both SLA counts exclude closed threads, or an archived breach stays in the red
+                // badge forever — the count would say "11 breached" over an empty inbox.
+                + "  count(*) FILTER (WHERE status NOT IN " + CLOSED_STATUSES
+                + "                     AND (sla_first_response_state = 'AT_RISK'"
+                + "                       OR sla_resolution_state = 'AT_RISK')) AS at_risk,"
+                + "  count(*) FILTER (WHERE status NOT IN " + CLOSED_STATUSES
+                + "                     AND (sla_first_response_state = 'BREACHED'"
+                + "                       OR sla_resolution_state = 'BREACHED')) AS breached"
                 + "  FROM mailbox_thread"
                 + " WHERE tenant_id = ? AND mailbox_id IN (" + placeholders + ")";
 
