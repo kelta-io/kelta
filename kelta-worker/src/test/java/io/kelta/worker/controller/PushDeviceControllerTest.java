@@ -30,13 +30,50 @@ class PushDeviceControllerTest {
     @Mock private DefaultPushService pushService;
     @Mock private JdbcTemplate jdbcTemplate;
     @Mock private WebPushProvider webPushProvider;
+    @Mock private io.kelta.runtime.router.UserIdResolver userIdResolver;
 
     private PushDeviceController controller(WebPushProvider provider) {
         @SuppressWarnings("unchecked")
         ObjectProvider<WebPushProvider> objectProvider = mock(ObjectProvider.class);
         // Only the key endpoint consults it; the registration tests never do.
         lenient().when(objectProvider.getIfAvailable()).thenReturn(provider);
-        return new PushDeviceController(pushService, jdbcTemplate, objectProvider);
+        // The header carries an email; the store needs platform_user.id. Existing tests pass
+        // "u1" as the header and expect "u1" stored, so the resolver is an identity here and
+        // the email→id case is covered by its own test below.
+        lenient().when(userIdResolver.resolve(any(), any()))
+                .thenAnswer(inv -> inv.getArgument(0));
+        return new PushDeviceController(pushService, jdbcTemplate, objectProvider, userIdResolver);
+    }
+
+    @Test
+    @DisplayName("Resolves the X-User-Id email to platform_user.id before storing")
+    void resolvesEmailHeaderToUserId() {
+        // push_device.user_id is a foreign key to platform_user(id). Storing the header's email
+        // was a constraint violation on every call: POST /api/devices had never once succeeded.
+        PushDeviceController c = controller(null);
+        when(userIdResolver.resolve("craig@example.com", "t1")).thenReturn("uuid-1");
+        when(pushService.registerDevice("uuid-1", "t1", "ios", "tok", "iPhone")).thenReturn("d9");
+
+        var response = withTenant(() -> c.registerDevice(
+                Map.of("platform", "ios", "deviceToken", "tok", "deviceName", "iPhone"),
+                "craig@example.com"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(201);
+        verify(pushService).registerDevice("uuid-1", "t1", "ios", "tok", "iPhone");
+        verify(pushService, never()).registerDevice(eq("craig@example.com"), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("An unresolvable identity is a 400, not a foreign-key 500")
+    void unknownUserIsBadRequest() {
+        PushDeviceController c = controller(null);
+        when(userIdResolver.resolve("ghost@example.com", "t1")).thenReturn(null);
+
+        var response = withTenant(() -> c.registerDevice(
+                Map.of("platform", "ios", "deviceToken", "tok"), "ghost@example.com"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        verify(pushService, never()).registerDevice(any(), any(), any(), any(), any());
     }
 
     private ResponseEntity<?> withTenant(java.util.function.Supplier<ResponseEntity<?>> call) {
