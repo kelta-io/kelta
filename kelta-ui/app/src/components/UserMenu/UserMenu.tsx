@@ -10,6 +10,9 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
+  Bell,
+  BellOff,
+  BellRing,
   Globe,
   Sun,
   Moon,
@@ -40,6 +43,9 @@ import { useI18n } from '@/context/I18nContext'
 import { useTheme } from '@/context/ThemeContext'
 import type { ThemeMode } from '@/context/ThemeContext'
 import { useSystemPermissions } from '@/hooks/useSystemPermissions'
+import { useOptionalApi } from '@/context/ApiContext'
+import { enableWebPush, webPushStatus, type WebPushStatus } from '@/push/webPush'
+import { toast } from 'sonner'
 import { getGravatarUrl } from '@/utils/gravatar'
 import type { User } from '@/types/auth'
 import { ChevronDown } from 'lucide-react'
@@ -122,6 +128,59 @@ export function UserMenu({
   const handleNavigateToTokens = useCallback(() => {
     navigate(`/${tenantSlug}/app/api-tokens`)
   }, [navigate, tenantSlug])
+
+  // Web Push. Read once per open rather than on every render: `Notification.permission` is a
+  // synchronous getter, but reading it in render on a menu that re-renders on hover is waste.
+  const api = useOptionalApi()
+  const [pushStatus, setPushStatus] = useState<WebPushStatus>(() =>
+    typeof window === 'undefined' ? 'unsupported' : webPushStatus()
+  )
+  const [pushBusy, setPushBusy] = useState(false)
+  const handleEnablePush = useCallback(async () => {
+    if (!api) return
+    setPushBusy(true)
+    try {
+      const result = await enableWebPush(api.apiClient)
+      switch (result) {
+        case 'subscribed':
+          toast.success(t('userMenu.notificationsOn', 'Notifications are on for this device'))
+          break
+        case 'denied':
+          toast.error(
+            t(
+              'userMenu.notificationsDenied',
+              'Notifications are blocked for this site — allow them in your browser settings'
+            )
+          )
+          break
+        case 'needs-install':
+          toast.info(
+            t(
+              'userMenu.notificationsNeedInstall',
+              'On iPhone, add this site to your Home Screen first, then open it from there'
+            )
+          )
+          break
+        case 'not-configured':
+          toast.error(
+            t(
+              'userMenu.notificationsNotConfigured',
+              'Push notifications are not set up on this server'
+            )
+          )
+          break
+        default:
+          toast.error(
+            t('userMenu.notificationsUnsupported', 'This browser cannot receive notifications')
+          )
+      }
+    } catch {
+      toast.error(t('userMenu.notificationsFailed', 'Could not enable notifications'))
+    } finally {
+      setPushBusy(false)
+      setPushStatus(webPushStatus())
+    }
+  }, [api, t])
 
   const handleNavigateToApprovals = useCallback(() => {
     navigate(`/${tenantSlug}/app/approvals`)
@@ -256,6 +315,34 @@ export function UserMenu({
           <DropdownMenuItem onClick={handleNavigateToAnalytics} data-testid="analytics-menu-item">
             <BarChart3 className="mr-2 h-4 w-4" />
             {t('navigation.analytics', 'Analytics')}
+          </DropdownMenuItem>
+        )}
+
+        {/* Notifications. Always rendered when the API is present so the reason it cannot work
+            is visible — a hidden item reads as "this app has no notifications". */}
+        {api && (
+          <DropdownMenuItem
+            onClick={handleEnablePush}
+            disabled={pushBusy || pushStatus === 'unsupported'}
+            data-testid="notifications-menu-item"
+            data-push-status={pushStatus}
+          >
+            {pushStatus === 'granted' ? (
+              <BellRing className="mr-2 h-4 w-4" />
+            ) : pushStatus === 'denied' || pushStatus === 'unsupported' ? (
+              <BellOff className="mr-2 h-4 w-4" />
+            ) : (
+              <Bell className="mr-2 h-4 w-4" />
+            )}
+            {pushStatus === 'granted'
+              ? t('userMenu.notificationsOnLabel', 'Notifications on — re-register')
+              : pushStatus === 'denied'
+                ? t('userMenu.notificationsBlockedLabel', 'Notifications blocked')
+                : pushStatus === 'needs-install'
+                  ? t('userMenu.notificationsInstallLabel', 'Add to Home Screen for notifications')
+                  : pushStatus === 'unsupported'
+                    ? t('userMenu.notificationsUnsupportedLabel', 'Notifications unavailable')
+                    : t('userMenu.enableNotifications', 'Enable notifications')}
           </DropdownMenuItem>
         )}
 

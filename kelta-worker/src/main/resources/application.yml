@@ -202,6 +202,10 @@ kelta:
   # to start without it, deliberately — an unsigned token is a forgeable one.
   mailbox:
     verp-secret: ${KELTA_MAILBOX_VERP_SECRET:}
+    # Where the console lives, for links in escalation emails and pushes. This is the APP host
+    # (https://app.kelta.io), not the gateway; falls back to external-base-url only so local
+    # single-host setups keep working.
+    app-base-url: ${KELTA_MAILBOX_APP_BASE_URL:${EXTERNAL_BASE_URL:http://localhost:8080}}
 
 management:
   endpoints:
