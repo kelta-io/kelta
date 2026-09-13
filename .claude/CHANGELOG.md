@@ -75,3 +75,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-09-13 fix(gateway): add PAT grace cache so valid tokens authenticate during worker outages (BUG-2026-09-13-0001)
 - 2026-09-13 chore(license): add SPDX AGPL-3.0-or-later package-info.java headers to kelta-gateway and runtime-core (CHORE-2026-09-13-0014)
 - 2026-09-13 doc(emf): add NOTICE, rewrite CONTRIBUTING.md for external contributors, add License section to README.md (DOC-2026-09-13-0013)
+- 2026-09-13 security(emf): add gitleaks pre-commit hook, CI scan workflow, and full-history baseline scan (clean, 2900 commits) (SEC-2026-09-13-0015)
