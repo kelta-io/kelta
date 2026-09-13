@@ -74,3 +74,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-09-13 chore(planner): teach planner to assign epic/tier/touches/acceptance from ROADMAP.md; add lint-plan.sh field-level checks for epic pattern, tier range, and acceptance non-empty strings (CHORE-2026-09-13-0005)
 - 2026-09-13 fix(gateway): add PAT grace cache so valid tokens authenticate during worker outages (BUG-2026-09-13-0001)
 - 2026-09-13 chore(license): add SPDX AGPL-3.0-or-later package-info.java headers to kelta-gateway and runtime-core (CHORE-2026-09-13-0014)
+- 2026-09-13 doc(emf): add NOTICE, rewrite CONTRIBUTING.md for external contributors, add License section to README.md (DOC-2026-09-13-0013)
