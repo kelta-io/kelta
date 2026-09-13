@@ -260,3 +260,8 @@ Pull requests run the full quality gate via GitHub Actions:
 On merge to `main`, container images are built and pushed to `harbor.rzware.com`, then
 deployed to Kubernetes via ArgoCD (with smoke test + auto-rollback). Full detail:
 [`.claude/docs/ci-cd.md`](.claude/docs/ci-cd.md).
+
+## License
+
+Kelta Platform is licensed under AGPLv3. If you need to use Kelta under terms other
+than AGPLv3, email licensing@rzware.com.
