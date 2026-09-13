@@ -29,6 +29,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/lib/log.sh"
 . "$SELF_DIR/lib/queue.sh"
 . "$SELF_DIR/lib/notify.sh"
+. "$SELF_DIR/lib/deploy-hooks.sh"
 
 EMF_REPO="${EMF_REPO:-$HOME/GitHub/emf}"
 EMF_QUEUE_REPO="${EMF_QUEUE_REPO:-$HOME/GitHub/emf-queue}"
@@ -331,6 +332,30 @@ while (( $(date +%s) < deadline )); do
     break
   fi
 
+  # Reviewer + merge policy (P-0 items 10-11): once every posted check is a
+  # terminal success, break out for the reviewer stage. `gh pr view` puts a
+  # `conclusion` on completed checks and only a `status` on in-flight ones,
+  # so requiring every entry to have a non-empty conclusion in {success,
+  # neutral,skipped} is the "all green" signal — an empty rollup means the
+  # CI harness hasn't posted yet and we keep polling.
+  checks_state="$(printf '%s' "$raw" | jq -r '
+    if (.statusCheckRollup | length) == 0 then "pending"
+    else
+      ([.statusCheckRollup[] | (.conclusion // .state // "") | ascii_downcase]) as $conclusions
+      | if any($conclusions[]; . == "" or . == "pending" or . == "in_progress" or . == "queued")
+          then "pending"
+        elif all($conclusions[]; IN("success","neutral","skipped"))
+          then "green"
+        else "pending"
+        end
+    end
+  ')"
+  if [[ "$checks_state" == "green" ]]; then
+    final_state="CHECKS_GREEN"
+    log_info "ci checks green; entering reviewer stage" pr="$PR_NUM"
+    break
+  fi
+
   sleep "$poll_interval"
 done
 
@@ -353,6 +378,55 @@ fi
 # ---- 8. Archive -------------------------------------------------------------
 
 case "$final_state" in
+  CHECKS_GREEN)
+    # Step 6b + 7b — reviewer stage, merge policy dispatch, deploy hook.
+    # process_after_ci lives in lib/deploy-hooks.sh so it's testable without
+    # spinning up a real worktree; it also handles queue archival on the
+    # request-changes paths (strike 1 = release_orphan, strike 2 = queue_fail).
+    REVIEWER_PROMPT="$SELF_DIR/review-prompt.md"
+    outcome="$(process_after_ci \
+      "$TASK_FILE" "$PR_NUM" "$PR_URL" "$REPO_NAME" "$REPO_PATH" \
+      "$REVIEWER_PROMPT" "$WORKER_PROMPT")"
+    log_event reviewer_done task="$ID" pr="$PR_NUM" outcome="$outcome"
+    case "$outcome" in
+      APPROVED_MERGED)
+        log_event task_done task="$ID" pr="$PR_NUM" duration_sec="$DURATION_SEC" via="reviewer_auto"
+        queue_done "$TASK_FILE" "$PR_NUM"
+        notify_slack "#rzware-ceo" "${ID} merged — PR #${PR_NUM} ${PR_URL}" || true
+        ;;
+      APPROVED_VETO)
+        # deploy_after: stamped by apply_merge_policy; archive as done so the
+        # queue reflects the reviewer's decision, then a separate cron flips
+        # the actual merge when the window elapses.
+        log_event task_done task="$ID" pr="$PR_NUM" via="veto_window"
+        queue_done "$TASK_FILE" "$PR_NUM"
+        ;;
+      APPROVED_MANUAL)
+        # Reviewer approved but merge_policy=manual_protected — Craig merges
+        # by hand. Release the queue slot; the task stays open until then.
+        log_info "manual_protected: released for craig to merge" task="$ID" pr="$PR_NUM"
+        queue_release_orphan "$TASK_FILE"
+        ;;
+      APPROVED_NONE)
+        log_info "no auto-merge policy; PR left open" task="$ID" pr="$PR_NUM"
+        queue_release_orphan "$TASK_FILE"
+        ;;
+      CHANGES_STRIKE_1)
+        log_warn "reviewer requested changes (strike 1)" task="$ID" pr="$PR_NUM"
+        # process_after_ci already called queue_release_orphan.
+        ;;
+      CHANGES_FAILED)
+        log_error "reviewer requested changes (strike 2); task failed" task="$ID" pr="$PR_NUM"
+        # process_after_ci already called queue_fail + gh pr close.
+        notify_slack "#rzware-ceo" \
+          "FAILED: ${ID} — reviewer rejected twice. PR: ${PR_URL}. Log: ${JSONL_LOG}" || true
+        ;;
+      *)
+        log_warn "unexpected reviewer outcome; leaving PR open" outcome="$outcome"
+        queue_release_orphan "$TASK_FILE"
+        ;;
+    esac
+    ;;
   MERGED)
     log_event task_done task="$ID" pr="$PR_NUM" duration_sec="$DURATION_SEC"
     queue_done "$TASK_FILE" "$PR_NUM"
