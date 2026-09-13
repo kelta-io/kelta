@@ -65,6 +65,22 @@ queue_resolve_repo() {
   return 1
 }
 
+# Check whether a repo name appears in the etc/repos.yaml allowlist.
+# Usage: queue_repo_allowed <name>   → exit 0 if allowed, 1 otherwise.
+# Reads the file relative to this script: $SELF_DIR/../etc/repos.yaml.
+# Returns 1 (denied) if the file is absent or the name is not found.
+queue_repo_allowed() {
+  local name="${1:-}"
+  local SELF_DIR
+  SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local yaml="$SELF_DIR/../etc/repos.yaml"
+  if [[ ! -f "$yaml" ]]; then
+    printf 'queue_repo_allowed: %s not found — denying %s\n' "$yaml" "$name" >&2
+    return 1
+  fi
+  grep -q "^- name: ${name}$" "$yaml"
+}
+
 # Resolve the default branch of a repo (main, master, ...) from origin/HEAD.
 # Falls back to 'main' if origin/HEAD is unset and cannot be discovered.
 queue_repo_default_branch() {
