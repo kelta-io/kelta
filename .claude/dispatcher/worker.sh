@@ -283,6 +283,23 @@ PR_NUM="${PR_URL##*/}"
 log_event pr_opened task="$ID" pr="$PR_NUM" url="$PR_URL"
 queue_set_field "$TASK_FILE" pr "$PR_NUM"
 
+# ---- 5b. Auto-merge, tier 0 only --------------------------------------------
+# OPERATING-MODEL.md §4/§6: a tier 0 task inside an approved epic merges on its
+# own once checks pass. On repos without required checks (rzware-ceo, the
+# property sites) `--auto` merges immediately, so tier 1 is deliberately left
+# for the reviewer / 24h veto stage (P-0 items 10–11) and for repos whose CI
+# already arms auto-merge (emf) this is a no-op.
+TIER="$(queue_get_field "$TASK_FILE" tier 2>/dev/null || true)"
+if [[ "$TIER" == "0" ]]; then
+  if gh pr merge "$PR_NUM" --auto --squash >/dev/null 2>&1; then
+    log_event auto_merge_armed task="$ID" pr="$PR_NUM" tier="$TIER"
+  else
+    log_warn "gh pr merge --auto failed; PR left for a human" task="$ID" pr="$PR_NUM"
+  fi
+else
+  log_info "tier ${TIER:-unset}: PR left open for review" task="$ID" pr="$PR_NUM"
+fi
+
 # ---- 6. Poll CI -------------------------------------------------------------
 
 deadline=$(( $(date +%s) + PR_TIMEOUT_MIN * 60 ))
