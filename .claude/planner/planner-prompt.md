@@ -59,8 +59,21 @@ For each file in `inbox/`:
   - new known risk → `concerns.md`
   - new test pattern → `testing.md`
 - `depends_on`: list of other task ids that must merge before this one starts. Use sparingly — it serializes work. Only set when the second task literally cannot compile without the first.
-- `auto_promote`: leave `false` for tasks you generate from user briefs (the user reviews `ready/` before promoting to `approved/`). Set `true` only when the source was already `auto_promote: true` (bug ingest path).
 - `max_attempts`: 3 unless the task type is `bug` and you suspect it might be hard to reproduce — bump to 5 then.
+- `epic:` Id of the approved epic in ROADMAP.md this task descends from (e.g. `P-0`, `S-1`, `K-3`). Required for gate promotion; tasks without it stay in `ready/`.
+- `tier:` Autonomy tier. 0=auto, 1=auto+24h veto, 2=decision-only. Gate promotes 0 and 1 only.
+- `touches:` File paths or directories the task is expected to modify. Gate uses this for blast-radius checks. Worker uses it to scope its search.
+- `acceptance:` Mechanically checkable acceptance lines. Gate requires at least one when present. Each line should be an assertion a human or script can verify (e.g. `bash -n gate.sh exits 0`, `unit test X passes`, `endpoint returns 200`).
+- `promoted_by:` Written by gate.sh on promotion. Format: `gate/<ISO8601 timestamp>`. Null until gate promotes.
+
+# Epic and tier assignment
+
+Read `ROADMAP.md` from `$RZWARE_REPO` (the CEO repo; the planner's own env or the `$HOME/GitHub/rzware-ceo` convention). Each epic has a fenced code block with `id:`, `status:`, and `tier-ceiling:`. Only file tasks against epics with `status: approved`.
+
+- Set `epic:` to the epic id (e.g. `P-0`) for every task emitted. If a brief doesn't clearly map to an approved epic, move it to `_needs_clarification/` instead — explain which epic it would need and why that epic is blocked or absent. Do not guess an epic id.
+- Set `tier: 0` for fully reversible, narrow-blast-radius changes (docs, tests, config, UI copy, new files, CI fixes). Set `tier: 1` for anything touching auth, DB migrations, dispatcher/hook changes, `homelab-argo`, or any change whose rollback requires more than reverting a PR. Set `tier: 2` for anything in `CHARTER.md` §2 red — those must never reach `ready/`; escalate to `_needs_clarification/` instead.
+- Set `touches:` to the specific list of files/directories the task is expected to modify — e.g. `src/main/java/io/kelta/worker/auth/`, not `"auth code"`. Gate uses this for blast-radius checks; the worker uses it to scope its search.
+- Set `acceptance:` to at least one mechanically checkable assertion. Bad: `"the feature works"`. Good: `"GET /api/v1/health returns 200"`, `"bash -n gate.sh exits 0"`, `"unit test GateShRuleOneTest passes"`. If an acceptance criterion genuinely can't be checked mechanically, prefix it with `"Manually: "`.
 
 # Hard rules
 

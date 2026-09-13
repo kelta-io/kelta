@@ -95,6 +95,39 @@ for f in "${FILES[@]}"; do
     continue
   fi
 
+  # Extra field-level checks (beyond JSON Schema)
+  file_bad=0
+
+  epic_val="$(yq '.epic' "$fm")"
+  if [[ "$epic_val" != "null" && -n "$epic_val" ]]; then
+    if ! [[ "$epic_val" =~ ^[A-Z]-[0-9]+$ ]]; then
+      echo "INVALID $base: field 'epic' value '$epic_val' does not match ^[A-Z]-[0-9]+\$" >&2
+      file_bad=1
+    fi
+  fi
+
+  tier_val="$(yq '.tier' "$fm")"
+  if [[ "$tier_val" != "null" && -n "$tier_val" ]]; then
+    if [[ "$tier_val" != "0" && "$tier_val" != "1" && "$tier_val" != "2" ]]; then
+      echo "INVALID $base: field 'tier' must be 0, 1, or 2 (got '$tier_val')" >&2
+      file_bad=1
+    fi
+  fi
+
+  acceptance_raw="$(yq '.acceptance' "$fm")"
+  if [[ "$acceptance_raw" != "null" && -n "$acceptance_raw" ]]; then
+    empty_count="$(yq '[.acceptance[] | select(. == "")] | length' "$fm")"
+    if [[ "$empty_count" -gt 0 ]]; then
+      echo "INVALID $base: field 'acceptance' contains $empty_count empty string(s)" >&2
+      file_bad=1
+    fi
+  fi
+
+  if (( file_bad )); then
+    bad=$((bad + 1))
+    continue
+  fi
+
   echo "OK $base"
 done
 
