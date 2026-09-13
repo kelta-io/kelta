@@ -72,3 +72,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-09-02 chore(dispatcher): worker.sh falls back to emf's worker-prompt.md when task repo lacks one, unblocking tasks targeting rzware-ceo and other repos not yet onboarded with their own worker-prompt (CHORE-2026-09-02-0001)
 - 2026-09-13 chore(dispatcher): add etc/repos.yaml allowlist of 7 repos + queue_repo_allowed() helper in lib/queue.sh; covered by tests/repos-yaml-test.sh (CHORE-2026-09-13-0001)
 - 2026-09-13 chore(planner): teach planner to assign epic/tier/touches/acceptance from ROADMAP.md; add lint-plan.sh field-level checks for epic pattern, tier range, and acceptance non-empty strings (CHORE-2026-09-13-0005)
+- 2026-09-13 fix(gateway): add PAT grace cache so valid tokens authenticate during worker outages (BUG-2026-09-13-0001)

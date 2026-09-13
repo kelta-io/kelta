@@ -22,9 +22,12 @@ import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Global filter for Personal Access Token (PAT) authentication.
@@ -36,6 +39,13 @@ import java.util.Map;
  * Token metadata is cached in Redis by the worker on creation.
  * If Redis misses, the gateway calls the worker's validation endpoint
  * which re-caches the data in Redis.
+ *
+ * <p>Worker-outage resilience: every successfully resolved PAT JSON is stored
+ * in a short-TTL in-memory grace cache (default 5 min). When the worker is
+ * unreachable and Redis misses, the grace cache serves the last known-good
+ * token data so callers ride out rolling restarts without spurious 401s.
+ * Revocation is always checked first — a revoked token is rejected even when
+ * the grace cache holds its data.
  *
  * @since 1.0.0
  */
@@ -55,14 +65,30 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
     private final ReactiveStringRedisTemplate redisTemplate;
     private final WebClient workerClient;
     private final GatewayMetrics metrics;
+    private final Duration graceTtl;
+
+    // Short-TTL in-memory fallback keyed by token hash. Populated on every
+    // successful PAT resolution (Redis hit or worker call) so requests can
+    // authenticate during worker outages without hitting Redis-only callers
+    // with spurious 401s. Revocation is always checked before this cache is
+    // ever consulted, so a revoked token cannot ride through stale fallback data.
+    private final ConcurrentHashMap<String, CachedPat> graceCache = new ConcurrentHashMap<>();
+
+    private record CachedPat(String json, Instant cachedAt) {
+        boolean isExpired(Duration ttl) {
+            return cachedAt.plus(ttl).isBefore(Instant.now());
+        }
+    }
 
     public PatAuthenticationFilter(
             ReactiveStringRedisTemplate redisTemplate,
             WebClient.Builder webClientBuilder,
             @Value("${kelta.gateway.worker-service-url:http://kelta-worker:80}") String workerServiceUrl,
+            @Value("${kelta.gateway.pat-grace-ttl-seconds:300}") int graceTtlSeconds,
             GatewayMetrics metrics) {
         this.redisTemplate = redisTemplate;
         this.workerClient = webClientBuilder.baseUrl(workerServiceUrl).build();
+        this.graceTtl = Duration.ofSeconds(graceTtlSeconds);
         this.metrics = metrics;
     }
 
@@ -88,7 +114,8 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
         String tenantSlug = TenantResolutionFilter.getTenantSlug(exchange);
         String tokenHash = sha256(token);
 
-        // Check revocation first
+        // Check revocation first — a revoked token is always rejected, even when
+        // the grace cache holds its PAT data.
         return redisTemplate.opsForValue().get(REVOCATION_KEY_PREFIX + tokenHash)
                 .hasElement()
                 .flatMap(isRevoked -> {
@@ -97,7 +124,7 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
                         metrics.recordAuthFailure(tenantSlug, "revoked_pat");
                         return unauthorized(exchange, "Token has been revoked");
                     }
-                    // Try Redis first, fall back to worker.
+                    // Try Redis first, fall back to worker (with grace cache on worker error).
                     //
                     // The "unknown token" branch keys off whether the *lookup* produced JSON,
                     // never off whether the downstream Mono emitted. authenticateWithPat ends in
@@ -108,6 +135,8 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
                     // followed was swallowed only because the response was already committed.)
                     return redisTemplate.opsForValue().get(PAT_KEY_PREFIX + tokenHash)
                             .switchIfEmpty(fetchFromWorker(tokenHash))
+                            .doOnNext(patJson ->
+                                    graceCache.put(tokenHash, new CachedPat(patJson, Instant.now())))
                             .flatMap(patJson ->
                                     authenticateWithPat(patJson, exchange, chain, path, tenantSlug)
                                             .thenReturn(Boolean.TRUE))
@@ -127,8 +156,10 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
      * Fallback: call the worker's PAT validation endpoint.
      *
      * <p>A 404 is the worker's normal answer for a token it doesn't know, so it stays at debug.
-     * Anything else — worker down, timeout, 5xx — makes every cache-missing PAT look invalid to
-     * the caller, which is an incident rather than a bad token, so it is logged at warn.
+     * For any other error (worker down, timeout, 5xx — exactly the connection-refused errors
+     * seen during rolling restarts) the grace cache is consulted before giving up. This lets
+     * callers ride out a brief worker outage without receiving spurious 401s for valid tokens
+     * that were successfully validated within the grace window.
      */
     private Mono<String> fetchFromWorker(String tokenHash) {
         return workerClient.get()
@@ -142,6 +173,11 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
                         log.warn("Worker PAT validation is failing — PATs missing from the Redis "
                                 + "cache will be rejected as invalid until it recovers: {}",
                                 e.toString());
+                        CachedPat cached = graceCache.get(tokenHash);
+                        if (cached != null && !cached.isExpired(graceTtl)) {
+                            log.debug("Serving PAT from grace cache during worker outage");
+                            return Mono.just(cached.json());
+                        }
                     }
                     return Mono.empty();
                 });
