@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react'
+import { useTenantStorageScope } from '../context/TenantContext'
 
 /**
  * A recently viewed record entry
@@ -21,24 +22,47 @@ export interface RecentRecord {
 const MAX_ITEMS = 50
 const STORAGE_KEY_PREFIX = 'kelta_recent_'
 
-function getStorageKey(userId: string): string {
+/**
+ * Storage key for one user in one workspace. The tenant scope is part of the
+ * key: localStorage is per-origin and every workspace on the platform host
+ * shares the origin, so a user-only key leaks records across tenants.
+ */
+export function getStorageKey(scope: string, userId: string): string {
+  return `${STORAGE_KEY_PREFIX}${scope}:${userId}`
+}
+
+/** Pre-tenant-scoping key; entries under it carry no tenant and are dropped. */
+function getLegacyStorageKey(userId: string): string {
   return `${STORAGE_KEY_PREFIX}${userId}`
 }
 
-function loadRecords(userId: string): RecentRecord[] {
+function isRecentRecord(value: unknown): value is RecentRecord {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return (
+    typeof v.id === 'string' &&
+    typeof v.collectionName === 'string' &&
+    typeof v.collectionDisplayName === 'string' &&
+    typeof v.displayValue === 'string' &&
+    typeof v.viewedAt === 'string'
+  )
+}
+
+function loadRecords(scope: string, userId: string): RecentRecord[] {
   try {
-    const raw = localStorage.getItem(getStorageKey(userId))
+    localStorage.removeItem(getLegacyStorageKey(userId))
+    const raw = localStorage.getItem(getStorageKey(scope, userId))
     if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter(isRecentRecord) : []
   } catch {
     return []
   }
 }
 
-function saveRecords(userId: string, records: RecentRecord[]): void {
+function saveRecords(scope: string, userId: string, records: RecentRecord[]): void {
   try {
-    localStorage.setItem(getStorageKey(userId), JSON.stringify(records))
+    localStorage.setItem(getStorageKey(scope, userId), JSON.stringify(records))
   } catch {
     // localStorage full or unavailable
   }
@@ -52,28 +76,30 @@ export interface UseRecentRecordsReturn {
 
 /**
  * Hook to manage recently viewed records.
- * Records are stored in localStorage and synced across tabs.
+ * Records are stored in localStorage (per workspace, per user) and synced
+ * across tabs.
  *
  * @param userId - The current user's ID (used as storage key namespace)
  */
 export function useRecentRecords(userId: string): UseRecentRecordsReturn {
-  const [records, setRecords] = useState<RecentRecord[]>(() => loadRecords(userId))
+  const scope = useTenantStorageScope()
+  const [records, setRecords] = useState<RecentRecord[]>(() => loadRecords(scope, userId))
 
   // Sync across tabs
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === getStorageKey(userId)) {
-        setRecords(loadRecords(userId))
+      if (e.key === getStorageKey(scope, userId)) {
+        setRecords(loadRecords(scope, userId))
       }
     }
     window.addEventListener('storage', handleStorage)
     return () => window.removeEventListener('storage', handleStorage)
-  }, [userId])
+  }, [scope, userId])
 
-  // Reload when userId changes
+  // Reload when the workspace or user changes
   useEffect(() => {
-    setRecords(loadRecords(userId))
-  }, [userId])
+    setRecords(loadRecords(scope, userId))
+  }, [scope, userId])
 
   const addRecentRecord = useCallback(
     (record: Omit<RecentRecord, 'viewedAt'>) => {
@@ -84,21 +110,21 @@ export function useRecentRecords(userId: string): UseRecentRecordsReturn {
         )
         const entry: RecentRecord = { ...record, viewedAt: new Date().toISOString() }
         const updated = [entry, ...filtered].slice(0, MAX_ITEMS)
-        saveRecords(userId, updated)
+        saveRecords(scope, userId, updated)
         return updated
       })
     },
-    [userId]
+    [scope, userId]
   )
 
   const clearRecentRecords = useCallback(() => {
     setRecords([])
     try {
-      localStorage.removeItem(getStorageKey(userId))
+      localStorage.removeItem(getStorageKey(scope, userId))
     } catch {
       // ignore
     }
-  }, [userId])
+  }, [scope, userId])
 
   return { recentRecords: records, addRecentRecord, clearRecentRecords }
 }

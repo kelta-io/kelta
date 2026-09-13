@@ -108,6 +108,26 @@ export function useTenant(): TenantContextValue {
   return ctx
 }
 
+/**
+ * Namespace for per-tenant browser state (recent items, favorites).
+ *
+ * <p>localStorage is per-origin, and on the platform host every workspace
+ * shares the origin, so state written without a tenant key bleeds from one
+ * workspace into another (records from one workspace showing up in another's
+ * "Recent items" card). On a custom domain the origin itself is bound to a
+ * single tenant, so a constant scope is both correct and stable while the
+ * slug is still hydrating from /api/whoami.
+ *
+ * <p>Safe without a provider: falls back to the module-level slug so hooks
+ * that use it keep working in test wrappers that omit TenantProvider.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useTenantStorageScope(): string {
+  const ctx = useContext(TenantContext)
+  if (isCustomDomainHost()) return 'custom-domain'
+  return ctx?.tenantSlug || getTenantSlug()
+}
+
 export function TenantProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const { tenantSlug } = useParams<{ tenantSlug: string }>()
   const customDomain = isCustomDomainHost()

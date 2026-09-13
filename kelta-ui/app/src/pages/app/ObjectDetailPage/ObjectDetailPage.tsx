@@ -58,6 +58,8 @@ import { DetailTabBar, HISTORY_TAB } from '@/pages/ResourceDetailPage/DetailTabB
 import { scrollDetailTabBarIntoView } from '@/pages/ResourceDetailPage/detailTabBarScroll'
 import { RecordHistoryTab } from '@/components/RecordHistory/RecordHistoryTab'
 import { RecordShell } from '@/components/record/RecordShell'
+import { RecordNotFoundState } from './RecordNotFoundState'
+import { classifyRecordLoad } from './recordLoadOutcome'
 import { RecordDetailBody } from '@/components/record/RecordDetailBody'
 import { RecordSectionNav } from '@/components/record/RecordSectionNav'
 import { resolveSectionNavItems } from '@/components/LayoutFieldSections/sectionNavItems'
@@ -712,13 +714,16 @@ export function ObjectDetailPage(): React.ReactElement {
 
   // Status branch (permission gate / error / not-found), rendered by the shell
   // in place of the record frame. Order matches the legacy early-returns.
+  // A 404 on either the collection or the record is a terminal "not in this
+  // workspace" state (typically a recents/favorites link from another tenant).
+  const loadOutcome = classifyRecordLoad({ schemaError, recordError, hasRecord: !!record })
   const statusSlot: React.ReactNode = !permissions.canRead ? (
     <InsufficientPrivileges
       action="view"
       resource={`this ${collectionLabel} record`}
       backPath={`${basePath}/o/${collectionName}`}
     />
-  ) : schemaError || recordError ? (
+  ) : loadOutcome === 'error' ? (
     <div className="space-y-4 p-6">
       <Alert variant="destructive">
         <AlertCircle className="h-4 w-4" />
@@ -731,17 +736,14 @@ export function ObjectDetailPage(): React.ReactElement {
         Back to list
       </Button>
     </div>
-  ) : !record ? (
-    <div className="space-y-4 p-6">
-      <Alert>
-        <AlertCircle className="h-4 w-4" />
-        <AlertTitle>Not found</AlertTitle>
-        <AlertDescription>Record not found.</AlertDescription>
-      </Alert>
-      <Button variant="outline" onClick={() => navigate(`${basePath}/o/${collectionName}`)}>
-        Back to list
-      </Button>
-    </div>
+  ) : loadOutcome !== 'loaded' ? (
+    <RecordNotFoundState
+      outcome={loadOutcome}
+      collectionName={collectionName ?? ''}
+      tenantSlug={tenantSlug ?? ''}
+      basePath={basePath}
+      onNavigate={navigate}
+    />
   ) : null
 
   // One ActivityTimeline element, mounted in two places: docked in the left

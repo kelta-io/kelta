@@ -36,6 +36,7 @@ import { TenantTranslationsBridge } from './components/TenantTranslationsBridge/
 import { PluginProvider } from './context/PluginContext'
 import { TenantProvider, useTenant, isCustomDomainHost } from './context/TenantContext'
 import { AppContextProvider } from './context/AppContext'
+import { shouldRetryQuery } from './lib/queryRetry'
 import { useEffect } from 'react'
 import { useAuth } from './context/AuthContext'
 import { AiChatProvider, AiChatPanel, AiChatTrigger } from './components/AiChat'
@@ -374,7 +375,7 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000, // 5 minutes
-      retry: 3,
+      retry: shouldRetryQuery,
       refetchOnWindowFocus: false,
     },
   },
