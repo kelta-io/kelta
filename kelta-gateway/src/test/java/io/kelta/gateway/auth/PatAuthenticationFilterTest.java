@@ -12,6 +12,7 @@ import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.ReactiveValueOperations;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -48,7 +49,7 @@ class PatAuthenticationFilterTest {
     @BeforeEach
     void setUp() {
         WebClient.Builder builder = WebClient.builder();
-        filter = new PatAuthenticationFilter(redisTemplate, builder, "http://localhost", metrics);
+        filter = new PatAuthenticationFilter(redisTemplate, builder, "http://localhost", 300, metrics);
         lenient().when(filterChain.filter(any(ServerWebExchange.class))).thenReturn(Mono.empty());
     }
 
@@ -148,6 +149,95 @@ class PatAuthenticationFilterTest {
             verify(metrics).recordAuthFailure(any(), eq("unknown_pat"));
             assertThat(exchange.getResponse().getStatusCode())
                     .isEqualTo(org.springframework.http.HttpStatus.UNAUTHORIZED);
+        }
+    }
+
+    @Nested
+    @DisplayName("Grace cache — worker-outage resilience")
+    class GraceCacheResilience {
+
+        private static final String TOKEN = "klt_grace_token";
+        private static final String HASH = PatAuthenticationFilter.sha256(TOKEN);
+        private static final String PAT_JSON = """
+                {"userId":"u-2","tenantId":"t-2","email":"grace@b.c","scopes":"[\\"api\\"]"}""";
+
+        // A separate filter whose WebClient is backed by an ExchangeFunction that always
+        // throws a non-404 error — simulating a worker that is unreachable (503/connection
+        // refused). The outer setUp's filter points at localhost which returns real HTTP 404s
+        // for unknown paths; a 404 is the worker's "token not found" signal and must NOT
+        // trigger the grace cache, so we cannot reuse that filter for outage tests.
+        private PatAuthenticationFilter graceFilter;
+
+        @BeforeEach
+        void setUpGraceFilter() {
+            WebClient.Builder outageBuilder = WebClient.builder()
+                    .exchangeFunction(req -> Mono.error(
+                            new RuntimeException("Simulated worker outage (connection refused)")));
+            graceFilter = new PatAuthenticationFilter(
+                    redisTemplate, outageBuilder, "http://worker", 300, metrics);
+        }
+
+        private MockServerWebExchange exchangeFor(String path) {
+            return MockServerWebExchange.from(MockServerHttpRequest
+                    .get(path)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN)
+                    .build());
+        }
+
+        @Test
+        @DisplayName("Redis miss + worker throws (non-404) + prior grace window → authenticates")
+        void graceCacheAuthenticatesDuringWorkerOutage() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get("pat:revoked:" + HASH)).thenReturn(Mono.empty());
+
+            // First call: Redis cache hit → populates the grace cache via doOnNext.
+            // Second call: Redis misses → worker throws a non-404 error (simulated outage)
+            // → fetchFromWorker consults the grace cache and serves the cached JSON
+            // → request authenticates instead of receiving 401.
+            when(valueOps.get("pat:" + HASH))
+                    .thenReturn(Mono.just(PAT_JSON))  // first call: cache hit
+                    .thenReturn(Mono.empty());         // second call: cache miss
+
+            // First request: succeeds via Redis, populating the grace cache.
+            MockServerWebExchange exchange1 = exchangeFor("/api/records");
+            StepVerifier.create(graceFilter.filter(exchange1, filterChain)).verifyComplete();
+            assertThat(exchange1.getAttributes()).containsKey("gateway.principal");
+
+            // Second request: Redis misses, worker unreachable — grace cache must serve.
+            MockServerWebExchange exchange2 = exchangeFor("/api/records");
+            StepVerifier.create(graceFilter.filter(exchange2, filterChain)).verifyComplete();
+
+            assertThat(exchange2.getAttributes()).containsKey("gateway.principal");
+            assertThat(exchange2.getResponse().getStatusCode()).isNull();
+            verify(metrics, never()).recordAuthFailure(any(), eq("unknown_pat"));
+        }
+
+        @Test
+        @DisplayName("revoked PAT returns 401 even when grace cache holds its data")
+        void revokedPatIsRejectedDespiteGraceCache() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+
+            // First call: not revoked — populates the grace cache.
+            // Second call: token is now revoked — must be rejected before the grace cache
+            // is ever consulted; the fallback must never bypass revocation.
+            when(valueOps.get("pat:revoked:" + HASH))
+                    .thenReturn(Mono.empty())          // first call: not revoked
+                    .thenReturn(Mono.just("revoked")); // second call: revoked
+            when(valueOps.get("pat:" + HASH)).thenReturn(Mono.just(PAT_JSON));
+
+            // First request: succeeds and populates the grace cache.
+            MockServerWebExchange exchange1 = exchangeFor("/api/records");
+            StepVerifier.create(graceFilter.filter(exchange1, filterChain)).verifyComplete();
+            assertThat(exchange1.getAttributes()).containsKey("gateway.principal");
+
+            // Second request: token is revoked — must get 401 even though the grace
+            // cache has valid PAT data for this hash.
+            MockServerWebExchange exchange2 = exchangeFor("/api/records");
+            StepVerifier.create(graceFilter.filter(exchange2, filterChain)).verifyComplete();
+
+            verify(filterChain, never()).filter(exchange2);
+            assertThat(exchange2.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(metrics).recordAuthFailure(any(), eq("revoked_pat"));
         }
     }
 

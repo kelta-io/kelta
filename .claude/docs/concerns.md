@@ -646,6 +646,29 @@ passes the UUID (`route.getId()`). See `architecture.md` → Cerbos `collectionI
 **Pre-merge gate: verify on a live stack** (`make up`, log in as a non-admin profile, toggle
 per-collection object permissions) — the allow-all harness Cerbos cannot exercise real deny.
 
+**FIXED (autopilot/BUG-2026-09-13-0001) — valid PATs rejected with 401 during kelta-worker outages.**
+`PatAuthenticationFilter.fetchFromWorker` called the worker's `/api/me/tokens/validate/{hash}`
+endpoint when a PAT hash was absent from Redis. Any non-404 error (connection refused, timeout, 5xx
+— exactly what rolling restarts produce) was mapped to `Mono.empty()`, which the caller treated
+identically to "unknown token" → 401. Every request bearing a cache-miss PAT failed for the entire
+duration of any worker outage or rolling restart. First seen 2026-09-13T04:27Z; 201 log lines in 4h.
+
+Fix: `PatAuthenticationFilter` now maintains a short-TTL in-memory grace cache
+(`ConcurrentHashMap<String, CachedPat>`, default 5 min via
+`kelta.gateway.pat-grace-ttl-seconds`). Every successfully resolved PAT JSON (from Redis or the
+worker) is stored on the way through via `doOnNext`. When `fetchFromWorker` encounters a non-404
+error, it consults the grace cache before returning `Mono.empty()` — if the hash was validated
+within the grace window, the cached JSON is returned and the request authenticates normally.
+
+**Revocation is still checked first** (before the Redis/worker/grace-cache path). A token in the
+`pat:revoked:<hash>` Redis set is always rejected immediately, even when the grace cache holds
+its data. The fallback never bypasses revocation.
+
+**Grace cache memory:** entries are not actively evicted — they age past the TTL and are ignored
+on next access. Memory cost is proportional to distinct active PAT hashes seen within the grace
+window, which is bounded in practice. If the gateway sees an unusually high number of distinct
+PATs, consider wiring a `Caffeine`-backed cache with a size bound.
+
 ## Tech Debt
 
 **DB-design audit — incomplete legacy removals (2026-07-06).** A schema audit (159 migrations
