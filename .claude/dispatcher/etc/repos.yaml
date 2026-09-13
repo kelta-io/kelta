@@ -1,0 +1,57 @@
+# Declarative allowlist of repos the dispatcher fleet may operate on.
+# Fields per entry:
+#   name           — repo identifier (matches queue task `repo:` frontmatter)
+#   clone_path     — absolute path on worker-01
+#   default_branch — main or master
+#   merge_policy   — auto | veto_window | manual_protected | none
+#   deploy_hook    — argocd_image_bump | argocd_sync | install-claude-config.sh | none
+#   tier_ceiling   — integer 0-2 (max task tier the fleet may auto-claim for this repo)
+
+- name: emf
+  clone_path: /home/craig/GitHub/emf
+  default_branch: main
+  merge_policy: auto
+  deploy_hook: argocd_image_bump
+  tier_ceiling: 1
+
+- name: spotopened-web
+  clone_path: /home/craig/GitHub/spotopened-web
+  default_branch: main
+  merge_policy: auto
+  deploy_hook: argocd_image_bump
+  tier_ceiling: 1
+
+- name: couchpicks
+  clone_path: /home/craig/GitHub/couchpicks
+  default_branch: main
+  merge_policy: auto
+  deploy_hook: argocd_image_bump
+  tier_ceiling: 1
+
+- name: rzware_website
+  clone_path: /home/craig/GitHub/rzware_website
+  default_branch: main
+  merge_policy: auto
+  deploy_hook: argocd_sync
+  tier_ceiling: 0
+
+- name: homelab-argo
+  clone_path: /home/craig/GitHub/homelab-argo
+  default_branch: main
+  merge_policy: veto_window
+  deploy_hook: argocd_sync
+  tier_ceiling: 1
+
+- name: rzware-ceo
+  clone_path: /home/craig/GitHub/rzware-ceo
+  default_branch: master
+  merge_policy: manual_protected
+  deploy_hook: install-claude-config.sh
+  tier_ceiling: 1
+
+- name: emf-queue
+  clone_path: /home/craig/GitHub/emf-queue
+  default_branch: master
+  merge_policy: none
+  deploy_hook: none
+  tier_ceiling: 0
