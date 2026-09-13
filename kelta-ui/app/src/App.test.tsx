@@ -72,6 +72,7 @@ vi.mock('./context/TenantContext', () => ({
     tenantBasePath: '/test-tenant',
   }),
   getTenantSlug: () => 'test-tenant',
+  useTenantStorageScope: () => 'test-tenant',
   setResolvedTenantId: vi.fn(),
   getResolvedTenantId: () => null,
   isCustomDomainHost: () => false,
