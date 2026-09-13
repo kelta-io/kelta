@@ -76,3 +76,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-09-13 chore(license): add SPDX AGPL-3.0-or-later package-info.java headers to kelta-gateway and runtime-core (CHORE-2026-09-13-0014)
 - 2026-09-13 doc(emf): add NOTICE, rewrite CONTRIBUTING.md for external contributors, add License section to README.md (DOC-2026-09-13-0013)
 - 2026-09-13 security(emf): add gitleaks pre-commit hook, CI scan workflow, and full-history baseline scan (clean, 2900 commits) (SEC-2026-09-13-0015)
+- 2026-09-13 feat(dispatcher): reviewer stage + auto-merge policy dispatch in worker.sh; new lib/deploy-hooks.sh (reviewer, merge policy, deploy hook) + review-prompt.md; covered by tests/review-test.sh (TASK-2026-09-13-0016)
