@@ -1,0 +1,9 @@
+title = "Kelta gitleaks config"
+
+[allowlist]
+description = "allow synthetic secrets in test fixture files"
+paths = [
+  ".*Test.*\\.java$",
+  ".*/test/.*\\.java$",
+  ".*/testdata/.*",
+]

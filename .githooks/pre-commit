@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run gitleaks on staged files before commit
+if command -v gitleaks &>/dev/null; then
+  gitleaks protect --staged --config .gitleaks.toml --no-banner --redact \
+    && exit 0 \
+    || { echo "gitleaks: potential secret detected — commit blocked"; exit 1; }
+fi
+# Gitleaks not installed locally — skip; CI enforces it
+exit 0
