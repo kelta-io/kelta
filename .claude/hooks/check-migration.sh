@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse hook for Edit/Write/MultiEdit. If the touched file is a Flyway
 # migration, verify the sequence number matches a claim made via
-# scripts/migration-claim.sh. Prevents two parallel workers from grabbing
+# the automation running the session (claimed_migration: in EMF_TASK_FILE).
+# Prevents two parallel workers from grabbing
 # the same V<N>.
 #
 # Tool input shape (varies by tool):
