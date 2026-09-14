@@ -35,6 +35,15 @@ cd "$HOMELAB_ARGO_DIR"
 LAST_SUBJECT="$(git log -1 --pretty=%s)"
 LAST_AUTHOR="$(git log -1 --pretty=%an)"
 
+# Already rolled back: a prior run of this script already reverted the bump and
+# HEAD is that revert commit. Nothing to do — this is a benign no-op, not a failure
+# (e.g. the rollback workflow re-runs, or two failure paths fire for the same deploy).
+if [[ "$LAST_AUTHOR" == "github-actions[bot]" ]] && \
+   [[ "$LAST_SUBJECT" == "revert: roll back image bump"* ]]; then
+  echo "Head commit is already a rollback revert (subject=$LAST_SUBJECT) — nothing to do."
+  exit 0
+fi
+
 # Only revert if the head looks like the bot-authored image bump from this deploy.
 # Conservative: refuse to touch unrelated commits.
 if [[ "$LAST_AUTHOR" != "github-actions[bot]" ]] || \
