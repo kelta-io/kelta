@@ -709,26 +709,31 @@ jobs:
     needs: changes
     runs-on: k8s-runner
     if: needs.changes.outputs.any_java == 'true' || needs.changes.outputs.workflows == 'true'
+    # The `secrets` context is NOT available in `if:` conditions — only in `with:`,
+    # `env:` and `run:`. Map it to env here so the steps below can branch on
+    # `env.NVD_API_KEY`, which `if:` does support.
+    env:
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
     steps:
       - name: Announce skip when unkeyed
-        if: ${{ secrets.NVD_API_KEY == '' }}
+        if: env.NVD_API_KEY == ''
         run: |
           echo "::warning title=Java dependency scanning is OFF::NVD_API_KEY is not set, so OWASP dependency-check cannot run (unkeyed NVD access is rate-limited to the point of timing out). The Java dependency tree is UNSCANNED. Add the secret to activate this gate."
           echo "Skipping — no NVD_API_KEY."
 
       - name: Checkout code
-        if: ${{ secrets.NVD_API_KEY != '' }}
+        if: env.NVD_API_KEY != ''
         uses: actions/checkout@v6
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
-        if: ${{ secrets.NVD_API_KEY != '' }}
+        if: env.NVD_API_KEY != ''
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
 
       - name: Install Maven
-        if: ${{ secrets.NVD_API_KEY != '' }}
+        if: env.NVD_API_KEY != ''
         run: |
           if ! command -v mvn &> /dev/null; then
             curl -fsSL https://archive.apache.org/dist/maven/maven-3/${{ env.MAVEN_VERSION }}/binaries/apache-maven-${{ env.MAVEN_VERSION }}-bin.tar.gz | tar xz -C /opt
@@ -738,7 +743,7 @@ jobs:
           cp ci/maven-settings.xml ~/.m2/settings.xml
 
       - name: Cache NVD data
-        if: ${{ secrets.NVD_API_KEY != '' }}
+        if: env.NVD_API_KEY != ''
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
@@ -750,16 +755,16 @@ jobs:
       # kelta-platform's <pluginManagement>, and a phase binding would add the NVD
       # download to every ordinary `mvn verify`.
       - name: Run OWASP dependency-check
-        if: ${{ secrets.NVD_API_KEY != '' }}
+        if: env.NVD_API_KEY != ''
         run: |
           mvn -B org.owasp:dependency-check-maven:10.0.4:check \
             -f kelta-platform/pom.xml \
-            -DnvdApiKey="${{ secrets.NVD_API_KEY }}" \
+            -DnvdApiKey="$NVD_API_KEY" \
             -DfailBuildOnCVSS=7 \
             -DsuppressionFiles="$GITHUB_WORKSPACE/dependency-check-suppressions.xml"
 
       - name: Upload report
-        if: ${{ always() && secrets.NVD_API_KEY != '' }}
+        if: always() && env.NVD_API_KEY != ''
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
