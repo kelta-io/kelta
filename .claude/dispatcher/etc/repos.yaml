@@ -5,6 +5,10 @@
 #   default_branch — main or master
 #   merge_policy   — auto | veto_window | manual_protected | none
 #   deploy_hook    — argocd_image_bump | argocd_sync | install-claude-config.sh | none
+#   health_url     — URL curl'd 5 min after an argocd_image_bump; 2xx=healthy,
+#                    non-2xx triggers a homelab-argo revert + #rzware-ops Slack
+#                    post + a needs_clarification task. `none` for repos whose
+#                    deploy_hook is not argocd_image_bump.
 #   tier_ceiling   — integer 0-2 (max task tier the fleet may auto-claim for this repo)
 
 - name: emf
@@ -12,6 +16,7 @@
   default_branch: main
   merge_policy: auto
   deploy_hook: argocd_image_bump
+  health_url: https://api.kelta.io/actuator/health
   tier_ceiling: 1
 
 - name: spotopened-web
@@ -19,6 +24,7 @@
   default_branch: main
   merge_policy: auto
   deploy_hook: argocd_image_bump
+  health_url: https://app.spotopened.com/
   tier_ceiling: 1
 
 - name: couchpicks
@@ -26,6 +32,7 @@
   default_branch: main
   merge_policy: auto
   deploy_hook: argocd_image_bump
+  health_url: https://www.couchpicks.tv/
   tier_ceiling: 1
 
 - name: rzware_website
@@ -33,6 +40,7 @@
   default_branch: main
   merge_policy: auto
   deploy_hook: argocd_sync
+  health_url: none
   tier_ceiling: 0
 
 - name: homelab-argo
@@ -40,6 +48,7 @@
   default_branch: main
   merge_policy: veto_window
   deploy_hook: argocd_sync
+  health_url: none
   tier_ceiling: 1
 
 - name: rzware-ceo
@@ -47,6 +56,7 @@
   default_branch: master
   merge_policy: manual_protected
   deploy_hook: install-claude-config.sh
+  health_url: none
   tier_ceiling: 1
 
 - name: emf-queue
@@ -54,4 +64,5 @@
   default_branch: master
   merge_policy: none
   deploy_hook: none
+  health_url: none
   tier_ceiling: 0
