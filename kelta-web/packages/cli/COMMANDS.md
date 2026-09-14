@@ -377,6 +377,13 @@ Invite a portal (external) user
 
 Trigger a password reset for a user **(destructive — needs --yes off-TTY)**
 
+### `kelta users token-create <userId>`
+
+Mint a personal access token on a user's behalf (requires MANAGE_USERS) **(destructive — needs --yes off-TTY)**
+
+- `--name <name>` — Token name
+- `--expires-in <days>` — Lifetime in days (1-365) (default: "90")
+
 ### `kelta users logins <userId>`
 
 Show a user's login history
