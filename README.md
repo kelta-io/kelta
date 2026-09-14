@@ -56,6 +56,27 @@ provided by the internal `kelta-auth` service — no external identity server re
   - `make up` builds GraalVM native images and needs **~24 GB allocated to Docker**.
     With less, use `make up-jvm` — see [Native vs JVM images](#native-vs-jvm-images).
 
+## Quickstart
+
+Clone the repo, start the stack, open the UI, and create your first collection.
+
+```bash
+make setup   # first time only: copies .env, generates dev signing keys
+make up      # starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
+make seed    # waits for the stack to be healthy, prints login info
+```
+
+1. Open **http://localhost:5173** and sign in with `admin@kelta.local` / `password` (tenant `default`).
+2. Go to **Setup → Data Model → Collections**, click **Create Collection**, fill in
+   the wizard (Basics → Fields → Authorization → Review), then click **Create
+   Collection** on the Review step.
+
+That's it — a running, runtime-configurable Kelta instance with your first collection.
+First build compiling native images can take a while; see
+[Native vs JVM images](#native-vs-jvm-images) for a faster local build, or
+[Local Development](#local-development) below for ports, debugging, and the full
+service list.
+
 ## Local Development
 
 ### One-command start
