@@ -852,77 +852,12 @@ jobs:
           done
           ls -la _bug-context
 
-      - name: Set up SSH for emf-queue deploy key
-        if: failure() && github.ref == 'refs/heads/main'
-        env:
-          EMF_QUEUE_DEPLOY_KEY: ${{ secrets.EMF_QUEUE_DEPLOY_KEY }}
-        run: |
-          if [ -z "$EMF_QUEUE_DEPLOY_KEY" ]; then
-            echo "EMF_QUEUE_DEPLOY_KEY secret not set — skipping bug-task file."
-            exit 0
-          fi
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$EMF_QUEUE_DEPLOY_KEY" > ~/.ssh/emf_queue_deploy
-          chmod 600 ~/.ssh/emf_queue_deploy
-          ssh-keyscan -t ed25519,rsa github.com >> ~/.ssh/known_hosts 2>/dev/null
-          cat > ~/.ssh/config <<'SSHCFG'
-          Host emf-queue.github.com
-            HostName github.com
-            User git
-            IdentityFile ~/.ssh/emf_queue_deploy
-            IdentitiesOnly yes
-          SSHCFG
-          chmod 600 ~/.ssh/config
-
-      - name: File bug task into emf-queue
-        if: failure() && github.ref == 'refs/heads/main'
-        env:
-          EMF_QUEUE_DEPLOY_KEY: ${{ secrets.EMF_QUEUE_DEPLOY_KEY }}
-        run: |
-          if [ -z "$EMF_QUEUE_DEPLOY_KEY" ]; then
-            echo "EMF_QUEUE_DEPLOY_KEY not set — skipped (see SSH-setup step)."
-            exit 0
-          fi
-          git clone git@emf-queue.github.com:cklinker/emf-queue.git emf-queue
-          cd emf-queue
-          BUG_ID="BUG-$(date -u +%Y-%m-%d)-$(printf '%04d' $((RANDOM % 10000)))"
-          BUG_PATH="inbox/${BUG_ID}.md"
-          {
-            echo "---"
-            echo "id: ${BUG_ID}"
-            echo "title: \"E2E failure in run ${{ github.run_id }}\""
-            echo "type: bug"
-            echo "priority: 1"
-            echo "parallel_safe: true"
-            echo "needs_migration: false"
-            echo "depends_on: []"
-            echo "status: inbox"
-            echo "attempts: 0"
-            echo "max_attempts: 1"
-            echo "auto_promote: false"
-            echo "source_run: \"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\""
-            echo "source_test: \"e2e-tests/playwright (see attached report)\""
-            echo "created_at: \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
-            echo "---"
-            echo
-            echo "## Failing run"
-            echo "- Workflow: build-and-publish-containers"
-            echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            echo "- Commit: ${{ github.sha }}"
-            echo
-            echo "## Recent logs (tail 100 each)"
-            for d in ../_bug-context/*.log; do
-              [ -f "$d" ] || continue
-              echo
-              echo "### $(basename "$d" .log)"
-              echo '```'
-              tail -100 "$d"
-              echo '```'
-            done
-          } > "$BUG_PATH"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$BUG_PATH"
-          git commit -m "bug: file ${BUG_ID} from failed E2E run ${{ github.run_id }}"
-          git push origin main
+      # Failed E2E runs are picked up by the RZWare fleet (rzware-gh-failures), which files
+      # a bug task into the tracker tenant from the run URL and these uploaded logs.
+      - name: Upload failing pod logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bug-context
+          path: _bug-context/*.log
+          retention-days: 7

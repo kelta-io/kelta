@@ -60,7 +60,7 @@ Trigger: `push` → `main` (path-filtered), plus `workflow_dispatch`.
    worker bump whose own health steps had already passed, because the cli-downloads version
    check timed out on an unchanged tag.
 6. **`e2e-test`** — Playwright against production (`app.kelta.io`, `api.kelta.io`) using
-   E2E token + Authentik secrets. Timeout 25 min. Files failing-E2E bug tasks to `emf-queue`.
+   E2E token + Authentik secrets. Timeout 25 min. Uploads failing pod logs as the `bug-context` artifact; the RZWare fleet's `gh-failures` job files the bug task from the run.
    Also builds `@kelta/cli` (`kelta-web`: formula+sdk, then cli) so the CLI smoke spec
    (`e2e-tests/tests/admin/cli-smoke.spec.ts`) can spawn the built binary entry against the
    deployed stack via the pre-issued `E2E_API_TOKEN` (env-override auth path); the spec

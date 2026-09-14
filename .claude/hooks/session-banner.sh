@@ -9,17 +9,12 @@ set -uo pipefail
 
 emit() { printf '%s\n' "$1" >&2; }
 
-QUEUE="${EMF_QUEUE_REPO:-$HOME/GitHub/emf-queue}"
 
 emit "─── EMF autopilot session ───"
 emit "host:    $(hostname)  user: $(whoami)"
 emit "cwd:     $(pwd)"
 emit "branch:  $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '(no git)')"
 
-if [[ -d "$QUEUE" ]]; then
-  count() { ls -1 "$QUEUE/$1"/*.md 2>/dev/null | wc -l | tr -d ' '; }
-  emit "queue:   inbox=$(count inbox)  ready=$(count ready)  approved=$(count approved)  in-progress=$(count in-progress)  failed=$(count failed)"
-fi
 
 if [[ -n "${EMF_TASK_FILE:-}" && -f "$EMF_TASK_FILE" ]]; then
   emit ""
