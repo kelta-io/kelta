@@ -81,6 +81,16 @@ Location: `kelta-platform/runtime/runtime-events/src/main/java/io/kelta/runtime/
 | Logstash Logback Encoder | v8.0, JSON structured logging |
 | OTLP export | HTTP to port 4318 (configurable via `MANAGEMENT_OTLP_METRICS_EXPORT_URL`) |
 | Sampling | W3C propagation, 100% by default (configurable via `OTEL_TRACES_SAMPLER_ARG`) |
+| `service.instance.id` | `management.opentelemetry.resource-attributes.service.instance.id: ${HOSTNAME:local}` in every service's `application.yml` |
+
+**Every replica must carry a distinct `service.instance.id`.** `service.name` alone is identical
+across replicas, so without an instance id the OTLP resource is identical too and Mimir stores
+every replica's counters as one series — `rate()` then treats each replica switch as a counter
+reset and adds the whole counter value back, inflating request-rate panels (this produced a
+phantom ~100 req/s "Requests per Tenant" reading from three `kelta-worker` replicas on
+2026-09-14, resetting on every rollout). `${HOSTNAME}` is the pod name in Kubernetes — unique per
+replica — and still resolves outside it (container/host id), so the default needs no
+deployment-specific override.
 
 ## Local Development (docker-compose.yml)
 
