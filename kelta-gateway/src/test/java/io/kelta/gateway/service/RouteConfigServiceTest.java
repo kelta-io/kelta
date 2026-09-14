@@ -178,6 +178,12 @@ class RouteConfigServiceTest {
         RouteDefinition approvalsRoute = routeRegistry.findByPath("/api/approvals/**").orElse(null);
         assertNotNull(approvalsRoute);
         assertEquals("static-approvals", approvalsRoute.getId());
+
+        // WhoAmI route — regression guard: /spotopened/api/whoami was 404ing because no static
+        // route existed for /api/whoami after TenantSlugExtractionFilter stripped the slug prefix.
+        RouteDefinition whoamiRoute = routeRegistry.findByPath("/api/whoami/**").orElse(null);
+        assertNotNull(whoamiRoute);
+        assertEquals("static-whoami", whoamiRoute.getId());
     }
 
     @Test
