@@ -701,6 +701,10 @@ jobs:
   # clients so severely that a run takes hours and times out. Without the secret
   # this job SKIPS LOUDLY rather than passing quietly — quality-gate permits
   # skipped jobs, so it becomes a real gate the moment the key is provisioned.
+  # The first CI run proved the key IS already set (the skip step did not fire) but
+  # dependency-check 10.0.4 could not fetch NVD data: its bundled client NPE'd on an
+  # error/empty API response and aborted. Pinned to 12.2.2 here and in
+  # kelta-platform/pom.xml, with NVD retry/backoff flags.
   # Set it at repo level: Settings -> Secrets -> Actions -> NVD_API_KEY
   # (free key: https://nvd.nist.gov/developers/request-an-api-key)
   # ===========================================================================
@@ -757,9 +761,11 @@ jobs:
       - name: Run OWASP dependency-check
         if: env.NVD_API_KEY != ''
         run: |
-          mvn -B org.owasp:dependency-check-maven:10.0.4:check \
+          mvn -B org.owasp:dependency-check-maven:12.2.2:check \
             -f kelta-platform/pom.xml \
             -DnvdApiKey="$NVD_API_KEY" \
+            -DnvdMaxRetryCount=10 \
+            -DnvdApiDelay=4000 \
             -DfailBuildOnCVSS=7 \
             -DsuppressionFiles="$GITHUB_WORKSPACE/dependency-check-suppressions.xml"
 
