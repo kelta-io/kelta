@@ -176,6 +176,7 @@ public class RouteConfigService {
                 // Core admin/config endpoints (not data collections)
                 {"admin", "/api/admin/**", "admin"},
                 {"me", "/api/me/**", "me"},
+                {"whoami", "/api/whoami", "whoami"},
                 {"metrics", "/api/metrics/**", "metrics"},
                 {"search", "/api/_search/**", "_search"},
                 // Setup & customization

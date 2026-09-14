@@ -181,6 +181,23 @@ class RouteConfigServiceTest {
     }
 
     @Test
+    void testStaticRoutes_IncludesWhoAmI() throws InterruptedException {
+        // Regression guard: WhoAmIController maps /api/whoami exactly; without a static route
+        // the gateway falls through to the 404 error handler (BUG-2026-09-14-0011).
+        mockWebServer.enqueue(new MockResponse()
+            .setBody("{\"collections\":[]}")
+            .addHeader("Content-Type", "application/json"));
+
+        routeConfigService.refreshRoutes();
+        Thread.sleep(500);
+
+        RouteDefinition whoAmIRoute = routeRegistry.findByPath("/api/whoami").orElse(null);
+        assertNotNull(whoAmIRoute, "/api/whoami static route must be registered");
+        assertEquals("static-whoami", whoAmIRoute.getId());
+        assertEquals(workerServiceUrl, whoAmIRoute.getBackendUrl());
+    }
+
+    @Test
     void testRefreshRoutes_AlwaysUsesConfiguredServiceUrl() throws InterruptedException {
         // Arrange - bootstrap response includes pod-specific URLs, but gateway
         // should ignore them and always use the configured K8s Service URL.
