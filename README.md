@@ -1,5 +1,9 @@
 # Kelta Platform
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
+This software is available under the GNU Affero General Public License v3.0 (AGPL-3.0-only). For commercial or closed-source deployments, contact cklinker@rzware.com.
+
 Kelta is a platform for building dynamic, runtime-configurable enterprise applications. It provides a metadata-driven architecture where collections (tables), fields, validation rules, relationships, and workflows are all defined and managed at runtime — no redeployment required.
 
 ## Architecture
