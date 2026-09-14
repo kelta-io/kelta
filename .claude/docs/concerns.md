@@ -985,6 +985,18 @@ Regression guard: `TenantAwareDataSourceTest` asserts tenant connections use tra
   `JdbcTemplate` while Postgres rejected every row. A blocking gate has to be *reliably* green, not
   green once: enabling a flaky suite trades "never runs" for "main goes red at random", which is a
   deploy outage, not a test nuisance.
+  **And local green was not enough.** The first CI run of the newly-enabled suite failed **11
+  tests across 3 files** (`App.test.tsx` ×9, `ConfigContext`, `PageBuilderPage.save`) that pass
+  223/223 locally, twice. Root cause: `kelta-ui/app/vitest.setup.ts` had **no `configure(...)`**,
+  so every `waitFor`/`findBy*` in 223 files inherited Testing Library's **1000 ms** default —
+  while `kelta-web`, whose suite is green in CI, explicitly sets `asyncUtilTimeout: 5000`. The DOM
+  dumped at failure was the Suspense fallback (`page-loader`, `aria-busy`, "Loading…"): the lazy
+  route chunk had not resolved, i.e. the wait expired rather than the element being missing. Set
+  to 10000 for this suite. **Not reproducible locally** — running the three failing files under a
+  1-core limit passed with *and* without the setting, because three files generate none of the
+  223-file worker contention the shared runner sees, so CI is the only verification. This is the
+  starvation entry ("Frontend suite starves under concurrent image builds") biting at 4x the
+  scale; the underlying contention is still open.
 
 - **FIXED — the runtime modules' tests never ran in CI.** Both `ci.yml` and
   `build-and-publish-containers.yml` built `kelta-platform/runtime/*` with **`-DskipTests`** and
