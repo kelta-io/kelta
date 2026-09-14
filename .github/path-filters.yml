@@ -72,6 +72,22 @@ runtime_modules:
   - *runtime
   - 'kelta-modules/**'
 
+# Quickstart smoke test — anything that could break "clone → docker compose up →
+# create first collection" for a first-time user.
+quickstart:
+  - *runtime
+  - 'kelta-gateway/**'
+  - 'kelta-worker/**'
+  - 'kelta-auth/**'
+  - *web
+  - 'kelta-ui/**'
+  - 'docker-compose.yml'
+  - 'docker-compose.jvm.yml'
+  - 'docker-compose.ci.yml'
+  - 'Makefile'
+  - 'docker/bootstrap/**'
+  - '.env.example'
+
 # Workflow plumbing changed — run everything.
 workflows:
   - '.github/workflows/**'

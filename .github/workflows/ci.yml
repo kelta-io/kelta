@@ -44,6 +44,7 @@ jobs:
       any_java: ${{ steps.filter.outputs.any_java }}
       e2e: ${{ steps.filter.outputs.e2e }}
       runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
+      quickstart: ${{ steps.filter.outputs.quickstart }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout code
@@ -627,6 +628,91 @@ jobs:
             --profile ai --profile tools --profile seed down -v || true
 
   # ===========================================================================
+  # Quickstart smoke test (K-3) — proves the documented "clone → docker compose
+  # up → create your first collection" path actually works and stays fast.
+  #
+  # Images are built ahead of the timer (JVM Dockerfiles via docker-compose.ci.yml,
+  # same port-safe/name-safe overlay the e2e job uses — the k8s-runner shares a
+  # Docker daemon so fixed host ports collide across concurrent jobs). Only the
+  # wall clock from `docker compose up` to a successful first-collection API call
+  # counts against the 300s budget; a `timeout 300` around that exact sequence
+  # enforces it regardless of where the time goes. This deliberately does NOT use
+  # `make up`/`make up-ai` — GraalVM native-image compiles take ~10 min per
+  # service and cannot fit any CI budget; native still ships in production via
+  # build-and-publish-containers.yml.
+  # ===========================================================================
+  quickstart:
+    name: Quickstart Smoke Test
+    needs: changes
+    if: needs.changes.outputs.quickstart == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: k8s-runner-integration
+    timeout-minutes: 20
+    concurrency:
+      group: quickstart-${{ github.head_ref || github.ref }}
+      cancel-in-progress: true
+    env:
+      COMPOSE_PROJECT_NAME: qs-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate .env (JWK_SET + encryption key)
+        run: make setup
+
+      - name: Build service images (JVM, GHA cache)
+        run: |
+          docker buildx bake \
+            -f docker-compose.yml -f docker-compose.ci.yml \
+            --set "*.cache-from=type=gha,scope=e2e-ci-jvm" \
+            --set "*.cache-to=type=gha,mode=max,scope=e2e-ci-jvm" \
+            --load \
+            kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
+
+      - name: Pre-pull curl image (kept out of the timed window)
+        run: docker pull curlimages/curl:8.11.0
+
+      - name: 'Time: stack start → first collection created (budget 300s)'
+        run: |
+          set +e
+          START=$(date +%s)
+          timeout 300 bash ci/quickstart-run.sh
+          RESULT=$?
+          END=$(date +%s)
+          ELAPSED=$((END - START))
+          echo "Quickstart wall-clock (stack start → first collection created): ${ELAPSED}s"
+          if [ "$RESULT" -ne 0 ]; then
+            echo "::error::Quickstart did not complete within the 300s budget (timeout or failure) — ${ELAPSED}s elapsed."
+            exit 1
+          fi
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: |
+          mkdir -p _logs
+          for s in kelta-auth kelta-worker kelta-gateway kelta-ui postgres redis nats cerbos mailpit; do
+            docker compose -f docker-compose.yml -f docker-compose.ci.yml \
+              logs --no-color "$s" > "_logs/${s}.log" 2>&1 || true
+          done
+
+      - name: Upload logs
+        continue-on-error: true
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickstart-logs
+          path: _logs/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop stack + remove volumes
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v || true
+
+  # ===========================================================================
   # The worker image must stay JVM.
   #
   # Runtime module loading needs a bytecode interpreter: SandboxedModuleClassLoader defines classes
@@ -696,13 +782,13 @@ jobs:
 
   quality-gate:
     name: Quality Gate
-    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, integration-tests, e2e, worker-image-is-jvm, dependency-audit]
+    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, integration-tests, e2e, quickstart, worker-image-is-jvm, dependency-audit]
     if: always()
     runs-on: k8s-runner
     steps:
       - name: Check job results
         run: |
-          for job in test-java test-runtime test-runtime-modules test-frontend integration-tests e2e worker-image-is-jvm dependency-audit; do
+          for job in test-java test-runtime test-runtime-modules test-frontend integration-tests e2e quickstart worker-image-is-jvm dependency-audit; do
             result_var="${job//-/_}_result"
             case "${job}" in
               test-java)         result="${{ needs.test-java.result }}" ;;
@@ -711,6 +797,7 @@ jobs:
               test-frontend)     result="${{ needs.test-frontend.result }}" ;;
               integration-tests) result="${{ needs.integration-tests.result }}" ;;
               e2e)               result="${{ needs.e2e.result }}" ;;
+              quickstart)        result="${{ needs.quickstart.result }}" ;;
               worker-image-is-jvm) result="${{ needs.worker-image-is-jvm.result }}" ;;
               dependency-audit)  result="${{ needs.dependency-audit.result }}" ;;
             esac
