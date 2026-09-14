@@ -189,6 +189,7 @@ public class RouteConfigService {
                 {"ui-menus", "/api/ui-menus/**", "ui-menus"},
                 {"pages", "/api/pages/**", "pages"},
                 // Security & identity
+                {"whoami", "/api/whoami", "whoami"},
                 {"profiles", "/api/profiles/**", "profiles"},
                 {"users", "/api/users/**", "users"},
                 {"oidc-providers", "/api/oidc-providers/**", "oidc-providers"},

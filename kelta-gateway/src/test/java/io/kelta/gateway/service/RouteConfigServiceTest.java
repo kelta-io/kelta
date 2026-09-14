@@ -178,6 +178,12 @@ class RouteConfigServiceTest {
         RouteDefinition approvalsRoute = routeRegistry.findByPath("/api/approvals/**").orElse(null);
         assertNotNull(approvalsRoute);
         assertEquals("static-approvals", approvalsRoute.getId());
+
+        // WhoAmI route — regression guard: this row was missing, causing /api/whoami (after
+        // tenant-slug extraction) to fall through to the 404 error handler (BUG-2026-09-14-0011).
+        RouteDefinition whoamiRoute = routeRegistry.findByPath("/api/whoami").orElse(null);
+        assertNotNull(whoamiRoute);
+        assertEquals("static-whoami", whoamiRoute.getId());
     }
 
     @Test
