@@ -3,8 +3,9 @@
 Thank you for your interest in contributing! This guide covers everything you need to
 get started as an outside contributor.
 
-Maintainers: the internal automation workflow is documented separately in
-[`.claude/dispatcher/README.md`](.claude/dispatcher/README.md).
+Maintainers: automated pull requests are opened by `rzware-developer[bot]` and reviewed by
+`rzware-reviewer[bot]`; that fleet is operated from the private `rzware-ceo` repository.
+Everything merged here must be a generic platform feature (Critical Rule 0 in `CLAUDE.md`).
 
 ---
 

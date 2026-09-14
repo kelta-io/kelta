@@ -32,6 +32,15 @@ Then run the **Definition of Done** check (in Task Workflow) before declaring do
 
 ## Critical Rules (do not violate)
 
+0. **Generic only.** Every change to this repo is a generic, extensible platform feature
+   usable by any tenant. Nothing tenant-specific, customer-specific, or specific to the
+   RZWare agent fleet or its tracker tenant ever lands here — no special-cased slugs,
+   tables, flags, flows or prompts. Tenant-specific behaviour is expressed as tenant
+   metadata (collections, flows, views, approvals) created through the API, CLI or MCP.
+   If a tenant needs something the platform cannot express, add the generic capability
+   (with the same shape any other tenant would get) and configure it from metadata.
+   (RZWare standing rule, 2026-09-13; `rzware-ceo/CHARTER.md` §2.)
+
 1. **Multi-pod NATS config rule.** Never mutate an in-memory registry/cache on one pod
    only. Any change to configuration data (collections, fields, layouts, flows,
    features, domains, credentials) MUST be broadcast via NATS JetStream so every pod
@@ -317,8 +326,9 @@ git checkout main && git pull origin main        # after merge
 
 Every feature needs UI configuration + unit tests + e2e (Playwright) coverage **and its
 doc updates** (see Keeping Docs Current). Pre-PR the `/verify` skill runs Java build/tests
-and frontend lint + typecheck + `format:check` + `test:coverage`. CONTRIBUTING.md documents
-the autopilot dispatcher that drives queued tasks.
+and frontend lint + typecheck + `format:check` + `test:coverage`. Automated PRs arrive from
+the RZWare agent fleet as `rzware-developer[bot]` and are reviewed by
+`rzware-reviewer[bot]`; the fleet's runtime lives in `rzware-ceo`, not here.
 
 ### Definition of Done (self-check before declaring a task complete)
 
