@@ -1054,14 +1054,12 @@ kubectl describe pod -n kelta <pod-name>
 - **Auth**: JWT validation at gateway, Cerbos for fine-grained authorization
 - **Multi-tenancy**: TenantContext (ThreadLocal), per-tenant PostgreSQL schemas, tenant-aware NATS events
 
-## Autopilot loop
+## Automation (external)
 
-Two-machine pipeline that turns task briefs into merged PRs without human keystrokes. The **MacBook Pro** runs the planner agent (briefs → structured tasks) and the cockpit (`.claude/dispatcher/status.sh` refreshed every minute by launchd). **`worker-01`** (`craig@192.168.0.166`) runs the dispatcher (`.claude/dispatcher/dispatch.sh` under systemd) which claims work and spawns up to `MAX_PARALLEL` `claude -p` workers, each in its own `/var/lib/emf-wt/<id>` worktree + tmux session.
-
-Tasks flow through [`emf-queue`](../../../emf-queue/README.md): `inbox/` (user briefs + auto-filed bugs) → `ready/` (planner-emitted) → `approved/` (user review) → `in-progress/` (atomic claim) → `done/` (merged) or `failed/` (retries exhausted).
-
-Auto-merge is gated by the `autopilot` PR label: [`.github/workflows/auto-merge.yml`](../../.github/workflows/auto-merge.yml) enables squash auto-merge only when that label is present. Migrations are serialized by an `_active-migration` marker file at the `emf-queue` root — the dispatcher's eligibility filter refuses to claim a second `needs_migration: true` task while it exists. E2E failures auto-file `inbox/BUG-<run-id>.md` via `.github/workflows/post-deploy-validate.yml`; those bug tasks carry `auto_promote: true` and skip user review.
-
-**Post-deploy image bump + health check.** For repos whose `etc/repos.yaml` entry carries `deploy_hook: argocd_image_bump` (currently `emf`, `spotopened-web`, `couchpicks`), `run_deploy_hook` in [`lib/deploy-hooks.sh`](../dispatcher/lib/deploy-hooks.sh) does two things on a merged PR: (1) `_hook_argocd_image_bump` reads the merge SHA, rewrites the `main-<sha>` tag in the matching `~/GitHub/homelab-argo/<name>[-web]/` overlay (either the `images:`/`newTag:` block in `kustomization.yaml` or a hardcoded tag in `*deployment.yaml`), commits + pushes, and writes `sha=…` to `${DEPLOY_HEALTH_DIR:-/srv/rzware-ceo/state/deploy-health}/<name>`; (2) `run_health_check` sleeps 300s (1s under `DRY_RUN=1`), curls the entry's `health_url:`, and on non-2xx reverts the tag (git-checks out the file's previous SHA, commits + pushes), posts to `#rzware-ops`, and files a `needs_clarification` task into `emf-queue/failed/`. Both functions always return 0 — a health failure must not kill the worker. This is the OPERATING-MODEL.md §9 safety net; the 30-minute revert budget lives in `PR_TIMEOUT_MIN` + the 5-minute post-deploy wait.
-
-See [`.claude/dispatcher/README.md`](../dispatcher/README.md) for ops, install, and recovery.
+Automated changes to this repo are made by the RZWare agent fleet, which runs outside this
+repo (`rzware-ceo`, on Kubernetes) against a Kelta tenant that serves as the work tracker.
+PRs arrive as `rzware-developer[bot]` with the `autopilot` label and are reviewed by
+`rzware-reviewer[bot]`; [`.github/workflows/auto-merge.yml`](../../.github/workflows/auto-merge.yml)
+enables squash auto-merge for those authors on green CI. Nothing in this repo is specific to
+that fleet (Critical Rule 0 in `CLAUDE.md`): the repo hooks (`.claude/hooks/`) and `/verify`
+run inside any session, automated or not, and read only `EMF_TASK_FILE` when present.

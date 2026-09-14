@@ -631,37 +631,9 @@ environments as **metadata packages** (`PackageService` export → `PackageImpor
 - **Security types** (`ROLE`/`POLICY`/`ROUTE_POLICY`/`FIELD_POLICY`) are cloned INTO sandboxes
   but **never promoted** — authz changes reach production only via the explicit packages API.
 
-## Dispatcher — Slack Notifications
+## Fleet notifications
 
-The autopilot dispatcher posts two types of events to `#rzware-ceo`:
-
-| Event | When | Content |
-|-------|------|---------|
-| Task failed | All `max_attempts` exhausted | Task id, fail reason, PR number, attempt count, path to JSONL log |
-| PR merged | `gh pr view` returns `MERGED` | Task id and PR number/URL (terse) |
-
-Retry paths (`queue_release_orphan`) produce no Slack message — a task that fails once and
-succeeds on the next attempt is not newsworthy.
-
-**Implementation:** `.claude/dispatcher/lib/notify.sh` exposes `notify_slack CHANNEL TEXT`.
-Internally it builds a JSON payload with `jq`, then posts via the `rzware-ceo` sops-managed
-Slack bot token:
-
-```sh
-cd /srv/rzware-ceo && sops exec-env secrets/slack.yaml 'curl -sS --max-time 10 -X POST \
-  -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-  -H "Content-type: application/json; charset=utf-8" \
-  --data @<payload-file> https://slack.com/api/chat.postMessage'
-```
-
-**Credential:** `SLACK_BOT_TOKEN` lives in `/srv/rzware-ceo/secrets/slack.yaml` (SOPS-encrypted,
-`-rw-r----- craig:rzware`; `craig` is a member of group `rzware`). The dispatcher runs as
-`craig`, so `sops exec-env` resolves the key without permission changes.
-
-**Resilience:** failure is non-fatal. If sops, curl, or the network is unavailable,
-`notify_slack` logs a warning via `log_warn` and returns 1; `worker.sh` calls it with `|| true`
-so archiving continues normally. A dead Slack channel must never fail a task.
-
-**Call sites in `worker.sh`** (archive step):
-- `MERGED` branch — after `queue_done`
-- exhausted-retries `else` branch — after `queue_fail`
+Slack notifications about automated PRs are posted by the RZWare fleet from its own runtime
+(`rzware-ceo`), not from this repo. Kelta itself has no Slack integration beyond the OAuth
+credential template (`credential-templates/slack.json`); a flow reaches Slack through
+`CALL_API`/`HTTP_CALLOUT` with a stored credential.

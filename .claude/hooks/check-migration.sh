@@ -30,7 +30,8 @@ block() {
   exit 2
 }
 
-# Find the in-progress task file for this worker (set by the dispatcher).
+# Find the task file for this worker (EMF_TASK_FILE is set by whatever automation runs the
+# session; the RZWare fleet renders it from the tracker record).
 task_file="${EMF_TASK_FILE:-}"
 if [[ -z "$task_file" || ! -f "$task_file" ]]; then
   echo "WARN: EMF_TASK_FILE not set or missing; skipping migration claim check (interactive session?)" >&2
@@ -39,7 +40,7 @@ fi
 
 claimed="$(grep -oE '^claimed_migration:[[:space:]]*V[0-9]+' "$task_file" | grep -oE 'V[0-9]+' || true)"
 if [[ -z "$claimed" ]]; then
-  block "no claimed_migration in $task_file — run scripts/migration-claim.sh --task-file '$task_file' first"
+  block "no claimed_migration in $task_file — claim a Flyway sequence number through your automation's migration-claim step first"
 fi
 
 if [[ "$claimed" != "$v" ]]; then

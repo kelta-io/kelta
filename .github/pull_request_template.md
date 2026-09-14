@@ -40,4 +40,4 @@
 <!-- Set by the dispatcher; humans usually leave blank. -->
 
 - [ ] `autopilot` label applied → enables auto-merge on green CI
-- Source task: `<emf-queue/in-progress/TASK-...md>` (autopilot only)
+- Source task: `<tracker key, e.g. KLT-42>` (autopilot only)
