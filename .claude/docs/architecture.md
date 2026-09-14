@@ -532,6 +532,16 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   catalog lives in the frontend `SystemPermissionChecklist.tsx` (`VIEW_SETUP`, `MANAGE_USERS`,
   `API_ACCESS`, `VIEW_ALL_DATA`, …) — no Java enum. A new permission only gates once it is
   granted on the relevant profiles (rows in `profile_system_permission`).
+- **Admin-on-behalf-of a user (reference: `AdminPersonalAccessTokenController`,
+  `POST /api/admin/users/{id}/tokens`, `MANAGE_USERS`).** For an admin action that performs a
+  self-service operation *for another user* (minting that user's PAT, resetting their password,
+  …), don't duplicate the self-service controller's logic — extract the shared body into a
+  package-private method taking the target `userId` **and** an explicit `actorId` +
+  `SecurityAuditLogger.EventType`, then have the self-service endpoint call it with
+  `actorId == userId` and the admin endpoint call it with the caller's identity and a distinct
+  event type (`PAT_ADMIN_CREATED` vs `PAT_CREATED`, mirroring the existing
+  `PASSWORD_RESET_ADMIN`/`PASSWORD_CHANGED` split) — so the audit trail can tell a self-mint from
+  an admin-mint by event type alone, not just by comparing actor/target columns.
 
 ### Tenant context in the worker
 

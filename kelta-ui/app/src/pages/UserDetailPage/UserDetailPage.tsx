@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect, type FormEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useApi } from '../../context/ApiContext'
@@ -6,7 +6,13 @@ import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
 import { useToast } from '../../components/Toast'
 import { ConfirmDialog } from '../../components'
+import { useSystemPermissions } from '../../hooks/useSystemPermissions'
 import { cn } from '@/lib/utils'
+
+interface MintTokenFormData {
+  name: string
+  expiresInDays: number
+}
 
 interface PlatformUser {
   id: string
@@ -91,6 +97,7 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
   const { t, formatDate } = useI18n()
   const { apiClient, keltaClient } = useApi()
   const { showToast } = useToast()
+  const { hasPermission } = useSystemPermissions()
   const navigate = useNavigate()
   const tenantSlug = getTenantSlug()
 
@@ -106,6 +113,8 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
   const [historyPage, setHistoryPage] = useState(0)
   const [showMfaResetConfirm, setShowMfaResetConfirm] = useState(false)
   const [showPasswordResetConfirm, setShowPasswordResetConfirm] = useState(false)
+  const [showMintTokenForm, setShowMintTokenForm] = useState(false)
+  const [mintedToken, setMintedToken] = useState<string | null>(null)
   const {
     data: user,
     isLoading,
@@ -229,6 +238,24 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
     onError: (err: Error) => {
       showToast(err.message || 'Failed to reset password', 'error')
       setShowPasswordResetConfirm(false)
+    },
+  })
+
+  // Admin-on-behalf-of PAT mint (MANAGE_USERS) — mirrors ApiTokensPage's self-service
+  // createMutation, but targets this user id instead of the caller.
+  const mintTokenMutation = useMutation({
+    mutationFn: (data: MintTokenFormData) =>
+      keltaClient.admin.users.tokens.create(id!, {
+        name: data.name,
+        expiresInDays: data.expiresInDays,
+      }),
+    onSuccess: (result) => {
+      showToast('Token minted successfully', 'success')
+      setShowMintTokenForm(false)
+      setMintedToken(result.token)
+    },
+    onError: (err: Error) => {
+      showToast(err.message || 'Failed to mint token', 'error')
     },
   })
 
@@ -588,6 +615,58 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
             </div>
           </div>
 
+          {/* Personal Access Tokens Section — MANAGE_USERS only */}
+          {hasPermission('MANAGE_USERS') && (
+            <div className="rounded-lg border border-border bg-card p-6">
+              <h2 className="mb-4 text-lg font-semibold text-foreground">Personal Access Tokens</h2>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                  Mint a personal access token on this user's behalf for scripted/API access.
+                </p>
+                <button
+                  className="rounded-md border border-border bg-secondary px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                  onClick={() => setShowMintTokenForm(true)}
+                  disabled={mintTokenMutation.isPending}
+                  data-testid="mint-token-button"
+                >
+                  Mint Token
+                </button>
+              </div>
+
+              {mintedToken && (
+                <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950">
+                  <p className="mb-2 text-sm font-medium text-amber-800 dark:text-amber-300">
+                    Copy this token now. It will not be shown again.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code
+                      className="flex-1 break-all rounded bg-muted px-2 py-1.5 font-mono text-xs text-foreground"
+                      data-testid="minted-token-value"
+                    >
+                      {mintedToken}
+                    </code>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+                      onClick={() => setMintedToken(null)}
+                      data-testid="dismiss-minted-token"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {showMintTokenForm && (
+            <MintTokenForm
+              onSubmit={(data) => mintTokenMutation.mutate(data)}
+              onCancel={() => setShowMintTokenForm(false)}
+              isSubmitting={mintTokenMutation.isPending}
+            />
+          )}
+
           <ConfirmDialog
             open={showMfaResetConfirm}
             title="Reset MFA"
@@ -686,6 +765,146 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function MintTokenForm({
+  onSubmit,
+  onCancel,
+  isSubmitting,
+}: {
+  onSubmit: (data: MintTokenFormData) => void
+  onCancel: () => void
+  isSubmitting: boolean
+}) {
+  const [name, setName] = useState('')
+  const [expiresInDays, setExpiresInDays] = useState(90)
+  const [nameError, setNameError] = useState<string | undefined>()
+  const nameInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    nameInputRef.current?.focus()
+  }, [])
+
+  const handleSubmit = useCallback(
+    (e: FormEvent) => {
+      e.preventDefault()
+      const trimmed = name.trim()
+      if (!trimmed) {
+        setNameError('Name is required')
+        return
+      }
+      if (trimmed.length > 200) {
+        setNameError('Name must be 200 characters or fewer')
+        return
+      }
+      onSubmit({ name: trimmed, expiresInDays })
+    },
+    [name, expiresInDays, onSubmit]
+  )
+
+  return (
+    <div
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4"
+      onClick={(e) => e.target === e.currentTarget && onCancel()}
+      role="presentation"
+      data-testid="mint-token-form-overlay"
+    >
+      <div
+        className="w-full max-w-[500px] rounded-lg bg-card shadow-xl"
+        role="dialog"
+        aria-modal="true"
+        data-testid="mint-token-form-modal"
+      >
+        <div className="flex items-center justify-between border-b border-border p-6">
+          <h2 className="m-0 text-xl font-semibold text-foreground">Mint Personal Access Token</h2>
+          <button
+            type="button"
+            className="rounded p-2 text-2xl leading-none text-muted-foreground hover:bg-muted hover:text-foreground"
+            onClick={onCancel}
+            aria-label="Close"
+          >
+            &times;
+          </button>
+        </div>
+        <div className="p-6">
+          <form className="space-y-4" onSubmit={handleSubmit} noValidate>
+            <div>
+              <label
+                htmlFor="mint-token-name"
+                className="mb-1 block text-sm font-medium text-foreground"
+              >
+                Token Name <span className="ml-0.5 text-destructive">*</span>
+              </label>
+              <input
+                ref={nameInputRef}
+                id="mint-token-name"
+                type="text"
+                className={cn(
+                  'w-full rounded-md border px-3 py-2 text-sm text-foreground bg-background focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
+                  nameError ? 'border-destructive' : 'border-border'
+                )}
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value)
+                  if (nameError) setNameError(undefined)
+                }}
+                placeholder="e.g. CI/CD Pipeline"
+                disabled={isSubmitting}
+                data-testid="mint-token-name-input"
+              />
+              {nameError && (
+                <span className="mt-1 block text-xs text-destructive" role="alert">
+                  {nameError}
+                </span>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="mint-token-expiry"
+                className="mb-1 block text-sm font-medium text-foreground"
+              >
+                Expiration
+              </label>
+              <select
+                id="mint-token-expiry"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                value={expiresInDays}
+                onChange={(e) => setExpiresInDays(parseInt(e.target.value, 10))}
+                disabled={isSubmitting}
+                data-testid="mint-token-expiry-select"
+              >
+                <option value={30}>30 days</option>
+                <option value={60}>60 days</option>
+                <option value={90}>90 days</option>
+                <option value={180}>180 days</option>
+                <option value={365}>365 days</option>
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="rounded-md border border-border bg-secondary px-4 py-2 text-sm text-foreground hover:bg-muted disabled:opacity-50"
+                onClick={onCancel}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                disabled={isSubmitting}
+                data-testid="mint-token-submit"
+              >
+                {isSubmitting ? 'Minting...' : 'Mint Token'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   )
 }

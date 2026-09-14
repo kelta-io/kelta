@@ -114,7 +114,17 @@ public class PersonalAccessTokenController {
             return ResponseEntity.badRequest().body(Map.of("error", "Missing tenant or user context"));
         }
         String userId = resolveUserId(userIdentifier, tenantId);
+        return mintToken(userId, tenantId, body, userId, SecurityAuditLogger.EventType.PAT_CREATED);
+    }
 
+    /**
+     * Mints a token for {@code userId}, auditing under {@code eventType} with {@code actorId} as
+     * the acting party. Self-service minting passes {@code actorId == userId}; the admin-on-behalf-of
+     * path ({@link AdminPersonalAccessTokenController}) passes the admin's identity and
+     * {@code PAT_ADMIN_CREATED} so the two are distinguishable in the audit trail.
+     */
+    ResponseEntity<?> mintToken(String userId, String tenantId, Map<String, Object> body,
+                                String actorId, SecurityAuditLogger.EventType eventType) {
         // Validate request body
         String name = (String) body.get("name");
         if (name == null || name.isBlank() || name.length() > 200) {
@@ -183,9 +193,8 @@ public class PersonalAccessTokenController {
             log.warn("Failed to cache PAT in Redis: {}", e.getMessage());
         }
 
-        SecurityAuditLogger.log(SecurityAuditLogger.EventType.PAT_CREATED,
-                userId, userId, tenantId, "success", "name=" + name.trim());
-        log.info("PAT created for user {} in tenant {}: {}", userId, tenantId, name.trim());
+        SecurityAuditLogger.log(eventType, actorId, userId, tenantId, "success", "name=" + name.trim());
+        log.info("PAT created for user {} in tenant {} (actor {}): {}", userId, tenantId, actorId, name.trim());
 
         return ResponseEntity.ok(Map.of(
                 "token", rawToken,

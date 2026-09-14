@@ -185,3 +185,38 @@ describe('AdminClient users.invitePortal', () => {
     expect(result.status).toBe('REINVITED');
   });
 });
+
+describe('AdminClient users.tokens.create', () => {
+  let axios: AxiosInstance;
+  let client: AdminClient;
+  let mockPost: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    axios = createMockAxios();
+    client = new AdminClient(axios);
+    mockPost = axios.post as ReturnType<typeof vi.fn>;
+  });
+
+  it('POSTs to the admin-on-behalf-of mint endpoint for the target user', async () => {
+    mockPost.mockResolvedValue({
+      data: {
+        token: 'klt_abc123',
+        name: 'Integration token',
+        tokenPrefix: 'klt_abc1',
+        scopes: ['api'],
+        expiresAt: '2027-01-01T00:00:00Z',
+      },
+    });
+
+    const result = await client.users.tokens.create('user-1', {
+      name: 'Integration token',
+      expiresInDays: 90,
+    });
+
+    expect(mockPost).toHaveBeenCalledWith('/api/admin/users/user-1/tokens', {
+      name: 'Integration token',
+      expiresInDays: 90,
+    });
+    expect(result.token).toBe('klt_abc123');
+  });
+});

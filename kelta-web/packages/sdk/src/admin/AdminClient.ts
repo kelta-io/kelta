@@ -554,6 +554,20 @@ export class AdminClient {
       const response = await this.axios.post(`/api/admin/users/${userId}/reset-password`);
       return response.data as { status: string; userId: string };
     },
+
+    tokens: {
+      /**
+       * Admin-on-behalf-of PAT mint (`MANAGE_USERS`) — same shape as {@link AdminClient.personalTokens}'s
+       * self-service create, but mints for `userId` instead of the caller.
+       */
+      create: async (
+        userId: string,
+        request: CreatePersonalAccessTokenRequest
+      ): Promise<PersonalAccessTokenCreated> => {
+        const response = await this.axios.post(`/api/admin/users/${userId}/tokens`, request);
+        return response.data as PersonalAccessTokenCreated;
+      },
+    },
   };
 
   // ---------------------------------------------------------------------------
