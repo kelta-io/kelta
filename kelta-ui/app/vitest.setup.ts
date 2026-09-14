@@ -1,9 +1,31 @@
 import '@testing-library/jest-dom'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import { afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { setupServer } from 'msw/node'
 import { http, HttpResponse } from 'msw'
 import { mockAxios } from './src/test/testUtils'
+
+// ─── Async utility timeout ──────────────────────────────────────────────────
+// Testing Library's default asyncUtilTimeout is 1000ms, inherited by every waitFor
+// and findBy* in this suite. kelta-web sets 5000 in its own setup and its suite is
+// green in CI; this one is ~4x larger, renders whole routed pages, and had no
+// configure() at all.
+//
+// Evidence this matters: the first CI run of this suite failed 11 tests that pass
+// 223/223 locally, and the DOM dumped at failure was the Suspense fallback
+// (data-testid="page-loader", aria-busy, "Loading...") — the lazy route chunk had
+// simply not resolved yet, i.e. the wait expired rather than the element being
+// absent. The job shares the k8s-runner with concurrent GraalVM native image builds
+// (concerns.md -> "Frontend suite starves under concurrent image builds").
+//
+// Caveat, stated honestly: this was NOT reproduced locally. Running the three
+// failing files under a 1-core limit passed both with and without this setting —
+// three files generate none of the 223-file worker contention that the runner sees.
+// CI is the only environment that reproduces it, so CI is the verification.
+//
+// 10s stays well inside the 30s testTimeout in vitest.config.ts, and a genuinely
+// missing element still fails — it just gets a budget that survives contention.
+configure({ asyncUtilTimeout: 10000 })
 
 // ─── Global Axios mock ──────────────────────────────────────────────────────
 // All API calls flow through KeltaClient's Axios instance.
