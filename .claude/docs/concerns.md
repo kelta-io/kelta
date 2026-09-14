@@ -5,6 +5,37 @@ at the bottom so reviewers can see what's already been addressed.
 
 ## Security Risks
 
+**FIXED (2026-09-14) — the platform had no dependency vulnerability scanning at all, and the
+one scanner that was configured had never run.** OWASP dependency-check sat in
+`kelta-platform/pom.xml` with `failBuildOnCVSS=7` and a suppressions file, but only inside
+**`<pluginManagement>`** — which configures a plugin without ever running one. No module
+declared it in `<plugins>`, no workflow invoked it, and `dependency-check-suppressions.xml` is
+still the untouched template (its two `<suppress>` blocks are inside a **comment**), so no
+report had ever been reviewed. There was also no `npm audit` in CI, no Dependabot, and no
+Renovate — "Detect secrets" was the only security check in the pipeline.
+
+What that was hiding, production dependencies only (dev tooling excluded — it does not ship):
+**`kelta-ui/app` 2 critical + 5 high**, `kelta-web` 4 high. Among them `protobufjs` (arbitrary
+code execution), `maplibre-gl` (XSS sanitizer bypass in `DOM.sanitize()`), `react-router`
+(arbitrary content injection via vendored turbo-stream; CSRF via PUT/PATCH/DELETE), `axios`
+(prototype pollution → Basic auth injection, NO_PROXY bypass), `@tiptap/core` (prototype
+pollution via `__proto__`), `form-data` (CRLF injection). These ship to the browser in a
+platform that otherwise enforces RLS, Cerbos, FLS and data masking.
+
+Now gated by two CI jobs, both in `quality-gate`'s `needs` **and** its result loop:
+`dependency-audit` (npm, blocking today) and `dependency-check-java` (skips loudly until
+`NVD_API_KEY` is set — see `ci-cd.md`). The npm gate diffs against
+`ci/npm-audit-baseline.json` rather than using a flat threshold, because 33 known
+high/critical advisories would otherwise fail the build on day one. **The baseline is debt,
+not an allowlist** — the 33 entries are the burn-down list, and the 2 criticals are the place
+to start.
+
+**Third occurrence of the same shape** (after the runtime modules' `-DskipTests` and
+`kelta-ui`'s never-invoked vitest suite): a tool that is configured, looks wired, and never
+executes. When adding any checker, verify a job runs it *and* that its failure signal reaches
+a gate — the audit script's exit code was verified in both directions before wiring, precisely
+because a gate that prints FAIL and exits 0 is the same defect wearing a different hat.
+
 **No malware scanning exists anywhere in the platform, and the support mailbox makes
 strangers the upload source (support-mailbox slice 9).** Until inbound mail shipped, every
 byte in object storage arrived from an authenticated user of a tenant. `support@` inverts
