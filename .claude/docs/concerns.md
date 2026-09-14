@@ -22,13 +22,22 @@ code execution), `maplibre-gl` (XSS sanitizer bypass in `DOM.sanitize()`), `reac
 pollution via `__proto__`), `form-data` (CRLF injection). These ship to the browser in a
 platform that otherwise enforces RLS, Cerbos, FLS and data masking.
 
-Now gated by two CI jobs, both in `quality-gate`'s `needs` **and** its result loop:
-`dependency-audit` (npm, blocking today) and `dependency-check-java` (skips loudly until
-`NVD_API_KEY` is set — see `ci-cd.md`). The npm gate diffs against
+The **npm** side is now gated by `dependency-audit`, wired into `quality-gate`'s `needs`
+**and** its result loop. The gate diffs against
 `ci/npm-audit-baseline.json` rather than using a flat threshold, because 33 known
 high/critical advisories would otherwise fail the build on day one. **The baseline is debt,
 not an allowlist** — the 33 entries are the burn-down list, and the 2 criticals are the place
 to start.
+
+**Java dependencies are still unscanned.** Wiring dependency-check up is blocked on the
+`NVD_API_KEY` secret: it *is* configured, but the NVD API rejects it —
+`NvdApiException: Invalid API Key`. Worth knowing why that took two CI runs to learn: the
+pinned 10.0.4 shipped an `open-vulnerability-clients` that NPE'd on the error response
+(`Cannot read the array length because "bytes" is null` in `NvdCveClient._next`) instead of
+reporting it, so the real cause was invisible. Bumping to 12.2.2 surfaced the actual message.
+The follow-up is: regenerate the key at nvd.nist.gov, then land the job (pom bump to 12.2.2 +
+the CI job, with `-DnvdMaxRetryCount=10 -DnvdApiDelay=4000`). If the key stays troublesome,
+`-DnvdDatafeedUrl` uses the NVD datafeed mirror and drops the API-key dependency entirely.
 
 **Third occurrence of the same shape** (after the runtime modules' `-DskipTests` and
 `kelta-ui`'s never-invoked vitest suite): a tool that is configured, looks wired, and never

@@ -88,12 +88,7 @@
                 <plugin>
                     <groupId>org.owasp</groupId>
                     <artifactId>dependency-check-maven</artifactId>
-                    <!-- 10.0.4 could not update the NVD data: its bundled
-                         open-vulnerability-clients NPE'd ("Cannot read the array length
-                         because \"bytes\" is null" in NvdCveClient._next) whenever the NVD
-                         API returned an error or empty body, aborting the whole analysis.
-                         12.x carries the fixed client and the current API contract. -->
-                    <version>12.2.2</version>
+                    <version>10.0.4</version>
                     <configuration>
                         <failBuildOnCVSS>7</failBuildOnCVSS>
                         <suppressionFiles>
