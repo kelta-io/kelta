@@ -15,7 +15,8 @@ jobs:
     if: >-
       contains(github.event.pull_request.labels.*.name, 'autopilot') &&
       (github.event.pull_request.user.login == 'cklinker' ||
-       github.event.pull_request.user.login == 'github-actions[bot]') &&
+       github.event.pull_request.user.login == 'github-actions[bot]' ||
+       github.event.pull_request.user.login == 'rzware-developer[bot]') &&
       github.event.pull_request.draft == false
     steps:
       # Use a Personal Access Token instead of GITHUB_TOKEN. Merges performed
