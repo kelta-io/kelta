@@ -71,6 +71,13 @@ COPY kelta-mcp/src ./src
 RUN mvn clean package -DskipTests -B && \
     mv target/kelta-mcp-*.jar target/kelta-mcp.jar
 
+# Fetch the OpenTelemetry Java agent here — this stage already has curl and
+# network egress from the Maven build, and far more disk headroom than the
+# minimal JRE runtime stage.
+RUN curl -fL -o opentelemetry-javaagent.jar \
+    https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.25.0/opentelemetry-javaagent.jar && \
+    test -s opentelemetry-javaagent.jar
+
 # =============================================================================
 # Stage 3: Runtime image
 # =============================================================================
@@ -81,11 +88,7 @@ WORKDIR /app
 RUN groupadd -r kelta && useradd -r -g kelta kelta
 
 COPY --from=builder /build/target/kelta-mcp.jar app.jar
-
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/* && \
-    curl -fL -o opentelemetry-javaagent.jar \
-    https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.25.0/opentelemetry-javaagent.jar && \
-    test -s opentelemetry-javaagent.jar
+COPY --from=builder /build/opentelemetry-javaagent.jar opentelemetry-javaagent.jar
 
 RUN chown -R kelta:kelta /app
 
