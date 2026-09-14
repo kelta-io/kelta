@@ -1,0 +1,43 @@
+{
+  "_comment": "Known high/critical advisories in PRODUCTION npm deps, accepted as a backlog so CI can gate NEW ones. This is debt to burn down, not an allowlist to grow. Regenerate with: node ci/dependency-audit.mjs --update",
+  "_generated": "2026-09-14",
+  "packages": {
+    "kelta-web": {
+      "GHSA-gcfj-64vw-6mp9": "high | axios | Axios Node HTTP adapter can use an inherited proxy after interceptor config cloning",
+      "GHSA-5jgf-p345-68v8": "high | fast-uri | fast-uri vulnerable to host confusion via skipped IDN canonicalization on scheme-relative references",
+      "GHSA-f65p-4m7j-42xc": "high | fast-uri | fast-uri vulnerable to server-side request forgery via malformed IPv6 normalization",
+      "GHSA-fph4-wmhf-6fwf": "high | fast-uri | fast-uri vulnerable to server-side request forgery via repeated hostname percent-decoding",
+      "GHSA-jqff-g426-hqxp": "high | fast-uri | fast-uri vulnerable to host confusion via percent-encoded scheme normalization",
+      "GHSA-hmw2-7cc7-3qxx": "high | form-data | form-data: CRLF injection in form-data via unescaped multipart field names and filenames",
+      "GHSA-chx6-hx7r-mcp5": "high | react-router | React Router: Unauthenticated Denial of Service via Inefficient Route Matching",
+      "GHSA-qwww-vcr4-c8h2": "high | react-router | React Router: RSC Mode CSRF Bypass Allows Action Execution Before 400 Response"
+    },
+    "kelta-ui/app": {
+      "GHSA-j95f-988m-3j2f": "high | @tiptap/core | Tiptap: Quadratic ReDoS in block and inline Markdown attribute parsing",
+      "GHSA-pmwg-cvhr-8vh7": "high | axios | Axios: Incomplete Fix for CVE-2025-62718 — NO_PROXY Protection Bypassed via RFC 1122 Loopback Subnet",
+      "GHSA-pf86-5x62-jrwf": "high | axios | Axios: Prototype Pollution Gadgets - Response Tampering, Data Exfiltration, and Request Hijacking",
+      "GHSA-6chq-wfr3-2hj9": "high | axios | Axios: Header Injection via Prototype Pollution",
+      "GHSA-q8qp-cvcw-x6jj": "high | axios | Axios has prototype pollution read-side gadgets in HTTP adapter that allow credential injection and ",
+      "GHSA-hfxv-24rg-xrqf": "high | axios | Axios: Regular Expression Denial of Service (ReDoS) via Cookie Name Injection",
+      "GHSA-777c-7fjr-54vf": "high | axios | Allocation of Resources Without Limits or Throttling in Axios",
+      "GHSA-p92q-9vqr-4j8v": "high | axios | Axios: Proxy-Authorization Credential Leak to Origin Server Across HTTP-to-HTTPS Redirect in Axios N",
+      "GHSA-j5f8-grm9-p9fc": "high | axios | Axios: Proxy-Authorization header leaks to redirect target when proxy is re-evaluated to direct conn",
+      "GHSA-3g43-6gmg-66jw": "high | axios | axios Vulnerable to Credential Theft and Response Hijacking via Prototype Pollution Gadget in Config",
+      "GHSA-35jp-ww65-95wh": "high | axios | axios Vulnerable to Full Man-in-the-Middle via Prototype Pollution Gadget in `config.proxy`",
+      "GHSA-hmw2-7cc7-3qxx": "high | form-data | form-data: CRLF injection in form-data via unescaped multipart field names and filenames",
+      "GHSA-jrc7-96c5-q579": "critical | maplibre-gl | MapLibre GL JS: XSS Sanitizer Bypass in DOM.sanitize() via Live NamedNodeMap Removal Skip",
+      "GHSA-xq3m-2v4x-88gg": "critical | protobufjs | Arbitrary code execution in protobufjs",
+      "GHSA-66ff-xgx4-vchm": "high | protobufjs | protobuf.js: Code injection through bytes field defaults in generated toObject code",
+      "GHSA-75px-5xx7-5xc7": "high | protobufjs | protobuf.js: Code generation gadget after prototype pollution",
+      "GHSA-jvwf-75h9-cwgg": "high | protobufjs | protobuf.js: Process-wide denial of service through unsafe option paths",
+      "GHSA-685m-2w69-288q": "high | protobufjs | protobuf.js: Denial of service through unbounded protobuf recursion",
+      "GHSA-wcpc-wj8m-hjx6": "high | protobufjs | protobufjs: Denial of service through unbounded Any expansion during JSON conversion",
+      "GHSA-49rj-9fvp-4h2h": "high | react-router | React Router's vendored turbo-stream v2 allows arbitrary constructor invocation via TYPE_ERROR deser",
+      "GHSA-8646-j5j9-6r62": "high | react-router | React Router vulnerable to XSS in unstable RSC redirect handling via javascript: redirect targets",
+      "GHSA-8x6r-g9mw-2r78": "high | react-router | React Router vulnerable to DoS via unbounded path expansion in __manifest endpoint",
+      "GHSA-rxv8-25v2-qmq8": "high | react-router | React Router vulnerable to Denial of Service via reflected user input in single-fetch",
+      "GHSA-chx6-hx7r-mcp5": "high | react-router | React Router: Unauthenticated Denial of Service via Inefficient Route Matching",
+      "GHSA-qwww-vcr4-c8h2": "high | react-router | React Router: RSC Mode CSRF Bypass Allows Action Execution Before 400 Response"
+    }
+  }
+}
