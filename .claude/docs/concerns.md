@@ -773,6 +773,25 @@ nested GET mapping (`ModuleHttpControllerMvcTest` does).
 - **FK constraint generation** (`PhysicalTableStorageAdapter.java` 177-185): String concatenation for FK names; collision risk with very long tenant slugs + collection names.
 - **Tenant schema isolation** (`PhysicalTableStorageAdapter.java` 105-107): Assumes schema exists; silent failure on permission error. Surfaces as confused-state on tenant provisioning failure.
 
+### `_hook_argocd_image_bump` overlay discovery + tag rewrite are heuristic
+
+`_hook_argocd_image_bump` in `.claude/dispatcher/lib/deploy-hooks.sh` locates the homelab-argo
+overlay by probing `<repo>` then `<repo>-web` under `$HOMELAB_ARGO_REPO`, and rewrites the tag
+by `sed -E 's|main-[0-9a-f]{6,10}|main-<new>|g'` across the overlay's `kustomization.yaml` +
+`*deployment.yaml` files. Two things this cannot handle silently:
+
+- A new `deploy_hook: argocd_image_bump` repo whose overlay is under `apps/<name>/`, a per-env
+  overlay layout, or a name that doesn't match either probe → the function logs a warning and
+  returns 0 (deploy_hook is fail-open by contract, but this one *should* be adding a bump). If
+  you add a fourth argocd_image_bump repo, verify the probe matches, or extend it.
+- An image tag that is not `main-<7-10 hex>` (e.g. a release semver, `latest`, or a longer SHA)
+  won't be rewritten. `git diff --cached --quiet` after the sed catches the no-op and logs, so
+  the failure is visible in Loki, but the bump did not happen.
+
+The 5-minute `run_health_check` sleep also holds the worker slot for the duration — under
+`MAX_PARALLEL=1` that means the queue is idle for the wait. This is deliberate (the worker
+must stay alive to post the Slack outcome), but it caps effective task throughput.
+
 ## Dependency Risks
 
 - **`make up` needs ~24 GB allocated to Docker.** Compose builds `kelta-auth`, `kelta-worker` and

@@ -9,10 +9,14 @@
 #   . "$SELF_DIR/lib/deploy-hooks.sh"
 #
 # Env:
-#   REPOS_YAML   override for the allowlist path (default: ../etc/repos.yaml
-#                relative to this script)
-#   CLAUDE_BIN   claude CLI (default 'claude')
-#   DRY_RUN=1    do not call `gh pr merge`; print what would run instead
+#   REPOS_YAML          override for the allowlist path (default: ../etc/repos.yaml
+#                       relative to this script)
+#   CLAUDE_BIN          claude CLI (default 'claude')
+#   HOMELAB_ARGO_REPO   argocd overlay repo path (default $HOME/GitHub/homelab-argo)
+#   DEPLOY_HEALTH_DIR   post-bump SHA marker dir (default /srv/rzware-ceo/state/deploy-health);
+#                       sibling of $GATE_STATE_DIR from agents/gate.sh line 33
+#   DRY_RUN=1           skip gh/git/argocd side effects; still write the
+#                       deploy-health marker and print DRY_RUN diagnostics
 
 DEPLOY_HOOKS_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOS_YAML="${REPOS_YAML:-$DEPLOY_HOOKS_SELF_DIR/../etc/repos.yaml}"
@@ -154,7 +158,14 @@ run_deploy_hook() {
   hook="${hook:-none}"
   case "$hook" in
     none) return 0 ;;
-    argocd_image_bump) _hook_argocd_image_bump "$repo_name" "$repo_path" || true ;;
+    argocd_image_bump)
+      # OPERATING-MODEL.md §10 item 12 + §9: the bump commits a new image tag
+      # to homelab-argo; run_health_check then waits, probes health_url, and
+      # reverts on failure. The health-check wait happens inline so the worker
+      # process stays alive to post the outcome to Slack.
+      _hook_argocd_image_bump "$repo_name" "$repo_path" || true
+      run_health_check "$repo_name" || true
+      ;;
     argocd_sync)       _hook_argocd_sync       "$repo_name" "$repo_path" || true ;;
     install-claude-config.sh|sync-agents.sh)
       _hook_repo_script "$repo_path" "$hook" || true ;;
@@ -164,14 +175,232 @@ run_deploy_hook() {
   return 0
 }
 
+# Overlay-shape convention in homelab-argo, verified against the tree at time
+# of writing:
+#   - emf/           → kustomization.yaml with an images:/newTag: block
+#                      (8 harbor.rzware.com/emf/* images bumped in lockstep;
+#                      `kustomize edit set image` is the intended tool but a
+#                      literal sed matches the tag pattern in every case).
+#   - spotopened-web/  → deployment.yaml with a hardcoded
+#                        image: harbor.rzware.com/spotopened/spotopened-web:main-<sha>
+#   - couchpicks-web/  → deployment.yaml with a hardcoded
+#                        image: harbor.rzware.com/couchpicks/couchpicks-web:main-<sha>
+#                        (repos.yaml calls this repo `couchpicks`; the overlay
+#                        dir adds a "-web" suffix — probe both).
+_hook_argocd_overlay_dir() {
+  local repo_name="$1"
+  local hla="${HOMELAB_ARGO_REPO:-$HOME/GitHub/homelab-argo}"
+  local cand
+  for cand in "$hla/$repo_name" "$hla/${repo_name}-web"; do
+    if [[ -d "$cand" ]]; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Collect the tag-carrying files in an overlay: the kustomization.yaml if it
+# has a newTag: block, plus any *deployment.yaml with a `main-<sha>` image tag.
+# Writes one path per line to stdout.
+_hook_argocd_tag_files() {
+  local overlay_dir="$1"
+  local kust="$overlay_dir/kustomization.yaml"
+  if grep -qE '^[[:space:]]*newTag:' "$kust" 2>/dev/null; then
+    printf '%s\n' "$kust"
+  fi
+  local f
+  while IFS= read -r f; do
+    grep -qE 'image:.*:main-[0-9a-f]{6,10}' "$f" 2>/dev/null && printf '%s\n' "$f"
+  done < <(find "$overlay_dir" -maxdepth 1 -name '*deployment.yaml' 2>/dev/null)
+}
+
 _hook_argocd_image_bump() {
   local repo_name="$1" repo_path="$2"
-  # ArgoCD image bump lives in the homelab-argo overlay repo. A real bump
-  # commits a new imageTag there and lets ArgoCD reconcile. That workflow is
-  # not implemented in this task — the bump script does not exist yet (see
-  # TASK brief "Files checked"). Log once so the deploy path is visible in
-  # Loki and continue.
-  log_info "deploy_hook argocd_image_bump: no bump script yet, skipping" repo="$repo_name"
+  local sha short_sha
+  sha="$(git -C "$repo_path" rev-parse HEAD 2>/dev/null || echo unknown)"
+  short_sha="${sha:0:7}"
+
+  local overlay_dir
+  if ! overlay_dir="$(_hook_argocd_overlay_dir "$repo_name")"; then
+    log_warn "argocd_image_bump: no homelab-argo overlay found; skipping" repo="$repo_name"
+    return 0
+  fi
+  local hla
+  hla="$(dirname "$overlay_dir")"
+
+  local -a files=()
+  mapfile -t files < <(_hook_argocd_tag_files "$overlay_dir")
+  if (( ${#files[@]} == 0 )); then
+    log_warn "argocd_image_bump: no tag fields found in overlay; skipping" \
+      overlay="$overlay_dir" repo="$repo_name"
+    return 0
+  fi
+
+  # Write the health-state marker unconditionally so run_health_check can find
+  # the bumped SHA (and so DRY_RUN observably touches the sibling path noted in
+  # agents/gate.sh line 33).
+  local health_dir="${DEPLOY_HEALTH_DIR:-/srv/rzware-ceo/state/deploy-health}"
+  mkdir -p "$health_dir" 2>/dev/null || true
+  {
+    printf 'sha=%s\n' "$sha"
+    printf 'ts=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'repo=%s\n' "$repo_name"
+  } > "$health_dir/$repo_name" 2>/dev/null || true
+
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    printf 'DRY_RUN: would bump homelab-argo %s to %s\n' "$repo_name" "$sha" >&2
+    return 0
+  fi
+
+  local f
+  for f in "${files[@]}"; do
+    sed -i.bak -E "s|main-[0-9a-f]{6,10}|main-${short_sha}|g" "$f" && rm -f "${f}.bak"
+  done
+
+  git -C "$hla" add -- "${files[@]}" 2>/dev/null || true
+  if git -C "$hla" diff --cached --quiet 2>/dev/null; then
+    log_info "argocd_image_bump: no diff after tag rewrite; already at $short_sha" repo="$repo_name"
+    return 0
+  fi
+  if ! git -C "$hla" -c user.email="autopilot@rzware.com" -c user.name="autopilot" \
+       commit -m "chore: bump $repo_name to $short_sha [autopilot]" >/dev/null 2>&1; then
+    log_warn "argocd_image_bump: commit failed" repo="$repo_name"
+    return 1
+  fi
+  if ! git -C "$hla" push >/dev/null 2>&1; then
+    log_warn "argocd_image_bump: push failed; pull --rebase + retry" repo="$repo_name"
+    if ! git -C "$hla" pull --rebase >/dev/null 2>&1 || \
+       ! git -C "$hla" push >/dev/null 2>&1; then
+      notify_slack "#rzware-ops" "argocd_image_bump push failed for ${repo_name}" || true
+      return 1
+    fi
+  fi
+
+  if command -v argocd >/dev/null 2>&1; then
+    argocd app sync "$repo_name" >/dev/null 2>&1 \
+      || log_warn "argocd app sync failed" app="$repo_name"
+  else
+    log_info "argocd CLI not present; ArgoCD auto-sync will pick up the commit" repo="$repo_name"
+  fi
+  return 0
+}
+
+# Revert the last homelab-argo tag change for $repo_name by rewriting each
+# tag-carrying file to its previous git-committed contents. Used by
+# run_health_check when a post-deploy probe fails.
+_hook_argocd_revert() {
+  local repo_name="$1" bumped_sha="$2"
+  local overlay_dir
+  if ! overlay_dir="$(_hook_argocd_overlay_dir "$repo_name")"; then
+    log_warn "argocd revert: no overlay found" repo="$repo_name"
+    return 0
+  fi
+  local hla
+  hla="$(dirname "$overlay_dir")"
+
+  local -a files=()
+  mapfile -t files < <(_hook_argocd_tag_files "$overlay_dir")
+  (( ${#files[@]} == 0 )) && return 0
+
+  local f rel prev
+  for f in "${files[@]}"; do
+    rel="$(git -C "$hla" ls-files --full-name -- "$f" 2>/dev/null)"
+    [[ -n "$rel" ]] || continue
+    prev="$(git -C "$hla" log --format=%H -n 2 -- "$rel" 2>/dev/null | tail -1)"
+    [[ -n "$prev" ]] || continue
+    git -C "$hla" show "$prev:$rel" > "$f" 2>/dev/null || true
+  done
+
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    printf 'DRY_RUN: would revert homelab-argo %s from %s\n' "$repo_name" "$bumped_sha" >&2
+    return 0
+  fi
+
+  git -C "$hla" add -- "${files[@]}" 2>/dev/null || true
+  if git -C "$hla" diff --cached --quiet 2>/dev/null; then
+    log_info "argocd revert: no diff (file already at previous state)" repo="$repo_name"
+    return 0
+  fi
+  git -C "$hla" -c user.email="autopilot@rzware.com" -c user.name="autopilot" \
+    commit -m "chore: revert $repo_name from $bumped_sha [autopilot health check]" \
+    >/dev/null 2>&1 || return 0
+  git -C "$hla" push >/dev/null 2>&1 \
+    || log_warn "argocd revert push failed; local commit remains" repo="$repo_name"
+  return 0
+}
+
+# File a needs_clarification task in emf-queue/failed/ when a health check
+# reverts a deploy — human loop, not a retry.
+_hook_file_health_failure_task() {
+  local repo_name="$1" bumped_sha="$2" code="$3" pr_num="${4:-}"
+  local qroot="${EMF_QUEUE_REPO:-$HOME/GitHub/emf-queue}"
+  local failed_dir="$qroot/failed"
+  [[ -d "$failed_dir" ]] || return 0
+  local now id path
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  id="NEEDS-CLARIFY-$(date -u +%Y-%m-%d-%H%M%S)-${repo_name}"
+  path="$failed_dir/${id}.md"
+  cat > "$path" <<EOF
+---
+id: ${id}
+title: "health check failed for ${repo_name} after deploy ${bumped_sha}"
+type: needs_clarification
+status: failed
+repo: ${repo_name}
+pr: ${pr_num}
+fail_reason: "post-deploy health check returned HTTP ${code}; reverted homelab-argo tag from ${bumped_sha}"
+created_at: "${now}"
+---
+
+Post-deploy health check failed for repo \`${repo_name}\` after autopilot bumped
+the homelab-argo image tag to \`${bumped_sha}\`. The homelab-argo tag has been
+reverted to the previous SHA. Health probe HTTP status: ${code}.
+EOF
+  return 0
+}
+
+# run_health_check REPO_NAME
+# Called by run_deploy_hook immediately after a successful _hook_argocd_image_bump.
+# Sleeps 300s (DRY_RUN=1: 1s), then curls the repos.yaml health_url. Non-2xx
+# reverts the tag, files a needs_clarification, and posts one Slack line to
+# #rzware-ops. Always returns 0 — a health failure must not kill the worker.
+run_health_check() {
+  local repo_name="$1"
+  local health_dir="${DEPLOY_HEALTH_DIR:-/srv/rzware-ceo/state/deploy-health}"
+  local state_file="$health_dir/$repo_name"
+
+  if [[ ! -f "$state_file" ]]; then
+    log_warn "run_health_check: no deploy-health state; skipping" repo="$repo_name"
+    return 0
+  fi
+
+  local wait_sec=300
+  [[ "${DRY_RUN:-0}" == "1" ]] && wait_sec=1
+  sleep "$wait_sec"
+
+  local health_url
+  health_url="$(read_repo_field "$repo_name" health_url)"
+  if [[ -z "$health_url" || "$health_url" == "none" ]]; then
+    log_info "run_health_check: no health_url in repos.yaml; skipping" repo="$repo_name"
+    return 0
+  fi
+
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$health_url" 2>/dev/null || echo 000)"
+  if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
+    log_info "run_health_check: healthy" repo="$repo_name" code="$code" url="$health_url"
+    return 0
+  fi
+
+  local bumped_sha
+  bumped_sha="$(awk -F= '$1=="sha"{print $2; exit}' "$state_file" 2>/dev/null)"
+  log_warn "run_health_check: probe failed; reverting" \
+    repo="$repo_name" code="$code" sha="$bumped_sha" url="$health_url"
+  notify_slack "#rzware-ops" \
+    "health check failed for ${repo_name} after deploy ${bumped_sha} — reverting (HTTP ${code})" || true
+  _hook_argocd_revert "$repo_name" "$bumped_sha" || true
+  _hook_file_health_failure_task "$repo_name" "$bumped_sha" "$code" || true
   return 0
 }
 
