@@ -77,6 +77,16 @@ final class AdminLookups {
         return firstResourceId(res.body());
     }
 
+    /**
+     * Resolves a record's id by natural key on any collection (each entry ANDed as
+     * {@code filter[key][eq]=value}), or null when not found. Used to turn a friendly name
+     * (e.g. a report name) into the id an attribute/relationship actually stores, without a
+     * full {@link #upsert} round trip.
+     */
+    String idByNaturalKey(String collection, Map<String, Object> naturalKey) {
+        return findExisting(collection, naturalKey);
+    }
+
     /** Resolves a collection UUID to its name, or null when not found. */
     String collectionNameById(String collectionId) {
         String path = "/api/collections/" + URLEncoder.encode(collectionId, StandardCharsets.UTF_8);

@@ -749,6 +749,25 @@ an invalid path anywhere fails the call with a structured `{status,errors:[...]}
 (`code: INVALID_PATH`, `source.pointer` into the offending item) and writes nothing, rather
 than silently storing an item the nav renderer would never surface.
 
+**`apply_dashboard` (KLT-220)** upserts a `dashboards` row plus its `dashboard-components` by
+`title` (natural key: `name` for the dashboard via `AdminLookups.upsert`, `title` within the
+dashboard for each component — resolved locally against one `AdminLookups.list("dashboard-
+components", {dashboardId}, 200)`, the same shape `apply_menu` uses for items). Unlike
+`apply_menu`'s client-side nav-grammar check, `dashboard-components.config` can only be
+checked server-side (`DashboardComponentValidator`, KLT-213, needs the live collection/field
+registry), so this tool dry-runs the *whole* desired component set through the worker's own
+`POST /api/dashboards/{id}/validate` — after the dashboard itself is upserted (so the
+validator sees the dashboard's real `columnCount`), but **before** a single component create,
+update or delete — and maps each returned `{field, message}` onto `/components/<index>/<field>`
+in a structured `{status,errors:[...]}` result; an invalid component anywhere fails the whole
+call and no component write happens. `sortOrder` is derived from array position, matching
+`apply_menu`'s `displayOrder`. A component's `report` is a report *name*, resolved to
+`reportId` via a new generic `AdminLookups.idByNaturalKey(collection, naturalKey)` (a public
+wrapper around the same natural-key lookup `upsert` uses internally) — omit it for a component
+whose `config` names a target collection directly, since `dashboard_component.report_id` is a
+nullable `LOOKUP`. `prune:true` hard-deletes an existing component absent from the desired set;
+omitted or `false` reports it as `stale`, mirroring `apply_menu`.
+
 **Offline replica path (end-user only).** When `OfflineProvider` is mounted — it wraps the `EndUserShell` subtree — the shared data hooks route through a tenant-scoped IndexedDB replica: online reads write through to the store and offline reads serve it (`useCollectionRecords`/`useRecord`/`usePageDataSources`), and offline writes queue to an outbox (`useRecordMutation` → `engine.queue`) that flushes on reconnect (`SyncEngine.sync`). Admin pages render outside the provider (`useOffline()` → `undefined`), so their reads/writes stay online-only and unchanged. See `conventions.md` → offline hooks.
 
 ### List-view renderer contract — shared row publishes `viewType`/`typeConfig`

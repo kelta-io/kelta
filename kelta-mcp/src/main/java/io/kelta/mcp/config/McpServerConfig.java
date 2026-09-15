@@ -113,14 +113,16 @@ public class McpServerConfig {
             update_ counterparts exist for collection, flow, layout, listview, and \
             validation_rule.
 
-            Idempotent apply: apply_layout, apply_listview, apply_picklist and apply_menu are \
-            create-or-update, keyed on a natural key (collection+name for layouts/list \
-            views, name for picklists, name for menus) rather than an id — re-running the \
-            same setup script is safe. Each reports {"action": "created"|"updated"|"unchanged", \
-            "id": ..., "changed": [...] } (apply_picklist and apply_menu nest one such result \
-            per value/item plus "pruned" when prune:true removed extras — deactivated for \
-            picklist values, hard-deleted for menu items; without prune:true, apply_menu \
-            reports absent items as "stale" instead of touching them); prefer these over \
+            Idempotent apply: apply_layout, apply_listview, apply_picklist, apply_menu and \
+            apply_dashboard are create-or-update, keyed on a natural key (collection+name for \
+            layouts/list views, name for picklists/menus/dashboards, title within the \
+            dashboard for each component) rather than an id — re-running the same setup \
+            script is safe. Each reports {"action": "created"|"updated"|"unchanged", \
+            "id": ..., "changed": [...] } (apply_picklist, apply_menu and apply_dashboard nest \
+            one such result per value/item/component plus "pruned" when prune:true removed \
+            extras — deactivated for picklist values, hard-deleted for menu items and \
+            dashboard components; without prune:true, apply_menu/apply_dashboard report absent \
+            items as "stale" instead of touching them); prefer these over \
             create_listview/create_picklist/add_picklist_value for anything you expect to \
             re-apply. The one-shot create_/add_ tools remain for one-off scripting.
 
@@ -136,6 +138,15 @@ public class McpServerConfig {
             placements, related lists) in one idempotent call — reapplying the same body is \
             a no-op, and it can also restructure an existing layout by passing its layoutId. \
             create_layout is deprecated (kept for existing callers) and delegates to it.
+
+            Dashboards: apply_dashboard takes a dashboard and its components (metric, chart, \
+            table or recent widgets) in one idempotent call, matching components by title. \
+            Every component is dry-run through the worker's dashboard component validator \
+            (unknown collection/field/operator, non-aggregatable field, or a grid position \
+            outside columnCount) before anything is written — an invalid component fails the \
+            whole call with a structured error and no component is created, updated or \
+            deleted. A component's report is a saved report name (optional — a component can \
+            target config.collectionName directly instead).
 
             Field types: add_field's `type` argument accepts friendly aliases (text, number, \
             picklist, reference, ...) that map onto the native uppercase FieldType enum — see \
