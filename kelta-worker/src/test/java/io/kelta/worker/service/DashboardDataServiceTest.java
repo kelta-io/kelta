@@ -1,6 +1,7 @@
 package io.kelta.worker.service;
 
 import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.*;
 import io.kelta.runtime.registry.CollectionRegistry;
@@ -183,6 +184,181 @@ class DashboardDataServiceTest {
         List<Map<String, Object>> series =
             (List<Map<String, Object>>) result.data().get("series");
         assertEquals(5, series.size());
+    }
+
+    // =========================================================================
+    // Chart groupBy on a LOOKUP/MASTER_DETAIL field: resolve display value
+    // =========================================================================
+
+    @Test
+    void shouldResolveLookupGroupByToTargetDisplayValueInOneBatchedQuery() {
+        CollectionDefinition tasksDef = CollectionDefinition.builder()
+            .name("tasks")
+            .displayName("Tasks")
+            .addField(FieldDefinition.lookup("project", "projects", "tasks"))
+            .build();
+        CollectionDefinition projectsDef = CollectionDefinition.builder()
+            .name("projects")
+            .displayName("Projects")
+            .addField(FieldDefinition.string("name"))
+            .displayFieldName("name")
+            .build();
+
+        when(collectionRegistry.get("tasks")).thenReturn(tasksDef);
+        when(collectionRegistry.get("projects")).thenReturn(projectsDef);
+        when(lifecycleManager.getDisplayFieldName("projects")).thenReturn("name");
+
+        List<Map<String, Object>> taskRows = List.of(
+            Map.of("project", "proj-1"), Map.of("project", "proj-1"), Map.of("project", "proj-2"));
+        QueryResult taskResult = QueryResult.of(taskRows, 3L, new Pagination(1, 1000));
+        when(queryEngine.executeQuery(eq(tasksDef), any())).thenReturn(taskResult);
+
+        List<Map<String, Object>> projectRows = List.of(
+            Map.of("id", "proj-1", "name", "Apollo"),
+            Map.of("id", "proj-2", "name", "Zeus"));
+        QueryResult projectResult = QueryResult.of(projectRows, 2L, new Pagination(1, 2));
+        when(queryEngine.executeQuery(eq(projectsDef), any())).thenReturn(projectResult);
+
+        Map<String, Object> component = buildComponent("comp-lk", "chart",
+            Map.of("collectionName", "tasks", "groupByField", "project", "aggregateFunction", "COUNT"));
+
+        WidgetResult result = service.executeWidget(component, Map.of(), null);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> series = (List<Map<String, Object>>) result.data().get("series");
+        assertEquals(2, series.size());
+
+        Map<String, Object> apollo = series.stream()
+            .filter(s -> "proj-1".equals(s.get("key")))
+            .findFirst().orElseThrow();
+        assertEquals("Apollo", apollo.get("label"));
+        assertEquals(2, apollo.get("count"));
+
+        Map<String, Object> zeus = series.stream()
+            .filter(s -> "proj-2".equals(s.get("key")))
+            .findFirst().orElseThrow();
+        assertEquals("Zeus", zeus.get("label"));
+
+        // Single batched id IN (...) query against the target collection — not one per group.
+        verify(queryEngine, times(1)).executeQuery(eq(projectsDef), any());
+        verify(queryEngine).executeQuery(eq(projectsDef), argThat(req ->
+            req.filters().size() == 1
+                && req.filters().get(0).fieldName().equals("id")
+                && req.filters().get(0).operator() == FilterOperator.IN));
+    }
+
+    @Test
+    void shouldCapReferenceResolutionAtMaxGroups() {
+        CollectionDefinition tasksDef = CollectionDefinition.builder()
+            .name("tasks")
+            .displayName("Tasks")
+            .addField(FieldDefinition.lookup("project", "projects", "tasks"))
+            .build();
+        CollectionDefinition projectsDef = CollectionDefinition.builder()
+            .name("projects")
+            .displayName("Projects")
+            .addField(FieldDefinition.string("name"))
+            .displayFieldName("name")
+            .build();
+
+        when(collectionRegistry.get("tasks")).thenReturn(tasksDef);
+        when(collectionRegistry.get("projects")).thenReturn(projectsDef);
+        when(lifecycleManager.getDisplayFieldName("projects")).thenReturn("name");
+
+        // 5 distinct groups but maxGroups caps the chart (and thus resolution) at 2.
+        List<Map<String, Object>> taskRows = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            taskRows.add(Map.of("project", "proj-" + i));
+        }
+        QueryResult taskResult = QueryResult.of(taskRows, 5L, new Pagination(1, 1000));
+        when(queryEngine.executeQuery(eq(tasksDef), any())).thenReturn(taskResult);
+
+        QueryResult projectResult = QueryResult.of(
+            List.of(Map.of("id", "proj-0", "name", "Alpha"), Map.of("id", "proj-1", "name", "Beta")),
+            2L, new Pagination(1, 2));
+        when(queryEngine.executeQuery(eq(projectsDef), any())).thenReturn(projectResult);
+
+        Map<String, Object> component = buildComponent("comp-lk-cap", "chart",
+            Map.of("collectionName", "tasks", "groupByField", "project",
+                   "aggregateFunction", "COUNT", "maxGroups", 2));
+
+        service.executeWidget(component, Map.of(), null);
+
+        verify(queryEngine).executeQuery(eq(projectsDef), argThat(req ->
+            ((List<?>) req.filters().get(0).value()).size() == 2));
+    }
+
+    @Test
+    void shouldLeaveNonReferenceGroupByLabelUnchangedAndOmitKey() {
+        CollectionDefinition collDef = CollectionDefinition.builder()
+            .name("cases")
+            .displayName("Cases")
+            .addField(FieldDefinition.string("status"))
+            .build();
+        when(collectionRegistry.get("cases")).thenReturn(collDef);
+
+        List<Map<String, Object>> data = List.of(
+            Map.of("status", "open"), Map.of("status", "closed"));
+        QueryResult queryResult = QueryResult.of(data, 2L, new Pagination(1, 1000));
+        when(queryEngine.executeQuery(eq(collDef), any())).thenReturn(queryResult);
+
+        Map<String, Object> component = buildComponent("comp-nr", "chart",
+            Map.of("collectionName", "cases", "groupByField", "status", "aggregateFunction", "COUNT"));
+
+        WidgetResult result = service.executeWidget(component, Map.of(), null);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> series = (List<Map<String, Object>>) result.data().get("series");
+        Map<String, Object> openPoint = series.stream()
+            .filter(s -> "open".equals(s.get("label")))
+            .findFirst().orElseThrow();
+        assertFalse(openPoint.containsKey("key"));
+
+        // A non-reference groupBy never triggers a resolution query.
+        verify(queryEngine, times(1)).executeQuery(any(), any());
+    }
+
+    @Test
+    void shouldFallBackToIdLabelWhenTargetDisplayFieldIsMasked() {
+        CollectionDefinition tasksDef = CollectionDefinition.builder()
+            .name("tasks")
+            .displayName("Tasks")
+            .addField(FieldDefinition.lookup("project", "projects", "tasks"))
+            .build();
+        CollectionDefinition projectsDef = CollectionDefinition.builder()
+            .name("projects")
+            .displayName("Projects")
+            .addField(FieldDefinition.string("name"))
+            .displayFieldName("name")
+            .build();
+
+        when(collectionRegistry.get("tasks")).thenReturn(tasksDef);
+        when(collectionRegistry.get("projects")).thenReturn(projectsDef);
+        when(lifecycleManager.getDisplayFieldName("projects")).thenReturn("name");
+
+        FieldMaskingService.MaskingConfig cfg = new FieldMaskingService.MaskingConfig(
+            FieldMaskingService.MaskType.FULL, '*', null);
+        when(recordMaskingService.maskableConfigs(projectsDef)).thenReturn(Map.of("name", cfg));
+        when(recordMaskingService.maskedFieldsFor(anyString(), anyString(), anyString(),
+            eq("projects"), any())).thenReturn(Set.of("name"));
+
+        List<Map<String, Object>> taskRows = List.of(Map.of("project", "proj-1"));
+        QueryResult taskResult = QueryResult.of(taskRows, 1L, new Pagination(1, 1000));
+        when(queryEngine.executeQuery(eq(tasksDef), any())).thenReturn(taskResult);
+
+        Map<String, Object> component = buildComponent("comp-mask", "chart",
+            Map.of("collectionName", "tasks", "groupByField", "project", "aggregateFunction", "COUNT"));
+
+        WidgetResult result = service.executeWidget(component, Map.of(), MASKED_VIEWER);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> series = (List<Map<String, Object>>) result.data().get("series");
+        Map<String, Object> point = series.get(0);
+        assertEquals("proj-1", point.get("label"));
+        assertEquals("proj-1", point.get("key"));
+
+        // Masked-denied display field: never even queries the target collection.
+        verify(queryEngine, never()).executeQuery(eq(projectsDef), any());
     }
 
     // =========================================================================
