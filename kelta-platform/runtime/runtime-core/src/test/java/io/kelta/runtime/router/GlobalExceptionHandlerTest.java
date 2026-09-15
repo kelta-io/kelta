@@ -466,6 +466,23 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void hookConflict_emits409WithCodeAndMeta() {
+        io.kelta.runtime.workflow.HookConflictException ex = new io.kelta.runtime.workflow.HookConflictException(
+                "DEFAULT_VIEW_EXISTS", "isDefault",
+                "A default list view already exists for this collection and visibility",
+                Map.of("existingId", "lv-existing"));
+
+        ResponseEntity<Map<String, Object>> response = handler.handleHookConflict(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        Map<String, Object> e = firstError(response);
+        assertThat(str(e, "status")).isEqualTo("409");
+        assertThat(str(e, "code")).isEqualTo("DEFAULT_VIEW_EXISTS");
+        assertThat(source(e)).containsEntry("pointer", "/data/attributes/isDefault");
+        assertThat(meta(e)).containsEntry("existingId", "lv-existing");
+    }
+
+    @Test
     void genericException_emits500WithGenericDetail() {
         ResponseEntity<Map<String, Object>> response =
                 handler.handleGenericException(new RuntimeException("secret stack trace"), request);

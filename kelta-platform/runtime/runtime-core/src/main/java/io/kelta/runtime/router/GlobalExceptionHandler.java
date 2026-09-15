@@ -10,6 +10,7 @@ import io.kelta.runtime.storage.UniqueConstraintViolationException;
 import io.kelta.runtime.validation.RecordValidationException;
 import io.kelta.runtime.validation.ValidationException;
 import io.kelta.runtime.validation.ValidationResult;
+import io.kelta.runtime.workflow.HookConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -240,6 +241,33 @@ public class GlobalExceptionHandler {
             "409", "REFERENCED_RECORD", "Conflict",
             ex.getMessage());
         error.setMeta(Map.of("requestId", requestId, "path", request.getRequestURI()));
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorBody(error));
+    }
+
+    /**
+     * Handles conflicts raised directly by a {@code BeforeSaveHook} (e.g. "a default
+     * already exists") that need a 409 with a specific code and structured meta —
+     * something the hook's normal {@code BeforeSaveResult} error path can't express,
+     * since that always maps to 400 {@code VALIDATION_FAILED}.
+     * Returns 409 Conflict in JSON:API format.
+     */
+    @ExceptionHandler(HookConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleHookConflict(
+            HookConflictException ex, HttpServletRequest request) {
+
+        String requestId = generateRequestId();
+        logger.warn("Hook conflict [requestId={}, code={}]: {}", requestId, ex.getCode(), ex.getMessage());
+
+        Map<String, Object> meta = new LinkedHashMap<>(ex.getMeta());
+        meta.put("requestId", requestId);
+
+        JsonApiError error = new JsonApiError(
+            "409", ex.getCode(), "Conflict", ex.getMessage());
+        if (ex.getFieldName() != null) {
+            error.setSource(Map.of("pointer", "/data/attributes/" + ex.getFieldName()));
+        }
+        error.setMeta(meta);
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(errorBody(error));
     }
