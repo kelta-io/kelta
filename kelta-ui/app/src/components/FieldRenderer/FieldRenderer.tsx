@@ -191,10 +191,10 @@ function getRelativeTime(value: unknown): string {
 }
 
 /**
- * Strip HTML tags from rich text.
+ * Strip HTML tags from rich text. Does not truncate — callers decide preview length.
  */
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, '').substring(0, 200)
+  return html.replace(/<[^>]*>/g, '')
 }
 
 /**
@@ -432,7 +432,7 @@ export function FieldRenderer({
           </TooltipProvider>
         )
       }
-      return <span className={className}>{stripped}</span>
+      return <span className={cn('whitespace-pre-wrap', className)}>{stripped}</span>
     }
 
     case 'json': {
