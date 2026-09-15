@@ -11,7 +11,7 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import maplibregl from 'maplibre-gl';
+import { Map as MapLibreMap, Marker, Popup, type StyleSpecification } from 'maplibre-gl';
 
 export interface InteractiveMapImplProps {
   lat: number;
@@ -25,11 +25,11 @@ export interface InteractiveMapImplProps {
    * minimal OpenStreetMap raster style (free, no API key). Pass a Mapbox
    * style URL + token via the `style` prop for higher quality.
    */
-  style?: maplibregl.StyleSpecification | string;
+  style?: StyleSpecification | string;
   className?: string;
 }
 
-const OSM_STYLE: maplibregl.StyleSpecification = {
+const OSM_STYLE: StyleSpecification = {
   version: 8,
   sources: {
     osm: {
@@ -57,12 +57,12 @@ export default function InteractiveMapImpl({
   className,
 }: InteractiveMapImplProps): React.ReactElement {
   const container = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
 
   // Initialize map once on mount; recreate when style changes.
   useEffect(() => {
     if (!container.current) return;
-    const map = new maplibregl.Map({
+    const map = new MapLibreMap({
       container: container.current,
       style: style ?? OSM_STYLE,
       center: [lng, lat],
@@ -70,9 +70,9 @@ export default function InteractiveMapImpl({
       attributionControl: { compact: true },
     });
     mapRef.current = map;
-    const marker = new maplibregl.Marker({ color: '#3b82f6' }).setLngLat([lng, lat]).addTo(map);
+    const marker = new Marker({ color: '#3b82f6' }).setLngLat([lng, lat]).addTo(map);
     if (label) {
-      marker.setPopup(new maplibregl.Popup({ offset: 24 }).setText(label));
+      marker.setPopup(new Popup({ offset: 24 }).setText(label));
     }
     return () => {
       map.remove();
