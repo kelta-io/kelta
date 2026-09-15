@@ -51,7 +51,7 @@ public class PackageImportService {
     private static final List<String> TYPE_ORDER = List.of(
             "COLLECTION", "FIELD", "GLOBAL_PICKLIST", "PICKLIST_VALUE",
             "VALIDATION_RULE", "PAGE_LAYOUT", "LAYOUT_SECTION", "LAYOUT_FIELD",
-            "FLOW", "UI_PAGE", "UI_MENU", "UI_MENU_ITEM");
+            "LAYOUT_RELATED_LIST", "FLOW", "UI_PAGE", "UI_MENU", "UI_MENU_ITEM");
 
     /** Package type → system collection name (QueryEngine import path). */
     private static final Map<String, String> SYSTEM_COLLECTION_BY_TYPE = Map.ofEntries(
@@ -63,6 +63,7 @@ public class PackageImportService {
             Map.entry("PAGE_LAYOUT", "page-layouts"),
             Map.entry("LAYOUT_SECTION", "layout-sections"),
             Map.entry("LAYOUT_FIELD", "layout-fields"),
+            Map.entry("LAYOUT_RELATED_LIST", "layout-related-lists"),
             Map.entry("FLOW", "flows"),
             Map.entry("UI_PAGE", "ui-pages"),
             Map.entry("UI_MENU", "ui-menus"),
@@ -118,6 +119,7 @@ public class PackageImportService {
         for (var item : items) {
             byType.computeIfAbsent((String) item.get("type"), k -> new ArrayList<>()).add(item);
         }
+        byType.computeIfPresent("UI_MENU_ITEM", (k, menuItems) -> parentsFirst(menuItems));
 
         // In-package id→natural-key maps drive the raw authz-table remaps
 
@@ -176,12 +178,23 @@ public class PackageImportService {
                     ctx.layoutIdByKey);
             case "LAYOUT_SECTION" -> importLayoutSection(ctx, naturalKey, data);
             case "LAYOUT_FIELD" -> importLayoutField(ctx, naturalKey, data);
+            case "LAYOUT_RELATED_LIST" -> importLayoutRelatedList(ctx, naturalKey, data);
             case "FLOW" -> importFlow(ctx, naturalKey, data);
             case "UI_PAGE" -> importUiPage(ctx, naturalKey, data);
             case "UI_MENU" -> importSimpleByName(ctx, "UI_MENU", naturalKey, data, ctx.menuIdByName);
             case "UI_MENU_ITEM" -> importUiMenuItem(ctx, naturalKey, data);
             default -> new ItemResult(type, naturalKey, "SKIPPED", "Unsupported item type");
         };
+    }
+
+    /** Package types this importer understands, referenced types first. */
+    public static List<String> supportedTypes() {
+        return TYPE_ORDER;
+    }
+
+    /** System collection a package type is written to, or {@code null} if unsupported. */
+    public static String systemCollectionFor(String type) {
+        return SYSTEM_COLLECTION_BY_TYPE.get(type);
     }
 
     /** Cross-tenant identity of a package item — shared with environment diffing. */
@@ -199,8 +212,14 @@ public class PackageImportService {
                     + ":" + data.get("sort_order");
             case "LAYOUT_FIELD" -> data.get("collection_name") + ":" + data.get("layout_name")
                     + ":" + data.get("section_sort_order") + ":" + data.get("field_name");
+            case "LAYOUT_RELATED_LIST" -> data.get("collection_name") + ":" + data.get("layout_name")
+                    + ":" + data.get("related_collection_name")
+                    + ":" + data.get("relationship_field_name");
             case "UI_PAGE" -> String.valueOf(data.getOrDefault("path", data.get("name")));
-            case "UI_MENU_ITEM" -> data.get("menu_name") + ":" + data.get("label");
+            // Parent label included: two children with the same label under
+            // different groups of the same menu are different items.
+            case "UI_MENU_ITEM" -> data.get("menu_name") + ":" + blankIfNull(data.get("parent_label"))
+                    + ":" + data.get("label");
             default -> String.valueOf(data.get("name"));
         };
     }
@@ -327,6 +346,34 @@ public class PackageImportService {
                 id -> ctx.layoutFieldIdByKey.put(key, id));
     }
 
+    private ItemResult importLayoutRelatedList(ImportContext ctx, String key, Map<String, Object> data) {
+        CollectionDefinition def = systemDef("LAYOUT_RELATED_LIST");
+        Map<String, Object> mapped = mapRowToFields(def, data);
+
+        String layoutKey = data.get("collection_name") + ":" + data.get("layout_name");
+        String layoutId = ctx.layoutIdByKey.get(layoutKey);
+        if (layoutId == null) {
+            throw new IllegalStateException("Layout not found in target: " + layoutKey);
+        }
+        String relatedCollectionName = (String) data.get("related_collection_name");
+        // The relationship field lives on the related collection unless the
+        // export says otherwise (pre-existing packages omit the owning name).
+        String fieldCollectionName = (String) data.getOrDefault(
+                "relationship_field_collection_name", relatedCollectionName);
+        String fieldKey = fieldCollectionName + "." + data.get("relationship_field_name");
+        String fieldId = ctx.fieldIdByKey().get(fieldKey);
+        if (fieldId == null) {
+            throw new IllegalStateException("Relationship field not found in target: " + fieldKey);
+        }
+        mapped.put("layoutId", layoutId);
+        mapped.put("relatedCollectionId", ctx.requireCollection(relatedCollectionName));
+        mapped.put("relationshipFieldId", fieldId);
+
+        String existingId = ctx.relatedListIdByKey.get(key);
+        return upsertViaEngine(ctx, "LAYOUT_RELATED_LIST", key, def, existingId, mapped,
+                id -> ctx.relatedListIdByKey.put(key, id));
+    }
+
     private ItemResult importFlow(ImportContext ctx, String key, Map<String, Object> data) {
         CollectionDefinition def = systemDef("FLOW");
         Map<String, Object> mapped = mapRowToFields(def, data);
@@ -356,9 +403,28 @@ public class PackageImportService {
             throw new IllegalStateException("Menu not found in target: " + menuName);
         }
         mapped.put("menuId", menuId);
+
+        // parent_id is a SOURCE id — meaningless here. Remap it through the
+        // ids the parents got in this import (ordered parents-first above);
+        // writing it verbatim would break the FK or mis-parent the item.
+        Object sourceParentId = data.get("parent_id");
+        if (sourceParentId != null) {
+            String parentId = ctx.menuItemIdBySourceId.get(String.valueOf(sourceParentId));
+            if (parentId == null) {
+                throw new IllegalStateException(
+                        "Parent menu item not found in package: " + sourceParentId);
+            }
+            mapped.put("parentId", parentId);
+        }
+
+        Object sourceId = data.get("id");
         String existingId = ctx.menuItemIdByKey.get(key);
-        return upsertViaEngine(ctx, "UI_MENU_ITEM", key, def, existingId, mapped,
-                id -> ctx.menuItemIdByKey.put(key, id));
+        return upsertViaEngine(ctx, "UI_MENU_ITEM", key, def, existingId, mapped, id -> {
+            ctx.menuItemIdByKey.put(key, id);
+            if (sourceId != null) {
+                ctx.menuItemIdBySourceId.put(String.valueOf(sourceId), id);
+            }
+        });
     }
 
     private ItemResult upsertViaEngine(ImportContext ctx, String type, String key,
@@ -374,6 +440,9 @@ public class PackageImportService {
             mapped.putIfAbsent("tenantId", ctx.tenantId);
         }
         if (existingId != null) {
+            // Register even when skipping: later items resolve their references
+            // through these maps and must see the item that is already there.
+            register.accept(existingId);
             if (ctx.options.conflictMode() == ConflictMode.SKIP) {
                 return new ItemResult(type, key, "SKIPPED", null);
             }
@@ -395,6 +464,48 @@ public class PackageImportService {
     // ------------------------------------------------------------------
     // Row → system-collection field mapping
     // ------------------------------------------------------------------
+
+    /**
+     * Menu items point at their parent by source id, so a parent has to be
+     * imported before its children; the export is ordered by display_order,
+     * which says nothing about nesting. Sorting by depth is stable, so
+     * display_order still orders siblings.
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> parentsFirst(List<Map<String, Object>> items) {
+        Map<String, Map<String, Object>> byId = new HashMap<>();
+        for (var item : items) {
+            Object id = ((Map<String, Object>) item.get("data")).get("id");
+            if (id != null) {
+                byId.put(String.valueOf(id), item);
+            }
+        }
+        Map<Map<String, Object>, Integer> depths = new IdentityHashMap<>();
+        for (var item : items) {
+            depths.put(item, depth(item, byId, items.size()));
+        }
+        return items.stream().sorted(Comparator.comparingInt(depths::get)).toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static int depth(Map<String, Object> item, Map<String, Map<String, Object>> byId, int limit) {
+        int depth = 0;
+        Map<String, Object> current = item;
+        while (depth <= limit) {
+            Object parentId = ((Map<String, Object>) current.get("data")).get("parent_id");
+            Map<String, Object> parent = parentId == null ? null : byId.get(String.valueOf(parentId));
+            if (parent == null || parent == item) {
+                return depth;
+            }
+            current = parent;
+            depth++;
+        }
+        return depth;
+    }
+
+    private static String blankIfNull(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
 
     private CollectionDefinition systemDef(String type) {
         String name = SYSTEM_COLLECTION_BY_TYPE.get(type);
@@ -474,10 +585,13 @@ public class PackageImportService {
         final Map<String, String> layoutIdByKey = new HashMap<>();
         final Map<String, String> sectionIdByKey = new HashMap<>();
         final Map<String, String> layoutFieldIdByKey = new HashMap<>();
+        final Map<String, String> relatedListIdByKey = new HashMap<>();
         final Map<String, String> flowIdByName = new HashMap<>();
         final Map<String, String> uiPageIdByPath = new HashMap<>();
         final Map<String, String> menuIdByName = new HashMap<>();
         final Map<String, String> menuItemIdByKey = new HashMap<>();
+        /** Source menu-item id → target id, filled as this import runs (parent remap). */
+        final Map<String, String> menuItemIdBySourceId = new HashMap<>();
 
         private String defaultUserId;
 
@@ -531,6 +645,19 @@ public class PackageImportService {
                             r.get("coll") + ":" + r.get("layout_name") + ":" + r.get("section_sort")
                                     + ":" + r.get("field_name"),
                             (String) r.get("id")));
+            jdbc.queryForList(
+                    "SELECT rl.id, pl.name AS layout_name, c.name AS coll, " +
+                            "rc.name AS related_coll, f.name AS field_name " +
+                            "FROM layout_related_list rl " +
+                            "JOIN page_layout pl ON rl.layout_id = pl.id " +
+                            "JOIN collection c ON pl.collection_id = c.id " +
+                            "JOIN collection rc ON rl.related_collection_id = rc.id " +
+                            "JOIN field f ON rl.relationship_field_id = f.id " +
+                            "WHERE pl.tenant_id = ?", tenantId)
+                    .forEach(r -> relatedListIdByKey.put(
+                            r.get("coll") + ":" + r.get("layout_name") + ":" + r.get("related_coll")
+                                    + ":" + r.get("field_name"),
+                            (String) r.get("id")));
             jdbc.queryForList("SELECT id, name FROM flow WHERE tenant_id = ?", tenantId)
                     .forEach(r -> flowIdByName.put((String) r.get("name"), (String) r.get("id")));
             // role/policy tables were dropped in V47 — not seeded, not imported.
@@ -541,10 +668,14 @@ public class PackageImportService {
             jdbc.queryForList("SELECT id, name FROM ui_menu WHERE tenant_id = ?", tenantId)
                     .forEach(r -> menuIdByName.put((String) r.get("name"), (String) r.get("id")));
             jdbc.queryForList(
-                    "SELECT mi.id, mi.label, m.name AS menu_name FROM ui_menu_item mi " +
-                            "JOIN ui_menu m ON mi.menu_id = m.id WHERE mi.tenant_id = ?", tenantId)
+                    "SELECT mi.id, mi.label, p.label AS parent_label, m.name AS menu_name " +
+                            "FROM ui_menu_item mi JOIN ui_menu m ON mi.menu_id = m.id " +
+                            "LEFT JOIN ui_menu_item p ON mi.parent_id = p.id " +
+                            "WHERE mi.tenant_id = ?", tenantId)
                     .forEach(r -> menuItemIdByKey.put(
-                            r.get("menu_name") + ":" + r.get("label"), (String) r.get("id")));
+                            r.get("menu_name") + ":" + blankIfNull(r.get("parent_label"))
+                                    + ":" + r.get("label"),
+                            (String) r.get("id")));
         }
 
         Map<String, String> collectionIdByName() {

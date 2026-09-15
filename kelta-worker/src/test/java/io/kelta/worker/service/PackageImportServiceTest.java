@@ -102,6 +102,36 @@ class PackageImportServiceTest {
         return data;
     }
 
+    private static Map<String, Object> menuItemData(String id, String label, String parentId,
+                                                    String parentLabel) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", id);
+        data.put("menu_id", "src-menu");
+        data.put("menu_name", "main");
+        data.put("label", label);
+        data.put("parent_id", parentId);
+        data.put("parent_label", parentLabel);
+        data.put("display_order", 0);
+        data.put("active", true);
+        return data;
+    }
+
+    private static Map<String, Object> relatedListData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", "src-rl-1");
+        data.put("layout_id", "src-layout");
+        data.put("layout_name", "Default");
+        data.put("collection_name", "orders");
+        data.put("related_collection_id", "src-lines");
+        data.put("related_collection_name", "order_lines");
+        data.put("relationship_field_id", "src-line-order");
+        data.put("relationship_field_name", "order");
+        data.put("relationship_field_collection_name", "order_lines");
+        data.put("display_columns", List.of("name"));
+        data.put("sort_order", 0);
+        return data;
+    }
+
     private static Map<String, Object> flowData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("id", "src-flow-1");
@@ -360,6 +390,176 @@ class PackageImportServiceTest {
     // naturalKeyFor
     // ------------------------------------------------------------------
 
+    // ------------------------------------------------------------------
+    // Nested menu items
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("nested ui menu items")
+    class NestedMenuItems {
+
+        @BeforeEach
+        void seedMenu() {
+            when(jdbcTemplate.queryForList(contains("FROM ui_menu WHERE tenant_id"), eq(TENANT)))
+                    .thenReturn(List.of(Map.of("id", "tgt-menu", "name", "main")));
+        }
+
+        @Test
+        @DisplayName("points a child at the imported group's id, not the source parent id")
+        void remapsParentIdThroughTheImport() {
+            when(queryEngine.create(any(),
+                    ArgumentMatchers.<Map<String, Object>>argThat(m -> m != null && "Sales".equals(m.get("label")))))
+                    .thenReturn(Map.of("id", "tgt-group"));
+            when(queryEngine.create(any(),
+                    ArgumentMatchers.<Map<String, Object>>argThat(m -> m != null && "Orders".equals(m.get("label")))))
+                    .thenReturn(Map.of("id", "tgt-child"));
+
+            // Child first in the package: export order is display_order, not depth.
+            var report = service.importPackage(TENANT, pkg(
+                            item("UI_MENU_ITEM", menuItemData("src-child", "Orders", "src-group", "Sales")),
+                            item("UI_MENU_ITEM", menuItemData("src-group", "Sales", null, null))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.created()).isEqualTo(2);
+            assertThat(report.failed()).isZero();
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> dataCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine, times(2)).create(any(), dataCaptor.capture());
+            var written = dataCaptor.getAllValues();
+            assertThat(written.get(0).get("label")).as("parent imported first").isEqualTo("Sales");
+            assertThat(written.get(0)).doesNotContainKey("parentId");
+            assertThat(written.get(1).get("label")).isEqualTo("Orders");
+            assertThat(written.get(1).get("parentId"))
+                    .as("child points at the id the group got here")
+                    .isEqualTo("tgt-group");
+        }
+
+        @Test
+        @DisplayName("reparents onto an existing group that the import skipped")
+        void resolvesParentThatAlreadyExists() {
+            when(jdbcTemplate.queryForList(contains("FROM ui_menu_item mi"), eq(TENANT)))
+                    .thenReturn(List.of(mapOf("id", "existing-group", "label", "Sales",
+                            "parent_label", null, "menu_name", "main")));
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-child"));
+
+            var report = service.importPackage(TENANT, pkg(
+                            item("UI_MENU_ITEM", menuItemData("src-group", "Sales", null, null)),
+                            item("UI_MENU_ITEM", menuItemData("src-child", "Orders", "src-group", "Sales"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.skipped()).isEqualTo(1);
+            assertThat(report.created()).isEqualTo(1);
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> dataCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(any(), dataCaptor.capture());
+            assertThat(dataCaptor.getValue().get("parentId")).isEqualTo("existing-group");
+        }
+
+        @Test
+        @DisplayName("fails a child whose parent is absent rather than writing a source id")
+        void failsWhenParentIsMissing() {
+            var report = service.importPackage(TENANT, pkg(
+                            item("UI_MENU_ITEM", menuItemData("src-child", "Orders", "src-ghost", "Ghost"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isEqualTo(1);
+            assertThat(report.items().get(0).error()).contains("Parent menu item not found");
+            verify(queryEngine, never()).create(any(), anyMap());
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Layout related lists
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("layout related lists")
+    class LayoutRelatedLists {
+
+        @BeforeEach
+        void seedLayoutAndField() {
+            seedCollections(Map.of("orders", "tgt-orders", "order_lines", "tgt-lines"));
+            when(jdbcTemplate.queryForList(contains("FROM page_layout pl"), eq(TENANT)))
+                    .thenReturn(List.of(mapOf("id", "tgt-layout", "name", "Default", "coll", "orders")));
+            when(jdbcTemplate.queryForList(contains("FROM field f"), eq(TENANT)))
+                    .thenReturn(List.of(mapOf("id", "tgt-line-order", "name", "order", "coll", "order_lines")));
+        }
+
+        @Test
+        @DisplayName("remaps layout, related collection and relationship field by natural key")
+        void remapsEveryReference() {
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-rl"));
+
+            var report = service.importPackage(TENANT,
+                    pkg(item("LAYOUT_RELATED_LIST", relatedListData())),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.created()).isEqualTo(1);
+            assertThat(report.items().get(0).naturalKey())
+                    .isEqualTo("orders:Default:order_lines:order");
+
+            ArgumentCaptor<CollectionDefinition> defCaptor = ArgumentCaptor.forClass(CollectionDefinition.class);
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> dataCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(defCaptor.capture(), dataCaptor.capture());
+            assertThat(defCaptor.getValue().name()).isEqualTo("layout-related-lists");
+            assertThat(dataCaptor.getValue())
+                    .containsEntry("layoutId", "tgt-layout")
+                    .containsEntry("relatedCollectionId", "tgt-lines")
+                    .containsEntry("relationshipFieldId", "tgt-line-order")
+                    .containsEntry("sortOrder", 0)
+                    .containsEntry("displayColumns", List.of("name"));
+        }
+
+        @Test
+        @DisplayName("fails the item when the relationship field is missing in the target")
+        void failsOnMissingRelationshipField() {
+            when(jdbcTemplate.queryForList(contains("FROM field f"), eq(TENANT))).thenReturn(List.of());
+
+            var report = service.importPackage(TENANT,
+                    pkg(item("LAYOUT_RELATED_LIST", relatedListData())),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isEqualTo(1);
+            assertThat(report.items().get(0).error())
+                    .contains("Relationship field not found in target: order_lines.order");
+            verify(queryEngine, never()).create(any(), anyMap());
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Picklist values
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("carries a picklist value's colour through to the target")
+    void picklistValueColourRoundTrips() {
+        when(jdbcTemplate.queryForList(contains("FROM global_picklist"), eq(TENANT)))
+                .thenReturn(List.of(Map.of("id", "tgt-picklist", "name", "statuses")));
+        when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-value"));
+
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("id", "src-pv");
+        value.put("picklist_source_type", "GLOBAL");
+        value.put("picklist_source_id", "src-picklist");
+        value.put("picklist_name", "statuses");
+        value.put("value", "open");
+        value.put("label", "Open");
+        value.put("color", "#22c55e");
+
+        var report = service.importPackage(TENANT, pkg(item("PICKLIST_VALUE", value)),
+                PackageImportService.ImportOptions.defaults());
+
+        assertThat(report.created()).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> dataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(queryEngine).create(any(), dataCaptor.capture());
+        assertThat(dataCaptor.getValue())
+                .containsEntry("color", "#22c55e")
+                .containsEntry("picklistSourceId", "tgt-picklist");
+    }
+
     @Test
     @DisplayName("naturalKeyFor composes cross-tenant identities per type")
     void naturalKeyComposition() {
@@ -378,5 +578,25 @@ class PackageImportServiceTest {
         assertThat(PackageImportService.naturalKeyFor("PICKLIST_VALUE",
                 Map.of("picklist_source_type", "GLOBAL", "picklist_name", "colors", "value", "red")))
                 .isEqualTo("colors:red");
+        assertThat(PackageImportService.naturalKeyFor("LAYOUT_RELATED_LIST",
+                Map.of("collection_name", "orders", "layout_name", "Default",
+                        "related_collection_name", "order_lines", "relationship_field_name", "order")))
+                .isEqualTo("orders:Default:order_lines:order");
+        assertThat(PackageImportService.naturalKeyFor("UI_MENU_ITEM",
+                mapOf("menu_name", "main", "parent_label", null, "label", "Orders")))
+                .as("top-level items carry an empty parent segment")
+                .isEqualTo("main::Orders");
+        assertThat(PackageImportService.naturalKeyFor("UI_MENU_ITEM",
+                Map.of("menu_name", "main", "parent_label", "Sales", "label", "Orders")))
+                .isEqualTo("main:Sales:Orders");
+    }
+
+    /** {@link Map#of} rejects nulls; several fixtures need a null parent label. */
+    private static Map<String, Object> mapOf(Object... kv) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (int i = 0; i < kv.length; i += 2) {
+            map.put((String) kv[i], kv[i + 1]);
+        }
+        return map;
     }
 }

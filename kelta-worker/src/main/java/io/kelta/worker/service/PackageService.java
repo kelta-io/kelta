@@ -14,6 +14,14 @@ public class PackageService {
 
     private static final Logger log = LoggerFactory.getLogger(PackageService.class);
 
+    /** Option keys naming the ids to export; none present means "the whole tenant". */
+    private static final List<String> ID_OPTION_KEYS = List.of(
+            "collectionIds", "uiPageIds", "uiMenuIds", "flowIds", "pageLayoutIds",
+            "validationRuleIds", "globalPicklistIds");
+
+    private static final String DEFAULT_VERSION = "1.0.0";
+    private static final String DEFAULT_NAME = "metadata";
+
     private final PackageRepository repository;
     private final ObjectMapper objectMapper;
     private final PackageImportService importService;
@@ -53,9 +61,36 @@ public class PackageService {
         return exportPackage(tenantId, options, true);
     }
 
+    /**
+     * Fills in what the caller left out: a request that names no ids at all
+     * ({@code POST /api/packages/export {}} — the common {@code kelta metadata
+     * export} case) means the whole tenant, and name/version fall back to the
+     * tenant slug and {@value #DEFAULT_VERSION}. An explicit (even empty) id
+     * list is respected as-is.
+     */
+    public Map<String, Object> resolveExportOptions(String tenantId, Map<String, Object> options) {
+        String name = blankToNull((String) options.get("name"));
+        String version = blankToNull((String) options.get("version"));
+        if (name == null) {
+            name = repository.findTenantSlug(tenantId).orElse(DEFAULT_NAME);
+        }
+        if (version == null) {
+            version = DEFAULT_VERSION;
+        }
+
+        Map<String, Object> resolved = ID_OPTION_KEYS.stream().anyMatch(options::containsKey)
+                ? new LinkedHashMap<>(options)
+                : exportAllOptions(tenantId, name, version);
+        resolved.putAll(options);
+        resolved.put("name", name);
+        resolved.put("version", version);
+        return resolved;
+    }
+
     @SuppressWarnings("unchecked")
-    public Map<String, Object> exportPackage(String tenantId, Map<String, Object> options,
+    public Map<String, Object> exportPackage(String tenantId, Map<String, Object> rawOptions,
                                              boolean recordHistory) {
+        Map<String, Object> options = resolveExportOptions(tenantId, rawOptions);
         String name = (String) options.get("name");
         String version = (String) options.get("version");
         String description = (String) options.getOrDefault("description", "");
@@ -122,6 +157,9 @@ public class PackageService {
         }
         for (var lf : repository.findLayoutFieldsByLayoutIds(tenantId, pageLayoutIds)) {
             items.add(buildItem("LAYOUT_FIELD", lf));
+        }
+        for (var rl : repository.findLayoutRelatedListsByLayoutIds(tenantId, pageLayoutIds)) {
+            items.add(buildItem("LAYOUT_RELATED_LIST", rl));
         }
 
         // Flows
@@ -336,6 +374,10 @@ public class PackageService {
         return item;
     }
 
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
     @SuppressWarnings("unchecked")
     private List<String> getStringList(Map<String, Object> map, String key) {
         Object value = map.get(key);
@@ -355,7 +397,7 @@ public class PackageService {
             case "UI_PAGE" -> "page";
             case "UI_MENU", "UI_MENU_ITEM" -> "menu";
             case "FLOW" -> "flow";
-            case "PAGE_LAYOUT", "LAYOUT_SECTION", "LAYOUT_FIELD" -> "layout";
+            case "PAGE_LAYOUT", "LAYOUT_SECTION", "LAYOUT_FIELD", "LAYOUT_RELATED_LIST" -> "layout";
             case "VALIDATION_RULE" -> "validation-rule";
             case "GLOBAL_PICKLIST", "PICKLIST_VALUE" -> "picklist";
             default -> type.toLowerCase();
