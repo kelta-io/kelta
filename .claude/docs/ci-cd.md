@@ -79,10 +79,19 @@ Trigger: `push` → `main` (path-filtered), plus `workflow_dispatch`.
 
 ## `auto-merge.yml`
 
-Auto-merges PRs labeled `autopilot` from authorized actors (`cklinker`,
-`github-actions[bot]`). Squash strategy. Uses `ARGOCD_REPO_TOKEN` (a PAT, so the merge
-push triggers the downstream publish workflow). **`type: security` tasks are never
-auto-merged** (see `SECURITY.md`).
+Two paths, squash strategy, both using `ARGOCD_REPO_TOKEN` (a PAT, so the merge push
+triggers the downstream publish workflow):
+
+- **human** — PRs labeled `autopilot` from `cklinker` or `github-actions[bot]`: auto-merge
+  is enabled on the label (`pull_request` events), no review gate.
+- **fleet** — PRs from `rzware-developer[bot]`: auto-merge is enabled only when
+  `rzware-reviewer[bot]` submits an `approved` review (`pull_request_review`), and
+  disabled again by a later `changes_requested`. The worker Job's review round (request
+  changes → fix → push → re-review) therefore completes before anything merges. Before
+  2026-09-15 this path was label-triggered too and #1478 merged on CI green eleven minutes
+  after "changes requested", stranding the fix commit (#1479).
+
+**`type: security` tasks are never auto-merged** (see `SECURITY.md`).
 
 ## Other workflows
 
