@@ -1,0 +1,39 @@
+{
+  "apiVersion" : "api.cerbos.dev/v1",
+  "derivedRoles" : {
+    "name" : "kelta_roles_tenant-golden",
+    "definitions" : [ {
+      "name" : "profile_admin-profile",
+      "parentRoles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.profileId == \"admin-profile\" && P.attr.tenantId == \"tenant-golden\""
+        }
+      }
+    }, {
+      "name" : "profile_editor-profile",
+      "parentRoles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.profileId == \"editor-profile\" && P.attr.tenantId == \"tenant-golden\""
+        }
+      }
+    }, {
+      "name" : "profile_viewer-profile",
+      "parentRoles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.profileId == \"viewer-profile\" && P.attr.tenantId == \"tenant-golden\""
+        }
+      }
+    }, {
+      "name" : "profile_nobody-profile",
+      "parentRoles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.profileId == \"nobody-profile\" && P.attr.tenantId == \"tenant-golden\""
+        }
+      }
+    } ]
+  }
+}

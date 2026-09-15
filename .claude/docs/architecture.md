@@ -253,6 +253,18 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     while still looking up object permissions by the stored UUID. Get this wrong in one direction
     and per-collection allow rules silently never match: a UUID-keyed record CEL denies every
     record to non-`VIEW_ALL_DATA` profiles (they'd see empty lists everywhere).
+  - **Policy shape = latency.** Cerbos evaluates the CEL condition of every candidate rule per
+    check (~0.3ms each), so the `collection`/`record` policies must NOT grow with the tenant.
+    `buildCrudPolicy` folds the whole matrix into policy `constants.local`
+    (`perms: profileId → action → [collectionId]`, `viewAll`/`modifyAll: [profileId]`) and emits
+    **one `roles: [user]` rule per CRUD action** whose CEL is a map/list lookup
+    (`P.attr.profileId in C.perms && R.attr.collectionId in C.perms[P.attr.profileId].<action>`),
+    plus one rule each for the VIEW_ALL/MODIFY_ALL overrides. Only custom ABAC rules still use the
+    per-profile derived role. The previous one-rule-per-`collection × action` shape cost ~27ms per
+    check on a 22-collection tenant (2026-09-15); this shape is 1-2 CEL evaluations. Semantics are
+    pinned against a real PDP by `CerbosGeneratedPolicyIT` (harness) via the golden files in
+    `kelta-worker/src/test/resources/cerbos/golden/` — change the generator, regenerate the
+    goldens (the unit test prints the JSON on drift), and the IT re-checks the allow/deny matrix.
 - **Static routes** (`/api/admin/**`, `/api/me/**`, `/api/_search/**`, `/api/metrics/**`,
   `/api/operations`): `RouteAuthorizationFilter` **skips** ids starting `static-` — they get only
   the blanket `API_ACCESS` system-permission check. The worker advices **exclude** `/api/admin/` — and the record-level advice also excludes `/api/telehealth/` (those controllers scope access per participant themselves; the generic record check emptied portal users' appointment lists, fixed 2026-07-12).
