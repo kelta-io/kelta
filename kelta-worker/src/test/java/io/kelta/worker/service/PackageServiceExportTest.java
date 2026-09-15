@@ -22,12 +22,17 @@ class PackageServiceExportTest {
 
     private PackageRepository repository;
     private PackageImportService importService;
+    private JdbcTemplate jdbcTemplate;
     private PackageService service;
 
     @BeforeEach
     void setUp() {
         repository = mock(PackageRepository.class);
         importService = mock(PackageImportService.class);
+        jdbcTemplate = mock(JdbcTemplate.class);
+        when(repository.getJdbcTemplate()).thenReturn(jdbcTemplate);
+        when(jdbcTemplate.queryForList(anyString(), eq(String.class), eq(TENANT)))
+                .thenReturn(List.of());
         service = new PackageService(repository, new ObjectMapper(), importService);
     }
 
@@ -96,6 +101,11 @@ class PackageServiceExportTest {
                 row("id", "lf1", "section_sort_order", 0, "layout_name", "Default",
                         "collection_name", "orders", "field_name", "customer",
                         "field_collection_name", "orders")));
+        when(repository.findLayoutRelatedListsByLayoutIds(TENANT, layoutIds)).thenReturn(List.of(
+                row("id", "rl1", "sort_order", 0, "layout_name", "Default",
+                        "collection_name", "orders", "related_collection_name", "order_lines",
+                        "relationship_field_name", "order",
+                        "relationship_field_collection_name", "order_lines")));
         when(repository.findFlowsByIds(TENANT, List.of("f1"))).thenReturn(List.of(
                 row("id", "f1", "name", "myflow", "flow_type", "AUTOLAUNCHED",
                         "tenant_id", TENANT, "created_by", "u-9")));
@@ -114,7 +124,8 @@ class PackageServiceExportTest {
         var items = (List<Map<String, Object>>) pkg.get("items");
         assertThat(items.stream().map(i -> i.get("type")).toList()).containsExactlyInAnyOrder(
                 "COLLECTION", "FIELD", "GLOBAL_PICKLIST", "PICKLIST_VALUE",
-                "VALIDATION_RULE", "PAGE_LAYOUT", "LAYOUT_SECTION", "LAYOUT_FIELD", "FLOW");
+                "VALIDATION_RULE", "PAGE_LAYOUT", "LAYOUT_SECTION", "LAYOUT_FIELD",
+                "LAYOUT_RELATED_LIST", "FLOW");
 
         for (var item : items) {
             var data = (Map<String, Object>) item.get("data");
@@ -131,6 +142,70 @@ class PackageServiceExportTest {
         assertThat((Map<String, Object>) layoutField.get("data"))
                 .containsEntry("layout_name", "Default")
                 .containsEntry("field_collection_name", "orders");
+        var relatedList = items.stream().filter(i -> "LAYOUT_RELATED_LIST".equals(i.get("type")))
+                .findFirst().orElseThrow();
+        assertThat((Map<String, Object>) relatedList.get("data"))
+                .containsEntry("layout_name", "Default")
+                .containsEntry("related_collection_name", "order_lines")
+                .containsEntry("relationship_field_name", "order");
+    }
+
+    @Test
+    @DisplayName("a request naming no ids exports the whole tenant")
+    @SuppressWarnings("unchecked")
+    void noIdsMeansWholeTenant() {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.of("acme"));
+        when(jdbcTemplate.queryForList(contains("FROM collection"), eq(String.class), eq(TENANT)))
+                .thenReturn(List.of("c1"));
+        when(repository.findAllIds("ui_menu", TENANT)).thenReturn(List.of("um1"));
+        when(repository.findAllIds("page_layout", TENANT)).thenReturn(List.of("pl1"));
+        when(repository.findAllIds("global_picklist", TENANT)).thenReturn(List.of("gp1"));
+        when(repository.findCollectionsByIds(TENANT, List.of("c1"))).thenReturn(List.of(
+                row("id", "c1", "name", "orders")));
+        when(repository.findUiMenusByIds(TENANT, List.of("um1"))).thenReturn(List.of(
+                row("id", "um1", "name", "main")));
+        when(repository.findUiMenuItemsWithMenuNames(TENANT, List.of("um1"))).thenReturn(List.of(
+                row("id", "mi1", "label", "Orders", "menu_name", "main")));
+        when(repository.findPageLayoutsByIds(TENANT, List.of("pl1"))).thenReturn(List.of(
+                row("id", "pl1", "name", "Default", "collection_name", "orders")));
+        when(repository.findGlobalPicklistsByIds(TENANT, List.of("gp1"))).thenReturn(List.of(
+                row("id", "gp1", "name", "statuses")));
+        when(repository.findGlobalPicklistValues(TENANT, List.of("gp1"))).thenReturn(List.of(
+                row("id", "pv1", "value", "open", "picklist_source_type", "GLOBAL",
+                        "picklist_name", "statuses", "color", "#22c55e")));
+
+        var pkg = service.exportPackage(TENANT, Map.of());
+
+        assertThat(pkg).containsEntry("name", "acme").containsEntry("version", "1.0.0");
+        var items = (List<Map<String, Object>>) pkg.get("items");
+        assertThat(items.stream().map(i -> i.get("type")).toList())
+                .contains("COLLECTION", "UI_MENU", "UI_MENU_ITEM", "PAGE_LAYOUT",
+                        "GLOBAL_PICKLIST", "PICKLIST_VALUE");
+        var value = items.stream().filter(i -> "PICKLIST_VALUE".equals(i.get("type")))
+                .findFirst().orElseThrow();
+        assertThat((Map<String, Object>) value.get("data")).containsEntry("color", "#22c55e");
+    }
+
+    @Test
+    @DisplayName("falls back to a generic package name when the tenant has no slug")
+    void defaultsNameWithoutASlug() {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.empty());
+
+        var pkg = service.exportPackage(TENANT, Map.of(), false);
+
+        assertThat(pkg).containsEntry("name", "metadata").containsEntry("version", "1.0.0");
+    }
+
+    @Test
+    @DisplayName("an explicitly empty id list is respected, not widened to the tenant")
+    void explicitEmptyIdListExportsNothing() {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.of("acme"));
+
+        var pkg = service.exportPackage(TENANT,
+                Map.of("name", "pkg", "version", "1.0.0", "collectionIds", List.of()), false);
+
+        assertThat((List<?>) pkg.get("items")).isEmpty();
+        verify(repository, never()).findAllIds(anyString(), anyString());
     }
 
     @Test

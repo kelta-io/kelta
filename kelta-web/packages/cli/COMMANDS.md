@@ -489,9 +489,9 @@ Vector similarity search within one collection (needs a VECTOR field)
 
 Export this tenant's metadata as a package file
 
-- `-n, --name <name>` — Package name
-- `-v, --version <version>` — Package version
-- `-o, --out <file>` — Output file (default: <name>-<version>.json)
+- `-n, --name <name>` — Package name (default: the tenant slug)
+- `-v, --version <version>` — Package version (default: 1.0.0)
+- `-o, --out <file>` — Output file (default: the name the server returns)
 
 ### `kelta metadata diff <file>`
 
@@ -502,6 +502,7 @@ Preview the changes a package file would make (no writes)
 Apply a package file to this tenant **(destructive — needs --yes off-TTY)**
 
 - `--dry-run` — Validate without writing
+- `--conflict <mode>` — On an item that already exists: skip (default) or overwrite (default: "skip")
 
 ## sandbox
 

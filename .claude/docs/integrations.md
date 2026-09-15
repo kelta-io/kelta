@@ -622,9 +622,25 @@ environments as **metadata packages** (`PackageService` export → `PackageImpor
 - **Package format v2** — `{formatVersion: 2, source: {instanceId, tenantId, tenantSlug},
   exportedAt, items: [{type, data}]}`. `instanceId` is the installation's stable identity
   (`platform_instance`, V158). Items carry natural-key context (`collection_name`,
-  `reference_collection_name`, `layout_name`, `field_name`, `picklist_name`, `menu_name`) so
+  `reference_collection_name`, `layout_name`, `field_name`, `picklist_name`,
+  `related_collection_name`, `relationship_field_name`, `menu_name`, `parent_label`) so
   cross-tenant/cross-cluster import remaps every reference **by name, never by UUID**.
   Importers accept v1 packages (minus the new types).
+- **Types** (`PackageImportService.supportedTypes()`, applied in this order): `COLLECTION`,
+  `FIELD`, `GLOBAL_PICKLIST`, `PICKLIST_VALUE`, `VALIDATION_RULE`, `PAGE_LAYOUT`,
+  `LAYOUT_SECTION`, `LAYOUT_FIELD`, `LAYOUT_RELATED_LIST`, `FLOW`, `UI_PAGE`, `UI_MENU`,
+  `UI_MENU_ITEM`. Natural keys: related lists are
+  `collection:layout:relatedCollection:relationshipField`, menu items are
+  `menu:parentLabel:label` (empty parent segment at the top level). A menu item's `parent_id`
+  is a *source* id — the importer orders parents first and remaps it through the ids the
+  parents got in this import; an unresolvable parent fails that item.
+- **Export scope** — `POST /api/packages/export` with no `*Ids` list exports the **whole
+  tenant** (`PackageService.exportAllOptions`); `name`/`version` default to the tenant slug and
+  `1.0.0`. An explicitly empty list is respected as "none". `kelta metadata export` therefore
+  needs no flags.
+- **Conflicts** — `conflictMode=skip` (default) leaves an existing item alone; `overwrite`
+  updates it in place on its natural key, which is what makes re-applying an edited package
+  converge. `kelta metadata apply --conflict skip|overwrite`.
 - **Topology rule** — a tenant's dev/qa/staging/prod may span isolated clusters whose databases
   don't know each other. The only universal identity check is **source ≠ target**: promotion
   rejects a package whose `source.instanceId` + `source.tenantId` equal the local target.
@@ -638,8 +654,9 @@ environments as **metadata packages** (`PackageService` export → `PackageImpor
   rollback → 409; restore on the remote side.
 - **Manual cross-cluster path** — `kelta metadata export` on cluster A → move the file →
   `kelta metadata apply` on cluster B (same hardened import + provenance).
-- **Security types** (`ROLE`/`POLICY`/`ROUTE_POLICY`/`FIELD_POLICY`) are cloned INTO sandboxes
-  but **never promoted** — authz changes reach production only via the explicit packages API.
+- **Authz is never in a package** — the legacy `role`/`policy`/`route_policy`/`field_policy`
+  tables were dropped in V47; per-tenant authz is profiles + Cerbos, which a sandbox seeds
+  itself via `TenantProvisioningHook`. Nothing authz-shaped is exported, cloned, or promoted.
 
 ## Fleet notifications
 

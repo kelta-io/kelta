@@ -68,7 +68,7 @@ public class PackageController {
     }
 
     @PostMapping("/export")
-    public ResponseEntity<?> exportPackage(@RequestBody Map<String, Object> body,
+    public ResponseEntity<?> exportPackage(@RequestBody(required = false) Map<String, Object> body,
                                            jakarta.servlet.http.HttpServletRequest request) {
         String tenantId = TenantContext.get();
         if (tenantId == null) {
@@ -76,16 +76,14 @@ public class PackageController {
         }
         requirePermission(request);
 
-        // Unwrap JSON:API envelope if present
-        Map<String, Object> options = unwrapJsonApiBody(body);
-
-        String name = (String) options.get("name");
-        String version = (String) options.get("version");
-        if (name == null || name.isBlank() || version == null || version.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Package name and version are required"));
-        }
+        // Unwrap JSON:API envelope if present. An empty body is the common case
+        // (`kelta metadata export`): the service fills in name/version and, with
+        // no id lists named, exports the whole tenant.
+        Map<String, Object> options = unwrapJsonApiBody(body == null ? Map.of() : body);
 
         Map<String, Object> pkg = packageService.exportPackage(tenantId, options);
+        String name = (String) pkg.get("name");
+        String version = (String) pkg.get("version");
 
         // Return as downloadable JSON
         try {

@@ -180,17 +180,27 @@ class PackageControllerTest {
         }
 
         @Test
-        @DisplayName("Should return 400 when name is missing")
-        void shouldReturn400WhenNameMissing() {
-            var response = controller.exportPackage(Map.of("version", "1.0.0"), request);
-            assertThat(response.getStatusCode().value()).isEqualTo(400);
+        @DisplayName("Should export the whole tenant for an empty body, naming the file from the package")
+        void shouldExportWholeTenantForEmptyBody() {
+            when(packageService.exportPackage(eq("t1"), any())).thenReturn(Map.of(
+                    "name", "acme", "version", "1.0.0", "items", List.of()));
+
+            var response = controller.exportPackage(Map.of(), request);
+
+            assertThat(response.getStatusCode().value()).isEqualTo(200);
+            assertThat(response.getHeaders().getFirst("Content-Disposition"))
+                    .contains("acme-1.0.0.json");
+            verify(packageService).exportPackage(eq("t1"), argThat(Map::isEmpty));
         }
 
         @Test
-        @DisplayName("Should return 400 when version is missing")
-        void shouldReturn400WhenVersionMissing() {
-            var response = controller.exportPackage(Map.of("name", "test"), request);
-            assertThat(response.getStatusCode().value()).isEqualTo(400);
+        @DisplayName("Should accept a missing request body")
+        void shouldAcceptMissingBody() {
+            when(packageService.exportPackage(eq("t1"), any())).thenReturn(Map.of(
+                    "name", "acme", "version", "1.0.0", "items", List.of()));
+
+            var response = controller.exportPackage(null, request);
+            assertThat(response.getStatusCode().value()).isEqualTo(200);
         }
     }
 
