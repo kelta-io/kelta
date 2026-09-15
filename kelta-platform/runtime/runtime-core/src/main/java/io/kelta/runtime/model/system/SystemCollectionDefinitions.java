@@ -3233,7 +3233,7 @@ public final class SystemCollectionDefinitions {
             .addField(FieldDefinition.masterDetail("dashboardId", "dashboards",
                 "Dashboard").withColumnName("dashboard_id")
                 .withDescription("Dashboard this component belongs to."))
-            .addField(FieldDefinition.masterDetail("reportId", "reports", "Report")
+            .addField(FieldDefinition.lookup("reportId", "reports", "Report")
                 .withColumnName("report_id")
                 .withDescription("Saved report backing the widget; optional when config names a collection."))
             .addField(FieldDefinition.requiredString("componentType", 20)

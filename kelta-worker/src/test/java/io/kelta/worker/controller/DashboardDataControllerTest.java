@@ -4,8 +4,10 @@ import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.*;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.workflow.BeforeSaveResult;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
+import io.kelta.worker.service.DashboardComponentValidator;
 import io.kelta.worker.service.DashboardDataService;
 import io.kelta.worker.service.DashboardDataService.WidgetExecutionException;
 import io.kelta.worker.service.DashboardDataService.WidgetResult;
@@ -25,6 +27,7 @@ import static org.mockito.Mockito.*;
 class DashboardDataControllerTest {
 
     private DashboardDataService dashboardDataService;
+    private DashboardComponentValidator dashboardComponentValidator;
     private QueryEngine queryEngine;
     private CollectionRegistry collectionRegistry;
     private CerbosPermissionResolver permissionResolver;
@@ -35,14 +38,15 @@ class DashboardDataControllerTest {
     @BeforeEach
     void setUp() {
         dashboardDataService = mock(DashboardDataService.class);
+        dashboardComponentValidator = mock(DashboardComponentValidator.class);
         queryEngine = mock(QueryEngine.class);
         collectionRegistry = mock(CollectionRegistry.class);
         permissionResolver = mock(CerbosPermissionResolver.class);
         bootstrapRepository = mock(BootstrapRepository.class);
         request = mock(HttpServletRequest.class);
         controller = new DashboardDataController(
-            dashboardDataService, queryEngine, collectionRegistry, permissionResolver,
-            bootstrapRepository);
+            dashboardDataService, dashboardComponentValidator, queryEngine, collectionRegistry,
+            permissionResolver, bootstrapRepository);
         grantPermission("VIEW_ANALYTICS");
     }
 
@@ -277,6 +281,79 @@ class DashboardDataControllerTest {
             "dash-1", "comp-1", null, request);
 
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+    }
+
+    // =========================================================================
+    // Validate endpoint tests
+    // =========================================================================
+
+    @Test
+    void validateReportsValidWhenNoErrors() {
+        CollectionDefinition componentsDef = SystemCollectionDefinitions.dashboardComponents();
+        when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
+
+        Map<String, Object> component = new HashMap<>();
+        component.put("id", "comp-ok");
+        component.put("componentType", "metric");
+        component.put("config", Map.of("collectionName", "accounts"));
+        when(queryEngine.executeQuery(eq(componentsDef), any()))
+            .thenReturn(QueryResult.of(List.of(component), 1L, new Pagination(1, 100)));
+
+        when(dashboardComponentValidator.validate(any())).thenReturn(List.of());
+
+        ResponseEntity<Map<String, Object>> response = controller.validateDashboard(
+            "dash-1", null, request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        Map<String, Object> body = response.getBody();
+        assertEquals(true, body.get("valid"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> components = (List<Map<String, Object>>) body.get("components");
+        assertEquals(1, components.size());
+        assertEquals("comp-ok", components.get(0).get("id"));
+        assertTrue(((List<?>) components.get(0).get("errors")).isEmpty());
+    }
+
+    @Test
+    void validateReportsErrorsAndMarksInvalidWithoutWrites() {
+        Map<String, Object> candidate = new HashMap<>();
+        candidate.put("id", "comp-bad");
+        candidate.put("componentType", "chart");
+        candidate.put("config", Map.of("collectionName", "nope"));
+
+        when(dashboardComponentValidator.validate(any())).thenReturn(
+            List.of(new BeforeSaveResult.ValidationError("config/collectionName", "Unknown collection 'nope'")));
+
+        ResponseEntity<Map<String, Object>> response = controller.validateDashboard(
+            "dash-1", Map.of("components", List.of(candidate)), request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        Map<String, Object> body = response.getBody();
+        assertEquals(false, body.get("valid"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> components = (List<Map<String, Object>>) body.get("components");
+        assertEquals(1, components.size());
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> errors = (List<Map<String, Object>>) components.get(0).get("errors");
+        assertEquals(1, errors.size());
+        assertEquals("config/collectionName", errors.get(0).get("field"));
+
+        // Dry run — nothing is persisted through the query engine or dashboard service.
+        verifyNoInteractions(dashboardDataService);
+        verify(queryEngine, never()).create(any(), any());
+    }
+
+    @Test
+    void validateRejectsCallerWithoutAnalyticsPermission() {
+        when(permissionResolver.getProfileId(request)).thenReturn("profile-1");
+        when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
+                Map.of("permission_name", "API_ACCESS", "granted", true)));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.validateDashboard("dash-1", null, request));
+
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+        verifyNoInteractions(dashboardComponentValidator);
     }
 
     // =========================================================================
