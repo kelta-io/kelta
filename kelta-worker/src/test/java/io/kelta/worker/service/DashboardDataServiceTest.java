@@ -498,6 +498,16 @@ class DashboardDataServiceTest {
     }
 
     @Test
+    void shouldMapContainsOperatorToCaseInsensitiveIcontains() {
+        List<Map<String, Object>> filtersList = List.of(
+            Map.of("field", "status", "operator", "contains", "value", "Open"));
+
+        List<FilterCondition> filters = service.parseFilters(filtersList);
+        assertEquals(1, filters.size());
+        assertEquals(FilterOperator.ICONTAINS, filters.get(0).operator());
+    }
+
+    @Test
     void shouldThrowWidgetExecutionExceptionNamingUnknownOperator() {
         List<Map<String, Object>> filtersList = List.of(
             Map.of("field", "status", "operator", "nope", "value", "x"));

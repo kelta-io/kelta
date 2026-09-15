@@ -73,9 +73,10 @@ public class McpServerConfig {
             types for one collection) -> query_collection / get_record.
 
             Reading: query_collection lists/filters (ops: EQ NEQ GT GTE LT LTE CONTAINS \
-            STARTS ENDS ICONTAINS ISTARTS IENDS IEQ ISNULL; fields AND together, NO OR — \
-            run multiple queries and union client-side for OR/IN). get_record fetches one \
-            row by id. search is keyword full-text; semantic_search is vector/meaning-based. \
+            STARTS ENDS ICONTAINS ISTARTS IENDS IEQ ISNULL IN; IN takes a CSV string or \
+            array for a multi-value match; fields AND together, NO OR — run multiple \
+            queries and union client-side for OR). get_record fetches one row by id. \
+            search is keyword full-text; semantic_search is vector/meaning-based. \
             describe_api returns the full OpenAPI 3.0 spec for exact request/response shapes, \
             but only covers plain collection CRUD — flows, approvals, and bulk are NOT in it; \
             use the dedicated tools below for those.

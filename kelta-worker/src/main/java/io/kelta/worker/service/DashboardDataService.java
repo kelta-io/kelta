@@ -597,6 +597,12 @@ public class DashboardDataService {
 
     private FilterOperator mapOperator(String operator) {
         if (operator == null || operator.isBlank()) return FilterOperator.EQ;
+        // Widget configs historically use "contains" for case-insensitive matching
+        // (mirrored in ReportExecutionService); preserve that before falling back to
+        // FilterOperator's canonical case-sensitive CONTAINS.
+        if ("contains".equalsIgnoreCase(operator.trim())) {
+            return FilterOperator.ICONTAINS;
+        }
         try {
             return FilterOperator.parse(operator);
         } catch (InvalidFilterException e) {
