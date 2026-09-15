@@ -756,11 +756,17 @@ components", {dashboardId}, 200)`, the same shape `apply_menu` uses for items). 
 `apply_menu`'s client-side nav-grammar check, `dashboard-components.config` can only be
 checked server-side (`DashboardComponentValidator`, KLT-213, needs the live collection/field
 registry), so this tool dry-runs the *whole* desired component set through the worker's own
-`POST /api/dashboards/{id}/validate` — after the dashboard itself is upserted (so the
-validator sees the dashboard's real `columnCount`), but **before** a single component create,
-update or delete — and maps each returned `{field, message}` onto `/components/<index>/<field>`
-in a structured `{status,errors:[...]}` result; an invalid component anywhere fails the whole
-call and no component write happens. `sortOrder` is derived from array position, matching
+`POST /api/dashboards/{id}/validate` — **before** the `dashboards` row itself is created or
+updated, and before a single component create, update or delete — and maps each returned
+`{field, message}` onto `/components/<index>/<field>` in a structured `{status,errors:[...]}`
+result; an invalid component anywhere fails the whole call and nothing is written, not even a
+brand-new dashboard. When the named dashboard doesn't exist yet there is no real id to dry-run
+against, so the tool validates against a well-formed but unassigned placeholder id
+(`ApplyDashboardTool.UNSAVED_DASHBOARD_ID`) — the validator's dashboard lookup simply misses,
+skipping only the `columnCount`-overflow check (nothing persisted yet to check against); the
+`columnPosition < 1` check this tool relies on doesn't depend on that lookup. Once validation
+passes, the dashboard is upserted and its real id is backfilled onto every desired component.
+`sortOrder` is derived from array position, matching
 `apply_menu`'s `displayOrder`. A component's `report` is a report *name*, resolved to
 `reportId` via a new generic `AdminLookups.idByNaturalKey(collection, naturalKey)` (a public
 wrapper around the same natural-key lookup `upsert` uses internally) — omit it for a component

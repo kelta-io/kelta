@@ -99,7 +99,7 @@ class ApplyDashboardToolTest {
     @Test
     void createsDashboardWithThreeComponents() {
         stubNewDashboard();
-        stubValidate(true, List.of());
+        stubValidate(ApplyDashboardTool.UNSAVED_DASHBOARD_ID, true, List.of());
         wm.stubFor(get(urlEqualTo("/api/dashboard-components?filter[dashboardId][eq]=" + DASHBOARD_ID + "&page[size]=200"))
                 .willReturn(aResponse().withStatus(200).withBody("{\"data\":[]}")));
         stubCreateComponent("Total Deals", "C1");
@@ -137,7 +137,7 @@ class ApplyDashboardToolTest {
     @Test
     void reappliesIdenticalDashboardAsUnchanged() {
         stubExistingDashboard();
-        stubValidate(true, List.of());
+        stubValidate(DASHBOARD_ID, true, List.of());
         stubExistingComponents(
                 Map.of("id", "C1", "title", "Total Deals", "componentType", "metric",
                         "columnPosition", 1, "rowPosition", 1, "columnSpan", 1, "rowSpan", 1,
@@ -167,7 +167,7 @@ class ApplyDashboardToolTest {
     @Test
     void changingTitleCreatesNewAndPruneDeletesOld() {
         stubExistingDashboard();
-        stubValidate(true, List.of());
+        stubValidate(DASHBOARD_ID, true, List.of());
         stubExistingComponents(
                 Map.of("id", "C1", "title", "Total Deals", "componentType", "metric",
                         "columnPosition", 1, "rowPosition", 1, "columnSpan", 1, "rowSpan", 1,
@@ -206,7 +206,7 @@ class ApplyDashboardToolTest {
     @Test
     void rejectsInvalidColumnPositionWithStructuredErrorAndWritesNothing() {
         stubExistingDashboard();
-        stubValidate(false, List.of(Map.of(
+        stubValidate(DASHBOARD_ID, false, List.of(Map.of(
                 "index", 0, "field", "columnPosition",
                 "message", "columnPosition must be at least 1 (1-based grid column)")));
 
@@ -226,17 +226,49 @@ class ApplyDashboardToolTest {
         Map<String, Object> firstError = (Map<String, Object>) errors.get(0);
         assertThat(firstError.get("source")).isEqualTo(Map.of("pointer", "/components/0/columnPosition"));
 
+        wm.verify(0, WireMock.postRequestedFor(urlEqualTo("/api/dashboards")));
         wm.verify(0, WireMock.getRequestedFor(WireMock.urlMatching("/api/dashboard-components\\?.*")));
         wm.verify(0, WireMock.postRequestedFor(WireMock.urlMatching("/api/dashboard-components.*")));
         wm.verify(0, WireMock.patchRequestedFor(WireMock.urlMatching("/api/dashboard-components/.*")));
         wm.verify(0, WireMock.deleteRequestedFor(WireMock.urlMatching("/api/dashboard-components/.*")));
     }
 
+    /**
+     * Same as above but for a dashboard that does not exist yet — the regression this covers:
+     * validation must run before the {@code dashboards} row is created, not after, or a
+     * first-time apply with an invalid component would still leave behind a newly created
+     * (and now orphaned-looking) dashboard.
+     */
+    @Test
+    void rejectsInvalidColumnPositionForNewDashboardAndWritesNothing() {
+        stubNewDashboard();
+        stubValidate(ApplyDashboardTool.UNSAVED_DASHBOARD_ID, false, List.of(Map.of(
+                "index", 0, "field", "columnPosition",
+                "message", "columnPosition must be at least 1 (1-based grid column)")));
+
+        CallToolResult result = call(Map.of(
+                "name", "SalesOverview",
+                "components", List.of(component("Bad Widget", "metric", 0, 1))));
+
+        assertThat(result.isError()).isEqualTo(Boolean.TRUE);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> structured = (Map<String, Object>) result.structuredContent();
+        @SuppressWarnings("unchecked")
+        List<Object> errors = (List<Object>) structured.get("errors");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> firstError = (Map<String, Object>) errors.get(0);
+        assertThat(firstError.get("source")).isEqualTo(Map.of("pointer", "/components/0/columnPosition"));
+
+        wm.verify(0, WireMock.postRequestedFor(urlEqualTo("/api/dashboards")));
+        wm.verify(0, WireMock.getRequestedFor(WireMock.urlMatching("/api/dashboard-components\\?.*")));
+        wm.verify(0, WireMock.postRequestedFor(WireMock.urlMatching("/api/dashboard-components.*")));
+    }
+
     /** A component's "report" is a saved report name, resolved to reportId before the create call. */
     @Test
     void resolvesReportNameToReportIdOnCreate() {
         stubNewDashboard();
-        stubValidate(true, List.of());
+        stubValidate(ApplyDashboardTool.UNSAVED_DASHBOARD_ID, true, List.of());
         wm.stubFor(get(urlEqualTo("/api/reports?filter[name][eq]=DealReport&page[size]=1"))
                 .willReturn(aResponse().withStatus(200).withBody("{\"data\":[{\"id\":\"R1\"}]}")));
         wm.stubFor(get(urlEqualTo("/api/dashboard-components?filter[dashboardId][eq]=" + DASHBOARD_ID + "&page[size]=200"))
@@ -318,11 +350,14 @@ class ApplyDashboardToolTest {
     }
 
     /**
-     * Stubs {@code POST /api/dashboards/{id}/validate}. {@code fieldErrors} entries carry
-     * {@code index}/{@code field}/{@code message}, matching the controller's per-component
-     * {@code {id, errors:[{field,message}]}} result shape.
+     * Stubs {@code POST /api/dashboards/{dashboardId}/validate}. {@code dashboardId} is
+     * {@link #DASHBOARD_ID} for an already-existing dashboard, or {@link
+     * ApplyDashboardTool#UNSAVED_DASHBOARD_ID} — validation now runs before the dashboard row
+     * is created, so a brand-new dashboard has no real id to dry-run against yet. {@code
+     * fieldErrors} entries carry {@code index}/{@code field}/{@code message}, matching the
+     * controller's per-component {@code {id, errors:[{field,message}]}} result shape.
      */
-    private void stubValidate(boolean valid, List<Map<String, Object>> fieldErrors) {
+    private void stubValidate(String dashboardId, boolean valid, List<Map<String, Object>> fieldErrors) {
         StringBuilder componentsJson = new StringBuilder("[");
         if (!valid) {
             for (Map<String, Object> fe : fieldErrors) {
@@ -334,7 +369,7 @@ class ApplyDashboardToolTest {
         }
         componentsJson.append(']');
         String body = "{\"valid\":" + valid + ",\"components\":" + componentsJson + "}";
-        wm.stubFor(post(urlEqualTo("/api/dashboards/" + DASHBOARD_ID + "/validate"))
+        wm.stubFor(post(urlEqualTo("/api/dashboards/" + dashboardId + "/validate"))
                 .willReturn(aResponse().withStatus(200).withBody(body)));
     }
 }

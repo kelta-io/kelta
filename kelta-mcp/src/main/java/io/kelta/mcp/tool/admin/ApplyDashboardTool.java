@@ -34,9 +34,11 @@ import java.util.Set;
  * {@code columnCount}. Rather than re-deriving that grammar client-side (which would just
  * drift, as {@link ApplyListViewTool}'s class doc notes for {@code rowLimit}/operators), this
  * tool dry-runs the whole desired component set through the worker's own {@code POST
- * /api/dashboards/{id}/validate} <strong>before</strong> creating, updating or deleting a
- * single component — an invalid component fails the whole call with a structured error
- * (pointer {@code /components/<index>/<field>}) and no component write happens at all.
+ * /api/dashboards/{id}/validate} <strong>before creating or updating the dashboard row
+ * itself</strong>, and before creating, updating or deleting a single component — an invalid
+ * component fails the whole call with a structured error (pointer {@code
+ * /components/<index>/<field>}) and nothing is written at all, not even a brand-new
+ * dashboard.
  *
  * <p>{@code sortOrder} is always derived from array position, matching {@code apply_menu}'s
  * {@code displayOrder} and {@code apply_picklist}'s {@code sortOrder}. A component's optional
@@ -51,6 +53,17 @@ import java.util.Set;
 public class ApplyDashboardTool implements AdminTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * Path placeholder for {@code POST /api/dashboards/{id}/validate} when the named dashboard
+     * doesn't exist yet — validation must run <em>before</em> the dashboard row is created, so
+     * there is no real id to dry-run against. A well-formed but unassigned id makes the worker's
+     * {@code resolveColumnCount} lookup miss cleanly (columnCount-overflow checking is simply
+     * skipped, since there is no persisted columnCount yet to check against) rather than fail on
+     * a malformed id; the columnPosition &lt; 1 check this tool relies on is independent of that
+     * lookup and still runs.
+     */
+    static final String UNSAVED_DASHBOARD_ID = "00000000-0000-0000-0000-000000000000";
 
     private final GatewayHttpClient gateway;
     private final AdminLookups lookups;
@@ -172,8 +185,7 @@ public class ApplyDashboardTool implements AdminTool {
             if (args.get("accessLevel") instanceof String a && !a.isBlank()) dashboardAttrs.put("accessLevel", a);
             if (args.get("columnCount") instanceof Number c) dashboardAttrs.put("columnCount", c.intValue());
 
-            AdminLookups.UpsertResult dashboardResult = lookups.upsert("dashboards", Map.of("name", name), dashboardAttrs);
-            String dashboardId = dashboardResult.id();
+            String existingDashboardId = lookups.idByNaturalKey("dashboards", Map.of("name", name));
 
             List<Map<String, Object>> desired = new ArrayList<>();
             for (int i = 0; i < components.size(); i++) {
@@ -185,12 +197,21 @@ public class ApplyDashboardTool implements AdminTool {
                         return error("Report \"" + reportName + "\" not found.");
                     }
                 }
-                desired.add(buildDesiredComponent(component, dashboardId, reportId, i));
+                desired.add(buildDesiredComponent(component, existingDashboardId, reportId, i));
             }
 
-            CallToolResult validationError = validateComponents(dashboardId, desired);
+            CallToolResult validationError = validateComponents(
+                    existingDashboardId != null ? existingDashboardId : UNSAVED_DASHBOARD_ID, desired);
             if (validationError != null) {
                 return validationError;
+            }
+
+            AdminLookups.UpsertResult dashboardResult = lookups.upsert("dashboards", Map.of("name", name), dashboardAttrs);
+            String dashboardId = dashboardResult.id();
+            if (!dashboardId.equals(existingDashboardId)) {
+                for (Map<String, Object> component : desired) {
+                    component.put("dashboardId", dashboardId);
+                }
             }
 
             List<Map<String, Object>> existing = lookups.list("dashboard-components", Map.of("dashboardId", dashboardId), 200);
