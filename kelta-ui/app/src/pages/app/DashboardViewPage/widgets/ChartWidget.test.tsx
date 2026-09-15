@@ -21,6 +21,10 @@ vi.mock('recharts', () => {
       <div>
         <button data-testid="bar-won" onClick={() => onClick?.({ label: 'Won' })} />
         <button data-testid="bar-empty" onClick={() => onClick?.({ label: '(empty)' })} />
+        <button
+          data-testid="bar-with-key"
+          onClick={() => onClick?.({ label: 'Apollo', key: 'proj-1' })}
+        />
       </div>
     ),
     XAxis: Passthrough,
@@ -53,6 +57,13 @@ describe('ChartWidget', () => {
     expect(onSegmentClick).toHaveBeenCalledWith('Won')
     screen.getByTestId('bar-empty').click()
     expect(onSegmentClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('drills through on the raw key when present, ignoring the resolved label', () => {
+    const onSegmentClick = vi.fn()
+    render(<ChartWidget data={DATA} onSegmentClick={onSegmentClick} />)
+    screen.getByTestId('bar-with-key').click()
+    expect(onSegmentClick).toHaveBeenCalledWith('proj-1')
   })
 
   it('renders a placeholder with no series', () => {

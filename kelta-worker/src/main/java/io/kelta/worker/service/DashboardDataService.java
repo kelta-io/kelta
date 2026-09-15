@@ -1,6 +1,7 @@
 package io.kelta.worker.service;
 
 import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.query.*;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.cache.WorkerCacheManager;
@@ -154,7 +155,7 @@ public class DashboardDataService {
 
         WidgetResult result = switch (componentType.toLowerCase()) {
             case "metric" -> executeMetricWidget(targetCollection, config, allFilters);
-            case "chart" -> executeChartWidget(targetCollection, config, allFilters, maskedFields);
+            case "chart" -> executeChartWidget(targetCollection, config, allFilters, maskedFields, principal);
             case "table" -> executeTableWidget(targetCollection, config, allFilters, runtimeParams,
                 maskedFields, principal);
             case "recent" -> executeRecentWidget(targetCollection, config, allFilters, principal);
@@ -245,7 +246,8 @@ public class DashboardDataService {
     WidgetResult executeChartWidget(CollectionDefinition collection,
                                     Map<String, Object> config,
                                     List<FilterCondition> filters,
-                                    Set<String> maskedFields) {
+                                    Set<String> maskedFields,
+                                    ReportExecutionService.MaskingPrincipal principal) {
         String groupByField = getConfigString(config, "groupByField", null);
         if (groupByField == null || groupByField.isBlank()) {
             throw new WidgetExecutionException("groupByField is required for chart widgets");
@@ -276,14 +278,30 @@ public class DashboardDataService {
             groups.computeIfAbsent(key, k -> new ArrayList<>()).add(record);
         }
 
+        // A LOOKUP/MASTER_DETAIL groupByField groups on the raw referenced id — resolve
+        // the ids that will actually be emitted (capped at maxGroups) to the target
+        // collection's display value in a single batched query, keeping the raw id as
+        // "key" so drill-through still filters by id.
+        FieldDefinition groupByFieldDef = collection.getField(groupByField);
+        boolean isReferenceGroupBy = groupByFieldDef != null && groupByFieldDef.type().isRelationship();
+        Map<String, String> resolvedLabels = isReferenceGroupBy
+            ? resolveReferenceGroupLabels(groupByFieldDef, firstGroupKeys(groups, maxGroups), principal)
+            : Map.of();
+
         // Compute aggregates per group
         List<Map<String, Object>> series = new ArrayList<>();
         int count = 0;
         for (Map.Entry<String, List<Map<String, Object>>> entry : groups.entrySet()) {
             if (count >= maxGroups) break;
 
+            String rawKey = entry.getKey();
             Map<String, Object> point = new LinkedHashMap<>();
-            point.put("label", entry.getKey());
+            if (isReferenceGroupBy) {
+                point.put("label", resolvedLabels.getOrDefault(rawKey, rawKey));
+                point.put("key", rawKey);
+            } else {
+                point.put("label", rawKey);
+            }
             point.put("count", entry.getValue().size());
 
             if (!"COUNT".equalsIgnoreCase(aggregateFunction) &&
@@ -305,6 +323,78 @@ public class DashboardDataService {
         data.put("totalRecords", queryResult.metadata().totalCount());
 
         return new WidgetResult("chart", data, null, null);
+    }
+
+    /** Returns the first {@code limit} keys of {@code groups}, preserving insertion order. */
+    private List<String> firstGroupKeys(Map<String, ?> groups, int limit) {
+        List<String> keys = new ArrayList<>();
+        for (String key : groups.keySet()) {
+            if (keys.size() >= limit) break;
+            keys.add(key);
+        }
+        return keys;
+    }
+
+    /**
+     * Resolves raw referenced ids (a LOOKUP/MASTER_DETAIL groupByField's group keys) to
+     * the target collection's display value, via one batched {@code id IN (...)} query.
+     * Returns an empty map (callers fall back to the raw id as the label) when the target
+     * collection can't be resolved, has no display field configured, or the viewer can't
+     * see the display field (masking-denied) — never leaking it via the chart label.
+     */
+    private Map<String, String> resolveReferenceGroupLabels(FieldDefinition groupByFieldDef,
+                                                             List<String> groupKeys,
+                                                             ReportExecutionService.MaskingPrincipal principal) {
+        if (groupByFieldDef.referenceConfig() == null) {
+            return Map.of();
+        }
+        String targetCollectionName = groupByFieldDef.referenceConfig().targetCollection();
+        CollectionDefinition targetCollection = collectionRegistry.get(targetCollectionName);
+        if (targetCollection == null) {
+            targetCollection = lifecycleManager.loadCollectionByName(targetCollectionName, null);
+        }
+        if (targetCollection == null) {
+            return Map.of();
+        }
+
+        String displayFieldName = lifecycleManager.getDisplayFieldName(targetCollection.name());
+        if (displayFieldName == null) {
+            return Map.of();
+        }
+
+        // Don't resolve (and thus leak) a display field the viewer isn't allowed to unmask.
+        Map<String, FieldMaskingService.MaskingConfig> targetMaskable =
+            recordMaskingService.maskableConfigs(targetCollection);
+        if (!targetMaskable.isEmpty() && principal != null && principal.isPresent()) {
+            Set<String> targetMaskedFields = recordMaskingService.maskedFieldsFor(
+                principal.email(), principal.profileId(), principal.tenantId(),
+                targetCollection.name(), targetMaskable.keySet());
+            if (targetMaskedFields.contains(displayFieldName)) {
+                return Map.of();
+            }
+        }
+
+        List<String> distinctIds = groupKeys.stream()
+            .filter(key -> !"(empty)".equals(key))
+            .distinct()
+            .toList();
+        if (distinctIds.isEmpty()) {
+            return Map.of();
+        }
+
+        QueryRequest request = new QueryRequest(
+            new Pagination(1, distinctIds.size()), List.of(), List.of(displayFieldName),
+            List.of(FilterCondition.in("id", distinctIds)));
+        QueryResult result = queryEngine.executeQuery(targetCollection, request);
+
+        Map<String, String> labels = new LinkedHashMap<>();
+        for (Map<String, Object> record : result.data()) {
+            Object id = record.get("id");
+            if (id == null) continue;
+            Object display = record.get(displayFieldName);
+            labels.put(id.toString(), display != null ? display.toString() : id.toString());
+        }
+        return labels;
     }
 
     /**

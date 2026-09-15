@@ -26,6 +26,16 @@ vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>()
   return { ...actual, useNavigate: () => mockNavigate }
 })
+// Real ChartWidget renders through recharts, which doesn't produce clickable elements in
+// jsdom — stub it to expose the onSegmentClick wiring so drill-through routing can be
+// exercised without recharts internals.
+vi.mock('./widgets/ChartWidget', () => ({
+  ChartWidget: ({ onSegmentClick }: { onSegmentClick?: (value: string) => void }) => (
+    <div data-testid="chart-widget">
+      <button data-testid="chart-drill" onClick={() => onSegmentClick?.('proj-1')} />
+    </div>
+  ),
+}))
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -145,6 +155,18 @@ describe('DashboardViewPage', () => {
     renderPage()
     await waitFor(() => expect(screen.getByTestId('widget-time-range-chip')).toBeTruthy())
     expect(screen.getByTestId('widget-time-range-chip').textContent).toBe('Last 7 days')
+  })
+
+  it('drills through on whatever value the chart reports (key or label), not the label alone', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId('chart-widget')).toBeTruthy())
+    screen.getByTestId('chart-drill').click()
+
+    expect(mockNavigate).toHaveBeenCalledTimes(1)
+    const url = mockNavigate.mock.calls[0][0] as string
+    expect(url).toContain('/acme/app/o/orders')
+    expect(url).toContain('%22field%22%3A%22stage%22')
+    expect(url).toContain('%22value%22%3A%22proj-1%22')
   })
 
   it('shows no chip on a widget using the page time range', async () => {

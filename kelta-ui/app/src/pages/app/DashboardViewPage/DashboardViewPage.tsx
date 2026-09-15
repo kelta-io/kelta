@@ -89,12 +89,12 @@ export function DashboardViewPage() {
             chartStyle={component.config.chartStyle === 'pie' ? 'pie' : 'bar'}
             onSegmentClick={
               collectionName
-                ? (label) => {
+                ? (value) => {
                     const groupByField = (payload.data?.groupByField as string) ?? null
                     if (groupByField) {
                       navigate(
                         buildListUrl(tenantSlug!, collectionName, [
-                          { field: groupByField, operator: 'equals', value: label },
+                          { field: groupByField, operator: 'equals', value },
                         ])
                       )
                     }
