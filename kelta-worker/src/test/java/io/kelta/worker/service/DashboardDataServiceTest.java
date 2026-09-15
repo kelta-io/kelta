@@ -12,6 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -289,6 +292,74 @@ class DashboardDataServiceTest {
             Map.of());
 
         assertEquals(2, filters.size());
+    }
+
+    @Test
+    void shouldBuildNoTimeFilterWhenIgnoreTimeRangeIsTrue() {
+        Map<String, Object> config = Map.of("ignoreTimeRange", true);
+
+        List<FilterCondition> underToday = service.buildTimeFilters(
+            Map.of("timeRange", "TODAY"), config);
+        List<FilterCondition> under30d = service.buildTimeFilters(
+            Map.of("timeRange", "30D"), config);
+        List<FilterCondition> underAll = service.buildTimeFilters(
+            Map.of(), config);
+
+        assertTrue(underToday.isEmpty());
+        assertTrue(under30d.isEmpty());
+        assertTrue(underAll.isEmpty());
+    }
+
+    @Test
+    void shouldIgnoreTimeRangeTakePrecedenceOverFixedTimeRange() {
+        Map<String, Object> config = Map.of(
+            "ignoreTimeRange", true, "fixedTimeRange", "7D");
+
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "30D"), config);
+
+        assertTrue(filters.isEmpty());
+    }
+
+    @Test
+    void shouldApplyFixedTimeRangeRegardlessOfRuntimeTimeRange() {
+        Map<String, Object> config = Map.of("fixedTimeRange", "7D");
+
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "30D"), config);
+
+        assertEquals(1, filters.size());
+        assertEquals("createdAt", filters.get(0).fieldName());
+        assertEquals(FilterOperator.GTE, filters.get(0).operator());
+
+        Instant expectedStart = Instant.now().minus(7, ChronoUnit.DAYS);
+        Instant actualStart = Instant.parse((String) filters.get(0).value());
+        assertTrue(Duration.between(actualStart, expectedStart).abs().toSeconds() < 5);
+    }
+
+    @Test
+    void shouldApplyFixedTimeRangeWhenNoRuntimeTimeRangeGiven() {
+        Map<String, Object> config = Map.of("fixedTimeRange", "7D");
+
+        List<FilterCondition> filters = service.buildTimeFilters(Map.of(), config);
+
+        assertEquals(1, filters.size());
+    }
+
+    @Test
+    void shouldFallBackToRuntimeTimeRangeWhenNoIgnoreOrFixed() {
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "7D"), Map.of());
+
+        assertEquals(1, filters.size());
+    }
+
+    @Test
+    void shouldFallBackToConfigTimeRangeWhenNoRuntimeTimeRange() {
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of(), Map.of("timeRange", "90D"));
+
+        assertEquals(1, filters.size());
     }
 
     // =========================================================================

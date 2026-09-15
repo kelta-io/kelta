@@ -132,4 +132,24 @@ describe('DashboardViewPage', () => {
     renderPage()
     await waitFor(() => expect(screen.getByTestId('dashboard-empty')).toBeTruthy())
   })
+
+  it('shows an "All time" chip on a widget with config.ignoreTimeRange', async () => {
+    mockGetList.mockResolvedValue([{ ...COMPONENTS[0], config: { ignoreTimeRange: true } }])
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId('widget-time-range-chip')).toBeTruthy())
+    expect(screen.getByTestId('widget-time-range-chip').textContent).toBe('All time')
+  })
+
+  it('shows the fixed range label as a chip on a widget with config.fixedTimeRange', async () => {
+    mockGetList.mockResolvedValue([{ ...COMPONENTS[0], config: { fixedTimeRange: '7D' } }])
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId('widget-time-range-chip')).toBeTruthy())
+    expect(screen.getByTestId('widget-time-range-chip').textContent).toBe('Last 7 days')
+  })
+
+  it('shows no chip on a widget using the page time range', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Sales Overview')).toBeTruthy())
+    expect(screen.queryByTestId('widget-time-range-chip')).toBeNull()
+  })
 })
