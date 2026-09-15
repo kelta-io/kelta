@@ -675,6 +675,19 @@ jobs:
           }
           echo "CLI downloads smoke OK: ${EXPECT} served and executable."
 
+      # DORA: the release is live and healthy — stamp merge→healthy for this SHA
+      # (scripts/dora/README.md). Best-effort: the script always exits 0.
+      - name: Checkout (DORA emitter)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/dora
+          fetch-depth: 1
+
+      - name: Record deploy_healthy for DORA
+        env:
+          LOKI_URL: http://loki.observability.svc.cluster.local:3100
+        run: bash scripts/dora/emit-deploy-event.sh
+
   # ===========================================================================
   # Auto-rollback on smoke-test failure — reverts the image bump in homelab-argo.
   # ===========================================================================

@@ -92,3 +92,7 @@ quickstart:
 workflows:
   - '.github/workflows/**'
   - '.github/path-filters.yml'
+
+# DORA collector (node --test, no build).
+dora:
+  - 'scripts/dora/**'
