@@ -475,13 +475,28 @@ public class DashboardDataService {
                                            Map<String, Object> config) {
         List<FilterCondition> filters = new ArrayList<>();
 
-        // Check runtime params first, then widget config
-        String timeRange = runtimeParams != null ? runtimeParams.get("timeRange") : null;
-        if (timeRange == null) {
-            timeRange = getConfigString(config, "timeRange", null);
+        // A widget that opts out of the page time range entirely (a "state right now"
+        // metric, e.g. tasks currently in progress) gets no time filter at all — not even
+        // explicit start/end dates — regardless of the page's selected range.
+        if (getConfigBoolean(config, "ignoreTimeRange")) {
+            return filters;
         }
 
         String timeField = getConfigString(config, "timeField", "createdAt");
+
+        // Precedence: config.fixedTimeRange (one of TODAY|7D|30D|90D|1Y, ignoring the
+        // page's selected range) > runtime timeRange (the page's selected range) >
+        // config.timeRange (the widget's own default when the page sends none).
+        String fixedTimeRange = getConfigString(config, "fixedTimeRange", null);
+        String timeRange;
+        if (fixedTimeRange != null && !fixedTimeRange.isBlank()) {
+            timeRange = fixedTimeRange;
+        } else {
+            timeRange = runtimeParams != null ? runtimeParams.get("timeRange") : null;
+            if (timeRange == null) {
+                timeRange = getConfigString(config, "timeRange", null);
+            }
+        }
 
         if (timeRange != null && !timeRange.isBlank()) {
             Instant now = Instant.now();
@@ -616,6 +631,14 @@ public class DashboardDataService {
         if (val == null) return defaultValue;
         String str = val.toString();
         return str.isBlank() ? defaultValue : str;
+    }
+
+    boolean getConfigBoolean(Map<String, Object> config, String key) {
+        if (config == null) return false;
+        Object val = config.get(key);
+        if (val instanceof Boolean b) return b;
+        if (val instanceof String s) return Boolean.parseBoolean(s);
+        return false;
     }
 
     int getConfigInt(Map<String, Object> config, String key, int defaultValue) {

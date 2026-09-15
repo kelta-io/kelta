@@ -78,6 +78,32 @@ const COMPONENTS = [
   },
 ]
 
+const TIME_SCOPE_COMPONENTS = [
+  ...COMPONENTS,
+  {
+    id: 'c-ignore',
+    componentType: 'metric',
+    title: 'In progress',
+    columnPosition: 2,
+    rowPosition: 2,
+    columnSpan: 1,
+    rowSpan: 1,
+    sortOrder: 4,
+    config: { ignoreTimeRange: true },
+  },
+  {
+    id: 'c-fixed',
+    componentType: 'metric',
+    title: 'New this week',
+    columnPosition: 3,
+    rowPosition: 2,
+    columnSpan: 1,
+    rowSpan: 1,
+    sortOrder: 5,
+    config: { fixedTimeRange: '7D' },
+  },
+]
+
 const WIDGETS = {
   'c-metric': { type: 'metric', data: { value: 42, label: 'Open' } },
   'c-chart': {
@@ -91,6 +117,12 @@ const WIDGETS = {
     },
   },
   'c-broken': { error: 'Cannot filter on a masked field: ssn' },
+}
+
+const TIME_SCOPE_WIDGETS = {
+  ...WIDGETS,
+  'c-ignore': { type: 'metric', data: { value: 3, label: 'In progress' } },
+  'c-fixed': { type: 'metric', data: { value: 5, label: 'New this week' } },
 }
 
 beforeEach(() => {
@@ -124,6 +156,21 @@ describe('DashboardViewPage', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalled())
     expect(mockPost).toHaveBeenCalledWith('/api/dashboards/dash-1/data', { timeRange: '30D' })
     expect(screen.getByTestId('time-range-select')).toBeTruthy()
+  })
+
+  it('renders a chip on widgets that opt out of the page time range', async () => {
+    mockGetList.mockResolvedValue(TIME_SCOPE_COMPONENTS)
+    mockPost.mockResolvedValue({
+      data: { attributes: { dashboardName: 'Sales Overview', widgets: TIME_SCOPE_WIDGETS } },
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Sales Overview')).toBeTruthy())
+
+    const chips = screen.getAllByTestId('widget-time-scope-chip')
+    expect(chips).toHaveLength(2)
+    expect(chips.map((c) => c.textContent)).toEqual(
+      expect.arrayContaining(['All time', 'Last 7 days'])
+    )
   })
 
   it('renders the empty state when the dashboard has no components', async () => {

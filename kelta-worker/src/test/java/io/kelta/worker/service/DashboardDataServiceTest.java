@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -104,6 +106,30 @@ class DashboardDataServiceTest {
 
         assertThrows(WidgetExecutionException.class,
             () -> service.executeWidget(component, Map.of(), null));
+    }
+
+    @Test
+    void shouldReturnSameMetricValueUnderAnyPageRangeWhenIgnoreTimeRange() {
+        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        when(collectionRegistry.get("tasks")).thenReturn(collDef);
+
+        QueryResult queryResult = QueryResult.of(List.of(), 7L, new Pagination(1, 1000));
+        when(queryEngine.executeQuery(eq(collDef), any())).thenReturn(queryResult);
+
+        Map<String, Object> component = buildComponent("comp-ignore", "metric",
+            Map.of("collectionName", "tasks", "aggregateFunction", "COUNT",
+                   "ignoreTimeRange", true));
+
+        List<Map<String, String>> pageRanges = List.of(
+            Map.of("timeRange", "TODAY"), Map.of("timeRange", "30D"), Map.of());
+        for (Map<String, String> runtimeParams : pageRanges) {
+            WidgetResult result = service.executeWidget(component, runtimeParams, null);
+            assertEquals(7L, result.data().get("value"));
+        }
+
+        // No time FilterCondition was ever built for this component.
+        verify(queryEngine, times(3)).executeQuery(eq(collDef), argThat(req ->
+            req.filters().isEmpty()));
     }
 
     // =========================================================================
@@ -289,6 +315,88 @@ class DashboardDataServiceTest {
             Map.of());
 
         assertEquals(2, filters.size());
+    }
+
+    @Test
+    void shouldBuildNoTimeFilterWhenIgnoreTimeRangeUnderToday() {
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "TODAY"), Map.of("ignoreTimeRange", true));
+
+        assertTrue(filters.isEmpty());
+    }
+
+    @Test
+    void shouldBuildNoTimeFilterWhenIgnoreTimeRangeUnder30D() {
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "30D"), Map.of("ignoreTimeRange", true));
+
+        assertTrue(filters.isEmpty());
+    }
+
+    @Test
+    void shouldBuildNoTimeFilterWhenIgnoreTimeRangeUnderAll() {
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of(), Map.of("ignoreTimeRange", true));
+
+        assertTrue(filters.isEmpty());
+    }
+
+    @Test
+    void shouldIgnoreExplicitDatesWhenIgnoreTimeRangeIsSet() {
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("startDate", "2026-01-01", "endDate", "2026-03-31"),
+            Map.of("ignoreTimeRange", true));
+
+        assertTrue(filters.isEmpty());
+    }
+
+    @Test
+    void shouldUseFixedTimeRangeRegardlessOfPageRange() {
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "30D"), Map.of("fixedTimeRange", "7D"));
+
+        assertEquals(1, filters.size());
+        Instant expected = Instant.now().minus(7, ChronoUnit.DAYS);
+        Instant actual = Instant.parse((String) filters.get(0).value());
+        assertTrue(Math.abs(actual.getEpochSecond() - expected.getEpochSecond()) < 5);
+    }
+
+    @Test
+    void shouldUseFixedTimeRangeWhenPageRangeIsAll() {
+        List<FilterCondition> filters = service.buildTimeFilters(Map.of(), Map.of("fixedTimeRange", "7D"));
+
+        assertEquals(1, filters.size());
+    }
+
+    @Test
+    void shouldPreferIgnoreTimeRangeOverFixedTimeRange() {
+        // ignoreTimeRange > fixedTimeRange: both set, no filter should be built.
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "30D"),
+            Map.of("ignoreTimeRange", true, "fixedTimeRange", "7D"));
+
+        assertTrue(filters.isEmpty());
+    }
+
+    @Test
+    void shouldPreferRuntimeTimeRangeOverConfigTimeRange() {
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "7D"), Map.of("timeRange", "1Y"));
+
+        assertEquals(1, filters.size());
+        Instant expected = Instant.now().minus(7, ChronoUnit.DAYS);
+        Instant actual = Instant.parse((String) filters.get(0).value());
+        assertTrue(Math.abs(actual.getEpochSecond() - expected.getEpochSecond()) < 5);
+    }
+
+    @Test
+    void shouldFallBackToConfigTimeRangeWhenNoRuntimeTimeRange() {
+        List<FilterCondition> filters = service.buildTimeFilters(Map.of(), Map.of("timeRange", "1Y"));
+
+        assertEquals(1, filters.size());
+        Instant expected = Instant.now().minus(365, ChronoUnit.DAYS);
+        Instant actual = Instant.parse((String) filters.get(0).value());
+        assertTrue(Math.abs(actual.getEpochSecond() - expected.getEpochSecond()) < 5);
     }
 
     // =========================================================================

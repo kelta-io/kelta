@@ -23,6 +23,7 @@ import { ChartWidget } from './widgets/ChartWidget'
 import { RecordsWidget } from './widgets/RecordsWidget'
 
 const TIME_RANGES: DashboardTimeRange[] = ['ALL', 'TODAY', '7D', '30D', '90D', '1Y']
+const FIXED_TIME_RANGES: DashboardTimeRange[] = ['TODAY', '7D', '30D', '90D', '1Y']
 
 /**
  * End-user dashboard viewer: CSS-grid layout from dashboard-components rows joined with
@@ -59,6 +60,19 @@ export function DashboardViewPage() {
       '90D': t('analytics.range90d', 'Last 90 days'),
       '1Y': t('analytics.range1y', 'Last year'),
     })[r]
+
+  /** Chip label for a widget that opts out of the page's selected time range (precedence:
+   * config.ignoreTimeRange > config.fixedTimeRange). null for widgets that follow the page range. */
+  const widgetTimeScopeLabel = (component: DashboardComponentRow): string | null => {
+    if (component.config.ignoreTimeRange === true) {
+      return timeRangeLabel('ALL')
+    }
+    const fixed = component.config.fixedTimeRange
+    if (typeof fixed === 'string' && FIXED_TIME_RANGES.includes(fixed as DashboardTimeRange)) {
+      return timeRangeLabel(fixed as DashboardTimeRange)
+    }
+    return null
+  }
 
   const renderWidgetBody = (
     component: DashboardComponentRow,
@@ -184,6 +198,7 @@ export function DashboardViewPage() {
             >
               <WidgetFrame
                 title={component.title}
+                timeScopeLabel={widgetTimeScopeLabel(component)}
                 isLoading={isLoading}
                 error={data?.widgets[component.id]?.error}
               >

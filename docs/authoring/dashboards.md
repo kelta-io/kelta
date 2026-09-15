@@ -51,6 +51,27 @@ Time-range filters additionally accept the literals `TODAY`, `7D` /
 `LAST_7_DAYS`, `30D` / `LAST_30_DAYS`, `90D` / `LAST_90_DAYS`, and `1Y` /
 `LAST_YEAR`.
 
+## Per-widget time-range override
+
+The dashboard's selected time range (the viewer's `TODAY`/`7D`/`30D`/`90D`/
+`1Y`/`ALL` picker) applies to every widget by default — but a "state right
+now" metric (e.g. tasks currently in progress, pending approvals) is a
+count, not an event stream, and silently loses rows under a narrow window.
+Two `config` keys opt a widget out, in this precedence order:
+
+1. `config.ignoreTimeRange: true` — no time filter is built at all, for
+   any page range (including explicit `startDate`/`endDate`). The widget
+   always reflects the full data set.
+2. `config.fixedTimeRange` — one of `TODAY`, `7D`, `30D`, `90D`, `1Y`;
+   filters on that fixed window regardless of the page's selected range.
+
+Below that: the page's selected range (runtime `timeRange`) wins if set,
+else `config.timeRange` is the widget's own default. A widget with neither
+key behaves exactly as before. The end-user viewer (`DashboardViewPage`)
+renders a small "All time" / fixed-range chip on the widget frame of any
+component that opts out, so the reader knows the page range doesn't apply
+to it.
+
 ## `reportId`
 
 `dashboard-components.reportId` links a widget to a saved report; the
