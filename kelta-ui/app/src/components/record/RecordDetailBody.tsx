@@ -30,6 +30,8 @@ export interface RecordDetailBodyProps {
   tenantSlug?: string
   /** Reference/lookup display map (id → label) for reference fields. */
   lookupDisplayMap?: Record<string, Record<string, string>>
+  /** Field name → raw value→`{label, color}` for picklist/multi_picklist fields. */
+  picklistDisplayMaps?: Record<string, Map<string, { label: string; color?: string }>>
   /** Prefix for persisting per-section collapse state. */
   persistKeyPrefix?: string
   /** Opt-in in-place editing (requires `onFieldCommit`). */
@@ -52,6 +54,7 @@ export function RecordDetailBody({
   record,
   tenantSlug,
   lookupDisplayMap,
+  picklistDisplayMaps,
   persistKeyPrefix,
   editable,
   onFieldCommit,
@@ -66,6 +69,7 @@ export function RecordDetailBody({
         record={record}
         tenantSlug={tenantSlug}
         lookupDisplayMap={lookupDisplayMap}
+        picklistDisplayMaps={picklistDisplayMaps}
         persistKeyPrefix={persistKeyPrefix}
         editable={editable}
         onFieldCommit={onFieldCommit}

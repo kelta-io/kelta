@@ -89,6 +89,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useApi } from '@/context/ApiContext'
 import { usePageLayout } from '@/hooks/usePageLayout'
 import { useRecordContext } from '@/hooks/useRecordContext'
+import { usePicklistDisplayMaps } from '@/hooks/usePicklistOptions'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { QuickActionExecutionContext } from '@/types/quickActions'
 
@@ -323,6 +324,9 @@ export function ObjectDetailPage(): React.ReactElement {
     () => fields.filter((f) => REFERENCE_FIELD_TYPES.has(f.type) && f.referenceTarget),
     [fields]
   )
+
+  // Authored label/color for picklist/multi_picklist fields (badges in the detail body).
+  const { displayMaps: picklistDisplayMaps } = usePicklistDisplayMaps(fields)
 
   // Build unified include param combining:
   // 1. Forward includes — reference fields on this collection (e.g., customers, discount_codes)
@@ -891,6 +895,7 @@ export function ObjectDetailPage(): React.ReactElement {
               record={record}
               tenantSlug={tenantSlug}
               lookupDisplayMap={lookupDisplayMap}
+              picklistDisplayMaps={picklistDisplayMaps}
               persistKeyPrefix={collectionName}
               editable={permissions.canEdit}
               onFieldCommit={handleFieldCommit}
@@ -925,6 +930,7 @@ export function ObjectDetailPage(): React.ReactElement {
                                     tenantSlug={tenantSlug}
                                     targetCollection={field.referenceTarget}
                                     displayLabel={displayLabel}
+                                    picklistDisplayMap={picklistDisplayMaps[field.name]}
                                     truncate
                                   />
                                 </dd>
@@ -956,6 +962,7 @@ export function ObjectDetailPage(): React.ReactElement {
                           tenantSlug={tenantSlug}
                           targetCollection={field.referenceTarget}
                           displayLabel={displayLabel}
+                          picklistDisplayMap={picklistDisplayMaps[field.name]}
                           truncate={false}
                         />
                       )}
