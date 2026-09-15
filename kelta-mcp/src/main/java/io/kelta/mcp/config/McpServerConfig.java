@@ -107,11 +107,20 @@ public class McpServerConfig {
             Typical build order for a new object: create_collection (optionally with an \
             inline initial field set) -> add_field (repeat per additional field) -> \
             create_validation_rule / create_unique_constraint as needed -> for picklist \
-            fields, create_picklist + add_picklist_value first, then reference it from \
-            add_field via picklistSourceId -> apply_layout / create_listview for the admin \
-            UI -> create_flow for automation. delete_ counterparts exist for every create_ \
-            tool; update_ counterparts exist for collection, flow, layout, listview, and \
+            fields, apply_picklist first, then reference it from add_field via \
+            picklistSourceId -> apply_layout / apply_listview for the admin UI -> \
+            create_flow for automation. delete_ counterparts exist for every create_ tool; \
+            update_ counterparts exist for collection, flow, layout, listview, and \
             validation_rule.
+
+            Idempotent apply: apply_layout, apply_listview and apply_picklist are \
+            create-or-update, keyed on a natural key (collection+name for layouts/list \
+            views, name for picklists) rather than an id — re-running the same setup \
+            script is safe. Each reports {"action": "created"|"updated"|"unchanged", \
+            "id": ..., "changed": [...] } (apply_picklist nests one such result per \
+            value plus "pruned" when prune:true deactivated extras); prefer these over \
+            create_listview/create_picklist/add_picklist_value for anything you expect to \
+            re-apply. The one-shot create_/add_ tools remain for one-off scripting.
 
             Layouts: apply_layout takes the whole layout structure (sections, field \
             placements, related lists) in one idempotent call — reapplying the same body is \
@@ -132,11 +141,11 @@ public class McpServerConfig {
             get_collection_schema — use these to look up ids/names before a create_/update_ \
             call rather than guessing.
 
-            List views publish a renderer, not just columns: create_listview/update_listview \
-            take viewType (TABLE | KANBAN | CALENDAR | GALLERY) plus typeConfig, e.g. \
-            {"kanban": {"laneField": "status", "cardFields": ["title"]}}. Combine with \
-            visibility PUBLIC to hand a board to every user of the collection. Read \
-            kelta://docs/list-views first.
+            List views publish a renderer, not just columns: create_listview/update_listview/ \
+            apply_listview take viewType (TABLE | KANBAN | CALENDAR | GALLERY) plus \
+            typeConfig, e.g. {"kanban": {"laneField": "status", "cardFields": ["title"]}}. \
+            Combine with visibility PUBLIC to hand a board to every user of the collection. \
+            Read kelta://docs/list-views first.
 
             Bringing in external data: import_api_spec + materialize_api_collection wire up \
             an API-backed collection from an OpenAPI spec.
@@ -144,9 +153,14 @@ public class McpServerConfig {
             Every mutating tool declares destructiveHint / idempotentHint in its annotations \
             — check them before retrying a failed call or assuming a create_ is safe to repeat.
 
+            Errors: a failed tool call's structuredContent carries {"status": <http status>, \
+            "errors": [...]} — the gateway's own JSON:API error array verbatim (code, \
+            detail, source.pointer) — read that instead of parsing the text message when you \
+            need to branch on the failure.
+
             Resources: kelta://docs/<topic> (topics: jsonapi, page-layouts, list-views, \
             dashboards, ui-pages, ui-menus) are reference docs for authoring layouts, list \
-            views, dashboards, and page config directly through apply_layout/create_listview/ \
+            views, dashboards, and page config directly through apply_layout/apply_listview/ \
             record attributes — read one before hand-writing a config JSON blob.""";
 
     @Bean(name = "userTransportProvider")

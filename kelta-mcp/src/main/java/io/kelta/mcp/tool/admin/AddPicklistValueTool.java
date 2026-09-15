@@ -34,6 +34,7 @@ public class AddPicklistValueTool implements AdminTool {
                         + "GET /api/global-picklists?filter[name][EQ]=... before the value is created."));
         properties.put("value", Schemas.string("Stored value (e.g. \"OPEN\")."));
         properties.put("label", Schemas.string("Display label (e.g. \"Open\")."));
+        properties.put("color", Schemas.string("Hex color used when the value is rendered as a badge, e.g. \"#22C55E\"."));
         properties.put("sortOrder", Schemas.integer("Display order. Defaults to 0 if omitted.", null, null));
         properties.put("isActive", Schemas.bool("Whether the value is active. Defaults to true.", true));
         properties.put("isDefault", Schemas.bool("Whether the value is the picklist default. Defaults to false.", false));
@@ -91,6 +92,7 @@ public class AddPicklistValueTool implements AdminTool {
                         attrs.put("sortOrder", args.get("sortOrder") instanceof Number n ? n.intValue() : 0);
                         attrs.put("isActive", !(args.get("isActive") instanceof Boolean b) || b);
                         attrs.put("isDefault", args.get("isDefault") instanceof Boolean b && b);
+                        if (args.get("color") instanceof String c && !c.isBlank()) attrs.put("color", c);
 
                         Map<String, Object> body = Map.of("data", Map.of(
                                 "type", "picklist-values",

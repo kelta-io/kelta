@@ -713,6 +713,20 @@ resolves those server-side. `apply_layout` accepts either `layoutId` (PUT by id)
 `collectionName` + `name` (PUT by name, create-on-missing); `create_layout` is deprecated in favor
 of it.
 
+**Generalized to `apply_listview`/`apply_picklist` (KLT-218).** Unlike `apply_layout` (a
+dedicated worker tree endpoint), these two ride the ordinary `list-views`/`global-picklists`/
+`picklist-values` REST resources through a new generic helper,
+`AdminLookups.upsert(collection, naturalKey, attributes)` (`kelta-mcp/.../tool/admin/`):
+`GET` filtered on the natural key (`(collectionId, name)` for a list view; `name` for a
+picklist; `(picklistSourceId, value)` per picklist value) decides create vs. update, and a
+fresh single-resource `GET` is diffed against the desired attributes to decide update vs.
+no-op, reporting `{action: created|updated|unchanged, id, changed:[...]}`. Every later
+`apply_*` admin tool in this family (menu, dashboard, page) is expected to build on the same
+helper rather than reimplement the create-vs-update decision. `apply_picklist` derives each
+value's `sortOrder` from its position in the input array and, with `prune:true`, deactivates
+(`isActive=false`, never a hard delete) any existing active value whose `value` is absent from
+that array.
+
 **Offline replica path (end-user only).** When `OfflineProvider` is mounted — it wraps the `EndUserShell` subtree — the shared data hooks route through a tenant-scoped IndexedDB replica: online reads write through to the store and offline reads serve it (`useCollectionRecords`/`useRecord`/`usePageDataSources`), and offline writes queue to an outbox (`useRecordMutation` → `engine.queue`) that flushes on reconnect (`SyncEngine.sync`). Admin pages render outside the provider (`useOffline()` → `undefined`), so their reads/writes stay online-only and unchanged. See `conventions.md` → offline hooks.
 
 ### List-view renderer contract — shared row publishes `viewType`/`typeConfig`
@@ -962,6 +976,16 @@ construction sites:
 
 `source.pointer` (RFC 6901, e.g. `/data/attributes/name`) carries field-level
 context; `source.parameter` is used for query/path-parameter errors.
+
+**MCP tool face (KLT-218)** — `kelta-mcp`'s `McpErrorMapper.toResult(...)` is the one place a
+gateway error crosses into the MCP protocol: a non-2xx response still gets the existing
+human-readable `TextContent`, plus `structuredContent = {status, errors:[...]}` where `errors`
+is this same JSON:API array parsed and re-emitted verbatim (not reshaped) — so `errors[0].code`
+/ `errors[0].source.pointer` survive the hop unchanged and a calling agent can branch on them
+without parsing prose. `klt_…` PAT redaction runs on the raw body before it's parsed into
+`structuredContent`, so both forms are scrubbed identically. Every admin/user MCP tool that
+routes its response through `McpErrorMapper.toResult` (i.e. all of them) picked this up with no
+per-tool change.
 
 **Orphan-column filtering on record reads/writes** —
 `SchemaMigrationEngine.createDeprecateColumnMigration` only marks a deleted

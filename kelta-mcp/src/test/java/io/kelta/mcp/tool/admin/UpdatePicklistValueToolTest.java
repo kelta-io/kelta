@@ -82,4 +82,20 @@ class UpdatePicklistValueToolTest {
                         equalTo("Open (updated)")))
                 .withRequestBody(matchingJsonPath("$.data.attributes.sortOrder", equalTo("3"))));
     }
+
+    @Test
+    void forwardsColorWhenProvided() {
+        wm.stubFor(patch(urlEqualTo("/api/picklist-values/" + VALUE_UUID))
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":{}}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("update_picklist_value", Map.of(
+                        "id", VALUE_UUID,
+                        "color", "#22C55E"), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(WireMock.patchRequestedFor(
+                urlEqualTo("/api/picklist-values/" + VALUE_UUID))
+                .withRequestBody(matchingJsonPath("$.data.attributes.color", equalTo("#22C55E"))));
+    }
 }

@@ -6,8 +6,11 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Gateway-backed name/id resolution shared by the admin tools.
@@ -110,5 +113,151 @@ final class AdminLookups {
             return out;
         }
         return out;
+    }
+
+    /** Outcome of {@link #upsert}: what happened and, for an update, which keys changed. */
+    record UpsertResult(String action, String id, List<String> changed) {
+        static UpsertResult created(String id) {
+            return new UpsertResult("created", id, List.of());
+        }
+
+        static UpsertResult unchanged(String id) {
+            return new UpsertResult("unchanged", id, List.of());
+        }
+
+        static UpsertResult updated(String id, List<String> changed) {
+            return new UpsertResult("updated", id, changed);
+        }
+    }
+
+    /**
+     * Thrown when a gateway call made while resolving an {@link #upsert} returns a
+     * non-2xx response — the caller catches this and maps {@link #response} via
+     * {@code McpErrorMapper.toResult(...)}, the same as any other tool-level gateway
+     * failure.
+     */
+    static final class GatewayFailure extends RuntimeException {
+        final GatewayHttpClient.Response response;
+
+        GatewayFailure(GatewayHttpClient.Response response) {
+            super("Gateway call failed with status "
+                    + (response.status() == null ? "?" : response.status().value()));
+            this.response = response;
+        }
+    }
+
+    /**
+     * Create-or-update by natural key: looks up an existing record filtered on
+     * {@code naturalKey} (each entry ANDed as {@code filter[key][eq]=value}), then:
+     * <ul>
+     *   <li>no match — POSTs {@code attributes} (merged with {@code naturalKey}) and
+     *       returns {@code created}.</li>
+     *   <li>a match — re-reads that record by id (a fresh single-resource GET, not the
+     *       filtered list result) and diffs {@code attributes} against it, folding
+     *       relationship ids into the comparison so a lookup/master-detail field (only
+     *       present in {@code relationships.<field>.data.id} in principle) compares the
+     *       same as a plain attribute. No differing key — {@code unchanged}. Otherwise
+     *       PATCHes only the differing keys and returns {@code updated} with the list of
+     *       changed keys.</li>
+     * </ul>
+     *
+     * <p>Only keys present in {@code attributes} are ever compared or written — a key
+     * the caller didn't supply is left at whatever the record already has (or the
+     * collection's own default, on create).
+     */
+    UpsertResult upsert(String collection, Map<String, Object> naturalKey, Map<String, Object> attributes) {
+        String existingId = findExisting(collection, naturalKey);
+        if (existingId == null) {
+            Map<String, Object> createAttrs = new LinkedHashMap<>(naturalKey);
+            createAttrs.putAll(attributes);
+            return UpsertResult.created(create(collection, createAttrs));
+        }
+
+        Map<String, Object> current = readAttributes(collection, existingId);
+        List<String> changed = diff(current, attributes);
+        if (changed.isEmpty()) {
+            return UpsertResult.unchanged(existingId);
+        }
+        Map<String, Object> patchAttrs = new LinkedHashMap<>();
+        for (String key : changed) {
+            patchAttrs.put(key, attributes.get(key));
+        }
+        patch(collection, existingId, patchAttrs);
+        return UpsertResult.updated(existingId, changed);
+    }
+
+    private String findExisting(String collection, Map<String, Object> naturalKey) {
+        StringBuilder path = new StringBuilder("/api/").append(collection).append('?');
+        for (Map.Entry<String, Object> entry : naturalKey.entrySet()) {
+            path.append("filter[").append(entry.getKey()).append("][eq]=")
+                    .append(URLEncoder.encode(String.valueOf(entry.getValue()), StandardCharsets.UTF_8))
+                    .append('&');
+        }
+        path.append("page[size]=1");
+        GatewayHttpClient.Response response = gateway.get(path.toString());
+        if (!response.isSuccess()) {
+            throw new GatewayFailure(response);
+        }
+        return firstResourceId(response.body());
+    }
+
+    private Map<String, Object> readAttributes(String collection, String id) {
+        String path = "/api/" + collection + "/" + URLEncoder.encode(id, StandardCharsets.UTF_8);
+        GatewayHttpClient.Response response = gateway.get(path);
+        if (!response.isSuccess()) {
+            throw new GatewayFailure(response);
+        }
+        return foldedAttributes(response.body());
+    }
+
+    /** {@code attributes}, overlaid with each relationship's {@code data.id} keyed by field name. */
+    private static Map<String, Object> foldedAttributes(String json) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        JsonNode data = dataNode(json);
+        if (data == null) {
+            return out;
+        }
+        for (Map.Entry<String, JsonNode> entry : data.path("attributes").properties()) {
+            out.put(entry.getKey(), MAPPER.convertValue(entry.getValue(), Object.class));
+        }
+        for (Map.Entry<String, JsonNode> entry : data.path("relationships").properties()) {
+            JsonNode id = entry.getValue().path("data").path("id");
+            if (!id.isMissingNode() && !id.isNull()) {
+                out.put(entry.getKey(), id.asString());
+            }
+        }
+        return out;
+    }
+
+    /** Keys of {@code desired} whose value differs from {@code current}, in {@code desired}'s order. */
+    private static List<String> diff(Map<String, Object> current, Map<String, Object> desired) {
+        List<String> changed = new ArrayList<>();
+        for (Map.Entry<String, Object> entry : desired.entrySet()) {
+            JsonNode currentNode = MAPPER.valueToTree(current.get(entry.getKey()));
+            JsonNode desiredNode = MAPPER.valueToTree(entry.getValue());
+            if (!Objects.equals(currentNode, desiredNode)) {
+                changed.add(entry.getKey());
+            }
+        }
+        return changed;
+    }
+
+    private String create(String collection, Map<String, Object> attributes) {
+        Map<String, Object> body = Map.of("data", Map.of("type", collection, "attributes", attributes));
+        GatewayHttpClient.Response response = gateway.post("/api/" + collection, body);
+        if (!response.isSuccess()) {
+            throw new GatewayFailure(response);
+        }
+        return firstResourceId(response.body());
+    }
+
+    private void patch(String collection, String id, Map<String, Object> attributes) {
+        Map<String, Object> body = Map.of("data", Map.of(
+                "type", collection, "id", id, "attributes", attributes));
+        String path = "/api/" + collection + "/" + URLEncoder.encode(id, StandardCharsets.UTF_8);
+        GatewayHttpClient.Response response = gateway.patch(path, body);
+        if (!response.isSuccess()) {
+            throw new GatewayFailure(response);
+        }
     }
 }
