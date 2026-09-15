@@ -500,12 +500,21 @@ backfilled from `collection.tenant_id`) rather than a router-level join, keeping
 `tenant_isolation` RLS policy, and the same router special-case (`injectTenantFilter`)
 that unions the caller's tenant with `SYSTEM_TENANT_ID` on list reads so a system
 collection's own fields stay visible everywhere. New field rows get `tenant_id` from the
-caller's `X-Tenant-ID` (`DynamicCollectionRouter.injectTenantId`); the two raw-SQL seeders
-that write `field` rows outside that path — `SystemCollectionSeeder` (stamps
-`SYSTEM_TENANT_ID` for every system collection's built-in fields) and
-`MigrationFieldRepository` (stamps `TenantContext.get()` for the destructive
-schema-migration path) — were updated to populate the column explicitly, since a `NOT
-NULL` column with no default silently breaks any INSERT that doesn't supply it.
+caller's `X-Tenant-ID` (`DynamicCollectionRouter.injectTenantId`); every writer of `field`
+rows *outside* that path had to stamp the column itself, since a `NOT NULL` column with no
+default breaks any INSERT that doesn't supply it: the two raw-SQL seeders —
+`SystemCollectionSeeder` (`SYSTEM_TENANT_ID` for every system collection's built-in fields)
+and `MigrationFieldRepository` (`TenantContext.get()` for the destructive schema-migration
+path) — and the two direct `queryEngine.create(fieldsDef, …)` callers,
+`ExternalEntityMaterializer` and `ModuleCollectionProvisioner`, which already did this for
+their `collections` row (the storage adapter writes `tenant_id` only when the record map
+carries `tenantId`). `PackageImportService` needed nothing: it stamps `tenantId` for any
+`tenantScoped()` definition. **Get-by-id is guarded router-side too**
+(`DynamicCollectionRouter.visibleToTenant`, the counterpart of `injectTenantFilter`): a
+tenant-scoped system record owned by another tenant answers 404 even where RLS is a no-op
+— superuser DB roles, i.e. local `docker-compose` and the test harness (`testing.md`) — so
+the harness scenario `FieldTenantScopingScenarioTest` proves the boundary without a
+non-superuser probe role, and a misconfigured deployment fails closed rather than open.
 
 **FIXED (fix/cerbos-record-check-shortcircuit) — per-record Cerbos batch checks ran (with
 full record payloads) even for collections with no record-level rules; a read burst could

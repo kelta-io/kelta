@@ -63,7 +63,8 @@ class FieldTenantScopingScenarioTest extends ScenarioBase {
                 .doesNotContain(bField.id());
         assertThat(dataAsA)
                 .as("tenant A's field list must not contain tenant B's collectionId")
-                .extracting(row -> ((Map<String, Object>) row.get("attributes")).get("collectionId"))
+                .extracting(FieldTenantScopingScenarioTest::collectionIdOf)
+                .isNotEmpty()
                 .doesNotContain(bField.collectionId());
 
         // ---- (2) as tenant A, GET /api/fields/{B-field-id} -> 404 (no existence leak)
@@ -94,8 +95,25 @@ class FieldTenantScopingScenarioTest extends ScenarioBase {
         List<Map<String, Object>> filteredData = (List<Map<String, Object>>) filtered.get("data");
         assertThat(filteredData).as("collectionId filter returns at least the seeded field").isNotEmpty();
         assertThat(filteredData)
-                .extracting(row -> ((Map<String, Object>) row.get("attributes")).get("collectionId"))
+                .extracting(FieldTenantScopingScenarioTest::collectionIdOf)
                 .allMatch(bField.collectionId()::equals);
+    }
+
+    /**
+     * {@code collectionId} is a MASTER_DETAIL field, so the JSON:API resource carries it under
+     * {@code relationships.collectionId.data.id}, not {@code attributes}.
+     */
+    @SuppressWarnings("unchecked")
+    private static Object collectionIdOf(Map<String, Object> row) {
+        Map<String, Object> relationships = (Map<String, Object>) row.get("relationships");
+        if (relationships == null) {
+            return null;
+        }
+        Map<String, Object> rel = (Map<String, Object>) relationships.get("collectionId");
+        if (rel == null || rel.get("data") == null) {
+            return null;
+        }
+        return ((Map<String, Object>) rel.get("data")).get("id");
     }
 
     private record CollectionField(String id, String collectionId) {}

@@ -565,9 +565,11 @@ jobs. RLS then scopes every query automatically.
 - **Tenant scoping for tenant-scoped system collections**: `injectTenantFilter` adds a
   `tenantId = <caller>` predicate for list reads; `fields` and `collections` are the two
   exceptions that get `tenantId IN (<caller>, SYSTEM_TENANT_ID)` instead, so a system
-  collection's own rows (and its built-in fields) stay visible to every tenant. RLS enforces
-  the real boundary underneath (strict per-tenant `tenant_isolation` policy — the IN-list is
-  router-side query shaping, not a security control on its own). `fields` gained a
+  collection's own rows (and its built-in fields) stay visible to every tenant. Get-by-id
+  applies the same rule after the fetch (`visibleToTenant`: another tenant's row → 404, never
+  a 403 existence oracle). RLS enforces the real boundary underneath (strict per-tenant
+  `tenant_isolation` policy — the router-side predicate/check makes the answer identical
+  where RLS is a no-op, e.g. superuser DB roles in local dev). `fields` gained a
   denormalised `tenant_id` column for this (V198, KLT-206; see concerns.md) — it was
   previously `.tenantScoped(false)` with no `tenant_id` column at all, so `GET /api/fields`
   leaked every tenant's field metadata.

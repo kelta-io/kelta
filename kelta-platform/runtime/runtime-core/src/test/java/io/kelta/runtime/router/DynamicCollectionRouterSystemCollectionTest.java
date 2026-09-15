@@ -235,6 +235,87 @@ class DynamicCollectionRouterSystemCollectionTest {
         }
     }
 
+    // ==================== Get-by-id Tenant Visibility Tests ====================
+
+    @Nested
+    @DisplayName("Get-by-id - Tenant Visibility")
+    class GetByIdTenantVisibilityTests {
+
+        private static final String FIELD_ID = "0f9a3b1e-6c2d-4c9e-9d2a-1b2c3d4e5f60";
+
+        private Map<String, Object> fieldRow(String tenantId) {
+            Map<String, Object> row = new HashMap<>();
+            row.put("id", FIELD_ID);
+            row.put("name", "secret_margin");
+            row.put("collectionId", "c-1");
+            row.put("tenantId", tenantId);
+            return row;
+        }
+
+        @Test
+        @DisplayName("Should 404 another tenant's 'fields' row even when the engine returns it (RLS no-op)")
+        void get_hidesOtherTenantsRow() throws Exception {
+            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            when(registry.get("fields")).thenReturn(def);
+            when(queryEngine.getById(def, FIELD_ID)).thenReturn(Optional.of(fieldRow("tenant-other")));
+
+            mockMvc.perform(get("/api/fields/" + FIELD_ID)
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("Should serve the caller's own 'fields' row")
+        void get_servesOwnRow() throws Exception {
+            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            when(registry.get("fields")).thenReturn(def);
+            when(queryEngine.getById(def, FIELD_ID)).thenReturn(Optional.of(fieldRow("tenant-123")));
+
+            mockMvc.perform(get("/api/fields/" + FIELD_ID)
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.id").value(FIELD_ID));
+        }
+
+        @Test
+        @DisplayName("Should serve SYSTEM_TENANT_ID 'fields' rows to every tenant, like 'collections'")
+        void get_servesSystemRow() throws Exception {
+            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            when(registry.get("fields")).thenReturn(def);
+            when(queryEngine.getById(def, FIELD_ID)).thenReturn(Optional.of(
+                    fieldRow(io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID)));
+
+            mockMvc.perform(get("/api/fields/" + FIELD_ID)
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("Should not extend SYSTEM_TENANT_ID visibility to other tenant-scoped system collections")
+        void get_systemRowNotSharedForOtherCollections() throws Exception {
+            CollectionDefinition def = buildTenantScopedSystemCollection();
+            when(registry.get("workflow-rules")).thenReturn(def);
+            when(queryEngine.getById(def, FIELD_ID)).thenReturn(Optional.of(
+                    fieldRow(io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID)));
+
+            mockMvc.perform(get("/api/workflow-rules/" + FIELD_ID)
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("Should not apply tenant visibility to non-system collections")
+        void get_nonSystemCollectionUnaffected() throws Exception {
+            CollectionDefinition def = buildNonSystemCollection();
+            when(registry.get("products")).thenReturn(def);
+            when(queryEngine.getById(def, FIELD_ID)).thenReturn(Optional.of(fieldRow("tenant-other")));
+
+            mockMvc.perform(get("/api/products/" + FIELD_ID)
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk());
+        }
+    }
+
     // ==================== Read-Only Rejection Tests ====================
 
     @Nested

@@ -270,7 +270,11 @@ public class DynamicCollectionRouter {
                 record = resolveByDisplayField(definition, id, request);
             }
 
-            if (record.isEmpty()) {
+            // Another tenant's row must read as absent, not as a 403 existence oracle. RLS
+            // is the real boundary; this mirrors injectTenantFilter for get-by-id so the
+            // answer is the same wherever RLS is a no-op (superuser DB roles: local
+            // docker-compose, the test harness).
+            if (record.isEmpty() || !visibleToTenant(record.get(), definition, request)) {
                 return ResponseEntity.notFound().build();
             }
 
@@ -913,13 +917,47 @@ public class DynamicCollectionRouter {
         // and system records so that system collections (and their fields) are visible
         // alongside custom ones.
         List<FilterCondition> filters = new ArrayList<>(queryRequest.filters());
-        if ("collections".equals(definition.name()) || "fields".equals(definition.name())) {
+        if (sharesSystemRows(definition)) {
             filters.add(new FilterCondition("tenantId", FilterOperator.IN,
                     List.of(tenantId, SystemCollectionDefinitions.SYSTEM_TENANT_ID)));
         } else {
             filters.add(new FilterCondition("tenantId", FilterOperator.EQ, tenantId));
         }
         return queryRequest.withFilters(filters);
+    }
+
+    /**
+     * Tenant-scoped system collections whose {@code SYSTEM_TENANT_ID} rows are visible to
+     * every tenant alongside its own: a system collection's definition and its built-in
+     * fields must be readable by the tenants that use it.
+     */
+    private static boolean sharesSystemRows(CollectionDefinition definition) {
+        return "collections".equals(definition.name()) || "fields".equals(definition.name());
+    }
+
+    /**
+     * Get-by-id counterpart of {@link #injectTenantFilter}: a tenant-scoped system record
+     * is visible only to its owning tenant (plus the platform's own rows for the collections
+     * in {@link #sharesSystemRows}). Non-tenant-scoped definitions, requests without a
+     * tenant header and rows without a {@code tenantId} pass through, matching the list path.
+     */
+    private boolean visibleToTenant(Map<String, Object> record, CollectionDefinition definition,
+                                    HttpServletRequest request) {
+        if (!definition.systemCollection() || !definition.tenantScoped()) {
+            return true;
+        }
+        String tenantId = request.getHeader("X-Tenant-ID");
+        if (tenantId == null || tenantId.isBlank()) {
+            return true;
+        }
+        Object owner = record.get("tenantId");
+        if (owner == null) {
+            return true;
+        }
+        String ownerId = String.valueOf(owner);
+        return tenantId.equals(ownerId)
+                || (sharesSystemRows(definition)
+                        && SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(ownerId));
     }
 
     /**

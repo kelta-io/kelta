@@ -141,6 +141,8 @@ public class ModuleCollectionProvisioner {
         int order = 0;
         for (ModuleManifest.CollectionManifest.FieldManifest field : collection.fields()) {
             Map<String, Object> fieldData = new LinkedHashMap<>();
+            // fields is tenant-scoped too (KLT-206): same direct-create rule as above.
+            fieldData.put("tenantId", tenantId);
             fieldData.put("collectionId", collectionId);
             fieldData.put("name", field.name());
             fieldData.put("displayName",
