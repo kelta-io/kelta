@@ -127,6 +127,12 @@ public class McpServerConfig {
             get_collection_schema — use these to look up ids/names before a create_/update_ \
             call rather than guessing.
 
+            List views publish a renderer, not just columns: create_listview/update_listview \
+            take viewType (TABLE | KANBAN | CALENDAR | GALLERY) plus typeConfig, e.g. \
+            {"kanban": {"laneField": "status", "cardFields": ["title"]}}. Combine with \
+            visibility PUBLIC to hand a board to every user of the collection. Read \
+            kelta://docs/list-views first.
+
             Bringing in external data: import_api_spec + materialize_api_collection wire up \
             an API-backed collection from an OpenAPI spec.
 

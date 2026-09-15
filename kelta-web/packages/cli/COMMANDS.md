@@ -273,6 +273,26 @@ Create a saved list view
 - `--filter <spec>` — Filter as field[.op]=value (repeatable) (repeatable)
 - `--sort <field>` — Sort field, -prefix for descending
 - `--default` — Mark as the default list view
+- `--visibility <vis>` — PRIVATE (default), PUBLIC or GROUP
+- `--view-type <type>` — Renderer: TABLE (default), KANBAN, CALENDAR or GALLERY
+- `--lane-field <field>` — Kanban lane field (a picklist field)
+- `--card-fields <list>` — Kanban card fields, comma-separated
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
+### `kelta list-views update <listViewId>`
+
+Update a saved list view by id
+
+- `--name <name>` — List view name
+- `--columns <list>` — Displayed field names, comma-separated
+- `--filter <spec>` — Filter as field[.op]=value (repeatable); replaces all filters (repeatable)
+- `--sort <field>` — Sort field, -prefix for descending
+- `--default <bool>` — true|false
+- `--visibility <vis>` — PRIVATE, PUBLIC or GROUP
+- `--view-type <type>` — Renderer: TABLE, KANBAN, CALENDAR or GALLERY
+- `--lane-field <field>` — Kanban lane field (a picklist field)
+- `--card-fields <list>` — Kanban card fields, comma-separated
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
 ## flows
 

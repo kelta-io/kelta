@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
 
+import java.util.List;
 import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
@@ -98,6 +99,58 @@ class CreateListViewToolTest {
                 .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].field", equalTo("status")))
                 .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].operator", equalTo("EQ")))
                 .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].value", equalTo("OPEN"))));
+    }
+
+    /**
+     * The published-board case (V196): the CLI's
+     * `--view-type KANBAN --lane-field status --card-fields title` must land the
+     * same row as this call, so both write `viewType` + a `typeConfig.kanban`
+     * object — not a JSON string, which the end-user list would have to re-parse.
+     */
+    @Test
+    void postsViewTypeAndTypeConfigForAPublishedKanban() {
+        wm.stubFor(post(urlEqualTo("/api/list-views"))
+                .willReturn(aResponse().withStatus(201).withBody("{\"data\":{\"id\":\"lv1\"}}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("create_listview", Map.of(
+                        "collectionName", "projects",
+                        "name", "The board",
+                        "displayedFields", "title",
+                        "visibility", "PUBLIC",
+                        "viewType", "kanban",
+                        "typeConfig", Map.of("kanban", Map.of(
+                                "laneField", "status",
+                                "cardFields", List.of("title")))), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/list-views"))
+                // lowercase in, canonical uppercase out — the column's CHECK only
+                // accepts the uppercase form
+                .withRequestBody(matchingJsonPath("$.data.attributes.viewType", equalTo("KANBAN")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.visibility", equalTo("PUBLIC")))
+                .withRequestBody(matchingJsonPath(
+                        "$.data.attributes.typeConfig.kanban.laneField", equalTo("status")))
+                .withRequestBody(matchingJsonPath(
+                        "$.data.attributes.typeConfig.kanban.cardFields[0]", equalTo("title"))));
+    }
+
+    @Test
+    void omitsRendererAttributesWhenNotAsked() {
+        wm.stubFor(post(urlEqualTo("/api/list-views"))
+                .willReturn(aResponse().withStatus(201).withBody("{\"data\":{\"id\":\"lv1\"}}")));
+
+        tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("create_listview", Map.of(
+                        "collectionName", "projects",
+                        "name", "Plain",
+                        "displayedFields", "name"), null));
+
+        // Not sent at all rather than sent as TABLE: the column default owns that,
+        // and a create that says nothing about the renderer must keep saying nothing.
+        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/list-views"))
+                .withRequestBody(WireMock.notMatching("(?s).*\"viewType\".*"))
+                .withRequestBody(WireMock.notMatching("(?s).*\"typeConfig\".*")));
     }
 
     @Test

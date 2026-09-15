@@ -1129,6 +1129,13 @@ public final class SystemCollectionDefinitions {
             .addField(FieldDefinition.integer("rowLimit").withColumnName("row_limit")
                 .withDefault(50))
             .addField(FieldDefinition.json("chartConfig").withColumnName("chart_config"))
+            // Renderer for the shared view (V196). Mirrors the per-user SavedView
+            // fields so an admin can publish a board, not just a column set. The
+            // enum values are also a CHECK constraint on the column.
+            .addField(FieldDefinition.enumField("viewType",
+                    List.of("TABLE", "KANBAN", "CALENDAR", "GALLERY"))
+                .withColumnName("view_type").withDefault("TABLE").withNullable(false))
+            .addField(FieldDefinition.json("typeConfig").withColumnName("type_config"))
             .build();
     }
 

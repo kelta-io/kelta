@@ -167,6 +167,31 @@ as legacy behavior. List URLs carry `view=<id>` plus the standard
 `?filter/sort/pageSize`; the `sort` param uses the server's comma grammar (`a,-b`,
 multi-level — already supported end-to-end server-side).
 
+### Shared list views own their renderer; the toolbar switch is a per-user override
+
+A `list-views` row carries `viewType` (`TABLE`|`KANBAN`|`CALENDAR`|`GALLERY`, uppercase on
+the wire) and `typeConfig` (per-renderer settings keyed by lowercased view type), so the
+renderer is publishable metadata — not something each user re-picks. Rules when touching
+this path:
+
+- **Map shared rows through `mapSharedListView`** (`ObjectListPage/listViewMapping.ts`) —
+  never read `row.viewType` directly. It lowercases into `SavedViewType` and returns
+  `undefined` (⇒ table) for anything unrecognized, and `parseTypeConfig` drops a section
+  missing its required field (kanban `laneField`, calendar `dateField`). **An unknown
+  renderer or a malformed config must degrade to the table, never throw** — rows predate
+  V196 and a rollback can reintroduce them.
+- **Never write a user's renderer choice back to the shared row.** The toolbar switch on a
+  shared view persists through `useViewTypeOverrides` (a `user-ui-preferences` row,
+  `prefType: 'list-view-type'`, keyed by collection, holding shared-view id → override) —
+  i.e. through `usePreferenceValue`, per *Per-user UI preferences* above. Precedence is
+  personal override → published `viewType`/`typeConfig` → `table`; gate the first paint on
+  `isLoaded` so the published board does not flash in ahead of the override.
+- **A new renderer is four coordinated edits**: the `view_type` CHECK + the enum values in
+  `SystemCollectionDefinitions.listViews()`, `VIEW_TYPES`/`parseTypeConfig` in
+  `listViewMapping.ts`, the CLI `--view-type` vocabulary (`commands/layouts.ts`), and the
+  MCP `create_listview`/`update_listview` schema text. Keep the four in sync — they are the
+  same vocabulary, and the CLI/MCP paths are expected to produce an identical row.
+
 ## REST API: pagination
 
 Every paginated REST endpoint MUST use **JSON:API bracket syntax** — `page[number]` and `page[size]`. The flat forms `pageNumber` / `pageSize` are not honored and a request that sends them silently falls back to defaults.

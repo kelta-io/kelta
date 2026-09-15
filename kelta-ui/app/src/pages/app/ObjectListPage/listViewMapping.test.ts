@@ -52,6 +52,79 @@ describe('mapSharedListView', () => {
   })
 })
 
+describe('mapSharedListView renderer (V196)', () => {
+  const row = (extra: Record<string, unknown>) => ({ id: 'lv-1', name: 'Board', ...extra })
+
+  it('maps a published KANBAN view onto the SavedView renderer fields', () => {
+    const view = mapSharedListView(
+      row({
+        viewType: 'KANBAN',
+        typeConfig: { kanban: { laneField: 'status', cardFields: ['title'] } },
+      }),
+      'projects'
+    )
+    expect(view.viewType).toBe('kanban')
+    expect(view.typeConfig?.kanban).toEqual({ laneField: 'status', cardFields: ['title'] })
+  })
+
+  it('reads a typeConfig stored as a JSON string', () => {
+    const view = mapSharedListView(
+      row({ viewType: 'KANBAN', typeConfig: '{"kanban":{"laneField":"stage"}}' }),
+      'projects'
+    )
+    expect(view.typeConfig?.kanban).toEqual({ laneField: 'stage', cardFields: undefined })
+  })
+
+  // undefined is what the page reads as 'table' (applyView), so "falls back" means
+  // "returns undefined without throwing".
+  it.each([[null], [''], ['TIMELINE'], ['timeline'], [42], [{ type: 'KANBAN' }]])(
+    'falls back to the table renderer for viewType %p',
+    (viewType) => {
+      expect(mapSharedListView(row({ viewType }), 'projects').viewType).toBeUndefined()
+    }
+  )
+
+  it('accepts a viewType regardless of case or surrounding space', () => {
+    expect(mapSharedListView(row({ viewType: ' kanban ' }), 'p').viewType).toBe('kanban')
+    expect(mapSharedListView(row({ viewType: 'Gallery' }), 'p').viewType).toBe('gallery')
+  })
+
+  it('drops renderer settings that do not match the shape', () => {
+    const view = mapSharedListView(
+      row({
+        viewType: 'KANBAN',
+        typeConfig: {
+          kanban: { laneField: 42, cardFields: 'title' },
+          calendar: { dateField: '' },
+          gallery: { imageField: 'cover', cardFields: ['a', 7] },
+        },
+      }),
+      'projects'
+    )
+    // a kanban section without a usable laneField is dropped entirely — the page
+    // then resolves the lane field from the schema instead of half-applying one
+    expect(view.typeConfig?.kanban).toBeUndefined()
+    expect(view.typeConfig?.calendar).toBeUndefined()
+    expect(view.typeConfig?.gallery).toEqual({
+      imageField: 'cover',
+      titleField: undefined,
+      cardFields: ['a'],
+    })
+  })
+
+  it('leaves a pre-V196 row (no viewType/typeConfig) rendering as today', () => {
+    const view = mapSharedListView(row({ columns: ['a'] }), 'projects')
+    expect(view.viewType).toBeUndefined()
+    expect(view.typeConfig).toBeUndefined()
+  })
+
+  it('drops a typeConfig that is not an object', () => {
+    expect(mapSharedListView(row({ typeConfig: 'not json' }), 'p').typeConfig).toBeUndefined()
+    expect(mapSharedListView(row({ typeConfig: ['kanban'] }), 'p').typeConfig).toBeUndefined()
+    expect(mapSharedListView(row({ typeConfig: 7 }), 'p').typeConfig).toBeUndefined()
+  })
+})
+
 describe('orderFieldsByView', () => {
   const fields = [{ name: 'a' }, { name: 'b' }, { name: 'c' }]
 

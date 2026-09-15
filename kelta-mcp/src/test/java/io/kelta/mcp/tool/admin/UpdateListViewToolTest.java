@@ -98,6 +98,39 @@ class UpdateListViewToolTest {
     }
 
     @Test
+    void patchesViewTypeAndTypeConfig() {
+        wm.stubFor(patch(urlEqualTo("/api/list-views/" + LV_ID))
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":{\"id\":\"" + LV_ID + "\"}}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("update_listview", Map.of(
+                        "id", LV_ID,
+                        "viewType", "kanban",
+                        "typeConfig", Map.of("kanban", Map.of("laneField", "status"))), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(WireMock.patchRequestedFor(urlEqualTo("/api/list-views/" + LV_ID))
+                .withRequestBody(matchingJsonPath("$.data.attributes.viewType", equalTo("KANBAN")))
+                .withRequestBody(matchingJsonPath(
+                        "$.data.attributes.typeConfig.kanban.laneField", equalTo("status"))));
+    }
+
+    /** An empty object clears the renderer settings, mirroring `filter: {}`. */
+    @Test
+    void anEmptyTypeConfigClearsIt() {
+        wm.stubFor(patch(urlEqualTo("/api/list-views/" + LV_ID))
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":{\"id\":\"" + LV_ID + "\"}}")));
+
+        tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("update_listview", Map.of(
+                        "id", LV_ID,
+                        "typeConfig", Map.of()), null));
+
+        wm.verify(WireMock.patchRequestedFor(urlEqualTo("/api/list-views/" + LV_ID))
+                .withRequestBody(WireMock.containing("\"typeConfig\":null")));
+    }
+
+    @Test
     void mapsSortFieldAndDirection() {
         wm.stubFor(patch(urlEqualTo("/api/list-views/" + LV_ID))
                 .willReturn(aResponse().withStatus(200).withBody("{\"data\":{\"id\":\"" + LV_ID + "\"}}")));

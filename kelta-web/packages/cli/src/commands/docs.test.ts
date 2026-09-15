@@ -39,7 +39,7 @@ describe('kelta docs', () => {
       'ui-menus',
     ]) {
       const result = await run(topic);
-      expect(result.text.length).toBeGreaterThan(0);
+      expect(result.text?.length ?? 0).toBeGreaterThan(0);
     }
   });
 });
