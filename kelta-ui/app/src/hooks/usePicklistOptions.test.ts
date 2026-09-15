@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React from 'react'
 import {
   usePicklistOptions,
+  usePicklistDisplayMap,
   resolvePicklistSource,
   resolveGlobalPicklistId,
 } from './usePicklistOptions'
@@ -159,6 +160,49 @@ describe('usePicklistOptions', () => {
 
   it('does not fetch when disabled (e.g. editor mode)', () => {
     renderHook(() => usePicklistOptions({ id: 'f1', fieldTypeConfig: undefined }, false), {
+      wrapper,
+    })
+    expect(mockGetList).not.toHaveBeenCalled()
+  })
+})
+
+describe('usePicklistDisplayMap', () => {
+  it('maps raw value to label/color/description, dropping inactive values', async () => {
+    mockGetList.mockResolvedValueOnce([
+      {
+        value: 'in_progress',
+        label: 'In progress',
+        color: '#F59E0B',
+        isActive: true,
+        sortOrder: 0,
+      },
+      { value: 'archived', label: 'Archived', isActive: false, sortOrder: 1 },
+    ])
+    const { result } = renderHook(
+      () => usePicklistDisplayMap({ id: 'f1', fieldTypeConfig: undefined }),
+      { wrapper }
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.displayMap.get('in_progress')).toEqual({
+      label: 'In progress',
+      color: '#F59E0B',
+      description: undefined,
+    })
+    expect(result.current.displayMap.has('archived')).toBe(false)
+  })
+
+  it('returns an empty map on fetch error', async () => {
+    mockGetList.mockRejectedValueOnce(new Error('boom'))
+    const { result } = renderHook(
+      () => usePicklistDisplayMap({ id: 'f1', fieldTypeConfig: undefined }),
+      { wrapper }
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.displayMap.size).toBe(0)
+  })
+
+  it('does not fetch when disabled', () => {
+    renderHook(() => usePicklistDisplayMap({ id: 'f1', fieldTypeConfig: undefined }, false), {
       wrapper,
     })
     expect(mockGetList).not.toHaveBeenCalled()

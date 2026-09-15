@@ -30,6 +30,7 @@ export function FieldControlView({
       displayLabel={ctx.displayLabel}
       truncate={truncate}
       className={className}
+      picklistDisplayMap={ctx.picklistDisplayMap}
     />
   )
 }
