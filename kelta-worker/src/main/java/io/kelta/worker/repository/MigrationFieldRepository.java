@@ -1,5 +1,6 @@
 package io.kelta.worker.repository;
 
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.ReferenceConfig;
 import io.kelta.runtime.model.ValidationRules;
@@ -40,8 +41,8 @@ public class MigrationFieldRepository {
                                field_type_config, reference_target, reference_collection_id,
                                relationship_type, relationship_name, cascade_delete,
                                field_order, active, column_name, immutable, track_history,
-                               auto_number_sequence_name, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               auto_number_sequence_name, created_at, updated_at, tenant_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -96,7 +97,8 @@ public class MigrationFieldRepository {
                 SystemCollectionSeeder.mapFieldType(f.type()), required,
                 f.unique(), indexed, defaultValueJson, constraintsJson, fieldTypeConfigJson,
                 referenceTarget, referenceCollectionId, relationshipType, relationshipName, cascadeDelete,
-                order, true, f.columnName(), f.immutable(), false, null, now, now);
+                order, true, f.columnName(), f.immutable(), false, null, now, now,
+                TenantContext.get());
     }
 
     private String lookupCollectionId(String collectionName) {

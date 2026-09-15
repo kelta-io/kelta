@@ -85,6 +85,12 @@ public class DynamicCollectionRouter {
     private static final Pattern UUID_PATTERN = Pattern.compile(
             "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 
+    // Tenant-scoped system collections whose rows also include the platform's
+    // SYSTEM_TENANT_ID records — every tenant must see the built-in collections
+    // (and, since a field belongs to a collection, the built-in collections'
+    // fields) alongside its own.
+    private static final Set<String> SYSTEM_VISIBLE_COLLECTIONS = Set.of("collections", "fields");
+
     // Framework metadata keys that belong in every record's response envelope
     // even though they have no FieldDefinition. Aligned with PhysicalTableStorageAdapter's
     // PAYLOAD_SYSTEM_KEYS (minus "id", which is hoisted to the top level). Used by
@@ -909,10 +915,11 @@ public class DynamicCollectionRouter {
             return queryRequest;
         }
 
-        // For the 'collections' collection, include both tenant-specific and system
-        // records so that system collections are visible alongside custom ones.
+        // For 'collections' and 'fields', include both tenant-specific and system
+        // records so that system collections (and their fields) are visible
+        // alongside a tenant's own custom ones.
         List<FilterCondition> filters = new ArrayList<>(queryRequest.filters());
-        if ("collections".equals(definition.name())) {
+        if (SYSTEM_VISIBLE_COLLECTIONS.contains(definition.name())) {
             filters.add(new FilterCondition("tenantId", FilterOperator.IN,
                     List.of(tenantId, SystemCollectionDefinitions.SYSTEM_TENANT_ID)));
         } else {

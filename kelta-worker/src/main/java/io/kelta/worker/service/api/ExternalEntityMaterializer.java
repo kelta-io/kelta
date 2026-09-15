@@ -160,6 +160,9 @@ public class ExternalEntityMaterializer {
                     continue;
                 }
                 Map<String, Object> fieldData = new LinkedHashMap<>();
+                // Same as collectionData above: a direct queryEngine.create must set
+                // tenantId itself — field.tenant_id is NOT NULL (KLT-206).
+                fieldData.put("tenantId", tenantId);
                 fieldData.put("collectionId", collectionId);
                 fieldData.put("name", field.name());
                 fieldData.put("displayName", field.name());

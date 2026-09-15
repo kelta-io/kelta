@@ -5,6 +5,38 @@ at the bottom so reviewers can see what's already been addressed.
 
 ## Security Risks
 
+**FIXED (2026-09-15) — `GET /api/fields` was not tenant-scoped: any tenant could enumerate
+every other tenant's field names and types (KLT-206).** The `fields` system collection was
+declared `.tenantScoped(false)` (`SystemCollectionDefinitions.fields()`) and the `field` table
+carried no `tenant_id` column — tenancy was only transitive through `collection_id`, which
+`DynamicCollectionRouter.injectTenantFilter` never joined through. In production this returned
+~2,580 field rows across every tenant to any caller, and `filter[collectionId][eq]=<guessed-uuid>`
+was enough to read another tenant's schema. Fixed with a denormalised `field.tenant_id`
+(migration V197, backfilled from `collection.tenant_id`), `fields` now `.tenantScoped(true)`,
+and RLS on `field` mirroring `collection` (`tenant_isolation` + `admin_bypass`) **plus a third
+`system_fields_visible` policy** (`FOR SELECT`, `tenant_id = SYSTEM_TENANT_ID`) so a system
+collection's fields stay visible to every tenant instead of disappearing once RLS applies.
+`DynamicCollectionRouter`'s `"collections"`-only IN-filter special case is now
+`SYSTEM_VISIBLE_COLLECTIONS = {"collections", "fields"}`. The two direct-SQL field writers
+(`SystemCollectionSeeder`, `MigrationFieldRepository`) now stamp `tenant_id` themselves — the
+generic `POST /api/fields` path already got this for free via the existing tenant-scoped
+`injectTenantId` hook.
+
+**Open question surfaced while fixing the above, not addressed here: does `collections`'
+own cross-tenant visibility actually work under RLS today?** `collection` has had
+`tenant_isolation`/`admin_bypass` RLS since the baseline, with no third policy for
+`SYSTEM_TENANT_ID` rows. RLS predicates AND with the query's own `WHERE` clause, so
+`injectTenantFilter`'s `tenantId IN (caller, SYSTEM_TENANT_ID)` for `"collections"` reduces,
+under RLS bound to a real tenant, to just `tenant_id = caller` — the `SYSTEM_TENANT_ID` branch
+of the `IN` appears to be inert today, meaning system collections' own `collection` rows may
+not actually surface via `GET /api/collections` for an ordinary tenant (no test exercises this
+against a real, non-superuser-bypassed database; `CollectionLifecycleScenarioTest`'s
+"collections list includes at least the system collections" test only checks the response
+shape, not specific system names). If confirmed, `collection` needs the same third
+`system-visible` SELECT policy added here for `field`. Runtime routing is unaffected either
+way — system collection *definitions* come from the compiled-in `SystemCollectionDefinitions`
+registry, never from a live query against the `collection` table.
+
 **FIXED (2026-09-14) — the platform had no dependency vulnerability scanning at all, and the
 one scanner that was configured had never run.** OWASP dependency-check sat in
 `kelta-platform/pom.xml` with `failBuildOnCVSS=7` and a suppressions file, but only inside

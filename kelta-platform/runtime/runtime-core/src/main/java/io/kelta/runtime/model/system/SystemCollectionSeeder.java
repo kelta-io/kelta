@@ -59,8 +59,8 @@ public class SystemCollectionSeeder {
                                field_type_config, reference_target, reference_collection_id,
                                relationship_type, relationship_name, cascade_delete,
                                field_order, active, column_name, immutable, track_history,
-                               auto_number_sequence_name, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               auto_number_sequence_name, created_at, updated_at, tenant_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     private static final String SELECT_COLLECTION_ID_BY_NAME =
@@ -279,7 +279,8 @@ public class SystemCollectionSeeder {
                 false,  // track_history default
                 null,   // auto_number_sequence_name
                 now,
-                now);
+                now,
+                SYSTEM_TENANT_ID);
     }
 
     /**

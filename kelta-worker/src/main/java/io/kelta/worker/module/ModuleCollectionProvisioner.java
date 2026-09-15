@@ -141,6 +141,9 @@ public class ModuleCollectionProvisioner {
         int order = 0;
         for (ModuleManifest.CollectionManifest.FieldManifest field : collection.fields()) {
             Map<String, Object> fieldData = new LinkedHashMap<>();
+            // A direct queryEngine.create must set tenantId itself (see collectionData above) —
+            // field.tenant_id is NOT NULL now that "fields" is tenant-scoped (KLT-206).
+            fieldData.put("tenantId", tenantId);
             fieldData.put("collectionId", collectionId);
             fieldData.put("name", field.name());
             fieldData.put("displayName",

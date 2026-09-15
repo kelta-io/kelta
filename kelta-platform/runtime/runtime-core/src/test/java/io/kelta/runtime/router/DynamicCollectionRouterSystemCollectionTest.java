@@ -154,6 +154,41 @@ class DynamicCollectionRouterSystemCollectionTest {
         }
 
         @Test
+        @DisplayName("Should inject an IN(tenant, SYSTEM) tenant filter for the 'fields' collection list")
+        void list_injectsSystemVisibleTenantFilter_forFieldsCollection() throws Exception {
+            CollectionDefinition def = new CollectionDefinitionBuilder()
+                    .name("fields")
+                    .displayName("Fields")
+                    .addField(FieldDefinition.requiredString("name"))
+                    .addField(FieldDefinition.masterDetail("collectionId", "collections", "Collection"))
+                    .systemCollection(true)
+                    .tenantScoped(true)
+                    .build();
+            when(registry.get("fields")).thenReturn(def);
+
+            QueryResult emptyResult = QueryResult.empty(Pagination.defaults());
+            when(queryEngine.executeQuery(eq(def), any(QueryRequest.class))).thenReturn(emptyResult);
+
+            mockMvc.perform(get("/api/fields")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk());
+
+            ArgumentCaptor<QueryRequest> requestCaptor = ArgumentCaptor.forClass(QueryRequest.class);
+            verify(queryEngine).executeQuery(eq(def), requestCaptor.capture());
+
+            QueryRequest capturedRequest = requestCaptor.getValue();
+            boolean hasSystemVisibleFilter = capturedRequest.filters().stream()
+                    .anyMatch(f -> "tenantId".equals(f.fieldName())
+                            && FilterOperator.IN == f.operator()
+                            && f.value() instanceof List<?> values
+                            && values.contains("tenant-123")
+                            && values.contains(io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID));
+            assertTrue(hasSystemVisibleFilter,
+                    "Should have a tenantId IN (tenant-123, SYSTEM_TENANT_ID) filter for 'fields', "
+                            + "so system-collection fields stay visible to every tenant");
+        }
+
+        @Test
         @DisplayName("Should not inject tenant filter for non-tenant-scoped collection list")
         void list_noTenantFilter_forNonTenantScopedCollection() throws Exception {
             // Create a system collection that is NOT tenant-scoped
