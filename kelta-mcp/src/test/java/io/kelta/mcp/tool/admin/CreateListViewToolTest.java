@@ -101,6 +101,26 @@ class CreateListViewToolTest {
                 .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].value", equalTo("OPEN"))));
     }
 
+    @Test
+    void postsRowLimitAndAnInFilter() {
+        wm.stubFor(post(urlEqualTo("/api/list-views"))
+                .willReturn(aResponse().withStatus(201).withBody("{\"data\":{\"id\":\"lv1\"}}")));
+
+        tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("create_listview", Map.of(
+                        "collectionName", "projects",
+                        "name", "Open",
+                        "displayedFields", "name",
+                        "rowLimit", 25,
+                        "filter", Map.of("status", Map.of("IN", "a,b"))), null));
+
+        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/list-views"))
+                .withRequestBody(matchingJsonPath("$.data.attributes.rowLimit", equalTo("25")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].field", equalTo("status")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].operator", equalTo("IN")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].value", equalTo("a,b"))));
+    }
+
     /**
      * The published-board case (V196): the CLI's
      * `--view-type KANBAN --lane-field status --card-fields title` must land the

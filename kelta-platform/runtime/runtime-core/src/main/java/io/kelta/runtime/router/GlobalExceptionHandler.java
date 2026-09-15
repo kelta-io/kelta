@@ -10,6 +10,7 @@ import io.kelta.runtime.storage.UniqueConstraintViolationException;
 import io.kelta.runtime.validation.RecordValidationException;
 import io.kelta.runtime.validation.ValidationException;
 import io.kelta.runtime.validation.ValidationResult;
+import io.kelta.runtime.workflow.DuplicateDefaultException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -240,6 +241,28 @@ public class GlobalExceptionHandler {
             "409", "REFERENCED_RECORD", "Conflict",
             ex.getMessage());
         error.setMeta(Map.of("requestId", requestId, "path", request.getRequestURI()));
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorBody(error));
+    }
+
+    /**
+     * Handles a rejected second default (one-default-per-scope hooks, e.g. list views).
+     * Returns 409 Conflict in JSON:API format, naming the current default in
+     * {@code meta.existingId} so the client can offer to replace it without a re-fetch.
+     */
+    @ExceptionHandler(DuplicateDefaultException.class)
+    public ResponseEntity<Map<String, Object>> handleDuplicateDefault(
+            DuplicateDefaultException ex, HttpServletRequest request) {
+
+        String requestId = generateRequestId();
+        logger.warn("Duplicate default [requestId={}]: {}", requestId, ex.getMessage());
+
+        JsonApiError error = new JsonApiError(
+            "409", ex.getCode(), "Conflict", ex.getMessage());
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("requestId", requestId);
+        meta.put("existingId", ex.getExistingId());
+        error.setMeta(meta);
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(errorBody(error));
     }
