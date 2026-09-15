@@ -23,6 +23,8 @@ public class CerbosPolicyGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(CerbosPolicyGenerator.class);
 
+    private static final List<String> CRUD_ACTIONS = List.of("create", "read", "edit", "delete");
+
     private final ObjectMapper objectMapper;
 
     public CerbosPolicyGenerator(ObjectMapper objectMapper) {
@@ -89,68 +91,23 @@ public class CerbosPolicyGenerator {
 
     /**
      * Generates the collection resource policy for a tenant.
+     *
+     * <p><strong>Shape matters for latency.</strong> Cerbos evaluates the CEL condition of
+     * every candidate rule on each check, and the cost is roughly linear in the number of
+     * conditional rules (~0.3ms each). The previous shape emitted one rule per
+     * {@code collection × action} guarded by a per-profile derived role, so a tenant with
+     * 22 collections and 17 profiles paid ~105 CEL evaluations (~27ms) per check. This
+     * shape instead folds the whole permission matrix into a policy {@code constants}
+     * map ({@code profileId → action → [collectionId]}) and emits <em>one</em> rule per
+     * action whose condition does a map/list lookup — 1-2 evaluations per check. The
+     * {@code VIEW_ALL_DATA} / {@code MODIFY_ALL_DATA} overrides are lists of profile ids
+     * in the same constants block. See {@code CerbosGeneratedPolicyIT} for the
+     * real-PDP allow/deny matrix that pins the semantics.
      */
     public Map<String, Object> generateCollectionPolicy(String tenantId,
                                                           List<ProfileData> profiles,
                                                           List<String> collectionIds) {
-        List<Map<String, Object>> rules = new ArrayList<>();
-
-        // Per-collection CRUD rules
-        for (String collectionId : collectionIds) {
-            for (String action : List.of("create", "read", "edit", "delete")) {
-                List<String> allowedRoles = new ArrayList<>();
-                for (ProfileData profile : profiles) {
-                    Map<String, Boolean> objPerms = profile.objectPermissions().get(collectionId);
-                    if (objPerms != null && isActionAllowed(objPerms, action)) {
-                        allowedRoles.add("profile_" + profile.id());
-                    }
-                }
-                if (!allowedRoles.isEmpty()) {
-                    Map<String, Object> rule = new LinkedHashMap<>();
-                    rule.put("actions", List.of(action));
-                    rule.put("effect", "EFFECT_ALLOW");
-                    rule.put("derivedRoles", allowedRoles);
-
-                    Map<String, Object> condition = new LinkedHashMap<>();
-                    Map<String, Object> match = new LinkedHashMap<>();
-                    match.put("expr", "R.attr.collectionId == \"" + collectionId + "\"");
-                    condition.put("match", match);
-                    rule.put("condition", condition);
-
-                    rules.add(rule);
-                }
-            }
-        }
-
-        // System permission overrides: VIEW_ALL_DATA → read, MODIFY_ALL_DATA → create/edit/delete
-        List<String> viewAllRoles = new ArrayList<>();
-        List<String> modifyAllRoles = new ArrayList<>();
-        for (ProfileData profile : profiles) {
-            if (Boolean.TRUE.equals(profile.systemPermissions().get("VIEW_ALL_DATA"))) {
-                viewAllRoles.add("profile_" + profile.id());
-            }
-            if (Boolean.TRUE.equals(profile.systemPermissions().get("MODIFY_ALL_DATA"))) {
-                modifyAllRoles.add("profile_" + profile.id());
-            }
-        }
-
-        if (!viewAllRoles.isEmpty()) {
-            Map<String, Object> rule = new LinkedHashMap<>();
-            rule.put("actions", List.of("read"));
-            rule.put("effect", "EFFECT_ALLOW");
-            rule.put("derivedRoles", viewAllRoles);
-            rules.add(rule);
-        }
-
-        if (!modifyAllRoles.isEmpty()) {
-            Map<String, Object> rule = new LinkedHashMap<>();
-            rule.put("actions", List.of("create", "edit", "delete"));
-            rule.put("effect", "EFFECT_ALLOW");
-            rule.put("derivedRoles", modifyAllRoles);
-            rules.add(rule);
-        }
-
-        return buildResourcePolicy("collection", tenantId, rules);
+        return buildCrudPolicy("collection", tenantId, profiles, collectionIds, null, List.of());
     }
 
     /**
@@ -250,62 +207,83 @@ public class CerbosPolicyGenerator {
                                                       List<String> collectionIds,
                                                       List<CustomRule> customRules,
                                                       Map<String, String> collectionIdToName) {
-        // Start with same collection-level CRUD rules applied to records
-        List<Map<String, Object>> rules = new ArrayList<>();
+        return buildCrudPolicy("record", tenantId, profiles, collectionIds, collectionIdToName, customRules);
+    }
 
-        // Per-collection CRUD (same as collection policy)
-        for (String collectionId : collectionIds) {
-            String collectionRef = resolveCollectionRef(collectionIdToName, collectionId);
-            for (String action : List.of("create", "read", "edit", "delete")) {
-                List<String> allowedRoles = new ArrayList<>();
-                for (ProfileData profile : profiles) {
-                    Map<String, Boolean> objPerms = profile.objectPermissions().get(collectionId);
-                    if (objPerms != null && isActionAllowed(objPerms, action)) {
-                        allowedRoles.add("profile_" + profile.id());
+    /**
+     * Shared body of the collection and record policies: a constants-driven CRUD matrix
+     * (see {@link #generateCollectionPolicy}) plus, for records, the custom ABAC rules.
+     * {@code collectionIdToName} is {@code null} for the UUID-keyed collection policy.
+     */
+    private Map<String, Object> buildCrudPolicy(String resource,
+                                                String tenantId,
+                                                List<ProfileData> profiles,
+                                                List<String> collectionIds,
+                                                Map<String, String> collectionIdToName,
+                                                List<CustomRule> customRules) {
+        // profileId -> action -> [collection refs]; every profile entry carries all four
+        // action keys so the CEL lookup C.perms[P.attr.profileId].<action> never errors.
+        Map<String, Map<String, List<String>>> perms = new LinkedHashMap<>();
+        for (ProfileData profile : profiles) {
+            Map<String, List<String>> byAction = new LinkedHashMap<>();
+            for (String action : CRUD_ACTIONS) {
+                byAction.put(action, new ArrayList<>());
+            }
+            boolean any = false;
+            for (String collectionId : collectionIds) {
+                Map<String, Boolean> objPerms = profile.objectPermissions().get(collectionId);
+                if (objPerms == null) continue;
+                String ref = resolveCollectionRef(collectionIdToName, collectionId);
+                for (String action : CRUD_ACTIONS) {
+                    if (isActionAllowed(objPerms, action)) {
+                        byAction.get(action).add(ref);
+                        any = true;
                     }
                 }
-                if (!allowedRoles.isEmpty()) {
-                    Map<String, Object> rule = new LinkedHashMap<>();
-                    rule.put("actions", List.of(action));
-                    rule.put("effect", "EFFECT_ALLOW");
-                    rule.put("derivedRoles", allowedRoles);
-                    Map<String, Object> condition = new LinkedHashMap<>();
-                    condition.put("match", Map.of("expr", "R.attr.collectionId == \"" + collectionRef + "\""));
-                    rule.put("condition", condition);
-                    rules.add(rule);
-                }
+            }
+            if (any) {
+                perms.put(profile.id(), byAction);
             }
         }
 
-        // System permission overrides
-        List<String> viewAllRoles = new ArrayList<>();
-        List<String> modifyAllRoles = new ArrayList<>();
+        // System permission overrides: VIEW_ALL_DATA -> read, MODIFY_ALL_DATA -> create/edit/delete
+        List<String> viewAll = new ArrayList<>();
+        List<String> modifyAll = new ArrayList<>();
         for (ProfileData profile : profiles) {
             if (Boolean.TRUE.equals(profile.systemPermissions().get("VIEW_ALL_DATA"))) {
-                viewAllRoles.add("profile_" + profile.id());
+                viewAll.add(profile.id());
             }
             if (Boolean.TRUE.equals(profile.systemPermissions().get("MODIFY_ALL_DATA"))) {
-                modifyAllRoles.add("profile_" + profile.id());
+                modifyAll.add(profile.id());
             }
         }
 
-        if (!viewAllRoles.isEmpty()) {
-            Map<String, Object> rule = new LinkedHashMap<>();
-            rule.put("actions", List.of("read"));
-            rule.put("effect", "EFFECT_ALLOW");
-            rule.put("derivedRoles", viewAllRoles);
-            rules.add(rule);
+        Map<String, Object> constants = new LinkedHashMap<>();
+        constants.put("perms", perms);
+        constants.put("viewAll", viewAll);
+        constants.put("modifyAll", modifyAll);
+
+        String tenantGuard = "P.attr.tenantId == \"" + tenantId + "\"";
+        List<Map<String, Object>> rules = new ArrayList<>();
+
+        if (!perms.isEmpty()) {
+            for (String action : CRUD_ACTIONS) {
+                rules.add(userRule(List.of(action), "EFFECT_ALLOW",
+                        tenantGuard + " && P.attr.profileId in C.perms"
+                                + " && R.attr.collectionId in C.perms[P.attr.profileId]." + action));
+            }
+        }
+        if (!viewAll.isEmpty()) {
+            rules.add(userRule(List.of("read"), "EFFECT_ALLOW",
+                    tenantGuard + " && P.attr.profileId in C.viewAll"));
+        }
+        if (!modifyAll.isEmpty()) {
+            rules.add(userRule(List.of("create", "edit", "delete"), "EFFECT_ALLOW",
+                    tenantGuard + " && P.attr.profileId in C.modifyAll"));
         }
 
-        if (!modifyAllRoles.isEmpty()) {
-            Map<String, Object> rule = new LinkedHashMap<>();
-            rule.put("actions", List.of("create", "edit", "delete"));
-            rule.put("effect", "EFFECT_ALLOW");
-            rule.put("derivedRoles", modifyAllRoles);
-            rules.add(rule);
-        }
-
-        // Custom ABAC rules from admin UI
+        // Custom ABAC rules from admin UI (record policy only). These keep the per-profile
+        // derived role — there are few of them and admin-authored CEL may assume it.
         for (CustomRule customRule : customRules) {
             if (!customRule.enabled()) continue;
 
@@ -329,7 +307,19 @@ public class CerbosPolicyGenerator {
             rules.add(rule);
         }
 
-        return buildResourcePolicy("record", tenantId, rules);
+        return buildResourcePolicy(resource, tenantId, rules, constants);
+    }
+
+    /** A rule matched on the static {@code user} role and gated purely by CEL. */
+    private static Map<String, Object> userRule(List<String> actions, String effect, String expr) {
+        Map<String, Object> rule = new LinkedHashMap<>();
+        rule.put("actions", actions);
+        rule.put("effect", effect);
+        rule.put("roles", List.of("user"));
+        Map<String, Object> condition = new LinkedHashMap<>();
+        condition.put("match", Map.of("expr", expr));
+        rule.put("condition", condition);
+        return rule;
     }
 
     /**
@@ -345,6 +335,12 @@ public class CerbosPolicyGenerator {
 
     private Map<String, Object> buildResourcePolicy(String resource, String tenantId,
                                                       List<Map<String, Object>> rules) {
+        return buildResourcePolicy(resource, tenantId, rules, null);
+    }
+
+    private Map<String, Object> buildResourcePolicy(String resource, String tenantId,
+                                                      List<Map<String, Object>> rules,
+                                                      Map<String, Object> localConstants) {
         Map<String, Object> policy = new LinkedHashMap<>();
         policy.put("apiVersion", "api.cerbos.dev/v1");
 
@@ -353,6 +349,9 @@ public class CerbosPolicyGenerator {
         resourcePolicy.put("scope", tenantId);
         resourcePolicy.put("resource", resource);
         resourcePolicy.put("importDerivedRoles", List.of("kelta_roles_" + tenantId));
+        if (localConstants != null) {
+            resourcePolicy.put("constants", Map.of("local", localConstants));
+        }
         resourcePolicy.put("rules", rules);
 
         policy.put("resourcePolicy", resourcePolicy);

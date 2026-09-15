@@ -156,67 +156,107 @@ class CerbosPolicyGeneratorTest {
     class CollectionPolicyTests {
 
         @Test
-        @DisplayName("should create per-collection CRUD rules")
+        @DisplayName("emits one constants-gated rule per CRUD action, not one per collection")
         @SuppressWarnings("unchecked")
-        void createsPerCollectionCrudRules() {
+        void emitsOneRulePerAction() {
             Map<String, Object> policy = generator.generateCollectionPolicy(
-                    TENANT_ID, List.of(adminProfile()), List.of("col-1"));
+                    TENANT_ID, List.of(readOnlyProfile()), List.of("col-1", "col-2", "col-3"));
 
             Map<String, Object> resourcePolicy = (Map<String, Object>) policy.get("resourcePolicy");
             assertThat(resourcePolicy.get("resource")).isEqualTo("collection");
 
             List<Map<String, Object>> rules = (List<Map<String, Object>>) resourcePolicy.get("rules");
-            // 4 CRUD rules for col-1 + system override rules (VIEW_ALL_DATA read, MODIFY_ALL_DATA create/edit/delete)
-            assertThat(rules.size()).isGreaterThanOrEqualTo(4);
-        }
-
-        @Test
-        @DisplayName("should add VIEW_ALL_DATA override rule")
-        @SuppressWarnings("unchecked")
-        void addsViewAllDataOverride() {
-            Map<String, Object> policy = generator.generateCollectionPolicy(
-                    TENANT_ID, List.of(adminProfile()), List.of("col-1"));
-
-            Map<String, Object> resourcePolicy = (Map<String, Object>) policy.get("resourcePolicy");
-            List<Map<String, Object>> rules = (List<Map<String, Object>>) resourcePolicy.get("rules");
-
-            boolean hasViewAllOverride = rules.stream().anyMatch(rule -> {
-                List<String> actions = (List<String>) rule.get("actions");
-                List<String> derivedRoles = (List<String>) rule.get("derivedRoles");
-                return actions.equals(List.of("read"))
-                        && derivedRoles != null && derivedRoles.contains("profile_admin-profile")
-                        && !rule.containsKey("condition");
+            // 4 CRUD rules regardless of collection count; read-only profile has no overrides
+            assertThat(rules).hasSize(4);
+            assertThat(rules).allSatisfy(rule -> {
+                assertThat(rule.get("roles")).isEqualTo(List.of("user"));
+                assertThat(rule).doesNotContainKey("derivedRoles");
             });
-            assertThat(hasViewAllOverride).isTrue();
+            assertThat(rules.stream().map(r -> ((List<String>) r.get("actions")).get(0)))
+                    .containsExactly("create", "read", "edit", "delete");
         }
 
         @Test
-        @DisplayName("should only include read for read-only profiles")
+        @DisplayName("folds the permission matrix into constants.local.perms keyed by profile then action")
         @SuppressWarnings("unchecked")
-        void onlyReadForReadOnlyProfiles() {
+        void foldsMatrixIntoConstants() {
+            Map<String, Object> policy = generator.generateCollectionPolicy(
+                    TENANT_ID, List.of(adminProfile(), readOnlyProfile()), List.of("col-1", "col-2"));
+
+            Map<String, Object> constants = constants(policy);
+            Map<String, Map<String, List<String>>> perms =
+                    (Map<String, Map<String, List<String>>>) constants.get("perms");
+
+            assertThat(perms).containsOnlyKeys("admin-profile", "readonly-profile");
+            assertThat(perms.get("admin-profile")).containsOnlyKeys("create", "read", "edit", "delete");
+            assertThat(perms.get("admin-profile").get("delete")).containsExactly("col-1");
+            // Every profile entry carries all four action keys so the CEL lookup never errors
+            assertThat(perms.get("readonly-profile").get("read")).containsExactly("col-1");
+            assertThat(perms.get("readonly-profile").get("create")).isEmpty();
+            assertThat(perms.get("readonly-profile").get("edit")).isEmpty();
+            assertThat(perms.get("readonly-profile").get("delete")).isEmpty();
+            // col-2 has no object permission row for either profile
+            assertThat(perms.get("admin-profile").get("read")).doesNotContain("col-2");
+        }
+
+        @Test
+        @DisplayName("per-action CEL guards tenant, profile membership and collection membership")
+        void perActionCelShape() {
             Map<String, Object> policy = generator.generateCollectionPolicy(
                     TENANT_ID, List.of(readOnlyProfile()), List.of("col-1"));
 
-            Map<String, Object> resourcePolicy = (Map<String, Object>) policy.get("resourcePolicy");
-            List<Map<String, Object>> rules = (List<Map<String, Object>>) resourcePolicy.get("rules");
+            assertThat(ruleExpr(policy, "edit", "EFFECT_ALLOW"))
+                    .isEqualTo("P.attr.tenantId == \"" + TENANT_ID + "\""
+                            + " && P.attr.profileId in C.perms"
+                            + " && R.attr.collectionId in C.perms[P.attr.profileId].edit");
+        }
 
-            // Only read action should have the readonly profile's role
-            boolean hasReadRule = rules.stream().anyMatch(rule -> {
-                List<String> actions = (List<String>) rule.get("actions");
-                List<String> derivedRoles = (List<String>) rule.get("derivedRoles");
-                return actions.contains("read")
-                        && derivedRoles != null && derivedRoles.contains("profile_readonly-profile");
-            });
-            assertThat(hasReadRule).isTrue();
+        @Test
+        @DisplayName("VIEW_ALL_DATA / MODIFY_ALL_DATA become profile-id lists with their own rules")
+        @SuppressWarnings("unchecked")
+        void addsSystemPermissionOverrides() {
+            Map<String, Object> policy = generator.generateCollectionPolicy(
+                    TENANT_ID, List.of(adminProfile(), readOnlyProfile()), List.of("col-1"));
 
-            // No create/edit/delete rules should have the readonly profile
-            boolean hasWriteRule = rules.stream().anyMatch(rule -> {
-                List<String> actions = (List<String>) rule.get("actions");
-                List<String> derivedRoles = (List<String>) rule.get("derivedRoles");
-                return (actions.contains("create") || actions.contains("edit") || actions.contains("delete"))
-                        && derivedRoles != null && derivedRoles.contains("profile_readonly-profile");
-            });
-            assertThat(hasWriteRule).isFalse();
+            Map<String, Object> constants = constants(policy);
+            assertThat((List<String>) constants.get("viewAll")).containsExactly("admin-profile");
+            assertThat((List<String>) constants.get("modifyAll")).containsExactly("admin-profile");
+
+            List<Map<String, Object>> rules = rules(policy);
+            assertThat(rules).hasSize(6);
+            Map<String, Object> viewAllRule = rules.get(4);
+            assertThat(viewAllRule.get("actions")).isEqualTo(List.of("read"));
+            assertThat(expr(viewAllRule)).isEqualTo(
+                    "P.attr.tenantId == \"" + TENANT_ID + "\" && P.attr.profileId in C.viewAll");
+            Map<String, Object> modifyAllRule = rules.get(5);
+            assertThat(modifyAllRule.get("actions")).isEqualTo(List.of("create", "edit", "delete"));
+            assertThat(expr(modifyAllRule)).isEqualTo(
+                    "P.attr.tenantId == \"" + TENANT_ID + "\" && P.attr.profileId in C.modifyAll");
+        }
+
+        @Test
+        @DisplayName("omits the CRUD rules when no profile holds any object permission")
+        @SuppressWarnings("unchecked")
+        void omitsCrudRulesWithoutObjectPermissions() {
+            ProfileData viewer = new ProfileData("viewer", "Viewer",
+                    Map.of("VIEW_ALL_DATA", true), Map.of(), Map.of());
+
+            Map<String, Object> policy = generator.generateCollectionPolicy(
+                    TENANT_ID, List.of(viewer), List.of("col-1"));
+
+            assertThat((Map<String, Object>) constants(policy).get("perms")).isEmpty();
+            List<Map<String, Object>> rules = rules(policy);
+            assertThat(rules).hasSize(1);
+            assertThat(rules.get(0).get("actions")).isEqualTo(List.of("read"));
+        }
+
+        @Test
+        @DisplayName("emits no rules at all for a tenant with no grants")
+        void noGrantsNoRules() {
+            Map<String, Object> policy = generator.generateCollectionPolicy(
+                    TENANT_ID, List.of(), List.of("col-1"));
+
+            assertThat(rules(policy)).isEmpty();
         }
     }
 
@@ -404,14 +444,10 @@ class CerbosPolicyGeneratorTest {
             Map<String, Object> collectionPolicy = generator.generateCollectionPolicy(
                     TENANT_ID, List.of(reader), collectionIds);
 
-            // Record read rule matches on the NAME (what CerbosRecordAuthorizationAdvice passes).
-            assertThat(readRuleExpr(recordPolicy, "read"))
-                    .contains("R.attr.collectionId == \"contacts\"")
-                    .doesNotContain("col-uuid-1");
-            // Collection read rule still matches on the UUID (what the gateway passes).
-            assertThat(readRuleExpr(collectionPolicy, "read"))
-                    .contains("R.attr.collectionId == \"col-uuid-1\"")
-                    .doesNotContain("contacts");
+            // Record perms list the NAME (what CerbosRecordAuthorizationAdvice passes).
+            assertThat(readPerms(recordPolicy, "reader-profile")).containsExactly("contacts");
+            // Collection perms still list the UUID (what the gateway passes).
+            assertThat(readPerms(collectionPolicy, "reader-profile")).containsExactly("col-uuid-1");
         }
 
         @Test
@@ -425,24 +461,31 @@ class CerbosPolicyGeneratorTest {
             Map<String, Object> policy = generator.generateRecordPolicy(
                     TENANT_ID, List.of(reader), List.of("col-uuid-9"), List.of(), Map.of());
 
-            assertThat(readRuleExpr(policy, "read")).contains("R.attr.collectionId == \"col-uuid-9\"");
+            assertThat(readPerms(policy, "reader-profile")).containsExactly("col-uuid-9");
+        }
+
+        @Test
+        @DisplayName("custom ABAC rules keep the per-profile derived role and name-keyed collection guard")
+        @SuppressWarnings("unchecked")
+        void customRulesKeepDerivedRole() {
+            CustomRule customRule = new CustomRule(
+                    "rule-1", "admin-profile", "col-1",
+                    "edit", "EFFECT_DENY", "R.attr.status == \"locked\"", true);
+
+            Map<String, Object> policy = generator.generateRecordPolicy(
+                    TENANT_ID, List.of(adminProfile()), List.of("col-1"), List.of(customRule),
+                    Map.of("col-1", "accounts"));
+
+            Map<String, Object> custom = rules(policy).get(rules(policy).size() - 1);
+            assertThat(custom.get("derivedRoles")).isEqualTo(List.of("profile_admin-profile"));
+            assertThat(expr(custom)).isEqualTo("R.attr.collectionId == \"accounts\" && R.attr.status == \"locked\"");
         }
 
         @SuppressWarnings("unchecked")
-        private String readRuleExpr(Map<String, Object> policy, String action) {
-            Map<String, Object> resourcePolicy = (Map<String, Object>) policy.get("resourcePolicy");
-            List<Map<String, Object>> rules = (List<Map<String, Object>>) resourcePolicy.get("rules");
-            return rules.stream()
-                    .filter(rule -> "EFFECT_ALLOW".equals(rule.get("effect")))
-                    .filter(rule -> ((List<String>) rule.get("actions")).contains(action))
-                    .filter(rule -> rule.get("condition") != null)
-                    .map(rule -> {
-                        Map<String, Object> condition = (Map<String, Object>) rule.get("condition");
-                        Map<String, Object> match = (Map<String, Object>) condition.get("match");
-                        return (String) match.get("expr");
-                    })
-                    .findFirst()
-                    .orElse("");
+        private List<String> readPerms(Map<String, Object> policy, String profileId) {
+            Map<String, Map<String, List<String>>> perms =
+                    (Map<String, Map<String, List<String>>>) constants(policy).get("perms");
+            return perms.get(profileId).get("read");
         }
 
         @Test
@@ -482,5 +525,109 @@ class CerbosPolicyGeneratorTest {
             assertThat(resourcePolicy.get("rules")).isEqualTo(List.of());
             assertThat(resourcePolicy).doesNotContainKey("scope");
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Golden fixture — the harness IT (CerbosGeneratedPolicyIT) pushes these files
+    // into a real Cerbos PDP and asserts an allow/deny matrix, so the generator output
+    // must stay byte-for-byte in sync with src/test/resources/cerbos/golden/*.json.
+    // -------------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("golden fixture")
+    class GoldenFixtureTests {
+
+        static final String GOLDEN_TENANT = "tenant-golden";
+
+        @Test
+        @DisplayName("generated policies match the golden files consumed by CerbosGeneratedPolicyIT")
+        void matchesGoldenFiles() throws Exception {
+            List<ProfileData> profiles = goldenProfiles();
+            List<String> collectionIds = List.of("col-a", "col-b", "col-c");
+            Map<String, String> idToName = new java.util.LinkedHashMap<>();
+            idToName.put("col-a", "accounts");
+            idToName.put("col-b", "bookings");
+            idToName.put("col-c", "contacts");
+            List<CustomRule> customRules = List.of(
+                    new CustomRule("rule-locked", "editor-profile", "col-a", "edit", "EFFECT_DENY",
+                            "R.attr.status == \"locked\"", true),
+                    new CustomRule("rule-disabled", "editor-profile", "col-a", "delete", "EFFECT_ALLOW",
+                            "true", false));
+
+            assertGolden("derived_roles.json", generator.generateDerivedRoles(GOLDEN_TENANT, profiles));
+            assertGolden("collection.json",
+                    generator.generateCollectionPolicy(GOLDEN_TENANT, profiles, collectionIds));
+            assertGolden("record.json",
+                    generator.generateRecordPolicy(GOLDEN_TENANT, profiles, collectionIds, customRules, idToName));
+            assertGolden("base_collection.json", generator.generateBaseResourcePolicy("collection"));
+            assertGolden("base_record.json", generator.generateBaseResourcePolicy("record"));
+        }
+
+        private List<ProfileData> goldenProfiles() {
+            // admin: VIEW_ALL + MODIFY_ALL, full CRUD on col-a only via object perms
+            ProfileData admin = new ProfileData("admin-profile", "Admin",
+                    Map.of("VIEW_ALL_DATA", true, "MODIFY_ALL_DATA", true),
+                    Map.of("col-a", Map.of("canCreate", true, "canRead", true, "canEdit", true, "canDelete", true)),
+                    Map.of());
+            // editor: read+edit col-a, read col-b, nothing on col-c, no system overrides
+            Map<String, Map<String, Boolean>> editorPerms = new java.util.LinkedHashMap<>();
+            editorPerms.put("col-a", Map.of("canCreate", false, "canRead", true, "canEdit", true, "canDelete", false));
+            editorPerms.put("col-b", Map.of("canRead", true));
+            ProfileData editor = new ProfileData("editor-profile", "Editor", Map.of(), editorPerms, Map.of());
+            // viewer: VIEW_ALL only, no object perms
+            ProfileData viewer = new ProfileData("viewer-profile", "Viewer",
+                    Map.of("VIEW_ALL_DATA", true), Map.of(), Map.of());
+            // nobody: no grants at all
+            ProfileData nobody = new ProfileData("nobody-profile", "Nobody", Map.of(), Map.of(), Map.of());
+            return List.of(admin, editor, viewer, nobody);
+        }
+
+        private void assertGolden(String file, Map<String, Object> policy) throws Exception {
+            ObjectMapper mapper = new ObjectMapper();
+            java.nio.file.Path path = java.nio.file.Path.of("src/test/resources/cerbos/golden", file);
+            tools.jackson.databind.JsonNode actual = mapper.valueToTree(policy);
+            tools.jackson.databind.JsonNode expected = mapper.readTree(java.nio.file.Files.readString(path));
+            assertThat(actual)
+                    .as("%s drifted from generator output — regenerate with:%n%s", path,
+                            mapper.writerWithDefaultPrettyPrinter().writeValueAsString(actual))
+                    .isEqualTo(expected);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Shared accessors
+    // -------------------------------------------------------------------------
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> resourcePolicy(Map<String, Object> policy) {
+        return (Map<String, Object>) policy.get("resourcePolicy");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> rules(Map<String, Object> policy) {
+        return (List<Map<String, Object>>) resourcePolicy(policy).get("rules");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> constants(Map<String, Object> policy) {
+        Map<String, Object> constants = (Map<String, Object>) resourcePolicy(policy).get("constants");
+        return (Map<String, Object>) constants.get("local");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String expr(Map<String, Object> rule) {
+        Map<String, Object> condition = (Map<String, Object>) rule.get("condition");
+        Map<String, Object> match = (Map<String, Object>) condition.get("match");
+        return (String) match.get("expr");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String ruleExpr(Map<String, Object> policy, String action, String effect) {
+        return rules(policy).stream()
+                .filter(rule -> effect.equals(rule.get("effect")))
+                .filter(rule -> ((List<String>) rule.get("actions")).contains(action))
+                .map(CerbosPolicyGeneratorTest::expr)
+                .findFirst()
+                .orElseThrow();
     }
 }

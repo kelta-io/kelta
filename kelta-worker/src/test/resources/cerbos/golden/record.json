@@ -1,0 +1,93 @@
+{
+  "apiVersion" : "api.cerbos.dev/v1",
+  "resourcePolicy" : {
+    "version" : "default",
+    "scope" : "tenant-golden",
+    "resource" : "record",
+    "importDerivedRoles" : [ "kelta_roles_tenant-golden" ],
+    "constants" : {
+      "local" : {
+        "perms" : {
+          "admin-profile" : {
+            "create" : [ "accounts" ],
+            "read" : [ "accounts" ],
+            "edit" : [ "accounts" ],
+            "delete" : [ "accounts" ]
+          },
+          "editor-profile" : {
+            "create" : [ ],
+            "read" : [ "accounts", "bookings" ],
+            "edit" : [ "accounts" ],
+            "delete" : [ ]
+          }
+        },
+        "viewAll" : [ "admin-profile", "viewer-profile" ],
+        "modifyAll" : [ "admin-profile" ]
+      }
+    },
+    "rules" : [ {
+      "actions" : [ "create" ],
+      "effect" : "EFFECT_ALLOW",
+      "roles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.tenantId == \"tenant-golden\" && P.attr.profileId in C.perms && R.attr.collectionId in C.perms[P.attr.profileId].create"
+        }
+      }
+    }, {
+      "actions" : [ "read" ],
+      "effect" : "EFFECT_ALLOW",
+      "roles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.tenantId == \"tenant-golden\" && P.attr.profileId in C.perms && R.attr.collectionId in C.perms[P.attr.profileId].read"
+        }
+      }
+    }, {
+      "actions" : [ "edit" ],
+      "effect" : "EFFECT_ALLOW",
+      "roles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.tenantId == \"tenant-golden\" && P.attr.profileId in C.perms && R.attr.collectionId in C.perms[P.attr.profileId].edit"
+        }
+      }
+    }, {
+      "actions" : [ "delete" ],
+      "effect" : "EFFECT_ALLOW",
+      "roles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.tenantId == \"tenant-golden\" && P.attr.profileId in C.perms && R.attr.collectionId in C.perms[P.attr.profileId].delete"
+        }
+      }
+    }, {
+      "actions" : [ "read" ],
+      "effect" : "EFFECT_ALLOW",
+      "roles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.tenantId == \"tenant-golden\" && P.attr.profileId in C.viewAll"
+        }
+      }
+    }, {
+      "actions" : [ "create", "edit", "delete" ],
+      "effect" : "EFFECT_ALLOW",
+      "roles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.tenantId == \"tenant-golden\" && P.attr.profileId in C.modifyAll"
+        }
+      }
+    }, {
+      "actions" : [ "edit" ],
+      "effect" : "EFFECT_DENY",
+      "derivedRoles" : [ "profile_editor-profile" ],
+      "condition" : {
+        "match" : {
+          "expr" : "R.attr.collectionId == \"accounts\" && R.attr.status == \"locked\""
+        }
+      }
+    } ]
+  }
+}

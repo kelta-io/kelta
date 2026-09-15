@@ -701,6 +701,21 @@ and that contrast is the point.
 while PostgreSQL folds to *lower*; without the flag, quoted-lowercase DDL wouldn't match the
 column H2 creates unquoted — a test-only divergence that made the suite disagree with production.
 
+**FIXED (perf/cerbos-constants-policy) — every Cerbos `collection`/`record` check cost ~27ms
+because the generated policy had one conditional rule per `collection × action`.** Loki showed
+`CheckResources` p50 13ms with modes at 7/17/27ms; Tempo put all of it inside
+`engine.EvalCtxEvaluate` (not store, not audit); `field` checks on the same PDP took 0.3ms. Cerbos
+evaluates every candidate rule's CEL per check (~0.3ms each), and `CerbosPolicyGenerator` emitted
+88 conditional rules + 17 conditional derived roles for a 22-collection tenant. A/B on an isolated
+Cerbos 0.42: old shape 35ms, constants-driven shape 6ms (incl. HTTP). Fix: `buildCrudPolicy` puts
+the permission matrix in `constants.local` and emits one rule per action (see `architecture.md` →
+Policy shape = latency). The earlier infra change (homelab-argo #300, `GOMAXPROCS=2` + 2-CPU limit)
+only removed the 100ms+ CFS-throttle tail; it did not move p50. Also closed the CI blind spot for
+generated policies: `CerbosGeneratedPolicyIT` pushes the goldens into a real Cerbos and asserts the
+allow/deny matrix (the KeltaStack Cerbos stays allow-all). Still open: `CerbosPolicySeeder`'s Redis
+lock is a mutex, not a done-marker, so every worker replica reseeds all tenants on each deploy
+(64 `AddOrUpdatePolicy` per replica, harmless but noisy).
+
 **FIXED (PR #1174) — record-policy `collectionId` was UUID-keyed but checked by name.**
 `CerbosPolicyGenerator.generateRecordPolicy` emitted `R.attr.collectionId == "<UUID>"` (from
 `profile_object_permission.collection_id` + `collection.id`, both UUIDs), but
@@ -714,7 +729,9 @@ policy CEL (and its custom-rule CEL) now key on the collection **name** via a `c
 map; the **collection** policy stays UUID-keyed because the gateway's `checkObjectPermission`
 passes the UUID (`route.getId()`). See `architecture.md` → Cerbos `collectionId` keying.
 **Pre-merge gate: verify on a live stack** (`make up`, log in as a non-admin profile, toggle
-per-collection object permissions) — the allow-all harness Cerbos cannot exercise real deny.
+per-collection object permissions) — the allow-all harness Cerbos cannot exercise real deny
+end-to-end; `CerbosGeneratedPolicyIT` now at least pins the generated policy's allow/deny matrix
+on a real PDP.
 
 **FIXED (autopilot/BUG-2026-09-13-0001) — valid PATs rejected with 401 during kelta-worker outages.**
 `PatAuthenticationFilter.fetchFromWorker` called the worker's `/api/me/tokens/validate/{hash}`
