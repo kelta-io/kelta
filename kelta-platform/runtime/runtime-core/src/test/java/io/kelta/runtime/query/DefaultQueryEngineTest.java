@@ -1440,6 +1440,32 @@ class DefaultQueryEngineTest {
         }
 
         @Test
+        @DisplayName("Should compute formula value on a sparse fields[] read that omits its (non-existent) column")
+        void shouldComputeFormulaValueOnSparseFieldsetQuery() {
+            // Mirrors what PhysicalTableStorageAdapter#buildSelectClause now returns for
+            // fields[]=amount,quantity,total: "total" is a FORMULA field with no physical
+            // column, so the storage layer's row never carries it. This is a QueryEngine-level
+            // test, not a storage one — it pins that computeVirtualFields (unconditional over
+            // definition.fields()) still fills the value in on the response regardless of what
+            // the storage adapter returned, so the router-level GET keeps working end to end.
+            QueryRequest request = new QueryRequest(
+                    Pagination.defaults(), List.of(), List.of("amount", "quantity", "total"), List.of());
+
+            Map<String, Object> stored = new HashMap<>();
+            stored.put("id", "order-4");
+            stored.put("amount", 25.0);
+            stored.put("quantity", 4);
+
+            when(storageAdapter.query(orderCollection, request))
+                    .thenReturn(QueryResult.of(List.of(stored), 1, Pagination.defaults()));
+
+            QueryResult result = engineWithFormula.executeQuery(orderCollection, request);
+
+            assertEquals(1, result.data().size());
+            assertEquals(100.0, ((Number) result.data().get(0).get("total")).doubleValue(), 0.001);
+        }
+
+        @Test
         @DisplayName("Should return null when formula expression is missing")
         void shouldReturnNullWhenExpressionMissing() {
             CollectionDefinition emptyConfigCollection = new CollectionDefinitionBuilder()
