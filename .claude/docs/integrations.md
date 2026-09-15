@@ -11,6 +11,16 @@
 | AWS S3 / Garage | Object storage | `aws-sdk-s3` 2.30.1 | `${KELTA_S3_ENDPOINT}` | `kelta-worker/.../service/S3StorageService.java` |
 | Keycloak | OIDC federation | Spring Security OAuth2 | Port 8180 (docker-compose) | `kelta-auth/.../federation/FederatedUserMapper.java` |
 
+### Cerbos policy seeding (worker startup)
+
+`CerbosPolicySeeder` pushes base + per-tenant generated policies via the Cerbos Admin HTTP API
+(`http://${CERBOS_HOST}:3592/admin/policy`, basic auth `kelta.worker.cerbos.admin-{username,password}`)
+**once per build**: after a successful seed it writes `cerbos:policy-seed:done:<build.time>` in Redis
+and later replicas of the same image skip, provided `GET /admin/policies` still lists the unscoped
+`collection` policy (a wiped/restored Cerbos store re-seeds). `CERBOS_SEED_FORCE=true`
+(`kelta.worker.cerbos.seed.force`) forces a full seed. Runtime permission changes never rely on this
+path — they sync through the profile/permission hooks and `CerbosPolicySyncCoalescer`.
+
 ### Attachment lifecycle (S3)
 
 Files attach to any record via the `attachments` system collection (backed by `file_attachment`, `S3StorageService`). The full lifecycle:

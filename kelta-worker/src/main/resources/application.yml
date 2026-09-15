@@ -88,6 +88,10 @@ kelta:
     cerbos:
       host: ${CERBOS_HOST:cerbos.emf.svc.cluster.local}
       grpc-port: ${CERBOS_GRPC_PORT:3593}
+      seed:
+        # Re-push every tenant's policies on startup even if this image already seeded
+        # (e.g. after restoring the Cerbos store from backup). Declared here, not env-only.
+        force: ${CERBOS_SEED_FORCE:false}
   svix:
     server-url: ${SVIX_SERVER_URL:http://localhost:8071}
     public-url: ${SVIX_PUBLIC_URL:${SVIX_SERVER_URL:http://localhost:8071}}
