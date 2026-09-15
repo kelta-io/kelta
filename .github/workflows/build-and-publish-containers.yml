@@ -459,14 +459,26 @@ jobs:
             local tag="$2"            # main-1234567
             local repo="${img#harbor.rzware.com/}"
             local code
-            code=$(curl -sk -o /dev/null -w "%{http_code}" \
-              -u "${HARBOR_USERNAME}:${HARBOR_PASSWORD}" \
-              -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-              -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
-              -H "Accept: application/vnd.oci.image.manifest.v1+json" \
-              -H "Accept: application/vnd.oci.image.index.v1+json" \
-              "https://harbor.rzware.com/v2/${repo}/manifests/${tag}")
-            [[ "$code" == "200" ]]
+            local attempt
+            # Harbor's manifest API can lag briefly behind a successful push
+            # (registry read-after-write race), so retry before concluding
+            # the tag is genuinely missing.
+            for attempt in 1 2 3 4 5; do
+              code=$(curl -sk -o /dev/null -w "%{http_code}" \
+                -u "${HARBOR_USERNAME}:${HARBOR_PASSWORD}" \
+                -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+                -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+                -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+                -H "Accept: application/vnd.oci.image.index.v1+json" \
+                "https://harbor.rzware.com/v2/${repo}/manifests/${tag}")
+              if [[ "$code" == "200" ]]; then
+                return 0
+              fi
+              if [[ "$attempt" -lt 5 ]]; then
+                sleep 5
+              fi
+            done
+            return 1
           }
 
           bump() {
