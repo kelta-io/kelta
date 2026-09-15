@@ -1,6 +1,7 @@
 package io.kelta.runtime.model.system;
 
 import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.FieldDefinition;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -103,5 +104,16 @@ class SystemCollectionDefinitionsTest {
         // Users should have fields like email, status, etc.
         assertTrue(users.fields().stream().anyMatch(f -> "email".equals(f.name())));
         assertTrue(users.fields().stream().anyMatch(f -> "status".equals(f.name())));
+    }
+
+    @Test
+    @DisplayName("Should default layout-fields columnNumber to 0 (0-based columns)")
+    void shouldDefaultLayoutFieldColumnNumberToZero() {
+        CollectionDefinition layoutFields = SystemCollectionDefinitions.layoutFields();
+        FieldDefinition columnNumber = layoutFields.fields().stream()
+                .filter(f -> "columnNumber".equals(f.name()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("columnNumber field not found"));
+        assertEquals(0, columnNumber.defaultValue());
     }
 }
