@@ -6,11 +6,15 @@ import type { CommandContext, RegisteredCommand } from '../registry/types.js';
 import { auditCommands } from './audit.js';
 import { collectionCommands } from './collections.js';
 import { constraintCommands } from './constraints.js';
+import { dashboardCommands } from './dashboards.js';
 import { flowCommands } from './flows.js';
 import { layoutCommands } from './layouts.js';
 import { limitCommands } from './limits.js';
+import { menuCommands } from './menus.js';
+import { pageCommands } from './pages.js';
 import { picklistCommands } from './picklists.js';
 import { recordCommands } from './records.js';
+import { reportCommands } from './reports.js';
 import { userCommands } from './users.js';
 import { validationCommands } from './validation.js';
 
@@ -592,5 +596,183 @@ describe('records bulk/search/semantic-search', () => {
       query: 'similar things',
       limit: 3,
     });
+  });
+});
+
+describe('list-views get/delete', () => {
+  const listViewsOnly = () => layoutCommands.filter((c) => c.group === 'list-views');
+
+  it('get fetches by id; delete is dangerous and deletes by id', async () => {
+    const axios = fakeAxios();
+    expect(command(listViewsOnly(), 'delete').dangerous).toBe(true);
+    await run(listViewsOnly(), 'get', { listViewId: 'lv-1' }, axios);
+    expect(axios.get).toHaveBeenCalledWith('/api/list-views/lv-1');
+    await run(listViewsOnly(), 'delete', { listViewId: 'lv-1' }, axios);
+    expect(axios.delete).toHaveBeenCalledWith('/api/list-views/lv-1');
+  });
+});
+
+describe('pages', () => {
+  it('create posts a JSON:API ui-pages body', async () => {
+    const axios = fakeAxios();
+    await run(pageCommands, 'create', { name: 'Home', path: '/home' }, axios);
+    expect(axios.post).toHaveBeenCalledWith('/api/ui-pages', {
+      data: { type: 'ui-pages', attributes: { name: 'Home', path: '/home' } },
+    });
+  });
+
+  it('update PATCHes only what was passed', async () => {
+    const axios = fakeAxios();
+    await run(pageCommands, 'update', { pageId: 'p1', published: 'true' }, axios);
+    expect(axios.patch).toHaveBeenCalledWith('/api/ui-pages/p1', {
+      data: { type: 'ui-pages', id: 'p1', attributes: { published: true } },
+    });
+  });
+
+  it('update refuses an empty change set', async () => {
+    const axios = fakeAxios();
+    await expect(run(pageCommands, 'update', { pageId: 'p1' }, axios)).rejects.toThrow(
+      /Nothing to update/
+    );
+  });
+
+  it('delete is dangerous and deletes by id', async () => {
+    const axios = fakeAxios();
+    expect(command(pageCommands, 'delete').dangerous).toBe(true);
+    await run(pageCommands, 'delete', { pageId: 'p1' }, axios);
+    expect(axios.delete).toHaveBeenCalledWith('/api/ui-pages/p1');
+  });
+
+  it('publish resolves the page by path and PATCHes published=true', async () => {
+    const axios = fakeAxios({
+      '/api/ui-pages?filter[path][eq]=%2Fhome': { data: [{ id: 'p1' }] },
+    });
+    const result = await run(pageCommands, 'publish', { path: '/home' }, axios);
+    expect(axios.patch).toHaveBeenCalledWith('/api/ui-pages/p1', {
+      data: { type: 'ui-pages', id: 'p1', attributes: { published: true } },
+    });
+    expect(result.ids).toEqual(['p1']);
+  });
+
+  it('publish on an unknown path throws NOT_FOUND', async () => {
+    const axios = fakeAxios({ '/api/ui-pages?filter[path][eq]=%2Fmissing': { data: [] } });
+    await expect(run(pageCommands, 'publish', { path: '/missing' }, axios)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+});
+
+describe('menus', () => {
+  it('get resolves a name to id then fetches the plain resource without --tree', async () => {
+    const axios = fakeAxios({
+      '/api/ui-menus?filter[name][EQ]=main': { data: [{ id: 'm1' }] },
+      '/api/ui-menus/m1': { data: { id: 'm1', type: 'ui-menus', attributes: { name: 'main' } } },
+    });
+    const result = await run(menuCommands, 'get', { menu: 'main', tree: false }, axios);
+    expect(axios.get).toHaveBeenCalledWith('/api/ui-menus/m1');
+    expect(result.data).toEqual({
+      data: { id: 'm1', type: 'ui-menus', attributes: { name: 'main' } },
+    });
+  });
+
+  it('get --tree nests items by parentId, sorted by displayOrder', async () => {
+    const axios = fakeAxios({
+      '/api/ui-menus?filter[name][EQ]=main': { data: [{ id: 'm1' }] },
+      '/api/ui-menus/m1': { data: { id: 'm1', type: 'ui-menus', attributes: { name: 'main' } } },
+      '/api/ui-menu-items?filter[menuId][eq]=m1': {
+        data: [
+          { id: 'child-2', attributes: { label: 'Second', parentId: 'group-1', displayOrder: 2 } },
+          { id: 'group-1', attributes: { label: 'Group', parentId: null, displayOrder: 1 } },
+          { id: 'child-1', attributes: { label: 'First', parentId: 'group-1', displayOrder: 1 } },
+        ],
+      },
+    });
+    const result = await run(menuCommands, 'get', { menu: 'main', tree: true }, axios);
+    const data = result.data as {
+      data: { attributes: { items: { id: string; children: { id: string }[] }[] } };
+    };
+    expect(data.data.attributes.items).toHaveLength(1);
+    expect(data.data.attributes.items[0].id).toBe('group-1');
+    expect(data.data.attributes.items[0].children.map((c) => c.id)).toEqual(['child-1', 'child-2']);
+  });
+
+  it('create posts isDefault alongside name', async () => {
+    const axios = fakeAxios();
+    await run(menuCommands, 'create', { name: 'Sales', default: true }, axios);
+    expect(axios.post).toHaveBeenCalledWith('/api/ui-menus', {
+      data: { type: 'ui-menus', attributes: { name: 'Sales', isDefault: true } },
+    });
+  });
+
+  it('delete is dangerous and deletes by id', async () => {
+    const axios = fakeAxios();
+    expect(command(menuCommands, 'delete').dangerous).toBe(true);
+    await run(menuCommands, 'delete', { menuId: 'm1' }, axios);
+    expect(axios.delete).toHaveBeenCalledWith('/api/ui-menus/m1');
+  });
+});
+
+describe('dashboards', () => {
+  it('get --components sorts widgets by row then column position', async () => {
+    const axios = fakeAxios({
+      '/api/dashboards/d1': {
+        data: { id: 'd1', type: 'dashboards', attributes: { name: 'Overview' } },
+      },
+      '/api/dashboard-components?filter[dashboardId][eq]=d1': {
+        data: [
+          { id: 'c-br', attributes: { rowPosition: 2, columnPosition: 1 } },
+          { id: 'c-tr', attributes: { rowPosition: 1, columnPosition: 2 } },
+          { id: 'c-tl', attributes: { rowPosition: 1, columnPosition: 1 } },
+        ],
+      },
+    });
+    const result = await run(
+      dashboardCommands,
+      'get',
+      { dashboardId: 'd1', components: true },
+      axios
+    );
+    const data = result.data as { data: { attributes: { components: { id: string }[] } } };
+    expect(data.data.attributes.components.map((c) => c.id)).toEqual(['c-tl', 'c-tr', 'c-br']);
+  });
+
+  it('get without --components fetches the plain resource', async () => {
+    const axios = fakeAxios();
+    await run(dashboardCommands, 'get', { dashboardId: 'd1', components: false }, axios);
+    expect(axios.get).toHaveBeenCalledWith('/api/dashboards/d1');
+    expect(axios.get).not.toHaveBeenCalledWith(expect.stringContaining('dashboard-components'));
+  });
+
+  it('create uppercases --access-level', async () => {
+    const axios = fakeAxios();
+    await run(
+      dashboardCommands,
+      'create',
+      { name: 'KPIs', accessLevel: 'public', dynamic: false },
+      axios
+    );
+    expect(axios.post).toHaveBeenCalledWith('/api/dashboards', {
+      data: {
+        type: 'dashboards',
+        attributes: { name: 'KPIs', dynamic: false, accessLevel: 'PUBLIC' },
+      },
+    });
+  });
+
+  it('delete is dangerous and deletes by id', async () => {
+    const axios = fakeAxios();
+    expect(command(dashboardCommands, 'delete').dangerous).toBe(true);
+    await run(dashboardCommands, 'delete', { dashboardId: 'd1' }, axios);
+    expect(axios.delete).toHaveBeenCalledWith('/api/dashboards/d1');
+  });
+});
+
+describe('reports', () => {
+  it('list and get hit the reports collection read-only', async () => {
+    const axios = fakeAxios();
+    await run(reportCommands, 'list', {}, axios);
+    expect(axios.get).toHaveBeenCalledWith('/api/reports');
+    await run(reportCommands, 'get', { reportId: 'r1' }, axios);
+    expect(axios.get).toHaveBeenCalledWith('/api/reports/r1');
   });
 });

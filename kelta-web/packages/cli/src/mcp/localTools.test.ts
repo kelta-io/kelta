@@ -23,12 +23,20 @@ describe('selectLocalCommands', () => {
         'profile:list',
         'token:list',
         'token:revoke',
+        'pages:list',
+        'menus:get',
+        'dashboards:get',
+        'reports:list',
       ])
     );
     // hosted toolset territory stays remote
     expect(keys.some((key) => key.startsWith('fields:'))).toBe(false);
     expect(keys.some((key) => key.startsWith('records:'))).toBe(false);
     expect(keys.some((key) => key.startsWith('flows:'))).toBe(false);
+    // layouts/list-views already have hosted admin tools (apply_layout,
+    // apply_listview et al.) — stay remote so they aren't double-sourced
+    expect(keys.some((key) => key.startsWith('layouts:'))).toBe(false);
+    expect(keys.some((key) => key.startsWith('list-views:'))).toBe(false);
     // raw escape hatch is opt-in
     expect(keys).not.toContain(':api');
     const withApi = selectLocalCommands(allCommands, { enableApiTool: true });

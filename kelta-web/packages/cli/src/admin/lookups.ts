@@ -79,3 +79,19 @@ export async function picklistIdByName(axios: AxiosInstance, nameOrId: string): 
   }
   return id;
 }
+
+/** Resolve a UI menu name (or UUID passthrough) to its id. */
+export async function menuIdByName(axios: AxiosInstance, nameOrId: string): Promise<string> {
+  if (UUID_RE.test(nameOrId)) return nameOrId;
+  const response = await axios.get<ListBody>(
+    `/api/ui-menus?filter[name][EQ]=${encodeURIComponent(nameOrId)}&page[size]=1`
+  );
+  const id = response.data.data?.[0]?.id;
+  if (!id) {
+    throw new CliError(`Menu "${nameOrId}" not found`, {
+      code: 'NOT_FOUND',
+      exitCode: EXIT.NOT_FOUND,
+    });
+  }
+  return id;
+}

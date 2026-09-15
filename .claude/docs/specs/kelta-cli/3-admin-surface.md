@@ -14,7 +14,11 @@ Command groups (each maps to existing gateway-fronted endpoints; **no server cha
 | `picklists` | `list`, `get`, `create`, `delete`, `value add/update/deactivate` | `/api/global-picklists`, `/api/picklist-values` |
 | `validation-rules` | `list <col>`, `create`, `update`, `delete` | `/api/validation-rules` |
 | `constraints` | `list <col>`, `create`, `delete` | `/api/admin/collections/{name}/unique-constraints` |
-| `layouts` | `list`, `create`, `update`, `delete`; `list-views create/list` | `/api/page-layouts`, `/api/list-views` |
+| `layouts` | `list`, `create`, `update`, `delete`, `apply`, `get [--tree]`; `list-views list/create/update/get/delete` | `/api/page-layouts`, `/api/list-views` |
+| `pages` | `list`, `get`, `create`, `update`, `delete`, `publish <path>` | `/api/ui-pages` (generic system collection; `publish` PATCHes `published=true` after resolving by `path` — there is no dedicated publish endpoint) |
+| `menus` | `list`, `get [--tree]`, `create`, `update`, `delete` | `/api/ui-menus`, `/api/ui-menu-items` (`--tree` nests items by `parentId` client-side — no server tree endpoint) |
+| `dashboards` | `list`, `get [--components]`, `create`, `update`, `delete` | `/api/dashboards`, `/api/dashboard-components` (`--components` fetches and sorts by `rowPosition`/`columnPosition` client-side — no server "dashboard with components" read) |
+| `reports` | `list`, `get` | `/api/reports` (read-only sugar; authoring stays on `kelta api` — see below) |
 | `flows` | `list`, `describe`, `create`, `update`, `publish`, `execute`, `runs`, `run <execId>`, `cancel`, `retry` | `/api/flows` + `FlowExecutionController` |
 | `users` | `list`, `get`, `invite`, `portal-invite`, `reset-password` | `/api/users`, `/api/admin/users/*` |
 | `limits` | `get`, `set-tier`, `set` | `GovernorLimitsController` |
@@ -30,9 +34,14 @@ Conventions:
 - `flows execute` prints the execution id and, with `--wait`, polls `runs`-status to a
   terminal state (reuses the existing `promote --wait` poller util).
 - Every list command supports the shared filter/sort/fields/include/pagination flags.
+- `pages`/`menus`/`dashboards`/`reports` have no hosted kelta-mcp admin tool (unlike
+  `layouts`/`list-views`, which are fully covered there), so they're also registered as
+  local MCP tools in `mcp/localTools.ts` (`LOCAL_GROUPS`) rather than staying remote-only.
 
-Out of scope: screen-builder pages, dashboards/reports authoring, campaign admin —
-available via `kelta api` (slice 4) until demand justifies sugar.
+Out of scope: dashboard/report **authoring** (report column/filter/grouping definitions,
+dashboard component layout beyond what `--data`/`kelta api` can express), campaign admin —
+available via `kelta api` until demand justifies more sugar. Screen-builder pages, nav
+menus and dashboard/report **read+CRUD** sugar landed in KLT-217.
 
 ## 2. UI samples
 

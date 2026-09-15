@@ -307,6 +307,144 @@ Update a saved list view by id
 - `--card-fields <list>` — Kanban card fields, comma-separated
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+### `kelta list-views get <listViewId>`
+
+Get a saved list view by id
+
+### `kelta list-views delete <listViewId>`
+
+Delete a saved list view **(destructive — needs --yes off-TTY)**
+
+## pages
+
+### `kelta pages list`
+
+List UI pages (screen builder)
+
+### `kelta pages get <pageId>`
+
+Get a UI page by id
+
+### `kelta pages create`
+
+Create a UI page (draft — unpublished until `pages publish`)
+
+- `--name <name>` — Page name (required)
+- `--path <path>` — Route the page is served at (required)
+- `--title <title>` — Browser and header title
+- `--config <json>` — Page config as JSON, @file, or - (layout, components, bindings)
+- `--active <bool>` — true|false (default true)
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
+### `kelta pages update <pageId>`
+
+Update a UI page by id
+
+- `--name <name>` — Page name
+- `--path <path>` — Route the page is served at
+- `--title <title>` — Browser and header title
+- `--config <json>` — Page config as JSON, @file, or -
+- `--active <bool>` — true|false
+- `--published <bool>` — true|false
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
+### `kelta pages delete <pageId>`
+
+Delete a UI page **(destructive — needs --yes off-TTY)**
+
+### `kelta pages publish <path>`
+
+Publish the UI page served at a route path (sets published=true)
+
+## menus
+
+### `kelta menus list`
+
+List UI menus (apps/nav v2)
+
+### `kelta menus get <menu>`
+
+Get a UI menu by name or id (--tree nests items by parentId)
+
+- `--tree` — Include menu items nested by parentId under attribute "items"
+
+### `kelta menus create`
+
+Create a UI menu
+
+- `--name <name>` — Menu name (required)
+- `--description <text>` — Description
+- `--icon <name>` — Icon rendered beside the app label
+- `--display-order <n>` — Ordinal position among sibling menus
+- `--default` — Mark as the default menu
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
+### `kelta menus update <menuId>`
+
+Update a UI menu by id
+
+- `--name <name>` — Menu name
+- `--description <text>` — Description
+- `--icon <name>` — Icon rendered beside the app label
+- `--display-order <n>` — Ordinal position among sibling menus
+- `--default <bool>` — true|false
+- `--active <bool>` — true|false
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
+### `kelta menus delete <menuId>`
+
+Delete a UI menu **(destructive — needs --yes off-TTY)**
+
+## dashboards
+
+### `kelta dashboards list`
+
+List dashboards
+
+### `kelta dashboards get <dashboardId>`
+
+Get a dashboard by id (--components includes widgets sorted by row/column)
+
+- `--components` — Include dashboard components, sorted by rowPosition then columnPosition
+
+### `kelta dashboards create`
+
+Create a dashboard (add widgets via `kelta api` — dashboard-components)
+
+- `--name <name>` — Dashboard name (required)
+- `--description <text>` — Description
+- `--access-level <level>` — PRIVATE (default), PUBLIC or HIDDEN
+- `--column-count <n>` — Width of the dashboard grid in columns
+- `--dynamic` — Widgets execute as --running-user-id rather than the viewer
+- `--running-user-id <id>` — User a dynamic dashboard executes widgets as
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
+### `kelta dashboards update <dashboardId>`
+
+Update a dashboard by id
+
+- `--name <name>` — Dashboard name
+- `--description <text>` — Description
+- `--access-level <level>` — PRIVATE, PUBLIC or HIDDEN
+- `--column-count <n>` — Width of the dashboard grid in columns
+- `--dynamic <bool>` — true|false
+- `--running-user-id <id>` — User a dynamic dashboard executes widgets as
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
+### `kelta dashboards delete <dashboardId>`
+
+Delete a dashboard **(destructive — needs --yes off-TTY)**
+
+## reports
+
+### `kelta reports list`
+
+List saved reports
+
+### `kelta reports get <reportId>`
+
+Get a report definition by id
+
 ## flows
 
 ### `kelta flows list`

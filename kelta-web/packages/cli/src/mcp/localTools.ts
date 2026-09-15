@@ -9,7 +9,18 @@ import type { RegisteredCommand } from '../registry/types.js';
  * equivalent. Everything the hosted kelta-mcp toolsets cover stays remote so
  * platform tools remain single-sourced in Java.
  */
-const LOCAL_GROUPS = new Set(['metadata', 'sandbox', 'promote', 'sdk']);
+const LOCAL_GROUPS = new Set([
+  'metadata',
+  'sandbox',
+  'promote',
+  'sdk',
+  // pages/menus/dashboards/reports have no hosted kelta-mcp admin tool (unlike
+  // layouts/list-views, which do — see CreateLayoutTool/CreateListViewTool et al.)
+  'pages',
+  'menus',
+  'dashboards',
+  'reports',
+]);
 /** Additional group:name picks outside the whole-group list. */
 const LOCAL_PICKS = new Set(['profile:list', 'token:list', 'token:revoke', ':docs']);
 /** Powerful raw escape hatch — opt-in only (`--enable-api-tool`). */
