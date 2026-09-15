@@ -29,6 +29,7 @@ import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -75,7 +76,12 @@ public class GlobalExceptionHandler {
                     "400", code, "Validation Error",
                     fieldError.message() != null ? fieldError.message() : "Invalid value");
                 error.setSource(Map.of("pointer", "/data/attributes/" + fieldError.fieldName()));
-                error.setMeta(Map.of("requestId", requestId));
+                Map<String, Object> meta = new LinkedHashMap<>();
+                if (fieldError.meta() != null) {
+                    meta.putAll(fieldError.meta());
+                }
+                meta.put("requestId", requestId);
+                error.setMeta(meta);
                 errors.add(error);
             }
         } else {

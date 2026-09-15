@@ -775,6 +775,13 @@ class DefaultValidationEngineTest {
             
             assertFalse(result.valid());
             assertEquals("reference", result.errors().get(0).constraint());
+            var fieldError = result.errors().get(0);
+            assertTrue(fieldError.message().contains("non-existent-id"));
+            assertTrue(fieldError.message().contains("users"));
+            assertTrue(fieldError.message().contains("userId"));
+            assertEquals(
+                Map.of("field", "userId", "value", "non-existent-id", "targetCollection", "users"),
+                fieldError.meta());
         }
 
         @Test
@@ -816,6 +823,11 @@ class DefaultValidationEngineTest {
             assertFalse(result.valid());
             assertEquals("reference", result.errors().get(0).constraint());
             assertTrue(result.errors().get(0).message().contains("does not exist"));
+            var fieldError = result.errors().get(0);
+            assertEquals(
+                Map.of("field", "userId", "targetCollection", "non_existent_collection"),
+                fieldError.meta());
+            assertFalse(fieldError.meta().containsKey("value"));
         }
     }
 
