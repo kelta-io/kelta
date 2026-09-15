@@ -460,10 +460,14 @@ jobs:
             local repo="${img#harbor.rzware.com/}"
             local code
             local attempt
+            local max_attempts=14
+            local sleep_seconds=10
             # Harbor's manifest API can lag briefly behind a successful push
             # (registry read-after-write race), so retry before concluding
-            # the tag is genuinely missing.
-            for attempt in 1 2 3 4 5; do
+            # the tag is genuinely missing. Budget: 14 attempts x 10s ≈ 130s
+            # (>2min total), so a slower service checked later in bump()'s
+            # sequence still gets a real window to catch up.
+            for attempt in $(seq 1 "$max_attempts"); do
               code=$(curl -sk -o /dev/null -w "%{http_code}" \
                 -u "${HARBOR_USERNAME}:${HARBOR_PASSWORD}" \
                 -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
@@ -474,8 +478,9 @@ jobs:
               if [[ "$code" == "200" ]]; then
                 return 0
               fi
-              if [[ "$attempt" -lt 5 ]]; then
-                sleep 5
+              echo "verify_image_exists: attempt ${attempt}/${max_attempts} for ${img}:${tag} got HTTP ${code:-<no response>}"
+              if [[ "$attempt" -lt "$max_attempts" ]]; then
+                sleep "$sleep_seconds"
               fi
             done
             return 1
