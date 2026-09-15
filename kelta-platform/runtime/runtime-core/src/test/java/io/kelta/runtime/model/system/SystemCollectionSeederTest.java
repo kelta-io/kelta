@@ -268,7 +268,7 @@ class SystemCollectionSeederTest {
                     contains("INSERT INTO field"),
                     any(), any(), any(), any(), any(), any(), any(), any(),
                     any(), any(), any(), any(), any(), any(), any(), any(),
-                    any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
     }
 
@@ -302,7 +302,7 @@ class SystemCollectionSeederTest {
             verify(jdbcTemplate, never()).update(contains("INSERT INTO field"),
                     any(), any(), any(), any(), any(), any(), any(), any(),
                     any(), any(), any(), any(), any(), any(), any(), any(),
-                    any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -329,7 +329,7 @@ class SystemCollectionSeederTest {
             verify(jdbcTemplate, times(missingCount)).update(contains("INSERT INTO field"),
                     any(), any(), any(), any(), any(), any(), any(), any(),
                     any(), any(), any(), any(), any(), any(), any(), any(),
-                    any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test

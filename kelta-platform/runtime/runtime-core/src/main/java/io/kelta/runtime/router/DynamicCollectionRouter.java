@@ -909,10 +909,11 @@ public class DynamicCollectionRouter {
             return queryRequest;
         }
 
-        // For the 'collections' collection, include both tenant-specific and system
-        // records so that system collections are visible alongside custom ones.
+        // For the 'collections' and 'fields' collections, include both tenant-specific
+        // and system records so that system collections (and their fields) are visible
+        // alongside custom ones.
         List<FilterCondition> filters = new ArrayList<>(queryRequest.filters());
-        if ("collections".equals(definition.name())) {
+        if ("collections".equals(definition.name()) || "fields".equals(definition.name())) {
             filters.add(new FilterCondition("tenantId", FilterOperator.IN,
                     List.of(tenantId, SystemCollectionDefinitions.SYSTEM_TENANT_ID)));
         } else {

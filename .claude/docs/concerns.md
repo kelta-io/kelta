@@ -482,9 +482,30 @@ Same investigation fixed three latent bugs it surfaced: `DefaultQueryEngine` pas
 literal `"default"` as tenantId to delete hooks (setup-audit rows for deletes always failed
 their tenant FK — never persisted for real tenants); `FieldQuotaEnforcementHook` counted
 `field WHERE tenant_id = ?` but `field` has no tenant_id column (query always threw, hook
-fail-open → per-collection field quota was never enforced; now JOINs through `collection`);
-and NATS consumers had no `maxDeliver`, so a poison message redelivered forever (now
-maxDeliver=5 with a 2s delayed NAK).
+fail-open → per-collection field quota was never enforced; fixed at the time by JOINing
+through `collection` — see KLT-206 below, which added the column back and reverted this
+hook to the direct `tenant_id` predicate); and NATS consumers had no `maxDeliver`, so a
+poison message redelivered forever (now maxDeliver=5 with a 2s delayed NAK).
+
+**FIXED (KLT-206) — `GET /api/fields` returned every field on the platform (2,580+ rows
+across tenants in production), letting a tenant enumerate other tenants' field names and
+types.** The `fields` system collection was declared `.tenantScoped(false)`
+(`SystemCollectionDefinitions.fields()`) and the `field` table had no `tenant_id` column,
+so `DynamicCollectionRouter.injectTenantFilter` added no predicate and RLS had nothing to
+key on — `filter[collectionId][eq]=<uuid>` guessing (or no filter at all) leaked every
+tenant's field metadata. Fixed with a denormalised `field.tenant_id` column (V198,
+backfilled from `collection.tenant_id`) rather than a router-level join, keeping
+`injectTenantFilter`/RLS uniform with every other tenant-scoped system collection —
+`fields` now behaves exactly like `collections`: `tenantScoped(true)`, a strict
+`tenant_isolation` RLS policy, and the same router special-case (`injectTenantFilter`)
+that unions the caller's tenant with `SYSTEM_TENANT_ID` on list reads so a system
+collection's own fields stay visible everywhere. New field rows get `tenant_id` from the
+caller's `X-Tenant-ID` (`DynamicCollectionRouter.injectTenantId`); the two raw-SQL seeders
+that write `field` rows outside that path — `SystemCollectionSeeder` (stamps
+`SYSTEM_TENANT_ID` for every system collection's built-in fields) and
+`MigrationFieldRepository` (stamps `TenantContext.get()` for the destructive
+schema-migration path) — were updated to populate the column explicitly, since a `NOT
+NULL` column with no default silently breaks any INSERT that doesn't supply it.
 
 **FIXED (fix/cerbos-record-check-shortcircuit) — per-record Cerbos batch checks ran (with
 full record payloads) even for collections with no record-level rules; a read burst could

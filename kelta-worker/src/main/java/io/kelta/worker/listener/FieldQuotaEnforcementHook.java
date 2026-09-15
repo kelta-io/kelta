@@ -21,10 +21,10 @@ public class FieldQuotaEnforcementHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(FieldQuotaEnforcementHook.class);
 
-    // field has no tenant_id column — tenant scope comes from the parent collection
+    // field.tenant_id is denormalised from the parent collection (KLT-206); the tenant_id
+    // predicate here is belt-and-suspenders scoping alongside RLS, not the only guard.
     private static final String COUNT_FIELDS =
-            "SELECT COUNT(*) FROM field f JOIN collection c ON c.id = f.collection_id "
-                    + "WHERE c.tenant_id = ? AND f.collection_id = ?";
+            "SELECT COUNT(*) FROM field WHERE tenant_id = ? AND collection_id = ?";
 
     private final TenantQuotaResolver quotaResolver;
     private final JdbcTemplate jdbcTemplate;

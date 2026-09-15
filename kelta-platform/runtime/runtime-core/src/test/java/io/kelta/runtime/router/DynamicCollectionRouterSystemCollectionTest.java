@@ -154,6 +154,34 @@ class DynamicCollectionRouterSystemCollectionTest {
         }
 
         @Test
+        @DisplayName("Should scope 'fields' list to caller tenant plus SYSTEM_TENANT_ID, like 'collections'")
+        void list_scopesFieldsToTenantAndSystem() throws Exception {
+            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            when(registry.get("fields")).thenReturn(def);
+
+            QueryResult emptyResult = QueryResult.empty(Pagination.defaults());
+            when(queryEngine.executeQuery(eq(def), any(QueryRequest.class))).thenReturn(emptyResult);
+
+            mockMvc.perform(get("/api/fields")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk());
+
+            ArgumentCaptor<QueryRequest> requestCaptor = ArgumentCaptor.forClass(QueryRequest.class);
+            verify(queryEngine).executeQuery(eq(def), requestCaptor.capture());
+
+            QueryRequest capturedRequest = requestCaptor.getValue();
+            boolean hasScopedTenantFilter = capturedRequest.filters().stream()
+                    .anyMatch(f -> "tenantId".equals(f.fieldName())
+                            && FilterOperator.IN == f.operator()
+                            && f.value() instanceof List<?> values
+                            && values.contains("tenant-123")
+                            && values.contains(io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID));
+            assertTrue(hasScopedTenantFilter,
+                    "Should have a tenantId IN (tenant-123, SYSTEM_TENANT_ID) filter, exposing system fields "
+                            + "alongside the caller's own, and never another tenant's");
+        }
+
+        @Test
         @DisplayName("Should not inject tenant filter for non-tenant-scoped collection list")
         void list_noTenantFilter_forNonTenantScopedCollection() throws Exception {
             // Create a system collection that is NOT tenant-scoped

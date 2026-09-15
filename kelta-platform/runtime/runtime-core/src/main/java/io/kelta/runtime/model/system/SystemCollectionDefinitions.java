@@ -1034,7 +1034,6 @@ public final class SystemCollectionDefinitions {
     public static CollectionDefinition fields() {
         return systemBuilder("fields", "Fields", "field")
             .displayFieldName("name")
-            .tenantScoped(false)
             .addImmutableField("collectionId")
             .addField(FieldDefinition.masterDetail("collectionId", "collections", "Collection")
                 .withColumnName("collection_id"))
