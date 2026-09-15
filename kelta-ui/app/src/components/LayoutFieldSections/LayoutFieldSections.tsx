@@ -35,6 +35,11 @@ export interface LayoutFieldSectionsProps {
   /** Lookup display map: { fieldName: { recordId: displayLabel } } */
   lookupDisplayMap?: Record<string, Record<string, string>>
   /**
+   * Field name → raw value→`{label, color}` (see `usePicklistDisplayMap`) for picklist/
+   * multi_picklist fields. Badges show the authored label; the stored value is unaffected.
+   */
+  picklistDisplayMaps?: Record<string, Map<string, { label: string; color?: string }>>
+  /**
    * Prefix for persisting per-section open state. When set, each section's
    * collapsed state survives navigation/reload via localStorage. Usually
    * the collection name.
@@ -141,6 +146,7 @@ export function LayoutFieldSections({
   record,
   tenantSlug,
   lookupDisplayMap,
+  picklistDisplayMaps,
   persistKeyPrefix,
   editable,
   onFieldCommit,
@@ -203,6 +209,7 @@ export function LayoutFieldSections({
                     value={value}
                     displayLabel={displayLabel}
                     tenantSlug={tenantSlug}
+                    picklistDisplayMap={picklistDisplayMaps?.[field.name]}
                     editable
                     readOnly={placementOverrides.get(field.name)?.readOnly}
                     required={placementOverrides.get(field.name)?.required}
@@ -219,6 +226,7 @@ export function LayoutFieldSections({
                       tenantSlug={tenantSlug}
                       targetCollection={field.referenceTarget}
                       displayLabel={displayLabel}
+                      picklistDisplayMap={picklistDisplayMaps?.[field.name]}
                       truncate={false}
                     />
                     <ChangedBadge />
@@ -232,6 +240,7 @@ export function LayoutFieldSections({
                     tenantSlug={tenantSlug}
                     targetCollection={field.referenceTarget}
                     displayLabel={displayLabel}
+                    picklistDisplayMap={picklistDisplayMaps?.[field.name]}
                     truncate={false}
                   />
                 )

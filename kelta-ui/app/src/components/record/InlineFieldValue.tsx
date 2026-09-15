@@ -27,6 +27,8 @@ export interface InlineFieldValueProps {
   value: unknown
   displayLabel?: string
   tenantSlug?: string
+  /** Raw value → authored `{label, color}` for picklist / multi_picklist (see `usePicklistDisplayMap`). */
+  picklistDisplayMap?: Map<string, { label: string; color?: string }>
   /** Page-level edit permission. When false, always renders the read view. */
   editable?: boolean
   /** Placement-level read-only override. */
@@ -51,7 +53,7 @@ export interface InlineFieldValueProps {
 }
 
 function buildContext(props: InlineFieldValueProps): FieldControlContext {
-  const { field, tenantSlug, displayLabel, readOnly, required } = props
+  const { field, tenantSlug, displayLabel, readOnly, required, picklistDisplayMap } = props
   return {
     fieldName: field.name,
     displayName: field.displayName || field.name,
@@ -59,6 +61,7 @@ function buildContext(props: InlineFieldValueProps): FieldControlContext {
     targetCollection: field.referenceTarget,
     displayLabel,
     enumValues: field.enumValues,
+    picklistDisplayMap,
     referenceOptions: field.lookupOptions,
     readOnly,
     required: required ?? field.required,
