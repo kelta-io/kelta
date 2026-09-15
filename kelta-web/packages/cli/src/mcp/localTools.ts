@@ -11,7 +11,7 @@ import type { RegisteredCommand } from '../registry/types.js';
  */
 const LOCAL_GROUPS = new Set(['metadata', 'sandbox', 'promote', 'sdk']);
 /** Additional group:name picks outside the whole-group list. */
-const LOCAL_PICKS = new Set(['profile:list', 'token:list', 'token:revoke']);
+const LOCAL_PICKS = new Set(['profile:list', 'token:list', 'token:revoke', ':docs']);
 /** Powerful raw escape hatch — opt-in only (`--enable-api-tool`). */
 const API_PICK = ':api';
 
