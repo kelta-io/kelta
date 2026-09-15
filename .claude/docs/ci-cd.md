@@ -50,7 +50,10 @@ Trigger: `push` → `main` (path-filtered), plus `workflow_dispatch`.
    Docker buildx → pushes to `harbor.rzware.com/emf/emf-<svc>:latest` and
    `:main-<short-sha>`. Per-service GHA cache scope.
 3. **`deploy`** — checks out `homelab-argo`, runs kustomize to bump image tags (verifies
-   each image exists on Harbor first), commits to `homelab-argo`. ArgoCD then syncs.
+   each image exists on Harbor first — `verify_image_exists()` retries the manifest check up
+   to 5 times with a short backoff, since Harbor can briefly lag behind a successful push
+   before the tag is queryable; it still fails the step with `::error::Refusing to bump ...`
+   if every retry comes back non-200), commits to `homelab-argo`. ArgoCD then syncs.
 4. **`smoke-test`** — waits for k8s rollouts; `curl .../actuator/health/liveness` on gateway
    + worker; then (only when cli-downloads was rebuilt) downloads and executes the CLI binary.
    **The CLI check keys on two different values and they can disagree:** `CLI_VERSION` is baked
