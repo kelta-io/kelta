@@ -475,14 +475,28 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   to duplicate it with. Requires **both** the `permitAll` entry and a **CSRF exemption** in
   `AuthorizationServerConfig` — permitAll alone leaves the POST returning 403.
 - **Analytics endpoints** (`/api/reports/{id}/execute|export`, `/api/dashboards/{id}/data`,
-  `/api/dashboards/{id}/components/{cid}/data`): static routes, so gated **in-controller** —
-  `ReportExecutionController`/`DashboardDataController.requireAnalyticsAccess` requires a granted
-  **`VIEW_ANALYTICS`** (or `MANAGE_REPORTS`, the authoring permission) via the standard
-  `CerbosPermissionResolver` + `BootstrapRepository.findProfileSystemPermissions` check;
+  `/api/dashboards/{id}/components/{cid}/data`, `/api/dashboards/{id}/validate`): static routes,
+  so gated **in-controller** — `ReportExecutionController`/`DashboardDataController.requireAnalyticsAccess`
+  requires a granted **`VIEW_ANALYTICS`** (or `MANAGE_REPORTS`, the authoring permission) via the
+  standard `CerbosPermissionResolver` + `BootstrapRepository.findProfileSystemPermissions` check;
   fail-closed 403 on missing identity. The gate runs *before* each endpoint's try/catch (a
   `ResponseStatusException` thrown inside would be swallowed into a 500). Scheduled report
   delivery calls `ReportExecutionService` at the service layer and is deliberately ungated
   (system-trust tier, same contract as masking's null principal).
+- **Dashboard component config validation** (K-9 item 11): `dashboard-components.config` is free
+  JSON with no schema of its own, so a bad `collectionName`/field/operator/grid position was only
+  ever discovered at render time. `DashboardComponentValidator` (shared by
+  `DashboardComponentConfigHook`, a `BeforeSaveHook` on `dashboard-components`, and the dry-run
+  `POST /api/dashboards/{id}/validate`) rejects those at write time with a
+  `/data/attributes/config/...` (or `/data/attributes/columnPosition`) pointer; `validate` writes
+  nothing and reports the same errors so a builder UI can check a candidate config before saving.
+  At render time, `DashboardDataService.executeWidget` additionally classifies a runtime
+  `InvalidQueryException` naming a field the collection no longer has (e.g. deleted after the
+  widget was configured) into `"Unknown field 'x' on collection 'y'"` on that widget's `error`,
+  instead of the generic "Internal error executing widget" catch-all. `dashboard_component.report_id`
+  is a nullable LOOKUP (not MASTER_DETAIL) — `resolveTargetCollection` already accepts
+  `config.collectionName` as an alternative target, so a collection-targeting widget needs no
+  report row.
 - **End-user analytics viewer** (slice 3): `/app/dashboards/:id` consumes the pass-through
   dashboard-data contract — `POST /api/dashboards/{id}/data` returns widget payloads keyed by
   componentId with NO layout metadata; the client joins them onto `dashboard-components` rows
