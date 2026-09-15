@@ -284,6 +284,43 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void validationException_referenceError_mergesFieldValueAndTargetCollectionIntoMeta() {
+        ValidationResult result = ValidationResult.failure(List.of(
+                io.kelta.runtime.validation.FieldError.reference("sectionId", "layout-sections", "page-layout-1")));
+
+        ResponseEntity<Map<String, Object>> response =
+                handler.handleValidationException(new ValidationException(result), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        Map<String, Object> e = firstError(response);
+        assertThat(str(e, "code")).isEqualTo("reference");
+        assertThat(str(e, "detail")).contains("page-layout-1", "layout-sections", "sectionId");
+        assertThat(source(e)).containsEntry("pointer", "/data/attributes/sectionId");
+        Map<String, Object> meta = meta(e);
+        assertThat(meta).containsEntry("field", "sectionId");
+        assertThat(meta).containsEntry("value", "page-layout-1");
+        assertThat(meta).containsEntry("targetCollection", "layout-sections");
+        assertThat(meta).containsKey("requestId");
+        assertThat(meta).hasSize(4);
+    }
+
+    @Test
+    void validationException_referenceTargetMissing_omitsValueFromMeta() {
+        ValidationResult result = ValidationResult.failure(List.of(
+                io.kelta.runtime.validation.FieldError.referenceTargetMissing("sectionId", "no-such-collection")));
+
+        ResponseEntity<Map<String, Object>> response =
+                handler.handleValidationException(new ValidationException(result), request);
+
+        Map<String, Object> e = firstError(response);
+        Map<String, Object> meta = meta(e);
+        assertThat(meta).containsEntry("field", "sectionId");
+        assertThat(meta).containsEntry("targetCollection", "no-such-collection");
+        assertThat(meta).containsKey("requestId");
+        assertThat(meta).doesNotContainKey("value");
+    }
+
+    @Test
     void recordValidationException_emits422WithRuleFailedCode() {
         RecordValidationException ex = new RecordValidationException(List.of(
                 new ValidationError("title_year_range",

@@ -1,22 +1,27 @@
 package io.kelta.runtime.validation;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
  * Represents a validation error for a specific field.
- * 
+ *
  * <p>Contains the field name, error message, and the constraint that was violated.
- * 
+ *
  * @param fieldName the name of the field that failed validation
  * @param message a human-readable error message describing the validation failure
  * @param constraint the name of the constraint that was violated (e.g., "nullable", "minValue", "pattern")
- * 
+ * @param meta optional structured detail merged into the JSON:API error's {@code meta}
+ *             (e.g. the offending value / target collection for reference errors); may be {@code null}
+ *
  * @since 1.0.0
  */
 public record FieldError(
     String fieldName,
     String message,
-    String constraint
+    String constraint,
+    Map<String, Object> meta
 ) {
     /**
      * Compact constructor with validation.
@@ -26,7 +31,14 @@ public record FieldError(
         Objects.requireNonNull(message, "message cannot be null");
         Objects.requireNonNull(constraint, "constraint cannot be null");
     }
-    
+
+    /**
+     * Convenience constructor for errors with no extra meta.
+     */
+    public FieldError(String fieldName, String message, String constraint) {
+        this(fieldName, message, constraint, null);
+    }
+
     /**
      * Creates a nullable constraint violation error.
      * 
@@ -134,13 +146,44 @@ public record FieldError(
     }
     
     /**
-     * Creates a reference constraint violation error.
-     * 
+     * Creates a reference constraint violation error for a value that does not
+     * resolve to an existing record in the target collection.
+     *
      * @param fieldName the field name
      * @param targetCollection the target collection name
-     * @return a FieldError for reference constraint violation
+     * @param value the offending referenced id
+     * @return a FieldError for reference constraint violation, with {@code meta}
+     *         carrying {@code field}, {@code value} and {@code targetCollection}
      */
-    public static FieldError reference(String fieldName, String targetCollection) {
-        return new FieldError(fieldName, "Referenced record does not exist in collection: " + targetCollection, "reference");
+    public static FieldError reference(String fieldName, String targetCollection, String value) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("field", fieldName);
+        meta.put("value", value);
+        meta.put("targetCollection", targetCollection);
+        return new FieldError(
+            fieldName,
+            "Referenced record '" + value + "' does not exist in collection '" + targetCollection + "' (field " + fieldName + ")",
+            "reference",
+            meta);
+    }
+
+    /**
+     * Creates a reference constraint violation error for a field whose configured
+     * target collection does not exist (a configuration error, not a bad value).
+     *
+     * @param fieldName the field name
+     * @param targetCollection the (non-existent) target collection name
+     * @return a FieldError for reference constraint violation, with {@code meta}
+     *         carrying {@code field} and {@code targetCollection} only (no {@code value})
+     */
+    public static FieldError referenceTargetMissing(String fieldName, String targetCollection) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("field", fieldName);
+        meta.put("targetCollection", targetCollection);
+        return new FieldError(
+            fieldName,
+            "Referenced collection does not exist: " + targetCollection,
+            "reference",
+            meta);
     }
 }

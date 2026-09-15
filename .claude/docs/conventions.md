@@ -55,6 +55,8 @@ All 4xx responses returned from any Kelta service MUST use the JSON:API error en
 
 Never emit an empty error object (`{}`). If you reach a path with no specific information, fall through to the generic handler so clients still get a populated envelope.
 
+- `meta` — always carries `requestId`. Field-level errors may add error-specific keys next to it; `GlobalExceptionHandler.handleValidationException` merges `FieldError.meta()` into the response error's `meta` map. The `reference` code (a lookup/master-detail field whose value doesn't resolve to an existing record) sets `meta.field`, `meta.targetCollection` and, when the offending value is known, `meta.value` — e.g. `{"field": "sectionId", "value": "page-layout-1", "targetCollection": "layout-sections", "requestId": "abc12345"}`. When the field's configured target collection itself doesn't exist (`FieldError.referenceTargetMissing`), `meta.value` is omitted since there was no candidate record to check.
+
 Where errors are constructed:
 - `kelta-gateway/src/main/java/io/kelta/gateway/error/GlobalErrorHandler.java` — reactive (`ErrorWebExceptionHandler`) for all gateway-originating 4xx/5xx
 - `kelta-platform/runtime/runtime-core/src/main/java/io/kelta/runtime/router/GlobalExceptionHandler.java` — servlet (`@ControllerAdvice`) covering bean validation, malformed bodies, missing params, type mismatches, `NoResourceFoundException`/`NoHandlerFoundException`, `MethodNotAllowed`, `UnsupportedMediaType`, `ResponseStatusException`, plus the platform's own `ValidationException` / `InvalidQueryException` / `UniqueConstraintViolationException`
