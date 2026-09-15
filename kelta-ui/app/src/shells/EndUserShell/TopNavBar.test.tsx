@@ -86,6 +86,25 @@ describe('TopNavBar', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/couchpicks/app/p/dashboard')
   })
 
+  it('appends a collection tab query string to the href and still highlights it as active', () => {
+    const tabsWithQuery: NavTab[] = [
+      {
+        key: '/resources/tasks?view=shared:abc&pageSize=100',
+        kind: 'collection',
+        target: 'tasks',
+        label: 'Shared Tasks',
+        query: 'view=shared:abc&pageSize=100',
+      },
+    ]
+    render(<TopNavBar tabs={tabsWithQuery} />)
+    const tab = desktopNav().getByText('Shared Tasks')
+    fireEvent.click(tab)
+    expect(mockNavigate).toHaveBeenCalledWith(
+      '/couchpicks/app/o/tasks?view=shared:abc&pageSize=100'
+    )
+    expect(tab).toHaveAttribute('aria-current', 'page')
+  })
+
   it('groups page items under a Pages heading in the mobile menu', () => {
     render(<TopNavBar tabs={TABS} />)
     // Mobile sheet (mocked open) renders its Collections + Pages section headings.

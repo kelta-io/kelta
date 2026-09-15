@@ -56,6 +56,12 @@ export interface NavTab {
   label: string
   /** Lucide icon name (optional) */
   icon?: string
+  /**
+   * Query string (without the leading `?`) carried over from the menu item's path — e.g.
+   * `view=shared:<id>&pageSize=100`. Collection tabs only; appended verbatim to the `…/o/<target>`
+   * href so a menu item can deep-link into a specific shared view.
+   */
+  query?: string
   /** Child tabs — present only when kind === 'group' (one level of nesting). */
   children?: NavTab[]
 }
@@ -138,7 +144,7 @@ export function TopNavBar({
         case 'chat':
           return `${basePath}/chat`
         default:
-          return `${basePath}/o/${tab.target}`
+          return `${basePath}/o/${tab.target}${tab.query ? `?${tab.query}` : ''}`
       }
     },
     [basePath]

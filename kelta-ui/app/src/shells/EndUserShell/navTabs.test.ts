@@ -2,7 +2,13 @@
  * Unit tests for the menu-config → nav-tab mapping (collections + custom pages).
  */
 import { describe, it, expect } from 'vitest'
-import { activeMenus, buildNavTabs, menuItemToTab, resolveActiveMenu } from './navTabs'
+import {
+  activeMenus,
+  buildNavTabs,
+  menuItemToTab,
+  parseResourcePath,
+  resolveActiveMenu,
+} from './navTabs'
 import type { MenuConfig } from '@/types/config'
 
 describe('menuItemToTab', () => {
@@ -50,6 +56,50 @@ describe('menuItemToTab', () => {
     expect(menuItemToTab({ id: '7', label: 'Settings', path: '/settings' })).toBeNull()
     expect(menuItemToTab({ id: '8', label: 'No path' })).toBeNull()
     expect(menuItemToTab({ id: '9', label: 'Empty resource', path: '/resources/' })).toBeNull()
+  })
+
+  it('keeps a query string on a /resources/<collection>?... item, target stays the collection', () => {
+    expect(
+      menuItemToTab({
+        id: '10',
+        label: 'Shared queue',
+        path: '/resources/tasks?view=shared:abc&pageSize=50',
+      })
+    ).toEqual({
+      key: '/resources/tasks?view=shared:abc&pageSize=50',
+      kind: 'collection',
+      target: 'tasks',
+      label: 'Shared queue',
+      icon: undefined,
+      query: 'view=shared:abc&pageSize=50',
+    })
+  })
+
+  it('omits query on a plain /resources/<collection> item — behaves exactly as before', () => {
+    const tab = menuItemToTab({ id: '11', label: 'Tasks', path: '/resources/tasks' })
+    expect(tab?.query).toBeUndefined()
+  })
+})
+
+describe('parseResourcePath', () => {
+  it('returns the collection name with no query for a plain path', () => {
+    expect(parseResourcePath('/resources/tasks')).toEqual({ collectionName: 'tasks' })
+  })
+
+  it('splits the collection name from its query string', () => {
+    expect(parseResourcePath('/resources/tasks?view=shared:abc&pageSize=100')).toEqual({
+      collectionName: 'tasks',
+      query: 'view=shared:abc&pageSize=100',
+    })
+  })
+
+  it('returns null for a non-resource path', () => {
+    expect(parseResourcePath('/p/dashboard')).toBeNull()
+  })
+
+  it('returns null when the collection segment is empty, with or without a query', () => {
+    expect(parseResourcePath('/resources/')).toBeNull()
+    expect(parseResourcePath('/resources/?view=shared:abc')).toBeNull()
   })
 })
 

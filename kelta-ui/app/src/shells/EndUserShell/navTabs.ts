@@ -20,6 +20,23 @@ const REPORT_PATH_RE = /^\/(?:app\/)?reports\/([^/]+)/
 const CHAT_PATH_RE = /^\/(?:app\/)?chat\/?$/
 
 /**
+ * Parse a `/resources/<collection>[?query]` menu path into the collection name and its
+ * query string (without the leading `?`). Returns `null` when there's no collection segment
+ * (e.g. `/resources/` or `/resources/?view=x`). The query string is kept verbatim — deep-link
+ * params like `view=shared:<id>`, `filter`, `sort`, `pageSize` are `ObjectListPage`'s to parse.
+ */
+export function parseResourcePath(path: string): { collectionName: string; query?: string } | null {
+  if (!path.startsWith('/resources/')) return null
+  const rest = path.slice('/resources/'.length)
+  const queryIndex = rest.indexOf('?')
+  const withoutQuery = queryIndex === -1 ? rest : rest.slice(0, queryIndex)
+  const query = queryIndex === -1 ? undefined : rest.slice(queryIndex + 1)
+  const collectionName = withoutQuery.split('/')[0]
+  if (!collectionName) return null
+  return query ? { collectionName, query } : { collectionName }
+}
+
+/**
  * Map a single menu item to a nav tab, or `null` if its path is not a surfaceable target.
  * An item with children becomes a `group` tab (a dropdown in the top nav); its own path,
  * if any, is ignored — group headers organize, they don't navigate. Groups whose children
@@ -45,15 +62,17 @@ export function menuItemToTab(item: MenuItemConfig): NavTab | null {
   if (!path) return null
 
   if (path.startsWith('/resources/')) {
-    const collectionName = path.replace('/resources/', '').split('/')[0]
-    if (!collectionName) return null
-    return {
+    const parsed = parseResourcePath(path)
+    if (!parsed) return null
+    const tab: NavTab = {
       key: path,
       kind: 'collection',
-      target: collectionName,
-      label: item.label || collectionName,
+      target: parsed.collectionName,
+      label: item.label || parsed.collectionName,
       icon: item.icon,
     }
+    if (parsed.query) tab.query = parsed.query
+    return tab
   }
 
   const pageMatch = PAGE_PATH_RE.exec(path)

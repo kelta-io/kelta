@@ -25,6 +25,7 @@ import { useAppContext } from '@/context/AppContext'
 import { useConfig } from '@/context/ConfigContext'
 import { CustomPage } from '../CustomPage/CustomPage'
 import { resolveHomePageSlug } from './homePage'
+import { parseResourcePath } from '@/shells/EndUserShell/navTabs'
 import type { MenuConfig, MenuItemConfig } from '@/types/config'
 
 /**
@@ -57,14 +58,13 @@ function getCollectionTabs(
   const tabs: Array<{ collectionName: string; label: string }> = []
   const visit = (items: MenuItemConfig[] | undefined) => {
     for (const item of items ?? []) {
-      if (item.path?.startsWith('/resources/')) {
-        const collectionName = item.path.replace('/resources/', '').split('/')[0]
-        if (collectionName) {
-          tabs.push({
-            collectionName,
-            label: item.label || collectionName.charAt(0).toUpperCase() + collectionName.slice(1),
-          })
-        }
+      const parsed = item.path ? parseResourcePath(item.path) : null
+      if (parsed) {
+        const { collectionName } = parsed
+        tabs.push({
+          collectionName,
+          label: item.label || collectionName.charAt(0).toUpperCase() + collectionName.slice(1),
+        })
       }
       // Submenu groups: collections may nest one level down.
       if (item.children?.length) visit(item.children)
