@@ -128,9 +128,10 @@ vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenuTrigger: ({ children }: React.PropsWithChildren<{ asChild?: boolean }>) => (
     <div>{children}</div>
   ),
-  DropdownMenuContent: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
-    <div {...props}>{children}</div>
-  ),
+  DropdownMenuContent: ({
+    children,
+    ...props
+  }: React.PropsWithChildren<Record<string, unknown>>) => <div {...props}>{children}</div>,
   DropdownMenuItem: ({
     children,
     onClick,
@@ -145,11 +146,19 @@ vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenuLabel: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   DropdownMenuCheckboxItem: ({
     children,
+    checked,
     onCheckedChange,
     ...props
-  }: React.PropsWithChildren<{ onCheckedChange?: (v: boolean) => void } & Record<string, unknown>>) => (
+  }: React.PropsWithChildren<
+    { checked?: boolean; onCheckedChange?: (v: boolean) => void } & Record<string, unknown>
+  >) => (
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus
-    <div role="menuitemcheckbox" onClick={() => onCheckedChange?.(true)} {...props}>
+    <div
+      role="menuitemcheckbox"
+      aria-checked={checked === true}
+      onClick={() => onCheckedChange?.(true)}
+      {...props}
+    >
       {children}
     </div>
   ),
@@ -233,9 +242,8 @@ describe('ObjectListPage — a published shared view', () => {
     expect(screen.queryByTestId('kanban-board')).toBeNull()
     // stored against this user for this shared view — the published row is untouched
     await waitFor(() => expect(postedPreferences.length).toBeGreaterThan(0))
-    const attributes = (
-      postedPreferences[0] as { data: { attributes: Record<string, unknown> } }
-    ).data.attributes
+    const attributes = (postedPreferences[0] as { data: { attributes: Record<string, unknown> } })
+      .data.attributes
     expect(attributes.prefType).toBe('list-view-type')
     expect(attributes.prefKey).toBe('projects')
     expect(attributes.value).toEqual({

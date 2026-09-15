@@ -7,15 +7,15 @@
  * and the submitted body carries `viewType` + a `typeConfig` object the end-user
  * list can read back.
  */
-import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/context/I18nContext'
 import { ListViewsPage } from './ListViewsPage'
 
-const create = vi.fn(async () => ({ id: 'lv-1' }))
-const update = vi.fn(async () => ({ id: 'lv-1' }))
+// Typed as variadic so the assertions can index the call args the page passes.
+const create = vi.fn<(...args: unknown[]) => Promise<{ id: string }>>(async () => ({ id: 'lv-1' }))
+const update = vi.fn<(...args: unknown[]) => Promise<{ id: string }>>(async () => ({ id: 'lv-1' }))
 
 const EXISTING = {
   id: 'lv-1',

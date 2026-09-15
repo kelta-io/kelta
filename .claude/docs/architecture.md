@@ -592,6 +592,43 @@ There is now **one record-detail path**. Both the end-user runtime (`/:tenant/ap
 
 **Offline replica path (end-user only).** When `OfflineProvider` is mounted — it wraps the `EndUserShell` subtree — the shared data hooks route through a tenant-scoped IndexedDB replica: online reads write through to the store and offline reads serve it (`useCollectionRecords`/`useRecord`/`usePageDataSources`), and offline writes queue to an outbox (`useRecordMutation` → `engine.queue`) that flushes on reconnect (`SyncEngine.sync`). Admin pages render outside the provider (`useOffline()` → `undefined`), so their reads/writes stay online-only and unchanged. See `conventions.md` → offline hooks.
 
+### List-view renderer contract — shared row publishes `viewType`/`typeConfig`
+
+A list view's **renderer** is part of the shared metadata, not only a per-user toggle.
+The `list-views` system collection carries `viewType`
+(`TABLE` | `KANBAN` | `CALENDAR` | `GALLERY`, NOT NULL DEFAULT `TABLE`, CHECK-constrained)
+and `typeConfig` (JSONB, per-renderer settings keyed by lowercased view type — e.g.
+`{"kanban": {"laneField": "status", "cardFields": ["title"]}}`) — added by
+`V196__list_view_view_type.sql` and declared in `SystemCollectionDefinitions.listViews()`.
+They mirror the fields the per-user `SavedView` already had, so an admin can publish "the
+board" instead of a column set every user re-configures.
+
+**Resolution precedence on the end-user list** (`ObjectListPage`), highest first:
+
+1. the viewer's own override for that shared view — one `user-ui-preferences` row per
+   collection (`prefType: 'list-view-type'`, `useViewTypeOverrides`), a map of shared-view
+   id → `{viewType, typeConfig}`, written when the toolbar switch is used on a shared view;
+2. the published `viewType`/`typeConfig` on the shared row, mapped by
+   `mapSharedListView` (`ObjectListPage/listViewMapping.ts`);
+3. `table`.
+
+The stored value is uppercase and the frontend `SavedViewType` is lowercase;
+`listViewMapping` normalizes and **falls back to the table renderer for anything
+unrecognized** (a row written before V196, or by a rolled-back platform version) rather than
+erroring, and drops a `typeConfig` section missing its required field (kanban lane, calendar
+date) instead of passing it through half-formed. The toolbar override never writes the
+shared row — a user flipping a published board back to a table changes only their own
+preference row. `ObjectListPage` waits for `useViewTypeOverrides().isLoaded` before applying
+a default/linked view, so a published board does not flash in ahead of the viewer's choice.
+
+Both write paths produce the same row: `kelta list-views create|update --view-type KANBAN
+--lane-field status --card-fields title,tier` (also `--visibility`, `--data`; `--card-fields`
+without `--lane-field` is a usage error) and the MCP `create_listview`/`update_listview`
+tools' `viewType` + `typeConfig` params (`update_listview` clears `typeConfig` on an explicit
+`{}`). Setup › List Views exposes the same choice, scoping the kanban lane select to the
+collection's picklist fields. Authoring reference: `docs/authoring/list-views.md`
+(served as `kelta docs list-views` and the `kelta://docs/list-views` MCP resource).
+
 ## Data Flow
 
 **Tenant-slug resolution (cold-cache safe).** `TenantSlugExtractionFilter` resolves the URL slug via
