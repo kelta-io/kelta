@@ -52,7 +52,7 @@ public class CreateLayoutTool implements AdminTool {
         Map<String, Object> sectionFieldItem = new LinkedHashMap<>();
         sectionFieldItem.put("type", "object");
         sectionFieldItem.put("description",
-                "{\"fieldName\":\"...\",\"sortOrder\":number,\"columnNumber\":1|2|3,"
+                "{\"fieldName\":\"...\",\"sortOrder\":number,\"columnNumber\":0|1|2 (0-based),"
                 + "\"columnSpan\":number,\"readOnly\":bool,\"required\":bool,\"labelOverride\":\"...\"}");
         sectionFieldItem.put("additionalProperties", true);
 
@@ -215,7 +215,7 @@ public class CreateLayoutTool implements AdminTool {
         fieldAttrs.put("fieldId", fieldId);
         fieldAttrs.put("sortOrder", fieldMap.get("sortOrder") instanceof Number so ? so.intValue() : index);
         fieldAttrs.put("columnNumber", fieldMap.get("columnNumber") instanceof Number c
-                ? c.intValue() : (index % Math.max(columns, 1)) + 1);
+                ? c.intValue() : index % Math.max(columns, 1));
         if (fieldMap.get("columnSpan") instanceof Number cs) fieldAttrs.put("columnSpan", cs.intValue());
         if (fieldMap.get("required") instanceof Boolean b) fieldAttrs.put("isRequiredOnLayout", b);
         if (fieldMap.get("readOnly") instanceof Boolean b) fieldAttrs.put("isReadOnlyOnLayout", b);

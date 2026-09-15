@@ -2166,7 +2166,7 @@ public final class SystemCollectionDefinitions {
             .addField(FieldDefinition.masterDetail("fieldId", "fields", "Field")
                 .withColumnName("field_id"))
             .addField(FieldDefinition.integer("columnNumber")
-                .withColumnName("column_number").withDefault(1))
+                .withColumnName("column_number").withDefault(0))
             .addField(FieldDefinition.requiredInteger("sortOrder")
                 .withColumnName("sort_order"))
             .addField(FieldDefinition.bool("isRequiredOnLayout")
