@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { FieldRenderer } from './FieldRenderer'
 import { componentRegistry } from '@/services/componentRegistry'
@@ -273,6 +274,41 @@ describe('FieldRenderer', () => {
         value: '<p>Hello <strong>World</strong></p>',
       })
       expect(screen.getByText('Hello World')).toBeDefined()
+    })
+
+    it('renders a 1000-character value in full when truncate is false', () => {
+      const longText = 'A'.repeat(1000)
+      renderField({
+        type: 'rich_text',
+        value: `<p>${longText}</p>`,
+        truncate: false,
+      })
+      expect(screen.getByText(longText)).toBeDefined()
+    })
+
+    it('shows a 100-character preview with the full text in a tooltip when truncated', async () => {
+      const user = userEvent.setup()
+      const longText = 'B'.repeat(1000)
+      renderField({
+        type: 'rich_text',
+        value: `<p>${longText}</p>`,
+        truncate: true,
+      })
+      const preview = screen.getByText(`${'B'.repeat(100)}...`)
+      expect(preview).toBeDefined()
+      await user.hover(preview)
+      expect((await screen.findAllByText(longText)).length).toBeGreaterThan(0)
+    })
+
+    it('never injects a stored <script> tag as HTML', () => {
+      const malicious = '<script>window.__pwned = true</script>Hello'
+      const { container } = renderField({
+        type: 'rich_text',
+        value: malicious,
+        truncate: false,
+      })
+      expect(container.querySelector('script')).toBeNull()
+      expect(container.textContent).toBe('window.__pwned = trueHello')
     })
   })
 
