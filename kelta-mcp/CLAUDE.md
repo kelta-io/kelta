@@ -51,6 +51,8 @@ io.kelta.mcp/
     user/          ← QueryCollectionTool, CreateRecordTool, ExecuteFlowTool, ...
     admin/         ← CreateCollectionTool, CreateLayoutTool, CreateFlowTool, ...
   resource/        ← MCP Resources for browsable schema/openapi
+    docs/          ← DocResource (kelta://docs/<topic>): classpath copies of docs/authoring/*.md,
+                     pinned against the repo-root source by DocResourceTest
   client/          ← GatewayHttpClient (in-cluster: http://emf-gateway:80)
   error/           ← McpErrorMapper (gateway 4xx/5xx → MCP error result, redacts klt_)
 ```
@@ -80,6 +82,15 @@ it's the front door that orients a client (discovery order, filter/formula gotch
 order for admin) instead of making it reconstruct the operating model tool-by-tool every
 session. **Update it in the same PR** whenever a tool is added, removed, renamed, or its
 documented behavior changes in a way that affects the recommended usage order.
+
+### Resource definition
+A static resource (fixed URI) implements **`UserResource`** and/or **`AdminResource`** — both
+are `@Component`-discoverable marker interfaces returning a `SyncResourceSpecification`; a
+class implementing both is registered on **both** endpoints (e.g. `docs/DocResource`, the
+`kelta://docs/<topic>` authoring reference). A URI with variable segments implements
+`UserResourceTemplate` instead (admin has no template variant yet). Registration is automatic
+via the `List<UserResource>`/`List<AdminResource>`/`List<UserResourceTemplate>` autowiring in
+`McpServerConfig` — do not hand-write `server.addResource(...)`.
 
 ### No DB
 kelta-mcp is stateless. The runtime-core auto-configurations (`KeltaRuntimeAutoConfiguration`, `EncryptionAutoConfiguration`) are excluded in `McpApplication`. Component scan is restricted to `io.kelta.mcp` so we only depend on runtime-core for type definitions (CollectionDefinition, FieldDefinition, FieldType).

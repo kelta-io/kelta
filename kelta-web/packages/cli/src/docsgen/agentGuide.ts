@@ -52,7 +52,8 @@ discoverable command catalog.
 ## Query grammar (list commands)
 
 - \`--filter field=value\` (op defaults to eq) or \`--filter field.op=value\`;
-  repeatable, ANDed. Ops: eq, neq, gt, gte, lt, lte, contains, …
+  repeatable, ANDed. Ops: eq, neq, gt, gte, lt, lte, isnull, contains, starts,
+  ends, icontains, istarts, iends, ieq, in (also aliased as any).
 - \`--sort -createdAt,name\` (leading \`-\` = descending)
 - \`--fields a,b\` (sparse) · \`--include rel1,rel2\` · \`--page N --size N\` (max 200)
 - \`--all\` auto-paginates (client cap 10k, warning on stderr when hit).

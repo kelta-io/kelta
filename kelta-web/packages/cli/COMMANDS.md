@@ -596,6 +596,10 @@ Raw API escape hatch: profile auth + tenant prefix applied, response verbatim **
 - `--data <json>` — Request body as JSON, @file, or - (any JSON value)
 - `--header <h>` — Extra header as Name:value (repeatable) (repeatable)
 
+### `kelta docs <topic>`
+
+Print a reference doc: the agent guide, or a metadata-authoring topic
+
 ## mcp
 
 ### `kelta mcp serve`
@@ -613,9 +617,3 @@ Print MCP client configuration for this profile (stdio bridge by default)
 
 - `--toolset <set>` — user|admin|all (default: "all")
 - `--direct` — Hosted HTTP config instead of the stdio bridge
-
-## docs
-
-### `kelta docs agent`
-
-Print the condensed agent guide (auth model, contracts, examples)

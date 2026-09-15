@@ -1,5 +1,6 @@
 package io.kelta.mcp;
 
+import io.kelta.mcp.resource.AdminResource;
 import io.kelta.mcp.resource.UserResource;
 import io.kelta.mcp.resource.UserResourceTemplate;
 import io.kelta.mcp.tool.AdminTool;
@@ -58,6 +59,9 @@ class McpApplicationTest {
     private List<AdminTool> adminTools;
 
     @Autowired
+    private List<AdminResource> adminResources;
+
+    @Autowired
     @Qualifier("userTransportProvider")
     private HttpServletStatelessServerTransportProvider userTransport;
 
@@ -110,7 +114,31 @@ class McpApplicationTest {
                 .toList();
         assertThat(uris).containsExactlyInAnyOrder(
                 "kelta://collections",
-                "kelta://openapi.json"
+                "kelta://openapi.json",
+                "kelta://docs/jsonapi",
+                "kelta://docs/page-layouts",
+                "kelta://docs/list-views",
+                "kelta://docs/dashboards",
+                "kelta://docs/ui-pages",
+                "kelta://docs/ui-menus"
+        );
+    }
+
+    @Test
+    void adminResourcesAreDiscovered() {
+        // Admin has no schema/openapi browse resources (those are data-plane), but the
+        // authoring docs are shared — same DocResource beans implement both marker
+        // interfaces, so both endpoints see kelta://docs/<topic>.
+        List<String> uris = adminResources.stream()
+                .map(r -> r.toSpecification().resource().uri())
+                .toList();
+        assertThat(uris).containsExactlyInAnyOrder(
+                "kelta://docs/jsonapi",
+                "kelta://docs/page-layouts",
+                "kelta://docs/list-views",
+                "kelta://docs/dashboards",
+                "kelta://docs/ui-pages",
+                "kelta://docs/ui-menus"
         );
     }
 
@@ -285,17 +313,62 @@ class McpApplicationTest {
 
     private static MockHttpServletResponse initialize(
             HttpServletStatelessServerTransportProvider transport, String path) throws Exception {
-        MockHttpServletRequest req = new MockHttpServletRequest("POST", path);
-        req.addHeader("Content-Type", "application/json");
-        req.setContent("""
+        MockHttpServletResponse res = rpc(transport, path, """
                 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{
                   "protocolVersion":"2025-11-25",
                   "capabilities":{},
                   "clientInfo":{"name":"test-client","version":"1.0"}
-                }}""".getBytes());
+                }}""");
+        return res;
+    }
+
+    private static MockHttpServletResponse rpc(
+            HttpServletStatelessServerTransportProvider transport, String path, String jsonRpcBody)
+            throws Exception {
+        MockHttpServletRequest req = new MockHttpServletRequest("POST", path);
+        req.addHeader("Content-Type", "application/json");
+        req.setContent(jsonRpcBody.getBytes());
         MockHttpServletResponse res = new MockHttpServletResponse();
         transport.service(req, res);
         return res;
+    }
+
+    @Test
+    void userResourcesListIncludesAuthoringDocs() throws Exception {
+        MockHttpServletResponse res = rpc(userTransport, "/threadline-clothing/mcp/user",
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{}}");
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(res.getContentAsString()).contains("kelta://docs/list-views");
+    }
+
+    @Test
+    void adminResourcesListIncludesAuthoringDocs() throws Exception {
+        MockHttpServletResponse res = rpc(adminTransport, "/threadline-clothing/mcp/admin",
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{}}");
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(res.getContentAsString()).contains("kelta://docs/list-views");
+    }
+
+    @Test
+    void userResourcesReadReturnsTheDocBody() throws Exception {
+        MockHttpServletResponse res = rpc(userTransport, "/threadline-clothing/mcp/user",
+                "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/read\","
+                        + "\"params\":{\"uri\":\"kelta://docs/list-views\"}}");
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(res.getContentAsString())
+                .contains("rowLimit")
+                .contains("{10, 25, 50, 100}");
+    }
+
+    @Test
+    void adminResourcesReadReturnsTheDocBody() throws Exception {
+        MockHttpServletResponse res = rpc(adminTransport, "/threadline-clothing/mcp/admin",
+                "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/read\","
+                        + "\"params\":{\"uri\":\"kelta://docs/list-views\"}}");
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(res.getContentAsString())
+                .contains("rowLimit")
+                .contains("{10, 25, 50, 100}");
     }
 
     @Test
