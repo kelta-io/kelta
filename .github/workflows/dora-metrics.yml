@@ -1,0 +1,119 @@
+name: DORA Metrics
+
+# Nightly DORA rollup: deployment frequency, lead time for changes, change failure
+# rate, time to restore. Recomputed from durable sources every run (GitHub merges,
+# this repo's main history, the ArgoCD image-bump log, alert history), then pushed
+# to Loki + Mimir (Grafana "DORA" dashboard) and upserted into the Kelta dora-*
+# collections (Kelta "DORA" dashboard — durable past the 30d observability retention).
+# See scripts/dora/README.md.
+
+on:
+  schedule:
+    - cron: '17 4 * * *'   # 04:17 UTC daily — after the US-evening merge train, before EU morning
+  workflow_dispatch:
+    inputs:
+      push_days:
+        description: 'Event lookback for the Kelta upsert (days). Raise to backfill.'
+        required: false
+        default: '6'
+      days:
+        description: 'History to load (days). Must exceed push_days + 90.'
+        required: false
+        default: '120'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: dora-metrics
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: Collect + publish
+    runs-on: k8s-runner
+    timeout-minutes: 30
+    env:
+      LOKI_URL: http://loki.observability.svc.cluster.local:3100
+      MIMIR_URL: http://mimir.observability.svc.cluster.local:8080
+      OTLP_URL: http://alloy-collector.observability.svc.cluster.local:4318
+      # Kelta sink — optional. Set vars KELTA_DORA_URL + KELTA_DORA_TENANT and secret
+      # KELTA_DORA_TOKEN (an admin-minted PAT for a service user) to enable it.
+      KELTA_URL: ${{ vars.KELTA_DORA_URL }}
+      KELTA_TENANT: ${{ vars.KELTA_DORA_TENANT }}
+      KELTA_TOKEN: ${{ secrets.KELTA_DORA_TOKEN }}
+    steps:
+      - name: Checkout platform repo (full history — first-parent walk of main)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout ArgoCD manifests (image-bump + rollback log)
+        uses: actions/checkout@v4
+        with:
+          repository: cklinker/homelab-argo
+          token: ${{ secrets.ARGOCD_REPO_TOKEN }}
+          path: homelab-argo
+          fetch-depth: 0
+
+      - name: Unit tests
+        run: node --test scripts/dora/lib.test.mjs
+
+      - name: Install kelta CLI (for the Kelta sink)
+        if: env.KELTA_TOKEN != ''
+        run: |
+          set -euo pipefail
+          BASE="${KELTA_DOWNLOADS_URL:-https://downloads.kelta.io}"
+          VERSION=$(curl -fsS "${BASE}/cli/manifest.json" | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -1)
+          [ -n "$VERSION" ] || { echo "::error::could not read CLI version from ${BASE}/cli/manifest.json"; exit 1; }
+          mkdir -p "$HOME/.local/bin"
+          curl -fsS "${BASE}/cli/releases/${VERSION}/kelta-linux-x64" -o "$HOME/.local/bin/kelta"
+          chmod +x "$HOME/.local/bin/kelta"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/kelta" version --output json
+
+      - name: Collect + push
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          KELTA_FLAG=""
+          if [ -n "${KELTA_TOKEN:-}" ]; then
+            KELTA_FLAG="--push-kelta"
+          else
+            echo "::notice::KELTA_DORA_TOKEN not set — skipping the Kelta sink (Loki/Mimir still published)."
+          fi
+          node scripts/dora/collect.mjs \
+            --repo-dir . \
+            --argo-dir homelab-argo \
+            --days "${{ github.event.inputs.days || '120' }}" \
+            --push-days "${{ github.event.inputs.push_days || '6' }}" \
+            --loki-url "$LOKI_URL" \
+            --mimir-url "$MIMIR_URL" \
+            --push-loki \
+            --push-otlp "$OTLP_URL" \
+            $KELTA_FLAG \
+            --out dora.json 2> collector.log
+          cat collector.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '## DORA'
+            echo
+            echo '```'
+            sed -n '/^DORA —/,$p' collector.log 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dora-report
+          path: |
+            dora.json
+            collector.log
+          retention-days: 90

@@ -97,9 +97,43 @@ triggers the downstream publish workflow):
 
 **`type: security` tasks are never auto-merged** (see `SECURITY.md`).
 
+## `dora-metrics.yml` — nightly DORA rollup
+
+Cron `17 4 * * *` on `k8s-runner` (in-cluster, so Loki/Mimir/Alloy are reachable by
+Service DNS). Runs `scripts/dora/collect.mjs`, which recomputes the four DORA numbers
+from durable sources every night — nothing is incrementally tracked, so a bad run just
+gets overwritten by the next one:
+
+| Metric | Source | Definition |
+|--------|--------|------------|
+| Deployment frequency | `homelab-argo` git log (`chore: update Kelta images to main-<sha>` bumps by `github-actions[bot]`) | bumps per day in the trailing window |
+| Lead time for changes | GitHub GraphQL (merged PRs + commit dates) joined to the bump that shipped them via the first-parent history of `main` | p50 of first-commit → bump for every PR in the window; also merge→prod |
+| Change failure rate | `revert: roll back image bump (...)` (auto) and manual `revert…` commits in `homelab-argo` | rolled-back bumps ÷ bumps |
+| Time to restore | Loki `{from="state-history"}` (Grafana alert state history) + Mimir `ALERTS{alertstate="firing"}` (Prometheus rules) | p50 of Alerting→Normal per alert fingerprint |
+
+Bands follow the Google DORA report thresholds. Segments `all` / `bot` / `human` split
+lead time by PR author (`rzware-developer[bot]` vs people) — deploys are shared, so only
+the change-level numbers differ.
+
+Sinks (all idempotent): Loki (`{job="dora"}` — one line per deploy/rollback/incident
+with the event's own timestamp, plus a `snapshot` per window; Loki drops byte-identical
+re-pushes), Mimir via Alloy OTLP (`dora_*` gauges, `job="ci/dora"`) → Grafana **EMF DORA**
+(`homelab-argo/grafana/dashboard-dora.yaml`), and — when `KELTA_DORA_TOKEN` +
+`KELTA_DORA_URL`/`KELTA_DORA_TENANT` are set — the tenant's `dora-deployments` /
+`dora-changes` / `dora-incidents` / `dora-snapshots` collections and a **DORA** native
+dashboard, created by `scripts/dora/bootstrap-kelta.mjs`. Kelta is the long-term store:
+Loki and Mimir retain 30 days, DORA wants 90+.
+
+`build-and-publish-containers.yml` additionally stamps `{job="dora", event="deploy_healthy"}`
+(merge→healthy seconds) at the end of the smoke-test job via
+`scripts/dora/emit-deploy-event.sh` — best-effort, never fails the deploy. Details, local
+usage and the counting caveats (cancelled builds bundling PRs, false-positive
+auto-rollbacks, re-apply bumps) are in `scripts/dora/README.md`.
+
 ## Other workflows
 
 - `build-runner-image.yml` — builds the self-hosted CI runner image.
+- `dora-metrics.yml` — see above.
 - `.github/workflows/README.md` and `scripts/ci/README.md` — runner + shared CI DB
   (`kelta-ci-db`, schema-isolated per run) notes.
 

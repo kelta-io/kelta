@@ -46,6 +46,7 @@ jobs:
       runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
       quickstart: ${{ steps.filter.outputs.quickstart }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      dora: ${{ steps.filter.outputs.dora }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -826,15 +827,36 @@ jobs:
           actionlint -color -shellcheck= \
             -ignore 'constant expression "false" in condition'
 
+  # ===========================================================================
+  # DORA collector — pure-logic unit tests (scripts/dora/lib.test.mjs). No build.
+  # ===========================================================================
+  test-dora:
+    name: DORA collector tests
+    needs: changes
+    runs-on: k8s-runner
+    if: needs.changes.outputs.dora == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run tests
+        run: node --test scripts/dora/lib.test.mjs
+
+      - name: Syntax-check the entry points
+        run: |
+          node --check scripts/dora/collect.mjs
+          node --check scripts/dora/bootstrap-kelta.mjs
+          bash -n scripts/dora/emit-deploy-event.sh
+
   quality-gate:
     name: Quality Gate
-    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, integration-tests, e2e, quickstart, worker-image-is-jvm, dependency-audit, lint-workflows]
+    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, integration-tests, e2e, quickstart, worker-image-is-jvm, dependency-audit, lint-workflows, test-dora]
     if: always()
     runs-on: k8s-runner
     steps:
       - name: Check job results
         run: |
-          for job in test-java test-runtime test-runtime-modules test-frontend integration-tests e2e quickstart worker-image-is-jvm dependency-audit lint-workflows; do
+          for job in test-java test-runtime test-runtime-modules test-frontend integration-tests e2e quickstart worker-image-is-jvm dependency-audit lint-workflows test-dora; do
             result_var="${job//-/_}_result"
             case "${job}" in
               test-java)         result="${{ needs.test-java.result }}" ;;
@@ -847,6 +869,7 @@ jobs:
               worker-image-is-jvm) result="${{ needs.worker-image-is-jvm.result }}" ;;
               dependency-audit)  result="${{ needs.dependency-audit.result }}" ;;
               lint-workflows)    result="${{ needs.lint-workflows.result }}" ;;
+              test-dora)         result="${{ needs.test-dora.result }}" ;;
             esac
             echo "${job}: ${result}"
             if [[ "${result}" == "failure" || "${result}" == "cancelled" ]]; then
