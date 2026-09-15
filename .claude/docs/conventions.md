@@ -254,6 +254,35 @@ Link generation lives in `io.kelta.jsonapi.PaginationLinks.build(...)`; the dyna
 
 MCP tools (`query_collection`, `list_picklists`, `list_approvals`) take flat `pageNumber` / `pageSize` arguments as an ergonomic affordance for LLM callers, and translate them to the bracket form when constructing the HTTP request to the gateway. The same `page[size]` cap (200) applies — the MCP tool's input schema declares `maximum: 200` and the call handler clamps defensively.
 
+## REST API: resource shape — reference fields on read
+
+A LOOKUP/MASTER_DETAIL field's raw id is present in **both** places on every read —
+`attributes.<field>` and `relationships.<field>.data.id` — for the primary `data`
+(single or list) and every `included[]` resource alike:
+
+```json
+{
+  "type": "page-layouts", "id": "layout-1",
+  "attributes": { "name": "Detail Layout", "collectionId": "coll-42" },
+  "relationships": {
+    "collectionId": { "data": { "type": "collections", "id": "coll-42" } }
+  }
+}
+```
+
+`DynamicCollectionRouter#toJsonApiResourceObject` (`runtime-core`) is the single place
+this is built. Writes already accept the id via either shape — `extractAttributes` /
+`extractRelationships` merge into the same field, relationships taking precedence on
+conflict — so a client that reads a resource and PATCHes `attributes` straight back
+sees no diff and no spurious field-history row. `CerbosFieldSecurityAdvice` strips a
+denied LOOKUP/MASTER_DETAIL field from both places, not just `relationships` (an
+attributes-only strip would leak a hidden FK's id).
+
+**CLI flattening**: `kelta-web/packages/cli/src/render/flatten.ts#flattenResource`
+copies `attributes` first, then adds a relationship-derived key only when that name
+isn't already present — so `kelta <collection> list` output is unchanged by this dual
+shape; a relationship never overwrites the attribute-sourced value.
+
 ## REST API: collection schema
 
 `GET /api/collections/{name}/schema` is the canonical way to learn what a collection's
