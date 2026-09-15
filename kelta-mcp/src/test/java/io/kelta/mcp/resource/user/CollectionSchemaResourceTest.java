@@ -47,23 +47,20 @@ class CollectionSchemaResourceTest {
     }
 
     @Test
-    void resolvesNameFromUriAndCombinesCollectionAndFields() {
-        wm.stubFor(get(urlEqualTo("/api/collections/accounts"))
+    void resolvesNameFromUriAndReturnsSchemaVerbatim() {
+        wm.stubFor(get(urlEqualTo("/api/collections/accounts/schema"))
                 .willReturn(aResponse().withStatus(200)
-                        .withBody("{\"data\":{\"id\":\"c1\",\"attributes\":{\"name\":\"accounts\"}}}")));
-        wm.stubFor(get(urlEqualTo("/api/fields?filter[collectionName][EQ]=accounts&page[size]=200"))
-                .willReturn(aResponse().withStatus(200)
-                        .withBody("{\"data\":[{\"id\":\"f1\"}]}")));
+                        .withBody("{\"name\":\"accounts\",\"displayName\":\"Accounts\","
+                                + "\"systemCollection\":false,"
+                                + "\"fields\":[{\"name\":\"phone\",\"type\":\"STRING\"}]}")));
 
         ReadResourceResult result = resource.toSpecification().readHandler().apply(
                 null, new ReadResourceRequest("kelta://collections/accounts"));
 
         TextResourceContents contents = (TextResourceContents) result.contents().get(0);
         assertThat(contents.uri()).isEqualTo("kelta://collections/accounts");
-        assertThat(contents.text()).contains("\"collection\":", "\"fields\":", "c1", "f1");
-        wm.verify(WireMock.getRequestedFor(urlEqualTo("/api/collections/accounts")));
-        wm.verify(WireMock.getRequestedFor(
-                urlEqualTo("/api/fields?filter[collectionName][EQ]=accounts&page[size]=200")));
+        assertThat(contents.text()).contains("\"fields\":", "\"phone\"").doesNotContain("null");
+        wm.verify(WireMock.getRequestedFor(urlEqualTo("/api/collections/accounts/schema")));
     }
 
     @Test
@@ -77,7 +74,7 @@ class CollectionSchemaResourceTest {
 
     @Test
     void wrapsCollectionLookupErrorInJsonPayload() {
-        wm.stubFor(get(urlEqualTo("/api/collections/missing"))
+        wm.stubFor(get(urlEqualTo("/api/collections/missing/schema"))
                 .willReturn(aResponse().withStatus(404)));
 
         ReadResourceResult result = resource.toSpecification().readHandler().apply(

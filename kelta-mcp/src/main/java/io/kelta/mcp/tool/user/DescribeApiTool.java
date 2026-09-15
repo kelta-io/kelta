@@ -23,7 +23,13 @@ public class DescribeApiTool implements UserTool {
         Tool tool = Tool.builder()
                 .name("describe_api")
                 .title("Describe API")
-                .description("Return the auto-generated OpenAPI 3.0 spec for the current tenant. The spec covers JSON:API CRUD on every collection — useful when you need exact request/response schemas. Specialized controllers (flows, approvals, bulk) are NOT in this spec; use the dedicated tools for those.")
+                .description("Return the auto-generated OpenAPI 3.0 spec for the current tenant: JSON:API CRUD "
+                        + "paths and schemas for every collection, including system collections. Specialized "
+                        + "controllers (flows, approvals, bulk) are NOT in this spec; use the dedicated tools "
+                        + "for those. For one collection's field list, types, enums and validation rules, use "
+                        + "get_collection_schema instead of parsing this spec. Example: call with no arguments, "
+                        + "then look up the \"/accounts\" path in the returned \"paths\" object for its exact "
+                        + "request/response shape.")
                 .inputSchema(Schemas.empty())
                 .annotations(ToolHints.read())
                 .build();

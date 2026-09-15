@@ -50,17 +50,12 @@ public class CollectionSchemaResource implements UserResourceTemplate {
             } else {
                 String name = URLDecode(m.group(1));
                 String encoded = URLEncoder.encode(name, StandardCharsets.UTF_8);
-                GatewayHttpClient.Response collectionRes = gateway.get("/api/collections/" + encoded);
-                if (!collectionRes.isSuccess()) {
-                    body = "{\"error\":\"gateway returned " + collectionRes.status()
+                GatewayHttpClient.Response schemaRes = gateway.get("/api/collections/" + encoded + "/schema");
+                if (!schemaRes.isSuccess()) {
+                    body = "{\"error\":\"gateway returned " + schemaRes.status()
                             + " for collection " + name + "\"}";
                 } else {
-                    GatewayHttpClient.Response fieldsRes = gateway.get(
-                            "/api/fields?filter[collectionName][EQ]=" + encoded + "&page[size]=200");
-                    body = "{\n  \"collection\": " + collectionRes.body()
-                            + ",\n  \"fields\": "
-                            + (fieldsRes.isSuccess() ? fieldsRes.body() : "null")
-                            + "\n}";
+                    body = schemaRes.body();
                 }
             }
             return new ReadResourceResult(List.of(
