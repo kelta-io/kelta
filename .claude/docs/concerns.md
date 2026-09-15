@@ -712,9 +712,19 @@ the permission matrix in `constants.local` and emits one rule per action (see `a
 Policy shape = latency). The earlier infra change (homelab-argo #300, `GOMAXPROCS=2` + 2-CPU limit)
 only removed the 100ms+ CFS-throttle tail; it did not move p50. Also closed the CI blind spot for
 generated policies: `CerbosGeneratedPolicyIT` pushes the goldens into a real Cerbos and asserts the
-allow/deny matrix (the KeltaStack Cerbos stays allow-all). Still open: `CerbosPolicySeeder`'s Redis
-lock is a mutex, not a done-marker, so every worker replica reseeds all tenants on each deploy
-(64 `AddOrUpdatePolicy` per replica, harmless but noisy).
+allow/deny matrix (the KeltaStack Cerbos stays allow-all).
+
+**FIXED (fix/cerbos-seed-once-per-image) — every worker replica reseeded all tenants on each
+deploy.** `CerbosPolicySeeder`'s Redis key was a mutex (acquire → seed → delete), so replicas
+starting after the first found it free and seeded again: 3 × 64 `AddOrUpdatePolicy` per deploy,
+each recompiling the policy in Cerbos. Startup seeding only matters when the generator may have
+changed (new image) or the store is empty — never per pod. Now the seeder writes a done-marker
+`cerbos:policy-seed:done:<build.time>` (30d TTL) after a successful seed; later replicas of the
+same build skip if the marker exists **and** `basePoliciesPresent()` (one `GET /admin/policies`)
+still sees the unscoped `collection` policy, so a wiped/restored Cerbos store re-seeds regardless.
+`kelta.worker.cerbos.seed.force` (`CERBOS_SEED_FORCE`) bypasses the marker. The fingerprint comes
+from `BuildProperties` (new `build-info` goal in `kelta-worker/pom.xml`); without build info the
+marker is disabled and every pod seeds as before. Metric: `cerbos.policy.seed.skipped{reason}`.
 
 **FIXED (PR #1174) — record-policy `collectionId` was UUID-keyed but checked by name.**
 `CerbosPolicyGenerator.generateRecordPolicy` emitted `R.attr.collectionId == "<UUID>"` (from

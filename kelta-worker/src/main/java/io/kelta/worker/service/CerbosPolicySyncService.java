@@ -35,6 +35,8 @@ import java.util.Base64;
 public class CerbosPolicySyncService {
 
     private static final Logger log = LoggerFactory.getLogger(CerbosPolicySyncService.class);
+    /** Store id Cerbos assigns the unscoped {@code collection} resource policy. */
+    static final String BASE_COLLECTION_POLICY_ID = "resource.collection.vdefault";
 
     private static final String SUBJECT_PREFIX = "kelta.cerbos.policies.changed.";
 
@@ -162,6 +164,36 @@ public class CerbosPolicySyncService {
             if (tenantId != null) {
                 syncTenant(tenantId);
             }
+        }
+    }
+
+    /**
+     * Probes the Cerbos Admin API for the unscoped {@code collection} base policy, the
+     * first thing {@link #seedBasePolicies()} writes. {@code false} means the store is
+     * empty (fresh/restored Cerbos) or unreachable — either way the caller should seed.
+     */
+    public boolean basePoliciesPresent() {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(cerbosAdminUrl + "/admin/policies"))
+                    .header("Authorization", cerbosAdminAuth)
+                    .timeout(java.time.Duration.ofSeconds(10))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                log.warn("Cerbos Admin API policy list returned {}: {}", response.statusCode(), response.body());
+                return false;
+            }
+            for (tools.jackson.databind.JsonNode id : objectMapper.readTree(response.body()).path("policyIds")) {
+                if (BASE_COLLECTION_POLICY_ID.equals(id.asText())) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            log.warn("Cerbos Admin API policy list failed: {}", e.getMessage());
+            return false;
         }
     }
 
