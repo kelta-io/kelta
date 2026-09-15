@@ -619,5 +619,12 @@ describe('CollectionForm Integration', () => {
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalled()
     })
+
+    // Wait for the 100ms mock to resolve and the wrapper's `finally` to flip
+    // isSubmitting back, otherwise that setState lands after jsdom teardown and
+    // vitest reports an unhandled "window is not defined" rejection.
+    await waitFor(() => {
+      expect(screen.getByTestId('collection-form-submit')).toBeEnabled()
+    })
   })
 })
