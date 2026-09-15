@@ -18,6 +18,10 @@ test.describe.skip('Analytics viewer (post-deploy)', () => {
     await expect(page.getByTestId('dashboard-grid')).toBeVisible()
     await expect(page.getByTestId('metric-widget').first()).not.toHaveText('—')
 
+    // A widget seeded with config.ignoreTimeRange/fixedTimeRange shows its opt-out chip
+    // regardless of the page's selected time range.
+    await expect(page.getByTestId('widget-time-range-chip').first()).toBeVisible()
+
     // Chart segment drill-through lands on a filtered list.
     await page.getByTestId('chart-widget').first().locator('path,rect').first().click()
     await expect(page).toHaveURL(/\/app\/o\/[^/]+\?.*filter=/)

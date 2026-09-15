@@ -475,8 +475,18 @@ public class DashboardDataService {
                                            Map<String, Object> config) {
         List<FilterCondition> filters = new ArrayList<>();
 
-        // Check runtime params first, then widget config
-        String timeRange = runtimeParams != null ? runtimeParams.get("timeRange") : null;
+        // A widget can opt out of the page's time range entirely — it reports a
+        // current state ("tasks in progress"), not an event stream, so applying the
+        // page range would silently hide older rows. Precedence: ignoreTimeRange >
+        // fixedTimeRange > runtime timeRange > config.timeRange.
+        if (getConfigBoolean(config, "ignoreTimeRange", false)) {
+            return filters;
+        }
+
+        String timeRange = getConfigString(config, "fixedTimeRange", null);
+        if (timeRange == null) {
+            timeRange = runtimeParams != null ? runtimeParams.get("timeRange") : null;
+        }
         if (timeRange == null) {
             timeRange = getConfigString(config, "timeRange", null);
         }
@@ -616,6 +626,14 @@ public class DashboardDataService {
         if (val == null) return defaultValue;
         String str = val.toString();
         return str.isBlank() ? defaultValue : str;
+    }
+
+    boolean getConfigBoolean(Map<String, Object> config, String key, boolean defaultValue) {
+        if (config == null) return defaultValue;
+        Object val = config.get(key);
+        if (val instanceof Boolean bool) return bool;
+        if (val instanceof String str) return Boolean.parseBoolean(str);
+        return defaultValue;
     }
 
     int getConfigInt(Map<String, Object> config, String key, int defaultValue) {
