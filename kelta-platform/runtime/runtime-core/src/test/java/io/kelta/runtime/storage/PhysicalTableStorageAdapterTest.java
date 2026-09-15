@@ -991,6 +991,98 @@ class PhysicalTableStorageAdapterTest {
     }
 
     @Nested
+    @DisplayName("Sparse Fieldset with Computed Fields Tests")
+    class SparseFieldsetComputedFieldsTests {
+
+        private CollectionDefinition collectionWithComputedFields() {
+            List<FieldDefinition> fields = List.of(
+                new FieldDefinition("code", FieldType.STRING, false, false, false, null, null, null, null, null),
+                new FieldDefinition("taskCount", FieldType.ROLLUP_SUMMARY, true, false, false, null, null, null, null, null),
+                new FieldDefinition("total", FieldType.FORMULA, true, false, false, null, null, null, null, null)
+            );
+            StorageConfig storageConfig = new StorageConfig("test_epics", Map.of());
+            return new CollectionDefinition(
+                "test_epics", "Test Epics", "A test collection with computed fields",
+                fields, storageConfig, null, null, 1L, Instant.now(), Instant.now());
+        }
+
+        @BeforeEach
+        void dropTable() {
+            try {
+                jdbcTemplate.execute("DROP TABLE IF EXISTS test_epics");
+            } catch (Exception ignored) {
+                // ignore
+            }
+        }
+
+        @Test
+        @DisplayName("a sparse fields[] naming a ROLLUP_SUMMARY field emits no column reference for it")
+        void sparseFieldsetSkipsRollupSummaryColumn() {
+            CollectionDefinition collection = collectionWithComputedFields();
+            adapter.initializeCollection(collection);
+
+            Map<String, Object> data = new HashMap<>();
+            data.put("id", "epic-1");
+            data.put("code", "EPIC-1");
+            data.put("createdAt", Instant.now());
+            data.put("updatedAt", Instant.now());
+            adapter.create(collection, data);
+
+            QueryRequest request = new QueryRequest(
+                Pagination.defaults(), List.of(), List.of("code", "taskCount"), List.of());
+
+            QueryResult result = assertDoesNotThrow(() -> adapter.query(collection, request),
+                "a sparse fieldset naming a ROLLUP_SUMMARY field must not 500 with a missing-column error");
+
+            assertEquals(1, result.data().size());
+            assertFalse(result.data().get(0).containsKey("taskCount"),
+                "there is no physical column for a ROLLUP_SUMMARY field — post-retrieval "
+                    + "computation fills it in, not the SELECT");
+        }
+
+        @Test
+        @DisplayName("a sparse fields[] naming a FORMULA field emits no column reference for it")
+        void sparseFieldsetSkipsFormulaColumn() {
+            CollectionDefinition collection = collectionWithComputedFields();
+            adapter.initializeCollection(collection);
+
+            Map<String, Object> data = new HashMap<>();
+            data.put("id", "epic-2");
+            data.put("code", "EPIC-2");
+            data.put("createdAt", Instant.now());
+            data.put("updatedAt", Instant.now());
+            adapter.create(collection, data);
+
+            QueryRequest request = new QueryRequest(
+                Pagination.defaults(), List.of(), List.of("code", "total"), List.of());
+
+            QueryResult result = assertDoesNotThrow(() -> adapter.query(collection, request),
+                "a sparse fieldset naming a FORMULA field must not 500 with a missing-column error");
+
+            assertEquals(1, result.data().size());
+            assertFalse(result.data().get(0).containsKey("total"),
+                "there is no physical column for a FORMULA field — post-retrieval computation "
+                    + "fills it in, not the SELECT");
+        }
+
+        @Test
+        @DisplayName("an undeclared field name in fields[] keeps today's resolveColumnName behavior (still attempted)")
+        void undeclaredFieldNameStillAttemptsColumnLookup() {
+            CollectionDefinition collection = collectionWithComputedFields();
+            adapter.initializeCollection(collection);
+
+            QueryRequest request = new QueryRequest(
+                Pagination.defaults(), List.of(), List.of("code", "doesNotExist"), List.of());
+
+            // Unlike a real computed field, an undeclared name has no FieldDefinition to consult,
+            // so buildSelectClause falls through to resolveColumnName's snake_case guess exactly
+            // as it did before this change — it is not silently skipped.
+            StorageException ex = assertThrows(StorageException.class, () -> adapter.query(collection, request));
+            assertNotNull(ex.getCause());
+        }
+    }
+
+    @Nested
     @DisplayName("Aggregate Tests")
     class AggregateTests {
 

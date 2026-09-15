@@ -1287,6 +1287,14 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         }
 
         for (String field : fields) {
+            // FORMULA/ROLLUP_SUMMARY fields have no physical column (FieldType#hasPhysicalColumn);
+            // their values are filled in after retrieval by DefaultQueryEngine.computeVirtualFields,
+            // so a sparse fields[] naming one must not put it in the SELECT list. Fields the
+            // collection doesn't declare fall through unchanged — same behavior as before.
+            FieldDefinition fieldDef = definition.getField(field);
+            if (fieldDef != null && !fieldDef.type().hasPhysicalColumn()) {
+                continue;
+            }
             String columnName = resolveColumnName(definition, field);
             // Dedupe against the bare system-column names added above, but emit the
             // quoted form so reserved-word columns (user, order, …) parse.
