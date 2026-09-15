@@ -113,14 +113,24 @@ public class McpServerConfig {
             update_ counterparts exist for collection, flow, layout, listview, and \
             validation_rule.
 
-            Idempotent apply: apply_layout, apply_listview and apply_picklist are \
+            Idempotent apply: apply_layout, apply_listview, apply_picklist and apply_menu are \
             create-or-update, keyed on a natural key (collection+name for layouts/list \
-            views, name for picklists) rather than an id — re-running the same setup \
-            script is safe. Each reports {"action": "created"|"updated"|"unchanged", \
-            "id": ..., "changed": [...] } (apply_picklist nests one such result per \
-            value plus "pruned" when prune:true deactivated extras); prefer these over \
+            views, name for picklists, name for menus) rather than an id — re-running the \
+            same setup script is safe. Each reports {"action": "created"|"updated"|"unchanged", \
+            "id": ..., "changed": [...] } (apply_picklist and apply_menu nest one such result \
+            per value/item plus "pruned" when prune:true removed extras — deactivated for \
+            picklist values, hard-deleted for menu items; without prune:true, apply_menu \
+            reports absent items as "stale" instead of touching them); prefer these over \
             create_listview/create_picklist/add_picklist_value for anything you expect to \
             re-apply. The one-shot create_/add_ tools remain for one-off scripting.
+
+            Menus: apply_menu takes a whole ui-menu ("app") and its items/groups in one \
+            idempotent call. An item with a non-empty "children" array is a group header \
+            (dropdown) — nesting is one level deep — and each child's parentId resolves to \
+            the group's id automatically. path is validated against the end-user shell's nav \
+            grammar (navTabs.ts / kelta://docs/ui-menus) before anything is written; an \
+            invalid path fails the whole call with a structured error instead of silently \
+            storing an item that would never appear in the rendered nav.
 
             Layouts: apply_layout takes the whole layout structure (sections, field \
             placements, related lists) in one idempotent call — reapplying the same body is \

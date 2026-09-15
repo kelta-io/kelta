@@ -43,3 +43,18 @@ but silently never appears in the top nav, so match one of these exactly:
 
 If a group's children all fail to resolve to one of these shapes, the
 whole group is dropped from the rendered nav rather than shown empty.
+
+## Authoring with `apply_menu`
+
+`apply_menu` (kelta-mcp, admin) upserts a whole menu tree in one idempotent
+call, keyed on `name` for the menu and `(menu, parent, label)` for each
+item — an item with a non-empty `children` array becomes a group, and
+each child's `parentId` is resolved to the group's id automatically, so
+callers never need to create the group first, read its id back, then
+create each child by hand. `path` is validated against the grammar above
+*before* anything is written; an invalid path fails the whole call with a
+structured error rather than silently storing an item the nav renderer
+will never surface. `prune:true` hard-deletes any existing item absent
+from the call's tree; omitted or `false` reports those items as `stale`
+and leaves them untouched. See the tool's own description for a worked
+example.

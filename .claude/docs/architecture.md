@@ -727,6 +727,28 @@ value's `sortOrder` from its position in the input array and, with `prune:true`,
 (`isActive=false`, never a hard delete) any existing active value whose `value` is absent from
 that array.
 
+**`apply_menu` (KLT-219)** upserts a `ui-menus` row plus its `ui-menu-items` tree — groups (an
+item with children and no `path`) and their children, one level deep — in a single idempotent
+call. It reuses `AdminLookups.upsert` for the menu row (natural key `name`), but items can't
+go through `upsert`'s remote `filter[parentId][eq]=...` lookup: a top-level item's natural
+parent is absent, and JSON:API's `eq` filter has no way to ask for "is null". Instead the tool
+does one `AdminLookups.list("ui-menu-items", {menuId}, 200)` (a new generic method — every
+resource in a filtered page, folded to `id` + attributes + relationship ids the same way
+`upsert`'s internal diff does) up front, indexes existing rows locally by `(parentId, label)`,
+and walks the desired tree top-down so a child's `parentId` is always the *resolved* id of its
+already-processed parent (existing or freshly created) rather than a value taken from input.
+`AdminLookups.diff` (previously private) is now package-visible so the tool can reuse the same
+current-vs-desired comparison outside a remote `upsert` call. `displayOrder` is derived from
+array position, matching `apply_picklist`'s `sortOrder`. `prune:true` hard-deletes an existing
+item absent from the desired tree (unlike `apply_picklist`'s soft deactivate — a menu item has
+no `active`-style suppression semantics); omitted or `false` reports it as `stale` instead.
+`path` is validated client-side against the end-user shell's nav grammar (`navTabs.ts` —
+`/resources/<collection>[?query]`, `/p/<slug>`, `/dashboards/<id>`, `/reports/<id>`, `/chat`,
+each optionally `/app`-prefixed) **before any gateway call**, over the whole tree in one pass —
+an invalid path anywhere fails the call with a structured `{status,errors:[...]}` result
+(`code: INVALID_PATH`, `source.pointer` into the offending item) and writes nothing, rather
+than silently storing an item the nav renderer would never surface.
+
 **Offline replica path (end-user only).** When `OfflineProvider` is mounted — it wraps the `EndUserShell` subtree — the shared data hooks route through a tenant-scoped IndexedDB replica: online reads write through to the store and offline reads serve it (`useCollectionRecords`/`useRecord`/`usePageDataSources`), and offline writes queue to an outbox (`useRecordMutation` → `engine.queue`) that flushes on reconnect (`SyncEngine.sync`). Admin pages render outside the provider (`useOffline()` → `undefined`), so their reads/writes stay online-only and unchanged. See `conventions.md` → offline hooks.
 
 ### List-view renderer contract — shared row publishes `viewType`/`typeConfig`
