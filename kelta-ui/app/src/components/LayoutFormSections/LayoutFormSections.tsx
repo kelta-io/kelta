@@ -34,6 +34,7 @@ export interface LayoutFormFieldDefinition {
   required: boolean
   readOnly?: boolean
   helpText?: string
+  description?: string
   columnSpan?: number
   [key: string]: unknown
 }
@@ -111,7 +112,7 @@ function resolvePlacements(
         displayName: placement.labelOverride || schemaField.displayName || schemaField.name,
         required: placement.requiredOnLayout || schemaField.required,
         readOnly: computed || placement.readOnlyOnLayout || schemaField.readOnly,
-        helpText: placement.helpTextOverride || schemaField.helpText,
+        helpText: placement.helpTextOverride || schemaField.description,
         columnSpan: placement.columnSpan ?? 1,
         isComputedField: computed,
       }

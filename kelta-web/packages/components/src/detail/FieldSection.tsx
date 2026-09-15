@@ -53,6 +53,12 @@ export interface FieldSectionProps<F extends DetailField = DetailField> {
    * `kelta_detail_section_${persistKey}`. Survives navigation and reloads.
    */
   persistKey?: string;
+  /**
+   * Optional override for the field label content. Defaults to
+   * `field.displayName || field.name`. Consumers use this to append
+   * adornments (e.g. a help-icon tooltip trigger) beside the label.
+   */
+  renderLabel?: (field: F) => React.ReactNode;
 }
 
 const STORAGE_PREFIX = 'kelta_detail_section_';
@@ -88,6 +94,7 @@ export function FieldSection<F extends DetailField = DetailField>({
   columns = 2,
   renderField,
   persistKey,
+  renderLabel,
 }: FieldSectionProps<F>): React.ReactElement | null {
   const [isOpen, setIsOpenState] = useState(() => readPersistedOpen(persistKey, !defaultCollapsed));
   const setIsOpen = useCallback(
@@ -139,7 +146,9 @@ export function FieldSection<F extends DetailField = DetailField>({
 
                 return (
                   <div key={field.name} className="min-w-0 space-y-1">
-                    <dt className="kelta-field-label">{field.displayName || field.name}</dt>
+                    <dt className="kelta-field-label">
+                      {renderLabel ? renderLabel(field) : field.displayName || field.name}
+                    </dt>
                     <dd className="text-sm text-foreground">
                       {renderField({ field, value, displayLabel })}
                     </dd>

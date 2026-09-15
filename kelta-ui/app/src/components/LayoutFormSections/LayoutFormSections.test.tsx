@@ -7,6 +7,14 @@ const schemaFields: LayoutFormFieldDefinition[] = [
   { id: 'f1', name: 'name', displayName: 'Name', type: 'string', required: false },
   { id: 'f2', name: 'total', displayName: 'Total', type: 'currency', required: false },
   { id: 'f3', name: 'qty', displayName: 'Qty', type: 'number', required: false },
+  {
+    id: 'f4',
+    name: 'veto_window',
+    displayName: 'Veto window',
+    type: 'number',
+    required: false,
+    description: '0 = auto-merge, 1 = 24 h veto',
+  },
 ]
 
 function placement(
@@ -118,6 +126,51 @@ describe('LayoutFormSections', () => {
     )
     expect(screen.getByTestId('layout-field-help-name')).toHaveTextContent(
       'Enter your full legal name'
+    )
+  })
+
+  it('renders the field description as help text when no layout override is set', () => {
+    const sections = [
+      section([
+        placement({
+          id: 'p1',
+          fieldId: 'f4',
+          fieldName: 'veto_window',
+        }),
+      ]),
+    ]
+    render(
+      <LayoutFormSections
+        sections={sections}
+        schemaFields={schemaFields}
+        renderField={renderInput}
+      />
+    )
+    expect(screen.getByTestId('layout-field-help-veto_window')).toHaveTextContent(
+      '0 = auto-merge, 1 = 24 h veto'
+    )
+  })
+
+  it('prefers the layout helpTextOverride over the field description', () => {
+    const sections = [
+      section([
+        placement({
+          id: 'p1',
+          fieldId: 'f4',
+          fieldName: 'veto_window',
+          helpTextOverride: 'Custom override text',
+        }),
+      ]),
+    ]
+    render(
+      <LayoutFormSections
+        sections={sections}
+        schemaFields={schemaFields}
+        renderField={renderInput}
+      />
+    )
+    expect(screen.getByTestId('layout-field-help-veto_window')).toHaveTextContent(
+      'Custom override text'
     )
   })
 

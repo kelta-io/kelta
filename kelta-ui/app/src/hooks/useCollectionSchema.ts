@@ -48,6 +48,8 @@ export interface FieldDefinition {
   id: string
   name: string
   displayName?: string
+  /** Help text authored in Setup, shown as a fallback when no layout override is set */
+  description?: string
   type: FieldType
   required: boolean
   referenceTarget?: string
