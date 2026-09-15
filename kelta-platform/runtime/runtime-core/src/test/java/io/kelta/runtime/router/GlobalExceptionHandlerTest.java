@@ -1,6 +1,11 @@
 package io.kelta.runtime.router;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.kelta.runtime.query.InvalidQueryException;
+import io.kelta.runtime.storage.StorageException;
+import io.kelta.runtime.storage.StorageQueryException;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
 import io.kelta.runtime.validation.RecordValidationException;
 import io.kelta.runtime.validation.ValidationError;
@@ -8,6 +13,7 @@ import io.kelta.runtime.validation.ValidationException;
 import io.kelta.runtime.validation.ValidationResult;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
@@ -54,11 +60,24 @@ class GlobalExceptionHandlerTest {
 
     private GlobalExceptionHandler handler;
     private MockHttpServletRequest request;
+    private ch.qos.logback.classic.Logger handlerLogger;
+    private ListAppender<ILoggingEvent> logAppender;
 
     @BeforeEach
     void setUp() {
         handler = new GlobalExceptionHandler();
         request = new MockHttpServletRequest("POST", "/api/widgets");
+
+        handlerLogger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
+        logAppender = new ListAppender<>();
+        logAppender.start();
+        handlerLogger.addAppender(logAppender);
+    }
+
+    @AfterEach
+    void tearDown() {
+        handlerLogger.detachAppender(logAppender);
     }
 
     private static List<Map<String, Object>> errors(ResponseEntity<Map<String, Object>> response) {
@@ -365,6 +384,69 @@ class GlobalExceptionHandlerTest {
         assertThat(str(e, "code")).isEqualTo("INVALID_QUERY");
         assertThat(str(e, "detail")).isEqualTo("unknown sort field");
         assertThat(source(e)).containsEntry("pointer", "/data/attributes/sort");
+    }
+
+    @Test
+    void storageQueryException_withField_emits400WithSqlStateAndPointer() {
+        StorageQueryException ex = new StorageQueryException(
+                "id", "invalid input syntax for type uuid: \"not-a-uuid\"", "22P02",
+                new RuntimeException("driver cause"));
+
+        ResponseEntity<Map<String, Object>> response =
+                handler.handleStorageQueryException(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        Map<String, Object> e = firstError(response);
+        assertThat(str(e, "status")).isEqualTo("400");
+        assertThat(str(e, "code")).isEqualTo("INVALID_QUERY");
+        assertThat(str(e, "detail")).contains("not-a-uuid");
+        assertThat(source(e)).containsEntry("pointer", "/data/attributes/id");
+        assertThat(meta(e)).containsEntry("sqlState", "22P02");
+    }
+
+    @Test
+    void storageQueryException_withoutField_emits400WithSqlStateAndPath() {
+        StorageQueryException ex = new StorageQueryException(
+                "operator does not exist: character varying >= timestamp", "42883",
+                new RuntimeException("driver cause"));
+
+        ResponseEntity<Map<String, Object>> response =
+                handler.handleStorageQueryException(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        Map<String, Object> e = firstError(response);
+        assertThat(meta(e)).containsEntry("sqlState", "42883");
+        assertThat(meta(e)).containsEntry("path", "/api/widgets");
+        assertThat(source(e)).isNull();
+    }
+
+    @Test
+    void storageQueryException_logsExactlyOneWarnLineWithNoStackTrace() {
+        StorageQueryException ex = new StorageQueryException(
+                "id", "invalid input syntax for type uuid: \"not-a-uuid\"", "22P02",
+                new RuntimeException("driver cause"));
+
+        handler.handleStorageQueryException(ex, request);
+
+        assertThat(logAppender.list).hasSize(1);
+        ILoggingEvent event = logAppender.list.get(0);
+        assertThat(event.getLevel()).isEqualTo(Level.WARN);
+        assertThat(event.getThrowableProxy()).isNull();
+    }
+
+    @Test
+    void storageException_emits500WithGenericDetailAndSqlErrorStaysHidden() {
+        StorageException ex = new StorageException("Failed to query collection: widgets",
+                new RuntimeException("Connection refused"));
+
+        ResponseEntity<Map<String, Object>> response =
+                handler.handleStorageException(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        Map<String, Object> e = firstError(response);
+        assertThat(str(e, "status")).isEqualTo("500");
+        assertThat(str(e, "code")).isEqualTo("STORAGE_ERROR");
+        assertThat(str(e, "detail")).doesNotContain("Connection refused");
     }
 
     @Test
