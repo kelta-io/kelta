@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { useApi } from '@/context/ApiContext'
 import { useConfig } from '@/context/ConfigContext'
 import { useAppContext } from '@/context/AppContext'
+import { parseResourcePath } from './navTabs'
 import type { MenuConfig, MenuItemConfig } from '@/types/config'
 
 interface SearchResult {
@@ -48,14 +49,13 @@ function getCollectionNames(
   const collections: Array<{ name: string; label: string }> = []
   const visit = (items: MenuItemConfig[] | undefined) => {
     for (const item of items ?? []) {
-      if (item.path?.startsWith('/resources/')) {
-        const name = item.path.replace('/resources/', '').split('/')[0]
-        if (name) {
-          collections.push({
-            name,
-            label: item.label || name.charAt(0).toUpperCase() + name.slice(1),
-          })
-        }
+      const parsed = item.path ? parseResourcePath(item.path) : null
+      if (parsed) {
+        const name = parsed.collectionName
+        collections.push({
+          name,
+          label: item.label || name.charAt(0).toUpperCase() + name.slice(1),
+        })
       }
       // Submenu groups: collections may nest one level down.
       if (item.children?.length) visit(item.children)
