@@ -1,9 +1,36 @@
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { collectionIdByName } from '../admin/lookups.js';
 import { readDataArgument } from '../data.js';
 import { CliError, EXIT } from '../errors.js';
 import { parseFilterSpec, parseList } from '../query.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
+
+/** Reads and parses a layout tree JSON file for `layouts apply --file`. */
+function readTreeFile(path: string): Record<string, unknown> {
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf-8');
+  } catch {
+    throw new CliError(`Cannot read file "${path}"`, {
+      code: 'FILE_NOT_FOUND',
+      exitCode: EXIT.USAGE,
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new CliError(`Invalid JSON in "${path}"`, { code: 'INVALID_JSON', exitCode: EXIT.USAGE });
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new CliError(`"${path}" must contain a JSON object (a layout tree)`, {
+      code: 'INVALID_JSON',
+      exitCode: EXIT.USAGE,
+    });
+  }
+  return parsed as Record<string, unknown>;
+}
 
 /** Renderers a shared list view can publish (V196). */
 const VIEW_TYPES = ['TABLE', 'KANBAN', 'CALENDAR', 'GALLERY'] as const;
@@ -96,6 +123,82 @@ const layoutCreate = defineCommand({
       data: response.data,
       message: `Layout "${input.name}" created for ${input.collection}`,
       ids: response.data.data?.id ? [response.data.data.id] : [],
+    };
+  },
+});
+
+const layoutGet = defineCommand({
+  group: 'layouts',
+  name: 'get',
+  summary: 'Get a page layout by id',
+  positionals: [{ name: 'layoutId', description: 'Layout id', required: true }],
+  options: [
+    {
+      flag: '--tree',
+      description:
+        'Fetch the whole layout as a tree (sections, field placements, related lists) — ' +
+        'the document `layouts apply --file` accepts.',
+    },
+  ],
+  input: z.object({ layoutId: z.string().min(1), tree: z.boolean().default(false) }),
+  handler: async (ctx, input) => {
+    const axios = ctx.client.getAxiosInstance();
+    const path = input.tree
+      ? `/api/page-layouts/${input.layoutId}/tree`
+      : `/api/page-layouts/${input.layoutId}`;
+    const response = await axios.get<unknown>(path);
+    return { data: response.data };
+  },
+});
+
+const layoutApply = defineCommand({
+  group: 'layouts',
+  name: 'apply',
+  summary: 'Apply a layout tree file (sections, fields, related lists) to a collection',
+  options: [
+    {
+      flag: '--file <path>',
+      description: 'Layout tree JSON file — see `layouts get <id> --tree` for the shape',
+    },
+    {
+      flag: '--name <name>',
+      description:
+        'Layout name (overrides the file\'s own "name"; addresses the layout ' +
+        'within the collection, creating it if it does not exist yet)',
+    },
+  ],
+  positionals: [{ name: 'collection', description: 'Collection name (not id)', required: true }],
+  input: z.object({
+    collection: z.string().min(1),
+    file: z.string().min(1),
+    name: z.string().optional(),
+  }),
+  handler: async (ctx, input) => {
+    const tree = readTreeFile(input.file);
+    const name = input.name ?? (typeof tree.name === 'string' ? tree.name : undefined);
+    if (!name) {
+      throw new CliError('Layout name required — pass --name or set "name" in the tree file', {
+        code: 'INVALID_ARGUMENTS',
+        exitCode: EXIT.USAGE,
+      });
+    }
+    const body = { ...tree, name };
+    const path = `/api/collections/${encodeURIComponent(input.collection)}/layouts/${encodeURIComponent(name)}/tree`;
+    const response = await ctx.client.getAxiosInstance().put<{
+      layoutId?: string;
+      created?: number;
+      updated?: number;
+      deleted?: number;
+      unchanged?: number;
+    }>(path, body);
+    const counts = response.data;
+    return {
+      data: counts,
+      message:
+        `Layout tree applied to "${input.collection}/${name}" ` +
+        `(created=${counts.created ?? 0}, updated=${counts.updated ?? 0}, ` +
+        `deleted=${counts.deleted ?? 0}, unchanged=${counts.unchanged ?? 0})`,
+      ids: counts.layoutId ? [counts.layoutId] : [],
     };
   },
 });
@@ -331,6 +434,8 @@ const listViewUpdate = defineCommand({
 export const layoutCommands: RegisteredCommand[] = [
   layoutList,
   layoutCreate,
+  layoutGet,
+  layoutApply,
   layoutUpdate,
   layoutDelete,
   listViewList,

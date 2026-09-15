@@ -633,7 +633,7 @@ jobs. RLS then scopes every query automatically.
 
 There is now **one record-detail path**. Both the end-user runtime (`/:tenant/app/o/:collection/:id`, `ObjectDetailPage`) and the admin Resource Browser (`/:tenant/resources/:collection/:id`, `ResourceDetailPage`) are **thin `variant` wrappers over `RecordShell`** (`kelta-ui/app/src/components/record/RecordShell.tsx`): `RecordShell` owns the page skeleton (loading/status branches + breadcrumb → header → body(+rail) → tab bar → below-tabs → dialogs), variant chrome is passed as slots, and the field body renders through `RecordDetailBody` (`LayoutFieldSections` when the layout has sections, else a variant fallback). The shared `DetailTabBar` drives related lists (with inline CRUD) + Notes/Attachments/System tabs for both. A fix to view/inline-edit/related-CRUD/rules/optimistic-locking lands once and shows in both stacks. Do **not** reintroduce a per-stack detail body. (The list pages — `ObjectListPage`/`ResourceListPage` — are not yet converged; they share `ObjectDataTable` but keep separate page shells.)
 
-`layout-fields.columnNumber` is **0-based** — column `0` is a section's first column — matching how `LayoutFieldSections` indexes into a section's columns. `SystemCollectionDefinitions.layoutFields()` defaults it to `0` (`V197__layout_field_column_zero.sql`; a pre-existing row's explicit value was never rewritten), and `kelta-mcp`'s `CreateLayoutTool` computes the same 0-based placement (`index % columns`) when a `create_layout` field entry omits `columnNumber`. The Setup layout editor (`FieldPropertyForm.tsx` / `LayoutEditorList.tsx`) always writes an explicit `columnNumber` on every placement, so it never relies on either default.
+`layout-fields.columnNumber` is **0-based** — column `0` is a section's first column — matching how `LayoutFieldSections` indexes into a section's columns. `SystemCollectionDefinitions.layoutFields()` defaults it to `0` (`V197__layout_field_column_zero.sql`; a pre-existing row's explicit value was never rewritten), and `kelta-mcp`'s `ApplyLayoutTool` computes the same 0-based placement (`index % columns`) when a `sections[].fields[]` entry omits `column` — the tree endpoint itself defaults an omitted `column` to a flat `0`, so this fill-in happens client-side before the PUT. `CreateLayoutTool` (`create_layout`, deprecated) translates its legacy `fieldName`/`columnNumber` shape onto `apply_layout`'s body and delegates there rather than duplicating the logic. The Setup layout editor (`FieldPropertyForm.tsx` / `LayoutEditorList.tsx`) always writes an explicit `columnNumber` on every placement, so it never relies on either default.
 
 ### Layout tree endpoint — one idempotent write for a whole layout
 
@@ -693,6 +693,13 @@ single-pod cache mutation. Reads resolve ids → names with plain SQL: neither `
 nor `FieldDefinition` carries the metadata row id. Because the endpoint assigns `sortOrder` from
 array position, the first PUT over a hand-built layout with sparse sort orders may renumber them;
 every PUT after that is a no-op.
+
+**MCP/CLI face (KLT-215).** `kelta-mcp`'s `apply_layout` admin tool and the CLI's `kelta layouts
+apply <collection> --file <tree.json> [--name]` / `kelta layouts get <id> --tree` both wrap this
+endpoint directly — one gateway call per apply, no client-side name/id lookups, since the endpoint
+resolves those server-side. `apply_layout` accepts either `layoutId` (PUT by id) or
+`collectionName` + `name` (PUT by name, create-on-missing); `create_layout` is deprecated in favor
+of it.
 
 **Offline replica path (end-user only).** When `OfflineProvider` is mounted — it wraps the `EndUserShell` subtree — the shared data hooks route through a tenant-scoped IndexedDB replica: online reads write through to the store and offline reads serve it (`useCollectionRecords`/`useRecord`/`usePageDataSources`), and offline writes queue to an outbox (`useRecordMutation` → `engine.queue`) that flushes on reconnect (`SyncEngine.sync`). Admin pages render outside the provider (`useOffline()` → `undefined`), so their reads/writes stay online-only and unchanged. See `conventions.md` → offline hooks.
 

@@ -59,7 +59,7 @@ public class UpdateLayoutTool implements AdminTool {
                         return error("Provide at least one of name, isDefault, recordTypeName.");
                     }
                     Map<String, Object> body = Map.of("data", Map.of(
-                            "type", "pageLayouts",
+                            "type", "page-layouts",
                             "id", id.toString(),
                             "attributes", attrs));
                     String path = "/api/page-layouts/" + URLEncoder.encode(id.toString(), StandardCharsets.UTF_8);

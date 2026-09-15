@@ -60,6 +60,10 @@ public class GatewayHttpClient {
         return exchange("PATCH", pathAndQuery, body);
     }
 
+    public Response put(String pathAndQuery, Object body) {
+        return exchange("PUT", pathAndQuery, body);
+    }
+
     public Response delete(String pathAndQuery) {
         return exchange("DELETE", pathAndQuery, null);
     }
