@@ -562,6 +562,17 @@ jobs. RLS then scopes every query automatically.
   services via direct JDBC, so no write path ever evicts their entries; the router serves them
   uncached (previously each pod served stale per-pod version/history lists until the TTL —
   Activity vs History tab count mismatch, flapping across refreshes).
+- **Tenant scoping for tenant-scoped system collections**: `injectTenantFilter` adds a
+  `tenantId = <caller>` predicate for list reads; `fields` and `collections` are the two
+  exceptions that get `tenantId IN (<caller>, SYSTEM_TENANT_ID)` instead, so a system
+  collection's own rows (and its built-in fields) stay visible to every tenant. Get-by-id
+  applies the same rule after the fetch (`visibleToTenant`: another tenant's row → 404, never
+  a 403 existence oracle). RLS enforces the real boundary underneath (strict per-tenant
+  `tenant_isolation` policy — the router-side predicate/check makes the answer identical
+  where RLS is a no-op, e.g. superuser DB roles in local dev). `fields` gained a
+  denormalised `tenant_id` column for this (V198, KLT-206; see concerns.md) — it was
+  previously `.tenantScoped(false)` with no `tenant_id` column at all, so `GET /api/fields`
+  leaked every tenant's field metadata.
 - **Services**: `kelta-worker/src/main/java/io/kelta/service/` — Business logic (CollectionLifecycleManager, CerbosAuthorizationService, SearchIndexService, S3StorageService)
 - **Listeners**: `kelta-worker/src/main/java/io/kelta/listener/` — NATS subscribers (CollectionSchemaListener, SearchIndexListener, CerbosCacheInvalidationListener, SvixWebhookPublisher)
 - **Data**: `kelta-worker/src/main/java/io/kelta/repository/` — JdbcTemplate + JPA repositories
