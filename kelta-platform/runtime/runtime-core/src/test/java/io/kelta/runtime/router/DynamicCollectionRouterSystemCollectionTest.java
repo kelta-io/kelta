@@ -4,6 +4,7 @@ import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.CollectionDefinitionBuilder;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.FieldType;
+import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.FilterCondition;
 import io.kelta.runtime.query.FilterOperator;
 import io.kelta.runtime.query.Pagination;
@@ -90,6 +91,21 @@ class DynamicCollectionRouterSystemCollectionTest {
                 .systemCollection(true)
                 .tenantScoped(true)
                 .readOnly(true)
+                .build();
+    }
+
+    /**
+     * Creates a definition standing in for the real "fields" system collection
+     * (tenant-scoped, whose SYSTEM_TENANT_ID rows must stay visible to every tenant).
+     */
+    private CollectionDefinition buildFieldsCollection() {
+        return new CollectionDefinitionBuilder()
+                .name("fields")
+                .displayName("Fields")
+                .addField(FieldDefinition.requiredString("name"))
+                .systemCollection(true)
+                .tenantScoped(true)
+                .readOnly(false)
                 .build();
     }
 
@@ -204,6 +220,31 @@ class DynamicCollectionRouterSystemCollectionTest {
                     .anyMatch(f -> "tenantId".equals(f.fieldName()));
             assertFalse(hasTenantFilter,
                     "Should NOT have a tenantId filter for non-system collection");
+        }
+
+        @Test
+        @DisplayName("Should inject IN(tenant, SYSTEM_TENANT_ID) filter for 'fields' list (KLT-206)")
+        void list_injectsSystemTenantInFilter_forFields() throws Exception {
+            CollectionDefinition def = buildFieldsCollection();
+            when(registry.get("fields")).thenReturn(def);
+
+            QueryResult emptyResult = QueryResult.empty(Pagination.defaults());
+            when(queryEngine.executeQuery(eq(def), any(QueryRequest.class))).thenReturn(emptyResult);
+
+            mockMvc.perform(get("/api/fields")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk());
+
+            ArgumentCaptor<QueryRequest> requestCaptor = ArgumentCaptor.forClass(QueryRequest.class);
+            verify(queryEngine).executeQuery(eq(def), requestCaptor.capture());
+
+            boolean hasInFilter = requestCaptor.getValue().filters().stream()
+                    .anyMatch(f -> "tenantId".equals(f.fieldName())
+                            && FilterOperator.IN == f.operator()
+                            && ((List<?>) f.value()).containsAll(
+                                    List.of("tenant-123", SystemCollectionDefinitions.SYSTEM_TENANT_ID)));
+            assertTrue(hasInFilter,
+                    "Should have a tenantId IN (tenant-123, SYSTEM_TENANT_ID) filter for 'fields'");
         }
     }
 
@@ -338,6 +379,81 @@ class DynamicCollectionRouterSystemCollectionTest {
             Map<String, Object> capturedData = dataCaptor.getValue();
             assertFalse(capturedData.containsKey("tenantId"),
                     "tenantId should NOT be injected for non-system collection");
+        }
+    }
+
+    // ==================== Get-By-ID Tenant Isolation Tests (KLT-206) ====================
+
+    @Nested
+    @DisplayName("Get-By-ID — Tenant Isolation")
+    class GetByIdTenantIsolationTests {
+
+        @Test
+        @DisplayName("Should return the record when it belongs to the caller's tenant")
+        void get_returnsRecord_whenOwnedByCallerTenant() throws Exception {
+            CollectionDefinition def = buildFieldsCollection();
+            when(registry.get("fields")).thenReturn(def);
+
+            Map<String, Object> record = new HashMap<>();
+            record.put("id", "field-1");
+            record.put("name", "amount");
+            record.put("tenantId", "tenant-123");
+            when(queryEngine.getById(eq(def), eq("field-1"))).thenReturn(Optional.of(record));
+
+            mockMvc.perform(get("/api/fields/field-1")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("Should return 404 when the record belongs to another tenant")
+        void get_returns404_whenOwnedByAnotherTenant() throws Exception {
+            CollectionDefinition def = buildFieldsCollection();
+            when(registry.get("fields")).thenReturn(def);
+
+            Map<String, Object> record = new HashMap<>();
+            record.put("id", "field-1");
+            record.put("name", "amount");
+            record.put("tenantId", "tenant-456");
+            when(queryEngine.getById(eq(def), eq("field-1"))).thenReturn(Optional.of(record));
+
+            mockMvc.perform(get("/api/fields/field-1")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("Should return the record when it belongs to the platform SYSTEM tenant")
+        void get_returnsRecord_whenOwnedBySystemTenant() throws Exception {
+            CollectionDefinition def = buildFieldsCollection();
+            when(registry.get("fields")).thenReturn(def);
+
+            Map<String, Object> record = new HashMap<>();
+            record.put("id", "field-1");
+            record.put("name", "name");
+            record.put("tenantId", SystemCollectionDefinitions.SYSTEM_TENANT_ID);
+            when(queryEngine.getById(eq(def), eq("field-1"))).thenReturn(Optional.of(record));
+
+            mockMvc.perform(get("/api/fields/field-1")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("Should return 404 for a tenant-scoped (non fields/collections) system record owned by another tenant")
+        void get_returns404_forOtherTenantScopedSystemCollection() throws Exception {
+            CollectionDefinition def = buildTenantScopedSystemCollection();
+            when(registry.get("workflow-rules")).thenReturn(def);
+
+            Map<String, Object> record = new HashMap<>();
+            record.put("id", "rule-1");
+            record.put("name", "Auto-approve");
+            record.put("tenantId", "tenant-456");
+            when(queryEngine.getById(eq(def), eq("rule-1"))).thenReturn(Optional.of(record));
+
+            mockMvc.perform(get("/api/workflow-rules/rule-1")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
         }
     }
 }

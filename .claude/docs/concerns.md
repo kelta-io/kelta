@@ -367,6 +367,44 @@ ids raw when they're not in the live page's `lookupDisplayMap` (no write-time di
 
 (No open bugs from the original audit. See Resolved → Bugs.)
 
+**FIXED (V196__add_field_tenant_id / KLT-206) — `GET /api/fields` returned every tenant's
+field metadata, ~2,580 rows across tenants in production, letting any tenant enumerate
+other tenants' field names and types via `filter[collectionId][eq]=<guessed-uuid>`.** The
+`fields` system collection was declared `.tenantScoped(false)`
+(`SystemCollectionDefinitions.fields()`) and the `field` table had no `tenant_id` column
+at all — `DynamicCollectionRouter.injectTenantFilter` only adds a predicate for
+tenant-scoped system collections, so it added none. Fixed the way `collection` already
+does it: V196 adds `field.tenant_id` (backfilled from `collection.tenant_id`, `NOT NULL`,
+FK to `tenant`, same `admin_bypass`/`tenant_isolation` RLS policies as `collection`), and
+`fields` is now `.tenantScoped(true)`. `injectTenantFilter`'s `collections`-only special
+case (`tenantId IN (caller, SYSTEM_TENANT_ID)`, so system-owned fields stay visible to
+every tenant) is now a small `INCLUDES_SYSTEM_TENANT` set covering both `collections` and
+`fields`. The two raw-JDBC paths that insert `field` rows outside the generic CRUD path
+now set `tenant_id` explicitly: `SystemCollectionSeeder.insertField` (always
+`SYSTEM_TENANT_ID` — it only ever seeds system-collection fields) and
+`MigrationFieldRepository.insertField` (`TenantContext.get()`, since destructive schema
+migration already runs under the request-bound tenant). `FieldQuotaEnforcementHook`'s
+`field JOIN collection` workaround (see the gateway-rate-limiter entry above) is no longer
+needed now that `field.tenant_id` exists — simplified back to a direct filter.
+
+**Found in the same investigation, NOT fixed here (out of KLT-206's scope) — `GET/PATCH/DELETE
+/api/<collectionName>/{id}` for ANY tenant-scoped *system* collection resolves purely by
+`id`, with no tenant check at the storage layer** (`PhysicalTableStorageAdapter.getById/
+update/delete` — `WHERE id = ?`, nothing else). List endpoints are safe because
+`injectTenantFilter` shapes the `WHERE` clause; single-record fetch has no such hook. This
+PR closes the gap for the **get-by-id** path generically (`DynamicCollectionRouter.
+isVisibleToCaller`, applied to every tenant-scoped system collection, not just `fields`)
+because the acceptance criteria required `GET /api/fields/{other-tenant-id}` → 404. The
+same hole still exists for **update and delete** — a tenant that already knows another
+tenant's record ID for e.g. `workflow-rules`-shaped tenant-scoped system collections can
+still PATCH/DELETE it. Note this only matters where Postgres RLS doesn't independently
+save you: the harness and (per `docker-compose.yml`'s `POSTGRES_USER`) the standalone
+prod role are the image's bootstrap superuser, which **bypasses RLS unconditionally, even
+`FORCE`d** — so today the `tenant_isolation`/`admin_bypass` policies on `collection`/
+`field` are inert defense-in-depth, not the actual isolation boundary. The actual boundary
+is entirely the application-level `WHERE` filtering. Follow-up: scope update/delete the
+same way (or run the app under a non-superuser role so RLS is a real backstop).
+
 **FIXED (RouteRegistry authoritative member paths) — member-controller static routes were
 shadowed by their backing collection's generic route, 403-ing portal members.** A member
 resource served by a dedicated controller (e.g. `/api/watches` → `WatchController`, "API_ACCESS

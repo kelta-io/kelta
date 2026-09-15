@@ -94,6 +94,11 @@ public class DynamicCollectionRouter {
             "createdAt", "updatedAt", "createdBy", "updatedBy",
             "createdGeo", "updatedGeo", "tenantId", "recordTypeId");
 
+    // System collections whose rows must remain visible to every tenant even though
+    // they are tenant-scoped: system-owned rows carry SYSTEM_TENANT_ID, not the
+    // caller's tenant, so the list filter matches on either.
+    private static final Set<String> INCLUDES_SYSTEM_TENANT = Set.of("collections", "fields");
+
     // Suffixes appended to a primary field name to form companion column keys
     // for CURRENCY and GEOLOCATION fields. Used to keep `<field>_currency_code`,
     // `<field>_longitude`, `<field>_latitude` in the response envelope while
@@ -270,7 +275,7 @@ public class DynamicCollectionRouter {
                 record = resolveByDisplayField(definition, id, request);
             }
 
-            if (record.isEmpty()) {
+            if (record.isEmpty() || !isVisibleToCaller(record.get(), definition, request)) {
                 return ResponseEntity.notFound().build();
             }
 
@@ -909,16 +914,52 @@ public class DynamicCollectionRouter {
             return queryRequest;
         }
 
-        // For the 'collections' collection, include both tenant-specific and system
-        // records so that system collections are visible alongside custom ones.
+        // For 'collections' and 'fields', include both tenant-specific and system
+        // records so that system collections (and their fields) are visible
+        // alongside a tenant's own custom ones.
         List<FilterCondition> filters = new ArrayList<>(queryRequest.filters());
-        if ("collections".equals(definition.name())) {
+        if (INCLUDES_SYSTEM_TENANT.contains(definition.name())) {
             filters.add(new FilterCondition("tenantId", FilterOperator.IN,
                     List.of(tenantId, SystemCollectionDefinitions.SYSTEM_TENANT_ID)));
         } else {
             filters.add(new FilterCondition("tenantId", FilterOperator.EQ, tenantId));
         }
         return queryRequest.withFilters(filters);
+    }
+
+    /**
+     * Get-by-id equivalent of {@link #injectTenantFilter}: that method only shapes a
+     * list {@code WHERE} clause, so a single-record fetch by known ID has nothing to
+     * inject a filter into and must instead check the resolved record's tenant after
+     * the fact.
+     *
+     * @param record the resolved record
+     * @param definition the collection definition
+     * @param request the HTTP servlet request (used to extract tenant ID)
+     * @return false if the record belongs to a tenant the caller may not see
+     */
+    private boolean isVisibleToCaller(Map<String, Object> record, CollectionDefinition definition,
+                                       HttpServletRequest request) {
+        if (!definition.systemCollection() || !definition.tenantScoped()) {
+            return true;
+        }
+
+        String tenantId = request.getHeader("X-Tenant-ID");
+        if (tenantId == null || tenantId.isBlank()) {
+            return true;
+        }
+
+        Object recordTenantId = record.get("tenantId");
+        if (recordTenantId == null) {
+            return true;
+        }
+        String recordTenant = recordTenantId.toString();
+
+        if (INCLUDES_SYSTEM_TENANT.contains(definition.name())) {
+            return recordTenant.equals(tenantId)
+                    || recordTenant.equals(SystemCollectionDefinitions.SYSTEM_TENANT_ID);
+        }
+        return recordTenant.equals(tenantId);
     }
 
     /**
