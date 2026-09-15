@@ -1,0 +1,11 @@
+# actionlint configuration.
+#
+# Jobs here run on self-hosted runners; without declaring their labels actionlint
+# reports 22 "unknown label" findings and drowns out the real ones.
+#   k8s-runner             — the general pool (most jobs)
+#   k8s-runner-integration — the heavier pool used by integration-tests, e2e and
+#                            the quality gate
+self-hosted-runner:
+  labels:
+    - k8s-runner
+    - k8s-runner-integration
