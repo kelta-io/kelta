@@ -107,7 +107,7 @@ public class ApprovalProcessConfigHook implements BeforeSaveHook {
 
     private String resolveCollectionName(String collectionId) {
         List<String> names = jdbcTemplate.queryForList(
-                "SELECT name FROM collection WHERE id = ?::uuid", String.class, collectionId);
+                "SELECT name FROM collection WHERE id = ?", String.class, collectionId);
         return names.isEmpty() ? null : names.get(0);
     }
 }

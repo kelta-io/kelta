@@ -205,11 +205,11 @@ public class ListViewConfigHook implements BeforeSaveHook {
     private Optional<String> findExistingDefaultId(String collectionId, String visibility, String excludeId) {
         List<String> ids = excludeId != null
                 ? jdbcTemplate.queryForList(
-                        "SELECT id FROM list_view WHERE collection_id = ?::uuid AND visibility = ? "
-                                + "AND is_default = true AND id <> ?::uuid LIMIT 1",
+                        "SELECT id FROM list_view WHERE collection_id = ? AND visibility = ? "
+                                + "AND is_default = true AND id <> ? LIMIT 1",
                         String.class, collectionId, visibility, excludeId)
                 : jdbcTemplate.queryForList(
-                        "SELECT id FROM list_view WHERE collection_id = ?::uuid AND visibility = ? "
+                        "SELECT id FROM list_view WHERE collection_id = ? AND visibility = ? "
                                 + "AND is_default = true LIMIT 1",
                         String.class, collectionId, visibility);
         return ids.isEmpty() ? Optional.empty() : Optional.of(ids.get(0));
@@ -220,7 +220,7 @@ public class ListViewConfigHook implements BeforeSaveHook {
             return null;
         }
         List<String> names = jdbcTemplate.queryForList(
-                "SELECT name FROM collection WHERE id = ?::uuid", String.class, collectionId);
+                "SELECT name FROM collection WHERE id = ?", String.class, collectionId);
         if (names.isEmpty()) {
             log.warn("List view targets unknown collection '{}' -- skipping field validation", collectionId);
             return null;
