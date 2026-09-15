@@ -1,8 +1,44 @@
 import { z } from 'zod';
 import { collectionIdByName } from '../admin/lookups.js';
 import { readDataArgument } from '../data.js';
+import { CliError, EXIT } from '../errors.js';
 import { parseFilterSpec, parseList } from '../query.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
+
+/** Renderers a shared list view can publish (V196). */
+const VIEW_TYPES = ['TABLE', 'KANBAN', 'CALENDAR', 'GALLERY'] as const;
+
+function normalizeViewType(value: string): string {
+  const upper = value.trim().toUpperCase();
+  if (!(VIEW_TYPES as readonly string[]).includes(upper)) {
+    throw new CliError(`Invalid --view-type "${value}" (expected ${VIEW_TYPES.join(' | ')})`, {
+      code: 'INVALID_ARGUMENTS',
+      exitCode: EXIT.USAGE,
+    });
+  }
+  return upper;
+}
+
+/**
+ * Builds the `typeConfig` attribute from the kanban flags. Returns undefined when
+ * neither is given so an update leaves an existing config (calendar/gallery
+ * included) alone rather than clearing it.
+ */
+function kanbanTypeConfig(
+  laneField: string | undefined,
+  cardFields: string | undefined
+): Record<string, unknown> | undefined {
+  if (!laneField && !cardFields) return undefined;
+  if (!laneField) {
+    throw new CliError('--card-fields requires --lane-field (card fields are stored with it)', {
+      code: 'INVALID_ARGUMENTS',
+      exitCode: EXIT.USAGE,
+    });
+  }
+  const kanban: Record<string, unknown> = { laneField };
+  if (cardFields) kanban.cardFields = parseList(cardFields);
+  return { kanban };
+}
 
 const layoutList = defineCommand({
   group: 'layouts',
@@ -130,6 +166,7 @@ const listViewList = defineCommand({
       columns: [
         { key: 'name', header: 'NAME' },
         { key: 'isDefault', header: 'DEFAULT' },
+        { key: 'viewType', header: 'VIEW TYPE' },
         { key: 'sortField', header: 'SORT' },
       ],
     };
@@ -151,6 +188,14 @@ const listViewCreate = defineCommand({
     },
     { flag: '--sort <field>', description: 'Sort field, -prefix for descending' },
     { flag: '--default', description: 'Mark as the default list view' },
+    { flag: '--visibility <vis>', description: 'PRIVATE (default), PUBLIC or GROUP' },
+    {
+      flag: '--view-type <type>',
+      description: 'Renderer: TABLE (default), KANBAN, CALENDAR or GALLERY',
+    },
+    { flag: '--lane-field <field>', description: 'Kanban lane field (a picklist field)' },
+    { flag: '--card-fields <list>', description: 'Kanban card fields, comma-separated' },
+    { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
   input: z.object({
     collection: z.string().min(1),
@@ -159,6 +204,11 @@ const listViewCreate = defineCommand({
     filter: z.array(z.string()).default([]),
     sort: z.string().optional(),
     default: z.boolean().default(false),
+    visibility: z.string().optional(),
+    viewType: z.string().optional(),
+    laneField: z.string().optional(),
+    cardFields: z.string().optional(),
+    data: z.string().optional(),
   }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
@@ -182,6 +232,11 @@ const listViewCreate = defineCommand({
       attributes.sortField = input.sort.replace(/^-/, '');
       attributes.sortDirection = input.sort.startsWith('-') ? 'DESC' : 'ASC';
     }
+    if (input.visibility) attributes.visibility = input.visibility.trim().toUpperCase();
+    if (input.viewType) attributes.viewType = normalizeViewType(input.viewType);
+    const typeConfig = kanbanTypeConfig(input.laneField, input.cardFields);
+    if (typeConfig) attributes.typeConfig = typeConfig;
+    if (input.data) Object.assign(attributes, readDataArgument(input.data));
     const response = await axios.post<{ data?: { id?: string } }>('/api/list-views', {
       data: { type: 'list-views', attributes },
     });
@@ -193,6 +248,86 @@ const listViewCreate = defineCommand({
   },
 });
 
+const listViewUpdate = defineCommand({
+  group: 'list-views',
+  name: 'update',
+  summary: 'Update a saved list view by id',
+  positionals: [{ name: 'listViewId', description: 'List view id', required: true }],
+  options: [
+    { flag: '--name <name>', description: 'List view name' },
+    { flag: '--columns <list>', description: 'Displayed field names, comma-separated' },
+    {
+      flag: '--filter <spec>',
+      description: 'Filter as field[.op]=value (repeatable); replaces all filters',
+      repeatable: true,
+    },
+    { flag: '--sort <field>', description: 'Sort field, -prefix for descending' },
+    { flag: '--default <bool>', description: 'true|false' },
+    { flag: '--visibility <vis>', description: 'PRIVATE, PUBLIC or GROUP' },
+    {
+      flag: '--view-type <type>',
+      description: 'Renderer: TABLE, KANBAN, CALENDAR or GALLERY',
+    },
+    { flag: '--lane-field <field>', description: 'Kanban lane field (a picklist field)' },
+    { flag: '--card-fields <list>', description: 'Kanban card fields, comma-separated' },
+    { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
+  ],
+  input: z.object({
+    listViewId: z.string().min(1),
+    name: z.string().optional(),
+    columns: z.string().optional(),
+    filter: z.array(z.string()).default([]),
+    sort: z.string().optional(),
+    default: z.enum(['true', 'false']).optional(),
+    visibility: z.string().optional(),
+    viewType: z.string().optional(),
+    laneField: z.string().optional(),
+    cardFields: z.string().optional(),
+    data: z.string().optional(),
+  }),
+  handler: async (ctx, input) => {
+    const attributes: Record<string, unknown> = {};
+    if (input.name) attributes.name = input.name;
+    if (input.columns) attributes.columns = parseList(input.columns);
+    if (input.filter.length > 0) {
+      attributes.filters = input.filter.map((spec) => {
+        const parsed = parseFilterSpec(spec);
+        return {
+          field: parsed.field,
+          operator: parsed.operator.toUpperCase(),
+          value: parsed.value,
+        };
+      });
+    }
+    if (input.sort) {
+      attributes.sortField = input.sort.replace(/^-/, '');
+      attributes.sortDirection = input.sort.startsWith('-') ? 'DESC' : 'ASC';
+    }
+    if (input.default !== undefined) attributes.isDefault = input.default === 'true';
+    if (input.visibility) attributes.visibility = input.visibility.trim().toUpperCase();
+    if (input.viewType) attributes.viewType = normalizeViewType(input.viewType);
+    const typeConfig = kanbanTypeConfig(input.laneField, input.cardFields);
+    if (typeConfig) attributes.typeConfig = typeConfig;
+    if (input.data) Object.assign(attributes, readDataArgument(input.data));
+    if (Object.keys(attributes).length === 0) {
+      throw new CliError('Nothing to update — pass at least one field flag', {
+        code: 'INVALID_ARGUMENTS',
+        exitCode: EXIT.USAGE,
+      });
+    }
+    const response = await ctx.client
+      .getAxiosInstance()
+      .patch<unknown>(`/api/list-views/${input.listViewId}`, {
+        data: { type: 'list-views', id: input.listViewId, attributes },
+      });
+    return {
+      data: response.data,
+      message: `List view ${input.listViewId} updated`,
+      ids: [input.listViewId],
+    };
+  },
+});
+
 export const layoutCommands: RegisteredCommand[] = [
   layoutList,
   layoutCreate,
@@ -200,4 +335,5 @@ export const layoutCommands: RegisteredCommand[] = [
   layoutDelete,
   listViewList,
   listViewCreate,
+  listViewUpdate,
 ];

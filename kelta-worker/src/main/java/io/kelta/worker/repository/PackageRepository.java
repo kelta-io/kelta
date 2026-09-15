@@ -271,6 +271,29 @@ public class PackageRepository {
         );
     }
 
+    /** Related lists enriched with layout/collection/related-collection/field natural keys. */
+    public List<Map<String, Object>> findLayoutRelatedListsByLayoutIds(String tenantId, List<String> layoutIds) {
+        if (layoutIds.isEmpty()) return List.of();
+        String placeholders = String.join(",", layoutIds.stream().map(i -> "?").toList());
+        Object[] params = new Object[layoutIds.size() + 1];
+        params[0] = tenantId;
+        for (int i = 0; i < layoutIds.size(); i++) params[i + 1] = layoutIds.get(i);
+        return jdbcTemplate.queryForList(
+                "SELECT rl.*, pl.name AS layout_name, c.name AS collection_name, " +
+                        "rc.name AS related_collection_name, rf.name AS relationship_field_name, " +
+                        "rfc.name AS relationship_field_collection_name " +
+                        "FROM layout_related_list rl " +
+                        "JOIN page_layout pl ON rl.layout_id = pl.id " +
+                        "JOIN collection c ON pl.collection_id = c.id " +
+                        "JOIN collection rc ON rl.related_collection_id = rc.id " +
+                        "JOIN field rf ON rl.relationship_field_id = rf.id " +
+                        "JOIN collection rfc ON rf.collection_id = rfc.id " +
+                        "WHERE pl.tenant_id = ? AND rl.layout_id IN (" + placeholders + ") " +
+                        "ORDER BY rl.sort_order ASC",
+                params
+        );
+    }
+
     public List<Map<String, Object>> findGlobalPicklistsByIds(String tenantId, List<String> ids) {
         if (ids.isEmpty()) return List.of();
         String placeholders = String.join(",", ids.stream().map(i -> "?").toList());
@@ -319,7 +342,7 @@ public class PackageRepository {
         );
     }
 
-    /** Menu items enriched with the owning menu name (natural-key remap on import). */
+    /** Menu items enriched with the owning menu + parent labels (natural-key remap on import). */
     public List<Map<String, Object>> findUiMenuItemsWithMenuNames(String tenantId, List<String> menuIds) {
         if (menuIds.isEmpty()) return List.of();
         String placeholders = String.join(",", menuIds.stream().map(i -> "?").toList());
@@ -327,8 +350,9 @@ public class PackageRepository {
         params[0] = tenantId;
         for (int i = 0; i < menuIds.size(); i++) params[i + 1] = menuIds.get(i);
         return jdbcTemplate.queryForList(
-                "SELECT mi.*, m.name AS menu_name FROM ui_menu_item mi " +
+                "SELECT mi.*, m.name AS menu_name, p.label AS parent_label FROM ui_menu_item mi " +
                         "JOIN ui_menu m ON mi.menu_id = m.id " +
+                        "LEFT JOIN ui_menu_item p ON mi.parent_id = p.id " +
                         "WHERE mi.tenant_id = ? AND mi.menu_id IN (" + placeholders + ") " +
                         "ORDER BY mi.display_order ASC",
                 params

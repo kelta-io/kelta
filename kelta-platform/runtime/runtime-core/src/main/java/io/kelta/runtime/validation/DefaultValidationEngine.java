@@ -397,20 +397,16 @@ public class DefaultValidationEngine implements ValidationEngine {
         CollectionDefinition targetCollection = collectionRegistry.get(refConfig.targetCollection());
         if (targetCollection == null) {
             // Target collection doesn't exist - this is a configuration error
-            errors.add(new FieldError(
-                field.name(),
-                "Referenced collection does not exist: " + refConfig.targetCollection(),
-                "reference"
-            ));
+            errors.add(FieldError.referenceTargetMissing(field.name(), refConfig.targetCollection()));
             return;
         }
-        
+
         // Check if the referenced record exists
         String refId = value.toString();
         var referencedRecord = storageAdapter.getById(targetCollection, refId);
-        
+
         if (referencedRecord.isEmpty()) {
-            errors.add(FieldError.reference(field.name(), refConfig.targetCollection()));
+            errors.add(FieldError.reference(field.name(), refConfig.targetCollection(), refId));
         }
     }
 }

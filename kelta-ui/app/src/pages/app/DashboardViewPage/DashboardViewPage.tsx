@@ -60,6 +60,17 @@ export function DashboardViewPage() {
       '1Y': t('analytics.range1y', 'Last year'),
     })[r]
 
+  /** Chip shown on a widget that opts out of the page's time range (config.ignoreTimeRange /
+   * config.fixedTimeRange) so the reader knows the selected page range doesn't apply to it. */
+  const widgetTimeRangeChip = (config: Record<string, unknown>): string | undefined => {
+    if (config.ignoreTimeRange === true) return t('analytics.rangeAll', 'All time')
+    const fixed = config.fixedTimeRange
+    if (typeof fixed === 'string' && fixed.length > 0) {
+      return timeRangeLabel(fixed as DashboardTimeRange) ?? fixed
+    }
+    return undefined
+  }
+
   const renderWidgetBody = (
     component: DashboardComponentRow,
     payload: WidgetPayload | undefined
@@ -78,12 +89,12 @@ export function DashboardViewPage() {
             chartStyle={component.config.chartStyle === 'pie' ? 'pie' : 'bar'}
             onSegmentClick={
               collectionName
-                ? (label) => {
+                ? (value) => {
                     const groupByField = (payload.data?.groupByField as string) ?? null
                     if (groupByField) {
                       navigate(
                         buildListUrl(tenantSlug!, collectionName, [
-                          { field: groupByField, operator: 'equals', value: label },
+                          { field: groupByField, operator: 'equals', value },
                         ])
                       )
                     }
@@ -186,6 +197,7 @@ export function DashboardViewPage() {
                 title={component.title}
                 isLoading={isLoading}
                 error={data?.widgets[component.id]?.error}
+                timeRangeChip={widgetTimeRangeChip(component.config)}
               >
                 {renderWidgetBody(component, data?.widgets[component.id])}
               </WidgetFrame>

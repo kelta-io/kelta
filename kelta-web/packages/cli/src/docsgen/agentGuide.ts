@@ -37,9 +37,14 @@ discoverable command catalog.
 ## Errors & exit codes
 
 - Non-table modes emit ONE line of JSON on stderr:
-  \`{"error":{"code":"VALIDATION_FAILED","status":400,"detail":"…","requestId":"…"}}\`
+  \`{"error":{"code":"VALIDATION_FAILED","status":400,"detail":"…","source":{"pointer":"/data/attributes/name"},"meta":{"requestId":"…"}},"errors":[…]}\`
+- \`error\` is \`errors[0]\` flattened for convenience; \`errors\` is the full
+  JSON:API array — read it when a request can fail on more than one field
+  (e.g. \`records create\` with two invalid attributes) or when you need
+  every entry's \`source.pointer\`/\`meta\`, not just the first.
 - \`code\` is the platform's stable UPPER_SNAKE_CASE contract — branch on it,
-  never on \`detail\`. \`requestId\` correlates with server logs.
+  never on \`detail\`. \`meta.requestId\` correlates with server logs;
+  reference errors additionally carry \`meta.targetCollection\`.
 - Exit codes: 0 ok · 1 API error · 2 usage/confirmation · 3 auth · 4 not found ·
   5 conflict/rate-limit.
 
@@ -52,7 +57,8 @@ discoverable command catalog.
 ## Query grammar (list commands)
 
 - \`--filter field=value\` (op defaults to eq) or \`--filter field.op=value\`;
-  repeatable, ANDed. Ops: eq, neq, gt, gte, lt, lte, contains, …
+  repeatable, ANDed. Ops: eq, neq, gt, gte, lt, lte, isnull, contains, starts,
+  ends, icontains, istarts, iends, ieq, in (also aliased as any).
 - \`--sort -createdAt,name\` (leading \`-\` = descending)
 - \`--fields a,b\` (sparse) · \`--include rel1,rel2\` · \`--page N --size N\` (max 200)
 - \`--all\` auto-paginates (client cap 10k, warning on stderr when hit).
@@ -62,7 +68,11 @@ discoverable command catalog.
 - \`kelta api GET '/api/collections?page[size]=5'\` — any endpoint, profile auth +
   tenant prefix applied automatically, response verbatim. \`--data\` takes any
   JSON (inline, @file, or \`-\` for stdin); \`--header Name:value\` repeatable.
-  Non-GET methods are treated as dangerous (need \`--yes\` off-TTY).
+  Every non-GET method is dangerous by spec (needs \`--yes\` off-TTY, DELETE
+  included) — without it, exit 2 and \`{"error":{"code":"CONFIRMATION_REQUIRED"}}\`,
+  unchanged. \`kelta manifest\` advertises this via \`"dangerous": true\`.
+- On a non-2xx response, \`kelta api\` surfaces the full error envelope above
+  (all of \`errors[]\`, not just the first) and exits per the status table.
 
 ## Canonical examples
 

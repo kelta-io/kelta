@@ -1,31 +1,39 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import type { AxiosInstance } from 'axios';
+import type { AxiosInstance, AxiosResponse } from 'axios';
 import { z } from 'zod';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
 
 export interface ExportOptions {
-  name: string;
-  version: string;
+  name?: string;
+  version?: string;
   output?: string;
 }
+
+export type ConflictMode = 'skip' | 'overwrite';
 
 /**
  * Export this tenant's metadata as a package file (GitOps-friendly).
  * POST /api/packages/export → write the returned package JSON to disk.
- * Returns the path written.
+ * Name and version are sent only when given; an empty body means "the whole
+ * tenant, named after it" and is the default. Returns the path written.
  */
 export async function runExport(client: AxiosInstance, opts: ExportOptions): Promise<string> {
-  const res = await client.post(
-    '/api/packages/export',
-    { name: opts.name, version: opts.version },
-    { responseType: 'arraybuffer' }
-  );
+  const body: Record<string, string> = {};
+  if (opts.name) body.name = opts.name;
+  if (opts.version) body.version = opts.version;
+  const res = await client.post('/api/packages/export', body, { responseType: 'arraybuffer' });
   if (res.status !== 200) {
     throw new Error(`Export failed (status ${String(res.status)})`);
   }
-  const file = opts.output ?? `${opts.name}-${opts.version}.json`;
+  const file = opts.output ?? attachmentFilename(res) ?? 'metadata.json';
   writeFileSync(file, Buffer.from(res.data as ArrayBuffer));
   return file;
+}
+
+/** The server names the package file in Content-Disposition — use it when the caller didn't. */
+function attachmentFilename(res: AxiosResponse): string | undefined {
+  const header = res.headers?.['content-disposition'] as string | undefined;
+  return /filename="?([^";]+)"?/.exec(header ?? '')?.[1];
 }
 
 /** Preview the changes a package file would make — POST /api/packages/import/preview (no writes). */
@@ -34,14 +42,17 @@ export async function runDiff(client: AxiosInstance, file: string): Promise<unkn
   return res.data as unknown;
 }
 
-/** Apply a package file — POST /api/packages/import (with optional dryRun). */
+/** Apply a package file — POST /api/packages/import (with optional dryRun + conflict mode). */
 export async function runApply(
   client: AxiosInstance,
   file: string,
-  opts: { dryRun?: boolean }
+  opts: { dryRun?: boolean; conflict?: ConflictMode }
 ): Promise<unknown> {
-  const url = `/api/packages/import${opts.dryRun ? '?dryRun=true' : ''}`;
-  const res = await uploadPackage(client, url, file);
+  const params = new URLSearchParams();
+  if (opts.dryRun) params.set('dryRun', 'true');
+  if (opts.conflict) params.set('conflictMode', opts.conflict);
+  const query = params.toString();
+  const res = await uploadPackage(client, `/api/packages/import${query ? `?${query}` : ''}`, file);
   return res.data as unknown;
 }
 
@@ -63,13 +74,13 @@ const exportCommand = defineCommand({
   name: 'export',
   summary: "Export this tenant's metadata as a package file",
   options: [
-    { flag: '-n, --name <name>', description: 'Package name' },
-    { flag: '-v, --version <version>', description: 'Package version' },
-    { flag: '-o, --out <file>', description: 'Output file (default: <name>-<version>.json)' },
+    { flag: '-n, --name <name>', description: 'Package name (default: the tenant slug)' },
+    { flag: '-v, --version <version>', description: 'Package version (default: 1.0.0)' },
+    { flag: '-o, --out <file>', description: 'Output file (default: the name the server returns)' },
   ],
   input: z.object({
-    name: z.string().min(1),
-    version: z.string().min(1),
+    name: z.string().min(1).optional(),
+    version: z.string().min(1).optional(),
     out: z.string().optional(),
   }),
   handler: async (ctx, input) => {
@@ -100,11 +111,23 @@ const apply = defineCommand({
   summary: 'Apply a package file to this tenant',
   dangerous: (input) => !input.dryRun,
   positionals: [{ name: 'file', description: 'Package file', required: true }],
-  options: [{ flag: '--dry-run', description: 'Validate without writing' }],
-  input: z.object({ file: z.string().min(1), dryRun: z.boolean().default(false) }),
+  options: [
+    { flag: '--dry-run', description: 'Validate without writing' },
+    {
+      flag: '--conflict <mode>',
+      description: 'On an item that already exists: skip (default) or overwrite',
+      default: 'skip',
+    },
+  ],
+  input: z.object({
+    file: z.string().min(1),
+    dryRun: z.boolean().default(false),
+    conflict: z.enum(['skip', 'overwrite']).default('skip'),
+  }),
   handler: async (ctx, input) => {
     const result = await runApply(ctx.client.getAxiosInstance(), input.file, {
       dryRun: input.dryRun,
+      conflict: input.conflict,
     });
     return { data: result };
   },

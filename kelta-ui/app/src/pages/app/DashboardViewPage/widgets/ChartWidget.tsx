@@ -14,6 +14,10 @@ import {
 
 export interface ChartSeriesEntry {
   label: string
+  /** Raw group-by value (e.g. the referenced record's id) when the label was resolved
+   *  from a LOOKUP/MASTER_DETAIL field's display value. Absent for older cached payloads
+   *  and for non-reference group-by fields, where label itself is the raw value. */
+  key?: string
   count: number
   value: number
 }
@@ -22,8 +26,9 @@ export interface ChartWidgetProps {
   /** Widget data: {groupByField, aggregateFunction, series, totalRecords}. */
   data: Record<string, unknown>
   chartStyle?: 'bar' | 'pie'
-  /** Called with the clicked segment's group label (drill-through). */
-  onSegmentClick?: (label: string) => void
+  /** Called with the clicked segment's drill-through value: `key` when present
+   *  (the raw id behind a resolved lookup label), otherwise `label`. */
+  onSegmentClick?: (value: string) => void
 }
 
 const PIE_COLORS = ['#3B82F6', '#06B6D4', '#8B5CF6', '#F59E0B', '#10B981', '#EF4444', '#64748B']
@@ -32,10 +37,10 @@ const PIE_COLORS = ['#3B82F6', '#06B6D4', '#8B5CF6', '#F59E0B', '#10B981', '#EF4
 export function ChartWidget({ data, chartStyle = 'bar', onSegmentClick }: ChartWidgetProps) {
   const series = (data.series as ChartSeriesEntry[]) ?? []
 
-  const handleClick = (entry: { label?: string } | undefined) => {
-    const label = entry?.label
-    if (onSegmentClick && label && label !== '(empty)') {
-      onSegmentClick(label)
+  const handleClick = (entry: { label?: string; key?: string } | undefined) => {
+    const drillValue = entry?.key ?? entry?.label
+    if (onSegmentClick && drillValue && drillValue !== '(empty)') {
+      onSegmentClick(drillValue)
     }
   }
 

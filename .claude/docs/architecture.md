@@ -578,7 +578,7 @@ jobs. RLS then scopes every query automatically.
 ## Runtime Core Layers
 
 - **Model**: CollectionDefinition, FieldDefinition, FieldType, ReferenceConfig, ValidationRules — `runtime-core/.../model/`
-- **Query Engine**: DefaultQueryEngine — pagination, sorting, filtering, field selection, virtual fields — `runtime-core/.../query/`
+- **Query Engine**: DefaultQueryEngine — pagination, sorting, filtering, field selection, virtual fields — `runtime-core/.../query/`. Filter operator tokens (`eq`, `contains`, `any`/`in`, the end-user UI aliases `equals`/`not_equals`/…) resolve through one shared vocabulary, `FilterOperator.parse` — an unrecognized token throws `InvalidFilterException` naming the accepted list rather than defaulting silently. `FilterCondition.fromParams` rejects any `filter…` query key that isn't `filter[field]=value` or `filter[field][op]=value` with 400 `INVALID_QUERY` (previously a malformed key like `filter[status][in][]=a` was silently dropped, returning the unfiltered collection). `DashboardDataService.mapOperator` (kelta-worker) and MCP's `QueryCollectionTool` (kelta-mcp, `IN` accepts a CSV string or array) both parse through the same `FilterOperator.parse`, so an unknown widget/tool operator now fails loudly (`WidgetExecutionException` / tool error) instead of silently matching `EQ`. Exception: `mapOperator` special-cases the legacy widget token `"contains"` to case-insensitive `ICONTAINS` (matching `ReportExecutionService`) before delegating to `parse`, since the canonical name table alone would resolve it to case-sensitive `CONTAINS` and silently change existing widget behavior.
 - **Storage**: `StorageAdapter` SPI — `DispatchingStorageAdapter` (`@Primary`) routes each op to the adapter backing the target collection, keyed by `storageConfig().adapterConfig().get("adapterType")` (absent/unknown → `PhysicalTableStorageAdapter`, the PostgreSQL dynamic-schema default). External backends implement the `ExternalStorageAdapter` marker (so the dispatcher can collect them as `List<ExternalStorageAdapter>` without a circular bean ref) and override `storageType()`. Consumers that inject `PhysicalTableStorageAdapter` concretely (e.g. unique-constraint checks) bypass routing. `ExternalRestStorageAdapter` (`storageType=external-rest`) maps CRUD/query to a remote REST API over the tiny injectable `RestExecutor` HTTP seam (config in `adapterConfig`: `baseUrl`/`path`/`dataPath`/`idAttribute`/`bearerToken`); pagination + sort + `EQ` filters push down best-effort. `ExternalJdbcStorageAdapter` (`storageType=external-jdbc`) maps CRUD/query to SQL on a foreign table via an injectable `ExternalJdbcConnectionProvider` (config: `jdbcUrl`/`table`/`idColumn`); values bind as params and all identifiers are pattern-validated before interpolation. — `runtime-core/.../storage/`
 - **Flow Engine**: Flow execution, node processing, branching — `runtime-core/.../flow/`
 - **Modules**: Action handlers (CreateRecord, UpdateRecord, QueryRecords, DeleteRecord, TriggerFlow, Decision, LogMessage) — `runtime-module-core/.../module/core/`
@@ -599,7 +599,46 @@ jobs. RLS then scopes every query automatically.
 
 There is now **one record-detail path**. Both the end-user runtime (`/:tenant/app/o/:collection/:id`, `ObjectDetailPage`) and the admin Resource Browser (`/:tenant/resources/:collection/:id`, `ResourceDetailPage`) are **thin `variant` wrappers over `RecordShell`** (`kelta-ui/app/src/components/record/RecordShell.tsx`): `RecordShell` owns the page skeleton (loading/status branches + breadcrumb → header → body(+rail) → tab bar → below-tabs → dialogs), variant chrome is passed as slots, and the field body renders through `RecordDetailBody` (`LayoutFieldSections` when the layout has sections, else a variant fallback). The shared `DetailTabBar` drives related lists (with inline CRUD) + Notes/Attachments/System tabs for both. A fix to view/inline-edit/related-CRUD/rules/optimistic-locking lands once and shows in both stacks. Do **not** reintroduce a per-stack detail body. (The list pages — `ObjectListPage`/`ResourceListPage` — are not yet converged; they share `ObjectDataTable` but keep separate page shells.)
 
+`layout-fields.columnNumber` is **0-based** — column `0` is a section's first column — matching how `LayoutFieldSections` indexes into a section's columns. `SystemCollectionDefinitions.layoutFields()` defaults it to `0` (`V197__layout_field_column_zero.sql`; a pre-existing row's explicit value was never rewritten), and `kelta-mcp`'s `CreateLayoutTool` computes the same 0-based placement (`index % columns`) when a `create_layout` field entry omits `columnNumber`. The Setup layout editor (`FieldPropertyForm.tsx` / `LayoutEditorList.tsx`) always writes an explicit `columnNumber` on every placement, so it never relies on either default.
+
 **Offline replica path (end-user only).** When `OfflineProvider` is mounted — it wraps the `EndUserShell` subtree — the shared data hooks route through a tenant-scoped IndexedDB replica: online reads write through to the store and offline reads serve it (`useCollectionRecords`/`useRecord`/`usePageDataSources`), and offline writes queue to an outbox (`useRecordMutation` → `engine.queue`) that flushes on reconnect (`SyncEngine.sync`). Admin pages render outside the provider (`useOffline()` → `undefined`), so their reads/writes stay online-only and unchanged. See `conventions.md` → offline hooks.
+
+### List-view renderer contract — shared row publishes `viewType`/`typeConfig`
+
+A list view's **renderer** is part of the shared metadata, not only a per-user toggle.
+The `list-views` system collection carries `viewType`
+(`TABLE` | `KANBAN` | `CALENDAR` | `GALLERY`, NOT NULL DEFAULT `TABLE`, CHECK-constrained)
+and `typeConfig` (JSONB, per-renderer settings keyed by lowercased view type — e.g.
+`{"kanban": {"laneField": "status", "cardFields": ["title"]}}`) — added by
+`V196__list_view_view_type.sql` and declared in `SystemCollectionDefinitions.listViews()`.
+They mirror the fields the per-user `SavedView` already had, so an admin can publish "the
+board" instead of a column set every user re-configures.
+
+**Resolution precedence on the end-user list** (`ObjectListPage`), highest first:
+
+1. the viewer's own override for that shared view — one `user-ui-preferences` row per
+   collection (`prefType: 'list-view-type'`, `useViewTypeOverrides`), a map of shared-view
+   id → `{viewType, typeConfig}`, written when the toolbar switch is used on a shared view;
+2. the published `viewType`/`typeConfig` on the shared row, mapped by
+   `mapSharedListView` (`ObjectListPage/listViewMapping.ts`);
+3. `table`.
+
+The stored value is uppercase and the frontend `SavedViewType` is lowercase;
+`listViewMapping` normalizes and **falls back to the table renderer for anything
+unrecognized** (a row written before V196, or by a rolled-back platform version) rather than
+erroring, and drops a `typeConfig` section missing its required field (kanban lane, calendar
+date) instead of passing it through half-formed. The toolbar override never writes the
+shared row — a user flipping a published board back to a table changes only their own
+preference row. `ObjectListPage` waits for `useViewTypeOverrides().isLoaded` before applying
+a default/linked view, so a published board does not flash in ahead of the viewer's choice.
+
+Both write paths produce the same row: `kelta list-views create|update --view-type KANBAN
+--lane-field status --card-fields title,tier` (also `--visibility`, `--data`; `--card-fields`
+without `--lane-field` is a usage error) and the MCP `create_listview`/`update_listview`
+tools' `viewType` + `typeConfig` params (`update_listview` clears `typeConfig` on an explicit
+`{}`). Setup › List Views exposes the same choice, scoping the kanban lane select to the
+collection's picklist fields. Authoring reference: `docs/authoring/list-views.md`
+(served as `kelta docs list-views` and the `kelta://docs/list-views` MCP resource).
 
 ## Data Flow
 

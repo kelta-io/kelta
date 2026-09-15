@@ -46,6 +46,55 @@ describe('mapError', () => {
     expect(mapped.exitCode).toBe(EXIT.API);
   });
 
+  it('preserves source.pointer and the full meta for a reference error', () => {
+    const mapped = mapError(
+      axiosError(400, {
+        errors: [
+          {
+            status: '400',
+            code: 'REFERENCE_ERROR',
+            detail: "Referenced record 'x' does not exist in collection 'contacts' (field owner)",
+            source: { pointer: '/data/attributes/owner' },
+            meta: { field: 'owner', value: 'x', targetCollection: 'contacts', requestId: 'req-2' },
+          },
+        ],
+      })
+    );
+    expect(mapped.source).toEqual({ pointer: '/data/attributes/owner' });
+    expect(mapped.meta).toMatchObject({ targetCollection: 'contacts', requestId: 'req-2' });
+  });
+
+  it('keeps every entry of errors[], not just the first', () => {
+    const mapped = mapError(
+      axiosError(400, {
+        errors: [
+          {
+            status: '400',
+            code: 'VALIDATION_FAILED',
+            detail: 'name is required',
+            source: { pointer: '/data/attributes/name' },
+          },
+          {
+            status: '400',
+            code: 'VALIDATION_FAILED',
+            detail: 'amount must be >= 0',
+            source: { pointer: '/data/attributes/amount' },
+          },
+        ],
+      })
+    );
+    expect(mapped.errors).toHaveLength(2);
+    expect(mapped.errors?.[1]).toMatchObject({
+      detail: 'amount must be >= 0',
+      source: { pointer: '/data/attributes/amount' },
+    });
+  });
+
+  it('leaves errors undefined when the body has no JSON:API envelope', () => {
+    const mapped = mapError(axiosError(500, 'oops'));
+    expect(mapped.errors).toBeUndefined();
+  });
+
   it.each([
     [401, EXIT.AUTH, 'UNAUTHENTICATED'],
     [404, EXIT.NOT_FOUND, 'NOT_FOUND'],
@@ -92,12 +141,46 @@ describe('mapError', () => {
 
 describe('toErrorPayload', () => {
   it('emits the single-line machine contract', () => {
-    const payload = toErrorPayload(
-      new CliError('bad', { code: 'X', exitCode: 1, status: 400, requestId: 'r1' })
-    );
+    const payload = toErrorPayload(new CliError('bad', { code: 'X', exitCode: 1, status: 400 }));
     expect(JSON.parse(payload)).toEqual({
-      error: { code: 'X', status: 400, detail: 'bad', requestId: 'r1' },
+      error: { code: 'X', status: 400, detail: 'bad' },
     });
     expect(payload).not.toContain('\n');
+  });
+
+  it('carries source, meta, and the full errors[] through onto the envelope', () => {
+    const mapped = mapError(
+      axiosError(400, {
+        errors: [
+          {
+            status: '400',
+            code: 'REFERENCE_ERROR',
+            detail: "Referenced record 'x' does not exist in collection 'contacts'",
+            source: { pointer: '/data/attributes/owner' },
+            meta: { targetCollection: 'contacts', requestId: 'req-3' },
+          },
+          {
+            status: '400',
+            code: 'VALIDATION_FAILED',
+            detail: 'name is required',
+            source: { pointer: '/data/attributes/name' },
+          },
+        ],
+      })
+    );
+    const payload = JSON.parse(toErrorPayload(mapped)) as {
+      error: { source?: { pointer?: string }; meta?: { targetCollection?: string } };
+      errors: unknown[];
+    };
+    expect(payload.error.source?.pointer).toBe('/data/attributes/owner');
+    expect(payload.error.meta?.targetCollection).toBe('contacts');
+    expect(payload.errors).toHaveLength(2);
+  });
+
+  it('omits errors[] when the failure did not come from a JSON:API response', () => {
+    const payload = JSON.parse(
+      toErrorPayload(new CliError('boom', { code: 'ERROR', exitCode: 1 }))
+    );
+    expect(payload).not.toHaveProperty('errors');
   });
 });

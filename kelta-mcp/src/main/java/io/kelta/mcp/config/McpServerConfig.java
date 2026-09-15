@@ -4,6 +4,7 @@ import io.kelta.mcp.auth.KeltaTransportContextExtractor;
 import io.kelta.mcp.observe.ObservedToolDecorator;
 import io.kelta.mcp.observe.PatPropagatingToolDecorator;
 import io.kelta.mcp.observe.RateLimitedToolDecorator;
+import io.kelta.mcp.resource.AdminResource;
 import io.kelta.mcp.resource.UserResource;
 import io.kelta.mcp.resource.UserResourceTemplate;
 import io.kelta.mcp.tool.AdminTool;
@@ -73,9 +74,10 @@ public class McpServerConfig {
             types for one collection) -> query_collection / get_record.
 
             Reading: query_collection lists/filters (ops: EQ NEQ GT GTE LT LTE CONTAINS \
-            STARTS ENDS ICONTAINS ISTARTS IENDS IEQ ISNULL; fields AND together, NO OR — \
-            run multiple queries and union client-side for OR/IN). get_record fetches one \
-            row by id. search is keyword full-text; semantic_search is vector/meaning-based. \
+            STARTS ENDS ICONTAINS ISTARTS IENDS IEQ ISNULL IN; IN takes a CSV string or \
+            array for a multi-value match; fields AND together, NO OR — run multiple \
+            queries and union client-side for OR). get_record fetches one row by id. \
+            search is keyword full-text; semantic_search is vector/meaning-based. \
             describe_api returns the full OpenAPI 3.0 spec for exact request/response shapes, \
             but only covers plain collection CRUD — flows, approvals, and bulk are NOT in it; \
             use the dedicated tools below for those.
@@ -92,7 +94,11 @@ public class McpServerConfig {
             Conventions: tool arguments are friendly camelCase; the tool boundary translates \
             them into the platform's native JSON:API shape (kebab-case collection/attribute \
             names on the wire) — pass names as given in list_collections / \
-            get_collection_schema, don't pre-convert casing yourself.""";
+            get_collection_schema, don't pre-convert casing yourself.
+
+            Resources: kelta://docs/<topic> (topics: jsonapi, page-layouts, list-views, \
+            dashboards, ui-pages, ui-menus) are reference docs for authoring tenant metadata \
+            — read one before writing filters, layouts, dashboards, or page config by hand.""";
 
     private static final String ADMIN_INSTRUCTIONS = """
             Kelta control-plane MCP server: define collections, fields, layouts, flows, \
@@ -121,11 +127,22 @@ public class McpServerConfig {
             get_collection_schema — use these to look up ids/names before a create_/update_ \
             call rather than guessing.
 
+            List views publish a renderer, not just columns: create_listview/update_listview \
+            take viewType (TABLE | KANBAN | CALENDAR | GALLERY) plus typeConfig, e.g. \
+            {"kanban": {"laneField": "status", "cardFields": ["title"]}}. Combine with \
+            visibility PUBLIC to hand a board to every user of the collection. Read \
+            kelta://docs/list-views first.
+
             Bringing in external data: import_api_spec + materialize_api_collection wire up \
             an API-backed collection from an OpenAPI spec.
 
             Every mutating tool declares destructiveHint / idempotentHint in its annotations \
-            — check them before retrying a failed call or assuming a create_ is safe to repeat.""";
+            — check them before retrying a failed call or assuming a create_ is safe to repeat.
+
+            Resources: kelta://docs/<topic> (topics: jsonapi, page-layouts, list-views, \
+            dashboards, ui-pages, ui-menus) are reference docs for authoring layouts, list \
+            views, dashboards, and page config directly through create_layout/create_listview/ \
+            record attributes — read one before hand-writing a config JSON blob.""";
 
     @Bean(name = "userTransportProvider")
     public HttpServletStatelessServerTransportProvider userTransportProvider() {
@@ -182,13 +199,17 @@ public class McpServerConfig {
             @org.springframework.beans.factory.annotation.Qualifier("adminTransportProvider")
             HttpServletStatelessServerTransportProvider transport,
             List<AdminTool> adminTools,
+            List<AdminResource> adminResources,
             ObservedToolDecorator decorator,
             RateLimitedToolDecorator rateLimiter,
             PatPropagatingToolDecorator patPropagator) {
         McpStatelessSyncServer server = McpServer.sync(transport)
                 .serverInfo(SERVER_NAME + "-admin", SERVER_VERSION)
                 .instructions(ADMIN_INSTRUCTIONS)
-                .capabilities(ServerCapabilities.builder().tools(true).build())
+                .capabilities(ServerCapabilities.builder()
+                        .tools(true)
+                        .resources(false, false)  // (subscribe, listChanged): both off in stateless
+                        .build())
                 .build();
         server.addTool(wrap(pingTool("admin"), "admin", decorator, rateLimiter, patPropagator));
         for (AdminTool tool : adminTools) {
@@ -196,6 +217,11 @@ public class McpServerConfig {
                     tool.toSpecification(), "admin", decorator, rateLimiter, patPropagator);
             server.addTool(spec);
             log.info("Registered admin tool: {}", spec.tool().name());
+        }
+        for (AdminResource resource : adminResources) {
+            McpStatelessServerFeatures.SyncResourceSpecification spec = resource.toSpecification();
+            server.addResource(spec);
+            log.info("Registered admin resource: {}", spec.resource().uri());
         }
         return server;
     }

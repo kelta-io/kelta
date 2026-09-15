@@ -16,6 +16,19 @@ import {
   type FilterRow,
   type SortRow,
 } from './ListViewEditors'
+import type { SavedView } from '@/hooks/useSavedViews'
+import { parseTypeConfig } from '@/pages/app/ObjectListPage/listViewMapping'
+
+/** Renderers a shared view can publish (V196); the end-user list honours all four. */
+const VIEW_TYPES = ['TABLE', 'KANBAN', 'CALENDAR', 'GALLERY'] as const
+type ListViewType = (typeof VIEW_TYPES)[number]
+
+type TypeConfig = NonNullable<SavedView['typeConfig']>
+
+function asListViewType(value: unknown): ListViewType {
+  const upper = typeof value === 'string' ? value.trim().toUpperCase() : ''
+  return (VIEW_TYPES as readonly string[]).includes(upper) ? (upper as ListViewType) : 'TABLE'
+}
 
 interface ListView {
   id: string
@@ -31,6 +44,9 @@ interface ListView {
   filters: Record<string, unknown>[]
   /** Multi-field sort (V147); first entry mirrors sortField/sortDirection for back-compat. */
   sort?: SortRow[]
+  /** Published renderer + its settings (V196). */
+  viewType?: string
+  typeConfig?: unknown
 }
 
 /** Structured form state — no raw JSON. Columns/filters/sort are edited via schema-driven pickers. */
@@ -41,6 +57,13 @@ interface ListViewFormData {
   columns: string[]
   filters: FilterRow[]
   sort: SortRow[]
+  viewType: ListViewType
+  /**
+   * Held whole rather than as flat lane/card fields: the calendar and gallery
+   * sections are authorable through the API, CLI and MCP, and editing a view
+   * here must not silently drop settings this form has no editor for.
+   */
+  typeConfig: TypeConfig
 }
 
 interface FormErrors {
@@ -104,6 +127,11 @@ function serializeListViewBody(data: ListViewFormData) {
     sort: JSON.stringify(data.sort),
     sortField: first?.field ?? '',
     sortDirection: first?.direction ?? 'ASC',
+    viewType: data.viewType,
+    // Sent as an object, not a JSON string: the end-user list reads this back as
+    // the renderer config, and a JSON string would have to be re-parsed by every
+    // consumer (CLI and MCP write an object here too).
+    typeConfig: Object.keys(data.typeConfig).length > 0 ? data.typeConfig : null,
   }
 }
 
@@ -130,6 +158,8 @@ function ListViewForm({
     columns: listView?.columns ?? [],
     filters: toFilterRows(listView?.filters),
     sort: toSortRows(listView),
+    viewType: asListViewType(listView?.viewType),
+    typeConfig: parseTypeConfig(listView?.typeConfig) ?? {},
   })
   const [errors, setErrors] = useState<FormErrors>({})
   const [touched, setTouched] = useState<Record<string, boolean>>({})
@@ -152,6 +182,14 @@ function ListViewForm({
         .map((f) => ({ name: f.name, label: f.displayName || f.name })),
     [schemaFields]
   )
+  // Kanban lanes come from a picklist's values, so only picklist fields qualify.
+  const laneFields: EditorField[] = useMemo(
+    () =>
+      schemaFields
+        .filter((f) => f.type === 'picklist')
+        .map((f) => ({ name: f.name, label: f.displayName || f.name })),
+    [schemaFields]
+  )
 
   const handleChange = useCallback(
     (field: 'name' | 'collectionId' | 'visibility', value: string) => {
@@ -167,6 +205,38 @@ function ListViewForm({
   const setColumns = useCallback((v: string[]) => setFormData((p) => ({ ...p, columns: v })), [])
   const setFilters = useCallback((v: FilterRow[]) => setFormData((p) => ({ ...p, filters: v })), [])
   const setSort = useCallback((v: SortRow[]) => setFormData((p) => ({ ...p, sort: v })), [])
+  const setViewType = useCallback(
+    (v: ListViewType) => setFormData((p) => ({ ...p, viewType: v })),
+    []
+  )
+  const setLaneField = useCallback(
+    (v: string) =>
+      setFormData((p) => {
+        const typeConfig = { ...p.typeConfig }
+        if (v) {
+          typeConfig.kanban = { ...typeConfig.kanban, laneField: v }
+        } else {
+          delete typeConfig.kanban
+        }
+        return { ...p, typeConfig }
+      }),
+    []
+  )
+  const setCardFields = useCallback(
+    (v: string[]) =>
+      setFormData((p) => {
+        // Card fields hang off the lane field; without one there is no kanban section.
+        if (!p.typeConfig.kanban?.laneField) return p
+        return {
+          ...p,
+          typeConfig: {
+            ...p.typeConfig,
+            kanban: { ...p.typeConfig.kanban, cardFields: v.length > 0 ? v : undefined },
+          },
+        }
+      }),
+    []
+  )
 
   const handleBlur = useCallback(
     (field: keyof FormErrors) => {
@@ -328,6 +398,84 @@ function ListViewForm({
                 <option value="GROUP">GROUP</option>
               </select>
             </div>
+
+            <div>
+              <label
+                htmlFor="listview-viewType"
+                className="mb-1 block text-sm font-medium text-foreground"
+              >
+                View type
+              </label>
+              <select
+                id="listview-viewType"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                value={formData.viewType}
+                onChange={(e) => setViewType(e.target.value as ListViewType)}
+                disabled={isSubmitting}
+                data-testid="listview-viewType-input"
+              >
+                {VIEW_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                How everyone opening this view sees it. Each user can still switch renderer for
+                themselves.
+              </span>
+            </div>
+
+            {formData.viewType === 'KANBAN' && (
+              <>
+                <div>
+                  <label
+                    htmlFor="listview-laneField"
+                    className="mb-1 block text-sm font-medium text-foreground"
+                  >
+                    Lane field
+                  </label>
+                  <select
+                    id="listview-laneField"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    value={formData.typeConfig.kanban?.laneField ?? ''}
+                    onChange={(e) => setLaneField(e.target.value)}
+                    disabled={isSubmitting || laneFields.length === 0}
+                    data-testid="listview-laneField-input"
+                  >
+                    <option value="">
+                      {laneFields.length === 0
+                        ? 'No picklist fields on this collection'
+                        : 'First picklist field'}
+                    </option>
+                    {laneFields.map((f) => (
+                      <option key={f.name} value={f.name}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <span className="mb-1 block text-sm font-medium text-foreground">
+                    Card fields
+                  </span>
+                  {formData.typeConfig.kanban?.laneField ? (
+                    <ColumnsEditor
+                      fields={editorFields}
+                      value={formData.typeConfig.kanban.cardFields ?? []}
+                      onChange={setCardFields}
+                      emptyHint="No card fields selected — the first columns are shown on each card."
+                      idPrefix="listview-card"
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Pick a lane field first — card fields are stored with it.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
 
             <div>
               <span className="mb-1 block text-sm font-medium text-foreground">Columns</span>

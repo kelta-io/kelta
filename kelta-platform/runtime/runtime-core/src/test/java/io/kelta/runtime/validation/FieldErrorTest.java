@@ -159,13 +159,31 @@ class FieldErrorTest {
         }
 
         @Test
-        @DisplayName("reference() should create reference constraint error")
+        @DisplayName("reference() should create reference constraint error with meta")
         void referenceShouldCreateReferenceConstraintError() {
-            FieldError error = FieldError.reference("userId", "users");
-            
+            FieldError error = FieldError.reference("userId", "users", "not-a-real-id");
+
             assertEquals("userId", error.fieldName());
             assertEquals("reference", error.constraint());
             assertTrue(error.message().contains("users"));
+            assertTrue(error.message().contains("not-a-real-id"));
+            assertEquals(
+                java.util.Map.of("field", "userId", "value", "not-a-real-id", "targetCollection", "users"),
+                error.meta());
+        }
+
+        @Test
+        @DisplayName("referenceTargetMissing() should create reference error with no value in meta")
+        void referenceTargetMissingShouldCreateReferenceErrorWithNoValueInMeta() {
+            FieldError error = FieldError.referenceTargetMissing("userId", "non_existent_collection");
+
+            assertEquals("userId", error.fieldName());
+            assertEquals("reference", error.constraint());
+            assertTrue(error.message().contains("non_existent_collection"));
+            assertEquals(
+                java.util.Map.of("field", "userId", "targetCollection", "non_existent_collection"),
+                error.meta());
+            assertFalse(error.meta().containsKey("value"));
         }
     }
 

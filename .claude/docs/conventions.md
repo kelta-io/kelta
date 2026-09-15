@@ -55,6 +55,8 @@ All 4xx responses returned from any Kelta service MUST use the JSON:API error en
 
 Never emit an empty error object (`{}`). If you reach a path with no specific information, fall through to the generic handler so clients still get a populated envelope.
 
+- `meta` — always carries `requestId`. Field-level errors may add error-specific keys next to it; `GlobalExceptionHandler.handleValidationException` merges `FieldError.meta()` into the response error's `meta` map. The `reference` code (a lookup/master-detail field whose value doesn't resolve to an existing record) sets `meta.field`, `meta.targetCollection` and, when the offending value is known, `meta.value` — e.g. `{"field": "sectionId", "value": "page-layout-1", "targetCollection": "layout-sections", "requestId": "abc12345"}`. When the field's configured target collection itself doesn't exist (`FieldError.referenceTargetMissing`), `meta.value` is omitted since there was no candidate record to check. `INVALID_QUERY` raised from a `StorageQueryException` (a client-caused SQL error `PhysicalTableStorageAdapter` classified from the Postgres SQLSTATE — see `concerns.md` → Resolved) additionally sets `meta.sqlState` (e.g. `"22P02"`); `source.pointer` is present only when the offending field could be identified from the driver's message.
+
 Where errors are constructed:
 - `kelta-gateway/src/main/java/io/kelta/gateway/error/GlobalErrorHandler.java` — reactive (`ErrorWebExceptionHandler`) for all gateway-originating 4xx/5xx
 - `kelta-platform/runtime/runtime-core/src/main/java/io/kelta/runtime/router/GlobalExceptionHandler.java` — servlet (`@ControllerAdvice`) covering bean validation, malformed bodies, missing params, type mismatches, `NoResourceFoundException`/`NoHandlerFoundException`, `MethodNotAllowed`, `UnsupportedMediaType`, `ResponseStatusException`, plus the platform's own `ValidationException` / `InvalidQueryException` / `UniqueConstraintViolationException`
@@ -165,6 +167,31 @@ as legacy behavior. List URLs carry `view=<id>` plus the standard
 `?filter/sort/pageSize`; the `sort` param uses the server's comma grammar (`a,-b`,
 multi-level — already supported end-to-end server-side).
 
+### Shared list views own their renderer; the toolbar switch is a per-user override
+
+A `list-views` row carries `viewType` (`TABLE`|`KANBAN`|`CALENDAR`|`GALLERY`, uppercase on
+the wire) and `typeConfig` (per-renderer settings keyed by lowercased view type), so the
+renderer is publishable metadata — not something each user re-picks. Rules when touching
+this path:
+
+- **Map shared rows through `mapSharedListView`** (`ObjectListPage/listViewMapping.ts`) —
+  never read `row.viewType` directly. It lowercases into `SavedViewType` and returns
+  `undefined` (⇒ table) for anything unrecognized, and `parseTypeConfig` drops a section
+  missing its required field (kanban `laneField`, calendar `dateField`). **An unknown
+  renderer or a malformed config must degrade to the table, never throw** — rows predate
+  V196 and a rollback can reintroduce them.
+- **Never write a user's renderer choice back to the shared row.** The toolbar switch on a
+  shared view persists through `useViewTypeOverrides` (a `user-ui-preferences` row,
+  `prefType: 'list-view-type'`, keyed by collection, holding shared-view id → override) —
+  i.e. through `usePreferenceValue`, per *Per-user UI preferences* above. Precedence is
+  personal override → published `viewType`/`typeConfig` → `table`; gate the first paint on
+  `isLoaded` so the published board does not flash in ahead of the override.
+- **A new renderer is four coordinated edits**: the `view_type` CHECK + the enum values in
+  `SystemCollectionDefinitions.listViews()`, `VIEW_TYPES`/`parseTypeConfig` in
+  `listViewMapping.ts`, the CLI `--view-type` vocabulary (`commands/layouts.ts`), and the
+  MCP `create_listview`/`update_listview` schema text. Keep the four in sync — they are the
+  same vocabulary, and the CLI/MCP paths are expected to produce an identical row.
+
 ## REST API: pagination
 
 Every paginated REST endpoint MUST use **JSON:API bracket syntax** — `page[number]` and `page[size]`. The flat forms `pageNumber` / `pageSize` are not honored and a request that sends them silently falls back to defaults.
@@ -226,6 +253,34 @@ Link generation lives in `io.kelta.jsonapi.PaginationLinks.build(...)`; the dyna
 ### MCP tools
 
 MCP tools (`query_collection`, `list_picklists`, `list_approvals`) take flat `pageNumber` / `pageSize` arguments as an ergonomic affordance for LLM callers, and translate them to the bracket form when constructing the HTTP request to the gateway. The same `page[size]` cap (200) applies — the MCP tool's input schema declares `maximum: 200` and the call handler clamps defensively.
+
+## REST API: filter grammar
+
+Every `filter…` query key must be one of two shapes:
+
+```
+filter[field][op]=value   # e.g. filter[status][eq]=active, filter[id][in]=a,b
+filter[field]=value       # shorthand — behaves as [eq]
+```
+
+Any other `filter…`-prefixed key (e.g. the HTML-form array shape `filter[status][in][]=a`,
+or an indexed variant `filter[status][in][0]=a`) is rejected with `400 INVALID_QUERY` whose
+detail states the grammar above, rather than being silently dropped (which used to return the
+whole, unfiltered collection). `io.kelta.runtime.query.FilterCondition.fromParams` implements
+this; non-`filter…` keys (`sort`, `page[…]`, `fields`, `include`) are untouched.
+
+`io.kelta.runtime.query.FilterOperator.parse(String)` is the **single** operator vocabulary
+shared by the JSON:API filter grammar above, dashboard widget filters
+(`DashboardDataService.mapOperator`), and the MCP `query_collection` tool. It resolves, case-insensitively:
+- the canonical enum names (`eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `isnull`, `contains`, `starts`,
+  `ends`, `icontains`, `istarts`, `iends`, `ieq`, `in`)
+- the `any` alias for `in`
+- the end-user-UI aliases: `equals`, `not_equals`, `greater_than`, `less_than`,
+  `greater_than_or_equal`, `less_than_or_equal`, `starts_with`, `ends_with`
+
+An unrecognized token throws `InvalidFilterException` naming the token and listing the accepted
+names — callers must not fall back to `EQ` on an unknown operator (a dashboard widget filter
+with a bad operator is a widget error, not a silently-wrong query).
 
 ## TypeScript
 
@@ -306,6 +361,7 @@ The page-builder stores its whole tree + page-level config inside the single `ui
 - **Bindings & expressions (slice 2d):** any prop value may be a literal or a binding object `{ $bind: "<token>", mode?: "path" | "expr" }`. `$bind` holds a **bare** token (e.g. `record.name`); `{{…}}` is display-only (and may be embedded in literal strings via `interpolate`). `mode:'path'` (default) resolves a dotted/`[n]` path via `getPath`; `mode:'expr'` runs the token through `@kelta/formula` `FormulaEvaluator` — because that parser is **flat-key only** (stops at `.`), `resolveBindings` flattens the referenced scope leaves before `evaluate`. **Resolution is 100% client-side** (the server round-trips `$bind` untouched, preserving Cerbos/FLS). Authoritative namespace: `record` (current record / repeat row), `vars` (page variables), `data.<source>` (on-load data source), `page` (route params/meta), `item` (per-row `list`/`repeater` scope). `getPath` **refuses `__proto__`/`constructor`/`prototype` tokens** (prototype-pollution guard). Caps: `MAX_PAGE_DATA_SOURCES = 12`, `MAX_REPEATER_ROWS = 200` (`model/limits.ts`). The resolved-node invariant holds: a widget's `Render` receives already-resolved props and must not re-resolve — the sole exception is `list`/`repeater`, which re-resolves children under each per-row `item` scope.
 - **Typed inputs (slice 2f):** page-builder typed inputs **reuse** `LookupSelect`/`MultiPicklistSelect`/`RichTextEditor`/`ResourceForm` — never re-implement a typed control. The `form` widget renders via `@kelta/components` `ResourceForm`, upgraded through `setComponentRegistry` (`registerFormFieldRenderers.ts`) rather than a fork. Picklist source resolution is canonical: `fieldTypeConfig.globalPicklistId` present → `GLOBAL` source (`sourceId = globalPicklistId`), else `FIELD` (`sourceId = field.id`) — shared in `usePicklistOptions` (handles `fieldTypeConfig` as object **or** JSON string). **Client (Zod) validation is advisory only** — the worker validates required/type/unique on write and is the source of truth. **HTML-bearing output (`rich_text`, bound HTML) is sanitized through the same `FieldRenderer` `rich_text` path (`stripHtml`) — never `dangerouslySetInnerHTML` on unsanitized bound HTML.** All new widget strings go through `useI18n` (`builder.*`).
 - **DnD convention:** the **page canvas** uses `@dnd-kit` (`PageBuilderPage/canvas/*`), scoped to that surface only. `PageLayoutsPage`/`MenuBuilderPage`/`FlowDesignerPage` stay on **native HTML5 DnD** — do not migrate them, and do not mix the two libs in one tree.
+- **Menu item paths carry a query string (K-8 item 15).** A `ui-menu-items.path` of `/resources/<collection>?view=shared:<id>&pageSize=100` deep-links a nav tab straight into a shared view (or any `ObjectListPage` param: `filter`, `sort`, `pageSize`) — `parseResourcePath` (`kelta-ui/app/src/shells/EndUserShell/navTabs.ts`) is the single place that splits a `/resources/...` path into `{ collectionName, query? }`; `menuItemToTab` keeps the query on `NavTab.query` and `TopNavBar`'s `tabPath` appends it verbatim to the `…/o/<collection>` href (mobile nav sheet reuses the same `tabPath`). `AppHomePage`'s quick actions and `GlobalSearch`'s collection list only need the bare collection name, so they route through `parseResourcePath` too rather than re-deriving it — a raw `path.split('/')[0]` would leave the query string glued onto the last path segment. The active-tab match is index-based (which tab was clicked), not URL-based, so it already ignores the query string; `path` stays capped at 200 characters (`FieldDefinition.string("path", 200)` in `SystemCollectionDefinitions`), which a `view=shared:<uuid>` query comfortably fits inside.
 
 ## MCP tools (kelta-mcp)
 

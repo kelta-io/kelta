@@ -1,6 +1,7 @@
 package io.kelta.worker.service;
 
 import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.*;
 import io.kelta.runtime.registry.CollectionRegistry;
@@ -12,6 +13,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -183,6 +187,181 @@ class DashboardDataServiceTest {
     }
 
     // =========================================================================
+    // Chart groupBy on a LOOKUP/MASTER_DETAIL field: resolve display value
+    // =========================================================================
+
+    @Test
+    void shouldResolveLookupGroupByToTargetDisplayValueInOneBatchedQuery() {
+        CollectionDefinition tasksDef = CollectionDefinition.builder()
+            .name("tasks")
+            .displayName("Tasks")
+            .addField(FieldDefinition.lookup("project", "projects", "tasks"))
+            .build();
+        CollectionDefinition projectsDef = CollectionDefinition.builder()
+            .name("projects")
+            .displayName("Projects")
+            .addField(FieldDefinition.string("name"))
+            .displayFieldName("name")
+            .build();
+
+        when(collectionRegistry.get("tasks")).thenReturn(tasksDef);
+        when(collectionRegistry.get("projects")).thenReturn(projectsDef);
+        when(lifecycleManager.getDisplayFieldName("projects")).thenReturn("name");
+
+        List<Map<String, Object>> taskRows = List.of(
+            Map.of("project", "proj-1"), Map.of("project", "proj-1"), Map.of("project", "proj-2"));
+        QueryResult taskResult = QueryResult.of(taskRows, 3L, new Pagination(1, 1000));
+        when(queryEngine.executeQuery(eq(tasksDef), any())).thenReturn(taskResult);
+
+        List<Map<String, Object>> projectRows = List.of(
+            Map.of("id", "proj-1", "name", "Apollo"),
+            Map.of("id", "proj-2", "name", "Zeus"));
+        QueryResult projectResult = QueryResult.of(projectRows, 2L, new Pagination(1, 2));
+        when(queryEngine.executeQuery(eq(projectsDef), any())).thenReturn(projectResult);
+
+        Map<String, Object> component = buildComponent("comp-lk", "chart",
+            Map.of("collectionName", "tasks", "groupByField", "project", "aggregateFunction", "COUNT"));
+
+        WidgetResult result = service.executeWidget(component, Map.of(), null);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> series = (List<Map<String, Object>>) result.data().get("series");
+        assertEquals(2, series.size());
+
+        Map<String, Object> apollo = series.stream()
+            .filter(s -> "proj-1".equals(s.get("key")))
+            .findFirst().orElseThrow();
+        assertEquals("Apollo", apollo.get("label"));
+        assertEquals(2, apollo.get("count"));
+
+        Map<String, Object> zeus = series.stream()
+            .filter(s -> "proj-2".equals(s.get("key")))
+            .findFirst().orElseThrow();
+        assertEquals("Zeus", zeus.get("label"));
+
+        // Single batched id IN (...) query against the target collection — not one per group.
+        verify(queryEngine, times(1)).executeQuery(eq(projectsDef), any());
+        verify(queryEngine).executeQuery(eq(projectsDef), argThat(req ->
+            req.filters().size() == 1
+                && req.filters().get(0).fieldName().equals("id")
+                && req.filters().get(0).operator() == FilterOperator.IN));
+    }
+
+    @Test
+    void shouldCapReferenceResolutionAtMaxGroups() {
+        CollectionDefinition tasksDef = CollectionDefinition.builder()
+            .name("tasks")
+            .displayName("Tasks")
+            .addField(FieldDefinition.lookup("project", "projects", "tasks"))
+            .build();
+        CollectionDefinition projectsDef = CollectionDefinition.builder()
+            .name("projects")
+            .displayName("Projects")
+            .addField(FieldDefinition.string("name"))
+            .displayFieldName("name")
+            .build();
+
+        when(collectionRegistry.get("tasks")).thenReturn(tasksDef);
+        when(collectionRegistry.get("projects")).thenReturn(projectsDef);
+        when(lifecycleManager.getDisplayFieldName("projects")).thenReturn("name");
+
+        // 5 distinct groups but maxGroups caps the chart (and thus resolution) at 2.
+        List<Map<String, Object>> taskRows = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            taskRows.add(Map.of("project", "proj-" + i));
+        }
+        QueryResult taskResult = QueryResult.of(taskRows, 5L, new Pagination(1, 1000));
+        when(queryEngine.executeQuery(eq(tasksDef), any())).thenReturn(taskResult);
+
+        QueryResult projectResult = QueryResult.of(
+            List.of(Map.of("id", "proj-0", "name", "Alpha"), Map.of("id", "proj-1", "name", "Beta")),
+            2L, new Pagination(1, 2));
+        when(queryEngine.executeQuery(eq(projectsDef), any())).thenReturn(projectResult);
+
+        Map<String, Object> component = buildComponent("comp-lk-cap", "chart",
+            Map.of("collectionName", "tasks", "groupByField", "project",
+                   "aggregateFunction", "COUNT", "maxGroups", 2));
+
+        service.executeWidget(component, Map.of(), null);
+
+        verify(queryEngine).executeQuery(eq(projectsDef), argThat(req ->
+            ((List<?>) req.filters().get(0).value()).size() == 2));
+    }
+
+    @Test
+    void shouldLeaveNonReferenceGroupByLabelUnchangedAndOmitKey() {
+        CollectionDefinition collDef = CollectionDefinition.builder()
+            .name("cases")
+            .displayName("Cases")
+            .addField(FieldDefinition.string("status"))
+            .build();
+        when(collectionRegistry.get("cases")).thenReturn(collDef);
+
+        List<Map<String, Object>> data = List.of(
+            Map.of("status", "open"), Map.of("status", "closed"));
+        QueryResult queryResult = QueryResult.of(data, 2L, new Pagination(1, 1000));
+        when(queryEngine.executeQuery(eq(collDef), any())).thenReturn(queryResult);
+
+        Map<String, Object> component = buildComponent("comp-nr", "chart",
+            Map.of("collectionName", "cases", "groupByField", "status", "aggregateFunction", "COUNT"));
+
+        WidgetResult result = service.executeWidget(component, Map.of(), null);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> series = (List<Map<String, Object>>) result.data().get("series");
+        Map<String, Object> openPoint = series.stream()
+            .filter(s -> "open".equals(s.get("label")))
+            .findFirst().orElseThrow();
+        assertFalse(openPoint.containsKey("key"));
+
+        // A non-reference groupBy never triggers a resolution query.
+        verify(queryEngine, times(1)).executeQuery(any(), any());
+    }
+
+    @Test
+    void shouldFallBackToIdLabelWhenTargetDisplayFieldIsMasked() {
+        CollectionDefinition tasksDef = CollectionDefinition.builder()
+            .name("tasks")
+            .displayName("Tasks")
+            .addField(FieldDefinition.lookup("project", "projects", "tasks"))
+            .build();
+        CollectionDefinition projectsDef = CollectionDefinition.builder()
+            .name("projects")
+            .displayName("Projects")
+            .addField(FieldDefinition.string("name"))
+            .displayFieldName("name")
+            .build();
+
+        when(collectionRegistry.get("tasks")).thenReturn(tasksDef);
+        when(collectionRegistry.get("projects")).thenReturn(projectsDef);
+        when(lifecycleManager.getDisplayFieldName("projects")).thenReturn("name");
+
+        FieldMaskingService.MaskingConfig cfg = new FieldMaskingService.MaskingConfig(
+            FieldMaskingService.MaskType.FULL, '*', null);
+        when(recordMaskingService.maskableConfigs(projectsDef)).thenReturn(Map.of("name", cfg));
+        when(recordMaskingService.maskedFieldsFor(anyString(), anyString(), anyString(),
+            eq("projects"), any())).thenReturn(Set.of("name"));
+
+        List<Map<String, Object>> taskRows = List.of(Map.of("project", "proj-1"));
+        QueryResult taskResult = QueryResult.of(taskRows, 1L, new Pagination(1, 1000));
+        when(queryEngine.executeQuery(eq(tasksDef), any())).thenReturn(taskResult);
+
+        Map<String, Object> component = buildComponent("comp-mask", "chart",
+            Map.of("collectionName", "tasks", "groupByField", "project", "aggregateFunction", "COUNT"));
+
+        WidgetResult result = service.executeWidget(component, Map.of(), MASKED_VIEWER);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> series = (List<Map<String, Object>>) result.data().get("series");
+        Map<String, Object> point = series.get(0);
+        assertEquals("proj-1", point.get("label"));
+        assertEquals("proj-1", point.get("key"));
+
+        // Masked-denied display field: never even queries the target collection.
+        verify(queryEngine, never()).executeQuery(eq(projectsDef), any());
+    }
+
+    // =========================================================================
     // Table widget tests
     // =========================================================================
 
@@ -289,6 +468,74 @@ class DashboardDataServiceTest {
             Map.of());
 
         assertEquals(2, filters.size());
+    }
+
+    @Test
+    void shouldBuildNoTimeFilterWhenIgnoreTimeRangeIsTrue() {
+        Map<String, Object> config = Map.of("ignoreTimeRange", true);
+
+        List<FilterCondition> underToday = service.buildTimeFilters(
+            Map.of("timeRange", "TODAY"), config);
+        List<FilterCondition> under30d = service.buildTimeFilters(
+            Map.of("timeRange", "30D"), config);
+        List<FilterCondition> underAll = service.buildTimeFilters(
+            Map.of(), config);
+
+        assertTrue(underToday.isEmpty());
+        assertTrue(under30d.isEmpty());
+        assertTrue(underAll.isEmpty());
+    }
+
+    @Test
+    void shouldIgnoreTimeRangeTakePrecedenceOverFixedTimeRange() {
+        Map<String, Object> config = Map.of(
+            "ignoreTimeRange", true, "fixedTimeRange", "7D");
+
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "30D"), config);
+
+        assertTrue(filters.isEmpty());
+    }
+
+    @Test
+    void shouldApplyFixedTimeRangeRegardlessOfRuntimeTimeRange() {
+        Map<String, Object> config = Map.of("fixedTimeRange", "7D");
+
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "30D"), config);
+
+        assertEquals(1, filters.size());
+        assertEquals("createdAt", filters.get(0).fieldName());
+        assertEquals(FilterOperator.GTE, filters.get(0).operator());
+
+        Instant expectedStart = Instant.now().minus(7, ChronoUnit.DAYS);
+        Instant actualStart = Instant.parse((String) filters.get(0).value());
+        assertTrue(Duration.between(actualStart, expectedStart).abs().toSeconds() < 5);
+    }
+
+    @Test
+    void shouldApplyFixedTimeRangeWhenNoRuntimeTimeRangeGiven() {
+        Map<String, Object> config = Map.of("fixedTimeRange", "7D");
+
+        List<FilterCondition> filters = service.buildTimeFilters(Map.of(), config);
+
+        assertEquals(1, filters.size());
+    }
+
+    @Test
+    void shouldFallBackToRuntimeTimeRangeWhenNoIgnoreOrFixed() {
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of("timeRange", "7D"), Map.of());
+
+        assertEquals(1, filters.size());
+    }
+
+    @Test
+    void shouldFallBackToConfigTimeRangeWhenNoRuntimeTimeRange() {
+        List<FilterCondition> filters = service.buildTimeFilters(
+            Map.of(), Map.of("timeRange", "90D"));
+
+        assertEquals(1, filters.size());
     }
 
     // =========================================================================
@@ -485,6 +732,36 @@ class DashboardDataServiceTest {
         assertEquals(2, filters.size());
         assertEquals("status", filters.get(0).fieldName());
         assertEquals(FilterOperator.EQ, filters.get(0).operator());
+    }
+
+    @Test
+    void shouldParseInOperatorFilter() {
+        List<Map<String, Object>> filtersList = List.of(
+            Map.of("field", "status", "operator", "in", "value", List.of("a", "b")));
+
+        List<FilterCondition> filters = service.parseFilters(filtersList);
+        assertEquals(1, filters.size());
+        assertEquals(FilterOperator.IN, filters.get(0).operator());
+    }
+
+    @Test
+    void shouldMapContainsOperatorToCaseInsensitiveIcontains() {
+        List<Map<String, Object>> filtersList = List.of(
+            Map.of("field", "status", "operator", "contains", "value", "Open"));
+
+        List<FilterCondition> filters = service.parseFilters(filtersList);
+        assertEquals(1, filters.size());
+        assertEquals(FilterOperator.ICONTAINS, filters.get(0).operator());
+    }
+
+    @Test
+    void shouldThrowWidgetExecutionExceptionNamingUnknownOperator() {
+        List<Map<String, Object>> filtersList = List.of(
+            Map.of("field", "status", "operator", "nope", "value", "x"));
+
+        WidgetExecutionException ex = assertThrows(WidgetExecutionException.class,
+            () -> service.parseFilters(filtersList));
+        assertTrue(ex.getMessage().contains("nope"));
     }
 
     // =========================================================================

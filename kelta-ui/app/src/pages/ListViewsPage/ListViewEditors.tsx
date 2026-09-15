@@ -99,29 +99,35 @@ function FieldSelect({
   )
 }
 
-/** Pick which fields are columns + order them. */
+/** Pick which fields are columns + order them. Also used for kanban card fields. */
 export function ColumnsEditor({
   fields,
   value,
   onChange,
+  emptyHint = 'No columns selected — all fields shown.',
+  idPrefix = 'listview',
 }: {
   fields: EditorField[]
   value: string[]
   onChange: (next: string[]) => void
+  /** Shown when nothing is picked; says what the empty selection means here. */
+  emptyHint?: string
+  /** Namespaces the test ids so two editors can coexist in one form. */
+  idPrefix?: string
 }): React.ReactElement {
   if (fields.length === 0) return <NoCollection />
   const available = fields.filter((f) => !value.includes(f.name))
   return (
-    <div className="flex flex-col gap-2" data-testid="listview-columns-editor">
+    <div className="flex flex-col gap-2" data-testid={`${idPrefix}-columns-editor`}>
       {value.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No columns selected — all fields shown.</p>
+        <p className="text-xs text-muted-foreground">{emptyHint}</p>
       ) : (
         <ul className="flex flex-col gap-1">
           {value.map((name, i) => (
             <li
               key={name}
               className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1"
-              data-testid={`listview-column-${name}`}
+              data-testid={`${idPrefix}-column-${name}`}
             >
               <span className="flex-1 text-sm text-foreground">{labelFor(fields, name)}</span>
               <button
@@ -162,7 +168,7 @@ export function ColumnsEditor({
               type="button"
               className={ADD_BTN}
               onClick={() => onChange([...value, f.name])}
-              data-testid={`listview-add-column-${f.name}`}
+              data-testid={`${idPrefix}-add-column-${f.name}`}
             >
               <Plus className="h-3.5 w-3.5" />
               {f.label}

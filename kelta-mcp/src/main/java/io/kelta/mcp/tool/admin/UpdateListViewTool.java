@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -42,6 +43,12 @@ public class UpdateListViewTool implements AdminTool {
                 "New default sort field, '-' prefix for descending, e.g. \"-createdAt\"."));
         properties.put("isDefault", Schemas.bool("New default-for-collection flag.", false));
         properties.put("visibility", Schemas.string("PRIVATE or PUBLIC."));
+        properties.put("viewType", Schemas.string(
+                "Renderer everyone opening this view gets: TABLE, KANBAN, CALENDAR or GALLERY."));
+        properties.put("typeConfig", Schemas.freeObject(
+                "Settings for the chosen renderer, e.g. "
+                        + "{\"kanban\":{\"laneField\":\"status\",\"cardFields\":[\"title\"]}}. "
+                        + "Pass an empty object {} to clear them."));
 
         Tool tool = Tool.builder()
                 .name("update_listview")
@@ -79,8 +86,18 @@ public class UpdateListViewTool implements AdminTool {
                     }
                     if (args.get("isDefault") instanceof Boolean b) attrs.put("isDefault", b);
                     if (args.get("visibility") instanceof String v && !v.isBlank()) attrs.put("visibility", v);
+                    // Renderer + its config (V196).
+                    if (args.get("viewType") instanceof String vt && !vt.isBlank()) {
+                        attrs.put("viewType", vt.trim().toUpperCase(Locale.ROOT));
+                    }
+                    if (args.containsKey("typeConfig")) {
+                        Object tc = args.get("typeConfig");
+                        attrs.put("typeConfig",
+                                tc instanceof Map<?, ?> m && !m.isEmpty() ? m : null);
+                    }
                     if (attrs.isEmpty()) {
-                        return error("Provide at least one of name, displayedFields, filter, sort, isDefault, visibility.");
+                        return error("Provide at least one of name, displayedFields, filter, sort, "
+                                + "isDefault, visibility, viewType, typeConfig.");
                     }
                     Map<String, Object> body = Map.of("data", Map.of(
                             "type", "list-views",

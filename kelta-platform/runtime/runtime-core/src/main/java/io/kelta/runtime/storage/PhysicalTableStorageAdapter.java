@@ -545,7 +545,8 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
 
             return QueryResult.of(data, totalCount, pagination);
         } catch (DataAccessException e) {
-            throw new StorageException("Failed to query collection: " + definition.name(), e);
+            throw classifyDataAccessException(e, "Failed to query collection: " + definition.name(),
+                    filterValues(allFilters), definition);
         }
     }
 
@@ -578,7 +579,8 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             reconstructCompanionColumns(definition, data);
             return data;
         } catch (DataAccessException e) {
-            throw new StorageException("Failed semantic search on collection: " + definition.name(), e);
+            throw classifyDataAccessException(e, "Failed semantic search on collection: " + definition.name(),
+                    filterValues(filters), definition);
         }
     }
 
@@ -628,7 +630,8 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             }
             return result;
         } catch (DataAccessException e) {
-            throw new StorageException("Failed to aggregate collection: " + definition.name(), e);
+            throw classifyDataAccessException(e, "Failed to aggregate collection: " + definition.name(),
+                    filterValues(filters), definition);
         }
     }
 
@@ -658,7 +661,8 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             reconstructCompanionColumns(definition, results);
             return Optional.of(results.get(0));
         } catch (DataAccessException e) {
-            throw new StorageException("Failed to get record by ID from collection: " + definition.name(), e);
+            throw classifyDataAccessException(e, "Failed to get record by ID from collection: " + definition.name(),
+                    Map.of("id", id), definition);
         }
     }
 
@@ -776,7 +780,8 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             throw new UniqueConstraintViolationException(
                 definition.name(), fieldName, data.get(fieldName), e);
         } catch (DataAccessException e) {
-            throw new StorageException("Failed to create record in collection: " + definition.name(), e);
+            throw classifyDataAccessException(e, "Failed to create record in collection: " + definition.name(),
+                    data, definition);
         }
     }
 
@@ -880,7 +885,8 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             throw new UniqueConstraintViolationException(
                 definition.name(), fieldName, data.get(fieldName), e);
         } catch (DataAccessException e) {
-            throw new StorageException("Failed to update record in collection: " + definition.name(), e);
+            throw classifyDataAccessException(e, "Failed to update record in collection: " + definition.name(),
+                    data, definition);
         }
     }
 
@@ -927,6 +933,130 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         return false;
     }
 
+    /**
+     * Postgres SQLSTATE codes that mean "the client sent something this statement can't
+     * evaluate" rather than a storage fault: the whole data-exception class 22 (bad
+     * literal for the target type, out-of-range, truncation — {@code 22P02}, {@code 22007},
+     * {@code 22003}, {@code 22001} among them) plus the two 42xxx codes for a query that
+     * names something that doesn't exist for this schema ({@code 42703} undefined column,
+     * {@code 42883} no operator for the type). Everything else — connection loss, deadlock,
+     * a syntax error in SQL this adapter generated itself — is a genuine 500.
+     */
+    private static boolean isClientQuerySqlState(String sqlState) {
+        return sqlState != null
+                && (sqlState.startsWith("22") || "42703".equals(sqlState) || "42883".equals(sqlState));
+    }
+
+    /**
+     * Finds the innermost {@link java.sql.SQLException}'s SQLSTATE in the cause chain, or
+     * {@code null} when the failure never reached the driver (e.g. a Spring-side wrapper
+     * with no {@code SQLException} cause).
+     */
+    private static String extractSqlState(Throwable e) {
+        String sqlState = null;
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof java.sql.SQLException sql && sql.getSQLState() != null) {
+                sqlState = sql.getSQLState();
+            }
+        }
+        return sqlState;
+    }
+
+    /**
+     * The innermost cause's message — the actual Postgres error text (e.g.
+     * {@code invalid input syntax for type uuid: "not-a-uuid"}), which is what makes the
+     * 400 actionable instead of the generic wrapper message.
+     */
+    private static String rootCauseMessage(Throwable e) {
+        Throwable root = e;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        return root.getMessage() != null ? root.getMessage() : e.getMessage();
+    }
+
+    /**
+     * Best-effort match of which field's value (or column) triggered the failure, by
+     * checking whether the driver's error message names the field's resolved column or
+     * echoes its value — Postgres embeds both for the SQLSTATEs this handles (e.g.
+     * {@code column "..." does not exist}, {@code invalid input syntax ...: "value"}).
+     * Returns {@code null} when the field can't be identified; the caller still reports
+     * the SQLSTATE and root-cause message, just without a {@code source.pointer}.
+     */
+    private String detectOffendingField(Map<String, Object> valuesByField, CollectionDefinition definition,
+                                         Throwable cause) {
+        if (valuesByField == null || valuesByField.isEmpty()) {
+            return null;
+        }
+        String message = rootCauseMessage(cause);
+        if (message == null) {
+            return null;
+        }
+        // Check exact value matches first — precise, since Postgres quotes the literal
+        // verbatim (e.g. `invalid input syntax for type uuid: "not-a-uuid"`). Column-name
+        // matching runs as a fallback pass, not inline, because a short column name like
+        // "id" can appear inside an unrelated word (e.g. "uuid") and would otherwise beat
+        // a genuine value match found later in iteration order.
+        for (Map.Entry<String, Object> entry : valuesByField.entrySet()) {
+            if (valueAppearsIn(message, entry.getValue())) {
+                return entry.getKey();
+            }
+        }
+        for (Map.Entry<String, Object> entry : valuesByField.entrySet()) {
+            String fieldName = entry.getKey();
+            String columnName = definition != null ? resolveColumnName(definition, fieldName) : fieldName;
+            // Match the quoted form only (e.g. `column "colname" does not exist`) — an
+            // unquoted contains() would false-positive on short names like "id" showing up
+            // inside unrelated words (e.g. "uuid").
+            if (columnName != null && message.contains("\"" + columnName + "\"")) {
+                return fieldName;
+            }
+        }
+        return null;
+    }
+
+    private static boolean valueAppearsIn(String message, Object value) {
+        if (value == null) {
+            return false;
+        }
+        if (value instanceof Collection<?> coll) {
+            return coll.stream().anyMatch(el -> el != null && message.contains(String.valueOf(el)));
+        }
+        return message.contains(String.valueOf(value));
+    }
+
+    /**
+     * Classifies a {@link DataAccessException} into either a 400 {@link StorageQueryException}
+     * (client-caused, per {@link #isClientQuerySqlState}) or a 500 {@link StorageException} —
+     * extends the {@link #isForeignKeyViolation} pattern from a single SQLSTATE to the general
+     * case. {@code valuesByField} (the filter conditions, or the record data on a write) is used
+     * only to attempt a {@code source.pointer}; pass {@code null} when there's nothing to check.
+     */
+    private RuntimeException classifyDataAccessException(DataAccessException e, String contextMessage,
+                                                           Map<String, Object> valuesByField,
+                                                           CollectionDefinition definition) {
+        String sqlState = extractSqlState(e);
+        if (!isClientQuerySqlState(sqlState)) {
+            return new StorageException(contextMessage, e);
+        }
+        String fieldName = detectOffendingField(valuesByField, definition, e);
+        String reason = rootCauseMessage(e);
+        return fieldName != null
+                ? new StorageQueryException(fieldName, reason, sqlState, e)
+                : new StorageQueryException(reason, sqlState, e);
+    }
+
+    private static Map<String, Object> filterValues(List<FilterCondition> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> values = new LinkedHashMap<>();
+        for (FilterCondition filter : filters) {
+            values.put(filter.fieldName(), filter.value());
+        }
+        return values;
+    }
+
     @Override
     public boolean isUnique(CollectionDefinition definition, String fieldName, Object value, String excludeId) {
         TableRef tableRef = getTableRef(definition);
@@ -958,7 +1088,10 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             Integer count = jdbcTemplate.queryForObject(sql.toString(), Integer.class, params.toArray());
             return count == null || count == 0;
         } catch (DataAccessException e) {
-            throw new StorageException("Failed to check uniqueness for field: " + fieldName, e);
+            Map<String, Object> values = new LinkedHashMap<>();
+            values.put(fieldName, value);
+            throw classifyDataAccessException(e, "Failed to check uniqueness for field: " + fieldName,
+                    values, definition);
         }
     }
 
@@ -1287,6 +1420,14 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         }
 
         for (String field : fields) {
+            // FORMULA/ROLLUP_SUMMARY fields have no physical column (FieldType#hasPhysicalColumn);
+            // their values are filled in after retrieval by DefaultQueryEngine.computeVirtualFields,
+            // so a sparse fields[] naming one must not put it in the SELECT list. Fields the
+            // collection doesn't declare fall through unchanged — same behavior as before.
+            FieldDefinition fieldDef = definition.getField(field);
+            if (fieldDef != null && !fieldDef.type().hasPhysicalColumn()) {
+                continue;
+            }
             String columnName = resolveColumnName(definition, field);
             // Dedupe against the bare system-column names added above, but emit the
             // quoted form so reserved-word columns (user, order, …) parse.

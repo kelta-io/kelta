@@ -14,28 +14,28 @@ import org.springframework.stereotype.Component;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Component
 public class QueryCollectionTool implements UserTool {
 
     /**
-     * Operators the worker actually honors. The set comes from
-     * {@code io.kelta.runtime.query.FilterOperator} — the worker uppercases the
-     * URL token then does an enum {@code valueOf}, silently dropping any name
-     * that doesn't match. We mirror it exactly here so the MCP boundary
-     * rejects unsupported operators with a clear message instead of
-     * forwarding them to be silently dropped (which would produce confidently
-     * wrong query results to an LLM consumer).
+     * Operators the worker actually honors — mirrors
+     * {@code io.kelta.runtime.query.FilterOperator}, whose {@code parse}
+     * rejects (rather than silently drops) any other token. We mirror the
+     * accepted set here so the MCP boundary rejects unsupported operators
+     * with a clear message instead of forwarding them to the gateway, which
+     * would 400 with less actionable context for an LLM consumer.
      *
      * <p>Notable absences vs. common JSON:API conventions:
      * <ul>
-     *   <li>{@code IN} / {@code NIN} — the URL parser only accepts scalar
-     *       values; IN is constructed programmatically by other call sites
-     *       and not URL-addressable.</li>
+     *   <li>{@code NIN} — no negated-IN on the worker; combine with a
+     *       separate query and diff client-side.</li>
      *   <li>{@code BETWEEN} — combine {@code GTE} + {@code LTE} on the same
      *       field.</li>
      *   <li>{@code STARTSWITH} / {@code ENDSWITH} / {@code IS_NULL} — wrong
@@ -47,7 +47,7 @@ public class QueryCollectionTool implements UserTool {
             "EQ", "NEQ", "GT", "GTE", "LT", "LTE",
             "CONTAINS", "STARTS", "ENDS",
             "ICONTAINS", "ISTARTS", "IENDS", "IEQ",
-            "ISNULL");
+            "ISNULL", "IN");
 
     private final GatewayHttpClient gateway;
 
@@ -59,8 +59,9 @@ public class QueryCollectionTool implements UserTool {
     public SyncToolSpecification toSpecification() {
         Map<String, Object> filter = Schemas.freeObject("""
                 { field: { OP: value } }. Ops on one field AND together (ranges); fields AND across; NO OR.
-                Supported: EQ NEQ GT GTE LT LTE CONTAINS STARTS ENDS ICONTAINS ISTARTS IENDS IEQ ISNULL.
-                Workarounds: BETWEEN→GTE+LTE; STARTSWITH/ENDSWITH→STARTS/ENDS; IS_NULL→ISNULL; IN/OR→multiple queries.
+                Supported: EQ NEQ GT GTE LT LTE CONTAINS STARTS ENDS ICONTAINS ISTARTS IENDS IEQ ISNULL IN.
+                IN value is a CSV string or array, e.g. "a,b" or ["a","b"].
+                Workarounds: BETWEEN→GTE+LTE; STARTSWITH/ENDSWITH→STARTS/ENDS; IS_NULL→ISNULL; OR→multiple queries.
                 Ex: { "status": { "EQ": "ACTIVE" }, "createdAt": { "GTE": "2026-01-01T00:00:00Z" } }""");
 
         Map<String, Object> properties = new LinkedHashMap<>();
@@ -87,7 +88,7 @@ public class QueryCollectionTool implements UserTool {
                         names use `get_collection_schema`.
 
                         Filter ops: EQ NEQ GT GTE LT LTE CONTAINS STARTS ENDS ICONTAINS ISTARTS \
-                        IENDS IEQ ISNULL. Multiple ops on one field AND together (ranges); \
+                        IENDS IEQ ISNULL IN. Multiple ops on one field AND together (ranges); \
                         fields AND across; NO OR. Rejected names map to workarounds — full list \
                         in the `filter` arg.
 
@@ -163,7 +164,8 @@ public class QueryCollectionTool implements UserTool {
                             + ". Workarounds — ranges: GTE+LTE on one field; "
                             + "case-insensitive: ICONTAINS / ISTARTS / IENDS / IEQ; "
                             + "null check: ISNULL with value \"true\"/\"false\"; "
-                            + "IN / OR are not supported in a single query — "
+                            + "multi-value match: IN with a CSV or array value; "
+                            + "OR is not supported in a single query — "
                             + "run multiple calls and union client-side.";
                 }
             }
@@ -181,7 +183,16 @@ public class QueryCollectionTool implements UserTool {
                 for (Map.Entry<?, ?> op : ops.entrySet()) {
                     String opName = String.valueOf(op.getKey()).toUpperCase(Locale.ROOT);
                     if (!ALLOWED_OPS.contains(opName)) continue;
-                    parts.add("filter[" + enc(fieldName) + "][" + opName + "]=" + enc(String.valueOf(op.getValue())));
+                    if ("IN".equals(opName)) {
+                        String csv = inValues(op.getValue()).stream()
+                                .map(QueryCollectionTool::enc)
+                                .collect(Collectors.joining(","));
+                        if (!csv.isEmpty()) {
+                            parts.add("filter[" + enc(fieldName) + "][in]=" + csv);
+                        }
+                    } else {
+                        parts.add("filter[" + enc(fieldName) + "][" + opName + "]=" + enc(String.valueOf(op.getValue())));
+                    }
                 }
             }
         }
@@ -198,6 +209,27 @@ public class QueryCollectionTool implements UserTool {
         Object include = args.get("include");
         if (include != null && !include.toString().isBlank()) parts.add("include=" + enc(include.toString()));
         return String.join("&", parts);
+    }
+
+    /**
+     * Normalizes an {@code IN} operator value into individual string values.
+     * Accepts either a CSV string ({@code "a,b"}) or an array
+     * ({@code ["a", "b"]}); blanks are trimmed and dropped.
+     */
+    private static List<String> inValues(Object value) {
+        if (value == null) return List.of();
+        List<Object> raw = value instanceof Collection<?> coll
+                ? new ArrayList<>(coll)
+                : List.of(value);
+        List<String> values = new ArrayList<>();
+        for (Object item : raw) {
+            if (item == null) continue;
+            for (String part : String.valueOf(item).split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) values.add(trimmed);
+            }
+        }
+        return values;
     }
 
     private static String enc(String s) {

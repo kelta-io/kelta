@@ -127,6 +127,43 @@ class CreateLayoutToolTest {
     }
 
     @Test
+    void placesFieldsInZeroBasedColumnsWhenColumnNumberOmitted() {
+        stubCollectionAndFields();
+        wm.stubFor(post(urlEqualTo("/api/page-layouts"))
+                .willReturn(aResponse().withStatus(201).withBody(
+                        "{\"data\":{\"id\":\"L1\",\"type\":\"page-layouts\"}}")));
+        wm.stubFor(post(urlEqualTo("/api/layout-sections"))
+                .willReturn(aResponse().withStatus(201).withBody(
+                        "{\"data\":{\"id\":\"S1\",\"type\":\"layout-sections\"}}")));
+        wm.stubFor(post(urlEqualTo("/api/layout-fields"))
+                .willReturn(aResponse().withStatus(201).withBody(
+                        "{\"data\":{\"id\":\"F1\"}}")));
+
+        Map<String, Object> section = Map.of(
+                "sectionName", "Overview",
+                "columns", 2,
+                "fields", List.of(
+                        Map.of("fieldName", "name"),
+                        Map.of("fieldName", "owner"),
+                        Map.of("fieldName", "stage"),
+                        Map.of("fieldName", "name")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("create_layout", Map.of(
+                        "name", "ProjectsMain",
+                        "collectionName", "projects",
+                        "sections", List.of(section)), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        // two-column section, four fields, no explicit columnNumber -> 0,1,0,1
+        for (int i = 0; i < 4; i++) {
+            wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/layout-fields"))
+                    .withRequestBody(matchingJsonPath("$.data.attributes.sortOrder", equalTo(String.valueOf(i))))
+                    .withRequestBody(matchingJsonPath("$.data.attributes.columnNumber", equalTo(String.valueOf(i % 2)))));
+        }
+    }
+
+    @Test
     void reportsUnknownFieldNamesInsteadOfPosting() {
         stubCollectionAndFields();
         wm.stubFor(post(urlEqualTo("/api/page-layouts"))

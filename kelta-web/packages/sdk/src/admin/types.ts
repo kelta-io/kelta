@@ -1257,9 +1257,21 @@ export interface ListView {
   sortDirection: 'ASC' | 'DESC';
   chartConfig?: string;
   visibility: 'PRIVATE' | 'PUBLIC' | 'GROUP';
+  /** Renderer published with the view (V196); absent on rows written before it. */
+  viewType?: ListViewType;
+  /** Per-renderer settings, e.g. `{ kanban: { laneField, cardFields } }` (V196). */
+  typeConfig?: ListViewTypeConfig | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export type ListViewType = 'TABLE' | 'KANBAN' | 'CALENDAR' | 'GALLERY';
+
+export interface ListViewTypeConfig {
+  kanban?: { laneField: string; cardFields?: string[] };
+  calendar?: { dateField: string; endDateField?: string };
+  gallery?: { imageField?: string; titleField?: string; cardFields?: string[] };
 }
 
 export interface CreateListViewRequest {
@@ -1272,6 +1284,8 @@ export interface CreateListViewRequest {
   sortDirection?: string;
   chartConfig?: string;
   visibility?: string;
+  viewType?: ListViewType;
+  typeConfig?: ListViewTypeConfig | null;
 }
 
 // --- Reports (Phase 3 Stream C) ---

@@ -2,6 +2,7 @@ package io.kelta.worker.service;
 
 import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.*;
+import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.*;
@@ -22,6 +23,7 @@ class PackageServiceTest {
     void setUp() {
         repository = mock(PackageRepository.class);
         importService = mock(PackageImportService.class);
+        when(repository.getJdbcTemplate()).thenReturn(mock(JdbcTemplate.class));
         objectMapper = new ObjectMapper();
         service = new PackageService(repository, objectMapper, importService);
     }

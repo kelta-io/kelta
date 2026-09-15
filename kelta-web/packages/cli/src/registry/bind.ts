@@ -64,6 +64,17 @@ async function confirmDangerous(def: RegisteredCommand, global: GlobalOptions): 
   }
 }
 
+/** Human-readable rendering of every error, not just the first. */
+function formatTableError(mapped: CliError): string {
+  const entries = mapped.errors && mapped.errors.length > 0 ? mapped.errors : undefined;
+  if (!entries) return `Error [${mapped.code}]: ${mapped.message}\n`;
+  return (
+    entries
+      .map((e) => `Error [${e.code ?? mapped.code}]: ${e.detail ?? mapped.message}`)
+      .join('\n') + '\n'
+  );
+}
+
 /** Execute one command definition with already-merged raw input. */
 export async function dispatch(
   leaf: Command,
@@ -92,9 +103,7 @@ export async function dispatch(
     const mapped = mapError(error);
     const format = pickFormat(global.output, process.stderr.isTTY ?? false);
     process.stderr.write(
-      format === 'table'
-        ? `Error [${mapped.code}]: ${mapped.message}\n`
-        : toErrorPayload(mapped) + '\n'
+      format === 'table' ? formatTableError(mapped) : toErrorPayload(mapped) + '\n'
     );
     process.exitCode = mapped.exitCode;
   }
@@ -170,7 +179,6 @@ function groupSummary(group: string, defs: RegisteredCommand[]): string {
     sandbox: 'Create and manage sandbox environments',
     promote: 'Promote metadata between environments',
     sdk: 'Generate typed SDK artifacts from this tenant’s schema',
-    docs: 'Documentation for humans and agents',
     mcp: 'Local MCP server and client setup',
   };
   return summaries[group] ?? defs.find((d) => d.group === group)?.summary ?? group;

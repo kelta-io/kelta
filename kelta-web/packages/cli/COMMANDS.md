@@ -273,6 +273,26 @@ Create a saved list view
 - `--filter <spec>` — Filter as field[.op]=value (repeatable) (repeatable)
 - `--sort <field>` — Sort field, -prefix for descending
 - `--default` — Mark as the default list view
+- `--visibility <vis>` — PRIVATE (default), PUBLIC or GROUP
+- `--view-type <type>` — Renderer: TABLE (default), KANBAN, CALENDAR or GALLERY
+- `--lane-field <field>` — Kanban lane field (a picklist field)
+- `--card-fields <list>` — Kanban card fields, comma-separated
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
+### `kelta list-views update <listViewId>`
+
+Update a saved list view by id
+
+- `--name <name>` — List view name
+- `--columns <list>` — Displayed field names, comma-separated
+- `--filter <spec>` — Filter as field[.op]=value (repeatable); replaces all filters (repeatable)
+- `--sort <field>` — Sort field, -prefix for descending
+- `--default <bool>` — true|false
+- `--visibility <vis>` — PRIVATE, PUBLIC or GROUP
+- `--view-type <type>` — Renderer: TABLE, KANBAN, CALENDAR or GALLERY
+- `--lane-field <field>` — Kanban lane field (a picklist field)
+- `--card-fields <list>` — Kanban card fields, comma-separated
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
 ## flows
 
@@ -489,9 +509,9 @@ Vector similarity search within one collection (needs a VECTOR field)
 
 Export this tenant's metadata as a package file
 
-- `-n, --name <name>` — Package name
-- `-v, --version <version>` — Package version
-- `-o, --out <file>` — Output file (default: <name>-<version>.json)
+- `-n, --name <name>` — Package name (default: the tenant slug)
+- `-v, --version <version>` — Package version (default: 1.0.0)
+- `-o, --out <file>` — Output file (default: the name the server returns)
 
 ### `kelta metadata diff <file>`
 
@@ -502,6 +522,7 @@ Preview the changes a package file would make (no writes)
 Apply a package file to this tenant **(destructive — needs --yes off-TTY)**
 
 - `--dry-run` — Validate without writing
+- `--conflict <mode>` — On an item that already exists: skip (default) or overwrite (default: "skip")
 
 ## sandbox
 
@@ -595,6 +616,10 @@ Raw API escape hatch: profile auth + tenant prefix applied, response verbatim **
 - `--data <json>` — Request body as JSON, @file, or - (any JSON value)
 - `--header <h>` — Extra header as Name:value (repeatable) (repeatable)
 
+### `kelta docs <topic>`
+
+Print a reference doc: the agent guide, or a metadata-authoring topic
+
 ## mcp
 
 ### `kelta mcp serve`
@@ -612,9 +637,3 @@ Print MCP client configuration for this profile (stdio bridge by default)
 
 - `--toolset <set>` — user|admin|all (default: "all")
 - `--direct` — Hosted HTTP config instead of the stdio bridge
-
-## docs
-
-### `kelta docs agent`
-
-Print the condensed agent guide (auth model, contracts, examples)

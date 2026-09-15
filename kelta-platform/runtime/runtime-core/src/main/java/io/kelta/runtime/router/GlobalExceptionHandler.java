@@ -5,6 +5,7 @@ import io.kelta.runtime.query.InvalidQueryException;
 import io.kelta.runtime.storage.ReferencedRecordConflictException;
 import io.kelta.runtime.storage.StaleWriteException;
 import io.kelta.runtime.storage.StorageException;
+import io.kelta.runtime.storage.StorageQueryException;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
 import io.kelta.runtime.validation.RecordValidationException;
 import io.kelta.runtime.validation.ValidationException;
@@ -29,6 +30,7 @@ import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,6 +42,7 @@ import java.util.UUID;
  * <ul>
  *   <li>ValidationException -> 400 Bad Request</li>
  *   <li>InvalidQueryException -> 400 Bad Request</li>
+ *   <li>StorageQueryException -> 400 Bad Request (client-caused SQL error, with sqlState in meta)</li>
  *   <li>UniqueConstraintViolationException -> 409 Conflict</li>
  *   <li>StorageException -> 500 Internal Server Error</li>
  *   <li>Other exceptions -> 500 Internal Server Error</li>
@@ -75,7 +78,12 @@ public class GlobalExceptionHandler {
                     "400", code, "Validation Error",
                     fieldError.message() != null ? fieldError.message() : "Invalid value");
                 error.setSource(Map.of("pointer", "/data/attributes/" + fieldError.fieldName()));
-                error.setMeta(Map.of("requestId", requestId));
+                Map<String, Object> meta = new LinkedHashMap<>();
+                if (fieldError.meta() != null) {
+                    meta.putAll(fieldError.meta());
+                }
+                meta.put("requestId", requestId);
+                error.setMeta(meta);
                 errors.add(error);
             }
         } else {
@@ -144,6 +152,37 @@ public class GlobalExceptionHandler {
         }
 
         return ResponseEntity.badRequest().body(errorBody(errors));
+    }
+
+    /**
+     * Handles SQL errors caused by client-supplied values (bad literal for the column
+     * type, unknown column, no operator for the type) that {@code PhysicalTableStorageAdapter}
+     * classified from the Postgres SQLSTATE rather than treating as a storage fault.
+     * Returns 400 Bad Request with the SQLSTATE in {@code meta} — logged at WARN with no
+     * stack trace, since this is a client mistake, not something to page on.
+     */
+    @ExceptionHandler(StorageQueryException.class)
+    public ResponseEntity<Map<String, Object>> handleStorageQueryException(
+            StorageQueryException ex, HttpServletRequest request) {
+
+        String requestId = generateRequestId();
+        logger.warn("Invalid query [requestId={}] sqlState={}: {}", requestId, ex.getSqlState(), ex.getReason());
+
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("requestId", requestId);
+        meta.put("sqlState", ex.getSqlState());
+
+        JsonApiError error = new JsonApiError(
+            "400", "INVALID_QUERY", "Bad Request",
+            ex.getReason() != null ? ex.getReason() : "Invalid query");
+        if (ex.getFieldName() != null) {
+            error.setSource(Map.of("pointer", "/data/attributes/" + ex.getFieldName()));
+        } else {
+            meta.put("path", request.getRequestURI());
+        }
+        error.setMeta(meta);
+
+        return ResponseEntity.badRequest().body(errorBody(error));
     }
 
     /**
