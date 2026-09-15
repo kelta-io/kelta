@@ -223,6 +223,17 @@ export function runsFromAlertSeries(result, stepSec, now) {
   }
 }
 
+/**
+ * Keep only incidents whose alert name matches `pattern` (RegExp or string). Grafana
+ * hosts alerts for more than the platform (fleet ops, other tenants' pollers) — DORA
+ * time-to-restore is about the service, so the collector filters by name.
+ */
+export function filterIncidents(incidents, pattern) {
+  if (!pattern) return incidents;
+  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);
+  return incidents.filter((i) => re.test(i.alertName || ''));
+}
+
 /** Google DORA bands (2023/2024 report thresholds). */
 export function band(metric, value) {
   if (value === null || value === undefined) return null;
@@ -255,7 +266,8 @@ export function summarize({ deployments, incidents, windowDays, now, segment = '
   const deps = deployments.filter((d) => inWindow(d.deployedAt, start, end));
   const changes = deps.flatMap((d) => d.changes || []).filter((c) => segmentMatches(c, segment));
   const rolledBack = deps.filter((d) => d.status === 'rolled_back');
-  const incs = incidents.filter((i) => inWindow(i.firedAt, start, end) && i.ttrSec !== null);
+  // Ongoing incidents have a provisional ttrSec (measured to now) — reported, not averaged.
+  const incs = incidents.filter((i) => inWindow(i.firedAt, start, end) && i.ttrSec !== null && !i.ongoing);
 
   const leadTimes = changes.map((c) => c.leadTimeSec).filter((v) => v !== null);
   const mergeToProd = changes.map((c) => c.mergeToProdSec).filter((v) => v !== null);
