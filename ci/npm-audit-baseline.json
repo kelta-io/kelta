@@ -1,6 +1,6 @@
 {
   "_comment": "Known high/critical advisories in PRODUCTION npm deps, accepted as a backlog so CI can gate NEW ones. This is debt to burn down, not an allowlist to grow. Regenerate with: node ci/dependency-audit.mjs --update",
-  "_generated": "2026-09-14",
+  "_generated": "2026-09-15",
   "packages": {
     "kelta-web": {
       "GHSA-gcfj-64vw-6mp9": "high | axios | Axios Node HTTP adapter can use an inherited proxy after interceptor config cloning",
@@ -25,13 +25,6 @@
       "GHSA-3g43-6gmg-66jw": "high | axios | axios Vulnerable to Credential Theft and Response Hijacking via Prototype Pollution Gadget in Config",
       "GHSA-35jp-ww65-95wh": "high | axios | axios Vulnerable to Full Man-in-the-Middle via Prototype Pollution Gadget in `config.proxy`",
       "GHSA-hmw2-7cc7-3qxx": "high | form-data | form-data: CRLF injection in form-data via unescaped multipart field names and filenames",
-      "GHSA-jrc7-96c5-q579": "critical | maplibre-gl | MapLibre GL JS: XSS Sanitizer Bypass in DOM.sanitize() via Live NamedNodeMap Removal Skip",
-      "GHSA-xq3m-2v4x-88gg": "critical | protobufjs | Arbitrary code execution in protobufjs",
-      "GHSA-66ff-xgx4-vchm": "high | protobufjs | protobuf.js: Code injection through bytes field defaults in generated toObject code",
-      "GHSA-75px-5xx7-5xc7": "high | protobufjs | protobuf.js: Code generation gadget after prototype pollution",
-      "GHSA-jvwf-75h9-cwgg": "high | protobufjs | protobuf.js: Process-wide denial of service through unsafe option paths",
-      "GHSA-685m-2w69-288q": "high | protobufjs | protobuf.js: Denial of service through unbounded protobuf recursion",
-      "GHSA-wcpc-wj8m-hjx6": "high | protobufjs | protobufjs: Denial of service through unbounded Any expansion during JSON conversion",
       "GHSA-49rj-9fvp-4h2h": "high | react-router | React Router's vendored turbo-stream v2 allows arbitrary constructor invocation via TYPE_ERROR deser",
       "GHSA-8646-j5j9-6r62": "high | react-router | React Router vulnerable to XSS in unstable RSC redirect handling via javascript: redirect targets",
       "GHSA-8x6r-g9mw-2r78": "high | react-router | React Router vulnerable to DoS via unbounded path expansion in __manifest endpoint",
