@@ -90,6 +90,76 @@ test.describe("kelta CLI smoke", () => {
     expect(Array.isArray(body.data)).toBe(true);
   });
 
+  // Read coverage for the admin metadata groups added by KLT-217 (pages, menus,
+  // dashboards, reports, list-views get/delete). Seed data varies by tenant, so
+  // each test discovers a row via `list`/`records list` first and skips at
+  // runtime rather than asserting a fixed row exists.
+
+  test("list-views get retrieves a saved list view by id", () => {
+    const listed = runCli(["records", "list", "list-views", "--size", "1", "--output", "json"]);
+    expect(listed.status, listed.stderr).toBe(0);
+    const rows = JSON.parse(listed.stdout) as { id?: string }[];
+    test.skip(rows.length === 0, "no list views in the seeded tenant");
+    const result = runCli(["list-views", "get", rows[0].id!, "--output", "json"]);
+    expect(result.status, result.stderr).toBe(0);
+    const row = JSON.parse(result.stdout) as { id?: string };
+    expect(row.id).toBe(rows[0].id);
+  });
+
+  test("pages list and get return UI pages", () => {
+    const listed = runCli(["pages", "list", "--output", "json"]);
+    expect(listed.status, listed.stderr).toBe(0);
+    const rows = JSON.parse(listed.stdout) as { id?: string; path?: string }[];
+    expect(Array.isArray(rows)).toBe(true);
+    test.skip(rows.length === 0, "no UI pages in the seeded tenant");
+    const result = runCli(["pages", "get", rows[0].id!, "--output", "json"]);
+    expect(result.status, result.stderr).toBe(0);
+    const row = JSON.parse(result.stdout) as { id?: string; path?: string };
+    expect(row.path).toBe(rows[0].path);
+  });
+
+  test("menus get --tree nests items under their group", () => {
+    const listed = runCli(["menus", "list", "--output", "json"]);
+    expect(listed.status, listed.stderr).toBe(0);
+    const rows = JSON.parse(listed.stdout) as { id?: string; name?: string }[];
+    test.skip(rows.length === 0, "no UI menus in the seeded tenant");
+    const result = runCli(["menus", "get", rows[0].name ?? rows[0].id!, "--tree", "--output", "json"]);
+    expect(result.status, result.stderr).toBe(0);
+    const row = JSON.parse(result.stdout) as { id?: string; items?: unknown[] };
+    expect(row.id).toBe(rows[0].id);
+    expect(Array.isArray(row.items)).toBe(true);
+  });
+
+  test("dashboards list and get --components sort widgets by row/column", () => {
+    const listed = runCli(["dashboards", "list", "--output", "json"]);
+    expect(listed.status, listed.stderr).toBe(0);
+    const rows = JSON.parse(listed.stdout) as { id?: string }[];
+    test.skip(rows.length === 0, "no dashboards in the seeded tenant");
+    const result = runCli(["dashboards", "get", rows[0].id!, "--components", "--output", "json"]);
+    expect(result.status, result.stderr).toBe(0);
+    const row = JSON.parse(result.stdout) as {
+      id?: string;
+      components?: { rowPosition?: number; columnPosition?: number }[];
+    };
+    expect(row.id).toBe(rows[0].id);
+    expect(Array.isArray(row.components)).toBe(true);
+    const positions = (row.components ?? []).map((c) => [c.rowPosition ?? 0, c.columnPosition ?? 0]);
+    const sorted = [...positions].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    expect(positions).toEqual(sorted);
+  });
+
+  test("reports list and get return report definitions", () => {
+    const listed = runCli(["reports", "list", "--output", "json"]);
+    expect(listed.status, listed.stderr).toBe(0);
+    const rows = JSON.parse(listed.stdout) as { id?: string; name?: string }[];
+    expect(Array.isArray(rows)).toBe(true);
+    test.skip(rows.length === 0, "no reports in the seeded tenant");
+    const result = runCli(["reports", "get", rows[0].id!, "--output", "json"]);
+    expect(result.status, result.stderr).toBe(0);
+    const row = JSON.parse(result.stdout) as { id?: string; name?: string };
+    expect(row.name).toBe(rows[0].name);
+  });
+
   test("missing auth fails with the machine-readable error contract and exit 3", () => {
     const result = runCli(["collections", "list", "--output", "json"], {
       KELTA_TOKEN: undefined,

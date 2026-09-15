@@ -85,6 +85,9 @@ kelta flows execute <flowId> --input '{"key":"value"}' --wait   # flows read $.i
 kelta records bulk --data @ops.json --yes    # {"atomic:operations":[…]}, all-or-nothing
 kelta records search "acme" --limit 5
 kelta api GET '/api/governor-limits'
+kelta menus get main --tree                  # nests ui-menu-items by parentId, client-side
+kelta dashboards get <id> --components       # widgets sorted by rowPosition/columnPosition
+kelta pages publish /home                    # resolves ui-pages by path, sets published=true
 ```
 
 ## Gotchas

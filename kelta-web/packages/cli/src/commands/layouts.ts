@@ -431,6 +431,37 @@ const listViewUpdate = defineCommand({
   },
 });
 
+const listViewGet = defineCommand({
+  group: 'list-views',
+  name: 'get',
+  summary: 'Get a saved list view by id',
+  positionals: [{ name: 'listViewId', description: 'List view id', required: true }],
+  input: z.object({ listViewId: z.string().min(1) }),
+  handler: async (ctx, input) => {
+    const response = await ctx.client
+      .getAxiosInstance()
+      .get<unknown>(`/api/list-views/${input.listViewId}`);
+    return { data: response.data };
+  },
+});
+
+const listViewDelete = defineCommand({
+  group: 'list-views',
+  name: 'delete',
+  summary: 'Delete a saved list view',
+  dangerous: true,
+  positionals: [{ name: 'listViewId', description: 'List view id', required: true }],
+  input: z.object({ listViewId: z.string().min(1) }),
+  handler: async (ctx, input) => {
+    await ctx.client.getAxiosInstance().delete(`/api/list-views/${input.listViewId}`);
+    return {
+      data: { deleted: true, id: input.listViewId },
+      message: `List view ${input.listViewId} deleted`,
+      ids: [input.listViewId],
+    };
+  },
+});
+
 export const layoutCommands: RegisteredCommand[] = [
   layoutList,
   layoutCreate,
@@ -441,4 +472,6 @@ export const layoutCommands: RegisteredCommand[] = [
   listViewList,
   listViewCreate,
   listViewUpdate,
+  listViewGet,
+  listViewDelete,
 ];

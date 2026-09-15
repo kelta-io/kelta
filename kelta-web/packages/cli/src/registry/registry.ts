@@ -3,6 +3,7 @@ import { auditCommands } from '../commands/audit.js';
 import { authCommands } from '../commands/auth.js';
 import { tokenCommands } from '../commands/token.js';
 import { collectionCommands } from '../commands/collections.js';
+import { dashboardCommands } from '../commands/dashboards.js';
 import { docsCommands } from '../commands/docs.js';
 import { constraintCommands } from '../commands/constraints.js';
 import { environmentCommands } from '../commands/environments.js';
@@ -12,10 +13,13 @@ import { layoutCommands } from '../commands/layouts.js';
 import { limitCommands } from '../commands/limits.js';
 import { manifestCommands } from '../commands/manifest.js';
 import { mcpCommands } from '../commands/mcp.js';
+import { menuCommands } from '../commands/menus.js';
 import { metadataCommands } from '../commands/metadata.js';
+import { pageCommands } from '../commands/pages.js';
 import { picklistCommands } from '../commands/picklists.js';
 import { profileCommands } from '../commands/profile.js';
 import { recordCommands } from '../commands/records.js';
+import { reportCommands } from '../commands/reports.js';
 import { sdkCommands } from '../commands/sdk.js';
 import { updateCommands } from '../commands/update.js';
 import { userCommands } from '../commands/users.js';
@@ -33,6 +37,10 @@ export const allCommands: RegisteredCommand[] = [
   ...validationCommands,
   ...constraintCommands,
   ...layoutCommands,
+  ...pageCommands,
+  ...menuCommands,
+  ...dashboardCommands,
+  ...reportCommands,
   ...flowCommands,
   ...userCommands,
   ...limitCommands,
