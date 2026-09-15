@@ -81,6 +81,13 @@ management:
       probes:
         enabled: true
   opentelemetry:
+    # Every replica must carry a distinct service.instance.id, or the OTLP resource for
+    # kelta-auth is identical across pods and Mimir merges all replicas' counters into one
+    # series — rate() then treats every replica switch as a counter reset and adds the whole
+    # counter value back, inflating request-rate panels. ${HOSTNAME} is the pod name in
+    # Kubernetes (unique per replica) and still resolves outside it (container/host id).
+    resource-attributes:
+      service.instance.id: ${HOSTNAME:local}
     tracing:
       export:
         otlp:

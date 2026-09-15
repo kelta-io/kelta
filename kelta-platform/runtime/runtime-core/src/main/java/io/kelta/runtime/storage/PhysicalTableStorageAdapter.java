@@ -7,6 +7,7 @@ import io.kelta.runtime.model.FieldType;
 import io.kelta.runtime.query.AggregationSpec;
 import io.kelta.runtime.query.FilterCondition;
 import io.kelta.runtime.query.FilterOperator;
+import io.kelta.runtime.query.InvalidFilterException;
 import io.kelta.runtime.query.Pagination;
 import io.kelta.runtime.query.QueryRequest;
 import io.kelta.runtime.query.QueryResult;
@@ -1344,6 +1345,24 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             }
         }
 
+        // Temporal columns must bind as java.sql.Timestamp / java.sql.Date: pgjdbc cannot
+        // infer a SQL type for the java.time.Instant that coercion produces for DATETIME
+        // fields, and the system audit columns (createdAt/updatedAt) have no FieldDefinition,
+        // so their ISO-8601 strings bound as varchar — which Postgres refuses to compare with
+        // a timestamp column. Both surfaced as 500s on every dashboard time range.
+        FieldType temporal = temporalType(fieldDef, filter.fieldName());
+        if (temporal != null && COMPARISON_OPERATORS.contains(operator)) {
+            if (value instanceof Collection<?> coll) {
+                List<Object> bound = new ArrayList<>(coll.size());
+                for (Object element : coll) {
+                    bound.add(toTemporalParam(element, temporal, filter.fieldName()));
+                }
+                value = bound;
+            } else {
+                value = toTemporalParam(value, temporal, filter.fieldName());
+            }
+        }
+
         // Detect array-backed columns (Postgres TEXT[]) so we emit ANY(...) /
         // <> ALL(...) / unnest+ILIKE instead of scalar operators that 500 the
         // gateway on JSONB-coerced arrays. Currently only MULTI_PICKLIST maps
@@ -1446,6 +1465,48 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
                 }
             }
         };
+    }
+
+    /** Operators whose value is compared against the column and therefore must bind with its type. */
+    private static final java.util.Set<FilterOperator> COMPARISON_OPERATORS = java.util.EnumSet.of(
+        FilterOperator.EQ, FilterOperator.NEQ, FilterOperator.GT, FilterOperator.GTE,
+        FilterOperator.LT, FilterOperator.LTE, FilterOperator.IN);
+
+    /**
+     * The temporal type a filter must bind with: the field's own DATE/DATETIME type, or DATETIME
+     * for the system audit timestamps, which have no FieldDefinition on user collections.
+     *
+     * @return DATE, DATETIME, or null when the column is not temporal
+     */
+    private static FieldType temporalType(FieldDefinition fieldDef, String fieldName) {
+        if (fieldDef != null) {
+            return fieldDef.type() == FieldType.DATE || fieldDef.type() == FieldType.DATETIME
+                ? fieldDef.type() : null;
+        }
+        return switch (fieldName) {
+            case "createdAt", "updatedAt" -> FieldType.DATETIME;
+            default -> null;
+        };
+    }
+
+    /**
+     * Converts one filter value for a temporal column into the JDBC type the write path uses
+     * ({@link #convertValueForStorage}), so reads and writes bind identically.
+     *
+     * @throws InvalidFilterException when the value is not an ISO-8601 date / date-time (→ 400,
+     *         instead of the database rejecting the comparison with a 500)
+     */
+    private Object toTemporalParam(Object value, FieldType temporal, String fieldName) {
+        if (value == null) {
+            return null;
+        }
+        Object bound = convertValueForStorage(value, temporal);
+        if (bound instanceof java.sql.Timestamp || bound instanceof java.sql.Date) {
+            return bound;
+        }
+        throw new InvalidFilterException(fieldName, "expected an ISO-8601 "
+            + (temporal == FieldType.DATE ? "date (yyyy-MM-dd)" : "date-time (e.g. 2026-01-01T00:00:00Z)")
+            + ", got '" + value + "'");
     }
 
     /**

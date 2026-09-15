@@ -322,6 +322,33 @@ describe('users', () => {
     await run(userCommands, 'reset-password', { userId: 'u1' }, axios);
     expect(axios.post).toHaveBeenCalledWith('/api/admin/users/u1/reset-password');
   });
+
+  it('token-create is dangerous and mints via the admin SDK client for the target user', async () => {
+    const create = vi.fn().mockResolvedValue({
+      token: 'klt_xyz123',
+      name: 'CI bot',
+      tokenPrefix: 'klt_xyz1',
+      scopes: ['api'],
+      expiresAt: '2027-01-01T00:00:00Z',
+    });
+    const def = command(userCommands, 'token-create');
+    expect(def.dangerous).toBe(true);
+    const context = {
+      profile: { name: 'test' },
+      global: { raw: false, quiet: false, yes: true },
+      log: vi.fn(),
+      client: { admin: { users: { tokens: { create } } } },
+    } as unknown as CommandContext;
+
+    const result = await def.handler(
+      context,
+      def.input.parse({ userId: 'u1', name: 'CI bot' }) as never
+    );
+
+    expect(create).toHaveBeenCalledWith('u1', { name: 'CI bot', expiresInDays: 90 });
+    expect(result.message).toContain('klt_xyz123');
+    expect(result.message).toContain('u1');
+  });
 });
 
 describe('limits', () => {

@@ -133,6 +133,41 @@ describe('FieldRenderer', () => {
       renderField({ type: 'picklist', value: 'Active' })
       expect(screen.getByText('Active')).toBeDefined()
     })
+
+    it('renders the raw value on a neutral badge when no display map entry exists', () => {
+      renderField({
+        type: 'picklist',
+        value: 'in_progress',
+        picklistDisplayMap: new Map(),
+      })
+      const badge = screen.getByText('in_progress')
+      expect(badge.getAttribute('data-variant')).toBe('secondary')
+      expect(badge.style.backgroundColor).toBe('')
+    })
+
+    it('renders the authored label on a colored badge with a contrasting foreground', () => {
+      renderField({
+        type: 'picklist',
+        value: 'in_progress',
+        picklistDisplayMap: new Map([['in_progress', { label: 'In progress', color: '#F59E0B' }]]),
+      })
+      const badge = screen.getByText('In progress')
+      expect(screen.queryByText('in_progress')).toBeNull()
+      expect(badge.style.backgroundColor).toBe('rgb(245, 158, 11)')
+      // #F59E0B is a mid-brightness amber — black text gives the better WCAG contrast.
+      expect(badge.style.color).toBe('rgb(0, 0, 0)')
+    })
+
+    it('renders the authored label without recoloring when the value has no color', () => {
+      renderField({
+        type: 'picklist',
+        value: 'in_progress',
+        picklistDisplayMap: new Map([['in_progress', { label: 'In progress' }]]),
+      })
+      const badge = screen.getByText('In progress')
+      expect(badge.getAttribute('data-variant')).toBe('secondary')
+      expect(badge.style.backgroundColor).toBe('')
+    })
   })
 
   describe('multi_picklist type', () => {
@@ -141,6 +176,21 @@ describe('FieldRenderer', () => {
       expect(screen.getByText('Red')).toBeDefined()
       expect(screen.getByText('Blue')).toBeDefined()
       expect(screen.getByText('Green')).toBeDefined()
+    })
+
+    it('renders authored labels per chip from the display map', () => {
+      renderField({
+        type: 'multi_picklist',
+        value: ['open', 'won'],
+        picklistDisplayMap: new Map([
+          ['open', { label: 'Open', color: '#3B82F6' }],
+          ['won', { label: 'Won' }],
+        ]),
+      })
+      expect(screen.getByText('Open')).toBeDefined()
+      expect(screen.getByText('Won')).toBeDefined()
+      expect(screen.queryByText('open')).toBeNull()
+      expect(screen.queryByText('won')).toBeNull()
     })
   })
 

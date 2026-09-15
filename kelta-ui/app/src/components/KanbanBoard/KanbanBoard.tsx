@@ -47,6 +47,8 @@ export interface KanbanBoardProps {
   onMoveCard: (recordId: string, lane: string | null) => Promise<void>
   tenantSlug?: string
   lookupDisplayMap?: Record<string, Record<string, string>>
+  /** Lane field's raw value → authored `{label, color}` (see `usePicklistDisplayMap`). */
+  laneDisplayMap?: Map<string, { label: string; color?: string }>
 }
 
 function KanbanCard({
@@ -143,6 +145,13 @@ function KanbanLaneColumn({ lane, children }: { lane: KanbanLane; children: Reac
       data-testid={`kanban-lane-${lane.id}`}
     >
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        {lane.color && (
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: lane.color }}
+            aria-hidden="true"
+          />
+        )}
         <span className="truncate text-[11px] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
           {lane.label}
         </span>
@@ -169,6 +178,7 @@ export function KanbanBoard({
   onMoveCard,
   tenantSlug,
   lookupDisplayMap,
+  laneDisplayMap,
 }: KanbanBoardProps): React.ReactElement {
   // Optimistic lane overrides for in-flight moves; entries clear when the move
   // settles (success refetches, failure reverts here).
@@ -182,8 +192,8 @@ export function KanbanBoard({
   }, [records, pendingMoves, laneField.name])
 
   const lanes = useMemo(
-    () => resolveLanes(effectiveRecords, laneField.name, laneOptions),
-    [effectiveRecords, laneField.name, laneOptions]
+    () => resolveLanes(effectiveRecords, laneField.name, laneOptions, laneDisplayMap),
+    [effectiveRecords, laneField.name, laneOptions, laneDisplayMap]
   )
 
   // Distance activation keeps plain clicks flowing to onCardClick.

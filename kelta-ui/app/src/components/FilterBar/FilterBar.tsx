@@ -19,6 +19,22 @@ export interface FilterBarProps {
   onRemoveFilter: (filterId: string) => void
   /** Callback to clear all filters */
   onClearAll: () => void
+  /**
+   * Field name → raw value→`{label, color}` (see `usePicklistDisplayMap`) for picklist/
+   * multi_picklist fields being filtered on. The badge shows the authored label; the
+   * filter itself (and thus the query) keeps comparing on the raw stored value.
+   */
+  picklistDisplayMaps?: Record<string, Map<string, { label: string; color?: string }>>
+}
+
+/** Resolve the display text for one filter's value: authored label if the field is a mapped picklist. */
+function formatFilterValue(
+  filter: FilterCondition,
+  picklistDisplayMaps?: Record<string, Map<string, { label: string; color?: string }>>
+): string {
+  const displayMap = picklistDisplayMaps?.[filter.field]
+  if (!displayMap) return filter.value
+  return displayMap.get(filter.value)?.label || filter.value
 }
 
 /**
@@ -43,6 +59,7 @@ export function FilterBar({
   filters,
   onRemoveFilter,
   onClearAll,
+  picklistDisplayMaps,
 }: FilterBarProps): React.ReactElement | null {
   if (filters.length === 0) return null
 
@@ -55,7 +72,7 @@ export function FilterBar({
         <Badge key={filter.id} variant="secondary" className="gap-1 pr-1 text-xs">
           <span className="font-medium">{filter.field}</span>
           <span className="text-muted-foreground">{formatOperator(filter.operator)}</span>
-          <span>{filter.value}</span>
+          <span>{formatFilterValue(filter, picklistDisplayMaps)}</span>
           <button
             type="button"
             onClick={() => onRemoveFilter(filter.id)}

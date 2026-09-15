@@ -5,6 +5,46 @@ at the bottom so reviewers can see what's already been addressed.
 
 ## Security Risks
 
+**FIXED (2026-09-14) — the platform had no dependency vulnerability scanning at all, and the
+one scanner that was configured had never run.** OWASP dependency-check sat in
+`kelta-platform/pom.xml` with `failBuildOnCVSS=7` and a suppressions file, but only inside
+**`<pluginManagement>`** — which configures a plugin without ever running one. No module
+declared it in `<plugins>`, no workflow invoked it, and `dependency-check-suppressions.xml` is
+still the untouched template (its two `<suppress>` blocks are inside a **comment**), so no
+report had ever been reviewed. There was also no `npm audit` in CI, no Dependabot, and no
+Renovate — "Detect secrets" was the only security check in the pipeline.
+
+What that was hiding, production dependencies only (dev tooling excluded — it does not ship):
+**`kelta-ui/app` 2 critical + 5 high**, `kelta-web` 4 high. Among them `protobufjs` (arbitrary
+code execution), `maplibre-gl` (XSS sanitizer bypass in `DOM.sanitize()`), `react-router`
+(arbitrary content injection via vendored turbo-stream; CSRF via PUT/PATCH/DELETE), `axios`
+(prototype pollution → Basic auth injection, NO_PROXY bypass), `@tiptap/core` (prototype
+pollution via `__proto__`), `form-data` (CRLF injection). These ship to the browser in a
+platform that otherwise enforces RLS, Cerbos, FLS and data masking.
+
+The **npm** side is now gated by `dependency-audit`, wired into `quality-gate`'s `needs`
+**and** its result loop. The gate diffs against
+`ci/npm-audit-baseline.json` rather than using a flat threshold, because 33 known
+high/critical advisories would otherwise fail the build on day one. **The baseline is debt,
+not an allowlist** — the 33 entries are the burn-down list, and the 2 criticals are the place
+to start.
+
+**Java dependencies are still unscanned.** Wiring dependency-check up is blocked on the
+`NVD_API_KEY` secret: it *is* configured, but the NVD API rejects it —
+`NvdApiException: Invalid API Key`. Worth knowing why that took two CI runs to learn: the
+pinned 10.0.4 shipped an `open-vulnerability-clients` that NPE'd on the error response
+(`Cannot read the array length because "bytes" is null` in `NvdCveClient._next`) instead of
+reporting it, so the real cause was invisible. Bumping to 12.2.2 surfaced the actual message.
+The follow-up is: regenerate the key at nvd.nist.gov, then land the job (pom bump to 12.2.2 +
+the CI job, with `-DnvdMaxRetryCount=10 -DnvdApiDelay=4000`). If the key stays troublesome,
+`-DnvdDatafeedUrl` uses the NVD datafeed mirror and drops the API-key dependency entirely.
+
+**Third occurrence of the same shape** (after the runtime modules' `-DskipTests` and
+`kelta-ui`'s never-invoked vitest suite): a tool that is configured, looks wired, and never
+executes. When adding any checker, verify a job runs it *and* that its failure signal reaches
+a gate — the audit script's exit code was verified in both directions before wiring, precisely
+because a gate that prints FAIL and exits 0 is the same defect wearing a different hat.
+
 **No malware scanning exists anywhere in the platform, and the support mailbox makes
 strangers the upload source (support-mailbox slice 9).** Until inbound mail shipped, every
 byte in object storage arrived from an authenticated user of a tenant. `support@` inverts
@@ -1031,6 +1071,7 @@ Regression guard: `TenantAwareDataSourceTest` asserts tenant connections use tra
 
 ### Bugs (all addressed)
 
+- **Every dashboard time range 500'd; DATE/DATETIME filters bound with the wrong JDBC type (2026-09-14)** — `PhysicalTableStorageAdapter.buildFilterCondition` bound filter values raw: `TypeCoercionService` turns a DATETIME string into `java.time.Instant`, which pgjdbc cannot infer a SQL type for, and the audit columns `createdAt`/`updatedAt` have no `FieldDefinition` on user collections, so the dashboard's `createdAt >= <iso>` bound as varchar (`operator does not exist: timestamp with time zone >= character varying`). H2 tolerates both, so the unit suite was green. Comparison operators (EQ/NEQ/GT/GTE/LT/LTE/IN) on DATE/DATETIME fields and on the audit timestamps now go through `convertValueForStorage` — the write path — so reads and writes bind identically (`java.sql.Timestamp`/`java.sql.Date`); an unparseable value is an `InvalidFilterException` (400). Proven on Postgres by `PhysicalTableStorageAdapterTemporalFilterIntegrationTest` (Testcontainers), which fails on the old code.
 - **Gateway 404s a live tenant on every slug-cache refresh (2026-08-09, #1334)** — `GatewayCacheManager.refreshTenantSlugsFromWorker` did `invalidateAll()` then `putAll()`; a request landing in that sub-millisecond window missed and returned `TENANT_NOT_FOUND`. Compounding it, the lazy rescue lookup called `.block()` and its only caller is the reactive `TenantSlugExtractionFilter`, so on an `epoll` thread it always threw — the protection had never worked, and a brand-new tenant 404'd until the next refresh tick. Now the refresh writes the new entries before dropping departed ones (`replaceTenantSlugs`, never empty) and both slug and custom-domain resolution have non-blocking `…Reactive` variants that the filters use; the blocking variants keep a `Schedulers.isInNonBlockingThread()` guard. Custom-domain lookups negative-cache **only** a definitive worker 404, never a timeout/5xx. Surfaced as a `CampaignCreateScenarioTest` flake in CI.
 - **`/api/operations` 500 on the native worker (2026-07-12)** — `AtomicOperationExecutor` maps request maps into the `io.kelta.jsonapi.AtomicOperation`/`AtomicResult` records reflectively, but none of the jsonapi records were in the worker `reflect-config.json`, so every atomic-operations call failed with `MissingReflectionRegistrationError` on the native image only (JVM/CI green — same invisible-on-CI class as the NATS payload gaps). All five records (`AtomicOperation` + `ResourceRef`/`ResourceData`, `AtomicResult` + `ResourceObject`) are now registered.
 - **Federated users stuck PENDING_ACTIVATION** — `FederatedUserMapper.lookupProfileId` (line 199) calls `WorkerClient.findProfileByName` against `/internal/profile/by-name`.

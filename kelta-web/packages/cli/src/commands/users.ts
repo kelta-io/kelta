@@ -109,6 +109,35 @@ const resetPassword = defineCommand({
   },
 });
 
+const tokenCreate = defineCommand({
+  group: 'users',
+  name: 'token-create',
+  summary: "Mint a personal access token on a user's behalf (requires MANAGE_USERS)",
+  dangerous: true,
+  positionals: [{ name: 'userId', description: 'Target user id', required: true }],
+  options: [
+    { flag: '--name <name>', description: 'Token name' },
+    { flag: '--expires-in <days>', description: 'Lifetime in days (1-365)', default: '90' },
+  ],
+  input: z.object({
+    userId: z.string().min(1),
+    name: z.string().min(1).max(200),
+    expiresIn: z.coerce.number().int().min(1).max(365).default(90),
+  }),
+  handler: async (ctx, input) => {
+    const created = await ctx.client.admin.users.tokens.create(input.userId, {
+      name: input.name,
+      expiresInDays: input.expiresIn,
+    });
+    return {
+      data: created,
+      message:
+        `Created ${created.token} for user ${input.userId} (expires ${created.expiresAt})\n` +
+        'Store it now — it will NOT be shown again.',
+    };
+  },
+});
+
 const logins = defineCommand({
   group: 'users',
   name: 'logins',
@@ -135,5 +164,6 @@ export const userCommands: RegisteredCommand[] = [
   invite,
   portalInvite,
   resetPassword,
+  tokenCreate,
   logins,
 ];

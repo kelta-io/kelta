@@ -141,6 +141,11 @@ export interface ObjectDataTableProps {
   /** Lookup display map: { fieldName: { recordId: displayLabel } } */
   lookupDisplayMap?: Record<string, Record<string, string>>
   /**
+   * Field name → raw value→`{label, color}` (see `usePicklistDisplayMap`) for picklist/
+   * multi_picklist columns. Badges show the authored label; the stored value is unaffected.
+   */
+  picklistDisplayMaps?: Record<string, Map<string, { label: string; color?: string }>>
+  /**
    * Opt-in in-place cell editing (unified record experience, slice 3). When true AND
    * `onCellCommit` is provided, editable-type cells become click-to-edit via `InlineFieldValue`.
    * When false/omitted the grid is read-only exactly as before.
@@ -245,6 +250,7 @@ function DataRow({
   rowProps,
   tenantSlug,
   lookupDisplayMap,
+  picklistDisplayMaps,
   onRowClick,
   onSelectRow,
   onEdit,
@@ -265,6 +271,7 @@ function DataRow({
   }
   tenantSlug: string | undefined
   lookupDisplayMap?: Record<string, Record<string, string>>
+  picklistDisplayMaps?: Record<string, Map<string, { label: string; color?: string }>>
   onRowClick: (record: CollectionRecord) => void
   onSelectRow: (id: string) => void
   onEdit?: (record: CollectionRecord) => void
@@ -332,6 +339,7 @@ function DataRow({
                 value={fieldValue}
                 displayLabel={displayLabel}
                 tenantSlug={tenantSlug}
+                picklistDisplayMap={picklistDisplayMaps?.[field.name]}
                 editable
                 editOn="pencil"
                 masked={maskedFieldsOf(record).has(field.name)}
@@ -358,6 +366,7 @@ function DataRow({
               tenantSlug={tenantSlug}
               targetCollection={field.referenceTarget}
               displayLabel={displayLabel}
+              picklistDisplayMap={picklistDisplayMaps?.[field.name]}
               truncate
             />
           </TableCell>
@@ -416,6 +425,7 @@ export function ObjectDataTable({
   onEdit,
   onDelete,
   lookupDisplayMap,
+  picklistDisplayMaps,
   editable,
   onCellCommit,
 }: ObjectDataTableProps): React.ReactElement {
@@ -677,6 +687,7 @@ export function ObjectDataTable({
                     rowProps={getRowProps(index)}
                     tenantSlug={tenantSlug}
                     lookupDisplayMap={lookupDisplayMap}
+                    picklistDisplayMaps={picklistDisplayMaps}
                     onRowClick={handleRowClick}
                     onSelectRow={handleSelectRow}
                     onEdit={onEdit}
@@ -721,6 +732,7 @@ export function ObjectDataTable({
                 rowProps={rowPropsForIndex}
                 tenantSlug={tenantSlug}
                 lookupDisplayMap={lookupDisplayMap}
+                picklistDisplayMaps={picklistDisplayMaps}
                 onRowClick={handleRowClick}
                 onSelectRow={handleSelectRow}
                 onEdit={onEdit}
@@ -759,6 +771,7 @@ export function ObjectDataTable({
           rowProps={rowPropsForIndex}
           tenantSlug={tenantSlug}
           lookupDisplayMap={lookupDisplayMap}
+          picklistDisplayMaps={picklistDisplayMaps}
           onRowClick={handleRowClick}
           onSelectRow={handleSelectRow}
           onEdit={onEdit}

@@ -27,6 +27,8 @@ export interface FieldControlContext {
   displayName?: string
   /** Allowed values for picklist / multi_picklist. */
   enumValues?: string[]
+  /** Raw value → authored `{label, color}` for picklist / multi_picklist (see `usePicklistDisplayMap`). */
+  picklistDisplayMap?: Map<string, { label: string; color?: string }>
   /** Fetched options for reference/lookup/master_detail edit controls. */
   referenceOptions?: LookupOption[]
   /** Layout/schema read-only override — renders View or a disabled Edit. */

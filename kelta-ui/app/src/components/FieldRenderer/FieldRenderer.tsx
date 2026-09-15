@@ -50,6 +50,54 @@ export interface FieldRendererProps {
   className?: string
   /** Whether to truncate long text values */
   truncate?: boolean
+  /**
+   * For picklist/multi_picklist: raw stored value → authored `{label, color}` (see
+   * `usePicklistDisplayMap`). A value with no entry, or an entry with no color, renders exactly
+   * as before (raw value, neutral badge) — this is presentation-only, the stored value never
+   * changes.
+   */
+  picklistDisplayMap?: Map<string, { label: string; color?: string }>
+}
+
+/** Parse `#rgb`/`#rrggbb` into 0-255 channels, or null if not a recognizable hex color. */
+function parseHexColor(hex: string): [number, number, number] | null {
+  const short = /^#?([a-f\d])([a-f\d])([a-f\d])$/i.exec(hex.trim())
+  if (short) {
+    return [
+      parseInt(short[1] + short[1], 16),
+      parseInt(short[2] + short[2], 16),
+      parseInt(short[3] + short[3], 16),
+    ]
+  }
+  const long = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim())
+  if (!long) return null
+  return [parseInt(long[1], 16), parseInt(long[2], 16), parseInt(long[3], 16)]
+}
+
+/** WCAG relative luminance of an sRGB color (0-255 channels). */
+function relativeLuminance([r, g, b]: [number, number, number]): number {
+  const [rl, gl, bl] = [r, g, b].map((c) => {
+    const s = c / 255
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
+  })
+  return 0.2126 * rl + 0.7152 * gl + 0.0722 * bl
+}
+
+/** WCAG contrast ratio between two relative luminances. */
+function contrastRatio(l1: number, l2: number): number {
+  const lighter = Math.max(l1, l2)
+  const darker = Math.min(l1, l2)
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+/** Pick whichever of black/white gives the better WCAG AA contrast against a hex background. */
+function contrastingTextColor(bgHex: string): string {
+  const rgb = parseHexColor(bgHex)
+  if (!rgb) return '#000000'
+  const bgLuminance = relativeLuminance(rgb)
+  const whiteContrast = contrastRatio(bgLuminance, 1)
+  const blackContrast = contrastRatio(bgLuminance, 0)
+  return whiteContrast >= blackContrast ? '#ffffff' : '#000000'
 }
 
 /**
@@ -162,6 +210,7 @@ export function FieldRenderer({
   displayLabel,
   className,
   truncate = true,
+  picklistDisplayMap,
 }: FieldRendererProps): React.ReactElement {
   // Null/undefined values
   if (value === null || value === undefined) {
@@ -303,9 +352,21 @@ export function FieldRenderer({
     }
 
     case 'picklist': {
+      const strValue = String(value)
+      const entry = picklistDisplayMap?.get(strValue)
+      if (entry?.color) {
+        return (
+          <Badge
+            className={className}
+            style={{ backgroundColor: entry.color, color: contrastingTextColor(entry.color) }}
+          >
+            {entry.label || strValue}
+          </Badge>
+        )
+      }
       return (
         <Badge variant="secondary" className={className}>
-          {String(value)}
+          {entry?.label || strValue}
         </Badge>
       )
     }
@@ -314,11 +375,25 @@ export function FieldRenderer({
       const items = Array.isArray(value) ? value : [value]
       return (
         <div className={cn('flex flex-wrap gap-1', className)}>
-          {items.map((item, idx) => (
-            <Badge key={idx} variant="secondary">
-              {String(item)}
-            </Badge>
-          ))}
+          {items.map((item, idx) => {
+            const strItem = String(item)
+            const entry = picklistDisplayMap?.get(strItem)
+            if (entry?.color) {
+              return (
+                <Badge
+                  key={idx}
+                  style={{ backgroundColor: entry.color, color: contrastingTextColor(entry.color) }}
+                >
+                  {entry.label || strItem}
+                </Badge>
+              )
+            }
+            return (
+              <Badge key={idx} variant="secondary">
+                {entry?.label || strItem}
+              </Badge>
+            )
+          })}
         </div>
       )
     }

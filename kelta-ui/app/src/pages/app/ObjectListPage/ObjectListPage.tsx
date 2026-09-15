@@ -74,7 +74,11 @@ import { ColumnChooser } from '@/components/ColumnChooser/ColumnChooser'
 import { KanbanBoard } from '@/components/KanbanBoard'
 import { CalendarMonthView, currentMonthKey, monthRange } from '@/components/CalendarMonthView'
 import { GalleryGrid } from '@/components/GalleryGrid'
-import { usePicklistOptions } from '@/hooks/usePicklistOptions'
+import {
+  usePicklistOptions,
+  usePicklistDisplayMap,
+  usePicklistDisplayMaps,
+} from '@/hooks/usePicklistOptions'
 import { viewSorts, type SavedViewDensity, type SavedViewType } from '@/hooks/useSavedViews'
 import { ListShell } from '@/components/record/ListShell'
 import { ObjectDataTable } from '@/components/ObjectDataTable/ObjectDataTable'
@@ -264,6 +268,13 @@ export function ObjectListPage(): React.ReactElement {
     kanbanLaneField ?? undefined,
     viewType === 'kanban'
   )
+  const { displayMap: laneDisplayMap } = usePicklistDisplayMap(
+    kanbanLaneField ?? undefined,
+    viewType === 'kanban'
+  )
+  // Table columns + the filter bar render authored labels for every picklist/multi_picklist
+  // field, not just the kanban lane field above.
+  const { displayMaps: picklistDisplayMaps } = usePicklistDisplayMaps(accessibleFields)
 
   // Fields offered by the mass-edit picker (same rule as RelatedList): user-editable
   // schema fields only (excludes id, system audit fields, server-computed types).
@@ -1070,6 +1081,7 @@ export function ObjectListPage(): React.ReactElement {
             filters={filters}
             onRemoveFilter={handleRemoveFilter}
             onClearAll={handleClearAllFilters}
+            picklistDisplayMaps={picklistDisplayMaps}
           />
 
           {/* Error state for records */}
@@ -1098,6 +1110,7 @@ export function ObjectListPage(): React.ReactElement {
               onMoveCard={handleMoveCard}
               tenantSlug={tenantSlug}
               lookupDisplayMap={lookupDisplayMap}
+              laneDisplayMap={laneDisplayMap}
             />
           ) : (
             <div
@@ -1160,6 +1173,7 @@ export function ObjectListPage(): React.ReactElement {
               onEdit={permissions.canEdit ? handleEdit : undefined}
               onDelete={permissions.canDelete ? handleDeleteClick : undefined}
               lookupDisplayMap={lookupDisplayMap}
+              picklistDisplayMaps={picklistDisplayMaps}
               editable={permissions.canEdit}
               onCellCommit={handleCellCommit}
             />

@@ -120,7 +120,7 @@ function PicklistEdit({ value, ctx, onChange, onBlur, id }: FieldEditProps): Rea
       <option value="" />
       {(ctx.enumValues ?? []).map((opt) => (
         <option key={opt} value={opt}>
-          {opt}
+          {ctx.picklistDisplayMap?.get(opt)?.label || opt}
         </option>
       ))}
     </select>

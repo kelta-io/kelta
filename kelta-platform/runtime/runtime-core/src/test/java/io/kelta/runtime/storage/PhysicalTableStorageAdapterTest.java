@@ -1235,4 +1235,103 @@ class PhysicalTableStorageAdapterTest {
                     new RuntimeException("no sql cause")));
         }
     }
+
+    @Nested
+    @DisplayName("Temporal filter binding (DATE / DATETIME / audit timestamps)")
+    class TemporalFilterTests {
+
+        private CollectionDefinition events;
+
+        @BeforeEach
+        void initTableAndData() {
+            List<FieldDefinition> fields = List.of(
+                new FieldDefinition("name", FieldType.STRING, false, false, false, null, null, null, null, null),
+                FieldDefinition.datetime("dueAt"),
+                FieldDefinition.date("dueOn")
+            );
+            events = new CollectionDefinition("test_events", "Test Events", "temporal filters", fields,
+                new StorageConfig("test_events", Map.of()), null, null, 1L, Instant.now(), Instant.now());
+            try {
+                jdbcTemplate.execute("DROP TABLE IF EXISTS test_events");
+            } catch (Exception e) {
+                // Ignore
+            }
+            adapter.initializeCollection(events);
+            insert("1", "January", "2026-01-01T10:00:00Z", "2026-01-01", "2026-01-01T00:00:00Z");
+            insert("2", "February", "2026-02-01T10:00:00Z", "2026-02-01", "2026-02-01T00:00:00Z");
+            insert("3", "March", "2026-03-01T10:00:00Z", "2026-03-01", "2026-03-01T00:00:00Z");
+        }
+
+        private void insert(String id, String name, String dueAt, String dueOn, String createdAt) {
+            Map<String, Object> data = new HashMap<>();
+            data.put("id", id);
+            data.put("name", name);
+            data.put("dueAt", Instant.parse(dueAt));
+            data.put("dueOn", java.time.LocalDate.parse(dueOn));
+            data.put("createdAt", Instant.parse(createdAt));
+            data.put("updatedAt", Instant.parse(createdAt));
+            adapter.create(events, data);
+        }
+
+        private List<String> names(FilterCondition... filters) {
+            QueryRequest request = new QueryRequest(Pagination.defaults(), List.of(), List.of(), List.of(filters));
+            return adapter.query(events, request).data().stream().map(r -> (String) r.get("name")).sorted().toList();
+        }
+
+        @Test
+        @DisplayName("createdAt (no FieldDefinition) filters with an ISO-8601 string — the dashboard time range")
+        void shouldFilterAuditTimestampFromIsoString() {
+            assertEquals(List.of("February", "March"),
+                names(new FilterCondition("createdAt", FilterOperator.GTE, "2026-02-01T00:00:00Z")));
+            assertEquals(List.of("January"),
+                names(new FilterCondition("updatedAt", FilterOperator.LT, "2026-02-01T00:00:00Z")));
+        }
+
+        @Test
+        @DisplayName("a DATETIME field filters with every comparison operator")
+        void shouldFilterDatetimeField() {
+            assertEquals(List.of("February"), names(new FilterCondition("dueAt", FilterOperator.EQ, "2026-02-01T10:00:00Z")));
+            assertEquals(List.of("January", "March"), names(new FilterCondition("dueAt", FilterOperator.NEQ, "2026-02-01T10:00:00Z")));
+            assertEquals(List.of("March"), names(new FilterCondition("dueAt", FilterOperator.GT, "2026-02-01T10:00:00Z")));
+            assertEquals(List.of("February", "January"), names(new FilterCondition("dueAt", FilterOperator.LTE, "2026-02-01T10:00:00Z")));
+            assertEquals(List.of("January", "March"), names(new FilterCondition("dueAt", FilterOperator.IN,
+                List.of("2026-01-01T10:00:00Z", "2026-03-01T10:00:00Z"))));
+        }
+
+        @Test
+        @DisplayName("a DATE field filters with yyyy-MM-dd values, scalar and IN")
+        void shouldFilterDateField() {
+            assertEquals(List.of("February"), names(new FilterCondition("dueOn", FilterOperator.EQ, "2026-02-01")));
+            assertEquals(List.of("February", "March"), names(new FilterCondition("dueOn", FilterOperator.GTE, "2026-02-01")));
+            assertEquals(List.of("January", "March"), names(new FilterCondition("dueOn", FilterOperator.IN,
+                List.of("2026-01-01", "2026-03-01"))));
+        }
+
+        @Test
+        @DisplayName("an unparseable temporal value is a 400-class InvalidFilterException, not a database error")
+        void shouldRejectUnparseableTemporalValue() {
+            io.kelta.runtime.query.InvalidFilterException ex = assertThrows(io.kelta.runtime.query.InvalidFilterException.class,
+                () -> names(new FilterCondition("createdAt", FilterOperator.GTE, "yesterday")));
+            assertTrue(ex.getMessage().contains("createdAt"), ex.getMessage());
+            assertThrows(io.kelta.runtime.query.InvalidFilterException.class,
+                () -> names(new FilterCondition("dueOn", FilterOperator.EQ, "next week")));
+        }
+
+        @Test
+        @DisplayName("ISNULL on a temporal column is untouched")
+        void shouldLeaveIsNullAlone() {
+            assertEquals(List.of(), names(new FilterCondition("dueAt", FilterOperator.ISNULL, true)));
+            assertEquals(List.of("February", "January", "March"),
+                names(new FilterCondition("dueAt", FilterOperator.ISNULL, false)));
+        }
+
+        @Test
+        @DisplayName("the write-path converter is what binds: strings become java.sql types")
+        void shouldConvertTemporalValuesLikeTheWritePath() {
+            assertInstanceOf(java.sql.Timestamp.class, adapter.convertValueForStorage("2026-02-01T00:00:00Z", FieldType.DATETIME));
+            assertInstanceOf(java.sql.Date.class, adapter.convertValueForStorage("2026-02-01", FieldType.DATE));
+            assertInstanceOf(java.sql.Timestamp.class, adapter.convertValueForStorage(Instant.parse("2026-02-01T00:00:00Z"), FieldType.DATETIME));
+        }
+    }
+
 }

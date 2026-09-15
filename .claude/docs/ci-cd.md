@@ -14,8 +14,9 @@ MAVEN_OPTS=-Dmaven.wagon.http.retryHandler.count=10 ...
 - npm cache key: `npm-${runner.os}-${hashFiles('kelta-web/package-lock.json')}` over `~/.npm`.
 - Change detection: `.github/path-filters.yml` drives a `changes` job that outputs which
   services changed (`runtime`, `gateway`, `worker`, `auth`, `ai`, `mcp`, `web`, `ui`,
-  `any_java`, `e2e`, `workflows`). Downstream jobs run only for changed paths; a
-  `quality-gate` job passes if every *triggered* job passed (skipped jobs are allowed).
+  `any_java`, `e2e`, `runtime_modules`, `quickstart`, `workflows`). Downstream jobs run only
+  for changed paths; a `quality-gate` job passes if every *triggered* job passed (skipped
+  jobs are allowed).
 
 ## `ci.yml` — Pull-request CI
 
@@ -29,7 +30,11 @@ Trigger: `pull_request` → `main`, plus `workflow_dispatch`.
 | `test-frontend` | In `kelta-web`: `npm ci`, `npm run lint`, `npm run typecheck`, `npm run format:check`, `npm run test:coverage` (Vitest, v8 coverage, **80% threshold** in `vitest.config.ts`). Then **`kelta-ui/app`**: builds the `kelta-web` packages (formula → sdk → plugin-sdk → components — its `@kelta/*` types resolve through their built `dist/`), `npm ci`, `npm run typecheck`, **`npm run test:run`** (223 files, ~2,700 tests). The test step is newer than the rest: the job typechecked `kelta-ui/app` but never ran its tests, so the whole admin/builder + end-user UI suite gated nothing. **`NODE_VERSION` must stay ≥ 20.19** (pinned by `kelta-ui/app`'s `engines`) — on 18, jsdom's `html-encoding-sniffer` `require()`s an ES module and all 223 files fail to start with `ERR_REQUIRE_ESM` before a test runs. 20 also matches `kelta-ui/Dockerfile` (`node:20-alpine`). |
 | `integration-tests` | Builds service JARs, pre-pulls images (`redis:7`, `nats:2.10`, `cerbos:0.40.0`, `eclipse-temurin:25-jre`), pre-builds service images, then `mvn verify -f kelta-test-harness/pom.xml -Pintegration-tests` (failsafe). `TESTCONTAINERS_RYUK_DISABLED=true`. |
 | `e2e` | Builds JVM service images (`Dockerfile.jvm`), spins up the full stack via `docker-compose.yml -f docker-compose.ci.yml`, runs Playwright (`mcr.microsoft.com/playwright:v1.58.2-noble`) inside the compose network. Timeout 45 min. Uploads HTML report + traces. **Readiness gating:** `up -d --wait` is the only barrier before the tests run, so it has to be trustworthy. The gateway's healthcheck targets `/actuator/health/readiness`, which stays 503 until its route table is loaded — `RouteInitializer` is an `ApplicationRunner` and runs *after* the web server starts, so plain `/actuator/health` reports UP while every `/api/**` still 404s. That window used to surface as the first few minutes of specs failing and everything afterwards passing, which reads like a broken page but is pure startup ordering. See `architecture.md` → Gateway startup & readiness. |
+| `quickstart` | K-3's CI enforcement of the README [Quickstart](../../README.md#quickstart): same JVM-image build (`docker-compose.ci.yml`) as `e2e`, then `timeout 300` around `ci/quickstart-run.sh` — `docker compose up -d --wait` followed by a login-and-create-collection check (`ci/quickstart-check.sh`, piped over stdin — not bind-mounted, the remote runner daemon can't see the filesystem — into a `curlimages/curl` container on the compose network) — direct-login as the seeded admin, then `POST /default/api/collections`. Only that sequence is timed; image build happens first and isn't part of the 300s budget. Default profile only (no `--profile ai`), matching what a first-time `docker compose up` actually starts. Timeout 20 min. |
+| `dependency-audit` | `node ci/dependency-audit.mjs` — `npm audit --omit=dev` over `kelta-web` + `kelta-ui/app`, diffed against `ci/npm-audit-baseline.json`. Fails on any **new** high/critical advisory in a production dependency. Deliberately a delta gate, not `--audit-level=high`: production deps already carry **33** high/critical advisories, so a threshold gate would fail on day one, and a red `main` is a deploy outage rather than a signal. The baseline is debt to burn down — refresh it with `node ci/dependency-audit.mjs --update`, and only ever add an entry with a written reason. Needs no `node_modules` (audit resolves from the lockfile), so it skips the installs. |
 | `quality-gate` | Green iff all triggered jobs passed. |
+
+> **Java dependencies are not scanned yet.** OWASP dependency-check is configured in `kelta-platform/pom.xml` but only inside `<pluginManagement>`, so it never runs. Wiring it up is blocked on the `NVD_API_KEY` secret: it is set, but the NVD API rejects it (`NvdApiException: Invalid API Key`), which dependency-check 10.0.4 masked as an opaque `NullPointerException` in `NvdCveClient`. Tracked as a follow-up — see `concerns.md`.
 
 ## `build-and-publish-containers.yml` — Post-merge deploy
 
@@ -74,10 +79,19 @@ Trigger: `push` → `main` (path-filtered), plus `workflow_dispatch`.
 
 ## `auto-merge.yml`
 
-Auto-merges PRs labeled `autopilot` from authorized actors (`cklinker`,
-`github-actions[bot]`). Squash strategy. Uses `ARGOCD_REPO_TOKEN` (a PAT, so the merge
-push triggers the downstream publish workflow). **`type: security` tasks are never
-auto-merged** (see `SECURITY.md`).
+Two paths, squash strategy, both using `ARGOCD_REPO_TOKEN` (a PAT, so the merge push
+triggers the downstream publish workflow):
+
+- **human** — PRs labeled `autopilot` from `cklinker` or `github-actions[bot]`: auto-merge
+  is enabled on the label (`pull_request` events), no review gate.
+- **fleet** — PRs from `rzware-developer[bot]`: auto-merge is enabled only when
+  `rzware-reviewer[bot]` submits an `approved` review (`pull_request_review`), and
+  disabled again by a later `changes_requested`. The worker Job's review round (request
+  changes → fix → push → re-review) therefore completes before anything merges. Before
+  2026-09-15 this path was label-triggered too and #1478 merged on CI green eleven minutes
+  after "changes requested", stranding the fix commit (#1479).
+
+**`type: security` tasks are never auto-merged** (see `SECURITY.md`).
 
 ## Other workflows
 

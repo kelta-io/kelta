@@ -67,4 +67,37 @@ describe('FilterBar', () => {
 
     expect(screen.getByText('Filters:')).toBeDefined()
   })
+
+  it('shows the authored label for a mapped picklist filter value while keeping the raw value in the callback', () => {
+    const onRemoveFilter = vi.fn()
+    render(
+      <FilterBar
+        filters={sampleFilters}
+        onRemoveFilter={onRemoveFilter}
+        onClearAll={vi.fn()}
+        picklistDisplayMaps={{
+          status: new Map([['active', { label: 'Active', color: '#22C55E' }]]),
+        }}
+      />
+    )
+
+    expect(screen.getByText('Active')).toBeDefined()
+    expect(screen.queryByText('active')).toBeNull()
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Remove filter/ })[0])
+    expect(onRemoveFilter).toHaveBeenCalledWith('f1')
+  })
+
+  it('falls back to the raw value when no display map entry exists for the filtered field', () => {
+    render(
+      <FilterBar
+        filters={sampleFilters}
+        onRemoveFilter={vi.fn()}
+        onClearAll={vi.fn()}
+        picklistDisplayMaps={{ status: new Map() }}
+      />
+    )
+
+    expect(screen.getByText('active')).toBeDefined()
+  })
 })
