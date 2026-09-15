@@ -191,6 +191,7 @@ class McpApplicationTest {
                 "list_listviews",
                 "update_listview",
                 "delete_listview",
+                "apply_menu",
                 // automation admin + integrations (Phase 8)
                 "create_flow",
                 "update_flow",
@@ -279,7 +280,8 @@ class McpApplicationTest {
                 "update_picklist_value", "deactivate_picklist_value",
                 "update_validation_rule", "delete_validation_rule",
                 "delete_unique_constraint",
-                "update_listview", "delete_listview", "apply_listview", "apply_picklist");
+                "update_listview", "delete_listview", "apply_listview", "apply_picklist",
+                "apply_menu");
         for (UserTool ut : userTools) {
             Tool t = ut.toSpecification().tool();
             if (!destructive.contains(t.name())) continue;

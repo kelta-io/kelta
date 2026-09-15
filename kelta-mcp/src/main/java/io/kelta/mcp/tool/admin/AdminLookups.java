@@ -212,25 +212,61 @@ final class AdminLookups {
 
     /** {@code attributes}, overlaid with each relationship's {@code data.id} keyed by field name. */
     private static Map<String, Object> foldedAttributes(String json) {
-        Map<String, Object> out = new LinkedHashMap<>();
         JsonNode data = dataNode(json);
-        if (data == null) {
-            return out;
+        return data == null ? new LinkedHashMap<>() : foldedAttributesOf(data);
+    }
+
+    /** Same fold as {@link #foldedAttributes(String)}, applied to an already-resolved resource node, plus its {@code id}. */
+    private static Map<String, Object> foldedAttributesOf(JsonNode data) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        JsonNode id = data.path("id");
+        if (!id.isMissingNode() && !id.isNull()) {
+            out.put("id", id.asString());
         }
         for (Map.Entry<String, JsonNode> entry : data.path("attributes").properties()) {
             out.put(entry.getKey(), MAPPER.convertValue(entry.getValue(), Object.class));
         }
         for (Map.Entry<String, JsonNode> entry : data.path("relationships").properties()) {
-            JsonNode id = entry.getValue().path("data").path("id");
-            if (!id.isMissingNode() && !id.isNull()) {
-                out.put(entry.getKey(), id.asString());
+            JsonNode relId = entry.getValue().path("data").path("id");
+            if (!relId.isMissingNode() && !relId.isNull()) {
+                out.put(entry.getKey(), relId.asString());
             }
         }
         return out;
     }
 
+    /**
+     * All resources matching {@code filter} (each entry ANDed as {@code filter[key][eq]=value}),
+     * each as a folded attribute map ({@code id} + attributes + relationship ids, same shape as
+     * {@link #upsert}'s internal diff comparison) — up to {@code pageSize} rows. Used by tools
+     * that need the whole current set to resolve a tree (e.g. menu items keyed by parent) rather
+     * than a single natural-key lookup.
+     */
+    List<Map<String, Object>> list(String collection, Map<String, Object> filter, int pageSize) {
+        StringBuilder path = new StringBuilder("/api/").append(collection).append('?');
+        for (Map.Entry<String, Object> entry : filter.entrySet()) {
+            path.append("filter[").append(entry.getKey()).append("][eq]=")
+                    .append(URLEncoder.encode(String.valueOf(entry.getValue()), StandardCharsets.UTF_8))
+                    .append('&');
+        }
+        path.append("page[size]=").append(pageSize);
+        GatewayHttpClient.Response response = gateway.get(path.toString());
+        if (!response.isSuccess()) {
+            throw new GatewayFailure(response);
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (response.body() == null || response.body().isBlank()) {
+            return out;
+        }
+        JsonNode root = MAPPER.readTree(response.body());
+        for (JsonNode item : root.path("data")) {
+            out.add(foldedAttributesOf(item));
+        }
+        return out;
+    }
+
     /** Keys of {@code desired} whose value differs from {@code current}, in {@code desired}'s order. */
-    private static List<String> diff(Map<String, Object> current, Map<String, Object> desired) {
+    static List<String> diff(Map<String, Object> current, Map<String, Object> desired) {
         List<String> changed = new ArrayList<>();
         for (Map.Entry<String, Object> entry : desired.entrySet()) {
             JsonNode currentNode = MAPPER.valueToTree(current.get(entry.getKey()));
