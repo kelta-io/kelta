@@ -131,6 +131,25 @@ class UpdateListViewToolTest {
     }
 
     @Test
+    void forwardsRowLimitAndInFilter() {
+        wm.stubFor(patch(urlEqualTo("/api/list-views/" + LV_ID))
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":{\"id\":\"" + LV_ID + "\"}}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("update_listview", Map.of(
+                        "id", LV_ID,
+                        "rowLimit", 25,
+                        "filter", Map.of("status", Map.of("IN", "a,b"))), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(WireMock.patchRequestedFor(urlEqualTo("/api/list-views/" + LV_ID))
+                .withRequestBody(matchingJsonPath("$.data.attributes.rowLimit", equalTo("25")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].field", equalTo("status")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].operator", equalTo("IN")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].value", equalTo("a,b"))));
+    }
+
+    @Test
     void mapsSortFieldAndDirection() {
         wm.stubFor(patch(urlEqualTo("/api/list-views/" + LV_ID))
                 .willReturn(aResponse().withStatus(200).withBody("{\"data\":{\"id\":\"" + LV_ID + "\"}}")));

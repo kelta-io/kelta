@@ -52,6 +52,8 @@ public class CreateListViewTool implements AdminTool {
         properties.put("sort", Schemas.string("Default sort field, '-' prefix for descending, e.g. \"-createdAt\"."));
         properties.put("isDefault", Schemas.bool("Whether this is the default list view.", false));
         properties.put("visibility", Schemas.string("PRIVATE (default) or PUBLIC."));
+        properties.put("rowLimit", Schemas.integer(
+                "Maximum rows rendered: one of 10, 25, 50 (default) or 100.", 10, 100));
         properties.put("viewType", Schemas.string(
                 "Renderer everyone opening this view gets: TABLE (default), KANBAN, CALENDAR or GALLERY."));
         properties.put("typeConfig", Schemas.freeObject(
@@ -100,6 +102,9 @@ public class CreateListViewTool implements AdminTool {
                     attrs.put("filters", toFilters(args.get("filter")));
                     if (args.get("visibility") instanceof String v && !v.isBlank()) {
                         attrs.put("visibility", v);
+                    }
+                    if (args.get("rowLimit") instanceof Number rl) {
+                        attrs.put("rowLimit", rl.intValue());
                     }
                     // Renderer + its config (V196) — what makes a view publishable as a
                     // board rather than a column set every user re-configures.

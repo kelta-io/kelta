@@ -154,6 +154,27 @@ class CreateListViewToolTest {
     }
 
     @Test
+    void forwardsRowLimitAndInFilter() {
+        wm.stubFor(post(urlEqualTo("/api/list-views"))
+                .willReturn(aResponse().withStatus(201).withBody("{\"data\":{\"id\":\"lv1\"}}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("create_listview", Map.of(
+                        "collectionName", "projects",
+                        "name", "Active statuses",
+                        "displayedFields", "name",
+                        "rowLimit", 100,
+                        "filter", Map.of("status", Map.of("IN", "a,b"))), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/list-views"))
+                .withRequestBody(matchingJsonPath("$.data.attributes.rowLimit", equalTo("100")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].field", equalTo("status")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].operator", equalTo("IN")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].value", equalTo("a,b"))));
+    }
+
+    @Test
     void failsWhenCollectionUnknown() {
         wm.stubFor(get(urlEqualTo("/api/collections?filter[name][eq]=nope"))
                 .willReturn(aResponse().withStatus(200).withBody("{\"data\":[]}")));
