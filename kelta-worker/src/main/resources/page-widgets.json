@@ -1,0 +1,1143 @@
+{
+  "widgets": [
+    {
+      "type": "appointment-scheduler",
+      "label": "Appointment Scheduler",
+      "category": "data",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "providerId": "",
+        "visitType": "",
+        "durationMinutes": "30"
+      },
+      "propSchema": [
+        {
+          "key": "providerId",
+          "label": "Fixed provider id (optional)",
+          "kind": "text",
+          "bindable": false
+        },
+        {
+          "key": "visitType",
+          "label": "Visit type",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "durationMinutes",
+          "label": "Duration (minutes)",
+          "kind": "select",
+          "bindable": false,
+          "options": [
+            {
+              "label": "15",
+              "value": "15"
+            },
+            {
+              "label": "30",
+              "value": "30"
+            },
+            {
+              "label": "45",
+              "value": "45"
+            },
+            {
+              "label": "60",
+              "value": "60"
+            }
+          ]
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "button",
+      "label": "Button",
+      "category": "content",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "label": "Button"
+      },
+      "propSchema": [
+        {
+          "key": "label",
+          "label": "Label",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "variant",
+          "label": "Variant",
+          "kind": "select",
+          "bindable": false,
+          "options": [
+            {
+              "label": "Primary",
+              "value": "primary"
+            },
+            {
+              "label": "Secondary",
+              "value": "secondary"
+            },
+            {
+              "label": "Danger",
+              "value": "danger"
+            }
+          ]
+        },
+        {
+          "key": "events",
+          "label": "Events",
+          "kind": "event-list",
+          "bindable": false
+        }
+      ],
+      "source": "builtin",
+      "supportedEvents": [
+        "onClick"
+      ]
+    },
+    {
+      "type": "card",
+      "label": "Card",
+      "category": "layout",
+      "acceptsChildren": true,
+      "defaultProps": {},
+      "propSchema": [
+        {
+          "key": "span",
+          "label": "Column span",
+          "kind": "span",
+          "bindable": false
+        },
+        {
+          "key": "children",
+          "label": "Children",
+          "kind": "children",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "chart",
+      "label": "Chart",
+      "category": "chart",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "chartType": "bar",
+        "xKey": "",
+        "series": [],
+        "height": 300,
+        "showLegend": true,
+        "showGrid": true
+      },
+      "propSchema": [
+        {
+          "key": "dataView",
+          "label": "Data source",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "chartType",
+          "label": "Chart type",
+          "kind": "select",
+          "bindable": false,
+          "options": [
+            {
+              "value": "bar",
+              "label": "Bar"
+            },
+            {
+              "value": "line",
+              "label": "Line"
+            },
+            {
+              "value": "pie",
+              "label": "Pie"
+            }
+          ]
+        },
+        {
+          "key": "xKey",
+          "label": "X axis key",
+          "kind": "text",
+          "bindable": false
+        },
+        {
+          "key": "series",
+          "label": "Series",
+          "kind": "expression",
+          "bindable": false
+        },
+        {
+          "key": "height",
+          "label": "Height (px)",
+          "kind": "number",
+          "bindable": false
+        },
+        {
+          "key": "showLegend",
+          "label": "Show legend",
+          "kind": "boolean",
+          "bindable": false
+        },
+        {
+          "key": "showGrid",
+          "label": "Show grid",
+          "kind": "boolean",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "chat-panel",
+      "label": "Chat Panel",
+      "category": "data",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "welcomeText": "",
+        "subject": "",
+        "queueId": ""
+      },
+      "propSchema": [
+        {
+          "key": "welcomeText",
+          "label": "Welcome text",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "subject",
+          "label": "Conversation subject",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "queueId",
+          "label": "Queue id",
+          "kind": "text",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "checkbox",
+      "label": "Checkbox",
+      "category": "input",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "collection": "",
+        "field": "",
+        "required": false
+      },
+      "propSchema": [
+        {
+          "key": "collection",
+          "label": "Collection",
+          "kind": "collection-picker",
+          "bindable": false
+        },
+        {
+          "key": "field",
+          "label": "Field",
+          "kind": "field-picker",
+          "bindable": false
+        },
+        {
+          "key": "defaultValue",
+          "label": "Default value",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "required",
+          "label": "Required",
+          "kind": "boolean",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "column",
+      "label": "Column",
+      "category": "layout",
+      "acceptsChildren": true,
+      "defaultProps": {},
+      "propSchema": [
+        {
+          "key": "span",
+          "label": "Width",
+          "kind": "span",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "container",
+      "label": "Container",
+      "category": "layout",
+      "acceptsChildren": true,
+      "defaultProps": {},
+      "propSchema": [
+        {
+          "key": "span",
+          "label": "Column span",
+          "kind": "span",
+          "bindable": false
+        },
+        {
+          "key": "children",
+          "label": "Children",
+          "kind": "children",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "datepicker",
+      "label": "Date picker",
+      "category": "input",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "collection": "",
+        "field": "",
+        "required": false
+      },
+      "propSchema": [
+        {
+          "key": "collection",
+          "label": "Collection",
+          "kind": "collection-picker",
+          "bindable": false
+        },
+        {
+          "key": "field",
+          "label": "Field",
+          "kind": "field-picker",
+          "bindable": false
+        },
+        {
+          "key": "defaultValue",
+          "label": "Default value",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "required",
+          "label": "Required",
+          "kind": "boolean",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "divider",
+      "label": "Divider",
+      "category": "layout",
+      "acceptsChildren": false,
+      "defaultProps": {},
+      "propSchema": [],
+      "source": "builtin"
+    },
+    {
+      "type": "dropdown",
+      "label": "Dropdown",
+      "category": "input",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "collection": "",
+        "field": "",
+        "required": false
+      },
+      "propSchema": [
+        {
+          "key": "collection",
+          "label": "Collection",
+          "kind": "collection-picker",
+          "bindable": false
+        },
+        {
+          "key": "field",
+          "label": "Field",
+          "kind": "field-picker",
+          "bindable": false
+        },
+        {
+          "key": "defaultValue",
+          "label": "Default value",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "required",
+          "label": "Required",
+          "kind": "boolean",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "field-value",
+      "label": "Field value",
+      "category": "data",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "source": "",
+        "fieldType": "string"
+      },
+      "propSchema": [
+        {
+          "key": "source",
+          "label": "Value",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "fieldType",
+          "label": "Render as",
+          "kind": "select",
+          "bindable": false,
+          "options": [
+            {
+              "label": "Text",
+              "value": "string"
+            },
+            {
+              "label": "Number",
+              "value": "number"
+            },
+            {
+              "label": "Boolean",
+              "value": "boolean"
+            },
+            {
+              "label": "Date",
+              "value": "date"
+            },
+            {
+              "label": "Date & time",
+              "value": "datetime"
+            },
+            {
+              "label": "Currency",
+              "value": "currency"
+            },
+            {
+              "label": "Percent",
+              "value": "percent"
+            },
+            {
+              "label": "Email",
+              "value": "email"
+            },
+            {
+              "label": "Phone",
+              "value": "phone"
+            },
+            {
+              "label": "URL",
+              "value": "url"
+            }
+          ]
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "form",
+      "label": "Form",
+      "category": "input",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "dataView": {
+          "collection": ""
+        },
+        "mode": "create",
+        "readOnly": false
+      },
+      "propSchema": [
+        {
+          "key": "dataView.collection",
+          "label": "Collection",
+          "kind": "collection-picker",
+          "bindable": false
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "kind": "select",
+          "bindable": false,
+          "options": [
+            {
+              "value": "create",
+              "label": "Create"
+            },
+            {
+              "value": "edit",
+              "label": "Edit"
+            }
+          ]
+        },
+        {
+          "key": "recordId",
+          "label": "Record id",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "readOnly",
+          "label": "Read-only",
+          "kind": "boolean",
+          "bindable": false
+        },
+        {
+          "key": "events",
+          "label": "Events",
+          "kind": "event-list",
+          "bindable": false
+        }
+      ],
+      "source": "builtin",
+      "supportedEvents": [
+        "onSubmit"
+      ]
+    },
+    {
+      "type": "grid",
+      "label": "Grid",
+      "category": "layout",
+      "acceptsChildren": true,
+      "defaultProps": {},
+      "propSchema": [],
+      "source": "builtin"
+    },
+    {
+      "type": "heading",
+      "label": "Heading",
+      "category": "content",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "text": "Heading",
+        "level": "h2"
+      },
+      "propSchema": [
+        {
+          "key": "text",
+          "label": "Text",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "level",
+          "label": "Level",
+          "kind": "select",
+          "bindable": false,
+          "options": [
+            {
+              "label": "H1",
+              "value": "h1"
+            },
+            {
+              "label": "H2",
+              "value": "h2"
+            },
+            {
+              "label": "H3",
+              "value": "h3"
+            },
+            {
+              "label": "H4",
+              "value": "h4"
+            }
+          ]
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "icon",
+      "label": "Icon",
+      "category": "content",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "name": "star",
+        "size": 20,
+        "color": ""
+      },
+      "propSchema": [
+        {
+          "key": "name",
+          "label": "Icon name",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "size",
+          "label": "Size (px)",
+          "kind": "number",
+          "bindable": false
+        },
+        {
+          "key": "color",
+          "label": "Color",
+          "kind": "color",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "image",
+      "label": "Image",
+      "category": "content",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "src": "",
+        "alt": "Image",
+        "objectFit": "cover"
+      },
+      "propSchema": [
+        {
+          "key": "src",
+          "label": "Source URL",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "alt",
+          "label": "Alt text",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "objectFit",
+          "label": "Fit",
+          "kind": "select",
+          "bindable": false,
+          "options": [
+            {
+              "value": "cover",
+              "label": "cover"
+            },
+            {
+              "value": "contain",
+              "label": "contain"
+            },
+            {
+              "value": "fill",
+              "label": "fill"
+            },
+            {
+              "value": "none",
+              "label": "none"
+            }
+          ]
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "link",
+      "label": "Link",
+      "category": "content",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "label": "Link",
+        "to": "",
+        "href": "",
+        "newTab": false
+      },
+      "propSchema": [
+        {
+          "key": "label",
+          "label": "Label",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "to",
+          "label": "Internal route",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "href",
+          "label": "External URL",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "newTab",
+          "label": "Open in new tab",
+          "kind": "boolean",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "list",
+      "label": "List",
+      "category": "data",
+      "acceptsChildren": true,
+      "defaultProps": {
+        "source": {
+          "$bind": "",
+          "mode": "path"
+        }
+      },
+      "propSchema": [
+        {
+          "key": "source",
+          "label": "Items (array)",
+          "kind": "expression",
+          "bindable": true
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "lookup",
+      "label": "Lookup",
+      "category": "input",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "collection": "",
+        "field": "",
+        "required": false
+      },
+      "propSchema": [
+        {
+          "key": "collection",
+          "label": "Collection",
+          "kind": "collection-picker",
+          "bindable": false
+        },
+        {
+          "key": "field",
+          "label": "Field",
+          "kind": "field-picker",
+          "bindable": false
+        },
+        {
+          "key": "defaultValue",
+          "label": "Default value",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "required",
+          "label": "Required",
+          "kind": "boolean",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "metric",
+      "label": "Metric",
+      "category": "data",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "dataView": {},
+        "label": "",
+        "format": "number"
+      },
+      "propSchema": [
+        {
+          "key": "dataView",
+          "label": "Data source",
+          "kind": "collection-picker",
+          "bindable": false
+        },
+        {
+          "key": "label",
+          "label": "Label",
+          "kind": "text",
+          "bindable": true
+        },
+        {
+          "key": "format",
+          "label": "Number format",
+          "kind": "select",
+          "bindable": false,
+          "options": [
+            {
+              "label": "1,234",
+              "value": "number"
+            },
+            {
+              "label": "1.2K",
+              "value": "compact"
+            }
+          ]
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "multi-picklist",
+      "label": "Multi-picklist",
+      "category": "input",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "collection": "",
+        "field": "",
+        "required": false
+      },
+      "propSchema": [
+        {
+          "key": "collection",
+          "label": "Collection",
+          "kind": "collection-picker",
+          "bindable": false
+        },
+        {
+          "key": "field",
+          "label": "Field",
+          "kind": "field-picker",
+          "bindable": false
+        },
+        {
+          "key": "defaultValue",
+          "label": "Default value",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "required",
+          "label": "Required",
+          "kind": "boolean",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "nav",
+      "label": "Nav",
+      "category": "navigation",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "orientation": "horizontal",
+        "items": []
+      },
+      "propSchema": [
+        {
+          "key": "orientation",
+          "label": "Orientation",
+          "kind": "select",
+          "bindable": false,
+          "options": [
+            {
+              "value": "horizontal",
+              "label": "Horizontal"
+            },
+            {
+              "value": "vertical",
+              "label": "Vertical"
+            }
+          ]
+        },
+        {
+          "key": "items",
+          "label": "Menu items",
+          "kind": "expression",
+          "bindable": true
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "number-input",
+      "label": "Number input",
+      "category": "input",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "collection": "",
+        "field": "",
+        "required": false
+      },
+      "propSchema": [
+        {
+          "key": "collection",
+          "label": "Collection",
+          "kind": "collection-picker",
+          "bindable": false
+        },
+        {
+          "key": "field",
+          "label": "Field",
+          "kind": "field-picker",
+          "bindable": false
+        },
+        {
+          "key": "defaultValue",
+          "label": "Default value",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "required",
+          "label": "Required",
+          "kind": "boolean",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "repeater",
+      "label": "Repeater",
+      "category": "data",
+      "acceptsChildren": true,
+      "defaultProps": {
+        "source": {
+          "$bind": "",
+          "mode": "path"
+        }
+      },
+      "propSchema": [
+        {
+          "key": "source",
+          "label": "Items (array)",
+          "kind": "expression",
+          "bindable": true
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "rich-text",
+      "label": "Rich text",
+      "category": "input",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "collection": "",
+        "field": "",
+        "required": false
+      },
+      "propSchema": [
+        {
+          "key": "collection",
+          "label": "Collection",
+          "kind": "collection-picker",
+          "bindable": false
+        },
+        {
+          "key": "field",
+          "label": "Field",
+          "kind": "field-picker",
+          "bindable": false
+        },
+        {
+          "key": "defaultValue",
+          "label": "Default value",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "required",
+          "label": "Required",
+          "kind": "boolean",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "row",
+      "label": "Row",
+      "category": "layout",
+      "acceptsChildren": true,
+      "defaultProps": {},
+      "propSchema": [],
+      "source": "builtin"
+    },
+    {
+      "type": "tab-panel",
+      "label": "Tab panel",
+      "category": "layout",
+      "acceptsChildren": true,
+      "defaultProps": {
+        "value": ""
+      },
+      "propSchema": [
+        {
+          "key": "value",
+          "label": "Tab value",
+          "kind": "text",
+          "bindable": false
+        }
+      ],
+      "source": "builtin",
+      "paletteHidden": true
+    },
+    {
+      "type": "table",
+      "label": "Table",
+      "category": "data",
+      "acceptsChildren": false,
+      "defaultProps": {},
+      "propSchema": [
+        {
+          "key": "dataView",
+          "label": "Data source",
+          "kind": "collection-picker",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "tabs",
+      "label": "Tabs",
+      "category": "navigation",
+      "acceptsChildren": true,
+      "defaultProps": {
+        "tabs": [
+          {
+            "value": "tab-1",
+            "label": "Tab one"
+          },
+          {
+            "value": "tab-2",
+            "label": "Tab two"
+          }
+        ],
+        "defaultTab": "tab-1"
+      },
+      "propSchema": [
+        {
+          "key": "tabs",
+          "label": "Tabs",
+          "kind": "expression",
+          "bindable": false
+        },
+        {
+          "key": "defaultTab",
+          "label": "Default tab",
+          "kind": "text",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "text",
+      "label": "Text",
+      "category": "content",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "content": ""
+      },
+      "propSchema": [
+        {
+          "key": "content",
+          "label": "Content",
+          "kind": "textarea",
+          "bindable": true
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "text-input",
+      "label": "Text input",
+      "category": "input",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "collection": "",
+        "field": "",
+        "required": false
+      },
+      "propSchema": [
+        {
+          "key": "collection",
+          "label": "Collection",
+          "kind": "collection-picker",
+          "bindable": false
+        },
+        {
+          "key": "field",
+          "label": "Field",
+          "kind": "field-picker",
+          "bindable": false
+        },
+        {
+          "key": "defaultValue",
+          "label": "Default value",
+          "kind": "expression",
+          "bindable": true
+        },
+        {
+          "key": "required",
+          "label": "Required",
+          "kind": "boolean",
+          "bindable": false
+        }
+      ],
+      "source": "builtin"
+    },
+    {
+      "type": "video-visit",
+      "label": "Video Visit",
+      "category": "data",
+      "acceptsChildren": false,
+      "defaultProps": {
+        "showUpcomingList": true,
+        "joinGraceMinutes": "5",
+        "consentTextOverride": ""
+      },
+      "propSchema": [
+        {
+          "key": "showUpcomingList",
+          "label": "Show later visits",
+          "kind": "boolean",
+          "bindable": false
+        },
+        {
+          "key": "joinGraceMinutes",
+          "label": "Join grace (minutes)",
+          "kind": "select",
+          "bindable": false,
+          "options": [
+            {
+              "label": "0",
+              "value": "0"
+            },
+            {
+              "label": "5",
+              "value": "5"
+            },
+            {
+              "label": "10",
+              "value": "10"
+            },
+            {
+              "label": "15",
+              "value": "15"
+            }
+          ]
+        },
+        {
+          "key": "consentTextOverride",
+          "label": "Recording consent text (enables consent screen)",
+          "kind": "textarea",
+          "bindable": true
+        }
+      ],
+      "source": "builtin"
+    }
+  ]
+}

@@ -776,6 +776,56 @@ omitted or `false` reports it as `stale`, mirroring `apply_menu`.
 
 **Offline replica path (end-user only).** When `OfflineProvider` is mounted — it wraps the `EndUserShell` subtree — the shared data hooks route through a tenant-scoped IndexedDB replica: online reads write through to the store and offline reads serve it (`useCollectionRecords`/`useRecord`/`usePageDataSources`), and offline writes queue to an outbox (`useRecordMutation` → `engine.queue`) that flushes on reconnect (`SyncEngine.sync`). Admin pages render outside the provider (`useOffline()` → `undefined`), so their reads/writes stay online-only and unchanged. See `conventions.md` → offline hooks.
 
+### Page widget catalogue, config schema and validation — `ui-pages.config` has a contract
+
+`ui-pages.config` is a free JSON column. Its vocabulary — the widget `type` set, the prop names
+each widget accepts, the binding grammar, the data-source caps — lived only in kelta-ui source, so
+every non-browser author (API, MCP, CLI, agent) guessed at it, and nothing checked a page on write:
+an unknown widget type or a binding to a data source nobody declared rendered as nothing.
+
+**The catalogue is generated, not hand-maintained.** `kelta-ui/app/scripts/generate-page-widgets.ts`
+walks the builder's widget registry and emits two artifacts into `kelta-worker/src/main/resources/`:
+`page-widgets.json` (each descriptor minus its `icon`: `type, label, category, acceptsChildren,
+defaultProps, propSchema[{key,label,kind,bindable,options}], supportedEvents, source:"builtin"`) and
+`schema/ui-page-config.schema.json` (the JSON Schema for a config document). `registry.freshness.test.ts`
+pins both to a fresh generation, so a widget added or renamed without `npm run gen:page-widgets`
+fails the frontend suite rather than drifting. Both are read once at startup by `PageWidgetCatalog`
+and served verbatim:
+
+- `GET /api/pages/widgets` — the catalogue. Platform metadata, no tenant data, so no permission
+  beyond the route's `API_ACCESS`.
+- `GET /api/pages/config-schema` — the JSON Schema.
+- `POST /api/ui-pages/validate` — body is the config (or `{"config": {…}}`); response is
+  `{valid, errors:[{path, message, severity}]}` with `path` a JSON Pointer into the config.
+
+Both paths are already gateway static routes (`/api/pages/**`, `/api/ui-pages/**`); the literal
+patterns out-rank `DynamicCollectionRouter`'s all-variable mappings, which
+`PageAuthoringEndpointsTest` pins with a router stand-in.
+
+**One validator, two call sites.** `UiPageConfigValidator` is shared by the dry-run endpoint and
+`UiPageConfigHook`, a `BeforeSaveHook` on `ui-pages` ordered at 50 — ahead of `UIPageSlugHook` and
+`UIPageConfigEventPublisher` (200), so a config about to be rejected neither consumes a slug nor
+broadcasts a change. Problems carry a severity, and only `error` blocks the save (400):
+
+| Check | Severity |
+|---|---|
+| Widget `type` missing or absent from the catalogue | error |
+| `components`/`children`/`dataSources` not an array; tree deeper than 32 | error |
+| More than `MAX_PAGE_DATA_SOURCES` (12) sources | error |
+| Source without `name`/`collection`, duplicate name, unknown `mode` | error |
+| Source `limit` outside 1..`Pagination.MAX_HTTP_PAGE_SIZE` (200) | error |
+| A filter operator other than `EQ` (the only one `buildListUrl` emits) | error |
+| A `$bind` or `{{…}}` token naming an undeclared data source | warning |
+
+The warning tier is load-bearing: a page is authored incrementally, and a builder that cannot save
+a binding written before its data source is worse than one that renders it as null. The hook
+validates the *effective* record on update (previous merged with the delta), so a publish flip
+cannot slip an already-broken config past it.
+
+**Known limitation.** Plugin and module-UI-bundle page components register in the browser
+(`componentRegistry.registerPageComponent`) and have no server-side declaration, so a page using
+one is rejected as an unknown type. See `concerns.md`.
+
 ### List-view renderer contract — shared row publishes `viewType`/`typeConfig`
 
 A list view's **renderer** is part of the shared metadata, not only a per-user toggle.

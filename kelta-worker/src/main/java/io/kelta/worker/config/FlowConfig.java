@@ -390,6 +390,17 @@ public class FlowConfig {
     }
 
     @Bean
+    public io.kelta.worker.service.UiPageConfigHook uiPageConfigHook(
+            BeforeSaveHookRegistry hookRegistry,
+            io.kelta.worker.service.UiPageConfigValidator uiPageConfigValidator,
+            ObjectMapper objectMapper) {
+        io.kelta.worker.service.UiPageConfigHook hook =
+                new io.kelta.worker.service.UiPageConfigHook(uiPageConfigValidator, objectMapper);
+        hookRegistry.register(hook);
+        return hook;
+    }
+
+    @Bean
     public io.kelta.worker.service.DashboardComponentConfigHook dashboardComponentConfigHook(
             BeforeSaveHookRegistry hookRegistry,
             io.kelta.worker.service.DashboardComponentValidator dashboardComponentValidator) {
