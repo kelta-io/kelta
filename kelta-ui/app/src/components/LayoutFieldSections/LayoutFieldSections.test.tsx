@@ -1,3 +1,4 @@
+import type React from 'react'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { LayoutFieldSections } from './LayoutFieldSections'
@@ -9,9 +10,33 @@ vi.mock('@/context/I18nContext', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }))
 // FieldSection comes from @kelta/components whose workspace carries its own
-// React copy in this repo layout — stub it to keep the render single-React.
+// React copy in this repo layout — stub it to keep the render single-React,
+// while still calling through to renderLabel/renderField so this test can
+// inspect what LayoutFieldSections hands it per field.
 vi.mock('@/components/detail', () => ({
-  FieldSection: ({ title }: { title: string }) => <section>{title}</section>,
+  FieldSection: ({
+    title,
+    fields,
+    record,
+    renderField,
+    renderLabel,
+  }: {
+    title: string
+    fields: FieldDefinition[]
+    record: Record<string, unknown>
+    renderField: (ctx: { field: FieldDefinition; value: unknown }) => React.ReactNode
+    renderLabel?: (field: FieldDefinition) => React.ReactNode
+  }) => (
+    <section>
+      {title}
+      {fields.map((field) => (
+        <div key={field.name}>
+          <span>{renderLabel ? renderLabel(field) : field.displayName || field.name}</span>
+          {renderField({ field, value: record[field.name] })}
+        </div>
+      ))}
+    </section>
+  ),
 }))
 vi.mock('@/components/FieldRenderer', () => ({
   FieldRenderer: ({ fieldName }: { fieldName: string }) => <span>value:{fieldName}</span>,
@@ -140,5 +165,57 @@ describe('LayoutFieldSections anchors', () => {
     const anchor = document.getElementById('record-section-s1')
     expect(anchor).not.toBeNull()
     expect(screen.getByText('Overview')).toBeInTheDocument()
+  })
+})
+
+describe('LayoutFieldSections help text', () => {
+  const schemaFieldsWithDescription: FieldDefinition[] = [
+    {
+      id: 'f1',
+      name: 'title',
+      displayName: 'Title',
+      type: 'string',
+      description: '0 = auto-merge, 1 = 24 h veto',
+    } as FieldDefinition,
+    { id: 'f2', name: 'summary', displayName: 'Summary', type: 'string' } as FieldDefinition,
+  ]
+
+  it('shows a help icon with a tooltip trigger for a field with a description', () => {
+    render(
+      <LayoutFieldSections
+        sections={[section({ fields: [placement({})] })]}
+        schemaFields={schemaFieldsWithDescription}
+        record={{ id: 'r1', title: 'Hello' }}
+      />
+    )
+    expect(screen.getByTestId('layout-field-help-icon-title')).toBeInTheDocument()
+  })
+
+  it('renders no help icon for a field without a description', () => {
+    render(
+      <LayoutFieldSections
+        sections={[section({ fields: [placement({ fieldId: 'f2', fieldName: 'summary' })] })]}
+        schemaFields={schemaFieldsWithDescription}
+        record={{ id: 'r1', summary: 'Hello' }}
+      />
+    )
+    expect(screen.queryByTestId('layout-field-help-icon-summary')).toBeNull()
+  })
+
+  it('prefers the layout helpTextOverride over the field description for the tooltip content', () => {
+    render(
+      <LayoutFieldSections
+        sections={[
+          section({
+            fields: [
+              placement({ fieldId: 'f2', fieldName: 'summary', helpTextOverride: 'Override text' }),
+            ],
+          }),
+        ]}
+        schemaFields={schemaFieldsWithDescription}
+        record={{ id: 'r1', summary: 'Hello' }}
+      />
+    )
+    expect(screen.getByTestId('layout-field-help-icon-summary')).toBeInTheDocument()
   })
 })

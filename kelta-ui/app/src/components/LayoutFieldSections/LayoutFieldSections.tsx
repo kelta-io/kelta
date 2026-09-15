@@ -10,10 +10,12 @@
  */
 
 import React, { useMemo } from 'react'
+import { HelpCircle } from 'lucide-react'
 import { FieldSection } from '@/components/detail'
 import type { FieldSectionRenderContext } from '@/components/detail'
 import { FieldRenderer } from '@/components/FieldRenderer'
 import { InlineFieldValue } from '@/components/record/InlineFieldValue'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { sectionAnchorId } from './sectionNavItems'
 import { useI18n } from '@/context/I18nContext'
 import type { LayoutSectionDto, LayoutFieldPlacementDto } from '@/hooks/usePageLayout'
@@ -105,6 +107,8 @@ function mapPlacementsToFields(
         ...schemaField,
         // Apply label override from layout if set
         displayName: placement.labelOverride || schemaField.displayName || schemaField.name,
+        // Layout help-text override takes precedence over the field's authored description
+        description: placement.helpTextOverride || schemaField.description,
       }
     })
     .filter((f): f is FieldDefinition => f !== null)
@@ -122,6 +126,37 @@ export function ChangedBadge(): React.ReactElement {
       data-testid="version-changed-badge"
     >
       {t('history.changedBadge')}
+    </span>
+  )
+}
+
+/**
+ * Renders a field's label with a help-icon tooltip trigger beside it when the
+ * field carries a description (or layout helpTextOverride). Renders nothing
+ * extra when both are empty.
+ */
+function FieldLabel({ field }: { field: FieldDefinition }): React.ReactElement {
+  const label = field.displayName || field.name
+  if (!field.description) return <>{label}</>
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {label}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground"
+              aria-label={`Help for ${label}`}
+              data-testid={`layout-field-help-icon-${field.name}`}
+            >
+              <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{field.description}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </span>
   )
 }
@@ -198,6 +233,7 @@ export function LayoutFieldSections({
               defaultCollapsed={section.collapsed}
               columns={(section.columns as 1 | 2 | 3 | 4) || 2}
               persistKey={persistKeyPrefix ? `${persistKeyPrefix}.${section.id}` : undefined}
+              renderLabel={(field) => <FieldLabel field={field} />}
               renderField={({
                 field,
                 value,
