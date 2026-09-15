@@ -56,6 +56,11 @@ export interface FieldDefinition {
   fieldTypeConfig?: string | Record<string, unknown>
   /** Picklist enum values (populated at runtime by form pages) */
   enumValues?: string[]
+  /**
+   * Picklist values with their authored label/color (populated at runtime by form pages,
+   * alongside `enumValues`) — `enumValues[i]` is `enumOptions[i].value`.
+   */
+  enumOptions?: Array<{ value: string; label: string; color?: string }>
   /** Lookup options for reference fields (populated at runtime by form pages) */
   lookupOptions?: Array<{ id: string; label: string }>
 }

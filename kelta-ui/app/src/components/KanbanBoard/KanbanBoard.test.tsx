@@ -38,6 +38,20 @@ describe('resolveLanes', () => {
     const lanes = resolveLanes(records.slice(0, 3), 'status', ['open'])
     expect(lanes.some((l) => l.value === null)).toBe(false)
   })
+
+  it('uses the authored label/color for the header but keeps grouping on the stored value', () => {
+    const displayMap = new Map([['open', { label: 'Open', color: '#3B82F6' }]])
+    const lanes = resolveLanes(records, 'status', ['open', 'won', 'lost'], displayMap)
+    const openLane = lanes.find((l) => l.id === 'open')
+    expect(openLane?.label).toBe('Open')
+    expect(openLane?.color).toBe('#3B82F6')
+    expect(openLane?.value).toBe('open')
+    expect(openLane?.records.map((r) => r.id)).toEqual(['r1'])
+    // 'won' has no display-map entry — falls back to the raw value with no color.
+    const wonLane = lanes.find((l) => l.id === 'won')
+    expect(wonLane?.label).toBe('won')
+    expect(wonLane?.color).toBeUndefined()
+  })
 })
 
 function renderBoard(props: Partial<React.ComponentProps<typeof KanbanBoard>> = {}) {
@@ -88,5 +102,23 @@ describe('KanbanBoard', () => {
   it('falls back to the record id when the title field is empty', () => {
     renderBoard({ records: [{ id: 'r9', name: '', status: 'open' }] })
     expect(within(screen.getByTestId('kanban-card-r9')).getByText('r9')).toBeInTheDocument()
+  })
+
+  it('shows the authored label and a color dot in the lane header when a display map is given', () => {
+    renderBoard({
+      laneDisplayMap: new Map([['open', { label: 'In progress', color: '#F59E0B' }]]),
+    })
+    const openLane = screen.getByTestId('kanban-lane-open')
+    expect(within(openLane).getByText('In progress')).toBeInTheDocument()
+    expect(within(openLane).queryByText('open')).toBeNull()
+    const dot = openLane.querySelector('span[style*="background-color"]')
+    expect(dot).not.toBeNull()
+  })
+
+  it('renders the raw value with no dot when the lane has no display map entry', () => {
+    renderBoard()
+    const wonLane = screen.getByTestId('kanban-lane-won')
+    expect(within(wonLane).getByText('won')).toBeInTheDocument()
+    expect(wonLane.querySelector('span[style*="background-color"]')).toBeNull()
   })
 })

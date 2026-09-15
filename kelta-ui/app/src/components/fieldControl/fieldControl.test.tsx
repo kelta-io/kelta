@@ -167,6 +167,18 @@ describe('View (parity via FieldRenderer)', () => {
     const link = screen.getByText('Acme').closest('a')
     expect(link?.getAttribute('href')).toBe('/t/app/o/accounts/rec-1')
   })
+
+  it('passes picklistDisplayMap through to FieldRenderer for the picklist label/color', () => {
+    renderView(
+      'picklist',
+      'in_progress',
+      ctx({
+        picklistDisplayMap: new Map([['in_progress', { label: 'In progress', color: '#F59E0B' }]]),
+      })
+    )
+    expect(screen.getByText('In progress')).toBeDefined()
+    expect(screen.queryByText('in_progress')).toBeNull()
+  })
 })
 
 describe('Edit', () => {
@@ -210,6 +222,27 @@ describe('Edit', () => {
     )
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Green' } })
     expect(onChange).toHaveBeenCalledWith('Green')
+  })
+
+  it('PicklistEdit shows the authored label but still fires the raw stored value', () => {
+    const onChange = vi.fn()
+    render(
+      React.createElement(getFieldControl('picklist').Edit, {
+        type: 'picklist',
+        value: '',
+        ctx: ctx({
+          enumValues: ['in_progress', 'done'],
+          picklistDisplayMap: new Map([['in_progress', { label: 'In progress' }]]),
+        }),
+        onChange,
+      })
+    )
+    const select = screen.getByRole('combobox') as HTMLSelectElement
+    expect(screen.getByText('In progress')).toBeDefined()
+    // No display-map entry for 'done' — falls back to the raw value.
+    expect(screen.getByText('done')).toBeDefined()
+    fireEvent.change(select, { target: { value: 'in_progress' } })
+    expect(onChange).toHaveBeenCalledWith('in_progress')
   })
 
   it('respects readOnly by disabling the input', () => {

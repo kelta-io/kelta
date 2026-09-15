@@ -69,6 +69,7 @@ interface PicklistValueDto {
   isDefault: boolean
   isActive: boolean
   sortOrder: number
+  color?: string
 }
 
 /** Record type picklist override from the API */
@@ -145,7 +146,7 @@ interface FormFieldProps {
 /**
  * Renders the appropriate form control for a field type.
  */
-function FormField({
+export function FormField({
   field,
   value,
   onChange,
@@ -247,7 +248,7 @@ function FormField({
           <option value="">Select...</option>
           {(field.enumValues || []).map((val: string) => (
             <option key={val} value={val}>
-              {val}
+              {field.enumOptions?.find((o) => o.value === val)?.label || val}
             </option>
           ))}
         </select>
@@ -797,7 +798,7 @@ export function ObjectFormPage(): React.ReactElement {
   const { data: picklistValuesMap } = useQuery({
     queryKey: ['picklist-values-for-form', collectionName, picklistFields.map((f) => f.id)],
     queryFn: async () => {
-      const map: Record<string, string[]> = {}
+      const map: Record<string, PicklistValueDto[]> = {}
       await Promise.all(
         picklistFields.map(async (field) => {
           try {
@@ -810,7 +811,6 @@ export function ObjectFormPage(): React.ReactElement {
             map[field.id] = values
               .filter((v) => v.isActive)
               .sort((a, b) => a.sortOrder - b.sortOrder)
-              .map((v) => v.value)
           } catch {
             map[field.id] = []
           }
@@ -857,14 +857,18 @@ export function ObjectFormPage(): React.ReactElement {
     return permissionFilteredFields.map((f) => {
       let updated = f
       if ((f.type === 'picklist' || f.type === 'multi_picklist') && picklistValuesMap?.[f.id]) {
-        let values = picklistValuesMap[f.id]
+        let entries = picklistValuesMap[f.id]
         // Apply record type picklist restrictions if available
         const rtOverride = recordTypePicklistOverrides?.[f.id]
         if (rtOverride) {
           const allowedSet = new Set(rtOverride.values)
-          values = values.filter((v) => allowedSet.has(v))
+          entries = entries.filter((v) => allowedSet.has(v.value))
         }
-        updated = { ...updated, enumValues: values }
+        updated = {
+          ...updated,
+          enumValues: entries.map((v) => v.value),
+          enumOptions: entries.map((v) => ({ value: v.value, label: v.label, color: v.color })),
+        }
       }
       if (REFERENCE_TYPES.has(f.type) && lookupOptionsMap?.[f.id]) {
         updated = { ...updated, lookupOptions: lookupOptionsMap[f.id] }

@@ -74,7 +74,7 @@ import { ColumnChooser } from '@/components/ColumnChooser/ColumnChooser'
 import { KanbanBoard } from '@/components/KanbanBoard'
 import { CalendarMonthView, currentMonthKey, monthRange } from '@/components/CalendarMonthView'
 import { GalleryGrid } from '@/components/GalleryGrid'
-import { usePicklistOptions } from '@/hooks/usePicklistOptions'
+import { usePicklistOptions, usePicklistDisplayMap } from '@/hooks/usePicklistOptions'
 import { viewSorts, type SavedViewDensity, type SavedViewType } from '@/hooks/useSavedViews'
 import { ListShell } from '@/components/record/ListShell'
 import { ObjectDataTable } from '@/components/ObjectDataTable/ObjectDataTable'
@@ -261,6 +261,10 @@ export function ObjectListPage(): React.ReactElement {
   }, [typeConfig, accessibleFields, visibleFields, titleField])
   // Lanes come from the lane field's picklist values (fetched only in kanban view).
   const { options: laneOptions } = usePicklistOptions(
+    kanbanLaneField ?? undefined,
+    viewType === 'kanban'
+  )
+  const { displayMap: laneDisplayMap } = usePicklistDisplayMap(
     kanbanLaneField ?? undefined,
     viewType === 'kanban'
   )
@@ -1098,6 +1102,7 @@ export function ObjectListPage(): React.ReactElement {
               onMoveCard={handleMoveCard}
               tenantSlug={tenantSlug}
               lookupDisplayMap={lookupDisplayMap}
+              laneDisplayMap={laneDisplayMap}
             />
           ) : (
             <div
