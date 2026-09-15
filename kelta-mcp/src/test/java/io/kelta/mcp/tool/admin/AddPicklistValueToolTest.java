@@ -121,4 +121,21 @@ class AddPicklistValueToolTest {
                 .withRequestBody(matchingJsonPath("$.data.attributes.isDefault",
                         equalTo("true"))));
     }
+
+    @Test
+    void forwardsColorWhenProvided() {
+        wm.stubFor(post(urlEqualTo("/api/picklist-values"))
+                .willReturn(aResponse().withStatus(201).withBody("{\"data\":{\"id\":\"v1\"}}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("add_picklist_value", Map.of(
+                        "picklist", PICKLIST_UUID,
+                        "value", "OPEN",
+                        "label", "Open",
+                        "color", "#22C55E"), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/picklist-values"))
+                .withRequestBody(matchingJsonPath("$.data.attributes.color", equalTo("#22C55E"))));
+    }
 }

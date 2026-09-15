@@ -174,6 +174,7 @@ class McpApplicationTest {
                 "list_unique_constraints",
                 "delete_unique_constraint",
                 "create_picklist",
+                "apply_picklist",
                 "list_picklists",
                 "get_picklist",
                 "delete_picklist",
@@ -186,6 +187,7 @@ class McpApplicationTest {
                 "update_layout",
                 "delete_layout",
                 "create_listview",
+                "apply_listview",
                 "list_listviews",
                 "update_listview",
                 "delete_listview",
@@ -277,7 +279,7 @@ class McpApplicationTest {
                 "update_picklist_value", "deactivate_picklist_value",
                 "update_validation_rule", "delete_validation_rule",
                 "delete_unique_constraint",
-                "update_listview", "delete_listview");
+                "update_listview", "delete_listview", "apply_listview", "apply_picklist");
         for (UserTool ut : userTools) {
             Tool t = ut.toSpecification().tool();
             if (!destructive.contains(t.name())) continue;

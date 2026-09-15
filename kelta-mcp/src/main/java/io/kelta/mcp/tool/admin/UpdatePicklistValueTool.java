@@ -32,6 +32,7 @@ public class UpdatePicklistValueTool implements AdminTool {
         properties.put("id", Schemas.string("Picklist value id (UUID)."));
         properties.put("value", Schemas.string("New stored value."));
         properties.put("label", Schemas.string("New display label."));
+        properties.put("color", Schemas.string("New hex color used when the value is rendered as a badge, e.g. \"#22C55E\"."));
         properties.put("sortOrder", Schemas.integer("New display order.", null, null));
         properties.put("isActive", Schemas.bool("New active flag.", true));
         properties.put("isDefault", Schemas.bool("New default flag.", false));
@@ -56,11 +57,12 @@ public class UpdatePicklistValueTool implements AdminTool {
                     Map<String, Object> attrs = new LinkedHashMap<>();
                     if (args.get("value") instanceof String s && !s.isBlank()) attrs.put("value", s);
                     if (args.get("label") instanceof String s && !s.isBlank()) attrs.put("label", s);
+                    if (args.get("color") instanceof String s && !s.isBlank()) attrs.put("color", s);
                     if (args.get("sortOrder") instanceof Number n) attrs.put("sortOrder", n.intValue());
                     if (args.get("isActive") instanceof Boolean b) attrs.put("isActive", b);
                     if (args.get("isDefault") instanceof Boolean b) attrs.put("isDefault", b);
                     if (attrs.isEmpty()) {
-                        return error("Provide at least one of value, label, sortOrder, isActive, isDefault.");
+                        return error("Provide at least one of value, label, color, sortOrder, isActive, isDefault.");
                     }
 
                     Map<String, Object> body = Map.of("data", Map.of(

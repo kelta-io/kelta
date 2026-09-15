@@ -6,6 +6,9 @@ import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
+import java.util.List;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class McpErrorMapperTest {
@@ -98,5 +101,69 @@ class McpErrorMapperTest {
         assertThat(McpErrorMapper.redact("normal text with no token"))
                 .isEqualTo("normal text with no token");
         assertThat(McpErrorMapper.redact(null)).isNull();
+    }
+
+    @Test
+    void successHasNoStructuredContent() {
+        GatewayHttpClient.Response response = new GatewayHttpClient.Response(
+                HttpStatus.OK, "{\"data\":[1,2,3]}");
+
+        CallToolResult result = McpErrorMapper.toResult(response);
+
+        assertThat(result.structuredContent()).isNull();
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void nonSuccessCarriesStructuredErrorsVerbatim() {
+        GatewayHttpClient.Response response = new GatewayHttpClient.Response(
+                HttpStatus.BAD_REQUEST,
+                "{\"errors\":[{\"status\":\"400\",\"code\":\"VALIDATION_FAILED\","
+                        + "\"title\":\"Validation Error\",\"detail\":\"name must not be blank\","
+                        + "\"source\":{\"pointer\":\"/data/attributes/name\"}}]}");
+
+        CallToolResult result = McpErrorMapper.toResult(response);
+
+        assertThat(result.isError()).isEqualTo(Boolean.TRUE);
+        Map<String, Object> structured = (Map<String, Object>) result.structuredContent();
+        assertThat(structured.get("status")).isEqualTo(400);
+        List<Object> errors = (List<Object>) structured.get("errors");
+        assertThat(errors).hasSize(1);
+        Map<String, Object> firstError = (Map<String, Object>) errors.get(0);
+        assertThat(firstError.get("code")).isEqualTo("VALIDATION_FAILED");
+        assertThat((Map<String, Object>) firstError.get("source"))
+                .containsEntry("pointer", "/data/attributes/name");
+        // Text content is unchanged alongside the new structuredContent.
+        assertThat(((TextContent) result.content().get(0)).text()).contains("VALIDATION_FAILED");
+    }
+
+    @Test
+    void nonParseableBodyYieldsEmptyStructuredErrors() {
+        GatewayHttpClient.Response response = new GatewayHttpClient.Response(
+                HttpStatus.INTERNAL_SERVER_ERROR, "boom");
+
+        CallToolResult result = McpErrorMapper.toResult(response);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> structured = (Map<String, Object>) result.structuredContent();
+        assertThat(structured.get("status")).isEqualTo(500);
+        assertThat((List<?>) structured.get("errors")).isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void structuredErrorsAreRedactedLikeTextContent() {
+        GatewayHttpClient.Response response = new GatewayHttpClient.Response(
+                HttpStatus.UNAUTHORIZED,
+                "{\"errors\":[{\"detail\":\"invalid token klt_topsecret999999999999999\"}]}");
+
+        CallToolResult result = McpErrorMapper.toResult(response);
+
+        Map<String, Object> structured = (Map<String, Object>) result.structuredContent();
+        List<Object> errors = (List<Object>) structured.get("errors");
+        Map<String, Object> firstError = (Map<String, Object>) errors.get(0);
+        assertThat((String) firstError.get("detail"))
+                .contains("klt_***REDACTED***")
+                .doesNotContain("klt_topsecret");
     }
 }

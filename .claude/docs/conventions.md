@@ -433,6 +433,45 @@ MCP admin tools expose camelCase, lowercase-friendly argument names to LLM calle
 - **Per-type payload**: picklist fields need `attributes.fieldTypeConfig = {picklistSourceType, picklistSourceId}`; reference/lookup fields need `relationships.referenceCollectionId.data.id` + `attributes.relationshipName` (and optional `relationshipType`). Build these in the same helper so the on-the-wire shape can be unit-tested with WireMock JSON path matchers.
 - **ID resolution**: accept either a UUID (`collectionId`, `referenceCollectionId`, `picklistSourceId`) or a friendly name (`collectionName`, `referenceCollection`) and resolve names via `GET /api/collections?filter[name][eq]=…`. UUIDs match `FieldBodyBuilder.UUID_PATTERN`; anything else triggers the lookup.
 
+### Idempotent create-or-update (`apply_*` tools)
+
+`apply_layout`, `apply_listview` and `apply_picklist` are create-or-update, keyed on a
+natural key rather than an id, so a setup script can re-run the same call safely instead of
+list-then-decide (two round trips, still racy between the list and the write). `apply_layout`
+wraps the worker's own whole-tree endpoint; `apply_listview`/`apply_picklist` are built on
+`AdminLookups.upsert(collection, naturalKey, attributes)` (`kelta-mcp/.../tool/admin/AdminLookups.java`)
+— every later `apply_*` tool in this family (menu, dashboard, page) should reuse that helper
+rather than reinventing the create-vs-update decision:
+
+1. `GET` filtered on `naturalKey` (each entry ANDed as `filter[key][eq]=value`). No match →
+   `POST` the merged `naturalKey` + `attributes` and report `{"action":"created","id":...}`.
+2. A match → a fresh single-resource `GET` by id (not the filtered list result), diffed
+   against `attributes` — relationship-typed fields (`LOOKUP`/`MASTER_DETAIL`) are folded in
+   from `relationships.<field>.data.id` before comparing, though in practice
+   `DynamicCollectionRouter.toJsonApiResourceObject` already echoes them into `attributes`
+   too. No differing key → `{"action":"unchanged","id":...}`. Otherwise `PATCH` only the
+   differing keys and report `{"action":"updated","id":...,"changed":[...]}`.
+
+Only keys the caller actually supplies in `attributes` are ever compared or written — an
+omitted key is left at its current value (or the collection's default, on create), so a
+partial `apply_listview` call never clobbers fields it didn't mention. A field the tool
+treats as the view/picklist's core shape (`apply_listview`'s `columns`/`filters`,
+`apply_layout`'s `sections`) is the exception: it's always written, so omitting it means "empty",
+not "leave alone" — same as `apply_layout`'s existing whole-tree-replace contract.
+
+### Structured tool errors (`McpErrorMapper`)
+
+A non-2xx gateway response maps to `CallToolResult.isError = true` with **both** the
+existing human-readable `TextContent` **and** `structuredContent = {status, errors:[...]}`
+(MCP SDK 1.1.2 `CallToolResult.builder().structuredContent(...)`) — `errors` is the
+gateway's own JSON:API error array (see "JSON:API error response shape" above), parsed and
+re-emitted verbatim so a calling agent can branch on `errors[0].code` /
+`errors[0].source.pointer` instead of parsing the prose message. A body that isn't a
+parseable JSON:API error envelope yields `errors: []` rather than failing the mapping.
+`klt_…` token redaction runs on the raw body before it's parsed into `structuredContent`, so
+both forms are scrubbed the same way. A 2xx response carries no `structuredContent` — this is
+additive, existing callers reading only `content` see no change.
+
 ## CLI output & error contract
 
 The `kelta` CLI's machine contract (output formats, JSON:API flattening, single-line
