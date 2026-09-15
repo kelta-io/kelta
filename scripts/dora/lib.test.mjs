@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifyArgoCommit, parseArgoLog, buildDeployments, attachChanges, percentile,
-  pairStateTransitions, runsFromAlertSeries, band, summarize, stableStringify, normalizePr,
+  pairStateTransitions, runsFromAlertSeries, band, summarize, stableStringify, normalizePr, filterIncidents,
 } from './lib.mjs';
 
 const T0 = 1_757_800_000; // 2025-09-13T21:46:40Z-ish; only relative order matters
@@ -167,6 +167,7 @@ test('summarize computes the four numbers for a window and segments by author', 
     { firedAt: iso(3 * 86400), ttrSec: 1200 },
     { firedAt: iso(-20 * 86400), ttrSec: 99999 },
     { firedAt: iso(4 * 86400), ttrSec: null },
+    { firedAt: iso(4 * 86400), ttrSec: 50, ongoing: true }, // provisional — not averaged
   ];
   const s = summarize({ deployments, incidents, windowDays: 7, now });
   assert.equal(s.deployments, 2);
@@ -187,6 +188,18 @@ test('summarize computes the four numbers for a window and segments by author', 
   const empty = summarize({ deployments: [], incidents: [], windowDays: 7, now });
   assert.equal(empty.changeFailureRate, null);
   assert.equal(empty.bands.changeFailureRate, null);
+});
+
+test('filterIncidents keeps platform alerts only', () => {
+  const incs = [
+    { alertName: 'EMF Gateway — SLO fast burn (14.4x)' },
+    { alertName: 'KeltaHikariPoolExhausted' },
+    { alertName: 'Autopilot — median task duration > 8 min' },
+    { alertName: 'SpotOpened pollers — upstream 429s elevated' },
+  ];
+  assert.deepEqual(filterIncidents(incs, '^(EMF|Kelta)').map((i) => i.alertName.slice(0, 5)), ['EMF G', 'Kelta']);
+  assert.equal(filterIncidents(incs, '').length, 4);
+  assert.equal(filterIncidents(incs, /Autopilot/).length, 1);
 });
 
 test('stableStringify sorts keys recursively and drops undefined', () => {

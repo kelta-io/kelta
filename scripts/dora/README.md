@@ -80,8 +80,12 @@ well under a minute.
   separately so you can see the split.
 - **Incident** = Alerting→Normal for one alert fingerprint (Grafana state history in
   Loki) or one contiguous run of `ALERTS{alertstate="firing"}` samples (Prometheus
-  rules in Mimir). Ongoing incidents get `ttrSec` measured to now and are excluded from
-  MTTR until they resolve. Grafana only writes state history to Loki once
+  rules in Mimir). Both are read in 7-day chunks over the last 30 days (retention; Loki
+  caps a query at 30d, Mimir at 11k points/series). Only alerts whose name matches
+  `--incident-filter` (default `^(EMF|Kelta)` — the platform's Grafana rule titles and
+  Prometheus rule names) count; Grafana also hosts fleet/venture alerts that are not
+  platform incidents. Ongoing incidents get `ttrSec` measured to now and are excluded
+  from MTTR until they resolve. Grafana only writes state history to Loki once
   `GF_UNIFIED_ALERTING_STATE_HISTORY_*` is set on the Grafana deployment, so MTTR is
   empty before that ships and reads `0` on the Kelta metric tile (no resolved
   incidents), not "elite".

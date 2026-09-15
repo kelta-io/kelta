@@ -21,7 +21,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   WINDOWS, parseArgoLog, buildDeployments, attachChanges, pairStateTransitions,
-  runsFromAlertSeries, summarize, stableStringify, normalizePr,
+  runsFromAlertSeries, summarize, stableStringify, normalizePr, filterIncidents,
 } from './lib.mjs';
 
 const args = parseArgs(process.argv.slice(2));
@@ -35,6 +35,7 @@ if (args.help) {
   --now <iso>             fix the clock (tests / backfill)
   --loki-url <url>        Loki base URL for alert state history (e.g. http://loki:3100)
   --mimir-url <url>       Mimir base URL for ALERTS series (e.g. http://mimir:8080)
+  --incident-filter <re>  only alerts whose name matches count as incidents (default: ^(EMF|Kelta); '' = all)
   --out <file>            write the JSON report here
   --push-loki             push events to --loki-url (last --push-days days)
   --push-otlp <url>       push gauges to an OTLP/HTTP endpoint (e.g. http://alloy:4318)
@@ -114,44 +115,72 @@ async function loadMergedPrs() {
   return prs;
 }
 
+// Alert sources are bounded by observability retention (30d) and per-query limits
+// (Loki: 30d range; Mimir: 11k points per series), so incidents are loaded in
+// 7-day chunks over the last ALERT_LOOKBACK_DAYS regardless of --days. The Kelta
+// sink keeps the long history.
+const ALERT_LOOKBACK_DAYS = 30;
+const ALERT_CHUNK_DAYS = 7;
+
+function alertChunks() {
+  const endMs = Date.parse(now);
+  const startMs = Math.max(Date.parse(since), endMs - ALERT_LOOKBACK_DAYS * 86400 * 1000);
+  const chunks = [];
+  for (let a = startMs; a < endMs; a += ALERT_CHUNK_DAYS * 86400 * 1000) {
+    chunks.push([a, Math.min(a + ALERT_CHUNK_DAYS * 86400 * 1000, endMs)]);
+  }
+  return chunks;
+}
+
 async function loadGrafanaStateHistory(lokiUrl) {
   // Grafana writes one JSON line per state transition when
   // [unified_alerting.state_history] backend=loki is enabled.
-  const url = new URL('/loki/api/v1/query_range', lokiUrl);
-  url.searchParams.set('query', '{from="state-history"}');
-  url.searchParams.set('start', `${Date.parse(since)}000000`);
-  url.searchParams.set('end', `${Date.parse(now)}000000`);
-  url.searchParams.set('limit', '5000');
-  url.searchParams.set('direction', 'forward');
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Loki ${res.status}: ${await res.text()}`);
-  const body = await res.json();
   const entries = [];
-  for (const stream of body.data?.result || []) {
-    for (const [ns, line] of stream.values || []) {
-      let j; try { j = JSON.parse(line); } catch { continue; }
-      entries.push({
-        ts: new Date(Number(ns) / 1e6).toISOString(),
-        previous: j.previous, current: j.current,
-        alertname: j.labels?.alertname || j.ruleTitle, ruleTitle: j.ruleTitle,
-        fingerprint: j.fingerprint, ruleUID: j.ruleUID,
-      });
+  for (const [a, b] of alertChunks()) {
+    const url = new URL('/loki/api/v1/query_range', lokiUrl);
+    url.searchParams.set('query', '{from="state-history"}');
+    url.searchParams.set('start', `${a}000000`);
+    url.searchParams.set('end', `${b}000000`);
+    url.searchParams.set('limit', '5000');
+    url.searchParams.set('direction', 'forward');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Loki ${res.status}: ${await res.text()}`);
+    const body = await res.json();
+    for (const stream of body.data?.result || []) {
+      for (const [ns, line] of stream.values || []) {
+        let j; try { j = JSON.parse(line); } catch { continue; }
+        entries.push({
+          ts: new Date(Number(ns) / 1e6).toISOString(),
+          previous: j.previous, current: j.current,
+          alertname: j.labels?.alertname || j.ruleTitle, ruleTitle: j.ruleTitle,
+          fingerprint: j.fingerprint, ruleUID: j.ruleUID,
+        });
+      }
     }
   }
   return pairStateTransitions(entries, now);
 }
 
 async function loadPrometheusAlerts(mimirUrl) {
-  const step = 60;
-  const url = new URL('/prometheus/api/v1/query_range', mimirUrl);
-  url.searchParams.set('query', 'ALERTS{alertstate="firing"}');
-  url.searchParams.set('start', String(Math.floor(Date.parse(since) / 1000)));
-  url.searchParams.set('end', String(Math.floor(Date.parse(now) / 1000)));
-  url.searchParams.set('step', String(step));
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Mimir ${res.status}: ${await res.text()}`);
-  const body = await res.json();
-  return runsFromAlertSeries(body.data?.result || [], step, now);
+  const step = 60; // 7d × 60s = 10,080 points — under Mimir's 11k/series cap
+  // Merge chunks per series so a run spanning a chunk boundary stays one incident.
+  const bySeries = new Map();
+  for (const [a, b] of alertChunks()) {
+    const url = new URL('/prometheus/api/v1/query_range', mimirUrl);
+    url.searchParams.set('query', 'ALERTS{alertstate="firing"}');
+    url.searchParams.set('start', String(Math.floor(a / 1000)));
+    url.searchParams.set('end', String(Math.floor(b / 1000)));
+    url.searchParams.set('step', String(step));
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Mimir ${res.status}: ${await res.text()}`);
+    const body = await res.json();
+    for (const series of body.data?.result || []) {
+      const key = JSON.stringify(series.metric || {});
+      if (!bySeries.has(key)) bySeries.set(key, { metric: series.metric, values: [] });
+      bySeries.get(key).values.push(...(series.values || []));
+    }
+  }
+  return runsFromAlertSeries([...bySeries.values()], step, now);
 }
 
 // ---------------------------------------------------------------------------
@@ -370,13 +399,18 @@ async function main() {
     try { incidents.push(...await loadPrometheusAlerts(args['mimir-url'])); } catch (e) { sourceErrors.push(`mimir: ${e.message}`); }
   }
 
+  const incidentFilter = args['incident-filter'] === undefined ? '^(EMF|Kelta)' : args['incident-filter'];
+  const allIncidents = incidents;
+  incidents = filterIncidents(incidents, incidentFilter === true ? '' : incidentFilter);
+
   const summaries = [];
   for (const w of WINDOWS) for (const segment of ['all', 'bot', 'human']) {
     summaries.push(summarize({ deployments, incidents, windowDays: w, now, segment }));
   }
 
   const report = {
-    generatedAt: now, repo, since, sources: { argoDir, argoPath, mainCommits: mainHistory.length, mergedPrs: prs.length, sourceErrors },
+    generatedAt: now, repo, since,
+    sources: { argoDir, argoPath, mainCommits: mainHistory.length, mergedPrs: prs.length, incidentFilter, alertsSeen: allIncidents.length, sourceErrors },
     summaries, deployments, unshipped, incidents,
   };
 
