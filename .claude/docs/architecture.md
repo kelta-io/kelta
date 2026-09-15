@@ -278,6 +278,13 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   (`concerns.md` → Fragile Areas; `CollectionSchemaControllerTest` registers the router stand-in).
   The generated OpenAPI document (`GET /api/docs/openapi.json`) covers system collections for the
   same reason.
+- **Layout tree** (`GET|PUT /api/page-layouts/{id}/tree`,
+  `PUT /api/collections/{name}/layouts/{layoutName}/tree`, `PageLayoutTreeController`): rides the
+  existing `static-page-layouts` / `static-collections` routes, so only `API_ACCESS` is checked at
+  the gateway — the controller enforces `CUSTOMIZE_APPLICATION` itself (`CerbosPermissionResolver`
+  + `BootstrapRepository.findProfileSystemPermissions`, the `MigrationController` pattern). Its
+  mappings spell out every literal segment for the same reason the schema endpoint does. See
+  "Layout tree endpoint" below for the document shape.
 - **Approval writes** (`/api/approvals/{submit,{id}/approve|reject|recall}`): the acting user
   is ONLY the gateway-stamped `X-User-Id` (an email — `IdentityHeaderStripFilter` strips
   client-supplied values, `HeaderTransformationFilter` re-stamps from the validated
@@ -627,6 +634,62 @@ jobs. RLS then scopes every query automatically.
 There is now **one record-detail path**. Both the end-user runtime (`/:tenant/app/o/:collection/:id`, `ObjectDetailPage`) and the admin Resource Browser (`/:tenant/resources/:collection/:id`, `ResourceDetailPage`) are **thin `variant` wrappers over `RecordShell`** (`kelta-ui/app/src/components/record/RecordShell.tsx`): `RecordShell` owns the page skeleton (loading/status branches + breadcrumb → header → body(+rail) → tab bar → below-tabs → dialogs), variant chrome is passed as slots, and the field body renders through `RecordDetailBody` (`LayoutFieldSections` when the layout has sections, else a variant fallback). The shared `DetailTabBar` drives related lists (with inline CRUD) + Notes/Attachments/System tabs for both. A fix to view/inline-edit/related-CRUD/rules/optimistic-locking lands once and shows in both stacks. Do **not** reintroduce a per-stack detail body. (The list pages — `ObjectListPage`/`ResourceListPage` — are not yet converged; they share `ObjectDataTable` but keep separate page shells.)
 
 `layout-fields.columnNumber` is **0-based** — column `0` is a section's first column — matching how `LayoutFieldSections` indexes into a section's columns. `SystemCollectionDefinitions.layoutFields()` defaults it to `0` (`V197__layout_field_column_zero.sql`; a pre-existing row's explicit value was never rewritten), and `kelta-mcp`'s `CreateLayoutTool` computes the same 0-based placement (`index % columns`) when a `create_layout` field entry omits `columnNumber`. The Setup layout editor (`FieldPropertyForm.tsx` / `LayoutEditorList.tsx`) always writes an explicit `columnNumber` on every placement, so it never relies on either default.
+
+### Layout tree endpoint — one idempotent write for a whole layout
+
+A layout is four collections written parent → child (`page-layouts` → `layout-sections` →
+`layout-fields`, plus `layout-related-lists`), one row per request, with a field-id lookup per
+placement. `PageLayoutTreeController` + `PageLayoutTreeService` (kelta-worker) collapse that into
+one document addressed by **names**:
+
+- `GET /api/page-layouts/{layoutId}/tree` — the layout as `{layoutId, collection, name, layoutType,
+  isDefault, description, headerConfig, sections:[{heading, columns, collapsed,
+  fields:[{name, column, label, helpText, readOnly, required}]}], relatedLists:[{collection,
+  relationshipField, displayColumns, sortField, sortDirection, rowLimit}]}` — **field names, never
+  ids**. The response is exactly the document PUT accepts, so it round-trips with no diff.
+- `PUT /api/page-layouts/{layoutId}/tree` — apply it to an existing layout.
+- `PUT /api/collections/{name}/layouts/{layoutName}/tree` — apply it to the named layout,
+  **creating** the `page_layout` row when the collection has none by that name. The path name is
+  the identity: a body `name` that disagrees is a 400, not a silent rename.
+
+**Matching and deletion.** Sections upsert on `heading`, placements on the field's **name**
+(anywhere in the layout — moving a field between sections is an update of `sectionId`, not a
+delete/create pair), related lists on (related collection, relationship field). Anything the body
+no longer lists is deleted; placements are deleted before their section is, because
+`layout_field.section_id` cascades. The response is the diff —
+`{created, updated, deleted, unchanged}` — counting every row including the layout itself, so
+applying the same body twice returns `created=0, updated=0, deleted=0` and a caller can assert
+convergence instead of re-reading.
+
+**Scalar vs. tree semantics.** `sections` is required and authoritative. `relatedLists` is
+authoritative when present and left untouched when absent. The layout's own scalars (`name`,
+`layoutType`, `isDefault`, `description`, `headerConfig`) are applied only when the body carries
+the key, so a body that manages fields does not blank the header.
+
+**Validation** (400, one JSON:API error per offending position, each with a `source.pointer` into
+the request body — e.g. `/sections/0/fields/2/name`): an unknown field name, a `column` outside its
+section's 0-based `columns`, the same field placed twice, a missing/duplicate section `heading`, a
+related list whose `relationshipField` is not a lookup back to the layout's collection, and any
+unknown property. The whole body is checked before anything is written; a rejected body writes
+nothing. A heading-less section (the column is nullable, and the generic routes allow it) cannot be
+expressed by the tree — `heading` is the match key.
+
+**One interaction to know.** `CerbosFieldWriteSecurityAdvice` treats any non-JSON:API PUT body
+under `/api/**` as a flat attributes map, so the by-id PUT's top-level keys (`sections`,
+`relatedLists`, …) are batch-checked as *field* writes on `page-layouts`. The generated field
+policy default-**allows** `write` for the `user` role and only denies fields a profile marks
+HIDDEN/READ_ONLY/MASKED, so keys that are not fields pass through untouched; a profile that marks
+`page-layouts.name` READ_ONLY does lose that key from the body, which is the intended enforcement.
+The by-name PUT is exempt outright (`/api/collections` is on the advice's metadata list).
+
+**Writes go through `QueryEngine`**, the path the admin API and MCP tools use (the
+`PackageImportService.upsertViaEngine` pattern), so `PageLayoutConfigEventPublisher`,
+`LayoutSectionRefreshHook`, `LayoutFieldRefreshHook` and `LayoutRelatedListRefreshHook` fire and
+`kelta.config.layout.changed.<layoutId>` reaches every pod — no listener file changes, no
+single-pod cache mutation. Reads resolve ids → names with plain SQL: neither `CollectionDefinition`
+nor `FieldDefinition` carries the metadata row id. Because the endpoint assigns `sortOrder` from
+array position, the first PUT over a hand-built layout with sparse sort orders may renumber them;
+every PUT after that is a no-op.
 
 **Offline replica path (end-user only).** When `OfflineProvider` is mounted — it wraps the `EndUserShell` subtree — the shared data hooks route through a tenant-scoped IndexedDB replica: online reads write through to the store and offline reads serve it (`useCollectionRecords`/`useRecord`/`usePageDataSources`), and offline writes queue to an outbox (`useRecordMutation` → `engine.queue`) that flushes on reconnect (`SyncEngine.sync`). Admin pages render outside the provider (`useOffline()` → `undefined`), so their reads/writes stay online-only and unchanged. See `conventions.md` → offline hooks.
 
