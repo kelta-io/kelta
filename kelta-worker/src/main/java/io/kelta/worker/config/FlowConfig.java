@@ -950,6 +950,17 @@ public class FlowConfig {
     }
 
     @Bean
+    public io.kelta.worker.service.ListViewConfigHook listViewConfigHook(
+            BeforeSaveHookRegistry hookRegistry,
+            CollectionRegistry collectionRegistry,
+            JdbcTemplate jdbcTemplate) {
+        io.kelta.worker.service.ListViewConfigHook hook =
+                new io.kelta.worker.service.ListViewConfigHook(collectionRegistry, jdbcTemplate);
+        hookRegistry.register(hook);
+        return hook;
+    }
+
+    @Bean
     public SubmitForApprovalActionHandler submitForApprovalActionHandler(
             ActionHandlerRegistry actionHandlerRegistry,
             ApprovalService approvalService,

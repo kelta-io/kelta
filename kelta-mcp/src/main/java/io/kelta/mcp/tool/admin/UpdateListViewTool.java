@@ -43,6 +43,8 @@ public class UpdateListViewTool implements AdminTool {
                 "New default sort field, '-' prefix for descending, e.g. \"-createdAt\"."));
         properties.put("isDefault", Schemas.bool("New default-for-collection flag.", false));
         properties.put("visibility", Schemas.string("PRIVATE or PUBLIC."));
+        properties.put("rowLimit", Schemas.integer(
+                "New maximum rows rendered: one of 10, 25, 50 or 100.", 10, 100));
         properties.put("viewType", Schemas.string(
                 "Renderer everyone opening this view gets: TABLE, KANBAN, CALENDAR or GALLERY."));
         properties.put("typeConfig", Schemas.freeObject(
@@ -86,6 +88,7 @@ public class UpdateListViewTool implements AdminTool {
                     }
                     if (args.get("isDefault") instanceof Boolean b) attrs.put("isDefault", b);
                     if (args.get("visibility") instanceof String v && !v.isBlank()) attrs.put("visibility", v);
+                    if (args.get("rowLimit") instanceof Number rl) attrs.put("rowLimit", rl.intValue());
                     // Renderer + its config (V196).
                     if (args.get("viewType") instanceof String vt && !vt.isBlank()) {
                         attrs.put("viewType", vt.trim().toUpperCase(Locale.ROOT));
@@ -97,7 +100,7 @@ public class UpdateListViewTool implements AdminTool {
                     }
                     if (attrs.isEmpty()) {
                         return error("Provide at least one of name, displayedFields, filter, sort, "
-                                + "isDefault, visibility, viewType, typeConfig.");
+                                + "isDefault, visibility, rowLimit, viewType, typeConfig.");
                     }
                     Map<String, Object> body = Map.of("data", Map.of(
                             "type", "list-views",

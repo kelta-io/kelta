@@ -96,7 +96,7 @@ class CollectionDeletionScenarioTest extends ScenarioBase {
                 "attributes", Map.of(
                         "collectionId", collectionId,
                         "name", "All " + collectionName,
-                        "columns", List.of(Map.of("field", "title")))));
+                        "columns", List.of("title"))));
         ResponseEntity<Map> createdListView = client.post().uri("/" + slug + "/api/list-views")
                 .contentType(MediaType.APPLICATION_JSON).body(listViewBody)
                 .retrieve().toEntity(Map.class);
