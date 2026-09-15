@@ -86,6 +86,21 @@ class GatewayHttpClientTest {
     }
 
     @Test
+    void putSendsJsonBody() {
+        wm.stubFor(WireMock.put(urlEqualTo("/api/page-layouts/l1/tree"))
+                .willReturn(aResponse().withStatus(200).withBody("{\"layoutId\":\"l1\"}")));
+
+        GatewayHttpClient.Response res = client.put("/api/page-layouts/l1/tree",
+                java.util.Map.of("sections", java.util.List.of(java.util.Map.of("heading", "Overview"))));
+
+        assertThat(res.isSuccess()).isTrue();
+        wm.verify(putRequestedForUrl("/api/page-layouts/l1/tree")
+                .withHeader("Authorization", equalTo("Bearer klt_test_pat_value"))
+                .withHeader("Content-Type", equalTo("application/json"))
+                .withRequestBody(matchingJsonPath("$.sections[0].heading", equalTo("Overview"))));
+    }
+
+    @Test
     void deleteUsesNoBody() {
         wm.stubFor(delete(urlEqualTo("/api/accounts/a1"))
                 .willReturn(aResponse().withStatus(204)));
@@ -193,6 +208,10 @@ class GatewayHttpClientTest {
 
     private static RequestPatternBuilder patchRequestedForUrl(String url) {
         return WireMock.patchRequestedFor(urlEqualTo(url));
+    }
+
+    private static RequestPatternBuilder putRequestedForUrl(String url) {
+        return WireMock.putRequestedFor(urlEqualTo(url));
     }
 
     private static RequestPatternBuilder deleteRequestedForUrl(String url) {

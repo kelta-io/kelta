@@ -181,6 +181,7 @@ class McpApplicationTest {
                 "update_picklist_value",
                 "deactivate_picklist_value",
                 // UI admin (Phase 7)
+                "apply_layout",
                 "create_layout",
                 "update_layout",
                 "delete_layout",

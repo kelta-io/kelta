@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CommandContext, RegisteredCommand } from '../registry/types.js';
 import { auditCommands } from './audit.js';
 import { collectionCommands } from './collections.js';
@@ -338,6 +341,98 @@ describe('layouts update', () => {
     expect(axios.patch).toHaveBeenCalledWith('/api/page-layouts/L1', {
       data: { type: 'pageLayouts', id: 'L1', attributes: { name: 'New' } },
     });
+  });
+});
+
+describe('layouts get --tree / apply', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'kelta-cli-layout-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const layoutsOnly = () => layoutCommands.filter((c) => c.group === 'layouts');
+
+  it('get without --tree fetches the plain layout resource', async () => {
+    const axios = fakeAxios();
+    await run(layoutsOnly(), 'get', { layoutId: 'L1' }, axios);
+    expect(axios.get).toHaveBeenCalledWith('/api/page-layouts/L1');
+  });
+
+  it('get --tree fetches the tree document', async () => {
+    const tree = {
+      layoutId: 'L1',
+      collection: 'orders',
+      name: 'Main',
+      sections: [{ heading: 'Overview', columns: 2, collapsed: false, fields: [] }],
+      relatedLists: [],
+    };
+    const axios = fakeAxios({ '/api/page-layouts/L1/tree': tree });
+    const result = await run(layoutsOnly(), 'get', { layoutId: 'L1', tree: true }, axios);
+    expect(axios.get).toHaveBeenCalledWith('/api/page-layouts/L1/tree');
+    expect(result.data).toEqual(tree);
+  });
+
+  it('apply reads the tree file and PUTs it to the by-name endpoint', async () => {
+    const tree = {
+      name: 'Main',
+      sections: [
+        {
+          heading: 'Overview',
+          columns: 2,
+          fields: [{ name: 'name' }, { name: 'owner' }],
+        },
+      ],
+    };
+    const file = join(dir, 'tree.json');
+    writeFileSync(file, JSON.stringify(tree));
+
+    const axios = fakeAxios();
+    axios.put.mockResolvedValueOnce({
+      data: { layoutId: 'L1', created: 1, updated: 0, deleted: 0, unchanged: 0 },
+    });
+
+    const result = await run(layoutsOnly(), 'apply', { collection: 'orders', file }, axios);
+
+    expect(axios.put).toHaveBeenCalledWith('/api/collections/orders/layouts/Main/tree', tree);
+    expect(result.ids).toEqual(['L1']);
+    expect(result.message).toContain('created=1');
+  });
+
+  it("apply --name overrides the tree file's own name for addressing", async () => {
+    const file = join(dir, 'tree.json');
+    writeFileSync(file, JSON.stringify({ sections: [] }));
+
+    const axios = fakeAxios();
+    axios.put.mockResolvedValueOnce({ data: { layoutId: 'L1' } });
+
+    await run(layoutsOnly(), 'apply', { collection: 'orders', file, name: 'Compact' }, axios);
+
+    expect(axios.put).toHaveBeenCalledWith('/api/collections/orders/layouts/Compact/tree', {
+      sections: [],
+      name: 'Compact',
+    });
+  });
+
+  it('apply without --name or a name in the file throws a usage error', async () => {
+    const file = join(dir, 'tree.json');
+    writeFileSync(file, JSON.stringify({ sections: [] }));
+    const axios = fakeAxios();
+
+    await expect(
+      run(layoutsOnly(), 'apply', { collection: 'orders', file }, axios)
+    ).rejects.toThrow(/Layout name required/);
+  });
+
+  it('apply on a missing file throws a usage error', async () => {
+    const axios = fakeAxios();
+    await expect(
+      run(layoutsOnly(), 'apply', { collection: 'orders', file: join(dir, 'missing.json') }, axios)
+    ).rejects.toThrow(/Cannot read file/);
   });
 });
 

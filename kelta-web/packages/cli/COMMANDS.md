@@ -246,6 +246,19 @@ Create a page layout (sections/fields via the UI or kelta api)
 - `--default` — Mark as the default layout
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+### `kelta layouts get <layoutId>`
+
+Get a page layout by id
+
+- `--tree` — Fetch the whole layout as a tree (sections, field placements, related lists) — the document `layouts apply --file` accepts.
+
+### `kelta layouts apply <collection>`
+
+Apply a layout tree file (sections, fields, related lists) to a collection
+
+- `--file <path>` — Layout tree JSON file — see `layouts get <id> --tree` for the shape
+- `--name <name>` — Layout name (overrides the file's own "name"; addresses the layout within the collection, creating it if it does not exist yet)
+
 ### `kelta layouts update <layoutId>`
 
 Update a page layout by id

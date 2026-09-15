@@ -17,22 +17,19 @@ import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
-import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
-import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.put;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The tool targets the worker's kebab-case system-collection routes with the
- * real attribute shapes: page-layouts get a resolved {@code collectionId},
- * layout-sections a {@code layoutId} + {@code heading}, and layout-fields a
- * {@code sectionId} + {@code fieldId} resolved from the entry's fieldName.
- * (The previous camelCase paths — /api/pageLayouts etc. — 404 on the worker.)
+ * create_layout is deprecated and now a thin translation layer over {@link ApplyLayoutTool}:
+ * it maps its legacy fieldName/sectionName/columnNumber argument shape onto apply_layout's
+ * tree body and makes the same single gateway call — {@code PUT
+ * /api/collections/{collection}/layouts/{name}/tree} — instead of one POST per
+ * layout/section/field.
  */
 class CreateLayoutToolTest {
-
-    private static final String COLLECTION_ID = "11111111-1111-1111-1111-111111111111";
 
     private WireMockServer wm;
     private CreateLayoutTool tool;
@@ -44,7 +41,7 @@ class CreateLayoutToolTest {
         GatewayHttpClient client = new GatewayHttpClient(
                 RestClient.builder(),
                 new McpProperties("http://localhost:" + wm.port(), 30, 60_000, null));
-        tool = new CreateLayoutTool(client);
+        tool = new CreateLayoutTool(new ApplyLayoutTool(client));
         RequestPatHolder.set("klt_layout_test");
     }
 
@@ -52,19 +49,6 @@ class CreateLayoutToolTest {
     void tearDown() {
         RequestPatHolder.clear();
         wm.stop();
-    }
-
-    private void stubCollectionAndFields() {
-        wm.stubFor(get(urlEqualTo("/api/collections?filter[name][eq]=projects"))
-                .willReturn(aResponse().withStatus(200).withBody(
-                        "{\"data\":[{\"type\":\"collections\",\"id\":\"" + COLLECTION_ID + "\"}]}")));
-        wm.stubFor(get(urlEqualTo("/api/fields?filter[collectionId][EQ]=" + COLLECTION_ID + "&page[size]=200"))
-                .willReturn(aResponse().withStatus(200).withBody(
-                        "{\"data\":["
-                        + "{\"id\":\"fid-name\",\"type\":\"fields\",\"attributes\":{\"name\":\"name\"}},"
-                        + "{\"id\":\"fid-owner\",\"type\":\"fields\",\"attributes\":{\"name\":\"owner\"}},"
-                        + "{\"id\":\"fid-stage\",\"type\":\"fields\",\"attributes\":{\"name\":\"stage\"}}"
-                        + "]}")));
     }
 
     @Test
@@ -83,17 +67,10 @@ class CreateLayoutToolTest {
     }
 
     @Test
-    void createsLayoutSectionsAndFieldsInOrder() {
-        stubCollectionAndFields();
-        wm.stubFor(post(urlEqualTo("/api/page-layouts"))
-                .willReturn(aResponse().withStatus(201).withBody(
-                        "{\"data\":{\"id\":\"L1\",\"type\":\"page-layouts\"}}")));
-        wm.stubFor(post(urlEqualTo("/api/layout-sections"))
-                .willReturn(aResponse().withStatus(201).withBody(
-                        "{\"data\":{\"id\":\"S1\",\"type\":\"layout-sections\"}}")));
-        wm.stubFor(post(urlEqualTo("/api/layout-fields"))
-                .willReturn(aResponse().withStatus(201).withBody(
-                        "{\"data\":{\"id\":\"F1\"}}")));
+    void createsLayoutSectionsAndFieldsInOneTreeCall() {
+        wm.stubFor(put(urlEqualTo("/api/collections/projects/layouts/ProjectsMain/tree"))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"layoutId\":\"L1\",\"created\":3,\"updated\":0,\"deleted\":0,\"unchanged\":0}")));
 
         CallToolResult result = tool.toSpecification().callHandler().apply(
                 null, new CallToolRequest("create_layout", Map.of(
@@ -108,36 +85,18 @@ class CreateLayoutToolTest {
                                         "fields", List.of(Map.of("fieldName", "stage"))))), null));
 
         assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
-        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/page-layouts"))
-                .withHeader("Authorization", equalTo("Bearer klt_layout_test"))
-                .withRequestBody(matchingJsonPath("$.data.type", equalTo("page-layouts")))
-                .withRequestBody(matchingJsonPath("$.data.attributes.name", equalTo("ProjectsMain")))
-                .withRequestBody(matchingJsonPath("$.data.attributes.collectionId", equalTo(COLLECTION_ID)))
-                .withRequestBody(matchingJsonPath("$.data.attributes.layoutType", equalTo("DETAIL"))));
-        wm.verify(2, WireMock.postRequestedFor(urlEqualTo("/api/layout-sections")));
-        wm.verify(3, WireMock.postRequestedFor(urlEqualTo("/api/layout-fields")));
-        // sortOrder defaulting, heading mapping + child references
-        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/layout-sections"))
-                .withRequestBody(matchingJsonPath("$.data.attributes.layoutId", equalTo("L1")))
-                .withRequestBody(matchingJsonPath("$.data.attributes.heading", equalTo("Status")))
-                .withRequestBody(matchingJsonPath("$.data.attributes.sortOrder", equalTo("1"))));
-        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/layout-fields"))
-                .withRequestBody(matchingJsonPath("$.data.attributes.sectionId", equalTo("S1")))
-                .withRequestBody(matchingJsonPath("$.data.attributes.fieldId", equalTo("fid-stage"))));
+        wm.verify(1, WireMock.putRequestedFor(urlEqualTo("/api/collections/projects/layouts/ProjectsMain/tree"))
+                .withHeader("Authorization", equalTo("Bearer klt_layout_test")));
+        wm.verify(WireMock.putRequestedFor(urlEqualTo("/api/collections/projects/layouts/ProjectsMain/tree"))
+                .withRequestBody(matchingJsonPath("$.sections[0].heading", equalTo("Overview")))
+                .withRequestBody(matchingJsonPath("$.sections[1].heading", equalTo("Status")))
+                .withRequestBody(matchingJsonPath("$.sections[1].fields[0].name", equalTo("stage"))));
     }
 
     @Test
     void placesFieldsInZeroBasedColumnsWhenColumnNumberOmitted() {
-        stubCollectionAndFields();
-        wm.stubFor(post(urlEqualTo("/api/page-layouts"))
-                .willReturn(aResponse().withStatus(201).withBody(
-                        "{\"data\":{\"id\":\"L1\",\"type\":\"page-layouts\"}}")));
-        wm.stubFor(post(urlEqualTo("/api/layout-sections"))
-                .willReturn(aResponse().withStatus(201).withBody(
-                        "{\"data\":{\"id\":\"S1\",\"type\":\"layout-sections\"}}")));
-        wm.stubFor(post(urlEqualTo("/api/layout-fields"))
-                .willReturn(aResponse().withStatus(201).withBody(
-                        "{\"data\":{\"id\":\"F1\"}}")));
+        wm.stubFor(put(urlEqualTo("/api/collections/projects/layouts/ProjectsMain/tree"))
+                .willReturn(aResponse().withStatus(200).withBody("{\"layoutId\":\"L1\"}")));
 
         Map<String, Object> section = Map.of(
                 "sectionName", "Overview",
@@ -146,7 +105,7 @@ class CreateLayoutToolTest {
                         Map.of("fieldName", "name"),
                         Map.of("fieldName", "owner"),
                         Map.of("fieldName", "stage"),
-                        Map.of("fieldName", "name")));
+                        Map.of("fieldName", "notes")));
 
         CallToolResult result = tool.toSpecification().callHandler().apply(
                 null, new CallToolRequest("create_layout", Map.of(
@@ -157,40 +116,16 @@ class CreateLayoutToolTest {
         assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
         // two-column section, four fields, no explicit columnNumber -> 0,1,0,1
         for (int i = 0; i < 4; i++) {
-            wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/layout-fields"))
-                    .withRequestBody(matchingJsonPath("$.data.attributes.sortOrder", equalTo(String.valueOf(i))))
-                    .withRequestBody(matchingJsonPath("$.data.attributes.columnNumber", equalTo(String.valueOf(i % 2)))));
+            wm.verify(WireMock.putRequestedFor(urlEqualTo("/api/collections/projects/layouts/ProjectsMain/tree"))
+                    .withRequestBody(matchingJsonPath(
+                            "$.sections[0].fields[" + i + "].column", equalTo(String.valueOf(i % 2)))));
         }
     }
 
     @Test
-    void reportsUnknownFieldNamesInsteadOfPosting() {
-        stubCollectionAndFields();
-        wm.stubFor(post(urlEqualTo("/api/page-layouts"))
-                .willReturn(aResponse().withStatus(201).withBody(
-                        "{\"data\":{\"id\":\"L1\"}}")));
-        wm.stubFor(post(urlEqualTo("/api/layout-sections"))
-                .willReturn(aResponse().withStatus(201).withBody(
-                        "{\"data\":{\"id\":\"S1\"}}")));
-
-        CallToolResult result = tool.toSpecification().callHandler().apply(
-                null, new CallToolRequest("create_layout", Map.of(
-                        "name", "L",
-                        "collectionName", "projects",
-                        "sections", List.of(Map.of("sectionName", "S",
-                                "fields", List.of(Map.of("fieldName", "doesNotExist"))))), null));
-
-        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
-        assertThat(((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text())
-                .contains("field not found on collection");
-        wm.verify(0, WireMock.postRequestedFor(urlEqualTo("/api/layout-fields")));
-    }
-
-    @Test
-    void shortCircuitsWhenLayoutCreationFails() {
-        stubCollectionAndFields();
-        wm.stubFor(post(urlEqualTo("/api/page-layouts"))
-                .willReturn(aResponse().withStatus(409).withBody("{}")));
+    void surfacesGatewayFailureAsError() {
+        wm.stubFor(put(urlEqualTo("/api/collections/projects/layouts/L/tree"))
+                .willReturn(aResponse().withStatus(409).withBody("{\"errors\":[{\"detail\":\"conflict\"}]}")));
 
         CallToolResult result = tool.toSpecification().callHandler().apply(
                 null, new CallToolRequest("create_layout", Map.of(
@@ -200,7 +135,5 @@ class CreateLayoutToolTest {
                                 "fields", List.of(Map.of("fieldName", "name"))))), null));
 
         assertThat(result.isError()).isEqualTo(Boolean.TRUE);
-        wm.verify(0, WireMock.postRequestedFor(urlEqualTo("/api/layout-sections")));
-        wm.verify(0, WireMock.postRequestedFor(urlEqualTo("/api/layout-fields")));
     }
 }

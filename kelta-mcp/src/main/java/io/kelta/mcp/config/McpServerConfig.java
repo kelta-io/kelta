@@ -108,10 +108,15 @@ public class McpServerConfig {
             inline initial field set) -> add_field (repeat per additional field) -> \
             create_validation_rule / create_unique_constraint as needed -> for picklist \
             fields, create_picklist + add_picklist_value first, then reference it from \
-            add_field via picklistSourceId -> create_layout / create_listview for the admin \
+            add_field via picklistSourceId -> apply_layout / create_listview for the admin \
             UI -> create_flow for automation. delete_ counterparts exist for every create_ \
             tool; update_ counterparts exist for collection, flow, layout, listview, and \
             validation_rule.
+
+            Layouts: apply_layout takes the whole layout structure (sections, field \
+            placements, related lists) in one idempotent call — reapplying the same body is \
+            a no-op, and it can also restructure an existing layout by passing its layoutId. \
+            create_layout is deprecated (kept for existing callers) and delegates to it.
 
             Field types: add_field's `type` argument accepts friendly aliases (text, number, \
             picklist, reference, ...) that map onto the native uppercase FieldType enum — see \
@@ -141,7 +146,7 @@ public class McpServerConfig {
 
             Resources: kelta://docs/<topic> (topics: jsonapi, page-layouts, list-views, \
             dashboards, ui-pages, ui-menus) are reference docs for authoring layouts, list \
-            views, dashboards, and page config directly through create_layout/create_listview/ \
+            views, dashboards, and page config directly through apply_layout/create_listview/ \
             record attributes — read one before hand-writing a config JSON blob.""";
 
     @Bean(name = "userTransportProvider")
