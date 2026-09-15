@@ -10,7 +10,7 @@
  * to an empty list. `ObjectFormPage`/`ResourceFormPage` share `resolvePicklistSource` directly.
  */
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { useApi } from '@/context/ApiContext'
 import type { ApiClient } from '@/services/apiClient'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
@@ -163,4 +163,48 @@ export function usePicklistDisplayMap(
     return map
   }, [data])
   return { displayMap, isLoading }
+}
+
+/** Field name → `PicklistDisplayMap`, for surfaces rendering many columns/filters at once. */
+export type PicklistDisplayMaps = Record<string, PicklistDisplayMap>
+
+const PICKLIST_DISPLAY_TYPES = new Set(['picklist', 'multi_picklist'])
+
+/**
+ * Bulk form of `usePicklistDisplayMap`: fetches every picklist/multi_picklist field in `fields`
+ * with one `useQueries` fan-out (`FieldDefinition[]` is dynamic length, so a plain loop of
+ * `usePicklistDisplayMap` calls would violate the Rules of Hooks) and returns a
+ * field-name-keyed lookup for list/detail/filter surfaces that render many columns at once.
+ */
+export function usePicklistDisplayMaps(
+  fields: Pick<FieldDefinition, 'id' | 'name' | 'type' | 'fieldTypeConfig'>[],
+  enabled = true
+): { displayMaps: PicklistDisplayMaps; isLoading: boolean } {
+  const { apiClient } = useApi()
+  const picklistFields = useMemo(
+    () => fields.filter((f) => PICKLIST_DISPLAY_TYPES.has(f.type)),
+    [fields]
+  )
+  const results = useQueries({
+    queries: picklistFields.map((field) => ({
+      queryKey: ['picklist-display-map', field.id, field.fieldTypeConfig],
+      queryFn: () => fetchPicklistEntries(apiClient, field),
+      enabled,
+      staleTime: 5 * 60 * 1000,
+    })),
+  })
+  const out: PicklistDisplayMaps = {}
+  picklistFields.forEach((field, i) => {
+    const map: PicklistDisplayMap = new Map()
+    for (const entry of results[i]?.data ?? []) {
+      map.set(entry.value, {
+        label: entry.label,
+        color: entry.color,
+        description: entry.description,
+      })
+    }
+    out[field.name] = map
+  })
+  const isLoading = results.some((r) => r.isLoading)
+  return { displayMaps: out, isLoading }
 }

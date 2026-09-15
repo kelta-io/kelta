@@ -11,9 +11,13 @@ import React from 'react'
 import {
   usePicklistOptions,
   usePicklistDisplayMap,
+  usePicklistDisplayMaps,
   resolvePicklistSource,
   resolveGlobalPicklistId,
 } from './usePicklistOptions'
+import type { FieldDefinition } from '@/hooks/useCollectionSchema'
+
+type PicklistFieldInput = Pick<FieldDefinition, 'id' | 'name' | 'type' | 'fieldTypeConfig'>
 
 const mockGetList = vi.fn()
 vi.mock('@/context/ApiContext', () => ({
@@ -205,6 +209,47 @@ describe('usePicklistDisplayMap', () => {
     renderHook(() => usePicklistDisplayMap({ id: 'f1', fieldTypeConfig: undefined }, false), {
       wrapper,
     })
+    expect(mockGetList).not.toHaveBeenCalled()
+  })
+})
+
+describe('usePicklistDisplayMaps', () => {
+  it('keys the result by field name, one entry per picklist/multi_picklist field', async () => {
+    mockGetList.mockImplementation((url: string) => {
+      if (url.includes('SourceId][eq]=f-stage')) {
+        return Promise.resolve([
+          {
+            value: 'in_progress',
+            label: 'In progress',
+            color: '#F59E0B',
+            isActive: true,
+            sortOrder: 0,
+          },
+        ])
+      }
+      if (url.includes('SourceId][eq]=f-tags')) {
+        return Promise.resolve([{ value: 'vip', label: 'VIP', isActive: true, sortOrder: 0 }])
+      }
+      return Promise.resolve([])
+    })
+    const fields: PicklistFieldInput[] = [
+      { id: 'f-stage', name: 'stage', type: 'picklist', fieldTypeConfig: undefined },
+      { id: 'f-tags', name: 'tags', type: 'multi_picklist', fieldTypeConfig: undefined },
+      { id: 'f-name', name: 'name', type: 'string', fieldTypeConfig: undefined },
+    ]
+    const { result } = renderHook(() => usePicklistDisplayMaps(fields), { wrapper })
+    await waitFor(() =>
+      expect(result.current.displayMaps.stage?.get('in_progress')?.label).toBe('In progress')
+    )
+    expect(result.current.displayMaps.tags?.get('vip')?.label).toBe('VIP')
+    expect(result.current.displayMaps.name).toBeUndefined()
+  })
+
+  it('does not fetch when disabled', () => {
+    const fields: PicklistFieldInput[] = [
+      { id: 'f-stage', name: 'stage', type: 'picklist', fieldTypeConfig: undefined },
+    ]
+    renderHook(() => usePicklistDisplayMaps(fields, false), { wrapper })
     expect(mockGetList).not.toHaveBeenCalled()
   })
 })

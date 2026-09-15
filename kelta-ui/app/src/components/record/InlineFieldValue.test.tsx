@@ -140,6 +140,17 @@ describe('InlineFieldValue', () => {
     expect(screen.getByTestId('inline-field-stage')).toBeDefined()
   })
 
+  it('renders the authored label from picklistDisplayMap in the read view', () => {
+    renderInline({
+      field: field({ name: 'stage', type: 'picklist' }),
+      value: 'in_progress',
+      editable: false,
+      picklistDisplayMap: new Map([['in_progress', { label: 'In progress', color: '#F59E0B' }]]),
+    })
+    expect(screen.getByText('In progress')).toBeDefined()
+    expect(screen.queryByText('in_progress')).toBeNull()
+  })
+
   it('renders a locked read-only view when masked, even with edit permission', () => {
     renderInline({
       field: field({ name: 'ssn' }),
