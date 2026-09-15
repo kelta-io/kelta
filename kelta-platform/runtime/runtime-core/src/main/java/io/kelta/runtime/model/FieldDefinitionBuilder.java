@@ -35,6 +35,7 @@ public class FieldDefinitionBuilder {
     private ReferenceConfig referenceConfig;
     private Map<String, Object> fieldTypeConfig;
     private String columnName;
+    private String description;
 
     /**
      * Creates a new field definition builder.
@@ -164,6 +165,17 @@ public class FieldDefinitionBuilder {
     }
 
     /**
+     * Sets the one-line description surfaced by the schema endpoint and the OpenAPI document.
+     *
+     * @param description what the field holds, in one line
+     * @return this builder for method chaining
+     */
+    public FieldDefinitionBuilder description(String description) {
+        this.description = description;
+        return this;
+    }
+
+    /**
      * Builds the field definition.
      * 
      * @return the constructed field definition
@@ -188,7 +200,9 @@ public class FieldDefinitionBuilder {
             enumValues,
             referenceConfig,
             fieldTypeConfig,
-            columnName
+            columnName,
+            false,
+            description
         );
     }
     

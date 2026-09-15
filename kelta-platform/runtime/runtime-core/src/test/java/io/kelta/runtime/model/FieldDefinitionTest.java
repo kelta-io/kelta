@@ -538,4 +538,52 @@ class FieldDefinitionTest {
             assertEquals("profiles", field.referenceConfig().targetCollection());
         }
     }
+
+    @Nested
+    @DisplayName("Description Tests")
+    class DescriptionTests {
+
+        @Test
+        @DisplayName("withDescription should return new field with description")
+        void withDescriptionShouldSetDescription() {
+            FieldDefinition field = FieldDefinition.string("email")
+                .withDescription("Email address.");
+
+            assertEquals("Email address.", field.description());
+            assertEquals("email", field.name());
+            assertNull(FieldDefinition.string("email").description());
+        }
+
+        @Test
+        @DisplayName("withDescription should survive other with-ers")
+        void withDescriptionShouldSurviveOtherWithers() {
+            FieldDefinition field = FieldDefinition.string("status")
+                .withDescription("Current lifecycle status.")
+                .withEnumValues(List.of("OPEN", "CLOSED"))
+                .withNullable(false)
+                .withDefault("OPEN")
+                .withColumnName("status_col")
+                .withTrackHistory(true);
+
+            assertEquals("Current lifecycle status.", field.description());
+            assertEquals(List.of("OPEN", "CLOSED"), field.enumValues());
+            assertEquals("status_col", field.columnName());
+            assertTrue(field.trackHistory());
+        }
+
+        @Test
+        @DisplayName("Backward-compatible constructors should default description to null")
+        void backwardCompatibleConstructorsDefaultDescription() {
+            FieldDefinition twelveArg = new FieldDefinition(
+                "name", FieldType.STRING, true, false, false, null, null, null, null, null,
+                "name_col", true);
+            FieldDefinition elevenArg = new FieldDefinition(
+                "name", FieldType.STRING, true, false, false, null, null, null, null, null,
+                "name_col");
+
+            assertNull(twelveArg.description());
+            assertTrue(twelveArg.trackHistory());
+            assertNull(elevenArg.description());
+        }
+    }
 }

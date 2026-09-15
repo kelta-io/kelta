@@ -267,6 +267,17 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   identical to the gateway), denying the whole batch (403, fail-closed) before executing if any op is
   unauthorized. The `IdentityCollectionGuardHook` still guards identity-collection writes underneath
   (see "Delegated administration" below).
+- **Collection schema** (`GET /api/collections/{name}/schema`, `CollectionSchemaController`):
+  rides the existing `static-collections` route, so only `API_ACCESS` is checked. That is
+  deliberate and not a new exposure — the same prefix already serves
+  `GET /api/collections?include=fields`, which returns the same metadata for tenant collections;
+  the endpoint adds **system** collections, whose fields have no `field` rows to read that way.
+  It answers off `CollectionRegistry` (no record data), 404s on an unknown name, and its mapping
+  spells out both literal segments on purpose: `DynamicCollectionRouter` claims all-variable GETs
+  four segments deep under `/api`, so a looser pattern would lose every request to it
+  (`concerns.md` → Fragile Areas; `CollectionSchemaControllerTest` registers the router stand-in).
+  The generated OpenAPI document (`GET /api/docs/openapi.json`) covers system collections for the
+  same reason.
 - **Approval writes** (`/api/approvals/{submit,{id}/approve|reject|recall}`): the acting user
   is ONLY the gateway-stamped `X-User-Id` (an email — `IdentityHeaderStripFilter` strips
   client-supplied values, `HeaderTransformationFilter` re-stamps from the validated
