@@ -978,6 +978,21 @@ Regression guard: `TenantAwareDataSourceTest` asserts tenant connections use tra
 
 ## Test Coverage Gaps
 
+- **FIXED (2026-09-15) — nothing validated the workflow files, and a broken one produces
+  *silence*, not a red build.** Adding a `secrets` context to an `if:` condition made `ci.yml`
+  unparseable; GitHub exposes `secrets` to `with:`, `env:` and `run:` only. The result is worse
+  than a failure: **no jobs run at all** — not even `Detect Changes` — the run is named after the
+  file path instead of `CI`, and the PR looks like CI has not started yet. On #1470 only the
+  separate Gitleaks workflow reported, and it took a round-trip to notice. A `yaml.safe_load`
+  check called the broken file **VALID**, because it can only see syntax, not which contexts
+  GitHub permits where. `lint-workflows` now runs `actionlint` (pinned 1.7.12), gated into
+  `quality-gate`. Verified both directions before wiring: clean tree exits 0, and reintroducing
+  the bug exits 1 with `context "secrets" is not allowed here`. **shellcheck is off on purpose** —
+  22 findings, all info/style/warning (19× SC2086), which is a separate cleanup; the flag to
+  re-enable is documented in `ci-cd.md`. **Lesson: YAML-valid is not Actions-valid.** More
+  generally, when a config file is consumed by someone else's engine, validating it with a
+  generic parser proves almost nothing.
+
 - **FIXED (2026-09-09) — `kelta-ui/app`'s 223 test files / ~2,700 tests never ran, and could not
   have.** Two independent failures stacked. (1) Neither workflow invoked `npm run test` for
   `kelta-ui/app`: `ci.yml`'s `test-frontend` ran the full lint/typecheck/format/coverage set in

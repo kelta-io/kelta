@@ -780,15 +780,61 @@ jobs:
       - name: Audit production dependencies
         run: node ci/dependency-audit.mjs
 
+  # ===========================================================================
+  # Lint the workflow files themselves.
+  #
+  # Added after a `secrets` context in an `if:` condition broke this whole file:
+  # GitHub exposes `secrets` only to `with:`, `env:` and `run:`, never to `if:`.
+  # The failure mode is nastier than a normal red build — the file does not parse,
+  # so NO jobs run at all (not even Detect Changes), the run is named after the
+  # file path instead of "CI", and the PR looks like CI simply has not started.
+  # A YAML parse cannot catch it; actionlint can, and does:
+  #   context "secrets" is not allowed here. available contexts are "env", ...
+  #
+  # Scope, stated openly: shellcheck is OFF. The workflows carry 22 shell findings
+  # (19x SC2086 quoting, 2x SC2129 style, 1x SC2034) — all info/style/warning, none
+  # errors. Fixing them means editing live CI shell, which is its own change with its
+  # own risk; enabling it here would only have blocked this one. Turn it on by
+  # dropping `-shellcheck=` once those are cleaned up.
+  #
+  # The `if: false` ignore is narrow and deliberate: two CI-DB steps are disabled on
+  # purpose (see their comments), and actionlint's advice to delete the `if:` is
+  # wrong for them.
+  # ===========================================================================
+  lint-workflows:
+    name: Lint Workflows
+    needs: changes
+    runs-on: k8s-runner
+    if: needs.changes.outputs.workflows == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install actionlint
+        run: |
+          curl -fsSL --retry 5 --retry-delay 3 \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            | tar xz -C /usr/local/bin actionlint
+          actionlint -version
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+
+      # Runner labels come from .github/actionlint.yaml; without it the self-hosted
+      # pools read as unknown labels and bury the real findings.
+      - name: Lint workflows
+        run: |
+          actionlint -color -shellcheck= \
+            -ignore 'constant expression "false" in condition'
+
   quality-gate:
     name: Quality Gate
-    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, integration-tests, e2e, quickstart, worker-image-is-jvm, dependency-audit]
+    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, integration-tests, e2e, quickstart, worker-image-is-jvm, dependency-audit, lint-workflows]
     if: always()
     runs-on: k8s-runner
     steps:
       - name: Check job results
         run: |
-          for job in test-java test-runtime test-runtime-modules test-frontend integration-tests e2e quickstart worker-image-is-jvm dependency-audit; do
+          for job in test-java test-runtime test-runtime-modules test-frontend integration-tests e2e quickstart worker-image-is-jvm dependency-audit lint-workflows; do
             result_var="${job//-/_}_result"
             case "${job}" in
               test-java)         result="${{ needs.test-java.result }}" ;;
@@ -800,6 +846,7 @@ jobs:
               quickstart)        result="${{ needs.quickstart.result }}" ;;
               worker-image-is-jvm) result="${{ needs.worker-image-is-jvm.result }}" ;;
               dependency-audit)  result="${{ needs.dependency-audit.result }}" ;;
+              lint-workflows)    result="${{ needs.lint-workflows.result }}" ;;
             esac
             echo "${job}: ${result}"
             if [[ "${result}" == "failure" || "${result}" == "cancelled" ]]; then
