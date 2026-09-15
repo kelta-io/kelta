@@ -64,7 +64,15 @@ jobs:
         if: env.KELTA_TOKEN != ''
         run: |
           set -euo pipefail
-          BASE="${KELTA_DOWNLOADS_URL:-https://downloads.kelta.io}"
+          # The runner is in-cluster and the cluster's split DNS does not resolve
+          # downloads.kelta.io, so pull the binary from the Service that backs it —
+          # the same thing the smoke test does. KELTA_DOWNLOADS_URL overrides.
+          if [ -z "${KELTA_DOWNLOADS_URL:-}" ]; then
+            NS=emf
+            kubectl -n kelta get deploy emf-cli-downloads >/dev/null 2>&1 && NS=kelta
+            KELTA_DOWNLOADS_URL="http://emf-cli-downloads.${NS}.svc.cluster.local"
+          fi
+          BASE="$KELTA_DOWNLOADS_URL"
           VERSION=$(curl -fsS "${BASE}/cli/manifest.json" | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -1)
           [ -n "$VERSION" ] || { echo "::error::could not read CLI version from ${BASE}/cli/manifest.json"; exit 1; }
           mkdir -p "$HOME/.local/bin"
