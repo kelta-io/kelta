@@ -628,6 +628,71 @@ class DashboardDataServiceTest {
     }
 
     // =========================================================================
+    // Classified widget errors (deleted field at execution time)
+    // =========================================================================
+
+    @Test
+    void shouldReportUnknownFieldErrorWhenAggregateFieldWasDeleted() {
+        CollectionDefinition collDef = CollectionDefinition.builder()
+            .name("accounts")
+            .displayName("Accounts")
+            .addField(FieldDefinition.string("name"))
+            .build();
+        when(collectionRegistry.get("accounts")).thenReturn(collDef);
+        when(queryEngine.executeQuery(eq(collDef), any())).thenThrow(
+            new InvalidQueryException("amount", "Aggregation field does not exist in collection 'accounts'"));
+
+        Map<String, Object> component = buildComponent("comp-deleted", "metric",
+            Map.of("collectionName", "accounts", "aggregateFunction", "SUM", "aggregateField", "amount"));
+
+        WidgetExecutionException ex = assertThrows(WidgetExecutionException.class,
+            () -> service.executeWidget(component, Map.of(), null));
+
+        assertEquals("Unknown field 'amount' on collection 'accounts'", ex.getMessage());
+    }
+
+    @Test
+    void shouldSurfaceClassifiedErrorThroughExecuteDashboardNotGenericMessage() {
+        CollectionDefinition collDef = CollectionDefinition.builder()
+            .name("accounts")
+            .displayName("Accounts")
+            .addField(FieldDefinition.string("name"))
+            .build();
+        when(collectionRegistry.get("accounts")).thenReturn(collDef);
+        when(queryEngine.executeQuery(eq(collDef), any())).thenThrow(
+            new InvalidQueryException("region", "Filter field does not exist in collection 'accounts'"));
+
+        Map<String, Object> component = buildComponent("comp-deleted-2", "chart",
+            Map.of("collectionName", "accounts", "groupByField", "region"));
+
+        Map<String, WidgetResult> results = service.executeDashboard(
+            "dash-x", List.of(component), Map.of(), null);
+
+        assertEquals("Unknown field 'region' on collection 'accounts'", results.get("comp-deleted-2").error());
+        assertNotEquals("Internal error executing widget", results.get("comp-deleted-2").error());
+    }
+
+    @Test
+    void shouldKeepOriginalMessageWhenFieldExistsButQueryStillInvalid() {
+        CollectionDefinition collDef = CollectionDefinition.builder()
+            .name("accounts")
+            .displayName("Accounts")
+            .addField(FieldDefinition.string("amount"))
+            .build();
+        when(collectionRegistry.get("accounts")).thenReturn(collDef);
+        when(queryEngine.executeQuery(eq(collDef), any())).thenThrow(
+            new InvalidQueryException("amount", "value could not be parsed as a number"));
+
+        Map<String, Object> component = buildComponent("comp-badvalue", "metric",
+            Map.of("collectionName", "accounts", "aggregateFunction", "SUM", "aggregateField", "amount"));
+
+        WidgetExecutionException ex = assertThrows(WidgetExecutionException.class,
+            () -> service.executeWidget(component, Map.of(), null));
+
+        assertFalse(ex.getMessage().startsWith("Unknown field"));
+    }
+
+    // =========================================================================
     // Unsupported type test
     // =========================================================================
 

@@ -2,6 +2,7 @@ package io.kelta.runtime.model.system;
 
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.model.FieldType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -115,5 +116,15 @@ class SystemCollectionDefinitionsTest {
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("columnNumber field not found"));
         assertEquals(0, columnNumber.defaultValue());
+    }
+
+    @Test
+    @DisplayName("Should make dashboard-components.reportId an optional LOOKUP (KLT-213)")
+    void shouldMakeDashboardComponentReportIdOptionalLookup() {
+        CollectionDefinition dashboardComponents = SystemCollectionDefinitions.dashboardComponents();
+        FieldDefinition reportId = dashboardComponents.getField("reportId");
+        assertNotNull(reportId);
+        assertEquals(FieldType.LOOKUP, reportId.type());
+        assertTrue(reportId.nullable(), "reportId must be nullable — collectionName is a valid alternative target");
     }
 }

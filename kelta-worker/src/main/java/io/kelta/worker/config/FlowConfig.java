@@ -390,6 +390,16 @@ public class FlowConfig {
     }
 
     @Bean
+    public io.kelta.worker.service.DashboardComponentConfigHook dashboardComponentConfigHook(
+            BeforeSaveHookRegistry hookRegistry,
+            io.kelta.worker.service.DashboardComponentValidator dashboardComponentValidator) {
+        io.kelta.worker.service.DashboardComponentConfigHook hook =
+                new io.kelta.worker.service.DashboardComponentConfigHook(dashboardComponentValidator);
+        hookRegistry.register(hook);
+        return hook;
+    }
+
+    @Bean
     public FlowScheduleSyncHook flowScheduleSyncHook(
             BeforeSaveHookRegistry hookRegistry,
             io.kelta.worker.repository.ScheduledJobRepository scheduledJobRepository,

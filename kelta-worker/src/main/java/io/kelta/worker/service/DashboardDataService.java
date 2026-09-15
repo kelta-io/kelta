@@ -153,14 +153,19 @@ public class DashboardDataService {
             rejectMaskedField(maskedFields, f.fieldName(), "filter on");
         }
 
-        WidgetResult result = switch (componentType.toLowerCase()) {
-            case "metric" -> executeMetricWidget(targetCollection, config, allFilters);
-            case "chart" -> executeChartWidget(targetCollection, config, allFilters, maskedFields, principal);
-            case "table" -> executeTableWidget(targetCollection, config, allFilters, runtimeParams,
-                maskedFields, principal);
-            case "recent" -> executeRecentWidget(targetCollection, config, allFilters, principal);
-            default -> throw new WidgetExecutionException("Unsupported widget type: " + componentType);
-        };
+        WidgetResult result;
+        try {
+            result = switch (componentType.toLowerCase()) {
+                case "metric" -> executeMetricWidget(targetCollection, config, allFilters);
+                case "chart" -> executeChartWidget(targetCollection, config, allFilters, maskedFields, principal);
+                case "table" -> executeTableWidget(targetCollection, config, allFilters, runtimeParams,
+                    maskedFields, principal);
+                case "recent" -> executeRecentWidget(targetCollection, config, allFilters, principal);
+                default -> throw new WidgetExecutionException("Unsupported widget type: " + componentType);
+            };
+        } catch (InvalidQueryException e) {
+            throw classifyQueryException(e, targetCollection);
+        }
 
         // Only cache non-masked collections (see above).
         if (!maskingConfigured) {
@@ -171,6 +176,25 @@ public class DashboardDataService {
             componentId, componentType, targetCollection.name());
 
         return result;
+    }
+
+    /**
+     * Turns a query-engine-level {@link InvalidQueryException} (thrown when a widget's
+     * config references a field that no longer exists — e.g. deleted after the widget
+     * was configured) into the classified widget error text callers rely on, instead of
+     * leaking the query engine's own field-agnostic wording. Anything else (a bad value
+     * type, an operator/type mismatch) keeps its original message; only the truly
+     * unexpected escapes to the generic "Internal error executing widget" in
+     * {@link #executeDashboard}.
+     */
+    private WidgetExecutionException classifyQueryException(InvalidQueryException e,
+                                                             CollectionDefinition collection) {
+        String field = e.getFieldName();
+        if (field != null && collection.getField(field) == null) {
+            return new WidgetExecutionException(
+                "Unknown field '" + field + "' on collection '" + collection.name() + "'");
+        }
+        return new WidgetExecutionException(e.getMessage());
     }
 
     /** Rejects using a masked field as a predicate (filter / sort / group-by), mirroring reports. */
