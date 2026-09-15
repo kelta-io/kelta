@@ -64,6 +64,17 @@ async function confirmDangerous(def: RegisteredCommand, global: GlobalOptions): 
   }
 }
 
+/** Human-readable rendering of every error, not just the first. */
+function formatTableError(mapped: CliError): string {
+  const entries = mapped.errors && mapped.errors.length > 0 ? mapped.errors : undefined;
+  if (!entries) return `Error [${mapped.code}]: ${mapped.message}\n`;
+  return (
+    entries
+      .map((e) => `Error [${e.code ?? mapped.code}]: ${e.detail ?? mapped.message}`)
+      .join('\n') + '\n'
+  );
+}
+
 /** Execute one command definition with already-merged raw input. */
 export async function dispatch(
   leaf: Command,
@@ -92,9 +103,7 @@ export async function dispatch(
     const mapped = mapError(error);
     const format = pickFormat(global.output, process.stderr.isTTY ?? false);
     process.stderr.write(
-      format === 'table'
-        ? `Error [${mapped.code}]: ${mapped.message}\n`
-        : toErrorPayload(mapped) + '\n'
+      format === 'table' ? formatTableError(mapped) : toErrorPayload(mapped) + '\n'
     );
     process.exitCode = mapped.exitCode;
   }

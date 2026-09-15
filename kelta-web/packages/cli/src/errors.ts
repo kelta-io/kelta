@@ -11,11 +11,25 @@ export const EXIT = {
   CONFLICT: 5,
 } as const;
 
+/** One JSON:API error object, as sent by the platform (`JsonApiError#toMap`). */
+export interface JsonApiErrorEntry {
+  status?: string;
+  code?: string;
+  detail?: string;
+  title?: string;
+  source?: Record<string, unknown>;
+  meta?: Record<string, unknown> & { requestId?: string };
+}
+
 export interface CliErrorOptions {
   code: string;
   exitCode: number;
   status?: number;
   requestId?: string;
+  source?: Record<string, unknown>;
+  meta?: Record<string, unknown>;
+  /** The full JSON:API `errors[]` array, when the failure came from one. */
+  errors?: JsonApiErrorEntry[];
 }
 
 /** A fully-mapped CLI failure: stable `code`, exit code, optional HTTP context. */
@@ -24,6 +38,9 @@ export class CliError extends Error {
   readonly exitCode: number;
   readonly status?: number;
   readonly requestId?: string;
+  readonly source?: Record<string, unknown>;
+  readonly meta?: Record<string, unknown>;
+  readonly errors?: JsonApiErrorEntry[];
 
   constructor(message: string, options: CliErrorOptions) {
     super(message);
@@ -32,18 +49,15 @@ export class CliError extends Error {
     this.exitCode = options.exitCode;
     this.status = options.status;
     this.requestId = options.requestId;
+    this.source = options.source;
+    this.meta = options.meta;
+    this.errors = options.errors;
     Object.setPrototypeOf(this, CliError.prototype);
   }
 }
 
 interface JsonApiErrorBody {
-  errors?: {
-    status?: string;
-    code?: string;
-    detail?: string;
-    title?: string;
-    meta?: { requestId?: string };
-  }[];
+  errors?: JsonApiErrorEntry[];
 }
 
 /**
@@ -106,12 +120,16 @@ export function mapError(error: unknown): CliError {
     }
     const status = error.response.status;
     const body = error.response.data as JsonApiErrorBody | undefined;
-    const first = body?.errors?.[0];
+    const entries = body?.errors ?? [];
+    const first = entries[0];
     return new CliError(first?.detail ?? first?.title ?? `Request failed with status ${status}`, {
       code: first?.code ?? codeForStatus(status),
       exitCode: exitCodeForStatus(status),
       status,
       requestId: first?.meta?.requestId,
+      source: first?.source,
+      meta: first?.meta,
+      errors: entries.length > 0 ? entries : undefined,
     });
   }
 
@@ -130,14 +148,22 @@ export function mapError(error: unknown): CliError {
   return new CliError('Unknown error', { code: 'ERROR', exitCode: EXIT.API });
 }
 
-/** Machine-readable single-line error payload written to stderr in non-table modes. */
+/**
+ * Machine-readable single-line error payload written to stderr in non-table
+ * modes. `error` is `errors[0]` flattened onto the stable CliError fields for
+ * backwards compatibility; `errors` (when the failure came from a JSON:API
+ * response) carries every entry — source, meta, and all — so callers no
+ * longer have to reach past the first validation failure.
+ */
 export function toErrorPayload(error: CliError): string {
   return JSON.stringify({
     error: {
       code: error.code,
       status: error.status,
       detail: error.message,
-      requestId: error.requestId,
+      source: error.source,
+      meta: error.meta,
     },
+    ...(error.errors && error.errors.length > 0 ? { errors: error.errors } : {}),
   });
 }
