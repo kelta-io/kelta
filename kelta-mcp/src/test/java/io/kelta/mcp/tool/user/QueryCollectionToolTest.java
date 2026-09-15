@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.List;
 import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
@@ -74,6 +75,32 @@ class QueryCollectionToolTest {
     }
 
     @Test
+    void buildQueryStringBuildsInFromArray() {
+        String q = QueryCollectionTool.buildQueryString(Map.of(
+                "filter", Map.of("status", Map.of("IN", List.of("a", "b")))));
+
+        assertThat(q).contains("filter[status][in]=a,b");
+    }
+
+    @Test
+    void buildQueryStringIgnoresNullInValue() {
+        Map<String, Object> ops = new java.util.HashMap<>();
+        ops.put("IN", null);
+        String q = QueryCollectionTool.buildQueryString(Map.of(
+                "filter", Map.of("status", ops)));
+
+        assertThat(q).doesNotContain("[in]");
+    }
+
+    @Test
+    void buildQueryStringBuildsInFromCsvString() {
+        String q = QueryCollectionTool.buildQueryString(Map.of(
+                "filter", Map.of("status", Map.of("IN", "a,b"))));
+
+        assertThat(q).contains("filter[status][in]=a,b");
+    }
+
+    @Test
     void buildQueryStringPassesThroughCaseInsensitiveOperators() {
         // ICONTAINS / ISTARTS / IENDS / IEQ are real worker operators; they
         // must survive buildQueryString unchanged.
@@ -91,6 +118,8 @@ class QueryCollectionToolTest {
                 Map.of("price", Map.of("GTE", 100, "LTE", 1000)))).isNull();
         assertThat(QueryCollectionTool.validateFilterOperators(
                 Map.of("phone", Map.of("ISNULL", "true")))).isNull();
+        assertThat(QueryCollectionTool.validateFilterOperators(
+                Map.of("status", Map.of("IN", List.of("a", "b"))))).isNull();
     }
 
     @Test
@@ -98,10 +127,6 @@ class QueryCollectionToolTest {
         // Operators that look plausible but the worker doesn't recognize
         // — these used to be silently forwarded and dropped. Now the MCP
         // layer rejects them with a message that points at the workaround.
-        assertThat(QueryCollectionTool.validateFilterOperators(
-                Map.of("status", Map.of("IN", "ACTIVE,PENDING"))))
-                .contains("IN")
-                .contains("Workarounds");
         assertThat(QueryCollectionTool.validateFilterOperators(
                 Map.of("total", Map.of("BETWEEN", "100,1000"))))
                 .contains("BETWEEN")
@@ -179,5 +204,33 @@ class QueryCollectionToolTest {
         assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
         wm.verify(WireMock.getRequestedFor(urlEqualTo("/api/users?filter[status][EQ]=ACTIVE&sort=lastName"))
                 .withHeader("Authorization", equalTo("Bearer klt_q_test")));
+    }
+
+    @Test
+    void forwardsInFilterAsSingleQuery() {
+        // Previously IN was rejected at the MCP boundary and the tool
+        // description told the agent to issue multiple queries. Now a single
+        // {status: {IN: [...]}} filter round-trips to the worker's `in`
+        // grammar in one call.
+        wm.stubFor(get(urlEqualTo("/api/customers?filter[status][in]=a,b"))
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":[]}")));
+
+        SyncToolSpecification spec = tool.toSpecification();
+        CallToolRequest req = new CallToolRequest("query_collection", Map.of(
+                "collection", "customers",
+                "filter", Map.of("status", Map.of("IN", List.of("a", "b")))
+        ), null);
+
+        CallToolResult result = spec.callHandler().apply(null, req);
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(WireMock.getRequestedFor(urlEqualTo("/api/customers?filter[status][in]=a,b")));
+    }
+
+    @Test
+    void descriptionNoLongerAdvisesMultipleQueriesForIn() {
+        Tool t = tool.toSpecification().tool();
+        assertThat(t.description()).doesNotContain("IN/OR");
+        assertThat(t.description()).contains("IN");
     }
 }

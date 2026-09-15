@@ -487,6 +487,26 @@ class DashboardDataServiceTest {
         assertEquals(FilterOperator.EQ, filters.get(0).operator());
     }
 
+    @Test
+    void shouldParseInOperatorFilter() {
+        List<Map<String, Object>> filtersList = List.of(
+            Map.of("field", "status", "operator", "in", "value", List.of("a", "b")));
+
+        List<FilterCondition> filters = service.parseFilters(filtersList);
+        assertEquals(1, filters.size());
+        assertEquals(FilterOperator.IN, filters.get(0).operator());
+    }
+
+    @Test
+    void shouldThrowWidgetExecutionExceptionNamingUnknownOperator() {
+        List<Map<String, Object>> filtersList = List.of(
+            Map.of("field", "status", "operator", "nope", "value", "x"));
+
+        WidgetExecutionException ex = assertThrows(WidgetExecutionException.class,
+            () -> service.parseFilters(filtersList));
+        assertTrue(ex.getMessage().contains("nope"));
+    }
+
     // =========================================================================
     // Collection resolution tests
     // =========================================================================

@@ -227,6 +227,34 @@ Link generation lives in `io.kelta.jsonapi.PaginationLinks.build(...)`; the dyna
 
 MCP tools (`query_collection`, `list_picklists`, `list_approvals`) take flat `pageNumber` / `pageSize` arguments as an ergonomic affordance for LLM callers, and translate them to the bracket form when constructing the HTTP request to the gateway. The same `page[size]` cap (200) applies — the MCP tool's input schema declares `maximum: 200` and the call handler clamps defensively.
 
+## REST API: filter grammar
+
+Every `filter…` query key must be one of two shapes:
+
+```
+filter[field][op]=value   # e.g. filter[status][eq]=active, filter[id][in]=a,b
+filter[field]=value       # shorthand — behaves as [eq]
+```
+
+Any other `filter…`-prefixed key (e.g. the HTML-form array shape `filter[status][in][]=a`,
+or an indexed variant `filter[status][in][0]=a`) is rejected with `400 INVALID_QUERY` whose
+detail states the grammar above, rather than being silently dropped (which used to return the
+whole, unfiltered collection). `io.kelta.runtime.query.FilterCondition.fromParams` implements
+this; non-`filter…` keys (`sort`, `page[…]`, `fields`, `include`) are untouched.
+
+`io.kelta.runtime.query.FilterOperator.parse(String)` is the **single** operator vocabulary
+shared by the JSON:API filter grammar above, dashboard widget filters
+(`DashboardDataService.mapOperator`), and the MCP `query_collection` tool. It resolves, case-insensitively:
+- the canonical enum names (`eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `isnull`, `contains`, `starts`,
+  `ends`, `icontains`, `istarts`, `iends`, `ieq`, `in`)
+- the `any` alias for `in`
+- the end-user-UI aliases: `equals`, `not_equals`, `greater_than`, `less_than`,
+  `greater_than_or_equal`, `less_than_or_equal`, `starts_with`, `ends_with`
+
+An unrecognized token throws `InvalidFilterException` naming the token and listing the accepted
+names — callers must not fall back to `EQ` on an unknown operator (a dashboard widget filter
+with a bad operator is a widget error, not a silently-wrong query).
+
 ## TypeScript
 
 ### Naming

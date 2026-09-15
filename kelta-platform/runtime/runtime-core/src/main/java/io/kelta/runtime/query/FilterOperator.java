@@ -1,11 +1,15 @@
 package io.kelta.runtime.query;
 
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
+
 /**
  * Filter operators for query filtering.
- * 
+ *
  * <p>These operators are used in filter conditions to specify how field values
  * should be compared against filter values.
- * 
+ *
  * @since 1.0.0
  */
 public enum FilterOperator {
@@ -99,5 +103,65 @@ public enum FilterOperator {
      * <p>Usage (internal): created programmatically via
      * {@code new FilterCondition("field", FilterOperator.IN, listOfValues)}
      */
-    IN
+    IN;
+
+    /**
+     * Canonical enum names plus the UI's aliases (e.g. {@code equals}, {@code any}),
+     * keyed uppercase for case-insensitive lookup.
+     */
+    private static final Map<String, FilterOperator> ALIASES = buildAliases();
+
+    private static Map<String, FilterOperator> buildAliases() {
+        Map<String, FilterOperator> map = new LinkedHashMap<>();
+        for (FilterOperator op : values()) {
+            map.put(op.name(), op);
+        }
+        map.put("ANY", IN);
+        map.put("EQUALS", EQ);
+        map.put("NOT_EQUALS", NEQ);
+        map.put("GREATER_THAN", GT);
+        map.put("LESS_THAN", LT);
+        map.put("GREATER_THAN_OR_EQUAL", GTE);
+        map.put("LESS_THAN_OR_EQUAL", LTE);
+        map.put("STARTS_WITH", STARTS);
+        map.put("ENDS_WITH", ENDS);
+        return Map.copyOf(map);
+    }
+
+    /**
+     * Resolves a filter operator token — a canonical name (case-insensitive,
+     * e.g. {@code eq}, {@code in}), the {@code any} alias for {@link #IN}, or
+     * an end-user-UI alias ({@code equals}, {@code not_equals},
+     * {@code greater_than}, {@code less_than}, {@code greater_than_or_equal},
+     * {@code less_than_or_equal}, {@code starts_with}, {@code ends_with}).
+     *
+     * @param token the operator token
+     * @return the resolved operator
+     * @throws InvalidFilterException if the token is blank or unrecognized;
+     *         the message lists the accepted canonical names
+     */
+    public static FilterOperator parse(String token) {
+        if (token == null || token.isBlank()) {
+            throw new InvalidFilterException(
+                    "filter operator is required; accepted: " + acceptedNames());
+        }
+        FilterOperator operator = ALIASES.get(token.trim().toUpperCase(Locale.ROOT));
+        if (operator == null) {
+            throw new InvalidFilterException(
+                    "unknown filter operator '" + token.toLowerCase(Locale.ROOT)
+                            + "'; accepted: " + acceptedNames());
+        }
+        return operator;
+    }
+
+    private static String acceptedNames() {
+        StringBuilder sb = new StringBuilder();
+        for (FilterOperator op : values()) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(op.name().toLowerCase(Locale.ROOT));
+        }
+        return sb.toString();
+    }
 }
