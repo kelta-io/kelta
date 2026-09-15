@@ -98,6 +98,8 @@ export type {
   CreateLayoutRuleRequest,
   UpdateLayoutRuleRequest,
   ListView,
+  ListViewType,
+  ListViewTypeConfig,
   CreateListViewRequest,
   Report,
   CreateReportRequest,

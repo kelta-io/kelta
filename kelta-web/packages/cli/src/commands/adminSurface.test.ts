@@ -226,6 +226,106 @@ describe('list-views create', () => {
   });
 });
 
+describe('list-views renderer flags', () => {
+  function listViewCommand(name: string): RegisteredCommand {
+    return layoutCommands.filter((c) => c.group === 'list-views' && c.name === name)[0];
+  }
+
+  it('create publishes a kanban board from --view-type/--lane-field/--card-fields', async () => {
+    const axios = fakeAxios(COLLECTION_ROUTE);
+    const create = listViewCommand('create');
+    await create.handler(
+      ctx(axios),
+      create.input.parse({
+        collection: 'invoices',
+        name: 'The board',
+        columns: 'title,status',
+        visibility: 'public',
+        viewType: 'kanban',
+        laneField: 'status',
+        cardFields: 'title, tier',
+      }) as never
+    );
+    const [, body] = axios.post.mock.calls.find(([url]) => url === '/api/list-views')!;
+    const attributes = (body as { data: { attributes: Record<string, unknown> } }).data.attributes;
+    // the column's CHECK only accepts the uppercase form
+    expect(attributes.viewType).toBe('KANBAN');
+    expect(attributes.visibility).toBe('PUBLIC');
+    // same row the MCP create_listview call writes
+    expect(attributes.typeConfig).toEqual({
+      kanban: { laneField: 'status', cardFields: ['title', 'tier'] },
+    });
+  });
+
+  it('create leaves the renderer attributes off when no flag is given', async () => {
+    const axios = fakeAxios(COLLECTION_ROUTE);
+    const create = listViewCommand('create');
+    await create.handler(
+      ctx(axios),
+      create.input.parse({ collection: 'invoices', name: 'Plain', columns: 'title' }) as never
+    );
+    const [, body] = axios.post.mock.calls.find(([url]) => url === '/api/list-views')!;
+    const attributes = (body as { data: { attributes: Record<string, unknown> } }).data.attributes;
+    expect(attributes).not.toHaveProperty('viewType');
+    expect(attributes).not.toHaveProperty('typeConfig');
+  });
+
+  it('rejects an unknown --view-type before hitting the API', async () => {
+    const axios = fakeAxios(COLLECTION_ROUTE);
+    const create = listViewCommand('create');
+    await expect(
+      create.handler(
+        ctx(axios),
+        create.input.parse({
+          collection: 'invoices',
+          name: 'x',
+          columns: 'title',
+          viewType: 'timeline',
+        }) as never
+      )
+    ).rejects.toThrow(/view-type/);
+    expect(axios.post).not.toHaveBeenCalled();
+  });
+
+  it('rejects --card-fields without --lane-field (card fields are stored with it)', async () => {
+    const axios = fakeAxios(COLLECTION_ROUTE);
+    const create = listViewCommand('create');
+    await expect(
+      create.handler(
+        ctx(axios),
+        create.input.parse({
+          collection: 'invoices',
+          name: 'x',
+          columns: 'title',
+          viewType: 'KANBAN',
+          cardFields: 'title',
+        }) as never
+      )
+    ).rejects.toThrow(/lane-field/);
+  });
+
+  it('update patches only what was passed', async () => {
+    const axios = fakeAxios(COLLECTION_ROUTE);
+    const update = listViewCommand('update');
+    await update.handler(
+      ctx(axios),
+      update.input.parse({ listViewId: 'lv-1', viewType: 'GALLERY' }) as never
+    );
+    expect(axios.patch).toHaveBeenCalledWith('/api/list-views/lv-1', {
+      data: { type: 'list-views', id: 'lv-1', attributes: { viewType: 'GALLERY' } },
+    });
+  });
+
+  it('update refuses an empty change set rather than PATCHing nothing', async () => {
+    const axios = fakeAxios(COLLECTION_ROUTE);
+    const update = listViewCommand('update');
+    await expect(
+      update.handler(ctx(axios), update.input.parse({ listViewId: 'lv-1' }) as never)
+    ).rejects.toThrow(/Nothing to update/);
+    expect(axios.patch).not.toHaveBeenCalled();
+  });
+});
+
 describe('layouts update', () => {
   it('uses the camelCase pageLayouts body type (worker PATCH contract)', async () => {
     const axios = fakeAxios();

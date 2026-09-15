@@ -89,6 +89,7 @@ import { FilterBar } from '@/components/FilterBar'
 import { ViewSelector } from '@/components/ViewSelector/ViewSelector'
 import { useSavedViews, type SavedView } from '@/hooks/useSavedViews'
 import { useSharedListViews } from '@/hooks/useSharedListViews'
+import { useViewTypeOverrides } from '@/hooks/useViewTypeOverrides'
 import { isSharedViewId, orderFieldsByView } from './listViewMapping'
 import { toast } from 'sonner'
 import { useI18n } from '@/context/I18nContext'
@@ -190,6 +191,12 @@ export function ObjectListPage(): React.ReactElement {
   // (admin-authored PUBLIC `list-views` rows, read-only with a `shared:` id prefix).
   const savedViews = useSavedViews(collectionName || '')
   const { sharedViews } = useSharedListViews(collectionName, schema?.id)
+  // A shared view publishes its renderer; this is the user's own override of it.
+  const {
+    isLoaded: viewTypeOverridesLoaded,
+    overrideFor: viewTypeOverrideFor,
+    saveOverride: saveViewTypeOverride,
+  } = useViewTypeOverrides(collectionName || '')
   const allViews = useMemo(
     () => [...sharedViews, ...savedViews.views],
     [sharedViews, savedViews.views]
@@ -530,8 +537,10 @@ export function ObjectListPage(): React.ReactElement {
       setColumnOverride(null)
       setDensity(view?.density ?? 'normal')
       setGroupBy(view?.groupBy ?? null)
-      setViewType(view?.viewType ?? 'table')
-      setTypeConfig(view?.typeConfig ?? null)
+      // The user's own renderer choice for a shared view wins over the published one.
+      const override = viewTypeOverrideFor(view?.id)
+      setViewType(override?.viewType ?? view?.viewType ?? 'table')
+      setTypeConfig(override?.typeConfig ?? view?.typeConfig ?? null)
       if (view) {
         updateParams({
           filter: view.filters.length > 0 ? JSON.stringify(view.filters) : undefined,
@@ -550,7 +559,7 @@ export function ObjectListPage(): React.ReactElement {
         })
       }
     },
-    [updateParams]
+    [updateParams, viewTypeOverrideFor]
   )
 
   const handleSelectView = useCallback(
@@ -558,6 +567,39 @@ export function ObjectListPage(): React.ReactElement {
       applyView(viewId ? (allViews.find((v) => v.id === viewId) ?? null) : null)
     },
     [applyView, allViews]
+  )
+
+  /**
+   * Toolbar renderer switch. On a shared view this is the user's personal
+   * override of what the admin published — persisted per user so it survives a
+   * reload; the published row is never touched. Elsewhere it stays page state,
+   * as before (a personal view records it when the user saves the view).
+   */
+  const persistViewTypeOverride = useCallback(
+    (nextViewType: SavedViewType, nextTypeConfig: SavedView['typeConfig'] | null) => {
+      if (!activeViewId || !isSharedViewId(activeViewId)) return
+      saveViewTypeOverride(activeViewId, {
+        viewType: nextViewType,
+        typeConfig: nextTypeConfig ?? undefined,
+      })
+    },
+    [activeViewId, saveViewTypeOverride]
+  )
+
+  const handleViewTypeChange = useCallback(
+    (nextViewType: SavedViewType) => {
+      setViewType(nextViewType)
+      persistViewTypeOverride(nextViewType, typeConfig)
+    },
+    [persistViewTypeOverride, typeConfig]
+  )
+
+  const handleTypeConfigChange = useCallback(
+    (nextTypeConfig: SavedView['typeConfig'] | null) => {
+      setTypeConfig(nextTypeConfig)
+      persistViewTypeOverride(viewType, nextTypeConfig)
+    },
+    [persistViewTypeOverride, viewType]
   )
 
   const handleSaveView = useCallback(
@@ -626,17 +668,21 @@ export function ObjectListPage(): React.ReactElement {
   const appliedDefaultRef = useRef(false)
   useEffect(() => {
     if (appliedDefaultRef.current) return
+    // Wait for the user's renderer overrides, or a shared board would flash in
+    // for one paint before the user's own choice of table replaced it.
+    if (!viewTypeOverridesLoaded) return
     if (viewId) {
       const linked = allViews.find((v) => v.id === viewId)
       if (linked) {
         appliedDefaultRef.current = true
+        const override = viewTypeOverrideFor(linked.id)
         // Deferred: no synchronous setState inside the effect (cascading-render rule).
         const timer = setTimeout(() => {
           setActiveViewId(linked.id)
           setDensity(linked.density ?? 'normal')
           setGroupBy(linked.groupBy ?? null)
-          setViewType(linked.viewType ?? 'table')
-          setTypeConfig(linked.typeConfig ?? null)
+          setViewType(override?.viewType ?? linked.viewType ?? 'table')
+          setTypeConfig(override?.typeConfig ?? linked.typeConfig ?? null)
         }, 0)
         return () => clearTimeout(timer)
       }
@@ -657,7 +703,16 @@ export function ObjectListPage(): React.ReactElement {
       const timer = setTimeout(() => applyView(def), 0)
       return () => clearTimeout(timer)
     }
-  }, [savedViews.views, sharedViews, searchParams, applyView, viewId, allViews])
+  }, [
+    savedViews.views,
+    sharedViews,
+    searchParams,
+    applyView,
+    viewId,
+    allViews,
+    viewTypeOverridesLoaded,
+    viewTypeOverrideFor,
+  ])
 
   // Sort handler. Plain click: single-level cycle asc → desc → none. Shift-click:
   // additive — appends the field as a new level, or cycles/removes its existing level
@@ -966,7 +1021,7 @@ export function ObjectListPage(): React.ReactElement {
                 {VIEW_TYPE_META.map(({ type, icon: Icon }) => (
                   <DropdownMenuItem
                     key={type}
-                    onClick={() => setViewType(type)}
+                    onClick={() => handleViewTypeChange(type)}
                     data-testid={`view-type-${type}`}
                   >
                     <Icon className="mr-2 h-4 w-4" aria-hidden />
@@ -992,7 +1047,7 @@ export function ObjectListPage(): React.ReactElement {
                       <DropdownMenuItem
                         key={f.name}
                         onClick={() =>
-                          setTypeConfig((prev) => ({ ...prev, kanban: { laneField: f.name } }))
+                          handleTypeConfigChange({ ...typeConfig, kanban: { laneField: f.name } })
                         }
                         data-testid={`lane-field-${f.name}`}
                       >
@@ -1020,7 +1075,7 @@ export function ObjectListPage(): React.ReactElement {
                       <DropdownMenuItem
                         key={f.name}
                         onClick={() =>
-                          setTypeConfig((prev) => ({ ...prev, calendar: { dateField: f.name } }))
+                          handleTypeConfigChange({ ...typeConfig, calendar: { dateField: f.name } })
                         }
                         data-testid={`date-field-${f.name}`}
                       >
@@ -1043,13 +1098,11 @@ export function ObjectListPage(): React.ReactElement {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
                   <DropdownMenuItem
-                    onClick={() =>
-                      setTypeConfig((prev) => {
-                        const next = { ...prev }
-                        delete next.gallery
-                        return next
-                      })
-                    }
+                    onClick={() => {
+                      const next = { ...typeConfig }
+                      delete next.gallery
+                      handleTypeConfigChange(next)
+                    }}
                     data-testid="image-field-none"
                   >
                     {t('altViews.none', 'None')}
@@ -1061,7 +1114,7 @@ export function ObjectListPage(): React.ReactElement {
                       <DropdownMenuItem
                         key={f.name}
                         onClick={() =>
-                          setTypeConfig((prev) => ({ ...prev, gallery: { imageField: f.name } }))
+                          handleTypeConfigChange({ ...typeConfig, gallery: { imageField: f.name } })
                         }
                         data-testid={`image-field-${f.name}`}
                       >

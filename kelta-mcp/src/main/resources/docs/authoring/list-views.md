@@ -18,6 +18,45 @@ columns, and a row limit. Stored on the `list-views` system collection
 - `sortField` / `sortDirection` (`ASC` default) — single-column sort.
 - `rowLimit` — integer page size. See "Row limit" below.
 - `chartConfig` — optional JSON chart overlay for the view.
+- `viewType` — `TABLE` (default), `KANBAN`, `CALENDAR` or `GALLERY`. See
+  "Renderer" below.
+- `typeConfig` — optional JSON settings for the chosen renderer.
+
+## Renderer
+
+A view carries the renderer it opens as, so a board can be published
+rather than left for every user to configure. `viewType` is one of:
+
+```
+TABLE  KANBAN  CALENDAR  GALLERY
+```
+
+`typeConfig` holds that renderer's field references, keyed by the
+lowercased view type:
+
+```json
+{
+  "kanban":   { "laneField": "status", "cardFields": ["title", "owner"] },
+  "calendar": { "dateField": "dueAt", "endDateField": "closedAt" },
+  "gallery":  { "imageField": "coverUrl", "titleField": "name",
+                "cardFields": ["stage"] }
+}
+```
+
+Only the section matching `viewType` is read. Each is optional — a
+`KANBAN` view with no `kanban.laneField` falls back to the collection's
+first picklist field, and the same rule applies to the calendar's date
+field. `laneField` must name a `picklist` field: lanes are its values.
+
+Anything the end-user list cannot make sense of degrades to a table
+rather than erroring, so an unrecognized `viewType` (or a `typeConfig`
+that does not match the shapes above) renders as today.
+
+A published renderer is a starting point, not a lock: a user who
+switches the renderer in the list toolbar gets that choice stored
+against their own account for that view, and it wins on their next
+visit. The shared row is unchanged, and other users still see what was
+published.
 
 ## Filter grammar
 

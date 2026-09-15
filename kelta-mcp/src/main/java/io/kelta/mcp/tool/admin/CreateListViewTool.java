@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -51,6 +52,11 @@ public class CreateListViewTool implements AdminTool {
         properties.put("sort", Schemas.string("Default sort field, '-' prefix for descending, e.g. \"-createdAt\"."));
         properties.put("isDefault", Schemas.bool("Whether this is the default list view.", false));
         properties.put("visibility", Schemas.string("PRIVATE (default) or PUBLIC."));
+        properties.put("viewType", Schemas.string(
+                "Renderer everyone opening this view gets: TABLE (default), KANBAN, CALENDAR or GALLERY."));
+        properties.put("typeConfig", Schemas.freeObject(
+                "Settings for the chosen renderer, e.g. "
+                        + "{\"kanban\":{\"laneField\":\"status\",\"cardFields\":[\"title\"]}}."));
 
         Tool tool = Tool.builder()
                 .name("create_listview")
@@ -94,6 +100,14 @@ public class CreateListViewTool implements AdminTool {
                     attrs.put("filters", toFilters(args.get("filter")));
                     if (args.get("visibility") instanceof String v && !v.isBlank()) {
                         attrs.put("visibility", v);
+                    }
+                    // Renderer + its config (V196) — what makes a view publishable as a
+                    // board rather than a column set every user re-configures.
+                    if (args.get("viewType") instanceof String vt && !vt.isBlank()) {
+                        attrs.put("viewType", vt.trim().toUpperCase(Locale.ROOT));
+                    }
+                    if (args.get("typeConfig") instanceof Map<?, ?> tc && !tc.isEmpty()) {
+                        attrs.put("typeConfig", tc);
                     }
                     if (args.get("sort") instanceof String s && !s.isBlank()) {
                         String first = s.split(",")[0].trim();
