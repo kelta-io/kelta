@@ -7,6 +7,7 @@ import io.kelta.runtime.storage.StaleWriteException;
 import io.kelta.runtime.storage.StorageException;
 import io.kelta.runtime.storage.StorageQueryException;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
+import io.kelta.runtime.validation.DuplicateDefaultException;
 import io.kelta.runtime.validation.RecordValidationException;
 import io.kelta.runtime.validation.ValidationException;
 import io.kelta.runtime.validation.ValidationResult;
@@ -240,6 +241,32 @@ public class GlobalExceptionHandler {
             "409", "REFERENCED_RECORD", "Conflict",
             ex.getMessage());
         error.setMeta(Map.of("requestId", requestId, "path", request.getRequestURI()));
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorBody(error));
+    }
+
+    /**
+     * Handles a before-save hook rejecting a second "default" record within its scope
+     * (e.g. a second default list view for the same collection + visibility).
+     * Returns 409 Conflict with the hook-supplied code and the conflicting record's id
+     * in {@code meta.existingId}.
+     */
+    @ExceptionHandler(DuplicateDefaultException.class)
+    public ResponseEntity<Map<String, Object>> handleDuplicateDefault(
+            DuplicateDefaultException ex, HttpServletRequest request) {
+
+        String requestId = generateRequestId();
+        logger.warn("Duplicate default [requestId={}]: {}", requestId, ex.getMessage());
+
+        JsonApiError error = new JsonApiError(
+            "409", ex.getCode(), "Conflict", ex.getMessage());
+        if (ex.getFieldName() != null) {
+            error.setSource(Map.of("pointer", "/data/attributes/" + ex.getFieldName()));
+        }
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("requestId", requestId);
+        meta.put("existingId", ex.getExistingId());
+        error.setMeta(meta);
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(errorBody(error));
     }

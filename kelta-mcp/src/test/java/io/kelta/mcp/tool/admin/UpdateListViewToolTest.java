@@ -130,6 +130,25 @@ class UpdateListViewToolTest {
                 .withRequestBody(WireMock.containing("\"typeConfig\":null")));
     }
 
+    /** KLT-212: rowLimit and an {@code in} filter must reach the PATCH body. */
+    @Test
+    void patchesRowLimitAndInFilter() {
+        wm.stubFor(patch(urlEqualTo("/api/list-views/" + LV_ID))
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":{\"id\":\"" + LV_ID + "\"}}")));
+
+        tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("update_listview", Map.of(
+                        "id", LV_ID,
+                        "rowLimit", 100,
+                        "filter", Map.of("status", Map.of("IN", "a,b"))), null));
+
+        wm.verify(WireMock.patchRequestedFor(urlEqualTo("/api/list-views/" + LV_ID))
+                .withRequestBody(matchingJsonPath("$.data.attributes.rowLimit", equalTo("100")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].field", equalTo("status")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].operator", equalTo("IN")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].value", equalTo("a,b"))));
+    }
+
     @Test
     void mapsSortFieldAndDirection() {
         wm.stubFor(patch(urlEqualTo("/api/list-views/" + LV_ID))

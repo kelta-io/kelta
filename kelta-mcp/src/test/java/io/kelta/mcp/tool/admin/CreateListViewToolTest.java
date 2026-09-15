@@ -153,6 +153,32 @@ class CreateListViewToolTest {
                 .withRequestBody(WireMock.notMatching("(?s).*\"typeConfig\".*")));
     }
 
+    /**
+     * KLT-212: rowLimit must reach the worker so its own BeforeSave hook can
+     * validate it against the fixed page-size grammar {10,25,50,100}, and an
+     * {@code in} filter must forward with its CSV/array value untouched.
+     */
+    @Test
+    void postsRowLimitAndInFilter() {
+        wm.stubFor(post(urlEqualTo("/api/list-views"))
+                .willReturn(aResponse().withStatus(201).withBody("{\"data\":{\"id\":\"lv1\"}}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("create_listview", Map.of(
+                        "collectionName", "projects",
+                        "name", "By status",
+                        "displayedFields", "name",
+                        "rowLimit", 25,
+                        "filter", Map.of("status", Map.of("IN", "a,b"))), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/list-views"))
+                .withRequestBody(matchingJsonPath("$.data.attributes.rowLimit", equalTo("25")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].field", equalTo("status")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].operator", equalTo("IN")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.filters[0].value", equalTo("a,b"))));
+    }
+
     @Test
     void failsWhenCollectionUnknown() {
         wm.stubFor(get(urlEqualTo("/api/collections?filter[name][eq]=nope"))

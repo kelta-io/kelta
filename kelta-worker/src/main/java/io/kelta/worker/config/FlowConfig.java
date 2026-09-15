@@ -48,6 +48,7 @@ import io.kelta.worker.service.ApprovalService;
 import io.kelta.worker.service.AuditBeforeSaveHook;
 import io.kelta.worker.service.CerbosPolicySyncCoalescer;
 import io.kelta.worker.service.CollectionLifecycleManager;
+import io.kelta.worker.service.ListViewConfigHook;
 import io.kelta.worker.service.SetupAuditService;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -446,6 +447,16 @@ public class FlowConfig {
             BeforeSaveHookRegistry hookRegistry,
             SetupAuditService auditService) {
         AuditBeforeSaveHook hook = new AuditBeforeSaveHook(auditService);
+        hookRegistry.register(hook);
+        return hook;
+    }
+
+    @Bean
+    public ListViewConfigHook listViewConfigHook(
+            BeforeSaveHookRegistry hookRegistry,
+            CollectionRegistry collectionRegistry,
+            JdbcTemplate jdbcTemplate) {
+        ListViewConfigHook hook = new ListViewConfigHook(collectionRegistry, jdbcTemplate);
         hookRegistry.register(hook);
         return hook;
     }

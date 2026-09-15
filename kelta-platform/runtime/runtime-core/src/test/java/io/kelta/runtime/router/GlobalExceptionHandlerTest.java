@@ -7,6 +7,7 @@ import io.kelta.runtime.query.InvalidQueryException;
 import io.kelta.runtime.storage.StorageException;
 import io.kelta.runtime.storage.StorageQueryException;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
+import io.kelta.runtime.validation.DuplicateDefaultException;
 import io.kelta.runtime.validation.RecordValidationException;
 import io.kelta.runtime.validation.ValidationError;
 import io.kelta.runtime.validation.ValidationException;
@@ -463,6 +464,23 @@ class GlobalExceptionHandlerTest {
         assertThat(str(e, "code")).isEqualTo("UNIQUE_VIOLATION");
         assertThat(str(e, "detail")).isNotBlank();
         assertThat(source(e)).containsEntry("pointer", "/data/attributes/name");
+    }
+
+    @Test
+    void duplicateDefault_emits409WithCodeAndExistingId() {
+        DuplicateDefaultException ex = new DuplicateDefaultException(
+                "DEFAULT_VIEW_EXISTS", "isDefault", "existing-view-id",
+                "A default list view already exists for this collection and visibility");
+
+        ResponseEntity<Map<String, Object>> response =
+                handler.handleDuplicateDefault(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        Map<String, Object> e = firstError(response);
+        assertThat(str(e, "status")).isEqualTo("409");
+        assertThat(str(e, "code")).isEqualTo("DEFAULT_VIEW_EXISTS");
+        assertThat(source(e)).containsEntry("pointer", "/data/attributes/isDefault");
+        assertThat(meta(e)).containsEntry("existingId", "existing-view-id");
     }
 
     @Test
