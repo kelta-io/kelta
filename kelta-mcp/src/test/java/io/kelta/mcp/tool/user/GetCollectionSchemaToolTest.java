@@ -23,13 +23,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class GetCollectionSchemaToolTest {
 
+    private static final String SCHEMA_BODY = """
+            {"name":"customers","displayName":"Customers","systemCollection":false,\
+            "fields":[{"name":"phone","type":"STRING","required":false,"isRelationship":false}]}""";
     private static final String COLLECTION_BODY = """
             {"data":{"id":"ec000100-0000-0000-0000-000000000003",\
             "type":"collections",\
             "attributes":{"name":"customers","systemCollection":false}}}""";
-    private static final String FIELDS_BODY = """
-            {"metadata":{"totalCount":18},\
-            "data":[{"id":"f1","type":"fields","attributes":{"name":"phone"}}]}""";
+    private static final String RULES_BODY = """
+            {"data":[{"id":"r1","type":"validation-rules",\
+            "attributes":{"name":"amount-check"}}]}""";
 
     private WireMockServer wm;
     private GetCollectionSchemaTool tool;
@@ -66,16 +69,14 @@ class GetCollectionSchemaToolTest {
     }
 
     @Test
-    void fieldsAreFilteredByCollectionIdNotName() {
-        // Regression: the previous version filtered on `filter[collectionName]`
-        // which the worker rejected with HTTP 400 because no such column exists
-        // on FieldDefinition. The fix looks up the collection, extracts its id,
-        // and filters by `filter[collectionId]` — the actual foreign key.
+    void callsSchemaEndpointOnceAndEmbedsValidationRulesByDefault() {
+        wm.stubFor(get(urlEqualTo("/api/collections/customers/schema"))
+                .willReturn(aResponse().withStatus(200).withBody(SCHEMA_BODY)));
         wm.stubFor(get(urlEqualTo("/api/collections/customers"))
                 .willReturn(aResponse().withStatus(200).withBody(COLLECTION_BODY)));
         wm.stubFor(get(urlEqualTo(
-                "/api/fields?filter[collectionId][EQ]=ec000100-0000-0000-0000-000000000003&page[size]=200"))
-                .willReturn(aResponse().withStatus(200).withBody(FIELDS_BODY)));
+                "/api/validation-rules?filter[collectionId][EQ]=ec000100-0000-0000-0000-000000000003&page[size]=200"))
+                .willReturn(aResponse().withStatus(200).withBody(RULES_BODY)));
 
         SyncToolSpecification spec = tool.toSpecification();
         CallToolResult result = spec.callHandler().apply(null,
@@ -85,23 +86,36 @@ class GetCollectionSchemaToolTest {
         assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
         String text = ((TextContent) result.content().get(0)).text();
         assertThat(text)
-                .contains("\"collection\":")
-                .contains("\"fields\":")
-                .contains("phone");
+                .contains("\"fields\"")
+                .contains("phone")
+                .contains("\"validationRules\"")
+                .contains("amount-check");
 
-        // Pin: the second outbound request must use the collectionId UUID
-        // filter, not the old (broken) collectionName filter.
+        wm.verify(WireMock.getRequestedFor(urlEqualTo("/api/collections/customers/schema")));
         wm.verify(WireMock.getRequestedFor(urlEqualTo(
-                "/api/fields?filter[collectionId][EQ]=ec000100-0000-0000-0000-000000000003&page[size]=200")));
-        wm.verify(0, WireMock.getRequestedFor(WireMock.urlMatching(
-                "/api/fields\\?filter\\[collectionName\\]\\[EQ\\]=.*")));
+                "/api/validation-rules?filter[collectionId][EQ]=ec000100-0000-0000-0000-000000000003&page[size]=200")));
     }
 
     @Test
-    void surfacesNullFieldsWhenIdCannotBeExtracted() {
-        // If the collection response is missing a parseable data.id, we
-        // skip the fields fetch and return fields=null rather than
-        // forwarding a bogus filter or crashing.
+    void skipsValidationRulesFetchWhenIncludeRulesIsFalse() {
+        wm.stubFor(get(urlEqualTo("/api/collections/customers/schema"))
+                .willReturn(aResponse().withStatus(200).withBody(SCHEMA_BODY)));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(null,
+                new CallToolRequest("get_collection_schema",
+                        Map.of("collection", "customers", "includeRules", false), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        String text = ((TextContent) result.content().get(0)).text();
+        assertThat(text).contains("\"fields\"").doesNotContain("\"validationRules\"");
+        wm.verify(0, WireMock.getRequestedFor(urlEqualTo("/api/collections/customers")));
+        wm.verify(0, WireMock.getRequestedFor(WireMock.urlMatching("/api/validation-rules.*")));
+    }
+
+    @Test
+    void surfacesNullValidationRulesWhenCollectionIdCannotBeResolved() {
+        wm.stubFor(get(urlEqualTo("/api/collections/customers/schema"))
+                .willReturn(aResponse().withStatus(200).withBody(SCHEMA_BODY)));
         wm.stubFor(get(urlEqualTo("/api/collections/customers"))
                 .willReturn(aResponse().withStatus(200).withBody("{\"data\":{}}")));
 
@@ -111,23 +125,24 @@ class GetCollectionSchemaToolTest {
 
         assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
         String text = ((TextContent) result.content().get(0)).text();
-        assertThat(text).contains("\"fields\": null");
-        // No second request — we don't know what to filter by.
-        wm.verify(0, WireMock.getRequestedFor(WireMock.urlMatching("/api/fields.*")));
+        assertThat(text).contains("\"validationRules\":null");
+        wm.verify(0, WireMock.getRequestedFor(WireMock.urlMatching("/api/validation-rules.*")));
     }
 
     @Test
-    void surfacesErrorWhenCollectionLookupFails() {
-        wm.stubFor(get(urlEqualTo("/api/collections/nope"))
-                .willReturn(aResponse().withStatus(404).withBody("{\"errors\":[{\"status\":\"404\"}]}")));
+    void surfacesErrorWhenSchemaLookupFails() {
+        wm.stubFor(get(urlEqualTo("/api/collections/nope/schema"))
+                .willReturn(aResponse().withStatus(404).withBody(
+                        "{\"errors\":[{\"status\":\"404\",\"detail\":\"No collection named 'nope'\"}]}")));
 
         CallToolResult result = tool.toSpecification().callHandler().apply(null,
                 new CallToolRequest("get_collection_schema",
                         Map.of("collection", "nope"), null));
 
         assertThat(result.isError()).isEqualTo(Boolean.TRUE);
-        // No fields fetch attempted.
-        wm.verify(0, WireMock.getRequestedFor(WireMock.urlMatching("/api/fields.*")));
+        String text = ((TextContent) result.content().get(0)).text();
+        assertThat(text).contains("404").contains("No collection named 'nope'");
+        wm.verify(0, WireMock.getRequestedFor(WireMock.urlMatching("/api/validation-rules.*")));
     }
 
     @Test
