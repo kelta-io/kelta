@@ -81,6 +81,17 @@ public record FilterCondition(
     private static final Pattern FILTER_PATTERN = Pattern.compile("filter\\[([^\\]]+)\\]\\[([^\\]]+)\\]");
 
     /**
+     * Pattern to match the EQ shorthand: filter[fieldName] (no operator segment).
+     */
+    private static final Pattern FILTER_SHORTHAND_PATTERN = Pattern.compile("filter\\[([^\\]]+)\\]");
+
+    /**
+     * Grammar shown to callers whose {@code filter...} key matches neither
+     * {@link #FILTER_PATTERN} nor {@link #FILTER_SHORTHAND_PATTERN}.
+     */
+    private static final String FILTER_GRAMMAR = "filter[field][op]=value | filter[field]=value";
+
+    /**
      * Maximum number of values accepted in a single {@code IN}/{@code ANY}
      * list. Exceeding this throws {@link InvalidFilterException}, which the
      * gateway maps to HTTP 400. The cap exists so an untrusted caller can't
@@ -195,6 +206,8 @@ public record FilterCondition(
      *
      * <p>Behavior:
      * <ul>
+     *   <li>{@code filter[field]=value} (no operator segment) is shorthand for
+     *       {@code eq}.</li>
      *   <li>{@code in}/{@code any}: all repeated values are merged, each value
      *       is additionally split on {@code ,}, blanks are trimmed and dropped,
      *       and the result is de-duplicated. Yields a single
@@ -204,11 +217,17 @@ public record FilterCondition(
      *       string is passed through.</li>
      * </ul>
      *
+     * <p>Non-filter keys (e.g. {@code sort}, {@code page[size]}) are ignored.
+     * Any key that starts with {@code filter[} but matches neither shape above
+     * (e.g. {@code filter[field][in][]=value}) is rejected rather than
+     * silently dropped.
+     *
      * @param params the HTTP query parameters
      * @return list of filter conditions, or empty list if none found
-     * @throws InvalidFilterException if an operator is unrecognized, an
-     *         {@code in} list is blank, or the {@code in} list exceeds
-     *         {@link #MAX_IN_LIST_SIZE}
+     * @throws InvalidFilterException if a {@code filter[...]} key doesn't match
+     *         {@code filter[field][op]=value} or {@code filter[field]=value},
+     *         an operator is unrecognized, an {@code in} list is blank, or the
+     *         {@code in} list exceeds {@link #MAX_IN_LIST_SIZE}
      */
     public static List<FilterCondition> fromParams(MultiValueMap<String, String> params) {
         if (params == null || params.isEmpty()) {
@@ -218,26 +237,44 @@ public record FilterCondition(
         List<FilterCondition> filters = new ArrayList<>();
 
         for (Map.Entry<String, List<String>> entry : params.entrySet()) {
-            Matcher matcher = FILTER_PATTERN.matcher(entry.getKey());
-            if (!matcher.matches()) {
+            String key = entry.getKey();
+            if (!key.startsWith("filter[")) {
                 continue;
             }
-            String fieldName = matcher.group(1);
-            String operatorToken = matcher.group(2).toUpperCase();
 
-            FilterOperator operator = resolveOperator(fieldName, operatorToken);
-            List<String> rawValues = entry.getValue();
+            Matcher opMatcher = FILTER_PATTERN.matcher(key);
+            if (opMatcher.matches()) {
+                String fieldName = opMatcher.group(1);
+                String operatorToken = opMatcher.group(2).toUpperCase();
 
-            if (operator == FilterOperator.IN) {
-                List<String> values = collectInValues(fieldName, rawValues);
-                filters.add(new FilterCondition(fieldName, operator, values));
-            } else {
+                FilterOperator operator = resolveOperator(fieldName, operatorToken);
+                List<String> rawValues = entry.getValue();
+
+                if (operator == FilterOperator.IN) {
+                    List<String> values = collectInValues(fieldName, rawValues);
+                    filters.add(new FilterCondition(fieldName, operator, values));
+                } else {
+                    String value = (rawValues == null || rawValues.isEmpty())
+                            ? null
+                            : rawValues.get(rawValues.size() - 1);
+                    Object parsedValue = parseValue(value, operator);
+                    filters.add(new FilterCondition(fieldName, operator, parsedValue));
+                }
+                continue;
+            }
+
+            Matcher shorthandMatcher = FILTER_SHORTHAND_PATTERN.matcher(key);
+            if (shorthandMatcher.matches()) {
+                String fieldName = shorthandMatcher.group(1);
+                List<String> rawValues = entry.getValue();
                 String value = (rawValues == null || rawValues.isEmpty())
                         ? null
                         : rawValues.get(rawValues.size() - 1);
-                Object parsedValue = parseValue(value, operator);
-                filters.add(new FilterCondition(fieldName, operator, parsedValue));
+                filters.add(new FilterCondition(fieldName, FilterOperator.EQ, value));
+                continue;
             }
+
+            throw new InvalidFilterException(key, "malformed filter parameter; expected " + FILTER_GRAMMAR);
         }
 
         return List.copyOf(filters);
@@ -260,14 +297,10 @@ public record FilterCondition(
     }
 
     private static FilterOperator resolveOperator(String fieldName, String operatorToken) {
-        if ("ANY".equals(operatorToken)) {
-            return FilterOperator.IN;
-        }
         try {
-            return FilterOperator.valueOf(operatorToken);
-        } catch (IllegalArgumentException e) {
-            throw new InvalidFilterException(
-                    fieldName, "unknown filter operator '" + operatorToken.toLowerCase() + "'");
+            return FilterOperator.parse(operatorToken);
+        } catch (InvalidFilterException e) {
+            throw new InvalidFilterException(fieldName, e.getReason());
         }
     }
 

@@ -597,19 +597,17 @@ public class DashboardDataService {
 
     private FilterOperator mapOperator(String operator) {
         if (operator == null || operator.isBlank()) return FilterOperator.EQ;
-        return switch (operator.toLowerCase()) {
-            case "equals", "eq" -> FilterOperator.EQ;
-            case "not_equals", "neq" -> FilterOperator.NEQ;
-            case "contains", "icontains" -> FilterOperator.ICONTAINS;
-            case "greater_than", "gt" -> FilterOperator.GT;
-            case "less_than", "lt" -> FilterOperator.LT;
-            case "gte" -> FilterOperator.GTE;
-            case "lte" -> FilterOperator.LTE;
-            case "starts" -> FilterOperator.STARTS;
-            case "ends" -> FilterOperator.ENDS;
-            case "isnull" -> FilterOperator.ISNULL;
-            default -> FilterOperator.EQ;
-        };
+        // Widget configs historically use "contains" for case-insensitive matching
+        // (mirrored in ReportExecutionService); preserve that before falling back to
+        // FilterOperator's canonical case-sensitive CONTAINS.
+        if ("contains".equalsIgnoreCase(operator.trim())) {
+            return FilterOperator.ICONTAINS;
+        }
+        try {
+            return FilterOperator.parse(operator);
+        } catch (InvalidFilterException e) {
+            throw new WidgetExecutionException("Unsupported filter operator '" + operator + "'");
+        }
     }
 
     String getConfigString(Map<String, Object> config, String key, String defaultValue) {

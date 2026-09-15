@@ -216,6 +216,50 @@ class FilterConditionTest {
     }
 
     @Nested
+    @DisplayName("EQ shorthand and malformed keys")
+    class ShorthandAndMalformedKeys {
+
+        @Test
+        void fieldOnlyShorthandBehavesAsEq() {
+            MultiValueMap<String, String> p = params();
+            p.add("filter[status]", "a");
+
+            List<FilterCondition> filters = FilterCondition.fromParams(p);
+
+            assertEquals(1, filters.size());
+            FilterCondition c = filters.get(0);
+            assertEquals("status", c.fieldName());
+            assertEquals(FilterOperator.EQ, c.operator());
+            assertEquals("a", c.value());
+        }
+
+        @Test
+        void repeatedKeyInBracketsThrows400WithGrammar() {
+            // filter[status][in][]=a — a shape browsers/HTML forms commonly send
+            // for array params. Previously silently dropped (whole collection
+            // returned unfiltered); must now be rejected.
+            MultiValueMap<String, String> p = params();
+            p.add("filter[status][in][]", "a");
+
+            InvalidFilterException ex = assertThrows(
+                    InvalidFilterException.class,
+                    () -> FilterCondition.fromParams(p));
+            assertTrue(ex.getMessage().contains("filter[field][op]=value | filter[field]=value"));
+        }
+
+        @Test
+        void indexedBracketKeyThrows400WithGrammar() {
+            MultiValueMap<String, String> p = params();
+            p.add("filter[status][in][0]", "a");
+
+            InvalidFilterException ex = assertThrows(
+                    InvalidFilterException.class,
+                    () -> FilterCondition.fromParams(p));
+            assertTrue(ex.getMessage().contains("filter[field][op]=value | filter[field]=value"));
+        }
+    }
+
+    @Nested
     @DisplayName("Single-value Map adapter (legacy callers)")
     class SingleValueMapAdapter {
 
