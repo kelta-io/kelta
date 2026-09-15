@@ -219,7 +219,7 @@ class CerbosFieldSecurityAdviceTest {
     }
 
     @Test
-    @DisplayName("Should strip a hidden to-one relationship field (lookup/master-detail) from relationships")
+    @DisplayName("Should strip a hidden to-one relationship field (lookup/master-detail) from both attributes and relationships")
     void shouldStripHiddenRelationshipField() {
         var request = createRequest("/api/contacts/123");
         // 'name' allowed; the 'account' lookup relationship is denied
@@ -228,6 +228,8 @@ class CerbosFieldSecurityAdviceTest {
 
         Map<String, Object> attributes = new LinkedHashMap<>();
         attributes.put("name", "John");
+        // DynamicCollectionRouter now echoes the lookup id into attributes too.
+        attributes.put("account", "acc-1");
 
         Map<String, Object> relationships = new LinkedHashMap<>();
         relationships.put("account", new LinkedHashMap<>(Map.of(
@@ -243,6 +245,8 @@ class CerbosFieldSecurityAdviceTest {
         advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
 
         assertThat(attributes).containsKey("name");
+        // The denied lookup is stripped from attributes as well as relationships.
+        assertThat(attributes).doesNotContainKey("account");
         // The denied relationship is stripped and the now-empty relationships block removed.
         assertThat(record).doesNotContainKey("relationships");
     }

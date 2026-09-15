@@ -687,6 +687,18 @@ precedence; request-supplied entries fill the gaps. This keeps a stable
 "follow-up by id" shape for `create_record` / `update_record` callers so they
 don't need a second GET to discover related-record IDs.
 
+**Read shape: reference ids are in both `attributes` and `relationships`.**
+`toJsonApiResourceObject` writes every LOOKUP/MASTER_DETAIL field's raw id to
+`attributes.<field>` *as well as* `relationships.<field>.data.id`, in list
+responses, single-resource responses and `included[]` alike. A write already
+accepts the same id via either shape (`extractAttributes`/`extractRelationships`
+merge, relationships-precedence, into the same field), so this makes a read
+consistent with what a write accepts: a client that PATCHes `attributes` back
+unchanged after a GET no longer sees the reference field go "missing". CLI
+flattening (`kelta-web/packages/cli/src/render/flatten.ts`) already skips a
+relationship name once it has seen that key in `attributes`, so `kelta <collection>
+list` output is unaffected — see `flattenResource`.
+
 **Read-side include resolution** — `GET /api/{collection}[/{id}]?include=<name>`
 on `DynamicCollectionRouter#resolveIncludes` follows three resolution paths
 per include name, in order: (1) collection-name has-many — the named
@@ -698,8 +710,9 @@ field-name path covers both LOOKUP-typed fields and the legacy
 "STRING-with-refConfig" form where the FK UUID is stored on `attributes`
 (e.g. `availability.attributes.title`); it injects `relationships.<field>.data
 = { type, id }` on each primary resource and hydrates the referenced rows
-into top-level `included[]`. The raw UUID stays on `attributes` for
-back-compat. FK values are deduplicated before the single `id IN (…)` query
+into top-level `included[]`. The raw UUID also stays on `attributes` —
+for every LOOKUP/MASTER_DETAIL field, not only the legacy string form; see
+"Read shape" above. FK values are deduplicated before the single `id IN (…)` query
 to the target collection. A separate **transitive pass** then resolves
 grandchild includes via already-resolved direct children (e.g.
 `page-layouts ?include=layout-sections,layout-fields` queries `layout-fields`

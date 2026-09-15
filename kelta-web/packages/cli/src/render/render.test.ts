@@ -43,6 +43,22 @@ describe('flatten', () => {
   it('extracts ids for --quiet', () => {
     expect(extractIds(listBody)).toEqual(['1', '2']);
   });
+
+  it('skips a relationship id already present in attributes (server now echoes lookup/master-detail ids into both)', () => {
+    const resource = {
+      id: 'layout-1',
+      type: 'page-layouts',
+      attributes: { name: 'Detail Layout', collectionId: 'coll-42' },
+      relationships: {
+        collectionId: { data: { id: 'coll-42' } },
+      },
+    };
+    expect(flattenResource(resource)).toEqual({
+      id: 'layout-1',
+      name: 'Detail Layout',
+      collectionId: 'coll-42',
+    });
+  });
 });
 
 describe('table + csv', () => {

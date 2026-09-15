@@ -1253,6 +1253,10 @@ public class DynamicCollectionRouter {
                     relationshipData.put("data", null);
                 }
                 relationships.put(key, relationshipData);
+                // Also echo the raw id in attributes: a write accepts the same id via
+                // attributes, and a client that diffs what it sent against what it reads
+                // back must see it there too, not only nested under relationships.
+                attributes.put(key, value);
             } else if (fieldDef != null || isSystemOrCompanionKey(key, definition)) {
                 attributes.put(key, value);
             }
