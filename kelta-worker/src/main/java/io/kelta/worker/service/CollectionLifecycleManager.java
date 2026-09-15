@@ -70,7 +70,7 @@ public class CollectionLifecycleManager {
             SELECT name, type, required, unique_constraint, indexed, default_value,
                    constraints, field_type_config, reference_target, reference_collection_id,
                    relationship_type, relationship_name, cascade_delete, field_order, column_name,
-                   immutable, searchable, track_history
+                   immutable, searchable, track_history, description
             FROM field WHERE collection_id = ? AND active = true
             ORDER BY field_order, created_at, id
             """;
@@ -678,7 +678,8 @@ public class CollectionLifecycleManager {
 
             FieldDefinition fieldDef = new FieldDefinition(
                     fieldName, fieldType, !required, immutable, unique,
-                    parsedDefaultValue, null, null, refConfig, parsedFieldTypeConfig, columnName, trackHistory);
+                    parsedDefaultValue, null, null, refConfig, parsedFieldTypeConfig, columnName, trackHistory,
+                    (String) row.get("description"));
             fields.add(fieldDef);
         }
 

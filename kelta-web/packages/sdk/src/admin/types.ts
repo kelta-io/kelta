@@ -1362,7 +1362,12 @@ export interface UserDashboard {
 export interface DashboardComponent {
   id: string;
   reportId: string;
-  componentType: 'CHART' | 'GAUGE' | 'METRIC' | 'TABLE';
+  /**
+   * The four widget renderers the server supports, lowercase — the values
+   * `dashboard-components.componentType` now declares as its enum, so anything
+   * else is rejected with a 400. (`GAUGE` was never implemented.)
+   */
+  componentType: 'metric' | 'chart' | 'table' | 'recent';
   title?: string;
   columnPosition: number;
   rowPosition: number;

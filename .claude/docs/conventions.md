@@ -254,6 +254,38 @@ Link generation lives in `io.kelta.jsonapi.PaginationLinks.build(...)`; the dyna
 
 MCP tools (`query_collection`, `list_picklists`, `list_approvals`) take flat `pageNumber` / `pageSize` arguments as an ergonomic affordance for LLM callers, and translate them to the bracket form when constructing the HTTP request to the gateway. The same `page[size]` cap (200) applies — the MCP tool's input schema declares `maximum: 200` and the call handler clamps defensively.
 
+## REST API: collection schema
+
+`GET /api/collections/{name}/schema` is the canonical way to learn what a collection's
+attributes are — **including system collections**, whose fields have no rows in the `field`
+table and so cannot be read through `GET /api/collections/{name}?include=fields`:
+
+```json
+{
+  "name": "page-layouts", "displayName": "Page Layouts", "systemCollection": true,
+  "fields": [
+    { "name": "layoutType", "type": "STRING", "required": true, "isRelationship": false,
+      "description": "Which record surface the layout drives: DETAIL, EDIT, MINI or LIST.",
+      "default": "DETAIL", "enum": ["DETAIL", "EDIT", "MINI", "LIST"] },
+    { "name": "collectionId", "type": "MASTER_DETAIL", "required": true, "isRelationship": true,
+      "description": "Collection this row belongs to.",
+      "reference": { "target": "collections", "targetField": "id",
+                     "relationshipType": "MASTER_DETAIL", "relationshipName": "Collection" } }
+  ]
+}
+```
+
+`default`, `enum` and `reference` are omitted when the field declares none; an unknown
+collection name is `404 COLLECTION_NOT_FOUND`. It is served by
+`kelta-worker/.../controller/CollectionSchemaController` off `CollectionRegistry` (with the same
+on-demand load the record router uses), rides the existing static `/api/collections/**` gateway
+route, and is the read-side pair of the generated OpenAPI document at `GET /api/docs/openapi.json`
+— which documents system collections too.
+
+**Every system field must carry a `withDescription(...)`** in `SystemCollectionDefinitions`;
+`SystemCollectionDescriptionsTest` fails the build on one that doesn't, because an undescribed
+field is invisible to every client of this endpoint.
+
 ## REST API: filter grammar
 
 Every `filter…` query key must be one of two shapes:
