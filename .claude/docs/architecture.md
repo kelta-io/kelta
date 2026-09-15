@@ -670,8 +670,11 @@ the key, so a body that manages fields does not blank the header.
 the request body — e.g. `/sections/0/fields/2/name`): an unknown field name, a `column` outside its
 section's 0-based `columns`, the same field placed twice, a missing/duplicate section `heading`, a
 related list whose `relationshipField` is not a lookup back to the layout's collection, and any
-unknown property. The whole body is checked before anything is written; a rejected body writes
-nothing. A heading-less section (the column is nullable, and the generic routes allow it) cannot be
+unknown property. `layoutId` and `collection` are accepted only so a GET body round-trips through
+PUT unedited — they describe the layout the caller already addressed, so a value that names a
+*different* layout or collection is a 400 (`/layoutId`, `/collection`) rather than one layout's
+tree silently overwriting another's. The whole body is checked before anything is written; a
+rejected body writes nothing. A heading-less section (the column is nullable, and the generic routes allow it) cannot be
 expressed by the tree — `heading` is the match key.
 
 **One interaction to know.** `CerbosFieldWriteSecurityAdvice` treats any non-JSON:API PUT body

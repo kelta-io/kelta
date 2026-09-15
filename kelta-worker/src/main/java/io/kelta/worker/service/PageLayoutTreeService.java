@@ -51,7 +51,11 @@ public class PageLayoutTreeService {
 
     private static final Logger log = LoggerFactory.getLogger(PageLayoutTreeService.class);
 
-    /** Body keys the tree accepts. The read-only echo keys let a GET body round-trip through PUT. */
+    /**
+     * Body keys the tree accepts. The read-only echo keys ({@code layoutId}, {@code collection})
+     * let a GET body round-trip through PUT; they are not applied, but they must agree with the
+     * layout the caller addressed — see {@link #parse}.
+     */
     private static final Set<String> BODY_KEYS = Set.of(
             "name", "layoutType", "isDefault", "description", "headerConfig",
             "sections", "relatedLists", "layoutId", "collection");
@@ -237,7 +241,7 @@ public class PageLayoutTreeService {
         String collectionId = asString(layout.get("collection_id"));
         String collectionName = collectionNameById(collectionId);
 
-        DesiredTree desired = parse(body, collectionId, collectionName, null);
+        DesiredTree desired = parse(body, collectionId, collectionName, null, layoutId);
         Counts counts = new Counts();
         applyLayoutScalars(layoutId, layout, body, counts);
         applyChildren(layoutId, collectionId, desired, counts);
@@ -254,10 +258,10 @@ public class PageLayoutTreeService {
      */
     public ApplyResult applyTreeByName(String collectionName, String layoutName, Map<String, Object> body) {
         String collectionId = collectionIdByName(collectionName);
-        DesiredTree desired = parse(body, collectionId, collectionName, layoutName);
+        String layoutId = findLayoutIdByName(collectionId, layoutName);
+        DesiredTree desired = parse(body, collectionId, collectionName, layoutName, layoutId);
 
         Counts counts = new Counts();
-        String layoutId = findLayoutIdByName(collectionId, layoutName);
         if (layoutId == null) {
             layoutId = createLayout(collectionId, layoutName, body);
             counts.created++;
@@ -287,7 +291,7 @@ public class PageLayoutTreeService {
 
     @SuppressWarnings("unchecked")
     private DesiredTree parse(Map<String, Object> body, String collectionId, String collectionName,
-                              String pathLayoutName) {
+                              String pathLayoutName, String targetLayoutId) {
         List<TreeError> errors = new ArrayList<>();
         Map<String, Object> safeBody = body == null ? Map.of() : body;
 
@@ -300,6 +304,19 @@ public class PageLayoutTreeService {
                 && !bodyName.equals(pathLayoutName)) {
             errors.add(new TreeError("/name", "Body name '" + bodyName
                     + "' does not match the layout named in the path ('" + pathLayoutName + "')"));
+        }
+        // The echo keys let a GET body round-trip through PUT unedited. They only ever describe
+        // the layout the caller addressed, so a mismatch means one layout's tree is being pasted
+        // over another — reject it rather than silently rewriting the addressed layout.
+        if (safeBody.get("collection") instanceof String bodyCollection
+                && !bodyCollection.equals(collectionName)) {
+            errors.add(new TreeError("/collection", "Body collection '" + bodyCollection
+                    + "' does not match the addressed layout's collection ('" + collectionName + "')"));
+        }
+        if (targetLayoutId != null && safeBody.get("layoutId") instanceof String bodyLayoutId
+                && !bodyLayoutId.equals(targetLayoutId)) {
+            errors.add(new TreeError("/layoutId", "Body layoutId '" + bodyLayoutId
+                    + "' does not match the addressed layout ('" + targetLayoutId + "')"));
         }
 
         Map<String, String> fieldIdsByName = fieldIdsByName(collectionId);

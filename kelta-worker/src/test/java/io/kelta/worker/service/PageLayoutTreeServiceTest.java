@@ -36,8 +36,9 @@ import static org.mockito.Mockito.when;
 /**
  * The idempotent layout tree: names in, a diff out. Covers the convergence contract (a
  * re-applied body writes nothing), the GET → PUT round trip, deletion of what the body drops,
- * and the pointer-bearing 400s for an unknown field, an out-of-range column and a related list
- * whose relationship field does not point back at the layout's collection.
+ * and the pointer-bearing 400s for an unknown field, an out-of-range column, a related list
+ * whose relationship field does not point back at the layout's collection, and an echoed
+ * {@code layoutId}/{@code collection} naming a layout other than the one addressed.
  */
 @DisplayName("PageLayoutTreeService")
 class PageLayoutTreeServiceTest {
@@ -401,6 +402,32 @@ class PageLayoutTreeServiceTest {
                 .satisfies(e -> assertThat(((TreeValidationException) e).errors())
                         .singleElement()
                         .satisfies(error -> assertThat(error.pointer()).isEqualTo("/name")));
+    }
+
+    @Test
+    @DisplayName("A GET body pasted onto another collection's layout is a 400, not a silent rewrite")
+    void echoedCollectionMustMatchTheAddressedLayout() {
+        Map<String, Object> body = twoFieldBody();
+        body.put("collection", "accounts");
+
+        assertThatThrownBy(() -> apply(body))
+                .isInstanceOf(TreeValidationException.class)
+                .satisfies(e -> assertThat(((TreeValidationException) e).errors())
+                        .singleElement()
+                        .satisfies(error -> assertThat(error.pointer()).isEqualTo("/collection")));
+    }
+
+    @Test
+    @DisplayName("A GET body pasted onto another layout of the same collection is a 400")
+    void echoedLayoutIdMustMatchTheAddressedLayout() {
+        Map<String, Object> body = twoFieldBody();
+        body.put("layoutId", "some-other-layout");
+
+        assertThatThrownBy(() -> apply(body))
+                .isInstanceOf(TreeValidationException.class)
+                .satisfies(e -> assertThat(((TreeValidationException) e).errors())
+                        .singleElement()
+                        .satisfies(error -> assertThat(error.pointer()).isEqualTo("/layoutId")));
     }
 
     @SuppressWarnings("unchecked")
