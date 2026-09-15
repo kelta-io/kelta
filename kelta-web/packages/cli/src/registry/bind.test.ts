@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { z } from 'zod';
 import { bindCommands } from './bind.js';
 import { defineCommand, type RegisteredCommand } from './types.js';
+import { CliError } from '../errors.js';
 
 let stdout: string[];
 let stderr: string[];
@@ -58,6 +59,34 @@ const echo = defineCommand({
   handler: (_ctx, input) => Promise.resolve({ data: input }),
 });
 
+const multiInvalid = defineCommand({
+  group: 'things',
+  name: 'multi-invalid',
+  summary: 'fails with two validation errors',
+  requiresAuth: false,
+  input: z.object({}),
+  handler: () => {
+    throw new CliError('name is required', {
+      code: 'VALIDATION_FAILED',
+      exitCode: 1,
+      status: 400,
+      source: { pointer: '/data/attributes/name' },
+      errors: [
+        {
+          code: 'VALIDATION_FAILED',
+          detail: 'name is required',
+          source: { pointer: '/data/attributes/name' },
+        },
+        {
+          code: 'VALIDATION_FAILED',
+          detail: 'amount must be >= 0',
+          source: { pointer: '/data/attributes/amount' },
+        },
+      ],
+    });
+  },
+});
+
 const boom = defineCommand({
   group: 'things',
   name: 'boom',
@@ -106,6 +135,34 @@ describe('bindCommands', () => {
     );
     expect(process.exitCode).toBeUndefined();
     expect(JSON.parse(stdout.join(''))).toEqual({ message: 'boomed' });
+  });
+
+  it('surfaces every error of a multi-error failure, not just the first (json)', async () => {
+    await program([multiInvalid as RegisteredCommand]).parseAsync(
+      ['things', 'multi-invalid', '--output', 'json'],
+      { from: 'user' }
+    );
+    expect(process.exitCode).toBe(1);
+    const payload = JSON.parse(stderr.join('')) as {
+      error: { source?: { pointer?: string } };
+      errors: { detail: string }[];
+    };
+    expect(payload.error.source?.pointer).toBe('/data/attributes/name');
+    expect(payload.errors.map((e) => e.detail)).toEqual([
+      'name is required',
+      'amount must be >= 0',
+    ]);
+  });
+
+  it('surfaces every error of a multi-error failure, not just the first (table)', async () => {
+    await program([multiInvalid as RegisteredCommand]).parseAsync(
+      ['things', 'multi-invalid', '--output', 'table'],
+      { from: 'user' }
+    );
+    expect(process.exitCode).toBe(1);
+    const printed = stderr.join('');
+    expect(printed).toContain('name is required');
+    expect(printed).toContain('amount must be >= 0');
   });
 
   it('rejects an unknown --output format with exit 2', async () => {

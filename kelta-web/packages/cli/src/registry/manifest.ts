@@ -43,7 +43,8 @@ export function buildManifest(commands: RegisteredCommand[], group?: string): Ma
     cliVersion: VERSION,
     outputFormats: [...OUTPUT_FORMATS],
     exitCodes: { ...EXIT },
-    errorEnvelope: '{"error":{"code","status","detail","requestId"}} on stderr, one line',
+    errorEnvelope:
+      '{"error":{"code","status","detail","source","meta"},"errors":[...]} on stderr, one line — "error" is errors[0] flattened, "errors" is the full JSON:API array',
     commands: selected.map((command) => ({
       group: command.group,
       name: command.name,
