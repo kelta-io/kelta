@@ -113,11 +113,12 @@ public class McpServerConfig {
             update_ counterparts exist for collection, flow, layout, listview, and \
             validation_rule.
 
-            Idempotent apply: apply_layout, apply_listview, apply_picklist, apply_menu and \
-            apply_dashboard are create-or-update, keyed on a natural key (collection+name for \
-            layouts/list views, name for picklists/menus/dashboards, title within the \
-            dashboard for each component) rather than an id — re-running the same setup \
-            script is safe. Each reports {"action": "created"|"updated"|"unchanged", \
+            Idempotent apply: apply_layout, apply_listview, apply_picklist, apply_menu, \
+            apply_dashboard and apply_page are create-or-update, keyed on a natural key \
+            (collection+name for layouts/list views, name for picklists/menus/dashboards, \
+            title within the dashboard for each component, path — falling back to slug — for \
+            pages) rather than an id — re-running the same setup script is safe. Each reports \
+            {"action": "created"|"updated"|"unchanged", \
             "id": ..., "changed": [...] } (apply_picklist, apply_menu and apply_dashboard nest \
             one such result per value/item/component plus "pruned" when prune:true removed \
             extras — deactivated for picklist values, hard-deleted for menu items and \
@@ -147,6 +148,14 @@ public class McpServerConfig {
             whole call with a structured error and no component is created, updated or \
             deleted. A component's report is a saved report name (optional — a component can \
             target config.collectionName directly instead).
+
+            Pages: apply_page takes a custom UI page (screen builder), keyed on path — falling \
+            back to slug when path itself doesn't match an existing row, e.g. a route rename. \
+            config is dry-run through the worker's page config validator (unknown widget type, \
+            an out-of-range data source limit, an unsupported filter operator) before anything \
+            is written — an invalid config fails the whole call with a structured error \
+            (JSON Pointer from the validate response) and writes nothing. isHomePage lives \
+            inside config, not as a top-level argument — see kelta://docs/ui-pages.
 
             Field types: add_field's `type` argument accepts friendly aliases (text, number, \
             picklist, reference, ...) that map onto the native uppercase FieldType enum — see \

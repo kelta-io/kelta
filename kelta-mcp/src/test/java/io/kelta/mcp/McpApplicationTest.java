@@ -193,6 +193,7 @@ class McpApplicationTest {
                 "delete_listview",
                 "apply_menu",
                 "apply_dashboard",
+                "apply_page",
                 // automation admin + integrations (Phase 8)
                 "create_flow",
                 "update_flow",

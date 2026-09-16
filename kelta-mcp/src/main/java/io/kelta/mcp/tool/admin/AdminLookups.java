@@ -211,7 +211,13 @@ final class AdminLookups {
         return firstResourceId(response.body());
     }
 
-    private Map<String, Object> readAttributes(String collection, String id) {
+    /**
+     * A record's attributes folded with its to-one relationship ids, keyed by field name (plus
+     * {@code id}) — the same shape {@link #upsert} diffs against. Exposed for tools that resolve
+     * an existing id themselves (e.g. a fallback natural key) rather than through {@link #upsert}'s
+     * own single-key lookup.
+     */
+    Map<String, Object> readAttributes(String collection, String id) {
         String path = "/api/" + collection + "/" + URLEncoder.encode(id, StandardCharsets.UTF_8);
         GatewayHttpClient.Response response = gateway.get(path);
         if (!response.isSuccess()) {

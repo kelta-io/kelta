@@ -336,6 +336,12 @@ Create a UI page (draft — unpublished until `pages publish`)
 - `--active <bool>` — true|false (default true)
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+### `kelta pages apply <file>`
+
+Validate then create-or-update a UI page from a JSON file, keyed on path **(destructive — needs --yes off-TTY)**
+
+- `--dry-run` — Validate config only; write nothing
+
 ### `kelta pages update <pageId>`
 
 Update a UI page by id
