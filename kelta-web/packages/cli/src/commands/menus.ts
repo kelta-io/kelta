@@ -4,6 +4,15 @@ import { readDataArgument } from '../data.js';
 import { CliError, EXIT } from '../errors.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
 
+interface MenuTreeCounts {
+  menuId?: string;
+  name?: string;
+  created?: number;
+  updated?: number;
+  deleted?: number;
+  unchanged?: number;
+}
+
 interface MenuItemResource {
   id: string;
   attributes?: Record<string, unknown>;
@@ -144,6 +153,46 @@ const menuCreate = defineCommand({
   },
 });
 
+const menuApply = defineCommand({
+  group: 'menus',
+  name: 'apply',
+  summary: 'Apply a menu tree file (items/groups) in one call, creating the menu if needed',
+  options: [
+    {
+      flag: '--file <path>',
+      description: 'Menu tree JSON file — see `menus get <name> --tree` for the shape',
+    },
+    {
+      flag: '--name <name>',
+      description: 'Menu name (overrides the file\'s own "name"; creates the menu if it does not exist yet)',
+    },
+  ],
+  input: z.object({ file: z.string().min(1), name: z.string().optional() }),
+  handler: async (ctx, input) => {
+    const tree = readDataArgument('@' + input.file);
+    const name = input.name ?? (typeof tree.name === 'string' ? tree.name : undefined);
+    if (!name) {
+      throw new CliError('Menu name required — pass --name or set "name" in the tree file', {
+        code: 'INVALID_ARGUMENTS',
+        exitCode: EXIT.USAGE,
+      });
+    }
+    const body = { ...tree };
+    delete body.name;
+    const path = `/api/ui-menus/${encodeURIComponent(name)}/tree`;
+    const response = await ctx.client.getAxiosInstance().put<MenuTreeCounts>(path, body);
+    const counts = response.data;
+    return {
+      data: counts,
+      message:
+        `Menu tree applied to "${name}" ` +
+        `(created=${counts.created ?? 0}, updated=${counts.updated ?? 0}, ` +
+        `deleted=${counts.deleted ?? 0}, unchanged=${counts.unchanged ?? 0})`,
+      ids: counts.menuId ? [counts.menuId] : [],
+    };
+  },
+});
+
 const menuUpdate = defineCommand({
   group: 'menus',
   name: 'update',
@@ -213,6 +262,7 @@ export const menuCommands: RegisteredCommand[] = [
   menuList,
   menuGet,
   menuCreate,
+  menuApply,
   menuUpdate,
   menuDelete,
 ];

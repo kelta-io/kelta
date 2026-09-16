@@ -66,6 +66,12 @@ export class KeltaClient {
       this.setupAuthInterceptor();
     }
 
+    // Trace interceptor must see the raw response/error before the retry interceptor
+    // re-issues a request, so each actual HTTP attempt gets exactly one trace line.
+    if (process.env.KELTA_TRACE === '1') {
+      this.setupTraceInterceptor();
+    }
+
     // Setup retry interceptor
     this.setupRetryInterceptor();
 
@@ -203,6 +209,31 @@ export class KeltaClient {
       }
       return config;
     });
+  }
+
+  /**
+   * Setup the KELTA_TRACE request tracer: one stderr line per actual HTTP attempt
+   * (`method url status`), so a caller can count real network round trips — e.g. the
+   * agent-authoring e2e benchmark's request budget — without instrumenting every command.
+   */
+  private setupTraceInterceptor(): void {
+    this.axiosInstance.interceptors.response.use(
+      (response) => {
+        this.writeTrace(response.config?.method, response.config?.url, response.status);
+        return response;
+      },
+      (error) => {
+        if (axios.isAxiosError(error)) {
+          this.writeTrace(error.config?.method, error.config?.url, error.response?.status);
+        }
+        return Promise.reject(error);
+      }
+    );
+  }
+
+  private writeTrace(method: string | undefined, url: string | undefined, status: number | undefined): void {
+    const line = `[kelta-trace] ${(method ?? 'GET').toUpperCase()} ${url ?? ''} ${status ?? 'ERR'}\n`;
+    process.stderr.write(line);
   }
 
   /**

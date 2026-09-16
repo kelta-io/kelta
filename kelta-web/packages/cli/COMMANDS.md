@@ -292,6 +292,22 @@ Create a saved list view
 - `--card-fields <list>` — Kanban card fields, comma-separated
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+### `kelta list-views apply <collection>`
+
+Create-or-update a saved list view, keyed on (collection, name)
+
+- `--name <name>` — List view name (required)
+- `--columns <list>` — Displayed field names, comma-separated (required)
+- `--filter <spec>` — Filter as field[.op]=value (repeatable); always written as given (repeatable)
+- `--sort <field>` — Sort field, -prefix for descending
+- `--row-limit <n>` — Maximum rows rendered
+- `--default <bool>` — true|false — omit to leave the current value alone
+- `--visibility <vis>` — PRIVATE, PUBLIC or GROUP
+- `--view-type <type>` — Renderer: TABLE, KANBAN, CALENDAR or GALLERY
+- `--lane-field <field>` — Kanban lane field (a picklist field)
+- `--card-fields <list>` — Kanban card fields, comma-separated
+- `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
 ### `kelta list-views update <listViewId>`
 
 Update a saved list view by id
@@ -385,6 +401,13 @@ Create a UI menu
 - `--default` — Mark as the default menu
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+### `kelta menus apply`
+
+Apply a menu tree file (items/groups) in one call, creating the menu if needed
+
+- `--file <path>` — Menu tree JSON file — see `menus get <name> --tree` for the shape
+- `--name <name>` — Menu name (overrides the file's own "name"; creates the menu if it does not exist yet)
+
 ### `kelta menus update <menuId>`
 
 Update a UI menu by id
@@ -424,6 +447,13 @@ Create a dashboard (add widgets via `kelta api` — dashboard-components)
 - `--dynamic` — Widgets execute as --running-user-id rather than the viewer
 - `--running-user-id <id>` — User a dynamic dashboard executes widgets as
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
+### `kelta dashboards apply`
+
+Apply a dashboard tree file (widgets) in one call, creating the dashboard if needed
+
+- `--file <path>` — Dashboard tree JSON file — see `dashboards get <id> --components` for the shape
+- `--name <name>` — Dashboard name (overrides the file's own "name"; creates the dashboard if it does not exist yet)
 
 ### `kelta dashboards update <dashboardId>`
 

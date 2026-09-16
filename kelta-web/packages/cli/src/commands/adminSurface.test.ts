@@ -599,6 +599,92 @@ describe('records bulk/search/semantic-search', () => {
   });
 });
 
+describe('list-views apply', () => {
+  const listViewsOnly = () => layoutCommands.filter((c) => c.group === 'list-views');
+
+  it('creates when no view exists for (collection, name)', async () => {
+    const axios = fakeAxios({
+      '/api/collections/invoices': { data: { id: CID } },
+      '/api/list-views?filter[collectionId][eq]=11111111-2222-3333-4444-555555555555&filter[name][eq]=Open':
+        { data: [] },
+    });
+    axios.post.mockResolvedValueOnce({ data: { data: { id: 'lv-1' } } });
+
+    const result = await run(
+      listViewsOnly(),
+      'apply',
+      { collection: 'invoices', name: 'Open', columns: 'name,status', filter: [] },
+      axios
+    );
+
+    expect(axios.post).toHaveBeenCalledWith('/api/list-views', {
+      data: {
+        type: 'list-views',
+        attributes: {
+          collectionId: CID,
+          name: 'Open',
+          columns: ['name', 'status'],
+          filters: [],
+        },
+      },
+    });
+    expect(result.ids).toEqual(['lv-1']);
+  });
+
+  it('reports unchanged and writes nothing when the view already matches', async () => {
+    const axios = fakeAxios({
+      '/api/collections/invoices': { data: { id: CID } },
+      '/api/list-views?filter[collectionId][eq]=11111111-2222-3333-4444-555555555555&filter[name][eq]=Open':
+        {
+          data: [
+            {
+              id: 'lv-1',
+              attributes: { columns: ['name', 'status'], filters: [] },
+            },
+          ],
+        },
+    });
+
+    const result = await run(
+      listViewsOnly(),
+      'apply',
+      { collection: 'invoices', name: 'Open', columns: 'name,status', filter: [] },
+      axios
+    );
+
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(axios.patch).not.toHaveBeenCalled();
+    expect(result.data).toMatchObject({ action: 'unchanged', id: 'lv-1' });
+  });
+
+  it('PATCHes only the changed keys when columns differ', async () => {
+    const axios = fakeAxios({
+      '/api/collections/invoices': { data: { id: CID } },
+      '/api/list-views?filter[collectionId][eq]=11111111-2222-3333-4444-555555555555&filter[name][eq]=Open':
+        {
+          data: [
+            {
+              id: 'lv-1',
+              attributes: { columns: ['name'], filters: [] },
+            },
+          ],
+        },
+    });
+
+    const result = await run(
+      listViewsOnly(),
+      'apply',
+      { collection: 'invoices', name: 'Open', columns: 'name,status', filter: [] },
+      axios
+    );
+
+    expect(axios.patch).toHaveBeenCalledWith('/api/list-views/lv-1', {
+      data: { type: 'list-views', id: 'lv-1', attributes: { columns: ['name', 'status'] } },
+    });
+    expect(result.data).toMatchObject({ action: 'updated', changed: ['columns'] });
+  });
+});
+
 describe('list-views get/delete', () => {
   const listViewsOnly = () => layoutCommands.filter((c) => c.group === 'list-views');
 
@@ -659,6 +745,17 @@ describe('pages', () => {
     await expect(run(pageCommands, 'publish', { path: '/missing' }, axios)).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
+  });
+
+  it('publish is a no-op when the page is already published', async () => {
+    const axios = fakeAxios({
+      '/api/ui-pages?filter[path][eq]=%2Fhome': {
+        data: [{ id: 'p1', attributes: { published: true } }],
+      },
+    });
+    const result = await run(pageCommands, 'publish', { path: '/home' }, axios);
+    expect(axios.patch).not.toHaveBeenCalled();
+    expect(result.data).toMatchObject({ action: 'unchanged', id: 'p1' });
   });
 });
 
@@ -726,6 +823,21 @@ describe('pages apply', () => {
       },
     });
     expect(result.ids).toEqual(['p1']);
+  });
+
+  it('reports unchanged and PATCHes nothing when the page already matches', async () => {
+    const file = writePage({ name: 'Home', path: '/home', config: { schemaVersion: 2 } });
+    const axios = fakeAxios({
+      '/api/ui-pages?filter[path][eq]=%2Fhome': {
+        data: [{ id: 'p1', attributes: { name: 'Home', path: '/home', config: { schemaVersion: 2 } } }],
+      },
+    });
+    axios.post.mockResolvedValue({ data: { valid: true, errors: [] } });
+
+    const result = await run(pageCommands, 'apply', { file, dryRun: false }, axios);
+
+    expect(axios.patch).not.toHaveBeenCalled();
+    expect(result.data).toMatchObject({ action: 'unchanged', id: 'p1' });
   });
 
   it('--dry-run validates only and writes nothing', async () => {
@@ -828,6 +940,57 @@ describe('menus', () => {
   });
 });
 
+describe('menus apply', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'kelta-cli-menu-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reads the tree file and PUTs it to the by-name tree endpoint', async () => {
+    const tree = {
+      name: 'Main',
+      items: [{ label: 'Catalog', children: [{ label: 'Books', path: '/resources/books' }] }],
+    };
+    const file = join(dir, 'menu.json');
+    writeFileSync(file, JSON.stringify(tree));
+
+    const axios = fakeAxios();
+    axios.put.mockResolvedValueOnce({
+      data: { menuId: 'menu-1', created: 3, updated: 0, deleted: 0, unchanged: 0 },
+    });
+
+    const result = await run(menuCommands, 'apply', { file }, axios);
+
+    expect(axios.put).toHaveBeenCalledWith('/api/ui-menus/Main/tree', { items: tree.items });
+    expect(result.ids).toEqual(['menu-1']);
+    expect(result.message).toContain('created=3');
+  });
+
+  it("--name overrides the tree file's own name for addressing", async () => {
+    const file = join(dir, 'menu.json');
+    writeFileSync(file, JSON.stringify({ name: 'Main', items: [] }));
+    const axios = fakeAxios();
+    axios.put.mockResolvedValueOnce({ data: { menuId: 'menu-1' } });
+
+    await run(menuCommands, 'apply', { file, name: 'Secondary' }, axios);
+
+    expect(axios.put).toHaveBeenCalledWith('/api/ui-menus/Secondary/tree', { items: [] });
+  });
+
+  it('without --name or a name in the file throws a usage error', async () => {
+    const file = join(dir, 'menu.json');
+    writeFileSync(file, JSON.stringify({ items: [] }));
+    const axios = fakeAxios();
+
+    await expect(run(menuCommands, 'apply', { file }, axios)).rejects.toThrow(/Menu name required/);
+  });
+});
+
 describe('dashboards', () => {
   it('get --components sorts widgets by row then column position', async () => {
     const axios = fakeAxios({
@@ -880,6 +1043,71 @@ describe('dashboards', () => {
     expect(command(dashboardCommands, 'delete').dangerous).toBe(true);
     await run(dashboardCommands, 'delete', { dashboardId: 'd1' }, axios);
     expect(axios.delete).toHaveBeenCalledWith('/api/dashboards/d1');
+  });
+});
+
+describe('dashboards apply', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'kelta-cli-dashboard-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reads the tree file and PUTs it to the by-name tree endpoint', async () => {
+    const tree = {
+      name: 'Overview',
+      columnCount: 3,
+      components: [
+        {
+          title: 'Total Books',
+          componentType: 'metric',
+          columnPosition: 1,
+          rowPosition: 1,
+          config: { collectionName: 'books' },
+        },
+      ],
+    };
+    const file = join(dir, 'dashboard.json');
+    writeFileSync(file, JSON.stringify(tree));
+
+    const axios = fakeAxios();
+    axios.put.mockResolvedValueOnce({
+      data: { dashboardId: 'dash-1', created: 2, updated: 0, deleted: 0, unchanged: 0 },
+    });
+
+    const result = await run(dashboardCommands, 'apply', { file }, axios);
+
+    expect(axios.put).toHaveBeenCalledWith('/api/dashboards/Overview/tree', {
+      columnCount: 3,
+      components: tree.components,
+    });
+    expect(result.ids).toEqual(['dash-1']);
+    expect(result.message).toContain('created=2');
+  });
+
+  it("--name overrides the tree file's own name for addressing", async () => {
+    const file = join(dir, 'dashboard.json');
+    writeFileSync(file, JSON.stringify({ name: 'Overview', components: [] }));
+    const axios = fakeAxios();
+    axios.put.mockResolvedValueOnce({ data: { dashboardId: 'dash-1' } });
+
+    await run(dashboardCommands, 'apply', { file, name: 'Secondary' }, axios);
+
+    expect(axios.put).toHaveBeenCalledWith('/api/dashboards/Secondary/tree', { components: [] });
+  });
+
+  it('without --name or a name in the file throws a usage error', async () => {
+    const file = join(dir, 'dashboard.json');
+    writeFileSync(file, JSON.stringify({ components: [] }));
+    const axios = fakeAxios();
+
+    await expect(run(dashboardCommands, 'apply', { file }, axios)).rejects.toThrow(
+      /Dashboard name required/
+    );
   });
 });
 

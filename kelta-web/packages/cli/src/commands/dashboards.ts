@@ -8,6 +8,15 @@ interface DashboardComponentResource {
   attributes?: Record<string, unknown>;
 }
 
+interface DashboardTreeCounts {
+  dashboardId?: string;
+  name?: string;
+  created?: number;
+  updated?: number;
+  deleted?: number;
+  unchanged?: number;
+}
+
 const dashboardList = defineCommand({
   group: 'dashboards',
   name: 'list',
@@ -113,6 +122,47 @@ const dashboardCreate = defineCommand({
   },
 });
 
+const dashboardApply = defineCommand({
+  group: 'dashboards',
+  name: 'apply',
+  summary: 'Apply a dashboard tree file (widgets) in one call, creating the dashboard if needed',
+  options: [
+    {
+      flag: '--file <path>',
+      description: 'Dashboard tree JSON file — see `dashboards get <id> --components` for the shape',
+    },
+    {
+      flag: '--name <name>',
+      description:
+        'Dashboard name (overrides the file\'s own "name"; creates the dashboard if it does not exist yet)',
+    },
+  ],
+  input: z.object({ file: z.string().min(1), name: z.string().optional() }),
+  handler: async (ctx, input) => {
+    const tree = readDataArgument('@' + input.file);
+    const name = input.name ?? (typeof tree.name === 'string' ? tree.name : undefined);
+    if (!name) {
+      throw new CliError('Dashboard name required — pass --name or set "name" in the tree file', {
+        code: 'INVALID_ARGUMENTS',
+        exitCode: EXIT.USAGE,
+      });
+    }
+    const body = { ...tree };
+    delete body.name;
+    const path = `/api/dashboards/${encodeURIComponent(name)}/tree`;
+    const response = await ctx.client.getAxiosInstance().put<DashboardTreeCounts>(path, body);
+    const counts = response.data;
+    return {
+      data: counts,
+      message:
+        `Dashboard tree applied to "${name}" ` +
+        `(created=${counts.created ?? 0}, updated=${counts.updated ?? 0}, ` +
+        `deleted=${counts.deleted ?? 0}, unchanged=${counts.unchanged ?? 0})`,
+      ids: counts.dashboardId ? [counts.dashboardId] : [],
+    };
+  },
+});
+
 const dashboardUpdate = defineCommand({
   group: 'dashboards',
   name: 'update',
@@ -182,6 +232,7 @@ export const dashboardCommands: RegisteredCommand[] = [
   dashboardList,
   dashboardGet,
   dashboardCreate,
+  dashboardApply,
   dashboardUpdate,
   dashboardDelete,
 ];
