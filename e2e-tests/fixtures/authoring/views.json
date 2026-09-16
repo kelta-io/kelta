@@ -1,0 +1,22 @@
+[
+  {
+    "name": "All Books",
+    "columns": "title,genre,available"
+  },
+  {
+    "name": "Available Books",
+    "columns": "title,genre",
+    "filter": "available.eq=true",
+    "visibility": "PUBLIC"
+  },
+  {
+    "name": "Fiction and Nonfiction",
+    "columns": "title,genre",
+    "filter": "genre.in=Fiction,Nonfiction"
+  },
+  {
+    "name": "Books by Title",
+    "columns": "title,genre,available",
+    "sort": "title"
+  }
+]

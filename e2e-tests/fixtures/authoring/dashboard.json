@@ -1,0 +1,51 @@
+{
+  "description": "Agent-authoring benchmark dashboard (K-9) — neutral library demo domain",
+  "accessLevel": "PUBLIC",
+  "columnCount": 3,
+  "components": [
+    {
+      "title": "Total Books",
+      "componentType": "metric",
+      "columnPosition": 1,
+      "rowPosition": 1,
+      "config": { "collectionName": "{{BOOKS}}" }
+    },
+    {
+      "title": "Total Members",
+      "componentType": "metric",
+      "columnPosition": 2,
+      "rowPosition": 1,
+      "config": { "collectionName": "{{MEMBERS}}" }
+    },
+    {
+      "title": "Total Loans",
+      "componentType": "metric",
+      "columnPosition": 3,
+      "rowPosition": 1,
+      "config": { "collectionName": "{{LOANS}}" }
+    },
+    {
+      "title": "Books by Genre",
+      "componentType": "chart",
+      "columnPosition": 1,
+      "rowPosition": 2,
+      "columnSpan": 2,
+      "config": { "collectionName": "{{BOOKS}}", "groupByField": "genre" }
+    },
+    {
+      "title": "Book Catalog",
+      "componentType": "table",
+      "columnPosition": 3,
+      "rowPosition": 2,
+      "config": { "collectionName": "{{BOOKS}}", "fields": ["title", "genre", "available"] }
+    },
+    {
+      "title": "Recent Loans",
+      "componentType": "recent",
+      "columnPosition": 1,
+      "rowPosition": 3,
+      "columnSpan": 3,
+      "config": { "collectionName": "{{LOANS}}", "fields": ["bookTitle", "memberName", "dueDate"] }
+    }
+  ]
+}

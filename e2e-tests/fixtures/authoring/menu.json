@@ -1,0 +1,10 @@
+{
+  "description": "Agent-authoring benchmark menu (K-9) — neutral library demo domain",
+  "isDefault": true,
+  "items": [
+    {
+      "label": "Catalog",
+      "children": [{ "label": "Available Books", "path": "/resources/{{BOOKS}}?view=shared:{{VIEW_ID}}" }]
+    }
+  ]
+}
