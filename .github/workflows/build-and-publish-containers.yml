@@ -400,6 +400,53 @@ jobs:
             CLI_VERSION=1.0.${{ github.run_number }}
             GIT_SHA=${{ steps.sha.outputs.short }}
 
+      # Confirm the tag this leg just pushed is actually queryable on Harbor
+      # before the leg reports success. This is the leg that has real context
+      # (it just pushed) — catching a lagging/failed push here fails the leg
+      # itself, which deploy already treats as "don't bump" via its
+      # `needs.build-and-push.result != 'failure'` gate. Investigating run
+      # 35039447057 (PLT-236) found the recurring "tag not found on Harbor"
+      # failure was NOT registry read-after-write lag: `Test kelta-ui`
+      # (test-frontend) failed at 00:22:07Z, which skipped the ENTIRE
+      # build-and-push job (0 steps ran on any matrix leg, incl. worker) via
+      # its `needs.test-frontend.result != 'failure'` gate — so no push ever
+      # happened for emf-worker:main-66a7114 to lag behind. This check does
+      # not change that: a skipped leg still skips this step too. It guards
+      # the other failure mode — a leg that DID run its push but Harbor
+      # hasn't caught up (or the push silently no-op'd) — at the source
+      # instead of deploy discovering it ~140s later with no timing context.
+      - name: Verify image pushed to Harbor
+        if: |
+          (matrix.changed == 'true' || needs.changes.outputs.workflows == 'true')
+          && (github.event_name != 'workflow_dispatch' || inputs.push_images)
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          repo="emf/${{ steps.legacy.outputs.image }}"
+          tag="main-${{ steps.sha.outputs.short }}"
+          max_attempts=6
+          sleep_seconds=5
+          for attempt in $(seq 1 "$max_attempts"); do
+            code=$(curl -sk -o /dev/null -w "%{http_code}" \
+              -u "${HARBOR_USERNAME}:${HARBOR_PASSWORD}" \
+              -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+              -H "Accept: application/vnd.oci.image.index.v1+json" \
+              "https://harbor.rzware.com/v2/${repo}/manifests/${tag}")
+            if [[ "$code" == "200" ]]; then
+              echo "Verified harbor.rzware.com/${repo}:${tag} is queryable on Harbor."
+              exit 0
+            fi
+            echo "verify: attempt ${attempt}/${max_attempts} for ${repo}:${tag} got HTTP ${code:-<no response>}"
+            if [[ "$attempt" -lt "$max_attempts" ]]; then
+              sleep "$sleep_seconds"
+            fi
+          done
+          echo "::error::Pushed ${repo}:${tag} but it is not queryable on Harbor after ${max_attempts} attempts (${sleep_seconds}s apart). Failing this leg here, at the source of the push, instead of letting deploy guess later."
+          exit 1
+
   # ===========================================================================
   # Update ArgoCD manifests for services that were actually built.
   # Skipping services keep their previous image tag.
