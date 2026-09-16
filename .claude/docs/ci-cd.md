@@ -46,16 +46,39 @@ Trigger: `push` → `main` (path-filtered), plus `workflow_dispatch`.
    mirrors CI (build packages → install → typecheck → `test:run`).
    `build-and-push` gates on all three test jobs (`result != 'failure'`), so a runtime-module
    regression stops images from building rather than shipping.
-2. **`build-and-push`** — matrix `[gateway, worker, worker-migrate, auth, ui, ai, mcp]`.
-   Docker buildx → pushes to `harbor.rzware.com/emf/emf-<svc>:latest` and
-   `:main-<short-sha>`. Per-service GHA cache scope.
+2. **`build-and-push`** — matrix `[gateway, worker, worker-migrate, auth, ui, ai, mcp,
+   cli-downloads]`. Docker buildx → pushes to `harbor.rzware.com/emf/emf-<svc>:latest` and
+   `:main-<short-sha>`. Per-service GHA cache scope. Immediately after each leg's "Build and
+   push ${{ matrix.service }}" step, a **"Verify image pushed to Harbor"** step re-queries the
+   manifest it just pushed (up to 6 attempts, 5s apart, ~30s budget) and fails *that leg* if the
+   tag never becomes queryable — catching a lagging or silently-failed push at the leg that has
+   the context (it just pushed), rather than three jobs later in `deploy` with no timing
+   information. `deploy`'s existing `needs.build-and-push.result != 'failure'` gate already
+   turns a failed leg into "don't bump this image", so no new gating logic was needed there.
+   Added by PLT-236 after investigating run 35039447057 (`gh-run-35039447057`): `emf-worker`
+   404'd on Harbor for the full 14-attempt/~140s budget in `deploy`, but the actual root cause
+   was **not** registry read-after-write lag — `test-frontend`'s `Test kelta-ui` step failed at
+   `2026-09-16T00:22:07Z`, which skipped the *entire* `build-and-push` job (all matrix legs,
+   0 steps ran on any of them, confirmed via the Actions API) through its
+   `needs.test-frontend.result != 'failure'` gate. No push ever happened for
+   `emf-worker:main-66a7114` — there was nothing for Harbor to lag behind. `deploy` started at
+   `00:22:12Z` and its first `verify_image_exists()` attempt at `00:22:16Z` (per the source run)
+   was checking a tag that could never appear; it correctly refused to bump after exhausting
+   retries, but the two prior fixes (PLT-230, PLT-232) had both assumed lag and widened that
+   retry window, which could never fix a tag that was never pushed. The post-push check above
+   does not change this specific failure mode (a fully-skipped leg still skips its own
+   verify step) — it guards the *other* failure mode, a leg that did run its push but Harbor
+   hasn't caught up yet or the push silently no-op'd.
 3. **`deploy`** — checks out `homelab-argo`, runs kustomize to bump image tags (verifies
    each image exists on Harbor first — `verify_image_exists()` retries the manifest check up
    to 14 times, 10s apart (~130s / 2m10s total budget), since Harbor can briefly lag behind a
    successful push before the tag is queryable, especially for a service checked later in the
    `bump()` sequence; each failed attempt logs the HTTP status code it got back, and the step
    still fails with `::error::Refusing to bump ...` if every retry comes back non-200), commits
-   to `homelab-argo`. ArgoCD then syncs.
+   to `homelab-argo`. ArgoCD then syncs. Left unchanged by PLT-236 — it stays a defensive
+   fallback for a leg that reports success without the new build-and-push-side check running
+   (e.g. `workflow_dispatch` with `push_images=false` legitimately skips both the push and the
+   post-push verify).
 4. **`smoke-test`** — waits for k8s rollouts; `curl .../actuator/health/liveness` on gateway
    + worker; then (only when cli-downloads was rebuilt) downloads and executes the CLI binary.
    **The CLI check keys on two different values and they can disagree:** `CLI_VERSION` is baked
