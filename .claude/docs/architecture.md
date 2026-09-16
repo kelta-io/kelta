@@ -774,6 +774,21 @@ whose `config` names a target collection directly, since `dashboard_component.re
 nullable `LOOKUP`. `prune:true` hard-deletes an existing component absent from the desired set;
 omitted or `false` reports it as `stale`, mirroring `apply_menu`.
 
+**`apply_page` (KLT-222)** upserts a single `ui-pages` row, keyed on `path` — falling back to
+`idByNaturalKey("ui-pages", {slug})` when `path` itself doesn't match an existing row (a route
+rename keeps its `slug` identity) — then diffed via a newly package-visible
+`AdminLookups.readAttributes(collection, id)` (the same current-vs-desired comparison `upsert`
+does internally, exposed so this tool can diff against an id it resolved itself rather than
+`upsert`'s own single natural-key lookup). Like `apply_dashboard`, `config` can only be checked
+server-side, so the tool dry-runs it through the existing `POST /api/ui-pages/validate`
+(`UiPageConfigValidator`, KLT-217 — see "Page widget catalogue" below) **before** the row is
+created or updated at all; a config with any `error`-severity problem fails the whole call with
+a structured `{status,errors:[...]}` result (`source.pointer` = the validate response's JSON
+Pointer `path`) and writes nothing. `isHomePage` is not a tool argument — it round-trips inside
+`config` like every other page-authoring surface. The CLI's `kelta pages apply <file.json>`
+(`--dry-run` validates only) and the pre-existing `kelta pages publish <path>` wrap the same
+validate-then-upsert sequence directly against `/api/ui-pages` rather than through kelta-mcp.
+
 **Offline replica path (end-user only).** When `OfflineProvider` is mounted — it wraps the `EndUserShell` subtree — the shared data hooks route through a tenant-scoped IndexedDB replica: online reads write through to the store and offline reads serve it (`useCollectionRecords`/`useRecord`/`usePageDataSources`), and offline writes queue to an outbox (`useRecordMutation` → `engine.queue`) that flushes on reconnect (`SyncEngine.sync`). Admin pages render outside the provider (`useOffline()` → `undefined`), so their reads/writes stay online-only and unchanged. See `conventions.md` → offline hooks.
 
 ### Page widget catalogue, config schema and validation — `ui-pages.config` has a contract

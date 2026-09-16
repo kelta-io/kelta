@@ -130,3 +130,45 @@ Because the catalogue covers built-ins only, a page using a plugin- or
 module-contributed component type is rejected as an unknown type. Ship
 such a widget through the builder's widget registry if its pages need to
 be saveable.
+
+## Minimal example
+
+A heading plus a repeater bound to a data source:
+
+```json
+{
+  "schemaVersion": 2,
+  "dataSources": [
+    { "name": "accounts", "collection": "accounts", "mode": "list", "limit": 50 }
+  ],
+  "components": [
+    { "id": "h1", "type": "heading", "props": { "text": "Accounts", "level": "h2" } },
+    {
+      "id": "r1",
+      "type": "repeater",
+      "props": { "source": { "$bind": "data.accounts" } },
+      "children": [
+        { "id": "t1", "type": "text", "props": { "content": "{{ item.name }}" } }
+      ]
+    }
+  ]
+}
+```
+
+## Authoring with `apply_page` and the CLI
+
+`apply_page` (kelta-mcp, admin) validates a page's `config` via `POST
+/api/ui-pages/validate` — same checks as Validation above — *before*
+creating or updating anything, then upserts the `ui-pages` row keyed on
+`path` (falling back to `slug` when path itself doesn't match an existing
+row, e.g. a route rename). An invalid config fails the whole call with a
+structured error (the validate response's JSON Pointer) and writes
+nothing. Applying the identical body twice reports
+`{"action":"unchanged",...}` on the second call; changing `config` (or
+another attribute) reports `{"action":"updated","changed":[...]}` naming
+only the keys that actually differ.
+
+The CLI mirrors this: `kelta pages apply <file.json>` runs the same
+validate-then-upsert sequence (`--dry-run` runs validation only and
+writes nothing), and `kelta pages publish <path>` sets `published: true`
+on the page served at that route.

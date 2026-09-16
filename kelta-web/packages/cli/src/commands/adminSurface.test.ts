@@ -662,6 +662,122 @@ describe('pages', () => {
   });
 });
 
+describe('pages apply', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'kelta-cli-page-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function writePage(doc: Record<string, unknown>): string {
+    const file = join(dir, 'page.json');
+    writeFileSync(file, JSON.stringify(doc));
+    return file;
+  }
+
+  it('validates then creates when no page exists at the path', async () => {
+    const file = writePage({ name: 'Home', path: '/home', config: { schemaVersion: 2 } });
+    const axios = fakeAxios({
+      '/api/ui-pages?filter[path][eq]=%2Fhome': { data: [] },
+    });
+    axios.post.mockImplementation((url: string, body: unknown) => {
+      if (url === '/api/ui-pages/validate')
+        return Promise.resolve({ data: { valid: true, errors: [] } });
+      return Promise.resolve({ data: { data: { id: 'p1' } } });
+    });
+
+    const result = await run(pageCommands, 'apply', { file, dryRun: false }, axios);
+
+    expect(axios.post).toHaveBeenCalledWith('/api/ui-pages/validate', {
+      config: { schemaVersion: 2 },
+    });
+    expect(axios.post).toHaveBeenCalledWith('/api/ui-pages', {
+      data: {
+        type: 'ui-pages',
+        attributes: { name: 'Home', path: '/home', config: { schemaVersion: 2 } },
+      },
+    });
+    expect(result.ids).toEqual(['p1']);
+  });
+
+  it('validates then updates when a page already exists at the path', async () => {
+    const file = writePage({
+      name: 'Home',
+      path: '/home',
+      config: { schemaVersion: 2 },
+      published: true,
+    });
+    const axios = fakeAxios({
+      '/api/ui-pages?filter[path][eq]=%2Fhome': { data: [{ id: 'p1' }] },
+    });
+    axios.post.mockResolvedValue({ data: { valid: true, errors: [] } });
+
+    const result = await run(pageCommands, 'apply', { file, dryRun: false }, axios);
+
+    expect(axios.patch).toHaveBeenCalledWith('/api/ui-pages/p1', {
+      data: {
+        type: 'ui-pages',
+        id: 'p1',
+        attributes: { name: 'Home', path: '/home', config: { schemaVersion: 2 }, published: true },
+      },
+    });
+    expect(result.ids).toEqual(['p1']);
+  });
+
+  it('--dry-run validates only and writes nothing', async () => {
+    const file = writePage({ name: 'Home', path: '/home', config: { schemaVersion: 2 } });
+    const axios = fakeAxios();
+    axios.post.mockResolvedValue({ data: { valid: true, errors: [] } });
+
+    const result = await run(pageCommands, 'apply', { file, dryRun: true }, axios);
+
+    expect(axios.post).toHaveBeenCalledWith('/api/ui-pages/validate', {
+      config: { schemaVersion: 2 },
+    });
+    expect(axios.post).toHaveBeenCalledTimes(1);
+    expect(axios.get).not.toHaveBeenCalled();
+    expect(axios.patch).not.toHaveBeenCalled();
+    expect(result.message).toContain('dry run');
+  });
+
+  it('an invalid config throws with structured errors and writes nothing', async () => {
+    const file = writePage({
+      name: 'Home',
+      path: '/home',
+      config: { components: [{ type: 'bogus' }] },
+    });
+    const axios = fakeAxios();
+    axios.post.mockResolvedValue({
+      data: {
+        valid: false,
+        errors: [
+          { path: '/components/0/type', message: "Unknown widget type 'bogus'", severity: 'error' },
+        ],
+      },
+    });
+
+    await expect(run(pageCommands, 'apply', { file, dryRun: false }, axios)).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      errors: [expect.objectContaining({ source: { pointer: '/components/0/type' } })],
+    });
+    expect(axios.get).not.toHaveBeenCalled();
+    expect(axios.patch).not.toHaveBeenCalled();
+    expect(axios.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('apply is dangerous unless --dry-run', () => {
+    const def = command(pageCommands, 'apply');
+    expect(typeof def.dangerous).toBe('function');
+    const dangerous = def.dangerous as (input: { dryRun: boolean }) => boolean;
+    expect(dangerous({ dryRun: false })).toBe(true);
+    expect(dangerous({ dryRun: true })).toBe(false);
+  });
+});
+
 describe('menus', () => {
   it('get resolves a name to id then fetches the plain resource without --tree', async () => {
     const axios = fakeAxios({
