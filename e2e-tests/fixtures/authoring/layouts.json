@@ -1,0 +1,12 @@
+{
+  "layoutType": "DETAIL",
+  "isDefault": true,
+  "description": "Agent-authoring benchmark layout (K-9)",
+  "sections": [
+    {
+      "heading": "Details",
+      "columns": 2,
+      "fields": [{ "name": "{{PRIMARY_FIELD}}" }]
+    }
+  ]
+}

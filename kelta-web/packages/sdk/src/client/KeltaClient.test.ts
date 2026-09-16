@@ -662,4 +662,57 @@ describe('KeltaClient', () => {
       expect(orders.displayName).toBe('Orders');
     });
   });
+
+  describe('KELTA_TRACE request tracing', () => {
+    const originalEnv = process.env.KELTA_TRACE;
+
+    afterEach(() => {
+      if (originalEnv === undefined) delete process.env.KELTA_TRACE;
+      else process.env.KELTA_TRACE = originalEnv;
+    });
+
+    it('does not register a trace interceptor when KELTA_TRACE is unset', () => {
+      delete process.env.KELTA_TRACE;
+      const client = new KeltaClient({ baseUrl: 'https://api.example.com' });
+      const axiosInstance = client.getAxiosInstance();
+      const responseUse = axiosInstance.interceptors.response.use as ReturnType<typeof vi.fn>;
+      // Only the retry interceptor registers.
+      expect(responseUse).toHaveBeenCalledTimes(1);
+    });
+
+    it('writes one stderr line per successful response when KELTA_TRACE=1', () => {
+      process.env.KELTA_TRACE = '1';
+      const client = new KeltaClient({ baseUrl: 'https://api.example.com' });
+      const axiosInstance = client.getAxiosInstance();
+      const responseUse = axiosInstance.interceptors.response.use as ReturnType<typeof vi.fn>;
+      // Trace interceptor registers first, ahead of the retry interceptor.
+      const traceSuccess = responseUse.mock.calls[0][0];
+
+      const writeSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      const response = { status: 200, config: { method: 'get', url: '/api/collections' } };
+      expect(traceSuccess(response)).toBe(response);
+
+      expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('GET /api/collections 200'));
+      writeSpy.mockRestore();
+    });
+
+    it('writes a trace line and re-rejects on an error response', async () => {
+      process.env.KELTA_TRACE = '1';
+      const client = new KeltaClient({ baseUrl: 'https://api.example.com' });
+      const axiosInstance = client.getAxiosInstance();
+      const responseUse = axiosInstance.interceptors.response.use as ReturnType<typeof vi.fn>;
+      const traceError = responseUse.mock.calls[0][1];
+
+      const writeSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      const error = {
+        isAxiosError: true,
+        config: { method: 'post', url: '/api/dashboards' },
+        response: { status: 500 },
+      };
+
+      await expect(traceError(error)).rejects.toBe(error);
+      expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('POST /api/dashboards 500'));
+      writeSpy.mockRestore();
+    });
+  });
 });

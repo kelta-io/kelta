@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { AxiosInstance } from 'axios';
 import { z } from 'zod';
-import { readDataArgument } from '../data.js';
+import { deepEqual, readDataArgument } from '../data.js';
 import { CliError, EXIT, type JsonApiErrorEntry } from '../errors.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
 
@@ -42,16 +42,16 @@ function readPageFile(path: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-/** Resolves an existing `ui-pages` id by a single natural-key field, or undefined when none matches. */
-async function findPageId(
+/** Resolves an existing `ui-pages` row by a single natural-key field, or undefined when none matches. */
+async function findPage(
   axios: AxiosInstance,
   field: 'path' | 'slug',
   value: string
-): Promise<string | undefined> {
-  const response = await axios.get<{ data?: { id?: string }[] }>(
-    `/api/ui-pages?filter[${field}][eq]=${encodeURIComponent(value)}&page[size]=1`
-  );
-  return response.data.data?.[0]?.id;
+): Promise<{ id: string; attributes?: Record<string, unknown> } | undefined> {
+  const response = await axios.get<{
+    data?: { id: string; attributes?: Record<string, unknown> }[];
+  }>(`/api/ui-pages?filter[${field}][eq]=${encodeURIComponent(value)}&page[size]=1`);
+  return response.data.data?.[0];
 }
 
 const pageList = defineCommand({
@@ -192,16 +192,28 @@ const pageApply = defineCommand({
     if (typeof doc.published === 'boolean') attributes.published = doc.published;
     if (typeof doc.active === 'boolean') attributes.active = doc.active;
 
-    let existingId = await findPageId(axios, 'path', doc.path);
-    if (!existingId && slug) {
-      existingId = await findPageId(axios, 'slug', slug);
+    let existing = await findPage(axios, 'path', doc.path);
+    if (!existing && slug) {
+      existing = await findPage(axios, 'slug', slug);
     }
 
-    if (existingId) {
-      const response = await axios.patch<unknown>(`/api/ui-pages/${existingId}`, {
-        data: { type: 'ui-pages', id: existingId, attributes },
+    if (existing) {
+      const changed = Object.keys(attributes).filter(
+        (key) => !deepEqual(existing?.attributes?.[key], attributes[key])
+      );
+      if (changed.length === 0) {
+        return {
+          data: { action: 'unchanged', id: existing.id },
+          message: `Page "${doc.path}" unchanged`,
+          ids: [existing.id],
+        };
+      }
+      const patchAttrs: Record<string, unknown> = {};
+      for (const key of changed) patchAttrs[key] = attributes[key];
+      const response = await axios.patch<unknown>(`/api/ui-pages/${existing.id}`, {
+        data: { type: 'ui-pages', id: existing.id, attributes: patchAttrs },
       });
-      return { data: response.data, message: `Page "${doc.path}" updated`, ids: [existingId] };
+      return { data: response.data, message: `Page "${doc.path}" updated`, ids: [existing.id] };
     }
     const response = await axios.post<{ data?: { id?: string } }>('/api/ui-pages', {
       data: { type: 'ui-pages', attributes },
@@ -287,20 +299,24 @@ const pagePublish = defineCommand({
   input: z.object({ path: z.string().min(1) }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
-    const response = await axios.get<{ data?: { id?: string }[] }>(
-      `/api/ui-pages?filter[path][eq]=${encodeURIComponent(input.path)}`
-    );
-    const id = response.data.data?.[0]?.id;
-    if (!id) {
+    const page = await findPage(axios, 'path', input.path);
+    if (!page) {
       throw new CliError(`Page at path "${input.path}" not found`, {
         code: 'NOT_FOUND',
         exitCode: EXIT.NOT_FOUND,
       });
     }
-    const updated = await axios.patch<unknown>(`/api/ui-pages/${id}`, {
-      data: { type: 'ui-pages', id, attributes: { published: true } },
+    if (page.attributes?.published === true) {
+      return {
+        data: { action: 'unchanged', id: page.id },
+        message: `Page "${input.path}" already published`,
+        ids: [page.id],
+      };
+    }
+    const updated = await axios.patch<unknown>(`/api/ui-pages/${page.id}`, {
+      data: { type: 'ui-pages', id: page.id, attributes: { published: true } },
     });
-    return { data: updated.data, message: `Page "${input.path}" published`, ids: [id] };
+    return { data: updated.data, message: `Page "${input.path}" published`, ids: [page.id] };
   },
 });
 

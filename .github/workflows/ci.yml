@@ -538,6 +538,17 @@ jobs:
       - name: Generate .env (JWK_SET + encryption key)
         run: make setup
 
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build kelta CLI (agent-authoring benchmark drives it directly — kelta-mcp is not in CI compose)
+        working-directory: kelta-web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
       - name: Build service images (JVM, GHA cache)
         run: |
           docker buildx bake \
@@ -557,19 +568,28 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.ci.yml \
             --profile seed run --rm kelta-bootstrap
 
-      - name: Build Playwright runner image (tests baked in)
+      - name: Build Playwright runner image (tests + CLI baked in)
         # Bake e2e-tests + node_modules into a runner image. Bind-mounting the
         # workspace doesn't work with the k8s-runner-integration remote Docker
         # daemon (the daemon host can't see the runner's filesystem).
+        #
+        # Build context is the repo root (not e2e-tests) so the image can also carry
+        # the built kelta-web tree (dist/ + hoisted node_modules — the CLI's own
+        # package.json has no deps of its own to bundle, they resolve up to
+        # kelta-web/node_modules via normal workspace hoisting) at /kelta-web.
+        # agent-authoring.spec.ts resolves the CLI via
+        # `../../kelta-web/packages/cli/dist/index.js` from /work/tests, the same
+        # relative path cli-smoke.spec.ts already uses.
         run: |
           # Image tag must match the @playwright/test version in package-lock.json
           # (resolved from ^1.50.0 → currently 1.58.2). Update both together.
-          docker build -t kelta-e2e-runner:local -f - e2e-tests <<'DOCKERFILE'
+          docker build -t kelta-e2e-runner:local -f - . <<'DOCKERFILE'
           FROM mcr.microsoft.com/playwright:v1.58.2-noble
           WORKDIR /work
-          COPY package.json package-lock.json ./
+          COPY e2e-tests/package.json e2e-tests/package-lock.json ./
           RUN npm ci
-          COPY . .
+          COPY e2e-tests/ .
+          COPY kelta-web /kelta-web
           DOCKERFILE
 
       - name: Run Playwright tests (sibling container on compose network)
@@ -599,6 +619,21 @@ jobs:
           docker cp "$CONTAINER":/work/playwright-report/. e2e-tests/playwright-report/ 2>/dev/null || true
           docker cp "$CONTAINER":/work/test-results/. e2e-tests/test-results/ 2>/dev/null || true
           docker rm -f "$CONTAINER" || true
+
+      - name: Report agent-authoring benchmark request count
+        if: always() && steps.playwright.outcome != 'skipped'
+        run: |
+          COUNT_FILE="e2e-tests/test-results/agent-authoring-request-count.txt"
+          if [ -f "$COUNT_FILE" ]; then
+            COUNT="$(cat "$COUNT_FILE")"
+            echo "### Agent-authoring benchmark (K-9)" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "HTTP requests for the full authoring sequence (layouts x2, list-views x4, dashboard, page apply+publish, menu): **${COUNT} / 20**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Agent-authoring benchmark (K-9)" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "No request-count report found (agent-authoring.spec.ts did not run or was skipped)." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Dump compose logs on failure
         if: failure()

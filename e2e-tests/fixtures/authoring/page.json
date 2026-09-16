@@ -1,0 +1,21 @@
+{
+  "name": "Library Home",
+  "path": "/library-home",
+  "slug": "library-home",
+  "title": "Library",
+  "config": {
+    "schemaVersion": 2,
+    "isHomePage": true,
+    "components": [
+      {
+        "id": "total-books",
+        "type": "metric",
+        "props": {
+          "dataView": { "collection": "{{BOOKS}}" },
+          "label": "Total Books",
+          "format": "number"
+        }
+      }
+    ]
+  }
+}

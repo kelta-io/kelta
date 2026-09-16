@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { collectionIdByName } from '../admin/lookups.js';
-import { readDataArgument } from '../data.js';
+import { deepEqual, readDataArgument } from '../data.js';
 import { CliError, EXIT } from '../errors.js';
 import { parseFilterSpec, parseList } from '../query.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
@@ -326,7 +326,7 @@ const listViewCreate = defineCommand({
         const parsed = parseFilterSpec(spec);
         return {
           field: parsed.field,
-          operator: parsed.operator.toUpperCase(),
+          operator: parsed.operator,
           value: parsed.value,
         };
       }),
@@ -347,6 +347,111 @@ const listViewCreate = defineCommand({
       data: response.data,
       message: `List view "${input.name}" created for ${input.collection}`,
       ids: response.data.data?.id ? [response.data.data.id] : [],
+    };
+  },
+});
+
+const listViewApply = defineCommand({
+  group: 'list-views',
+  name: 'apply',
+  summary: 'Create-or-update a saved list view, keyed on (collection, name)',
+  positionals: [{ name: 'collection', description: 'Collection name or id', required: true }],
+  options: [
+    { flag: '--name <name>', description: 'List view name (required)' },
+    { flag: '--columns <list>', description: 'Displayed field names, comma-separated (required)' },
+    {
+      flag: '--filter <spec>',
+      description: 'Filter as field[.op]=value (repeatable); always written as given',
+      repeatable: true,
+    },
+    { flag: '--sort <field>', description: 'Sort field, -prefix for descending' },
+    { flag: '--row-limit <n>', description: 'Maximum rows rendered' },
+    { flag: '--default <bool>', description: 'true|false — omit to leave the current value alone' },
+    { flag: '--visibility <vis>', description: 'PRIVATE, PUBLIC or GROUP' },
+    { flag: '--view-type <type>', description: 'Renderer: TABLE, KANBAN, CALENDAR or GALLERY' },
+    { flag: '--lane-field <field>', description: 'Kanban lane field (a picklist field)' },
+    { flag: '--card-fields <list>', description: 'Kanban card fields, comma-separated' },
+    { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
+  ],
+  input: z.object({
+    collection: z.string().min(1),
+    name: z.string().min(1),
+    columns: z.string().min(1),
+    filter: z.array(z.string()).default([]),
+    sort: z.string().optional(),
+    rowLimit: z.coerce.number().int().optional(),
+    default: z.enum(['true', 'false']).optional(),
+    visibility: z.string().optional(),
+    viewType: z.string().optional(),
+    laneField: z.string().optional(),
+    cardFields: z.string().optional(),
+    data: z.string().optional(),
+  }),
+  handler: async (ctx, input) => {
+    const axios = ctx.client.getAxiosInstance();
+    const collectionId = await collectionIdByName(axios, input.collection);
+
+    const attributes: Record<string, unknown> = {
+      columns: parseList(input.columns),
+      filters: input.filter.map((spec) => {
+        const parsed = parseFilterSpec(spec);
+        return {
+          field: parsed.field,
+          operator: parsed.operator,
+          value: parsed.value,
+        };
+      }),
+    };
+    if (input.sort) {
+      attributes.sortField = input.sort.replace(/^-/, '');
+      attributes.sortDirection = input.sort.startsWith('-') ? 'DESC' : 'ASC';
+    }
+    if (input.rowLimit !== undefined) attributes.rowLimit = input.rowLimit;
+    if (input.default !== undefined) attributes.isDefault = input.default === 'true';
+    if (input.visibility) attributes.visibility = input.visibility.trim().toUpperCase();
+    if (input.viewType) attributes.viewType = normalizeViewType(input.viewType);
+    const typeConfig = kanbanTypeConfig(input.laneField, input.cardFields);
+    if (typeConfig) attributes.typeConfig = typeConfig;
+    if (input.data) Object.assign(attributes, readDataArgument(input.data));
+
+    const found = await axios.get<{
+      data?: { id: string; attributes?: Record<string, unknown> }[];
+    }>(
+      `/api/list-views?filter[collectionId][eq]=${collectionId}` +
+        `&filter[name][eq]=${encodeURIComponent(input.name)}&page[size]=1`
+    );
+    const existing = found.data.data?.[0];
+
+    if (!existing) {
+      const created = await axios.post<{ data?: { id?: string } }>('/api/list-views', {
+        data: { type: 'list-views', attributes: { collectionId, name: input.name, ...attributes } },
+      });
+      return {
+        data: { action: 'created', id: created.data.data?.id },
+        message: `List view "${input.name}" created for ${input.collection}`,
+        ids: created.data.data?.id ? [created.data.data.id] : [],
+      };
+    }
+
+    const changed = Object.keys(attributes).filter(
+      (key) => !deepEqual(existing.attributes?.[key], attributes[key])
+    );
+    if (changed.length === 0) {
+      return {
+        data: { action: 'unchanged', id: existing.id },
+        message: `List view "${input.name}" unchanged`,
+        ids: [existing.id],
+      };
+    }
+    const patchAttrs: Record<string, unknown> = {};
+    for (const key of changed) patchAttrs[key] = attributes[key];
+    await axios.patch(`/api/list-views/${existing.id}`, {
+      data: { type: 'list-views', id: existing.id, attributes: patchAttrs },
+    });
+    return {
+      data: { action: 'updated', id: existing.id, changed },
+      message: `List view "${input.name}" updated (${changed.join(', ')})`,
+      ids: [existing.id],
     };
   },
 });
@@ -397,7 +502,7 @@ const listViewUpdate = defineCommand({
         const parsed = parseFilterSpec(spec);
         return {
           field: parsed.field,
-          operator: parsed.operator.toUpperCase(),
+          operator: parsed.operator,
           value: parsed.value,
         };
       });
@@ -471,6 +576,7 @@ export const layoutCommands: RegisteredCommand[] = [
   layoutDelete,
   listViewList,
   listViewCreate,
+  listViewApply,
   listViewUpdate,
   listViewGet,
   listViewDelete,
