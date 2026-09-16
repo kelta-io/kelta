@@ -208,7 +208,7 @@ test.describe("agent authoring benchmark", () => {
     const dashboard = JSON.parse(r.stdout) as SequenceResult["dashboard"];
 
     const pageFile = writeFixture("page.json", { BOOKS: books.name });
-    r = tracedCli(["pages", "apply", pageFile, "--output", "json"], trace);
+    r = tracedCli(["pages", "apply", pageFile, "--yes", "--output", "json"], trace);
     expect(r.status, r.stderr).toBe(0);
     const page = JSON.parse(r.stdout) as SequenceResult["page"];
 
