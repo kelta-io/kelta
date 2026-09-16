@@ -40,11 +40,25 @@ Each `PageComponent` is `{ id, type, props, events?, span?, children? }`.
 
 ## Widget catalogue
 
-`type` selects the widget. Consult the page builder's component palette
-in the admin UI for the current full list (it changes as widgets are
-added); common types include text, image, button, form, table/repeater,
-and container/layout components. `props` values are either literals or
-bindings (below).
+`type` selects the widget. `GET /api/pages/widgets` is the machine-readable
+catalogue of every built-in:
+
+```json
+{ "widgets": [
+  { "type": "heading", "label": "Heading", "category": "content",
+    "acceptsChildren": false, "defaultProps": { "text": "Heading", "level": "h2" },
+    "propSchema": [ { "key": "text", "label": "Text", "kind": "text", "bindable": true } ],
+    "source": "builtin" } ] }
+```
+
+`propSchema[].bindable` says whether that prop accepts a binding;
+`acceptsChildren` says whether the widget may carry a `children` array.
+The file is generated from the builder's widget registry, so it never
+drifts from what the palette offers. Page component types contributed at
+runtime by a **plugin or a module UI bundle** are registered in the
+browser only and are not in this catalogue — see Validation below.
+
+`props` values are either literals or bindings (below).
 
 ## Data bindings
 
@@ -71,8 +85,48 @@ limit?, mode: "list" | "single", recordId? }`, fetched client-side over
 the normal authorized JSON:API path. Two limits apply:
 
 - **At most 12 data sources per page** (`MAX_PAGE_DATA_SOURCES`) —
-  additional entries are dropped, not rejected.
+  a page declaring more is rejected on save; the client also drops the
+  extras at render time.
 - **At most 200 rows per repeater/list widget** (`MAX_REPEATER_ROWS`) —
   this is a per-widget rendering cap, not a whole-page row cap. A data
-  source's own `limit` is separately clamped to the server's page-size
-  ceiling of 200 (see `kelta docs jsonapi`).
+  source's own `limit` is separately capped at 200, the server's
+  page-size ceiling (see `kelta docs jsonapi`), and a larger one is
+  rejected on save.
+
+`filter` is a field-to-value map, and every entry is compared with `EQ` —
+that is the only operator the client fetch emits. An operator map
+(`{ "amount": { "GT": 100 } }`) would be serialized into the query string
+as `[object Object]`, so it is rejected rather than silently mis-filtered.
+Filter values may themselves be bindings.
+
+## Validation
+
+Two endpoints let an author check a page before — or instead of — saving
+it, and the same checks run on every write:
+
+- `GET /api/pages/config-schema` — the JSON Schema for the `config`
+  document above (draft 2020-12).
+- `POST /api/ui-pages/validate` — body is the config (or
+  `{ "config": { ... } }`), response is
+  `{ "valid": true|false, "errors": [ { "path", "message", "severity" } ] }`.
+  `path` is a JSON Pointer into the config, e.g. `/components/0/type`.
+
+`severity` is `error` or `warning`, and `valid` answers "would this
+save?" — it is false only when an `error` was found. A **before-save hook
+on `ui-pages` rejects a write with any `error`** (HTTP 400); warnings are
+reported but still save, so a page can be authored incrementally.
+
+| Problem | Severity |
+|---|---|
+| Widget `type` missing, or not in the built-in catalogue | error |
+| `components` / `children` / `dataSources` not an array | error |
+| More than 12 data sources | error |
+| Data source without a `name` or `collection`, or with a duplicate name | error |
+| Data source `limit` outside 1–200, or an unknown `mode` | error |
+| A filter operator other than `EQ` | error |
+| A binding (`$bind` or `{{ ... }}`) naming a data source that is not declared | warning |
+
+Because the catalogue covers built-ins only, a page using a plugin- or
+module-contributed component type is rejected as an unknown type. Ship
+such a widget through the builder's widget registry if its pages need to
+be saveable.

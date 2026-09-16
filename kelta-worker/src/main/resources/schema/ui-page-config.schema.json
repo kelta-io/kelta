@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kelta.io/schema/ui-page-config.schema.json",
+  "title": "Kelta ui-pages config",
+  "description": "The `config` JSON column of a `ui-pages` record. Widget `type` values come from GET /api/pages/widgets; POST /api/ui-pages/validate checks the parts a JSON Schema cannot (unknown widget types, bindings to undeclared data sources).",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": 2,
+      "description": "Marks the component-tree config model. Absent on pre-tree (legacy) pages."
+    },
+    "layout": {
+      "type": "object",
+      "deprecated": true,
+      "description": "Inert legacy layout descriptor. The widget tree and per-child `span` own layout; this round-trips untouched."
+    },
+    "components": {
+      "$ref": "#/$defs/componentList"
+    },
+    "variables": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/variable"
+      }
+    },
+    "dataSources": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/dataSource"
+      },
+      "description": "On-load queries run client-side over the authorized JSON:API path, exposed to bindings as `data.<name>`. At most 12 per page."
+    },
+    "access": {
+      "type": "object",
+      "properties": {
+        "requiredPermission": {
+          "type": "string",
+          "description": "System permission a caller must hold for the page to render."
+        }
+      }
+    },
+    "isHomePage": {
+      "type": "boolean",
+      "description": "Overrides the end-user app's default landing page. Author at most one per tenant."
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "componentList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/component"
+      }
+    },
+    "component": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable node id, unique within the page."
+        },
+        "type": {
+          "type": "string",
+          "description": "Widget type. Built-in types are listed by GET /api/pages/widgets."
+        },
+        "props": {
+          "type": "object",
+          "description": "Prop values: literals, `{{ ... }}` merge-tag strings, or `$bind` objects.",
+          "additionalProperties": {
+            "$ref": "#/$defs/propValue"
+          }
+        },
+        "events": {
+          "$ref": "#/$defs/events"
+        },
+        "span": {
+          "$ref": "#/$defs/span"
+        },
+        "children": {
+          "$ref": "#/$defs/componentList"
+        }
+      },
+      "additionalProperties": true
+    },
+    "propValue": {
+      "description": "A literal (string/number/boolean/null/array/object) or a binding object. A literal string may carry `{{ ... }}` merge tags.",
+      "if": {
+        "type": "object",
+        "required": [
+          "$bind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/binding"
+      }
+    },
+    "binding": {
+      "type": "object",
+      "required": [
+        "$bind"
+      ],
+      "properties": {
+        "$bind": {
+          "type": "string",
+          "description": "Expression over the binding scope. Roots: record, vars, page, item, data."
+        },
+        "mode": {
+          "enum": [
+            "path",
+            "expr"
+          ],
+          "description": "Defaults to \"path\"."
+        }
+      }
+    },
+    "events": {
+      "type": "object",
+      "description": "Wired actions keyed by event name.",
+      "propertyNames": {
+        "enum": [
+          "onClick",
+          "onChange",
+          "onSubmit",
+          "onLoad"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "span": {
+      "type": "object",
+      "description": "Responsive column span on the 12-column grid.",
+      "required": [
+        "base"
+      ],
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/spanValue"
+        },
+        "sm": {
+          "$ref": "#/$defs/spanValue"
+        },
+        "md": {
+          "$ref": "#/$defs/spanValue"
+        },
+        "lg": {
+          "$ref": "#/$defs/spanValue"
+        }
+      },
+      "additionalProperties": false
+    },
+    "spanValue": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 12
+    },
+    "variable": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Referenced by bindings as `vars.<name>`."
+        },
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "json"
+          ]
+        },
+        "default": {},
+        "kind": {
+          "enum": [
+            "static",
+            "computed"
+          ],
+          "description": "Absent means \"static\". A computed variable derives its value from `expression`."
+        },
+        "expression": {
+          "type": "string",
+          "description": "Formula expression for `kind: \"computed\"`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "dataSource": {
+      "type": "object",
+      "required": [
+        "name",
+        "collection"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Exposed to bindings as `data.<name>`."
+        },
+        "collection": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "filter": {
+          "type": "object",
+          "description": "Field-to-value map. Values are literals or `$bind` objects and are always compared with EQ; no other operator is supported.",
+          "additionalProperties": {
+            "$ref": "#/$defs/propValue"
+          }
+        },
+        "sort": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "description": "Page size, clamped to the server's 200-row HTTP cap."
+        },
+        "mode": {
+          "enum": [
+            "list",
+            "single"
+          ]
+        },
+        "recordId": {
+          "$ref": "#/$defs/propValue"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

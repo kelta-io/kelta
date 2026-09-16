@@ -14,8 +14,12 @@ test.describe("Login Page", () => {
     await expect(loginPage.errorMessage).toBeVisible();
   });
 
+  // `logged_out=true` is what suppresses auto-login. The seeded tenant has exactly
+  // one OIDC provider and it is the internal one, so a bare /login auto-redirects to
+  // kelta-auth instead of rendering a picker -- this test only ever passed by winning
+  // the race against that redirect. The flag is the app's real "let me choose" path.
   test("shows provider buttons on login page", async ({ page }) => {
-    await page.goto(`/${tenantSlug}/login`);
+    await page.goto(`/${tenantSlug}/login?logged_out=true`);
 
     const loginPage = new LoginPage(page, tenantSlug);
     await expect(loginPage.container).toBeVisible();
