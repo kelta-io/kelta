@@ -326,7 +326,7 @@ const listViewCreate = defineCommand({
         const parsed = parseFilterSpec(spec);
         return {
           field: parsed.field,
-          operator: parsed.operator.toUpperCase(),
+          operator: parsed.operator,
           value: parsed.value,
         };
       }),
@@ -397,7 +397,7 @@ const listViewApply = defineCommand({
         const parsed = parseFilterSpec(spec);
         return {
           field: parsed.field,
-          operator: parsed.operator.toUpperCase(),
+          operator: parsed.operator,
           value: parsed.value,
         };
       }),
@@ -502,7 +502,7 @@ const listViewUpdate = defineCommand({
         const parsed = parseFilterSpec(spec);
         return {
           field: parsed.field,
-          operator: parsed.operator.toUpperCase(),
+          operator: parsed.operator,
           value: parsed.value,
         };
       });

@@ -222,8 +222,8 @@ describe('list-views create', () => {
           columns: ['status', 'amount'],
           isDefault: true,
           filters: [
-            { field: 'status', operator: 'EQ', value: 'OPEN' },
-            { field: 'amount', operator: 'GTE', value: '10' },
+            { field: 'status', operator: 'eq', value: 'OPEN' },
+            { field: 'amount', operator: 'gte', value: '10' },
           ],
           sortField: 'createdAt',
           sortDirection: 'DESC',
@@ -657,6 +657,39 @@ describe('list-views apply', () => {
     expect(result.data).toMatchObject({ action: 'unchanged', id: 'lv-1' });
   });
 
+  it("reports unchanged for a filtered view — operator is lowercase, matching the worker's canonical storage", async () => {
+    const axios = fakeAxios({
+      '/api/collections/invoices': { data: { id: CID } },
+      '/api/list-views?filter[collectionId][eq]=11111111-2222-3333-4444-555555555555&filter[name][eq]=Open':
+        {
+          data: [
+            {
+              id: 'lv-1',
+              attributes: {
+                columns: ['name', 'status'],
+                filters: [{ field: 'status', operator: 'eq', value: 'OPEN' }],
+              },
+            },
+          ],
+        },
+    });
+
+    const result = await run(
+      listViewsOnly(),
+      'apply',
+      {
+        collection: 'invoices',
+        name: 'Open',
+        columns: 'name,status',
+        filter: ['status.eq=OPEN'],
+      },
+      axios
+    );
+
+    expect(axios.patch).not.toHaveBeenCalled();
+    expect(result.data).toMatchObject({ action: 'unchanged', id: 'lv-1' });
+  });
+
   it('PATCHes only the changed keys when columns differ', async () => {
     const axios = fakeAxios({
       '/api/collections/invoices': { data: { id: CID } },
@@ -831,6 +864,33 @@ describe('pages apply', () => {
       '/api/ui-pages?filter[path][eq]=%2Fhome': {
         data: [
           { id: 'p1', attributes: { name: 'Home', path: '/home', config: { schemaVersion: 2 } } },
+        ],
+      },
+    });
+    axios.post.mockResolvedValue({ data: { valid: true, errors: [] } });
+
+    const result = await run(pageCommands, 'apply', { file, dryRun: false }, axios);
+
+    expect(axios.patch).not.toHaveBeenCalled();
+    expect(result.data).toMatchObject({ action: 'unchanged', id: 'p1' });
+  });
+
+  it('reports unchanged when the page was published out-of-band and the file has no "published" key', async () => {
+    // A page file without "published" doesn't claim a draft/published state — re-applying it
+    // after a separate `pages publish` must not fight that command over the field's value.
+    const file = writePage({ name: 'Home', path: '/home', config: { schemaVersion: 2 } });
+    const axios = fakeAxios({
+      '/api/ui-pages?filter[path][eq]=%2Fhome': {
+        data: [
+          {
+            id: 'p1',
+            attributes: {
+              name: 'Home',
+              path: '/home',
+              config: { schemaVersion: 2 },
+              published: true,
+            },
+          },
         ],
       },
     });

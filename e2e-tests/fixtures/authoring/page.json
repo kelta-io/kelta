@@ -3,7 +3,6 @@
   "path": "/library-home",
   "slug": "library-home",
   "title": "Library",
-  "published": false,
   "config": {
     "schemaVersion": 2,
     "isHomePage": true,
