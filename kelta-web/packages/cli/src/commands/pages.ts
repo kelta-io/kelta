@@ -48,9 +48,9 @@ async function findPage(
   field: 'path' | 'slug',
   value: string
 ): Promise<{ id: string; attributes?: Record<string, unknown> } | undefined> {
-  const response = await axios.get<{ data?: { id: string; attributes?: Record<string, unknown> }[] }>(
-    `/api/ui-pages?filter[${field}][eq]=${encodeURIComponent(value)}&page[size]=1`
-  );
+  const response = await axios.get<{
+    data?: { id: string; attributes?: Record<string, unknown> }[];
+  }>(`/api/ui-pages?filter[${field}][eq]=${encodeURIComponent(value)}&page[size]=1`);
   return response.data.data?.[0];
 }
 
@@ -307,7 +307,11 @@ const pagePublish = defineCommand({
       });
     }
     if (page.attributes?.published === true) {
-      return { data: { action: 'unchanged', id: page.id }, message: `Page "${input.path}" already published`, ids: [page.id] };
+      return {
+        data: { action: 'unchanged', id: page.id },
+        message: `Page "${input.path}" already published`,
+        ids: [page.id],
+      };
     }
     const updated = await axios.patch<unknown>(`/api/ui-pages/${page.id}`, {
       data: { type: 'ui-pages', id: page.id, attributes: { published: true } },

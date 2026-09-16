@@ -231,7 +231,11 @@ export class KeltaClient {
     );
   }
 
-  private writeTrace(method: string | undefined, url: string | undefined, status: number | undefined): void {
+  private writeTrace(
+    method: string | undefined,
+    url: string | undefined,
+    status: number | undefined
+  ): void {
     const line = `[kelta-trace] ${(method ?? 'GET').toUpperCase()} ${url ?? ''} ${status ?? 'ERR'}\n`;
     process.stderr.write(line);
   }

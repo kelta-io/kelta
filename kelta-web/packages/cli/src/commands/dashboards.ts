@@ -129,7 +129,8 @@ const dashboardApply = defineCommand({
   options: [
     {
       flag: '--file <path>',
-      description: 'Dashboard tree JSON file — see `dashboards get <id> --components` for the shape',
+      description:
+        'Dashboard tree JSON file — see `dashboards get <id> --components` for the shape',
     },
     {
       flag: '--name <name>',

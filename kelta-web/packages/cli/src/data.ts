@@ -56,14 +56,22 @@ export function readDataArgument(value: string): Record<string, unknown> {
 export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (Array.isArray(a) || Array.isArray(b)) {
-    return Array.isArray(a) && Array.isArray(b) && a.length === b.length
-      && a.every((v, i) => deepEqual(v, b[i]));
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((v, i) => deepEqual(v, b[i]))
+    );
   }
   if (a && b && typeof a === 'object' && typeof b === 'object') {
     const keysA = Object.keys(a as Record<string, unknown>);
     const keysB = Object.keys(b as Record<string, unknown>);
-    return keysA.length === keysB.length
-      && keysA.every((k) => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+    return (
+      keysA.length === keysB.length &&
+      keysA.every((k) =>
+        deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])
+      )
+    );
   }
   return false;
 }

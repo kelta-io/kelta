@@ -164,7 +164,8 @@ const menuApply = defineCommand({
     },
     {
       flag: '--name <name>',
-      description: 'Menu name (overrides the file\'s own "name"; creates the menu if it does not exist yet)',
+      description:
+        'Menu name (overrides the file\'s own "name"; creates the menu if it does not exist yet)',
     },
   ],
   input: z.object({ file: z.string().min(1), name: z.string().optional() }),

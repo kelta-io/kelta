@@ -829,7 +829,9 @@ describe('pages apply', () => {
     const file = writePage({ name: 'Home', path: '/home', config: { schemaVersion: 2 } });
     const axios = fakeAxios({
       '/api/ui-pages?filter[path][eq]=%2Fhome': {
-        data: [{ id: 'p1', attributes: { name: 'Home', path: '/home', config: { schemaVersion: 2 } } }],
+        data: [
+          { id: 'p1', attributes: { name: 'Home', path: '/home', config: { schemaVersion: 2 } } },
+        ],
       },
     });
     axios.post.mockResolvedValue({ data: { valid: true, errors: [] } });

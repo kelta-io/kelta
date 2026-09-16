@@ -395,7 +395,11 @@ const listViewApply = defineCommand({
       columns: parseList(input.columns),
       filters: input.filter.map((spec) => {
         const parsed = parseFilterSpec(spec);
-        return { field: parsed.field, operator: parsed.operator.toUpperCase(), value: parsed.value };
+        return {
+          field: parsed.field,
+          operator: parsed.operator.toUpperCase(),
+          value: parsed.value,
+        };
       }),
     };
     if (input.sort) {
@@ -410,7 +414,9 @@ const listViewApply = defineCommand({
     if (typeConfig) attributes.typeConfig = typeConfig;
     if (input.data) Object.assign(attributes, readDataArgument(input.data));
 
-    const found = await axios.get<{ data?: { id: string; attributes?: Record<string, unknown> }[] }>(
+    const found = await axios.get<{
+      data?: { id: string; attributes?: Record<string, unknown> }[];
+    }>(
       `/api/list-views?filter[collectionId][eq]=${collectionId}` +
         `&filter[name][eq]=${encodeURIComponent(input.name)}&page[size]=1`
     );
