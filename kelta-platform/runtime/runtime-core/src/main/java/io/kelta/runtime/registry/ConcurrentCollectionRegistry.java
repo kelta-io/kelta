@@ -154,8 +154,31 @@ public class ConcurrentCollectionRegistry implements CollectionRegistry {
             }
         }
 
-        // Fall back to name-only key (system collections or legacy registrations)
-        return collections.get(collectionName);
+        // Fall back to the bare-name key. Per CollectionDefinition.registryKey(), only
+        // definitions with a null tenantId are ever stored there -- which is meant to be
+        // exclusively system collections (see registryKey() javadoc). A custom collection
+        // must never be servable through this slot to a tenant that doesn't own it, so this
+        // is a hard restriction, not a heuristic: a bare-name hit that isn't systemCollection()
+        // is refused and logged rather than returned, however it got there.
+        CollectionDefinition fallback = collections.get(collectionName);
+        if (fallback == null) {
+            return null;
+        }
+        if (fallback.systemCollection()) {
+            return fallback;
+        }
+
+        if (tenantId != null && !tenantId.isBlank()) {
+            logger.warn("Refusing bare-name fallback: '{}' resolved to a custom collection owned by "
+                    + "tenant '{}' while resolving for tenant '{}' -- this would have been a "
+                    + "cross-tenant leak; returning null instead",
+                    collectionName, fallback.tenantId(), tenantId);
+        } else {
+            logger.warn("Refusing bare-name fallback: '{}' resolved to a custom collection owned by "
+                    + "tenant '{}' with no tenant context bound -- returning null instead",
+                    collectionName, fallback.tenantId());
+        }
+        return null;
     }
     
     @Override
