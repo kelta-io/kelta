@@ -5,6 +5,48 @@ at the bottom so reviewers can see what's already been addressed.
 
 ## Security Risks
 
+**Row-level security was configured on 111 control-plane tables and enforced on none
+(found 2026-09-16, fixed in code the same day; production enforcement is an operational
+step — see `playbooks.md` §8).** Every tenant-scoped table has had `tenant_isolation`
+(`tenant_id = current_setting('app.current_tenant_id', true)`) and `admin_bypass` (`''`)
+policies since V77, with `FORCE ROW LEVEL SECURITY`, and the worker's
+`TenantAwareDataSource` binds the setting per operation — but the production application
+role carried **`BYPASSRLS`**, which skips every policy regardless of `FORCE`. So the
+policies were never evaluated, and a single missing predicate in application code was a
+cross-tenant read: `PageLayoutTreeService` (#1534/#1535), `DashboardDataService` /
+`ReportExecutionService` / `PageRenderService` (a tenant's dashboard counted another
+tenant's users; `/api/pages/home/render` returned another tenant's page). Nothing in the
+test suites could have caught it: the harness and every Postgres IT run as the container
+superuser, which also bypasses RLS.
+
+What changed:
+- `V200__rls_system_rows_readable.sql` — `collection` and `field` gain a read-only
+  `system_rows_read` policy (`system_collection = true`) beside a `tenant_isolation` policy
+  with an explicit `WITH CHECK`. System collections live once, in the platform tenant, and
+  every tenant reads them; a strict per-tenant policy would have hidden them the moment
+  enforcement started. They stay writable only on the no-tenant path.
+- `kelta-auth` sets `hikari.connection-init-sql: SET app.current_tenant_id = ''` like
+  kelta-ai: auth reads `platform_user` across tenants by design, and with an *unset* setting
+  (NULL) neither policy matches, so every query would return nothing once bypass is gone.
+- `RowLevelSecurityIntegrationTest` (kelta-worker, Testcontainers) runs the real migrations,
+  creates a `NOBYPASSRLS` role with the application's grants and
+  `ALTER ROLE … SET app.current_tenant_id = ''`, and drives a one-connection Hikari pool
+  through `TenantAwareDataSource`: a tenant sees only its rows on `page_layout`,
+  `platform_user`, `ui_page`; system `collection`/`field` rows are readable by every tenant
+  and writable by none; an update of another tenant's row touches nothing and an insert into
+  another tenant fails with `new row violates row-level security policy`; the scope holds in
+  a Spring-managed transaction and does not leak to the next borrow.
+
+Production: `ALTER ROLE emf SET app.current_tenant_id = ''; ALTER ROLE emf NOBYPASSRLS;`
+after this deploys (playbook §8). Rollback is `ALTER ROLE emf BYPASSRLS`. V200 also adds the
+policy pair to the 17 tables that had a `tenant_id` column and no RLS (16 missed by the V77
+pass, `billing_webhook_event` from V178), and the IT asserts from the catalog that no such
+table exists — the next one cannot be forgotten. Still open after the flip: kelta-auth and
+kelta-ai run as platform sessions (they filter in SQL); the harness runs as the container
+superuser; and the in-code tenant predicate for direct `queryEngine.executeQuery` callers
+(PLT-260 in the RZWare tracker) remains the first line of defence — RLS is the backstop,
+not the predicate.
+
 **FIXED (2026-09-14) — the platform had no dependency vulnerability scanning at all, and the
 one scanner that was configured had never run.** OWASP dependency-check sat in
 `kelta-platform/pom.xml` with `failBuildOnCVSS=7` and a suppressions file, but only inside
@@ -1018,7 +1060,7 @@ The ArgoCD image bump + post-deploy health check that used to live in
 - **Tenant-scoped connection** (non-empty tenant in `TenantContext`): if the borrowed connection is in autocommit mode, autocommit is turned off (begins a transaction), `SET LOCAL app.current_tenant_id = '<id>'` is issued, and a thin commit-on-close proxy commits + restores autocommit when the connection is released. If a Spring-managed transaction already owns the connection, only `SET LOCAL` is issued and the proxy defers commit/rollback to the owner (it watches the owner's `commit()`/`rollback()` to avoid a double-commit). Because the variable is set per transaction on the same backend that serves the query, it survives PgBouncer `pool_mode = transaction`. Connection-hold time is unchanged — the connection is released right after the operation, exactly like the previous autocommit model.
 - **Admin/bypass connection** (no tenant — Flyway, internal, cross-tenant work): keeps the legacy session `SET app.current_tenant_id = ''`. Empty already maps to `admin_bypass`, so transaction scoping is irrelevant to isolation and these paths are unchanged.
 
-Regression guard: `TenantAwareDataSourceTest` asserts tenant connections use transaction-local `SET LOCAL` (not session `SET`) and commit/restore correctly; the harness `TenantIsolationScenarioTest` exercises real-stack isolation over Postgres + RLS.
+Regression guard: `TenantAwareDataSourceTest` asserts tenant connections use transaction-local `SET LOCAL` (not session `SET`) and commit/restore correctly; `RowLevelSecurityIntegrationTest` proves the policies themselves as a role without BYPASSRLS (the harness `TenantIsolationScenarioTest` runs as the container superuser, which bypasses RLS, so it exercises the gateway/JWT boundary, not the database one).
 
 **Remaining caveat — kelta-ai:** `kelta-ai/src/main/resources/application.yml` still uses `hikari.connection-init-sql: SET app.current_tenant_id = ''` (a session-level set to the bypass value). kelta-ai runs in admin/bypass mode and filters tenants explicitly in SQL rather than relying on RLS tenant isolation, so it is not a leak vector — but if kelta-ai ever begins relying on RLS for tenant-scoped reads, it must adopt the same transaction-scoped `SET LOCAL` mechanism before being placed behind a transaction-pool. Tracked as a follow-up.
 

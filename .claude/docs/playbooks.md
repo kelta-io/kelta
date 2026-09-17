@@ -347,3 +347,36 @@ tests; a harness scenario over the real HTTP path.
 These recipes assume the conventions in [`conventions.md`](conventions.md) and the rules in
 [`../../CLAUDE.md`](../../CLAUDE.md). When you complete one, update the docs it names — that's
 how the next agent gets a correct recipe.
+
+## 8. Enforce row-level security in a production database
+
+The control plane's RLS policies only apply to roles **without** `BYPASSRLS` and only when
+`app.current_tenant_id` is set (`''` = platform session, `<tenant id>` = that tenant). The
+worker binds the setting per operation (`TenantAwareDataSource`); kelta-auth and kelta-ai
+set `''` on every pooled connection (`hikari.connection-init-sql`). The database role must
+still be told to obey the policies — a one-time, reversible operational step.
+
+Preconditions: the image that carries `V200__rls_system_rows_readable.sql` has deployed and
+the migrate Job ran (`SELECT version FROM flyway_schema_history ORDER BY installed_rank DESC
+LIMIT 1` ≥ 200); kelta-auth is on a build with the `connection-init-sql` line.
+
+```sql
+-- as the postgres superuser, on the control-plane database
+ALTER ROLE emf SET app.current_tenant_id = '';   -- new sessions default to the platform session
+ALTER ROLE emf NOBYPASSRLS;                       -- evaluated per statement: takes effect at once
+SELECT rolbypassrls FROM pg_roles WHERE rolname = 'emf';   -- f
+```
+
+The `ALTER ROLE … SET` covers pooled connections opened before this change only after they
+recycle (Hikari `max-lifetime`, 30 min); restart kelta-auth right after the flip so no
+connection is left with a NULL setting (`kubectl -n emf rollout restart deploy/emf-auth`).
+kelta-worker and kelta-ai set the value themselves on every borrow and need no restart.
+
+Verify, as a tenant admin PAT: a dashboard `metric` on `users` returns that tenant's count;
+`GET /api/pages/<slug>/render` returns that tenant's page; `kelta collections list` still
+shows system collections; login works; `kelta sandbox create` still provisions (the sandbox
+flow switches `TenantContext` per tenant). Watch the worker log for
+`violates row-level security policy` — that is a code path writing another tenant's rows
+under a tenant context, which the policy now refuses.
+
+Rollback (instant, no restart): `ALTER ROLE emf BYPASSRLS;`.

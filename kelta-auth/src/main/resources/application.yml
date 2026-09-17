@@ -13,6 +13,11 @@ spring:
     username: ${DB_USERNAME:kelta}
     password: ${DB_PASSWORD:kelta}
     hikari:
+      # kelta-auth reads platform_user across tenants by design (login resolves the tenant).
+      # The empty sentinel selects the admin_bypass RLS policy on every connection; without it
+      # an unset app.current_tenant_id (NULL) matches no policy once the role loses BYPASSRLS
+      # and every query returns nothing. Same setting as kelta-ai; see docs/ops/rls-enforcement.md.
+      connection-init-sql: SET app.current_tenant_id = ''
       maximum-pool-size: ${DB_POOL_MAX:15}
       minimum-idle: ${DB_POOL_MIN_IDLE:3}
       connection-timeout: ${DB_POOL_CONNECTION_TIMEOUT_MS:5000}
