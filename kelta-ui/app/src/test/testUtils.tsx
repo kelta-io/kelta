@@ -207,6 +207,7 @@ export function wrapFetchMock(testFetchMock: typeof fetch) {
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export const mockAxios = {
+  request: vi.fn(),
   get: vi.fn(),
   post: vi.fn(),
   put: vi.fn(),
@@ -240,6 +241,7 @@ export function getMockAxiosInstance() {
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function resetMockAxios() {
+  mockAxios.request.mockReset()
   mockAxios.get.mockReset()
   mockAxios.post.mockReset()
   mockAxios.put.mockReset()
