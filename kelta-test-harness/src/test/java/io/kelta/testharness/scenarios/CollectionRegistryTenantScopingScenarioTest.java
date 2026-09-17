@@ -132,6 +132,10 @@ class CollectionRegistryTenantScopingScenarioTest extends ScenarioBase {
 
     // ------------------------------------------------------------- Helpers
 
+    /**
+     * Creates a user collection, or reuses an existing one of the same name (a prior run's
+     * cleanup can fail to remove it) — mirrors {@code EcommerceSeedFixture.createCollection}.
+     */
     @SuppressWarnings("unchecked")
     private String createCollection(String token, String slug, String name, String displayName) {
         Map<String, Object> body = Map.of("data", Map.of(
@@ -143,11 +147,20 @@ class CollectionRegistryTenantScopingScenarioTest extends ScenarioBase {
         ResponseEntity<Map> response = gatewayClientWithToken(token).post()
                 .uri("/" + slug + "/api/collections")
                 .contentType(MediaType.APPLICATION_JSON).body(body)
-                .retrieve().toEntity(Map.class);
-        assertThat(response.getStatusCode()).as("create collection '" + name + "'")
-                .isEqualTo(HttpStatus.CREATED);
-        String id = (String) ((Map<String, Object>) response.getBody().get("data")).get("id");
-        assertThat(id).isNotBlank();
+                .retrieve()
+                .onStatus(s -> true, (req, resp) -> { /* inspect status manually */ })
+                .toEntity(Map.class);
+
+        String id;
+        if (response.getStatusCode().is2xxSuccessful()) {
+            id = (String) ((Map<String, Object>) response.getBody().get("data")).get("id");
+        } else if (response.getStatusCode() == HttpStatus.CONFLICT) {
+            id = collectionIdByName(token, slug, name);
+        } else {
+            throw new IllegalStateException(
+                    "Failed to create collection '" + name + "': HTTP " + response.getStatusCode());
+        }
+        assertThat(id).as("collection id for '" + name + "'").isNotBlank();
         waitForStatus(gatewayClientWithToken(token), "/" + slug + "/api/" + name, HttpStatus.OK, 40);
         return id;
     }
