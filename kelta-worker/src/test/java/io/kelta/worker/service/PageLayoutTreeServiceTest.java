@@ -2,6 +2,7 @@ package io.kelta.worker.service;
 
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
@@ -264,6 +265,66 @@ class PageLayoutTreeServiceTest {
                 new PageLayoutTreeService.TreeCounts(0, 0, 0, 5));
     }
 
+    @Test
+    @DisplayName("GET->PUT round trip for a related list sorted by createdAt is unchanged")
+    void readTreeRoundTripsWithSystemSortField() {
+        seedAppliedLayout();
+        relatedListRows.add(row("id", "rl-1", "related_collection_id", "coll-2",
+                "relationship_field_id", "f9", "display_columns", "[\"id\",\"createdAt\"]",
+                "sort_field", "createdAt", "sort_direction", "ASC", "row_limit", 10,
+                "sort_order", 0, "related_collection_name", "notes",
+                "relationship_field_name", "contact"));
+        stubRelatedCollection();
+
+        Map<String, Object> tree = TenantContext.callWithTenant(TENANT, () -> service.readTree(LAYOUT_ID));
+
+        assertThat(relatedLists(tree).get(0))
+                .containsEntry("sortField", "createdAt")
+                .containsEntry("displayColumns", List.of("id", "createdAt"));
+
+        ApplyResult result = apply(tree);
+
+        assertThat(result.counts()).isEqualTo(
+                new PageLayoutTreeService.TreeCounts(0, 0, 0, 5));
+    }
+
+    @Test
+    @DisplayName("A related list may sort and display by system audit fields (id, createdAt, updatedAt)")
+    void relatedListAcceptsSystemFields() {
+        stubRelatedCollection();
+        Map<String, Object> body = row(
+                "sections", List.of(),
+                "relatedLists", List.of(row("collection", "notes",
+                        "relationshipField", "contact",
+                        "displayColumns", List.of("id", "createdAt"),
+                        "sortField", "createdAt")));
+
+        ApplyResult result = apply(body);
+
+        assertThat(result.counts().created()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("A related list sortField naming an unknown field is still a 400")
+    void relatedListRejectsUnknownSortField() {
+        stubRelatedCollection();
+        Map<String, Object> body = row(
+                "sections", List.of(),
+                "relatedLists", List.of(row("collection", "notes",
+                        "relationshipField", "contact",
+                        "displayColumns", List.of("firstName"),
+                        "sortField", "nope")));
+
+        assertThatThrownBy(() -> apply(body))
+                .isInstanceOf(TreeValidationException.class)
+                .satisfies(e -> assertThat(((TreeValidationException) e).errors())
+                        .singleElement()
+                        .satisfies(error -> {
+                            assertThat(error.pointer()).isEqualTo("/relatedLists/0/sortField");
+                            assertThat(error.detail()).contains("nope").contains("notes");
+                        }));
+    }
+
     /** `notes.contact` is a lookup back to the layout's collection — a valid related list. */
     private void stubRelatedCollection() {
         when(jdbcTemplate.queryForList(contains("FROM collection WHERE name"), eq("notes"), eq(TENANT)))
@@ -272,6 +333,11 @@ class PageLayoutTreeServiceTest {
                 .thenReturn(List.of(
                         row("id", "f9", "name", "contact", "reference_collection_id", COLLECTION_ID),
                         row("id", "f10", "name", "firstName", "reference_collection_id", null)));
+        when(collectionRegistry.get(eq("notes"))).thenReturn(CollectionDefinition.builder()
+                .name("notes")
+                .addField(FieldDefinition.requiredString("contact"))
+                .addField(FieldDefinition.string("firstName"))
+                .build());
     }
 
     // ------------------------------------------------------------------

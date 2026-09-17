@@ -491,6 +491,7 @@ public class PageLayoutTreeService {
         }
         List<Map<String, Object>> relatedFields =
                 jdbcTemplate.queryForList(SELECT_FIELDS_BY_COLLECTION, relatedCollectionId);
+        CollectionDefinition relatedDefinition = collectionRegistry.get(relatedName);
         Map<String, Object> relationshipRow = relatedFields.stream()
                 .filter(row -> relationshipField.equals(asString(row.get("name"))))
                 .findFirst().orElse(null);
@@ -523,7 +524,7 @@ public class PageLayoutTreeService {
                 if (!(column instanceof String name) || name.isBlank()) {
                     errors.add(new TreeError(pointer + "/displayColumns/" + k,
                             "Display column must be a field name"));
-                } else if (!relatedFieldNames.contains(name)) {
+                } else if (!relatedFieldNames.contains(name) && !isQueryable(relatedDefinition, name)) {
                     errors.add(new TreeError(pointer + "/displayColumns/" + k,
                             "Field '" + name + "' does not exist on collection '" + relatedName + "'"));
                 } else {
@@ -534,7 +535,8 @@ public class PageLayoutTreeService {
 
         String sortField = asString(related.get("sortField"));
         if (sortField != null && relatedFields.stream()
-                .noneMatch(row -> sortField.equals(asString(row.get("name"))))) {
+                .noneMatch(row -> sortField.equals(asString(row.get("name"))))
+                && !isQueryable(relatedDefinition, sortField)) {
             errors.add(new TreeError(pointer + "/sortField",
                     "Field '" + sortField + "' does not exist on collection '" + relatedName + "'"));
         }
@@ -557,6 +559,17 @@ public class PageLayoutTreeService {
         return new DesiredRelated(relatedName, relatedCollectionId, relationshipField,
                 asString(relationshipRow.get("id")), displayColumns, sortField, sortDirection,
                 rowLimit, index);
+    }
+
+    /**
+     * A related list's {@code sortField}/{@code displayColumns} may name a system audit column
+     * ({@code id}, {@code createdAt}, {@code updatedAt}, ...) — those are real, queryable columns
+     * on every record but have no row in the {@code field} table, so they never appear in
+     * {@link #SELECT_FIELDS_BY_COLLECTION}. Defer to the registered collection definition, which
+     * already knows the full queryable set (custom fields + system fields).
+     */
+    private static boolean isQueryable(CollectionDefinition relatedDefinition, String fieldName) {
+        return relatedDefinition != null && relatedDefinition.hasQueryableField(fieldName);
     }
 
     /** A relationship field points at the layout's collection by FK id, or by target name for older rows. */
