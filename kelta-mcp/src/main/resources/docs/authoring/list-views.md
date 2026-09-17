@@ -2,7 +2,9 @@
 
 A list view is a saved query against one collection: filters, sort, visible
 columns, and a row limit. Stored on the `list-views` system collection
-(child rows reference it by `collectionId`).
+(child rows reference it by `collectionId`). Page layouts have an
+equivalent whole-layout apply-in-one-call endpoint (see `kelta docs
+page-layouts` → "One call: the layout tree").
 
 ## Fields
 

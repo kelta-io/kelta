@@ -66,3 +66,115 @@ As with list views, `isDefault` on a layout is not enforced as unique per
 collection — author at most one `DETAIL` and one `EDIT` default per
 collection; if more than one is marked default the platform picks one
 without erroring, which is rarely what you want.
+
+## One call: the layout tree
+
+Everything above is one request per row across four collections, with a
+field-name → id lookup for every placement. The tree endpoint collapses
+that into a single idempotent upsert, addressed by **names** instead of
+ids.
+
+### Entry points
+
+- `GET /api/page-layouts/{layoutId}/tree` — reads the whole layout as the
+  document below.
+- `PUT /api/page-layouts/{layoutId}/tree` — applies that document to an
+  existing layout.
+- `PUT /api/collections/{collectionName}/layouts/{layoutName}/tree` —
+  applies it to the named layout of the named collection, creating the
+  layout row first if it doesn't exist yet.
+- MCP `apply_layout` (kelta-mcp, admin) wraps both PUTs — pass `layoutId`,
+  or `collectionName` + `name` to create-or-update. It also fills in a
+  0-based `column` (`index % columns`) for any field placement that omits
+  one, so "just list the fields" lands them left-to-right, top-to-bottom
+  instead of stacking every field in column 0 (the tree endpoint's own
+  default for an omitted `column`).
+- `kelta layouts apply <collection> --file <tree.json> [--name <name>]`
+  and `kelta layouts get <layoutId> --tree` (CLI) — the file is exactly
+  the body below; `--name` overrides the file's own `name` and addresses
+  the layout within the collection.
+
+### Body shape
+
+```json
+{
+  "name": "Main",
+  "layoutType": "DETAIL",
+  "isDefault": true,
+  "description": "...",
+  "headerConfig": { "titleFields": ["name"] },
+  "sections": [
+    {
+      "heading": "Overview",
+      "columns": 2,
+      "collapsed": false,
+      "fields": [
+        { "name": "name", "column": 0 },
+        { "name": "owner", "column": 1, "helpText": "Account owner", "required": true },
+        { "name": "notes", "column": 0, "readOnly": true }
+      ]
+    }
+  ],
+  "relatedLists": [
+    {
+      "collection": "invoices",
+      "relationshipField": "account",
+      "displayColumns": ["number", "amount", "createdAt"],
+      "sortField": "createdAt",
+      "sortDirection": "DESC",
+      "rowLimit": 10
+    }
+  ]
+}
+```
+
+Fields are addressed **by name**, not id — the endpoint resolves each
+`sections[].fields[].name` against the target collection itself.
+`column` is **0-based** (see "Fields and columns are 0-based" above) and
+must be less than its section's own `columns` (1-4, default `2`) — unlike
+the raw `layout-fields` collection, an out-of-range `column` here is
+rejected (400) rather than clamped. A field placement also accepts
+`label` (label override), `helpText`, `readOnly`, and `required`.
+`headerConfig` is the same shape as the layout's own `headerConfig`
+field, above.
+
+A `GET` response also carries `layoutId` and `collection` — read-only
+echoes of the layout addressed, there so the same body can be fed
+straight back into `PUT`. A `PUT` may include them, but only to agree
+with the layout/collection it's already addressing; either one naming a
+*different* layout or collection is rejected (400) rather than silently
+repointing the write.
+
+A layout scalar (`name`, `layoutType`, `isDefault`, `description`,
+`headerConfig`) is applied only when the body carries that key, so a body
+that only manages `sections` never blanks the header. The child arrays
+are authoritative for what they cover: a section, field placement, or
+related list absent from the body is deleted.
+
+### Idempotency and the GET -> PUT round trip
+
+Sections match on `heading`, field placements match on the field's
+`name`, and related lists match on `(collection, relationshipField)`.
+Applying the same body twice reports `created=0, updated=0, deleted=0` on
+the second call — everything lands as `unchanged` — so a caller can
+assert convergence from the response counts instead of re-reading the
+layout. `GET .../tree` returns exactly the document `PUT` accepts, so
+`GET` → edit → `PUT` is the supported authoring loop.
+
+### `relatedLists`: omit vs. empty
+
+`relatedLists` is managed only when the body carries the key at all:
+
+- **Omitting** the key entirely leaves existing related lists untouched —
+  a body that edits only `sections` never touches them.
+- **`relatedLists: []`** is a real assertion — "this layout has no
+  related lists" — and deletes every existing one.
+
+### System fields in related-list `sortField` / `displayColumns`
+
+A related list's `displayColumns`/`sortField` normally name a field on
+the *related* collection, but they also accept the system audit columns
+every record carries even though those have no row in that collection's
+own field list: `id`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy`,
+`createdGeo`, `updatedGeo`. An unrecognized name still fails validation
+(400) at the same JSON Pointer.

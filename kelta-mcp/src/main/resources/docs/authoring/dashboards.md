@@ -23,7 +23,9 @@ no default.** They map directly onto CSS Grid line numbers (`grid-column:
 <columnPosition> / span <columnSpan>`), and CSS Grid lines start at `1`.
 The first cell of the grid is `columnPosition: 1, rowPosition: 1`, not
 `0, 0`. This is the opposite convention from page-layout `columnNumber`,
-which is 0-based (see `kelta docs page-layouts`).
+which is 0-based (see `kelta docs page-layouts`). Page layouts also have
+a whole-layout apply-in-one-call tree endpoint (see `kelta docs
+page-layouts` → "One call: the layout tree").
 
 ## Widget catalogue (`componentType`)
 
