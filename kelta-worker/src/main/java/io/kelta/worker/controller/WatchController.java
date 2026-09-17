@@ -4,6 +4,7 @@ import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.router.DynamicCollectionRouter;
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.repository.BootstrapRepository;
@@ -32,6 +33,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.util.MultiValueMap;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
@@ -64,6 +66,11 @@ import java.util.Optional;
  * <p>The generic dynamic route reaches the same collection, which is why
  * {@code WatchGuardHook} exists — this controller is the pleasant door, not the
  * only one.
+ *
+ * <p>Support staff (INTERNAL, holding {@link #SUPPORT_PERMISSION}) calling {@code list}/{@code get}
+ * with no {@code memberId} are handed the tenant's full, unfiltered view — delegated verbatim to
+ * {@link DynamicCollectionRouter} so paging, filtering, sorting and {@code meta.totalCount} all
+ * behave exactly like every other collection, rather than being reimplemented here.
  */
 @RestController
 @RequestMapping("/api/watches")
@@ -93,6 +100,7 @@ public class WatchController implements SelfScopedController {
     private final CerbosPermissionResolver permissionResolver;
     private final BootstrapRepository bootstrapRepository;
     private final ObjectMapper objectMapper;
+    private final DynamicCollectionRouter dynamicCollectionRouter;
     /**
      * Sources a member may promote a target for, from
      * {@code kelta.watch.promotable-sources}.
@@ -113,6 +121,7 @@ public class WatchController implements SelfScopedController {
                            CerbosPermissionResolver permissionResolver,
                            BootstrapRepository bootstrapRepository,
                            ObjectMapper objectMapper,
+                           DynamicCollectionRouter dynamicCollectionRouter,
                            @Value("${kelta.watch.promotable-sources:}") String promotableSources) {
         this.watchRepository = watchRepository;
         this.targetRepository = targetRepository;
@@ -123,6 +132,7 @@ public class WatchController implements SelfScopedController {
         this.permissionResolver = permissionResolver;
         this.bootstrapRepository = bootstrapRepository;
         this.objectMapper = objectMapper;
+        this.dynamicCollectionRouter = dynamicCollectionRouter;
         this.promotableSources = promotableSources == null || promotableSources.isBlank()
                 ? Set.of()
                 : Arrays.stream(promotableSources.split(","))
@@ -131,18 +141,49 @@ public class WatchController implements SelfScopedController {
                         .collect(Collectors.toUnmodifiableSet());
     }
 
-    /** The caller's own watches. Support staff may name another member explicitly. */
+    /**
+     * The caller's own watches. Support staff may name another member explicitly, or — naming
+     * none — fall through to the tenant's full JSON:API view (paging, filtering, sorting,
+     * {@code meta.totalCount}), delegated to {@link DynamicCollectionRouter} rather than
+     * reimplemented here.
+     */
     @GetMapping
-    public Map<String, Object> list(@RequestParam(required = false) String memberId,
+    public ResponseEntity<Map<String, Object>> list(@RequestParam(required = false) String memberId,
+                                    @RequestParam(required = false) MultiValueMap<String, String> params,
                                     HttpServletRequest request) {
         String tenantId = requireTenant();
+        if (!isPortalCaller(request) && (memberId == null || memberId.isBlank())) {
+            if (!hasSupportPermission(request, tenantId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        SUPPORT_PERMISSION + " permission required");
+            }
+            return dynamicCollectionRouter.list(COLLECTION, params, request);
+        }
         String subject = resolveSubject(request, tenantId, memberId);
 
         List<Map<String, Object>> items = new ArrayList<>();
         for (Watch watch : watchRepository.findByMember(tenantId, subject)) {
             items.add(summarize(tenantId, watch));
         }
-        return Map.of("data", items);
+        return ResponseEntity.ok(Map.of("data", items));
+    }
+
+    /**
+     * A single watch. Support staff resolve any row in the tenant, delegated to
+     * {@link DynamicCollectionRouter}; everyone else only their own — a foreign id is 404, not
+     * 403, for the same enumeration-safety reason as {@link #requireOwnWatch}.
+     */
+    @GetMapping("/{id}")
+    public ResponseEntity<Map<String, Object>> get(@PathVariable String id,
+                                    @RequestParam(required = false) MultiValueMap<String, String> params,
+                                    HttpServletRequest request) {
+        String tenantId = requireTenant();
+        if (hasSupportPermission(request, tenantId)) {
+            return dynamicCollectionRouter.get(COLLECTION, id, params, request);
+        }
+        String subject = requireActor(request, tenantId);
+        Watch watch = requireOwnWatch(tenantId, id, subject);
+        return ResponseEntity.ok(Map.of("data", summarize(tenantId, watch)));
     }
 
     /** Creates a watch owned by the caller. */
@@ -326,6 +367,12 @@ public class WatchController implements SelfScopedController {
         return bootstrapRepository.findProfileSystemPermissions(profileId).stream()
                 .anyMatch(p -> SUPPORT_PERMISSION.equals(p.get("permission_name"))
                         && Boolean.TRUE.equals(p.get("granted")));
+    }
+
+    /** True when the caller is a portal (member) actor, per the gateway-stamped identity. */
+    private boolean isPortalCaller(HttpServletRequest request) {
+        String userType = request.getHeader("X-User-Type");
+        return userType != null && "PORTAL".equalsIgnoreCase(userType);
     }
 
     /** Rejects criteria the matcher could not act on, before it is stored. */
