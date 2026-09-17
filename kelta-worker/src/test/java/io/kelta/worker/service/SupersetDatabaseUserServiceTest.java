@@ -65,6 +65,9 @@ class SupersetDatabaseUserServiceTest {
 
         // Verify database name is quoted and matches the configured value
         verify(jdbcTemplate).execute(contains("GRANT CONNECT ON DATABASE \"emf_control_plane\""));
+
+        // The role is pinned to its tenant inside the RLS policies, not only by the GUC default
+        verify(jdbcTemplate).update(contains("INSERT INTO tenant_db_role"), eq("superset_acme"), eq(TENANT_UUID));
     }
 
     @Test
@@ -98,6 +101,7 @@ class SupersetDatabaseUserServiceTest {
         verify(jdbcTemplate).execute(contains("REVOKE USAGE ON SCHEMA public FROM \"superset_acme\""));
         verify(jdbcTemplate).execute(contains("REVOKE USAGE ON SCHEMA \"acme\" FROM \"superset_acme\""));
         verify(jdbcTemplate).execute(contains("DROP ROLE IF EXISTS \"superset_acme\""));
+        verify(jdbcTemplate).update(contains("DELETE FROM tenant_db_role"), eq("superset_acme"));
     }
 
     @Test

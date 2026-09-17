@@ -43,11 +43,21 @@ Production: `ALTER ROLE emf SET app.current_tenant_id = ''; ALTER ROLE emf NOBYP
 after this deploys (playbook §8). Rollback is `ALTER ROLE emf BYPASSRLS`. V200 also adds the
 policy pair to the 17 tables that had a `tenant_id` column and no RLS (16 missed by the V77
 pass, `billing_webhook_event` from V178), and the IT asserts from the catalog that no such
-table exists — the next one cannot be forgotten. Still open after the flip: kelta-auth and
-kelta-ai run as platform sessions (they filter in SQL); the harness runs as the container
-superuser; and the in-code tenant predicate for direct `queryEngine.executeQuery` callers
-(PLT-260 in the RZWare tracker) remains the first line of defence — RLS is the backstop,
-not the predicate.
+table exists — the next one cannot be forgotten. Follow-up the same day: the GUC is a
+plain custom setting, so a *direct* login (the per-tenant `superset_<slug>` users, a person's
+read-only role) could `SET app.current_tenant_id = ''` or name another tenant and read across
+tenants — demonstrated from a tenant login (10 visible users → 66). V201 adds `tenant_db_role`
++ `kelta_pinned_tenant()` (SECURITY DEFINER, keyed on `session_user`) and rewrites every
+GUC-based policy to `COALESCE((SELECT kelta_pinned_tenant()), current_setting(...))` — an
+InitPlan, one lookup per query — with `admin_bypass` only for unpinned roles;
+`SupersetDatabaseUserService` pins its roles and the existing ones are backfilled
+(`pinnedRoleCannotHopTenantsBySettingTheGuc`). Still open: kelta-auth and kelta-ai run as
+platform sessions (they filter in SQL); the harness runs as the container superuser; the
+tenant-less child/log tables (`flow_step_log`, `job_execution_log`, `alert_delivery`,
+`kelta_migrations`, …) have no RLS and are fully readable by any role granted
+`ALL TABLES IN SCHEMA public` — the Superset users are; and the in-code tenant predicate for
+direct `queryEngine.executeQuery` callers (PLT-260 in the RZWare tracker) remains the first
+line of defence — RLS is the backstop, not the predicate.
 
 **FIXED (2026-09-14) — the platform had no dependency vulnerability scanning at all, and the
 one scanner that was configured had never run.** OWASP dependency-check sat in
