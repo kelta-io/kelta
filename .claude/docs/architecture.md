@@ -556,6 +556,18 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   binding a sentinel matches no RLS policy and silently returned zero rows. The bypass is keyed
   on an **empty** `app.current_tenant_id` (`admin_bypass`), which is what an unbound context
   produces (see concerns.md).
+- **Sandbox admin credential contract** (fixed 2026-09-17, KLT-252): `SandboxProvisioningService
+  .hardenSandboxAdmin` writes the one-time password hash as `"{bcrypt}" + BCryptPasswordEncoder
+  .encode(...)` — kelta-auth's `AuthorizationServerConfig.passwordEncoder()` bean is a
+  `DelegatingPasswordEncoder` and rejects a bare bcrypt hash — and clears `force_change_on_login`
+  (the printed password is already a random one-time secret, so there is nothing to force-change,
+  and no API path a CLI/automated caller could use to clear the flag anyway). `POST
+  /auth/direct-login` (`DirectLoginController`) now surfaces a `CredentialsExpiredException`
+  (password matched, `force_change_on_login = true`) as `403 credentials_expired` with a
+  `force_change_url`, distinct from the generic `401 invalid_credentials` for a wrong password —
+  so a caller can tell "wrong password" from "right password, account still needs a forced
+  change" apart. `kelta sandbox create`'s human-readable output states the `POST
+  /auth/direct-login` login path alongside the printed credentials.
 
 **Worker-side system-permission check — how (use the existing pattern, don't reinvent):**
 - Enforce a specific system permission **in the controller/service** with a DB lookup against
