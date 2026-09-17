@@ -21,11 +21,11 @@ export function ReportViewPage() {
   const { tenantSlug, id } = useParams<{ tenantSlug: string; id: string }>()
   const [page, setPage] = useState(1)
   const { data, isLoading, error } = useReportExecution(id, page, PAGE_SIZE)
-  const [exporting, setExporting] = useState(false)
+  const [exportingFormat, setExportingFormat] = useState<'csv' | 'pdf' | null>(null)
 
   const download = async (format: 'csv' | 'pdf') => {
     if (!id) return
-    setExporting(true)
+    setExportingFormat(format)
     try {
       const filename = `${(data?.reportName ?? 'report').replace(/[^a-zA-Z0-9._-]/g, '_')}.${format}`
       let blob: Blob
@@ -46,7 +46,7 @@ export function ReportViewPage() {
     } catch {
       toast.error(t('analytics.exportFailed', 'Export failed'))
     } finally {
-      setExporting(false)
+      setExportingFormat(null)
     }
   }
 
@@ -114,7 +114,7 @@ export function ReportViewPage() {
           <Button
             variant="outline"
             size="sm"
-            disabled={exporting}
+            disabled={exportingFormat === 'csv'}
             onClick={() => download('csv')}
             data-testid="export-csv"
           >
@@ -124,7 +124,7 @@ export function ReportViewPage() {
           <Button
             variant="outline"
             size="sm"
-            disabled={exporting}
+            disabled={exportingFormat === 'pdf'}
             onClick={() => download('pdf')}
             data-testid="export-pdf"
           >
