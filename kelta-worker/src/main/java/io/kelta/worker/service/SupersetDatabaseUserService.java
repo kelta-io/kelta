@@ -15,9 +15,13 @@ import java.util.regex.Pattern;
  * <p>Each tenant gets a dedicated PostgreSQL role ({@code superset_{slug}}) with:
  * <ul>
  *   <li>USAGE on only {@code public} and the tenant's schema</li>
- *   <li>SELECT on all tables in those schemas</li>
- *   <li>A hardcoded {@code app.current_tenant_id} session variable so RLS
- *       policies on public tables automatically filter to tenant data</li>
+ *   <li>SELECT on every table in the tenant's own schema, and in {@code public} only on
+ *       the tables row-level security can scope to one tenant — a {@code tenant_id}
+ *       column with RLS enabled on it. {@code user_credential}, {@code oauth2_*},
+ *       {@code tenant} and the rest of the platform-wide control plane are not granted
+ *       at all, so no policy has to be relied on to hide them</li>
+ *   <li>A row in {@code tenant_db_role} pinning the role to its tenant inside the
+ *       policies, plus a {@code app.current_tenant_id} session default</li>
  *   <li>A {@code search_path} restricted to the tenant schema + public</li>
  * </ul>
  *
@@ -62,6 +66,42 @@ public class SupersetDatabaseUserService {
      * starting with a letter or underscore, max 63 chars.
      */
     private static final Pattern IDENT_PATTERN = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]{0,62}$");
+
+    /** Token substituted with the quoted role name before {@link #GRANT_TENANT_SCOPED_TABLES} runs. */
+    private static final String ROLE_PLACEHOLDER = "@role@";
+
+    /**
+     * Grants SELECT in {@code public} one table at a time, on exactly the tables a tenant
+     * login may see: those with a {@code tenant_id} column and row-level security enabled on
+     * it. Everything else in {@code public} — platform-wide config, another service's
+     * secrets, the {@code tenant_db_role} pin itself — is simply never granted.
+     *
+     * <p>Evaluated at grant time, so a table added later is not covered until the role is
+     * next rotated. That is deliberate: the previous {@code ALTER DEFAULT PRIVILEGES … GRANT
+     * SELECT ON TABLES} handed every future table over automatically, which is how
+     * {@code user_credential} became readable by a reporting login in the first place.
+     */
+    private static final String GRANT_TENANT_SCOPED_TABLES = """
+            DO $$
+            DECLARE
+                t text;
+            BEGIN
+                FOR t IN
+                    SELECT c.relname
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE n.nspname = 'public'
+                      AND c.relkind = 'r'
+                      AND c.relrowsecurity
+                      AND c.relname <> 'tenant_db_role'
+                      AND EXISTS (SELECT 1 FROM pg_attribute a
+                                  WHERE a.attrelid = c.oid AND a.attname = 'tenant_id'
+                                    AND a.attnum > 0 AND NOT a.attisdropped)
+                LOOP
+                    EXECUTE format('GRANT SELECT ON public.%I TO %I', t, @role@);
+                END LOOP;
+            END $$;
+            """;
 
     private final JdbcTemplate jdbcTemplate;
     private final String databaseName;
@@ -133,15 +173,20 @@ public class SupersetDatabaseUserService {
             jdbcTemplate.execute(
                     "GRANT USAGE ON SCHEMA " + schemaIdent + " TO " + userIdent);
 
-            // Grant SELECT on all existing tables
+            // public holds the control plane, not this tenant's data: most of it is
+            // platform-wide (oauth2_*, tenant, system_permission) or another service's
+            // secrets (user_credential). Grant only the tables RLS can scope to this
+            // tenant — see GRANT_TENANT_SCOPED_TABLES. Revoke first so a role created
+            // before this narrowing loses the blanket grant on its next rotation.
             jdbcTemplate.execute(
-                    "GRANT SELECT ON ALL TABLES IN SCHEMA public TO " + userIdent);
+                    "REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM " + userIdent);
+            jdbcTemplate.execute(
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM " + userIdent);
+            jdbcTemplate.execute(GRANT_TENANT_SCOPED_TABLES.replace(ROLE_PLACEHOLDER, quoteLiteral(username)));
+
+            // The tenant's own schema is entirely its data, present and future.
             jdbcTemplate.execute(
                     "GRANT SELECT ON ALL TABLES IN SCHEMA " + schemaIdent + " TO " + userIdent);
-
-            // Grant SELECT on future tables
-            jdbcTemplate.execute(
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO " + userIdent);
             jdbcTemplate.execute(
                     "ALTER DEFAULT PRIVILEGES IN SCHEMA " + schemaIdent
                             + " GRANT SELECT ON TABLES TO " + userIdent);
@@ -188,9 +233,23 @@ public class SupersetDatabaseUserService {
             jdbcTemplate.execute(
                     "REVOKE ALL ON ALL TABLES IN SCHEMA public FROM " + userIdent);
             jdbcTemplate.execute(
+                    "REVOKE ALL ON ALL TABLES IN SCHEMA " + schemaIdent + " FROM " + userIdent);
+            // Default privileges are a dependency of the role, not a grant on an object:
+            // DROP ROLE fails while any remain, including the public-schema one roles created
+            // before the grant narrowing still carry.
+            jdbcTemplate.execute(
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM " + userIdent);
+            jdbcTemplate.execute(
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA " + schemaIdent
+                            + " REVOKE SELECT ON TABLES FROM " + userIdent);
+            jdbcTemplate.execute(
                     "REVOKE USAGE ON SCHEMA public FROM " + userIdent);
             jdbcTemplate.execute(
                     "REVOKE USAGE ON SCHEMA " + schemaIdent + " FROM " + userIdent);
+            // The database-level CONNECT grant is a dependency too — without this,
+            // DROP ROLE fails with "privileges for database ..." and the role survives.
+            jdbcTemplate.execute(
+                    "REVOKE ALL ON DATABASE " + quoteIdent(databaseName) + " FROM " + userIdent);
             jdbcTemplate.execute(
                     "DROP ROLE IF EXISTS " + userIdent);
             jdbcTemplate.update("DELETE FROM tenant_db_role WHERE role_name = ?", username);

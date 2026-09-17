@@ -47,15 +47,25 @@ public abstract class ScenarioBase {
      * Opens a direct JDBC connection to the harness database as the service DB
      * user, for asserting DB state the API doesn't expose. Caller closes it.
      *
-     * <p>Note: this user is typically a Postgres superuser (both the local
-     * Testcontainers PG and the CI pool use the image's bootstrap user), so it
-     * <em>bypasses RLS</em> even on FORCE'd tables. Assertions about RLS must
-     * connect as a non-superuser role instead — see
-     * {@link #openDbConnection(String, String)}.
+     * <p>Note: this user is the Postgres bootstrap superuser (both the local
+     * Testcontainers PG and the CI pool use the image's), so it <em>bypasses RLS</em>
+     * even on FORCE'd tables — useful for planting and inspecting fixtures. Assertions
+     * about RLS must connect as {@link #openAppDbConnection()} instead.
      */
     protected Connection openDbConnection() throws SQLException {
         return DriverManager.getConnection(
                 KeltaStack.dbJdbcUrl(), KeltaStack.dbUsername(), KeltaStack.dbPassword());
+    }
+
+    /**
+     * Opens a direct JDBC connection as the harness's NOBYPASSRLS application role, which
+     * carries the privilege set a worker pod has — so the policies are evaluated rather than
+     * bypassed. Bind a tenant with {@code SET LOCAL app.current_tenant_id} to see what that
+     * tenant sees. Caller closes it. Read-only: the role is granted SELECT, not write.
+     */
+    protected Connection openAppDbConnection() throws SQLException {
+        return DriverManager.getConnection(
+                KeltaStack.dbJdbcUrl(), KeltaStack.appDbUsername(), KeltaStack.appDbPassword());
     }
 
     /**

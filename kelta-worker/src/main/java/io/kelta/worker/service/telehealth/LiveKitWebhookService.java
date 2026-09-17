@@ -19,10 +19,11 @@ import java.util.Map;
 
 /**
  * Applies verified LiveKit webhook events to video sessions (telehealth
- * slice 5). Idempotency = INSERT into {@code livekit_webhook_event} is the
- * claim (duplicate delivery → zero rows → skip). Room names resolve the
- * session (and its tenant — webhooks arrive tenant-less on the platform
- * connection); lifecycle transitions publish
+ * slice 5). Room names resolve the session (and its tenant — webhooks arrive
+ * tenant-less on the platform connection); idempotency = INSERT into
+ * {@code livekit_webhook_event} is the claim (duplicate delivery → zero rows →
+ * skip), taken once the tenant is known so the claim row carries it;
+ * lifecycle transitions publish
  * {@code kelta.video.session.<tenantId>.<sessionId>} for NATS-triggered flows.
  */
 @Service
@@ -61,11 +62,6 @@ public class LiveKitWebhookService {
         if (eventType == null) {
             return;
         }
-        if (eventId != null && !claim(eventId, eventType)) {
-            log.debug("Duplicate LiveKit webhook {} ({}) — skipping", eventId, eventType);
-            return;
-        }
-
         String roomName = event.path("room").path("name").asText(null);
         if (roomName == null && event.has("egressInfo")) {
             roomName = event.path("egressInfo").path("roomName").asText(null);
@@ -80,6 +76,14 @@ public class LiveKitWebhookService {
         }
         String sessionId = String.valueOf(session.get("id"));
         String tenantId = String.valueOf(session.get("tenant_id"));
+
+        // Claim after the room resolves, so the idempotency row can record the tenant it
+        // belongs to (V202 gives livekit_webhook_event RLS keyed on that column). An event
+        // for an unknown room is never claimed, which costs nothing: handling it is a no-op.
+        if (eventId != null && !claim(eventId, eventType, tenantId)) {
+            log.debug("Duplicate LiveKit webhook {} ({}) — skipping", eventId, eventType);
+            return;
+        }
 
         switch (eventType) {
             case "room_started" -> {
@@ -127,11 +131,11 @@ public class LiveKitWebhookService {
         }
     }
 
-    private boolean claim(String eventId, String eventType) {
+    private boolean claim(String eventId, String eventType, String tenantId) {
         return jdbcTemplate.update(
-                "INSERT INTO livekit_webhook_event (event_id, event_type, processed_at) "
-                        + "VALUES (?, ?, NOW()) ON CONFLICT (event_id) DO NOTHING",
-                eventId, eventType) > 0;
+                "INSERT INTO livekit_webhook_event (event_id, event_type, tenant_id, processed_at) "
+                        + "VALUES (?, ?, ?, NOW()) ON CONFLICT (event_id) DO NOTHING",
+                eventId, eventType, tenantId) > 0;
     }
 
     private Map<String, Object> findSession(String roomName) {

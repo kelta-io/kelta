@@ -1,6 +1,7 @@
 package io.kelta.auth.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.kelta.runtime.context.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -102,7 +103,7 @@ public class ConnectedAppRegisteredClientRepository implements RegisteredClientR
      * or {@code null} when no such app exists (caller falls back to the delegate).
      */
     private RegisteredClient fromConnectedApp(String cacheKey, String sql, String param) {
-        CachedClient cached = cache.get(cacheKey);
+        CachedClient cached = cache.get(scoped(cacheKey));
         if (cached != null && cached.cachedAt().plusSeconds(CACHE_TTL_SECONDS).isAfter(Instant.now())) {
             return cached.client();
         }
@@ -121,9 +122,21 @@ public class ConnectedAppRegisteredClientRepository implements RegisteredClientR
         // Cache under both keys so /authorize (by clientId) and the token exchange
         // (by id) share one build within the TTL.
         Instant now = Instant.now();
-        cache.put("id:" + client.getId(), new CachedClient(client, now));
-        cache.put("cid:" + client.getClientId(), new CachedClient(client, now));
+        cache.put(scoped("id:" + client.getId()), new CachedClient(client, now));
+        cache.put(scoped("cid:" + client.getClientId()), new CachedClient(client, now));
         return client;
+    }
+
+    /**
+     * Prefixes a cache key with the tenant the lookup ran under. The {@code connected_app}
+     * query carries no tenant predicate, so what it returns is whatever the connection's
+     * row-level security allows — a tenant-bound /authorize sees only its own apps, a
+     * session-less token exchange sees all of them. A cache keyed on the client id alone
+     * would let the first caller's answer serve the next tenant's request.
+     */
+    private static String scoped(String cacheKey) {
+        String tenantId = TenantContext.get();
+        return (tenantId == null || tenantId.isBlank() ? "" : tenantId) + "|" + cacheKey;
     }
 
     private RegisteredClient build(Map<String, Object> app) {

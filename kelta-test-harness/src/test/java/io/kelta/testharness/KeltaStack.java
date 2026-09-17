@@ -18,11 +18,17 @@ import java.security.KeyPairGenerator;
 import java.security.SecureRandom;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.interfaces.RSAPublicKey;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Singleton stack of Testcontainers that backs all harness scenario tests.
@@ -68,6 +74,36 @@ public final class KeltaStack {
      * a Testcontainers PG (local dev fallback).
      */
     static final HarnessDbConfig DB_CONFIG = HarnessDbConfig.resolve(System::getenv);
+
+    /**
+     * A NOBYPASSRLS role with the application's privilege set, provisioned once the worker's
+     * Flyway run has created the schema. It exists so the harness can observe row-level
+     * security at all: {@link HarnessDbConfig#username()} is the image's bootstrap superuser,
+     * and a superuser never evaluates a policy, so a scenario that connects as it proves
+     * nothing about tenant isolation in the database. {@code TenantIsolationScenarioTest}
+     * connects as this role instead and the policies are live for it, exactly as they are for
+     * a production pod.
+     *
+     * <p><b>The service containers still connect as the bootstrap superuser.</b> Pointing them
+     * here instead is the obvious next step and is deliberately not taken yet: it makes every
+     * query in kelta-worker and kelta-auth subject to the policies, and the paths that are not
+     * yet RLS-clean fail during {@link #start()} — which takes the whole harness down rather
+     * than failing one scenario. Two attempts at PLT-264 died that way, each on a different
+     * platform-side defect outside that task's scope (the latest fixed:
+     * {@code TenantProvisioningHook} seeding a new tenant under the *creating* tenant's
+     * binding). See {@code .claude/docs/concerns.md} → "the harness's service containers
+     * still bypass RLS" for what has to land before the switch, and prefer
+     * {@code RowLevelSecurityIntegrationTest} for policy coverage until then.
+     *
+     * <p>Named after the run's schema on the shared CI pool, where several runs share one
+     * Postgres instance and a fixed name would collide. {@code scripts/ci/release-db.sh}
+     * drops it alongside the schema.
+     */
+    static final String APP_ROLE = applicationRoleName();
+    static final String APP_PASSWORD = "harness-app-role";
+
+    /** How much of a failed service's log to print. Enough to carry a stack trace. */
+    private static final int LOG_TAIL_LINES = 120;
 
     static {
         try {
@@ -238,12 +274,24 @@ public final class KeltaStack {
         return DB_CONFIG.external() ? DB_CONFIG.jdbcUrl() : POSTGRES.getJdbcUrl();
     }
 
+    /** The bootstrap superuser — test-side admin access, bypasses RLS. */
     public static String dbUsername() {
         return DB_CONFIG.username();
     }
 
+    /** @see #dbUsername() */
     public static String dbPassword() {
         return DB_CONFIG.password();
+    }
+
+    /** The harness's NOBYPASSRLS role. Connect as this to observe RLS; read-only. */
+    public static String appDbUsername() {
+        return APP_ROLE;
+    }
+
+    /** @see #appDbUsername() */
+    public static String appDbPassword() {
+        return APP_PASSWORD;
     }
 
     // ── Startup ──────────────────────────────────────────────────────────────
@@ -302,17 +350,21 @@ public final class KeltaStack {
 
         // Phase 2: worker (owns Flyway migrations)
         log.info("Phase 2: starting kelta-worker...");
-        WORKER.start();
+        startService("kelta-worker", WORKER);
         log.info("kelta-worker healthy (Flyway complete)");
+
+        // The role is granted SELECT on the tables Flyway just created, so it can only be
+        // provisioned once the worker has run the migrations.
+        provisionApplicationRole();
 
         // Phase 3: auth (needs DB + worker)
         log.info("Phase 3: starting kelta-auth...");
-        AUTH.start();
+        startService("kelta-auth", AUTH);
         log.info("kelta-auth healthy");
 
         // Phase 4: gateway (needs auth JWKS + worker routes)
         log.info("Phase 4: starting kelta-gateway...");
-        GATEWAY.start();
+        startService("kelta-gateway", GATEWAY);
         log.info("kelta-gateway healthy");
 
         // Phase 5: seed the ecommerce fixture tenant via the admin API. The Flyway
@@ -325,6 +377,56 @@ public final class KeltaStack {
         log.info("ecommerce fixture seeded — stack ready");
     }
 
+    /**
+     * Starts a service container and, if it never reports healthy, logs the tail of its
+     * output before rethrowing.
+     *
+     * <p>The wait strategy is an HTTP probe on {@code /actuator/health}, so a service that
+     * dies during boot looks exactly like one that is merely slow: Testcontainers polls
+     * until the startup timeout and then throws a {@code ContainerLaunchException} that says
+     * nothing about why. Everything that matters — a Flyway error, a failed connection, a
+     * missing privilege — is in the container's own log, which is otherwise discarded with
+     * the container. One {@code docker logs} call at the point of failure is what makes a
+     * red CI run diagnosable.
+     */
+    private static void startService(String name, GenericContainer<?> container) {
+        try {
+            container.start();
+        } catch (RuntimeException e) {
+            log.error("{} did not become healthy — last {} lines of its log follow:\n{}",
+                    name, LOG_TAIL_LINES, tailLogs(container));
+            throw e;
+        }
+    }
+
+    /**
+     * Fetches the tail of a container's log, on a daemon thread with a deadline. The fetch
+     * is a one-shot {@code docker logs} rather than a follow, but this runs on the failure
+     * path of a start that is already timing out — a diagnostic must not be able to become
+     * the next hang.
+     */
+    private static String tailLogs(GenericContainer<?> container) {
+        var executor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "kelta-stack-logs");
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            return executor.submit(() -> {
+                String[] lines = container.getLogs().split("\n");
+                int from = Math.max(0, lines.length - LOG_TAIL_LINES);
+                return String.join("\n", Arrays.asList(lines).subList(from, lines.length));
+            }).get(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "(interrupted while reading container logs)";
+        } catch (Exception e) {
+            return "(could not read container logs: " + e + ")";
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     public static void stop() {
         GATEWAY.stop();
         AUTH.stop();
@@ -332,10 +434,106 @@ public final class KeltaStack {
         CERBOS.stop();
         NATS.stop();
         REDIS.stop();
+        if (DB_CONFIG.external()) {
+            // The local Testcontainers PG is thrown away wholesale; the shared CI instance is
+            // not, so the run's role must go with the run. release-db.sh repeats this in case
+            // the JVM never reaches here.
+            dropApplicationRole();
+        }
         if (POSTGRES != null) {
             POSTGRES.stop();
         }
         NETWORK.close();
+    }
+
+    // ── Application role (NOBYPASSRLS) ───────────────────────────────────────
+
+    /**
+     * Creates the NOBYPASSRLS role scenarios use to observe row-level security, with the
+     * privilege set a production pod has and nothing more.
+     *
+     * <p>Run as the bootstrap superuser: only a superuser may {@code CREATE ROLE}, and only
+     * a superuser may hand out {@code NOBYPASSRLS} as an explicit attribute.
+     *
+     * <p>Read access is granted on the schema's tables rather than by making the role their
+     * owner. A table's owner is exempt from its own policies unless the table declares FORCE,
+     * and while V200–V202 do force every policy, a plain non-owner role removes the question
+     * entirely — what this role sees is what a policy lets it see. Default privileges are set
+     * for the migrating role as well, so a table added to that schema after provisioning is
+     * readable without a re-grant.
+     *
+     * <p>{@code app.current_tenant_id = ''} is the production role default: a connection that
+     * binds no tenant is a platform session ({@code admin_bypass}), not one that sees nothing.
+     */
+    private static void provisionApplicationRole() {
+        String schema = targetSchema();
+        log.info("Provisioning NOBYPASSRLS application role '{}' on schema '{}'", APP_ROLE, schema);
+        try (Connection conn = adminConnection(); Statement st = conn.createStatement()) {
+            // Idempotent: a re-run inside the same CI schema reuses the role rather than
+            // failing on a name that already exists.
+            st.execute("DO $$ BEGIN "
+                    + "IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = " + literal(APP_ROLE) + ") THEN "
+                    + "  ALTER ROLE " + ident(APP_ROLE)
+                    + "    WITH LOGIN PASSWORD " + literal(APP_PASSWORD) + " NOBYPASSRLS; "
+                    + "ELSE "
+                    + "  CREATE ROLE " + ident(APP_ROLE)
+                    + "    LOGIN PASSWORD " + literal(APP_PASSWORD) + " NOBYPASSRLS; "
+                    + "END IF; END $$;");
+            st.execute("DO $$ BEGIN EXECUTE format("
+                    + "'GRANT CONNECT ON DATABASE %I TO %I', "
+                    + "current_database(), " + literal(APP_ROLE) + "); END $$;");
+            st.execute("GRANT USAGE ON SCHEMA " + ident(schema) + " TO " + ident(APP_ROLE));
+            st.execute("GRANT SELECT ON ALL TABLES IN SCHEMA " + ident(schema)
+                    + " TO " + ident(APP_ROLE));
+            st.execute("ALTER DEFAULT PRIVILEGES FOR ROLE " + ident(DB_CONFIG.username())
+                    + " IN SCHEMA " + ident(schema) + " GRANT SELECT ON TABLES TO " + ident(APP_ROLE));
+            st.execute("ALTER ROLE " + ident(APP_ROLE) + " SET app.current_tenant_id = ''");
+            st.execute("ALTER ROLE " + ident(APP_ROLE) + " SET search_path = " + ident(schema));
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "Could not provision the harness application role '" + APP_ROLE + "'. Scenarios "
+                            + "connect as it to observe row-level security, which a superuser never "
+                            + "evaluates; the bootstrap user must be able to CREATE ROLE.", e);
+        }
+    }
+
+    private static void dropApplicationRole() {
+        try (Connection conn = adminConnection(); Statement st = conn.createStatement()) {
+            st.execute("DROP OWNED BY " + ident(APP_ROLE) + " CASCADE");
+            st.execute("DROP ROLE IF EXISTS " + ident(APP_ROLE));
+        } catch (SQLException e) {
+            log.warn("Could not drop harness application role '{}': {}", APP_ROLE, e.getMessage());
+        }
+    }
+
+    private static Connection adminConnection() throws SQLException {
+        return DriverManager.getConnection(dbJdbcUrl(), DB_CONFIG.username(), DB_CONFIG.password());
+    }
+
+    /** {@code app_<run schema>} on the shared CI pool, a fixed name on a throwaway local PG. */
+    private static String applicationRoleName() {
+        String schema = targetSchema();
+        return "public".equals(schema) ? "kelta_app" : "app_" + schema;
+    }
+
+    /** The schema the services' JDBC URL pins, or {@code public} when it pins none. */
+    private static String targetSchema() {
+        String url = DB_CONFIG.jdbcUrl();
+        int at = url.indexOf("currentSchema=");
+        if (at < 0) {
+            return "public";
+        }
+        String rest = url.substring(at + "currentSchema=".length());
+        int end = rest.indexOf('&');
+        return end < 0 ? rest : rest.substring(0, end);
+    }
+
+    private static String ident(String name) {
+        return "\"" + name.replace("\"", "\"\"") + "\"";
+    }
+
+    private static String literal(String value) {
+        return "'" + value.replace("'", "''") + "'";
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────

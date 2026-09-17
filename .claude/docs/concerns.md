@@ -138,13 +138,103 @@ tenants — demonstrated from a tenant login (10 visible users → 66). V201 add
 GUC-based policy to `COALESCE((SELECT kelta_pinned_tenant()), current_setting(...))` — an
 InitPlan, one lookup per query — with `admin_bypass` only for unpinned roles;
 `SupersetDatabaseUserService` pins its roles and the existing ones are backfilled
-(`pinnedRoleCannotHopTenantsBySettingTheGuc`). Still open: kelta-auth and kelta-ai run as
-platform sessions (they filter in SQL); the harness runs as the container superuser; the
-tenant-less child/log tables (`flow_step_log`, `job_execution_log`, `alert_delivery`,
-`kelta_migrations`, …) have no RLS and are fully readable by any role granted
-`ALL TABLES IN SCHEMA public` — the Superset users are; and the in-code tenant predicate for
-direct `queryEngine.executeQuery` callers (PLT-260 in the RZWare tracker) remains the first
-line of defence — RLS is the backstop, not the predicate.
+(`pinnedRoleCannotHopTenantsBySettingTheGuc`).
+
+The four gaps that survived those two passes were closed on 2026-09-17 (PLT-264):
+- **Tenant-less child/log tables had no policy at all** — they hold tenant data but store no
+  `tenant_id`, so the V200 catalog sweep (keyed on that column) never saw them, and any role
+  granted `ALL TABLES IN SCHEMA public` read all of them across every tenant. `V202` gives
+  the pair to 21 tables: 18 keyed on an `EXISTS` against the tenant-scoped parent
+  (`flow_step_log`→`flow_execution`, `user_credential`/`user_totp_secret`/
+  `user_recovery_code`/`password_history`→`platform_user`, `collection_version`→`collection`,
+  `field_version` two hops through it, `approval_step`, `approval_step_instance`,
+  `alert_delivery`, `bulk_job_result`, `connected_app_token`, `flow_version`,
+  `job_execution_log`, `migration_step`, `package_item`, `record_type_picklist`,
+  `script_trigger`) and 3 on a denormalised column (`kelta_migrations` and the legacy
+  `emf_migrations`, defaulted from the session's tenant; `livekit_webhook_event`, whose claim
+  now happens after the room resolves so the row can record its tenant).
+  `everyTenantDerivedTableIsCovered` replaces the `tenant_id`-column sweep with a recursive
+  catalog walk — a `tenant_id` column, or an `ON DELETE CASCADE` FK to something with one
+  (an audit `created_by → platform_user` is `NO ACTION` and correctly not ownership) — so the
+  next child table cannot ship without a policy either.
+- **Superset logins were granted the whole `public` schema**, `user_credential` and
+  `oauth2_*` included, plus `ALTER DEFAULT PRIVILEGES … GRANT SELECT` so every future table
+  followed automatically. The grant is now table by table, on tables with a `tenant_id`
+  column that RLS is enforcing; `supersetRoleIsGrantedOnlyTenantScopedTables` asserts from
+  the catalog that nothing else in `public` is readable by such a role. Not granting beats
+  trusting a policy.
+- **kelta-auth and kelta-ai ran every query as the platform session.** Both resolved the
+  request's tenant into a `ScopedValue` and neither had a DataSource binder, so the
+  `connection-init-sql: SET app.current_tenant_id = ''` was the only value the setting ever
+  took (kelta-ai's `ChatController` comment claiming otherwise was aspirational).
+  `TenantAwareDataSource` moved to runtime-core and all three services register it;
+  kelta-auth's `TenantContextFilter` now resolves the session's tenant (slug or UUID, cached)
+  on every request, and kelta-ai's `ai_*` tables get `FORCE` + `admin_bypass` in its own
+  `V6` — they were owned by the app role and merely `ENABLE`d, so their policies had never
+  run either. `TenantBindingIntegrationTest` in each service proves a request scoped to
+  tenant A cannot read tenant B's rows as a `NOBYPASSRLS` role.
+- **The harness proved nothing about the database layer**, connecting as the container
+  superuser everywhere. `KeltaStack` now provisions a `NOBYPASSRLS` application role with the
+  privilege set a worker pod has (named after the CI run's schema; `release-db.sh` drops it),
+  exposed as `ScenarioBase.openAppDbConnection()`; `openDbConnection()` remains the superuser
+  for planting fixtures. `TenantIsolationScenarioTest` asserts through the app role that a
+  session bound to tenant A cannot read tenant B's `platform_user` rows, and that the role
+  really is neither a superuser nor `BYPASSRLS`. See the open item below for the part of this
+  that is *not* done.
+
+Enforcement also exposed a latent bug in tenant provisioning. `TenantProvisioningHook` runs
+inside the request that created the tenant, and rebound the tenant with the **legacy**
+`TenantContext.set(id)` — but `TenantContext.get()` prefers a bound `ScopedValue` over the
+ThreadLocal, and the worker's request filter has already bound the *creating* tenant. The
+setting was therefore ignored, and every row the hook seeds (profiles, OIDC provider, admin
+user + credential) was written under the wrong tenant: invisible while RLS was bypassed,
+rejected by `tenant_isolation`'s WITH CHECK the moment it was not. It now seeds inside
+`TenantContext.runWithTenant(id, slug, …)`, which shadows the outer binding — the
+cross-tenant form Critical Rule 3 prescribes. **`TenantContext.set(...)` is only safe where
+nothing is bound** (NATS listeners, bootstrap runners); on a request path it is a silent
+no-op. Remaining call sites — `DynamicCollectionRouter`, `SearchController`,
+`SubmitForApprovalActionHandler`, `CollectionLifecycleManager`, `CerbosPolicySyncService`,
+`InternalBootstrapController` — all set the tenant that is already bound, or run unbound.
+
+Still open: the in-code tenant predicate for direct `queryEngine.executeQuery` callers
+(PLT-260 in the RZWare tracker) remains the first line of defence — RLS is the backstop, not
+the predicate.
+
+**OPEN — the harness's *service containers* still bypass RLS.** `KeltaStack` provisions the
+`NOBYPASSRLS` role and scenarios assert through it, but `SPRING_DATASOURCE_USERNAME` for
+kelta-worker and kelta-auth is still the image's bootstrap superuser, so the ~40 scenario
+tests exercise the gateway/JWT boundary rather than the database one. Pointing the services
+at the app role is the obvious next step and was attempted twice under PLT-264; both attempts
+failed CI, because a policy violation on *any* path taken during `KeltaStack.start()` (Flyway
+→ worker boot → auth boot → gateway boot → seeding the `threadline-clothing` fixture tenant
+through the admin API) aborts the whole harness instead of failing one scenario. What the two
+attempts turned up, and what the next one needs:
+- Running **Flyway as the app role** works, but the role must then own the target schema: the
+  baseline is a `pg_dump` carrying `COMMENT ON SCHEMA public`, an ownership-level operation
+  that since Postgres 15 belongs to `pg_database_owner`. Without the handover the first
+  migration dies with *must be owner of schema public*. Extensions must also be pre-installed
+  by the provisioning step — `CREATE EXTENSION` is superuser-only, and `IF NOT EXISTS`
+  short-circuits before the privilege check, making the baseline's `pg_trgm` and
+  `PhysicalTableStorageAdapter`'s `vector` no-ops.
+- `TenantProvisioningHook` was seeding a new tenant under the *creating* tenant's binding
+  (see below); fixed, and re-verified against a real Postgres 15 as a `NOBYPASSRLS` role.
+- Something on the start path still fails after those two. It is **not** the migrations, the
+  provisioning hook's SQL, the Superset grant narrowing, or the `kelta_migrations` /
+  `collection_version` / `field_version` write paths — each was replayed against a real
+  Postgres 15 as a `NOBYPASSRLS` role and is clean. The likeliest remaining suspects are the
+  services that copy rows *between* tenants (`SandboxProvisioningService` and
+  `MetadataPromotionService` both read one tenant's `user_credential`/metadata and write
+  another's) and anything reading a *system*-collection child row under a tenant binding:
+  `system_rows_read` exempts `collection` and `field`, but **not** `collection_version` or
+  `field_version`, whose V202 policies key strictly on the parent's `tenant_id`.
+- Diagnosing it needs the harness log, which is why `KeltaStack.startService` prints the tail
+  of a failed container's output and `KeltaStackExtension` remembers a failed start instead of
+  retrying it for all ~40 scenario classes (that retry storm is what turned a clear failure
+  into an exhausted 20-minute CI budget and a cancelled job with no report to read).
+
+Until this lands, `RowLevelSecurityIntegrationTest` — which migrates as a `NOBYPASSRLS` role
+and drives queries through `TenantAwareDataSource` the way the worker does — is the coverage
+that actually gates the policies, not the harness.
 
 **FIXED (2026-09-14) — the platform had no dependency vulnerability scanning at all, and the
 one scanner that was configured had never run.** OWASP dependency-check sat in
@@ -1159,9 +1249,9 @@ The ArgoCD image bump + post-deploy health check that used to live in
 - **Tenant-scoped connection** (non-empty tenant in `TenantContext`): if the borrowed connection is in autocommit mode, autocommit is turned off (begins a transaction), `SET LOCAL app.current_tenant_id = '<id>'` is issued, and a thin commit-on-close proxy commits + restores autocommit when the connection is released. If a Spring-managed transaction already owns the connection, only `SET LOCAL` is issued and the proxy defers commit/rollback to the owner (it watches the owner's `commit()`/`rollback()` to avoid a double-commit). Because the variable is set per transaction on the same backend that serves the query, it survives PgBouncer `pool_mode = transaction`. Connection-hold time is unchanged — the connection is released right after the operation, exactly like the previous autocommit model.
 - **Admin/bypass connection** (no tenant — Flyway, internal, cross-tenant work): keeps the legacy session `SET app.current_tenant_id = ''`. Empty already maps to `admin_bypass`, so transaction scoping is irrelevant to isolation and these paths are unchanged.
 
-Regression guard: `TenantAwareDataSourceTest` asserts tenant connections use transaction-local `SET LOCAL` (not session `SET`) and commit/restore correctly; `RowLevelSecurityIntegrationTest` proves the policies themselves as a role without BYPASSRLS (the harness `TenantIsolationScenarioTest` runs as the container superuser, which bypasses RLS, so it exercises the gateway/JWT boundary, not the database one).
+Regression guard: `TenantAwareDataSourceTest` (runtime-core, beside the class since PLT-264 moved it there) asserts tenant connections use transaction-local `SET LOCAL` (not session `SET`) and commit/restore correctly; `RowLevelSecurityIntegrationTest` proves the policies themselves as a role without BYPASSRLS. `TenantIsolationScenarioTest` adds two database-layer assertions on a `NOBYPASSRLS` connection (`ScenarioBase.openAppDbConnection()`), but the harness's service containers still connect as the container superuser, so its other scenarios cover the gateway/JWT boundary rather than the database one — see "the harness's *service containers* still bypass RLS" above.
 
-**Remaining caveat — kelta-ai:** `kelta-ai/src/main/resources/application.yml` still uses `hikari.connection-init-sql: SET app.current_tenant_id = ''` (a session-level set to the bypass value). kelta-ai runs in admin/bypass mode and filters tenants explicitly in SQL rather than relying on RLS tenant isolation, so it is not a leak vector — but if kelta-ai ever begins relying on RLS for tenant-scoped reads, it must adopt the same transaction-scoped `SET LOCAL` mechanism before being placed behind a transaction-pool. Tracked as a follow-up.
+**Resolved for kelta-ai and kelta-auth (2026-09-17, PLT-264):** both now register `TenantAwareDataSourcePostProcessor` (runtime-core), so a request's tenant becomes a transaction-scoped `SET LOCAL` on the connection and only the genuinely tenant-less paths keep the `''` sentinel. The `hikari.connection-init-sql` line stays as the pre-wrapper default, not as the isolation mechanism.
 
 - **Compose healthchecks for kelta-worker and kelta-ai can never fail.** Both set
   `management.endpoint.health.show-details: always`, so `/actuator/health` returns every

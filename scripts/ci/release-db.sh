@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Release the schema claimed by checkout-db.sh.
 #
-# Reads /tmp/ci-db-checkout.env, drops the schema (CASCADE), exits cleanly.
+# Reads /tmp/ci-db-checkout.env, drops the schema (CASCADE) and the run's
+# NOBYPASSRLS application role (app_<schema>, created by the test harness's
+# KeltaStack), exits cleanly.
 # Safe to run more than once; missing schema is treated as already released.
 #
 # Usage (in a CI step, typically with `if: always()` so a failed test still
@@ -25,11 +27,19 @@ if [[ -z "${CI_DB_SCHEMA:-}" ]]; then
   exit 0
 fi
 
-echo "[release-db] dropping schema $CI_DB_SCHEMA on instance ${CI_DB_INSTANCE:-?}" >&2
+# KeltaStack creates a per-run NOBYPASSRLS role named after the run's schema, which
+# scenarios connect as to observe row-level security. It holds grants on the schema's
+# tables, and a role cannot be dropped while any grant or default privilege references
+# it — so DROP OWNED BY goes first to clear them, then the role, then the schema. The
+# role is per-run, so this never touches a concurrent run's objects.
+APP_ROLE="app_${CI_DB_SCHEMA}"
+
+echo "[release-db] dropping role $APP_ROLE and schema $CI_DB_SCHEMA on instance ${CI_DB_INSTANCE:-?}" >&2
 PGPASSWORD="$CI_DB_PASSWORD" psql \
   -h "$CI_DB_HOST" -p "$CI_DB_PORT" -U "$CI_DB_USER" -d "$CI_DB_DATABASE" \
   -v ON_ERROR_STOP=1 \
+  -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$APP_ROLE') THEN EXECUTE 'DROP OWNED BY \"$APP_ROLE\" CASCADE'; EXECUTE 'DROP ROLE \"$APP_ROLE\"'; END IF; END \$\$;" \
   -c "DROP SCHEMA IF EXISTS \"$CI_DB_SCHEMA\" CASCADE;" >&2 \
-  || echo "[release-db] DROP SCHEMA failed (instance may be down); leaving for next sweep" >&2
+  || echo "[release-db] cleanup failed (instance may be down); leaving for next sweep" >&2
 
 rm -f "$ENV_FILE"
