@@ -329,7 +329,13 @@ const sandboxCreate = defineCommand({
         'One-time admin credentials — store them now, they will NOT be shown again:',
         `  Sandbox slug:   ${attrs.sandboxSlug ?? ''}`,
         `  Admin username: ${attrs.adminUsername ?? ''}`,
-        `  Admin password: ${attrs.adminInitialPassword ?? ''}`
+        `  Admin password: ${attrs.adminInitialPassword ?? ''}`,
+        '',
+        'Log in with these credentials:',
+        '  POST /auth/direct-login ' +
+          `{ "username": "${attrs.adminUsername ?? ''}", "password": "<password>", ` +
+          `"tenantSlug": "${attrs.sandboxSlug ?? ''}" }`,
+        '  or: kelta token create (after logging in via the browser)'
       );
     }
     return { data: { data: env }, human: lines.join('\n') + '\n', ids: [env.id] };

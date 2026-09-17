@@ -364,9 +364,14 @@ public class SandboxProvisioningService {
     }
 
     private void hardenSandboxAdmin(String sandboxTenantId, String sandboxSlug, String password) {
-        String hash = passwordEncoder.encode(password);
+        // kelta-auth authenticates through a DelegatingPasswordEncoder that requires
+        // the "{bcrypt}" id prefix (AuthorizationServerConfig.passwordEncoder()); a
+        // bare BCryptPasswordEncoder hash never matches. force_change_on_login is
+        // cleared too — the printed password is already a random one-time secret,
+        // and there is no API path a CLI/automated caller could use to clear it.
+        String hash = "{bcrypt}" + passwordEncoder.encode(password);
         int updated = environmentRepository.getJdbcTemplate().update(
-                "UPDATE user_credential SET password_hash = ? " +
+                "UPDATE user_credential SET password_hash = ?, force_change_on_login = false " +
                         "WHERE user_id = (SELECT id FROM platform_user WHERE tenant_id = ? AND username = ?)",
                 hash, sandboxTenantId, sandboxSlug + "-admin");
         if (updated == 0) {

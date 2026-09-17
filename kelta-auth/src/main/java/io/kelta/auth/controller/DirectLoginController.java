@@ -4,9 +4,11 @@ import io.kelta.auth.config.AuthProperties;
 import io.kelta.auth.model.KeltaUserDetails;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -60,7 +63,8 @@ public class DirectLoginController {
     }
 
     @PostMapping
-    public ResponseEntity<?> login(@RequestBody DirectLoginRequest request, HttpSession session) {
+    public ResponseEntity<?> login(@RequestBody DirectLoginRequest request, HttpSession session,
+                                    HttpServletRequest httpRequest) {
         if (!authProperties.getDirectLogin().isEnabled()) {
             return ResponseEntity.notFound().build();
         }
@@ -80,6 +84,19 @@ public class DirectLoginController {
         try {
             authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.username(), request.password()));
+        } catch (CredentialsExpiredException e) {
+            log.info("Direct login rejected for user {}: credentials expired (force change required)",
+                    request.username());
+            String forceChangeUrl = ServletUriComponentsBuilder.fromRequestUri(httpRequest)
+                    .replacePath("/change-password")
+                    .replaceQuery(null)
+                    .build()
+                    .toUriString();
+            return ResponseEntity.status(403)
+                    .body(Map.of(
+                            "error", "credentials_expired",
+                            "error_description", "Password must be changed before this account can authenticate",
+                            "force_change_url", forceChangeUrl));
         } catch (AuthenticationException e) {
             log.warn("Direct login failed for user {}: {}", request.username(), e.getMessage());
             return ResponseEntity.status(401)

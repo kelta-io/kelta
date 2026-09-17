@@ -154,25 +154,32 @@ class SandboxProvisioningServiceTest {
         }
 
         @Test
-        @DisplayName("hardens the seeded admin credential with a fresh bcrypt hash")
+        @DisplayName("hardens the seeded admin credential with a {bcrypt}-prefixed hash and clears force_change_on_login")
         void hardensAdminCredential() {
             happyPathSetup();
 
             var result = service.createSandbox(PARENT, "dev", null, "SANDBOX", "admin");
 
+            ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
             ArgumentCaptor<Object> hashCaptor = ArgumentCaptor.forClass(Object.class);
-            verify(jdbcTemplate).update(contains("UPDATE user_credential"),
+            verify(jdbcTemplate).update(sqlCaptor.capture(),
                     hashCaptor.capture(), eq("sbx-tenant"), eq("acme--dev-admin"));
+            assertThat(sqlCaptor.getValue()).contains("UPDATE user_credential")
+                    .as("printed credential is a one-time secret — nothing left to force-change")
+                    .contains("force_change_on_login = false");
 
             String hash = (String) hashCaptor.getValue();
             String password = (String) result.get("adminInitialPassword");
+            assertThat(hash).as("DelegatingPasswordEncoder-compatible — kelta-auth rejects a bare bcrypt hash")
+                    .startsWith("{bcrypt}");
             assertThat(hash).as("never the well-known seeded default")
                     .isNotEqualTo(WELL_KNOWN_DEFAULT_HASH);
             BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
-            assertThat(encoder.matches(password, hash))
+            String bareHash = hash.substring("{bcrypt}".length());
+            assertThat(encoder.matches(password, bareHash))
                     .as("stored hash matches the one-time password returned to the caller")
                     .isTrue();
-            assertThat(encoder.matches("password", hash))
+            assertThat(encoder.matches("password", bareHash))
                     .as("default password no longer works")
                     .isFalse();
         }
