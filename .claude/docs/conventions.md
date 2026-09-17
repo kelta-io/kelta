@@ -111,7 +111,11 @@ collection-level covers fields outside it (`tenantId`, join keys).
 ### Row-level security: scoping tenant data in the database
 
 Postgres RLS is the last line of tenant isolation, and the application role runs
-`NOBYPASSRLS` in production and in `kelta-test-harness`. Three rules follow.
+`NOBYPASSRLS` in production — so the policies are evaluated, not decoration. Three rules
+follow. (`RowLevelSecurityIntegrationTest` is where they are proven: it migrates and queries
+as a `NOBYPASSRLS` role. `kelta-test-harness` provisions such a role for
+`ScenarioBase.openAppDbConnection()`, but its service containers still connect as the
+container superuser — see `concerns.md`.)
 
 **1. Every table that holds tenant data needs the policy pair, enabled *and* forced.**
 

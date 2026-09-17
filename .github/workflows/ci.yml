@@ -416,10 +416,7 @@ jobs:
     needs: [changes, test-java]
     if: needs.changes.outputs.any_java == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: k8s-runner-integration
-    # Covers ~12 min of Maven + image builds before a single test runs, then the stack.
-    # Since the harness started running as a NOBYPASSRLS role every scenario evaluates
-    # the RLS policies for real, and 20 min left the run with no headroom at all.
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

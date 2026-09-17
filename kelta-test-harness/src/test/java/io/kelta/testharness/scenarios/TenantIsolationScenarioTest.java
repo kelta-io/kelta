@@ -35,9 +35,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * </ul>
  * Each tenant has an admin account (password {@code password}); see {@code AuthFixture}.
  *
- * <p>The stack runs against a NOBYPASSRLS application role ({@code KeltaStack.APP_ROLE}), so
- * the isolation the gateway enforces above is backed by row-level security underneath: the
- * last two tests here assert that directly, on the same connection the services use.
+ * <p>The gateway-level isolation above is backed by row-level security underneath, and the
+ * last two tests assert that layer directly: they connect as {@code KeltaStack.APP_ROLE}, a
+ * NOBYPASSRLS role carrying the application's privilege set, so the policies are evaluated
+ * rather than bypassed. (The service containers themselves still connect as the image's
+ * bootstrap superuser — see {@code KeltaStack.APP_ROLE}'s javadoc for why, and
+ * {@code RowLevelSecurityIntegrationTest} for the policy coverage that does not depend on
+ * the full stack.)
  */
 @DisplayName("Tenant Isolation Scenario")
 class TenantIsolationScenarioTest extends ScenarioBase {
@@ -173,19 +177,20 @@ class TenantIsolationScenarioTest extends ScenarioBase {
     // ── database-layer isolation (the services' own role) ────────────────────
 
     /**
-     * The premise every RLS assertion in this class rests on. A superuser — which is what
-     * the harness used to hand the services — never evaluates a policy, so before this the
-     * whole stack could have had no RLS at all and every test here would still have passed.
+     * The premise the two assertions below rest on. A superuser never evaluates a policy, so
+     * a test that connects as one proves nothing about isolation in the database — which is
+     * exactly what every scenario here did before this role existed.
      */
     @Test
-    @DisplayName("the services connect as a role that row-level security applies to")
-    void servicesRunWithoutBypassRls() throws Exception {
+    @DisplayName("the harness application role is one that row-level security applies to")
+    void applicationRoleRunsWithoutBypassRls() throws Exception {
         try (Connection conn = openAppDbConnection(); Statement st = conn.createStatement()) {
             try (ResultSet rs = st.executeQuery(
                     "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")) {
                 assertThat(rs.next()).isTrue();
                 assertThat(rs.getBoolean(1))
-                        .as("%s must be NOBYPASSRLS and not a superuser, or the policies are decoration",
+                        .as("%s must be NOBYPASSRLS and not a superuser, or the assertions below "
+                                        + "prove nothing",
                                 KeltaStack.appDbUsername())
                         .isFalse();
             }
@@ -193,8 +198,8 @@ class TenantIsolationScenarioTest extends ScenarioBase {
     }
 
     /**
-     * Reads {@code platform_user} directly, as the services do, with each tenant bound in
-     * turn: the rows a tenant can see must be its own. A query that forgets its
+     * Reads {@code platform_user} directly, the way a worker pod does, with each tenant bound
+     * in turn: the rows a tenant can see must be its own. A query that forgets its
      * {@code WHERE tenant_id = ?} is contained by the database rather than by the caller.
      */
     @Test
@@ -206,7 +211,7 @@ class TenantIsolationScenarioTest extends ScenarioBase {
         assertThat(tenantIdsVisibleTo(defaultId)).containsExactly(defaultId);
         assertThat(tenantIdsVisibleTo(ecommerceId)).containsExactly(ecommerceId);
 
-        // The platform session (no tenant bound) still sees both — that is what Flyway and
+        // The platform session (the '' sentinel) still sees both — that is what Flyway and
         // the cross-tenant bootstrap paths run as.
         assertThat(tenantIdsVisibleTo("")).contains(defaultId, ecommerceId);
     }

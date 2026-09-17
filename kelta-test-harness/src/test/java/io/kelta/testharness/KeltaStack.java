@@ -76,11 +76,24 @@ public final class KeltaStack {
     static final HarnessDbConfig DB_CONFIG = HarnessDbConfig.resolve(System::getenv);
 
     /**
-     * The role the services connect as. Deliberately <b>not</b> {@link HarnessDbConfig#username()}:
-     * that is the image's bootstrap superuser, and a superuser never evaluates a row-level
-     * security policy — so every scenario the harness has ever run proved nothing about
-     * tenant isolation at the database layer. This role is created NOBYPASSRLS, like
-     * production's, so the policies are live for the whole stack.
+     * A NOBYPASSRLS role with the application's privilege set, provisioned once the worker's
+     * Flyway run has created the schema. It exists so the harness can observe row-level
+     * security at all: {@link HarnessDbConfig#username()} is the image's bootstrap superuser,
+     * and a superuser never evaluates a policy, so a scenario that connects as it proves
+     * nothing about tenant isolation in the database. {@code TenantIsolationScenarioTest}
+     * connects as this role instead and the policies are live for it, exactly as they are for
+     * a production pod.
+     *
+     * <p><b>The service containers still connect as the bootstrap superuser.</b> Pointing them
+     * here instead is the obvious next step and is deliberately not taken yet: it makes every
+     * query in kelta-worker and kelta-auth subject to the policies, and the paths that are not
+     * yet RLS-clean fail during {@link #start()} — which takes the whole harness down rather
+     * than failing one scenario. Two attempts at PLT-264 died that way, each on a different
+     * platform-side defect outside that task's scope (the latest fixed:
+     * {@code TenantProvisioningHook} seeding a new tenant under the *creating* tenant's
+     * binding). See {@code .claude/docs/concerns.md} → "the harness's service containers
+     * still bypass RLS" for what has to land before the switch, and prefer
+     * {@code RowLevelSecurityIntegrationTest} for policy coverage until then.
      *
      * <p>Named after the run's schema on the shared CI pool, where several runs share one
      * Postgres instance and a fixed name would collide. {@code scripts/ci/release-db.sh}
@@ -169,8 +182,8 @@ public final class KeltaStack {
             .withNetworkAliases("kelta-worker")
             .withNetwork(NETWORK)
             .withEnv("SPRING_DATASOURCE_URL",      DB_CONFIG.jdbcUrl())
-            .withEnv("SPRING_DATASOURCE_USERNAME", APP_ROLE)
-            .withEnv("SPRING_DATASOURCE_PASSWORD", APP_PASSWORD)
+            .withEnv("SPRING_DATASOURCE_USERNAME", DB_CONFIG.username())
+            .withEnv("SPRING_DATASOURCE_PASSWORD", DB_CONFIG.password())
             .withEnv("SPRING_DATA_REDIS_HOST",     "redis")
             .withEnv("SPRING_DATA_REDIS_PORT",     "6379")
             .withEnv("NATS_URL",                   "nats://nats:4222")
@@ -197,8 +210,8 @@ public final class KeltaStack {
             .withNetworkAliases("kelta-auth")
             .withNetwork(NETWORK)
             .withEnv("SPRING_DATASOURCE_URL",      DB_CONFIG.jdbcUrl())
-            .withEnv("SPRING_DATASOURCE_USERNAME", APP_ROLE)
-            .withEnv("SPRING_DATASOURCE_PASSWORD", APP_PASSWORD)
+            .withEnv("SPRING_DATASOURCE_USERNAME", DB_CONFIG.username())
+            .withEnv("SPRING_DATASOURCE_PASSWORD", DB_CONFIG.password())
             .withEnv("SPRING_DATA_REDIS_HOST",    "redis")
             .withEnv("SPRING_DATA_REDIS_PORT",    "6379")
             .withEnv("KELTA_AUTH_ISSUER_URI",     "http://kelta-auth:8080")
@@ -271,7 +284,7 @@ public final class KeltaStack {
         return DB_CONFIG.password();
     }
 
-    /** The NOBYPASSRLS role the services run as. Connect as this to observe RLS. */
+    /** The harness's NOBYPASSRLS role. Connect as this to observe RLS; read-only. */
     public static String appDbUsername() {
         return APP_ROLE;
     }
@@ -335,12 +348,14 @@ public final class KeltaStack {
         }
         log.info("Infrastructure healthy");
 
-        provisionApplicationRole();
-
         // Phase 2: worker (owns Flyway migrations)
         log.info("Phase 2: starting kelta-worker...");
         startService("kelta-worker", WORKER);
         log.info("kelta-worker healthy (Flyway complete)");
+
+        // The role is granted SELECT on the tables Flyway just created, so it can only be
+        // provisioned once the worker has run the migrations.
+        provisionApplicationRole();
 
         // Phase 3: auth (needs DB + worker)
         log.info("Phase 3: starting kelta-auth...");
@@ -434,29 +449,18 @@ public final class KeltaStack {
     // ── Application role (NOBYPASSRLS) ───────────────────────────────────────
 
     /**
-     * Creates the role the services connect as, with row-level security enforced.
+     * Creates the NOBYPASSRLS role scenarios use to observe row-level security, with the
+     * privilege set a production pod has and nothing more.
      *
-     * <p>Run as the bootstrap superuser, because three of these steps need one: creating a
-     * role, installing the extensions, and handing the schema over.
+     * <p>Run as the bootstrap superuser: only a superuser may {@code CREATE ROLE}, and only
+     * a superuser may hand out {@code NOBYPASSRLS} as an explicit attribute.
      *
-     * <p>Extensions are installed here rather than by the application: an ordinary role
-     * cannot {@code CREATE EXTENSION}, but {@code IF NOT EXISTS} short-circuits before the
-     * privilege check, so the baseline's {@code pg_trgm} and
-     * {@code PhysicalTableStorageAdapter}'s {@code vector} both become no-ops.
-     *
-     * <p>The role is made the schema's <b>owner</b>, not merely granted CREATE on it. The
-     * baseline is a {@code pg_dump}, and a dump of {@code public} carries
-     * {@code COMMENT ON SCHEMA public}; COMMENT is an ownership-level operation, and since
-     * Postgres 15 {@code public} belongs to {@code pg_database_owner}, which an ordinary
-     * application role is no member of. Without the handover the very first migration dies
-     * with <i>must be owner of schema public</i>, the worker never reports healthy, and the
-     * whole stack fails to start.
-     *
-     * <p>Beyond that the role gets CREATE on the database (for the per-tenant schemas the
-     * worker creates at runtime) and nothing else: Flyway runs as it, so every table is
-     * created by it and owned by it. That matters — a table's owner is exempt from its own
-     * policies unless the table says FORCE, which is exactly why the migrations force RLS
-     * rather than merely enabling it.
+     * <p>Read access is granted on the schema's tables rather than by making the role their
+     * owner. A table's owner is exempt from its own policies unless the table declares FORCE,
+     * and while V200–V202 do force every policy, a plain non-owner role removes the question
+     * entirely — what this role sees is what a policy lets it see. Default privileges are set
+     * for the migrating role as well, so a table added to that schema after provisioning is
+     * readable without a re-grant.
      *
      * <p>{@code app.current_tenant_id = ''} is the production role default: a connection that
      * binds no tenant is a platform session ({@code admin_bypass}), not one that sees nothing.
@@ -465,10 +469,8 @@ public final class KeltaStack {
         String schema = targetSchema();
         log.info("Provisioning NOBYPASSRLS application role '{}' on schema '{}'", APP_ROLE, schema);
         try (Connection conn = adminConnection(); Statement st = conn.createStatement()) {
-            st.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm");
-            installVectorExtension(st);
             // Idempotent: a re-run inside the same CI schema reuses the role rather than
-            // failing on the objects it already owns.
+            // failing on a name that already exists.
             st.execute("DO $$ BEGIN "
                     + "IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = " + literal(APP_ROLE) + ") THEN "
                     + "  ALTER ROLE " + ident(APP_ROLE)
@@ -477,41 +479,21 @@ public final class KeltaStack {
                     + "  CREATE ROLE " + ident(APP_ROLE)
                     + "    LOGIN PASSWORD " + literal(APP_PASSWORD) + " NOBYPASSRLS; "
                     + "END IF; END $$;");
-            st.execute("GRANT ALL ON SCHEMA " + ident(schema) + " TO " + ident(APP_ROLE));
-            // Ownership, not just CREATE — see the javadoc: the baseline dump comments on
-            // the schema, which only its owner may do. Granting the role to the current
-            // user first is what lets a non-superuser CI pool user hand it over too.
-            st.execute("GRANT " + ident(APP_ROLE) + " TO CURRENT_USER");
-            st.execute("ALTER SCHEMA " + ident(schema) + " OWNER TO " + ident(APP_ROLE));
-            // Per-tenant collection tables live in a schema named after the tenant slug, which
-            // the worker creates at runtime — that needs CREATE on the database, which PUBLIC
-            // does not have.
             st.execute("DO $$ BEGIN EXECUTE format("
-                    + "'GRANT CREATE, CONNECT, TEMPORARY ON DATABASE %I TO %I', "
+                    + "'GRANT CONNECT ON DATABASE %I TO %I', "
                     + "current_database(), " + literal(APP_ROLE) + "); END $$;");
+            st.execute("GRANT USAGE ON SCHEMA " + ident(schema) + " TO " + ident(APP_ROLE));
+            st.execute("GRANT SELECT ON ALL TABLES IN SCHEMA " + ident(schema)
+                    + " TO " + ident(APP_ROLE));
+            st.execute("ALTER DEFAULT PRIVILEGES FOR ROLE " + ident(DB_CONFIG.username())
+                    + " IN SCHEMA " + ident(schema) + " GRANT SELECT ON TABLES TO " + ident(APP_ROLE));
             st.execute("ALTER ROLE " + ident(APP_ROLE) + " SET app.current_tenant_id = ''");
             st.execute("ALTER ROLE " + ident(APP_ROLE) + " SET search_path = " + ident(schema));
         } catch (SQLException e) {
             throw new IllegalStateException(
-                    "Could not provision the harness application role '" + APP_ROLE + "'. The harness "
-                            + "runs the stack as a NOBYPASSRLS role so RLS is actually exercised; the "
-                            + "bootstrap user must be able to CREATE ROLE.", e);
-        }
-    }
-
-    /**
-     * Installs pgvector if the server has it. {@code PhysicalTableStorageAdapter} issues
-     * {@code CREATE EXTENSION IF NOT EXISTS vector} the first time a collection gets a
-     * vector field, which an ordinary role cannot do — so it is done here, once, as the
-     * superuser. Absence is not fatal: only the semantic-search path needs it, and the
-     * adapter already reports a clear error of its own when it is missing.
-     */
-    private static void installVectorExtension(Statement st) {
-        try {
-            st.execute("CREATE EXTENSION IF NOT EXISTS vector");
-        } catch (SQLException e) {
-            log.warn("pgvector not available on this server ({}); vector-field scenarios will "
-                    + "fail if any run", e.getMessage());
+                    "Could not provision the harness application role '" + APP_ROLE + "'. Scenarios "
+                            + "connect as it to observe row-level security, which a superuser never "
+                            + "evaluates; the bootstrap user must be able to CREATE ROLE.", e);
         }
     }
 

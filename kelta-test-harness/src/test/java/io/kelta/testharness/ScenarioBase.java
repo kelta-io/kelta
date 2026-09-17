@@ -58,10 +58,10 @@ public abstract class ScenarioBase {
     }
 
     /**
-     * Opens a direct JDBC connection as the role the services themselves run as —
-     * NOBYPASSRLS, so the policies are evaluated exactly as they are for kelta-worker.
-     * Bind a tenant with {@code SET LOCAL app.current_tenant_id} to see what that tenant
-     * sees. Caller closes it.
+     * Opens a direct JDBC connection as the harness's NOBYPASSRLS application role, which
+     * carries the privilege set a worker pod has — so the policies are evaluated rather than
+     * bypassed. Bind a tenant with {@code SET LOCAL app.current_tenant_id} to see what that
+     * tenant sees. Caller closes it. Read-only: the role is granted SELECT, not write.
      */
     protected Connection openAppDbConnection() throws SQLException {
         return DriverManager.getConnection(

@@ -161,12 +161,10 @@ auto-rollbacks, re-apply bumps) are in `scripts/dora/README.md`.
 - `dora-metrics.yml` — see above.
 - `.github/workflows/README.md` and `scripts/ci/README.md` — runner + shared CI DB
   (`kelta-ci-db`, schema-isolated per run) notes. `checkout-db.sh` claims the schema;
-  `release-db.sh` drops it **and** the run's `app_<schema>` role — the harness runs the
-  stack as a per-run `NOBYPASSRLS` application role so row-level security is actually
-  exercised (`KeltaStack.provisionApplicationRole`), and that role owns the schema's tables.
-  The `Integration Tests` job is capped at **30 minutes**: ~12 of those go to Maven and
-  image builds before a single test runs, and every scenario now evaluates the RLS policies
-  for real.
+  `release-db.sh` drops it **and** the run's `app_<schema>` role — `KeltaStack` provisions a
+  per-run `NOBYPASSRLS` application role (`KeltaStack.provisionApplicationRole`) that
+  scenarios connect as to observe row-level security, and it holds grants that block
+  `DROP ROLE` until `DROP OWNED BY` clears them.
 
 ## Container registry & deploy
 

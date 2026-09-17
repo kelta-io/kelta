@@ -173,20 +173,14 @@ The four gaps that survived those two passes were closed on 2026-09-17 (PLT-264)
   `V6` — they were owned by the app role and merely `ENABLE`d, so their policies had never
   run either. `TenantBindingIntegrationTest` in each service proves a request scoped to
   tenant A cannot read tenant B's rows as a `NOBYPASSRLS` role.
-- **The harness proved nothing about the database layer**, running the whole stack as the
-  container superuser. `KeltaStack` now provisions a `NOBYPASSRLS` application role (named
-  after the CI run's schema; `release-db.sh` drops it) and the services connect as it, so
-  every scenario test exercises the real policies. `ScenarioBase.openAppDbConnection()` is
-  that role; `openDbConnection()` remains the superuser for planting fixtures.
-  **Flyway runs as that role too**, which means the harness (and `RowLevelSecurityIntegrationTest`,
-  which now migrates the same way) is the only place the migrations are exercised by a
-  non-superuser. Two consequences to respect when adding one: extensions must be installed
-  by the provisioning step, not by a migration (`CREATE EXTENSION` is superuser-only;
-  `IF NOT EXISTS` then short-circuits), and the role is made the **owner** of the target
-  schema, because the baseline is a `pg_dump` and carries `COMMENT ON SCHEMA public` —
-  an ownership-level operation that since Postgres 15 belongs to `pg_database_owner`.
-  Omitting the handover fails the first migration with *must be owner of schema public*,
-  the worker never reports healthy, and the stack does not come up.
+- **The harness proved nothing about the database layer**, connecting as the container
+  superuser everywhere. `KeltaStack` now provisions a `NOBYPASSRLS` application role with the
+  privilege set a worker pod has (named after the CI run's schema; `release-db.sh` drops it),
+  exposed as `ScenarioBase.openAppDbConnection()`; `openDbConnection()` remains the superuser
+  for planting fixtures. `TenantIsolationScenarioTest` asserts through the app role that a
+  session bound to tenant A cannot read tenant B's `platform_user` rows, and that the role
+  really is neither a superuser nor `BYPASSRLS`. See the open item below for the part of this
+  that is *not* done.
 
 Enforcement also exposed a latent bug in tenant provisioning. `TenantProvisioningHook` runs
 inside the request that created the tenant, and rebound the tenant with the **legacy**
@@ -205,6 +199,42 @@ no-op. Remaining call sites — `DynamicCollectionRouter`, `SearchController`,
 Still open: the in-code tenant predicate for direct `queryEngine.executeQuery` callers
 (PLT-260 in the RZWare tracker) remains the first line of defence — RLS is the backstop, not
 the predicate.
+
+**OPEN — the harness's *service containers* still bypass RLS.** `KeltaStack` provisions the
+`NOBYPASSRLS` role and scenarios assert through it, but `SPRING_DATASOURCE_USERNAME` for
+kelta-worker and kelta-auth is still the image's bootstrap superuser, so the ~40 scenario
+tests exercise the gateway/JWT boundary rather than the database one. Pointing the services
+at the app role is the obvious next step and was attempted twice under PLT-264; both attempts
+failed CI, because a policy violation on *any* path taken during `KeltaStack.start()` (Flyway
+→ worker boot → auth boot → gateway boot → seeding the `threadline-clothing` fixture tenant
+through the admin API) aborts the whole harness instead of failing one scenario. What the two
+attempts turned up, and what the next one needs:
+- Running **Flyway as the app role** works, but the role must then own the target schema: the
+  baseline is a `pg_dump` carrying `COMMENT ON SCHEMA public`, an ownership-level operation
+  that since Postgres 15 belongs to `pg_database_owner`. Without the handover the first
+  migration dies with *must be owner of schema public*. Extensions must also be pre-installed
+  by the provisioning step — `CREATE EXTENSION` is superuser-only, and `IF NOT EXISTS`
+  short-circuits before the privilege check, making the baseline's `pg_trgm` and
+  `PhysicalTableStorageAdapter`'s `vector` no-ops.
+- `TenantProvisioningHook` was seeding a new tenant under the *creating* tenant's binding
+  (see below); fixed, and re-verified against a real Postgres 15 as a `NOBYPASSRLS` role.
+- Something on the start path still fails after those two. It is **not** the migrations, the
+  provisioning hook's SQL, the Superset grant narrowing, or the `kelta_migrations` /
+  `collection_version` / `field_version` write paths — each was replayed against a real
+  Postgres 15 as a `NOBYPASSRLS` role and is clean. The likeliest remaining suspects are the
+  services that copy rows *between* tenants (`SandboxProvisioningService` and
+  `MetadataPromotionService` both read one tenant's `user_credential`/metadata and write
+  another's) and anything reading a *system*-collection child row under a tenant binding:
+  `system_rows_read` exempts `collection` and `field`, but **not** `collection_version` or
+  `field_version`, whose V202 policies key strictly on the parent's `tenant_id`.
+- Diagnosing it needs the harness log, which is why `KeltaStack.startService` prints the tail
+  of a failed container's output and `KeltaStackExtension` remembers a failed start instead of
+  retrying it for all ~40 scenario classes (that retry storm is what turned a clear failure
+  into an exhausted 20-minute CI budget and a cancelled job with no report to read).
+
+Until this lands, `RowLevelSecurityIntegrationTest` — which migrates as a `NOBYPASSRLS` role
+and drives queries through `TenantAwareDataSource` the way the worker does — is the coverage
+that actually gates the policies, not the harness.
 
 **FIXED (2026-09-14) — the platform had no dependency vulnerability scanning at all, and the
 one scanner that was configured had never run.** OWASP dependency-check sat in
@@ -1219,7 +1249,7 @@ The ArgoCD image bump + post-deploy health check that used to live in
 - **Tenant-scoped connection** (non-empty tenant in `TenantContext`): if the borrowed connection is in autocommit mode, autocommit is turned off (begins a transaction), `SET LOCAL app.current_tenant_id = '<id>'` is issued, and a thin commit-on-close proxy commits + restores autocommit when the connection is released. If a Spring-managed transaction already owns the connection, only `SET LOCAL` is issued and the proxy defers commit/rollback to the owner (it watches the owner's `commit()`/`rollback()` to avoid a double-commit). Because the variable is set per transaction on the same backend that serves the query, it survives PgBouncer `pool_mode = transaction`. Connection-hold time is unchanged — the connection is released right after the operation, exactly like the previous autocommit model.
 - **Admin/bypass connection** (no tenant — Flyway, internal, cross-tenant work): keeps the legacy session `SET app.current_tenant_id = ''`. Empty already maps to `admin_bypass`, so transaction scoping is irrelevant to isolation and these paths are unchanged.
 
-Regression guard: `TenantAwareDataSourceTest` (runtime-core, beside the class since PLT-264 moved it there) asserts tenant connections use transaction-local `SET LOCAL` (not session `SET`) and commit/restore correctly; `RowLevelSecurityIntegrationTest` proves the policies themselves as a role without BYPASSRLS, and `TenantIsolationScenarioTest` now does too — the harness stack runs as a `NOBYPASSRLS` role, so it covers the database boundary as well as the gateway/JWT one.
+Regression guard: `TenantAwareDataSourceTest` (runtime-core, beside the class since PLT-264 moved it there) asserts tenant connections use transaction-local `SET LOCAL` (not session `SET`) and commit/restore correctly; `RowLevelSecurityIntegrationTest` proves the policies themselves as a role without BYPASSRLS. `TenantIsolationScenarioTest` adds two database-layer assertions on a `NOBYPASSRLS` connection (`ScenarioBase.openAppDbConnection()`), but the harness's service containers still connect as the container superuser, so its other scenarios cover the gateway/JWT boundary rather than the database one — see "the harness's *service containers* still bypass RLS" above.
 
 **Resolved for kelta-ai and kelta-auth (2026-09-17, PLT-264):** both now register `TenantAwareDataSourcePostProcessor` (runtime-core), so a request's tenant becomes a transaction-scoped `SET LOCAL` on the connection and only the genuinely tenant-less paths keep the `''` sentinel. The `hikari.connection-init-sql` line stays as the pre-wrapper default, not as the isolation mechanism.
 

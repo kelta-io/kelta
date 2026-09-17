@@ -27,11 +27,11 @@ if [[ -z "${CI_DB_SCHEMA:-}" ]]; then
   exit 0
 fi
 
-# KeltaStack names its application role after the run's schema, and hands it ownership
-# of that schema and everything Flyway creates in it. So the role goes first: DROP OWNED
-# BY takes the schema with it, and the DROP SCHEMA after it is then a no-op. The other
-# order would fail for a non-superuser CI user, which no longer owns the schema it made.
-# The role is per-run, so this never touches a concurrent run's objects.
+# KeltaStack creates a per-run NOBYPASSRLS role named after the run's schema, which
+# scenarios connect as to observe row-level security. It holds grants on the schema's
+# tables, and a role cannot be dropped while any grant or default privilege references
+# it — so DROP OWNED BY goes first to clear them, then the role, then the schema. The
+# role is per-run, so this never touches a concurrent run's objects.
 APP_ROLE="app_${CI_DB_SCHEMA}"
 
 echo "[release-db] dropping role $APP_ROLE and schema $CI_DB_SCHEMA on instance ${CI_DB_INSTANCE:-?}" >&2
