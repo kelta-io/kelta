@@ -376,6 +376,26 @@ jobs:
         working-directory: kelta-ui/app
         run: npm run test:run
 
+      # PLT-250: ReportViewPage's export race and FieldEditor's async-submission test both
+      # timed out intermittently under CI-load contention (concerns.md → "Frontend suite
+      # starves under concurrent image builds"), never locally. The fix removed the
+      # underlying race/render-count instead of raising the shared asyncUtilTimeout, so
+      # re-run each fixed file 5x consecutively here — this job's own log is the evidence,
+      # not a one-off green.
+      - name: Stability check — previously-flaky tests (5x consecutive)
+        working-directory: kelta-ui/app
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "::group::ReportViewPage.test.tsx run $i/5"
+            npm run test:run -- src/pages/app/ReportViewPage/ReportViewPage.test.tsx
+            echo "::endgroup::"
+          done
+          for i in 1 2 3 4 5; do
+            echo "::group::FieldEditor.test.tsx run $i/5"
+            npm run test:run -- src/components/FieldEditor/FieldEditor.test.tsx
+            echo "::endgroup::"
+          done
+
       - name: Upload coverage report
         continue-on-error: true
         if: always()
