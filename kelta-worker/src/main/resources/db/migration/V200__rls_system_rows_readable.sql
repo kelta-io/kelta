@@ -34,3 +34,36 @@ CREATE POLICY system_rows_read ON field
     FOR SELECT
     USING (EXISTS (SELECT 1 FROM collection c
                    WHERE c.id = field.collection_id AND c.system_collection = true));
+
+-- Seventeen tables carry a tenant_id column but never got the policy pair: sixteen predate
+-- the V77 RLS pass and were missed by it, billing_webhook_event (V178) came later. None holds
+-- a NULL or cross-tenant row. RowLevelSecurityIntegrationTest now asserts from the catalog
+-- that every public table with a tenant_id column has RLS enabled, forced, and both policies —
+-- so the next table cannot be forgotten.
+DO $$
+DECLARE
+    t text;
+BEGIN
+    FOREACH t IN ARRAY ARRAY[
+        'billing_webhook_event', 'connected_app_audit', 'data_export', 'flow_audit_log',
+        'flow_pending_resume', 'layout_assignment', 'observability_settings', 'package_history',
+        'password_policy', 'profile_custom_rules', 'push_device', 'scim_client',
+        'script_execution_log', 'sms_verification', 'tenant_custom_domain', 'tenant_module',
+        'user_api_token']
+    LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+        EXECUTE format('ALTER TABLE ONLY %I FORCE ROW LEVEL SECURITY', t);
+        IF NOT EXISTS (SELECT 1 FROM pg_policies
+                       WHERE tablename = t AND policyname = 'tenant_isolation') THEN
+            EXECUTE format(
+                'CREATE POLICY tenant_isolation ON %I '
+                'USING (((tenant_id)::text = current_setting(''app.current_tenant_id''::text, true)))', t);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_policies
+                       WHERE tablename = t AND policyname = 'admin_bypass') THEN
+            EXECUTE format(
+                'CREATE POLICY admin_bypass ON %I '
+                'USING ((current_setting(''app.current_tenant_id''::text, true) = ''''::text))', t);
+        END IF;
+    END LOOP;
+END $$;

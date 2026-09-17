@@ -170,6 +170,34 @@ class RowLevelSecurityIntegrationTest {
                 Integer.class)).isGreaterThanOrEqualTo(12);
     }
 
+    @Test
+    @DisplayName("every table with a tenant_id column has RLS enabled, forced, and both policies")
+    void everyTenantScopedTableIsCovered() {
+        List<String> uncovered = admin.queryForList("""
+                SELECT c.relname
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relkind = 'r'
+                  AND EXISTS (SELECT 1 FROM information_schema.columns col
+                              WHERE col.table_schema = 'public' AND col.table_name = c.relname
+                                AND col.column_name = 'tenant_id')
+                  AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity
+                       OR NOT EXISTS (SELECT 1 FROM pg_policies p
+                                      WHERE p.tablename = c.relname AND p.policyname = 'tenant_isolation')
+                       OR NOT EXISTS (SELECT 1 FROM pg_policies p
+                                      WHERE p.tablename = c.relname AND p.policyname = 'admin_bypass'))
+                ORDER BY 1
+                """, String.class);
+        assertThat(uncovered)
+                .as("tables with a tenant_id column but no enforced RLS policy pair — add them to the migration")
+                .isEmpty();
+        // Sanity: the check is not vacuous.
+        assertThat(admin.queryForObject(
+                "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                        + "WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity", Integer.class))
+                .isGreaterThan(120);
+    }
+
     // ------------------------------------------------------------------ reads
 
     @Test

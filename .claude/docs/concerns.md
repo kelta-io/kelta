@@ -38,15 +38,14 @@ What changed:
   a Spring-managed transaction and does not leak to the next borrow.
 
 Production: `ALTER ROLE emf SET app.current_tenant_id = ''; ALTER ROLE emf NOBYPASSRLS;`
-after this deploys (playbook §8). Rollback is `ALTER ROLE emf BYPASSRLS`. Still open after
-the flip: 17 tables with a `tenant_id` column and no RLS (`billing_webhook_event`,
-`connected_app_audit`, `data_export`, `flow_audit_log`, `flow_pending_resume`,
-`layout_assignment`, `observability_settings`, `package_history`, `password_policy`,
-`profile_custom_rules`, `push_device`, `scim_client`, `script_execution_log`,
-`sms_verification`, `tenant_custom_domain`, `tenant_module`, `user_api_token`); kelta-auth
-and kelta-ai still run as platform sessions (they filter in SQL); and the in-code tenant
-predicate for direct `queryEngine.executeQuery` callers (PLT-260 in the RZWare tracker)
-remains the first line of defence — RLS is the backstop, not the predicate.
+after this deploys (playbook §8). Rollback is `ALTER ROLE emf BYPASSRLS`. V200 also adds the
+policy pair to the 17 tables that had a `tenant_id` column and no RLS (16 missed by the V77
+pass, `billing_webhook_event` from V178), and the IT asserts from the catalog that no such
+table exists — the next one cannot be forgotten. Still open after the flip: kelta-auth and
+kelta-ai run as platform sessions (they filter in SQL); the harness runs as the container
+superuser; and the in-code tenant predicate for direct `queryEngine.executeQuery` callers
+(PLT-260 in the RZWare tracker) remains the first line of defence — RLS is the backstop,
+not the predicate.
 
 **FIXED (2026-09-14) — the platform had no dependency vulnerability scanning at all, and the
 one scanner that was configured had never run.** OWASP dependency-check sat in
