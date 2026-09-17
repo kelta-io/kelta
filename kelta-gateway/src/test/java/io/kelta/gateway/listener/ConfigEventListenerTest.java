@@ -94,12 +94,50 @@ class ConfigEventListenerTest {
         }
 
         @Test
+        @DisplayName("Route carries the tenant from the event envelope")
+        void shouldTagRouteWithEnvelopeTenant() throws Exception {
+            CollectionChangedPayload payload = new CollectionChangedPayload();
+            payload.setId("collection-t1");
+            payload.setName("tasks");
+            payload.setActive(true);
+            payload.setChangeType(ChangeType.CREATED);
+            PlatformEvent<CollectionChangedPayload> event = new PlatformEvent<>(
+                UUID.randomUUID().toString(), "config.collection.changed", "tenant-1",
+                UUID.randomUUID().toString(), null, Instant.now(), payload);
+
+            listener.handleCollectionChanged(toJson(event));
+
+            ArgumentCaptor<RouteDefinition> routeCaptor = ArgumentCaptor.forClass(RouteDefinition.class);
+            verify(routeRegistry).updateRoute(routeCaptor.capture());
+            assertEquals("tenant-1", routeCaptor.getValue().getTenantId());
+            assertEquals("/api/tasks/**", routeCaptor.getValue().getPath());
+        }
+
+        @Test
+        @DisplayName("An UPDATED event without `active` (field/rule hooks send none) keeps the route")
+        void shouldKeepRouteWhenUpdatedEventCarriesNoActiveFlag() throws Exception {
+            CollectionChangedPayload payload = new CollectionChangedPayload();
+            payload.setId("collection-1");
+            payload.setName("customers");
+            payload.setChangeType(ChangeType.UPDATED);   // active left at its primitive default
+            PlatformEvent<CollectionChangedPayload> event = new PlatformEvent<>(
+                UUID.randomUUID().toString(), "config.collection.changed", "tenant-1",
+                UUID.randomUUID().toString(), null, Instant.now(), payload);
+
+            listener.handleCollectionChanged(toJson(event));
+
+            verify(routeRegistry).updateRoute(any());
+            verify(routeRegistry, never()).removeRoute(any());
+        }
+
+        @Test
         @DisplayName("Should update route when collection is updated")
         void shouldUpdateRouteWhenCollectionUpdated() throws Exception {
             // Arrange
             CollectionChangedPayload payload = new CollectionChangedPayload();
             payload.setId("collection-1");
             payload.setName("users");
+            payload.setActive(true);
             payload.setChangeType(ChangeType.UPDATED);
 
             PlatformEvent<CollectionChangedPayload> event = new PlatformEvent<>(

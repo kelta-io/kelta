@@ -136,8 +136,11 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                         return forbidden(exchange, "API access not permitted");
                     }
 
-                    // 2. Look up the route to get collection info
-                    Optional<RouteDefinition> route = routeRegistry.findByPath(path);
+                    // 2. Look up the route to get collection info — the caller's own
+                    // collection at this path; another tenant's same-named collection
+                    // must never be the one we authorize against.
+                    Optional<RouteDefinition> route = routeRegistry.findByPath(
+                            path, TenantResolutionFilter.getTenantId(exchange));
                     if (route.isEmpty()) {
                         // No route found — not a collection API call, allow through
                         return forwardWithHeaders(exchange, chain, principal);
@@ -246,7 +249,7 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
      */
     private void setRouteAttribute(ServerWebExchange exchange, String path) {
         if (path != null && path.startsWith("/api/")) {
-            routeRegistry.findByPath(path)
+            routeRegistry.findByPath(path, TenantResolutionFilter.getTenantId(exchange))
                     .ifPresent(route -> exchange.getAttributes()
                             .put(RequestLoggingFilter.ROUTE_ATTR, route.getCollectionName()));
         }

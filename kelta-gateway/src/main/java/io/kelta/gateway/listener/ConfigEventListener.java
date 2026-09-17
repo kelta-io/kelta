@@ -62,16 +62,21 @@ public class ConfigEventListener {
                 logger.warn("Could not parse collection changed event from message");
                 return;
             }
+            String tenantId = parseEnvelopeTenantId(message);
 
-            logger.info("Processing collection change: id={}, name={}, changeType={}",
-                        payload.getId(), payload.getName(), payload.getChangeType());
+            logger.info("Processing collection change: id={}, name={}, changeType={}, tenantId={}",
+                        payload.getId(), payload.getName(), payload.getChangeType(), tenantId);
 
             if (payload.getChangeType() == ChangeType.DELETED) {
                 routeRegistry.removeRoute(payload.getId());
                 logger.info("Removed route for deleted collection: id={}, name={}",
                            payload.getId(), payload.getName());
             } else {
-                RouteDefinition route = buildRouteFromCollection(payload);
+                // Note: an UPDATED event does not reliably carry `active` — several publishers
+                // (field, validation-rule and approval hooks) send UPDATED with the primitive
+                // default of false — so a collection that turns inactive keeps its route until
+                // the next bootstrap. Do not treat active=false as a removal here.
+                RouteDefinition route = buildRouteFromCollection(payload, tenantId);
 
                 if (route != null) {
                     routeRegistry.updateRoute(route);
@@ -110,7 +115,23 @@ public class ConfigEventListener {
         }
     }
 
-    private RouteDefinition buildRouteFromCollection(CollectionChangedPayload payload) {
+    /**
+     * The owning tenant travels on the event envelope ({@code PlatformEvent.tenantId}),
+     * not in the collection payload. Null when the message is a bare payload.
+     */
+    private String parseEnvelopeTenantId(String message) {
+        try {
+            var tree = objectMapper.readTree(message);
+            if (tree.hasNonNull("tenantId")) {
+                return tree.get("tenantId").asText();
+            }
+        } catch (Exception e) {
+            logger.debug("No tenantId on collection event envelope: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    private RouteDefinition buildRouteFromCollection(CollectionChangedPayload payload, String tenantId) {
         try {
             String collectionId = payload.getId();
             String collectionName = payload.getName();
@@ -127,7 +148,10 @@ public class ConfigEventListener {
                 collectionId,
                 path,
                 workerServiceUrl,
-                collectionName
+                collectionName,
+                null,
+                0,
+                tenantId
             );
 
         } catch (Exception e) {
@@ -175,11 +199,16 @@ public class ConfigEventListener {
                 // of the pod-specific IP from the event. Pod IPs are ephemeral and become
                 // stale when pods restart, causing routing failures.
                 String path = "/api/" + collectionName + "/**";
+                String tenantId = payload.get("tenantId") instanceof String t && !t.isBlank()
+                        ? t : parseEnvelopeTenantId(message);
                 RouteDefinition route = new RouteDefinition(
                     collectionId,
                     path,
                     workerServiceUrl,
-                    collectionName
+                    collectionName,
+                    null,
+                    0,
+                    tenantId
                 );
 
                 routeRegistry.updateRoute(route);

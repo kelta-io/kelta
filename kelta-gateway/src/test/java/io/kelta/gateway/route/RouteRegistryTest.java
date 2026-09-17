@@ -450,4 +450,80 @@ private RouteDefinition createRoute(String id, String path) {
             "collection-" + id
         );
     }
+
+    // ---- tenant-scoped resolution: same path, different tenants (parent + sandbox clone, two customers)
+
+    private static RouteDefinition tenantRoute(String id, String path, String name, String tenantId) {
+        return new RouteDefinition(id, path, "http://worker:80", name, null, 0, tenantId);
+    }
+
+    @Test
+    void sameNamedCollectionsInTwoTenantsBothResolveToTheirOwn() {
+        registry.addRoute(tenantRoute("coll-a", "/api/tasks/**", "tasks", "tenant-a"));
+        registry.addRoute(tenantRoute("coll-b", "/api/tasks/**", "tasks", "tenant-b"));
+
+        assertEquals("coll-a", registry.findByPath("/api/tasks/123", "tenant-a").orElseThrow().getId());
+        assertEquals("coll-b", registry.findByPath("/api/tasks/123", "tenant-b").orElseThrow().getId());
+        assertEquals("coll-a", registry.findByPath("/api/tasks", "tenant-a").orElseThrow().getId());
+        // one proxy route per path, both entries retained
+        assertEquals(1, registry.getRoutesByPath().size());
+        assertEquals(2, registry.getAllRoutes().size());
+        assertEquals(1, registry.size());
+    }
+
+    @Test
+    void aLaterTenantDoesNotShadowAnEarlierOne() {
+        registry.addRoute(tenantRoute("coll-parent", "/api/tasks/**", "tasks", "tenant-parent"));
+        registry.updateRoute(tenantRoute("coll-sandbox", "/api/tasks/**", "tasks", "tenant-sandbox"));
+
+        assertEquals("coll-parent", registry.findByPath("/api/tasks/1", "tenant-parent").orElseThrow().getId());
+        assertEquals("coll-sandbox", registry.findByPath("/api/tasks/1", "tenant-sandbox").orElseThrow().getId());
+    }
+
+    @Test
+    void anotherTenantsRouteIsReturnedWhenTheCallerHasNoneSoAuthorizationStillRuns() {
+        registry.addRoute(tenantRoute("coll-b", "/api/orders/**", "orders", "tenant-b"));
+
+        Optional<RouteDefinition> seenByA = registry.findByPath("/api/orders/9", "tenant-a");
+        assertTrue(seenByA.isPresent(), "a real collection lives at the path — the filter must check it, not fall through");
+        assertEquals("coll-b", seenByA.get().getId());
+    }
+
+    @Test
+    void platformWideRouteWinsOverAnotherTenantsButNotOverTheCallersOwn() {
+        registry.addRoute(new RouteDefinition("static-flows", "/api/flows/**", "http://worker:80", "flows"));
+        registry.addRoute(tenantRoute("coll-b-flows", "/api/flows/**", "flows", "tenant-b"));
+
+        assertEquals("static-flows", registry.findByPath("/api/flows/1", "tenant-a").orElseThrow().getId());
+        assertEquals("static-flows", registry.findByPath("/api/flows/1").orElseThrow().getId());
+        assertEquals("coll-b-flows", registry.findByPath("/api/flows/1", "tenant-b").orElseThrow().getId());
+    }
+
+    @Test
+    void removingOneTenantsRouteLeavesTheOthersAtThatPath() {
+        registry.addRoute(tenantRoute("coll-a", "/api/tasks/**", "tasks", "tenant-a"));
+        registry.addRoute(tenantRoute("coll-b", "/api/tasks/**", "tasks", "tenant-b"));
+
+        registry.removeRoute("coll-b");
+
+        assertEquals("coll-a", registry.findByPath("/api/tasks/1", "tenant-a").orElseThrow().getId());
+        assertEquals("coll-a", registry.findByPath("/api/tasks/1", "tenant-b").orElseThrow().getId(),
+                "with tenant-b's collection gone, tenant-a's is the only one at the path (and will deny tenant-b)");
+        registry.removeRoute("coll-a");
+        assertTrue(registry.findByPath("/api/tasks/1", "tenant-a").isEmpty());
+        assertEquals(0, registry.size(), "an emptied path is dropped");
+    }
+
+    @Test
+    void renamePrunesOnlyThatTenantsStaleEntry() {
+        registry.addRoute(tenantRoute("coll-a", "/api/jobs/**", "jobs", "tenant-a"));
+        registry.addRoute(tenantRoute("coll-b", "/api/jobs/**", "jobs", "tenant-b"));
+
+        registry.updateRoute(tenantRoute("coll-a", "/api/work/**", "work", "tenant-a"));
+
+        assertEquals("coll-a", registry.findByPath("/api/work/1", "tenant-a").orElseThrow().getId());
+        assertEquals("coll-b", registry.findByPath("/api/jobs/1", "tenant-b").orElseThrow().getId());
+        assertEquals("coll-b", registry.findByPath("/api/jobs/1", "tenant-a").orElseThrow().getId(),
+                "tenant-a no longer has jobs; tenant-b's route is what remains at that path");
+    }
 }

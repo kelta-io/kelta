@@ -6,6 +6,7 @@ import io.kelta.gateway.auth.PublicPathMatcher;
 import io.kelta.gateway.authz.cerbos.CerbosAuthorizationService;
 import io.kelta.gateway.metrics.GatewayMetrics;
 import io.kelta.gateway.route.RouteDefinition;
+import io.kelta.gateway.filter.TenantResolutionFilter;
 import io.kelta.gateway.route.RouteRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -237,11 +238,35 @@ class RouteAuthorizationFilterTest {
         }
 
         @Test
+        @DisplayName("Resolves the route for the caller's own tenant, never a same-named collection elsewhere")
+        void shouldLookUpTheRouteForTheCallersTenant() {
+            RouteDefinition own = new RouteDefinition("coll-own", "/api/users/**",
+                    "http://worker:80", "users", null, 0, "tenant-1");
+            when(routeRegistry.findByPath(eq("/api/users"), eq("tenant-1"))).thenReturn(Optional.of(own));
+            when(cerbosService.checkSystemPermission(any(), eq("API_ACCESS"))).thenReturn(Mono.just(true));
+            when(cerbosService.checkObjectPermission(any(), eq("coll-own"), eq("read"))).thenReturn(Mono.just(true));
+
+            GatewayPrincipal principal = principalWithIdentity("user@test.com");
+            MockServerHttpRequest request = MockServerHttpRequest.get("/api/users").build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+            exchange.getAttributes().put(PRINCIPAL_ATTR, principal);
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-1");
+
+            StepVerifier.create(filter.filter(exchange, filterChain))
+                    .expectComplete()
+                    .verify();
+
+            verify(routeRegistry).findByPath("/api/users", "tenant-1");
+            verify(cerbosService).checkObjectPermission(any(), eq("coll-own"), eq("read"));
+            verify(filterChain).filter(any());
+        }
+
+        @Test
         @DisplayName("Should allow GET when Cerbos grants read")
         void shouldAllowGetWithCerbosRead() {
             RouteDefinition route = new RouteDefinition("coll-1", "/api/users/**",
                     "http://worker:80", "users");
-            when(routeRegistry.findByPath("/api/users")).thenReturn(Optional.of(route));
+            when(routeRegistry.findByPath(eq("/api/users"), any())).thenReturn(Optional.of(route));
 
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
             MockServerHttpRequest request = MockServerHttpRequest.get("/api/users").build();
@@ -265,7 +290,7 @@ class RouteAuthorizationFilterTest {
         void shouldDenyGetWhenCerbosDeniesRead() {
             RouteDefinition route = new RouteDefinition("coll-1", "/api/users/**",
                     "http://worker:80", "users");
-            when(routeRegistry.findByPath("/api/users")).thenReturn(Optional.of(route));
+            when(routeRegistry.findByPath(eq("/api/users"), any())).thenReturn(Optional.of(route));
 
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
             MockServerHttpRequest request = MockServerHttpRequest.get("/api/users").build();
@@ -289,7 +314,7 @@ class RouteAuthorizationFilterTest {
         void shouldAllowPostWithCerbosCreate() {
             RouteDefinition route = new RouteDefinition("coll-1", "/api/users/**",
                     "http://worker:80", "users");
-            when(routeRegistry.findByPath("/api/users")).thenReturn(Optional.of(route));
+            when(routeRegistry.findByPath(eq("/api/users"), any())).thenReturn(Optional.of(route));
 
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
             MockServerHttpRequest request = MockServerHttpRequest.post("/api/users").build();
@@ -313,7 +338,7 @@ class RouteAuthorizationFilterTest {
         void shouldDenyPostWhenCerbosDeniesCreate() {
             RouteDefinition route = new RouteDefinition("coll-1", "/api/users/**",
                     "http://worker:80", "users");
-            when(routeRegistry.findByPath("/api/users")).thenReturn(Optional.of(route));
+            when(routeRegistry.findByPath(eq("/api/users"), any())).thenReturn(Optional.of(route));
 
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
             MockServerHttpRequest request = MockServerHttpRequest.post("/api/users").build();
@@ -337,7 +362,7 @@ class RouteAuthorizationFilterTest {
         void shouldAllowPutWithCerbosEdit() {
             RouteDefinition route = new RouteDefinition("coll-1", "/api/users/**",
                     "http://worker:80", "users");
-            when(routeRegistry.findByPath("/api/users/123")).thenReturn(Optional.of(route));
+            when(routeRegistry.findByPath(eq("/api/users/123"), any())).thenReturn(Optional.of(route));
 
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
             MockServerHttpRequest request = MockServerHttpRequest.put("/api/users/123").build();
@@ -361,7 +386,7 @@ class RouteAuthorizationFilterTest {
         void shouldAllowDeleteWithCerbosDelete() {
             RouteDefinition route = new RouteDefinition("coll-1", "/api/users/**",
                     "http://worker:80", "users");
-            when(routeRegistry.findByPath("/api/users/123")).thenReturn(Optional.of(route));
+            when(routeRegistry.findByPath(eq("/api/users/123"), any())).thenReturn(Optional.of(route));
 
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
             MockServerHttpRequest request = MockServerHttpRequest.delete("/api/users/123").build();
@@ -385,7 +410,7 @@ class RouteAuthorizationFilterTest {
         void shouldDenyDeleteWhenCerbosDeniesDelete() {
             RouteDefinition route = new RouteDefinition("coll-1", "/api/users/**",
                     "http://worker:80", "users");
-            when(routeRegistry.findByPath("/api/users/123")).thenReturn(Optional.of(route));
+            when(routeRegistry.findByPath(eq("/api/users/123"), any())).thenReturn(Optional.of(route));
 
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
             MockServerHttpRequest request = MockServerHttpRequest.delete("/api/users/123").build();
@@ -407,7 +432,7 @@ class RouteAuthorizationFilterTest {
         @Test
         @DisplayName("Should allow through when no matching route found")
         void shouldAllowThroughWhenNoRouteFound() {
-            when(routeRegistry.findByPath("/api/unknown")).thenReturn(Optional.empty());
+            when(routeRegistry.findByPath(eq("/api/unknown"), any())).thenReturn(Optional.empty());
 
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
             MockServerHttpRequest request = MockServerHttpRequest.get("/api/unknown").build();
@@ -429,7 +454,7 @@ class RouteAuthorizationFilterTest {
         void shouldSkipCollectionCheckForStaticRoutes() {
             RouteDefinition staticRoute = new RouteDefinition("static-admin", "/api/admin/**",
                     "http://worker:80", "admin");
-            when(routeRegistry.findByPath("/api/admin/collections")).thenReturn(Optional.of(staticRoute));
+            when(routeRegistry.findByPath(eq("/api/admin/collections"), any())).thenReturn(Optional.of(staticRoute));
 
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
             MockServerHttpRequest request = MockServerHttpRequest.get("/api/admin/collections").build();
@@ -451,7 +476,7 @@ class RouteAuthorizationFilterTest {
         @Test
         @DisplayName("Should forward identity headers to worker")
         void shouldForwardIdentityHeaders() {
-            when(routeRegistry.findByPath("/api/users")).thenReturn(Optional.empty());
+            when(routeRegistry.findByPath(eq("/api/users"), any())).thenReturn(Optional.empty());
 
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
             MockServerHttpRequest request = MockServerHttpRequest.get("/api/users").build();
