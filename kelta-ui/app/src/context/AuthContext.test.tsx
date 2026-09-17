@@ -8,7 +8,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AuthProvider, useAuth } from './AuthContext'
+import { AuthProvider, useAuth, __resetRefreshStateForTests } from './AuthContext'
+import { SessionExpiredError, TokenUnavailableError } from './authErrors'
 import { clearBootstrapCache } from '../utils/bootstrapCache'
 import type { ReactNode } from 'react'
 
@@ -219,6 +220,7 @@ describe('AuthContext', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     clearBootstrapCache()
+    __resetRefreshStateForTests()
 
     // Clear mock storage
     Object.keys(mockSessionStorage).forEach((key) => delete mockSessionStorage[key])
@@ -600,40 +602,277 @@ describe('AuthContext', () => {
       vi.useRealTimers()
     })
 
-    it('retries after a failed proactive refresh instead of abandoning the session', async () => {
-      vi.useFakeTimers()
-      storeValidTokens(5 * 60 * 1000) // expires in 5 minutes
-
-      // Token endpoint fails with a network error (transient)
+    /** Replace the token endpoint's response; everything else keeps the default mock. */
+    function mockTokenEndpoint(handler: () => Promise<Response> | Response) {
       const baseFetch = createMockFetch()
       global.fetch = vi.fn(async (input: RequestInfo | URL) => {
         if (String(input) === mockDiscoveryDoc.token_endpoint) {
-          throw new Error('network down')
+          return handler()
         }
         return baseFetch(input)
       }) as typeof fetch
+    }
+
+    it('retries with backoff after a failed proactive refresh instead of abandoning the session', async () => {
+      vi.useFakeTimers()
+      storeValidTokens(10 * 60 * 1000) // expires in 10 minutes → proactive refresh at 5 minutes
+
+      // Token endpoint fails with a network error (transient)
+      mockTokenEndpoint(() => {
+        throw new Error('network down')
+      })
 
       renderWithAuth()
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
       expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+      expect(tokenEndpointCalls()).toBe(0)
 
-      // Advance past the refresh point (expiry - 60s): first attempt fails
+      // Advance to the proactive refresh point (expiry - 5 min): first attempt fails
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(4 * 60 * 1000 + 1000)
+        await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 100)
       })
       expect(tokenEndpointCalls()).toBe(1)
 
-      // A retry is scheduled after the failure cooldown
+      // Retry after the 5s base backoff
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(31 * 1000)
+        await vi.advanceTimersByTimeAsync(5 * 1000 + 100)
       })
       expect(tokenEndpointCalls()).toBe(2)
 
-      // Transient failure must not discard the refresh token
+      // Then 10s (doubled)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5 * 1000)
+      })
+      expect(tokenEndpointCalls()).toBe(2)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5 * 1000 + 100)
+      })
+      expect(tokenEndpointCalls()).toBe(3)
+
+      // Transient failures never discard the refresh token or the session
       const stored = JSON.parse(mockSessionStorage['kelta_auth_tokens'])
       expect(stored.refreshToken).toBe('stored-refresh-token')
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+    })
+
+    it('treats a 5xx from the token endpoint as transient and keeps the refresh token', async () => {
+      vi.useFakeTimers()
+      storeValidTokens(60 * 1000) // already inside the proactive window → refresh at once
+      mockTokenEndpoint(
+        () =>
+          ({
+            ok: false,
+            status: 502,
+            statusText: 'Bad Gateway',
+            json: async () => {
+              throw new Error('not json')
+            },
+          }) as unknown as Response
+      )
+
+      renderWithAuth()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100)
+      })
+      expect(tokenEndpointCalls()).toBe(1)
+      const stored = JSON.parse(mockSessionStorage['kelta_auth_tokens'])
+      expect(stored.refreshToken).toBe('stored-refresh-token')
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+
+      // Backoff retry keeps going
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5 * 1000 + 100)
+      })
+      expect(tokenEndpointCalls()).toBe(2)
+    })
+
+    it('drops the refresh token and ends the session on invalid_grant', async () => {
+      vi.useFakeTimers()
+      storeValidTokens(60 * 1000)
+      mockTokenEndpoint(
+        () =>
+          ({
+            ok: false,
+            status: 400,
+            statusText: 'Bad Request',
+            json: async () => ({ error: 'invalid_grant', error_description: 'revoked' }),
+          }) as unknown as Response
+      )
+
+      let authValue: ReturnType<typeof useAuth> | undefined
+      renderWithAuth(
+        <TestComponent
+          onRender={(auth) => {
+            authValue = auth
+          }}
+        />
+      )
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100)
+      })
+      expect(tokenEndpointCalls()).toBe(1)
+      expect(JSON.parse(mockSessionStorage['kelta_auth_tokens']).refreshToken).toBeUndefined()
+
+      // No retry is armed for a terminal failure
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+      })
+      expect(tokenEndpointCalls()).toBe(1)
+
+      // The next token request ends the session with a terminal error
+      vi.setSystemTime(Date.now() + 2 * 60 * 1000)
+      let thrown: unknown
+      await act(async () => {
+        await authValue!.getAccessToken().catch((e) => {
+          thrown = e
+        })
+      })
+      expect(thrown).toBeInstanceOf(SessionExpiredError)
+      expect(mockSessionStorage['kelta_auth_tokens']).toBeUndefined()
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('not-authenticated')
+    })
+
+    it('getAccessToken keeps the session and returns the current token on a transient failure', async () => {
+      vi.useFakeTimers()
+      storeValidTokens(2 * 60 * 1000) // inside proactive window, still valid for 2 min
+      const currentToken = JSON.parse(mockSessionStorage['kelta_auth_tokens']).accessToken
+      mockTokenEndpoint(() => {
+        throw new Error('network down')
+      })
+
+      let authValue: ReturnType<typeof useAuth> | undefined
+      renderWithAuth(
+        <TestComponent
+          onRender={(auth) => {
+            authValue = auth
+          }}
+        />
+      )
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100)
+      })
+
+      // Inside the 30s API buffer but before real expiry: refresh fails, token still handed back
+      vi.setSystemTime(Date.now() + 2 * 60 * 1000 - 10 * 1000)
+      let token: string | undefined
+      await act(async () => {
+        token = await authValue!.getAccessToken()
+      })
+      expect(token).toBe(currentToken)
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+
+      // Past real expiry: this one request fails, but the session is NOT torn down
+      vi.setSystemTime(Date.now() + 60 * 1000)
+      let thrown: unknown
+      await act(async () => {
+        await authValue!.getAccessToken().catch((e) => {
+          thrown = e
+        })
+      })
+      expect(thrown).toBeInstanceOf(TokenUnavailableError)
+      expect(JSON.parse(mockSessionStorage['kelta_auth_tokens']).refreshToken).toBe(
+        'stored-refresh-token'
+      )
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+    })
+
+    it('getAccessToken({ force: true }) refreshes an unexpired token after a server-side 401', async () => {
+      storeValidTokens(60 * 60 * 1000)
+
+      let authValue: ReturnType<typeof useAuth> | undefined
+      renderWithAuth(
+        <TestComponent
+          onRender={(auth) => {
+            authValue = auth
+          }}
+        />
+      )
+      await waitFor(() => expect(authValue?.isLoading).toBe(false))
+      expect(tokenEndpointCalls()).toBe(0)
+
+      const token = await authValue!.getAccessToken({ force: true })
+      expect(token).toBe('new-access-token')
+      expect(tokenEndpointCalls()).toBe(1)
+    })
+
+    it('refreshes an expired token on page load using the freshly loaded providers', async () => {
+      // Regression: initAuth's first-render closure saw providers=[] and the
+      // refresh "failed" with no internal provider, clearing the session on
+      // every reload with an expired token.
+      const payload = { sub: 'user-123', email: 'test@example.com', exp: 0 }
+      const mockToken = createMockJwt(payload)
+      mockSessionStorage['kelta_auth_tokens'] = JSON.stringify({
+        accessToken: mockToken,
+        idToken: mockToken,
+        refreshToken: 'stored-refresh-token',
+        expiresAt: Date.now() - 60 * 60 * 1000,
+      })
+
+      renderWithAuth()
+      await waitFor(() => {
+        expect(screen.getByTestId('loading')).toHaveTextContent('not-loading')
+      })
+      expect(tokenEndpointCalls()).toBe(1)
+      const stored = JSON.parse(mockSessionStorage['kelta_auth_tokens'])
+      expect(stored.accessToken).toBe('new-access-token')
+      expect(stored.refreshToken).toBe('new-refresh-token')
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+    })
+
+    it('keeps the session on page load when the refresh fails transiently', async () => {
+      const payload = { sub: 'user-123', email: 'test@example.com', exp: 0 }
+      const mockToken = createMockJwt(payload)
+      mockSessionStorage['kelta_auth_tokens'] = JSON.stringify({
+        accessToken: mockToken,
+        idToken: mockToken,
+        refreshToken: 'stored-refresh-token',
+        expiresAt: Date.now() - 60 * 60 * 1000,
+      })
+      mockTokenEndpoint(() => {
+        throw new Error('network down')
+      })
+
+      renderWithAuth()
+      await waitFor(() => {
+        expect(screen.getByTestId('loading')).toHaveTextContent('not-loading')
+      })
+      expect(tokenEndpointCalls()).toBe(1)
+      expect(JSON.parse(mockSessionStorage['kelta_auth_tokens']).refreshToken).toBe(
+        'stored-refresh-token'
+      )
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+    })
+
+    it('refreshes when the network comes back online inside the proactive window', async () => {
+      vi.useFakeTimers()
+      storeValidTokens(60 * 60 * 1000)
+
+      renderWithAuth()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(tokenEndpointCalls()).toBe(0)
+
+      // Wall clock jumps to inside the proactive window without timers firing
+      vi.setSystemTime(Date.now() + 57 * 60 * 1000)
+      await act(async () => {
+        window.dispatchEvent(new Event('online'))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(tokenEndpointCalls()).toBe(1)
+      expect(JSON.parse(mockSessionStorage['kelta_auth_tokens']).accessToken).toBe(
+        'new-access-token'
+      )
     })
 
     it('refreshes immediately when the tab wakes inside the expiry window', async () => {

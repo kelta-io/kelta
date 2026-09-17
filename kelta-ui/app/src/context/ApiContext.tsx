@@ -17,6 +17,7 @@ import { KeltaClient } from '@kelta/sdk'
 import type { TokenProvider } from '@kelta/sdk'
 import { ApiClient } from '../services/apiClient'
 import { useAuth } from './AuthContext'
+import { SessionExpiredError } from './authErrors'
 import { getTenantSlug, isCustomDomainHost } from './TenantContext'
 
 interface ApiContextValue {
@@ -38,7 +39,7 @@ export interface ApiProviderProps {
  * by the SDK's KeltaClient Axios instance.
  */
 export function ApiProvider({ children, baseUrl = '' }: ApiProviderProps): React.ReactElement {
-  const { getAccessToken, login } = useAuth()
+  const { getAccessToken } = useAuth()
 
   const keltaClient = useMemo(() => {
     // Adapt AuthContext's getAccessToken to the SDK's TokenProvider interface
@@ -80,33 +81,43 @@ export function ApiProvider({ children, baseUrl = '' }: ApiProviderProps): React
           err.config &&
           !err.config.__retried
         ) {
-          // Try refreshing the token and retrying the request once
+          // The server rejected the token we sent, so force a refresh even if
+          // the local clock thinks it is still valid (clock skew, server-side
+          // invalidation), then retry the request once.
+          let newToken: string
           try {
-            const newToken = await getAccessToken()
-            const retryConfig = {
-              ...err.config,
-              __retried: true,
-              headers: { ...err.config.headers, Authorization: `Bearer ${newToken}` },
+            newToken = await getAccessToken({ force: true })
+          } catch (refreshErr) {
+            if (refreshErr instanceof SessionExpiredError) {
+              // The session is genuinely over — redirect to login page.
+              // We intentionally do NOT call login() here because login() without
+              // a provider ID triggers a redirect to /login when multiple providers
+              // are configured, which causes an infinite redirect loop if the 401
+              // originated from a component that fires on the login page.
+              console.warn('[API] Session expired on 401, redirecting to login')
+              sessionStorage.removeItem('kelta_auth_tokens')
+              const loginPath = isCustomDomainHost() ? '/login' : `/${getTenantSlug()}/login`
+              window.location.assign(loginPath)
+            } else {
+              // Transient (network, auth rolling): fail this request only. The
+              // session stays alive and AuthContext keeps retrying the refresh.
+              console.warn('[API] Token refresh unavailable on 401; request failed, session kept')
             }
-            return await client.getAxiosInstance().request(retryConfig)
-          } catch {
-            // Refresh failed — clear tokens and redirect to login page.
-            // We intentionally do NOT call login() here because login() without
-            // a provider ID triggers a redirect to /login when multiple providers
-            // are configured, which causes an infinite redirect loop if the 401
-            // originated from a component that fires on the login page.
-            console.warn('[API] Token refresh failed on 401, redirecting to login')
-            sessionStorage.removeItem('kelta_auth_tokens')
-            const loginPath = isCustomDomainHost() ? '/login' : `/${getTenantSlug()}/login`
-            window.location.assign(loginPath)
+            return Promise.reject(error)
           }
+          const retryConfig = {
+            ...err.config,
+            __retried: true,
+            headers: { ...err.config.headers, Authorization: `Bearer ${newToken}` },
+          }
+          return client.getAxiosInstance().request(retryConfig)
         }
         return Promise.reject(error)
       }
     )
 
     return client
-  }, [baseUrl, getAccessToken, login])
+  }, [baseUrl, getAccessToken])
 
   const apiClient = useMemo(
     () =>

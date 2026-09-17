@@ -34,6 +34,7 @@ import type {
 } from '../types/auth'
 import type { OIDCProviderSummary } from '../types/config'
 import { fetchBootstrapConfig } from '../utils/bootstrapCache'
+import { SessionExpiredError, TokenUnavailableError } from './authErrors'
 import { getTenantSlug, setResolvedTenantId, getResolvedTenantId } from './TenantContext'
 
 /**
@@ -60,16 +61,77 @@ const STORAGE_KEYS = {
   JUST_LOGGED_OUT: 'kelta_auth_just_logged_out',
 } as const
 
-// Token refresh buffer (refresh 30 seconds before expiry)
+// Token refresh buffer: an access token is treated as expired for API calls
+// 30 seconds before its real expiry so a request never leaves with a token
+// that dies in flight.
 const TOKEN_REFRESH_BUFFER_MS = 30 * 1000
 
-// Cooldown after a failed refresh attempt (don't retry for 30 seconds)
-const REFRESH_FAILURE_COOLDOWN_MS = 30 * 1000
+// Proactive refresh lead: the background timer renews the token this long
+// before expiry. Far larger than the buffer on purpose — it leaves room for
+// several retries (auth-pod rollout, laptop waking before Wi-Fi is back)
+// while the current token is still perfectly usable.
+const PROACTIVE_REFRESH_LEAD_MS = 5 * 60 * 1000
+
+// Retry backoff after a transient refresh failure. Doubles per consecutive
+// failure, capped, and resets on success.
+const REFRESH_RETRY_BASE_MS = 5 * 1000
+const REFRESH_RETRY_MAX_MS = 60 * 1000
+
+// Cooldown after a failed refresh attempt: callers that hit refresh inside this
+// window get the last outcome instead of firing another request.
+const REFRESH_FAILURE_COOLDOWN_MS = 5 * 1000
+
+/**
+ * Outcome of a refresh attempt.
+ *
+ * - `ok`        new tokens stored
+ * - `transient` the attempt failed for a reason that may clear on its own
+ *               (network error, 5xx/429 from the token endpoint, bootstrap
+ *               config not loaded yet). The refresh token is KEPT and the
+ *               session stays alive — retry later.
+ * - `terminal`  the authorization server rejected the refresh token itself
+ *               (`invalid_grant`: revoked, expired, or rotated away) or there
+ *               is nothing to refresh with. Only this outcome ends the session.
+ */
+type RefreshResult =
+  | { status: 'ok'; tokens: StoredTokens }
+  | { status: 'transient' }
+  | { status: 'terminal' }
 
 // Module-level state for refresh deduplication and failure tracking.
 // Shared across all callers within the same page load.
-let inflightRefreshPromise: Promise<StoredTokens | null> | null = null
+let inflightRefreshPromise: Promise<RefreshResult> | null = null
 let lastRefreshFailureTime: number = 0
+let lastRefreshResult: RefreshResult | null = null
+let consecutiveRefreshFailures: number = 0
+
+/** Reset module refresh state (exported for tests only). */
+// eslint-disable-next-line react-refresh/only-export-components
+export function __resetRefreshStateForTests(): void {
+  inflightRefreshPromise = null
+  lastRefreshFailureTime = 0
+  lastRefreshResult = null
+  consecutiveRefreshFailures = 0
+}
+
+/**
+ * Classify a non-2xx token-endpoint response. Only an explicit OAuth
+ * `invalid_grant` (or a 401 — client rejected outright) means the refresh
+ * token is dead; everything else (502/503 during a rollout, 429, a stray
+ * HTML error page from the ingress) is treated as transient.
+ */
+async function classifyRefreshFailure(response: Response): Promise<RefreshResult> {
+  if (response.status === 401) return { status: 'terminal' }
+  if (response.status === 400) {
+    try {
+      const body = (await response.json()) as { error?: string }
+      if (body?.error === 'invalid_grant') return { status: 'terminal' }
+    } catch {
+      // Not JSON — an ingress error page; fall through to transient.
+    }
+  }
+  return { status: 'transient' }
+}
 
 /**
  * Generate a random string for state/nonce/code_verifier
@@ -193,6 +255,12 @@ export function AuthProvider({
 
   const isAuthenticated = user !== null
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Providers are also mirrored in a ref so refresh paths that run from a stale
+  // closure (initAuth's first-render closure, timers) see the loaded list. Before
+  // this, a page reload with an expired token always failed its refresh: the
+  // closure's `providers` was still `[]`, so it looked like "no internal
+  // provider" and the session was cleared.
+  const providersRef = useRef<OIDCProviderSummary[]>([])
 
   /**
    * Fetch OIDC discovery document for a provider
@@ -240,18 +308,19 @@ export function AuthProvider({
    * Perform the actual token refresh (called only by refreshAccessToken).
    * This function is NOT deduplication-aware — callers must go through refreshAccessToken.
    */
-  const doRefresh = useCallback(async (): Promise<StoredTokens | null> => {
+  const doRefresh = useCallback(async (): Promise<RefreshResult> => {
     const storedTokens = getStoredTokens()
     if (!storedTokens?.refreshToken) {
-      return null
+      return { status: 'terminal' }
     }
 
     // Refresh always targets the internal kelta-auth provider — it is the
     // issuer of the stored token regardless of which external IdP federated
-    // the original login.
-    const internal = findInternalProvider(providers)
+    // the original login. Providers come from bootstrap config; if that has
+    // not loaded (or failed to load) yet, that is a transient condition.
+    const internal = findInternalProvider(providersRef.current)
     if (!internal) {
-      return null
+      return { status: 'transient' }
     }
 
     try {
@@ -273,14 +342,15 @@ export function AuthProvider({
       })
 
       if (!response.ok) {
-        console.error('[Auth] Token refresh failed:', response.statusText)
-        // Clear the invalid refresh token to prevent further attempts
-        const clearedTokens: StoredTokens = {
-          ...storedTokens,
-          refreshToken: undefined,
+        const outcome = await classifyRefreshFailure(response)
+        console.error(
+          `[Auth] Token refresh failed (${response.status} ${response.statusText}) — ${outcome.status}`
+        )
+        if (outcome.status === 'terminal') {
+          // The refresh token is dead — drop it so nothing retries with it.
+          storeTokens({ ...storedTokens, refreshToken: undefined })
         }
-        storeTokens(clearedTokens)
-        return null
+        return outcome
       }
 
       const tokenResponse: TokenResponse = await response.json()
@@ -297,47 +367,58 @@ export function AuthProvider({
         setUser(newUser)
       }
 
-      return newTokens
+      return { status: 'ok', tokens: newTokens }
     } catch (err) {
+      // fetch() rejection = network down / DNS / CORS preflight during a
+      // rollout. Never fatal on its own.
       console.error('[Auth] Token refresh error:', err)
-      return null
+      return { status: 'transient' }
     }
-  }, [providers, fetchDiscoveryDocument])
+  }, [fetchDiscoveryDocument])
 
   /**
    * Refresh the access token using the refresh token.
    * Deduplicates concurrent calls — only one refresh request is in-flight at a time.
-   * Enforces a cooldown after failures to prevent retry storms.
+   * Enforces a short cooldown after failures to prevent retry storms; callers
+   * inside the cooldown get the last outcome back rather than a fresh attempt.
    */
-  const refreshAccessToken = useCallback(async (): Promise<StoredTokens | null> => {
-    // If we recently failed, don't try again until the cooldown expires
-    if (lastRefreshFailureTime > 0) {
-      const elapsed = Date.now() - lastRefreshFailureTime
-      if (elapsed < REFRESH_FAILURE_COOLDOWN_MS) {
-        return null
-      }
-    }
-
+  const refreshAccessToken = useCallback(async (): Promise<RefreshResult> => {
     // If a refresh is already in-flight, wait for it instead of making a new request
     if (inflightRefreshPromise) {
       return inflightRefreshPromise
+    }
+
+    // If we just failed, replay that outcome until the cooldown expires
+    if (lastRefreshFailureTime > 0 && lastRefreshResult) {
+      const elapsed = Date.now() - lastRefreshFailureTime
+      if (elapsed < REFRESH_FAILURE_COOLDOWN_MS) {
+        return lastRefreshResult
+      }
     }
 
     // Start the refresh and share the promise with any concurrent callers
     inflightRefreshPromise = doRefresh().then(
       (result) => {
         inflightRefreshPromise = null
-        if (!result) {
-          lastRefreshFailureTime = Date.now()
-        } else {
+        lastRefreshResult = result
+        if (result.status === 'ok') {
           lastRefreshFailureTime = 0
+          consecutiveRefreshFailures = 0
+        } else {
+          lastRefreshFailureTime = Date.now()
+          consecutiveRefreshFailures += 1
         }
         return result
       },
       (err) => {
+        // doRefresh catches everything itself; this is belt-and-braces.
         inflightRefreshPromise = null
+        const result: RefreshResult = { status: 'transient' }
+        lastRefreshResult = result
         lastRefreshFailureTime = Date.now()
-        throw err
+        consecutiveRefreshFailures += 1
+        console.error('[Auth] Unexpected refresh failure:', err)
+        return result
       }
     )
 
@@ -346,7 +427,11 @@ export function AuthProvider({
 
   /**
    * Schedule a proactive token refresh before the token expires.
-   * Refreshes 60 seconds before expiry (or immediately if already within the window).
+   * Refreshes PROACTIVE_REFRESH_LEAD_MS before expiry (or immediately if
+   * already inside that window). A transient failure re-arms the timer with
+   * exponential backoff and keeps going until the refresh succeeds or the
+   * server says the refresh token is dead — the session is never abandoned
+   * to die at expiry because one attempt happened to hit a blip.
    */
   const scheduleTokenRefresh = useCallback(() => {
     // Clear any existing timer
@@ -360,30 +445,28 @@ export function AuthProvider({
       return
     }
 
-    // Schedule refresh 60 seconds before expiry (twice the buffer to be safe)
-    const refreshAt = storedTokens.expiresAt - 2 * TOKEN_REFRESH_BUFFER_MS
+    const refreshAt = storedTokens.expiresAt - PROACTIVE_REFRESH_LEAD_MS
     const delay = Math.max(refreshAt - Date.now(), 0)
 
     refreshTimerRef.current = setTimeout(async () => {
       refreshTimerRef.current = null
-      let refreshed: StoredTokens | null = null
-      try {
-        refreshed = await refreshAccessToken()
-      } catch (err) {
-        console.warn('[Auth] Proactive token refresh failed:', err)
-      }
-      if (refreshed) {
+      const result = await refreshAccessToken()
+      if (result.status === 'ok') {
         // Schedule the next refresh after this one succeeds
         scheduleTokenRefresh()
-      } else if (getStoredTokens()?.refreshToken) {
-        // Transient failure (network blip, cooldown) but the refresh token is
-        // still there — retry after the cooldown instead of abandoning the
-        // session to die at token expiry.
+      } else if (result.status === 'transient' && getStoredTokens()?.refreshToken) {
+        const backoff = Math.min(
+          REFRESH_RETRY_BASE_MS * 2 ** Math.max(consecutiveRefreshFailures - 1, 0),
+          REFRESH_RETRY_MAX_MS
+        )
+        console.warn(`[Auth] Proactive token refresh failed; retrying in ${backoff / 1000}s`)
         refreshTimerRef.current = setTimeout(() => {
           refreshTimerRef.current = null
           scheduleTokenRefresh()
-        }, REFRESH_FAILURE_COOLDOWN_MS)
+        }, backoff)
       }
+      // terminal: nothing to re-arm. The next API call's getAccessToken (or
+      // the 401 interceptor) ends the session and routes to login.
     }, delay)
   }, [refreshAccessToken])
 
@@ -391,30 +474,52 @@ export function AuthProvider({
    * Get the current access token, refreshing if necessary
    * Requirement 2.4: Attempt silent token refresh when token expires
    * Requirement 2.7: Include access token in all API requests
+   *
+   * Only a TERMINAL refresh failure (refresh token rejected or absent) ends the
+   * session. A transient failure keeps the stored tokens: if the access token is
+   * still within its real lifetime it is returned as-is, otherwise a
+   * `TokenUnavailableError` is thrown so the caller can fail this one request
+   * without logging the user out — the background timer keeps retrying.
+   *
+   * @param options.force refresh even if the token is not locally expired
+   *   (used by the 401 interceptor: the server has rejected the token, so
+   *   the local clock is not to be trusted).
    */
-  const getAccessToken = useCallback(async (): Promise<string> => {
-    const storedTokens = getStoredTokens()
+  const getAccessToken = useCallback(
+    async (options?: { force?: boolean }): Promise<string> => {
+      const storedTokens = getStoredTokens()
 
-    if (!storedTokens) {
-      throw new Error('No tokens available. Please log in.')
-    }
-
-    // Check if token is expired or about to expire
-    if (isTokenExpired(storedTokens.expiresAt)) {
-      // Attempt to refresh
-      const refreshedTokens = await refreshAccessToken()
-      if (refreshedTokens) {
-        return refreshedTokens.accessToken
+      if (!storedTokens) {
+        throw new SessionExpiredError('No tokens available. Please log in.')
       }
-      // Refresh failed - clear auth and throw
-      // Requirement 2.5: Redirect to login if refresh fails
-      clearAuthStorage()
-      setUser(null)
-      throw new Error('Session expired. Please log in again.')
-    }
 
-    return storedTokens.accessToken
-  }, [refreshAccessToken])
+      if (!options?.force && !isTokenExpired(storedTokens.expiresAt)) {
+        return storedTokens.accessToken
+      }
+
+      const result = await refreshAccessToken()
+      if (result.status === 'ok') {
+        return result.tokens.accessToken
+      }
+      if (result.status === 'terminal') {
+        // Requirement 2.5: Redirect to login if refresh fails
+        clearAuthStorage()
+        setUser(null)
+        throw new SessionExpiredError('Session expired. Please log in again.')
+      }
+
+      // Transient: keep the session. Hand back the current token if it has
+      // not actually expired yet (a forced refresh after a 401 can only
+      // fall through here when the server disagrees with our clock).
+      if (!options?.force && Date.now() < storedTokens.expiresAt) {
+        return storedTokens.accessToken
+      }
+      throw new TokenUnavailableError(
+        'Could not refresh the access token; will retry. Please try again.'
+      )
+    },
+    [refreshAccessToken]
+  )
 
   /**
    * Initiate login flow
@@ -731,6 +836,7 @@ export function AuthProvider({
 
         // Fetch available providers
         const availableProviders = await fetchProviders()
+        providersRef.current = availableProviders
         setProviders(availableProviders)
 
         // If no providers available and this is a callback, we're in a bad state
@@ -788,18 +894,26 @@ export function AuthProvider({
             if (existingUser) {
               setUser(existingUser)
             }
-          } else {
-            if (storedTokens.refreshToken) {
-              // Try to refresh
-              const refreshedTokens = await refreshAccessToken()
-              if (!refreshedTokens) {
-                // Refresh failed, clear tokens
+          } else if (storedTokens.refreshToken) {
+            // Expired but refreshable — try now. A terminal rejection ends the
+            // session; a transient failure (offline, auth rolling) keeps the
+            // stored tokens and restores the user from them so the app renders
+            // and the proactive timer keeps retrying instead of forcing a
+            // re-login because the network was down for a moment.
+            const result = await refreshAccessToken()
+            if (result.status === 'terminal') {
+              clearAuthStorage()
+            } else if (result.status === 'transient') {
+              const staleUser = extractUserFromToken(storedTokens.idToken, storedTokens.accessToken)
+              if (staleUser) {
+                setUser(staleUser)
+              } else {
                 clearAuthStorage()
               }
-            } else {
-              // No refresh token and expired, clear
-              clearAuthStorage()
             }
+          } else {
+            // No refresh token and expired, clear
+            clearAuthStorage()
           }
         }
       } catch (err) {
@@ -834,24 +948,43 @@ export function AuthProvider({
   /**
    * Browsers throttle or suspend timers in background tabs and across machine
    * sleep, so the proactive timer can fire long after the token expired. When
-   * the tab becomes visible again, refresh immediately if we're inside the
-   * expiry window and re-arm the timer.
+   * the tab becomes visible again, or the network comes back, refresh
+   * immediately if we're inside the proactive window and re-arm the timer.
+   * The timer is re-armed even when no refresh is due: a throttled timer may
+   * otherwise fire far later than scheduled.
    */
   useEffect(() => {
     if (!isAuthenticated) return
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return
+    const refreshIfDue = (reason: string) => {
       const tokens = getStoredTokens()
-      if (tokens?.refreshToken && isTokenExpired(tokens.expiresAt)) {
-        refreshAccessToken()
-          .then((refreshed) => {
-            if (refreshed) scheduleTokenRefresh()
-          })
-          .catch((err) => console.warn('[Auth] Refresh on tab wake failed:', err))
+      if (!tokens?.refreshToken) return
+      const due = Date.now() >= tokens.expiresAt - PROACTIVE_REFRESH_LEAD_MS
+      if (!due) {
+        scheduleTokenRefresh()
+        return
       }
+      refreshAccessToken()
+        .then((result) => {
+          if (result.status === 'ok') {
+            scheduleTokenRefresh()
+          } else if (result.status === 'transient') {
+            // Re-arm: delay is 0 (already due) so the backoff chain in
+            // scheduleTokenRefresh takes over.
+            scheduleTokenRefresh()
+          }
+        })
+        .catch((err) => console.warn(`[Auth] Refresh on ${reason} failed:`, err))
     }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshIfDue('tab wake')
+    }
+    const onOnline = () => refreshIfDue('network online')
     document.addEventListener('visibilitychange', onVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('online', onOnline)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('online', onOnline)
+    }
   }, [isAuthenticated, refreshAccessToken, scheduleTokenRefresh])
 
   // Memoize context value to prevent unnecessary re-renders

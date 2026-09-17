@@ -637,6 +637,37 @@ jobs. RLS then scopes every query automatically.
 - **Hooks**: `src/hooks/` — Custom React hooks
 - **Services**: `src/services/` — API integration layer
 
+### SPA session lifetime — token refresh contract (`AuthContext`)
+
+The SPA holds an 8 h access token + 7 d rotating refresh token (`ConnectedAppRegistrar`,
+`reuseRefreshTokens(false)`) in **`sessionStorage`** (per tab). Refresh goes to kelta-auth's
+token endpoint with `client_id` only (`PublicClientRefreshTokenAuthenticationConverter`).
+The rules that keep an open tab signed in — a session must never be torn down by a blip:
+
+- **Only a *terminal* refresh failure ends the session**: HTTP 401, or 400 with OAuth
+  `error=invalid_grant` (revoked/expired/rotated-away refresh token), or no refresh token at
+  all. Everything else — `fetch` rejection (offline, DNS, CORS preflight during a rollout),
+  5xx/429, an ingress HTML error page, bootstrap config not loaded yet — is *transient*: the
+  refresh token is **kept** and retried. (`classifyRefreshFailure` / `RefreshResult`.)
+- **Proactive timer** fires `PROACTIVE_REFRESH_LEAD_MS` (5 min) before expiry, retries with
+  exponential backoff (5 s → 60 s cap) on transient failure, re-arms after success. API
+  calls treat the token as expired 30 s before real expiry (`TOKEN_REFRESH_BUFFER_MS`).
+- **`getAccessToken()`** on a transient failure returns the current token while it is still
+  inside its real lifetime, else throws `TokenUnavailableError` (session intact — that one
+  request fails). Terminal → `clearAuthStorage()` + `SessionExpiredError`. `{ force: true }`
+  refreshes even when the local clock says the token is fine — used by `ApiContext`'s 401
+  interceptor (clock skew / server-side rejection) before its single retry; it redirects to
+  login **only** on `SessionExpiredError`. Error classes live in `context/authErrors.ts`.
+- **`visibilitychange` + `online`** handlers refresh at once if inside the proactive window
+  (throttled timers, machine sleep, Wi-Fi back) and always re-arm the timer.
+- **Page reload with an expired token** refreshes through `providersRef` (a ref, because
+  `initAuth` runs in the first-render closure where `providers` state is still `[]` — the
+  old code read that empty list, saw "no internal provider", and cleared the session on
+  every reload, e.g. after Chrome Memory Saver discarded the tab). A transient failure here
+  restores the user from the stale token and lets the timer keep retrying.
+
+Tests: `AuthContext.test.tsx` → "Proactive Refresh", `ApiContext.test.tsx` (401 interceptor).
+
 ### Component layering — admin app vs. plugin library
 
 `kelta-ui/app/src/components/` and `kelta-web/packages/components/src/` have grown overlapping families of components (data tables, filter builders, field renderers, forms). The rule (see `conventions.md` → Component reuse): **reuse the unified `@kelta/components` variant or extend it — never fork a new app-side variant.** This protects the public `@kelta/components` plugin API. Consult `conventions.md` before adding a new shared list/form/filter component on either side.

@@ -96,9 +96,16 @@ export interface AuthContextValue extends AuthState {
   logout: () => Promise<void>
 
   /**
-   * Get the current access token, refreshing if necessary
+   * Get the current access token, refreshing if necessary.
+   *
+   * Throws `SessionExpiredError` (see `context/authErrors.ts`) only when the
+   * session is genuinely over; a transient refresh failure throws
+   * `TokenUnavailableError` and leaves the session intact.
+   *
+   * @param options.force refresh even if the token is not locally expired —
+   *   for callers that just received a 401 with it.
    */
-  getAccessToken: () => Promise<string>
+  getAccessToken: (options?: { force?: boolean }) => Promise<string>
 }
 
 /**
