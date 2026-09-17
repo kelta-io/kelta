@@ -690,6 +690,31 @@ for it, not just a `ScopedValue`.
 - **Flow Engine**: Flow execution, node processing, branching — `runtime-core/.../flow/`
 - **Modules**: Action handlers (CreateRecord, UpdateRecord, QueryRecords, DeleteRecord, TriggerFlow, Decision, LogMessage) — `runtime-module-core/.../module/core/`
 
+### `ConcurrentCollectionRegistry` tenant-key contract (KLT-259)
+
+`CollectionDefinition.registryKey()` is `tenantId + ":" + name` when `tenantId` is set, and the
+bare `name` **only** when `tenantId == null` — which in practice means system collections
+(`SystemCollectionDefinitions` entries never call `.tenantId(...)`). Every custom collection
+built from a DB row (`CollectionLifecycleManager.buildDefinitionFromDb`) carries the row's
+`collection.tenant_id`, a `NOT NULL` column, so it always registers under the tenant-scoped key.
+
+`ConcurrentCollectionRegistry.get(name)` tries `tenantId + ":" + name` first (`tenantId` from
+`TenantContext.get()`), then falls back to the bare `name` key. That fallback is **restricted to
+`systemCollection() == true` definitions** — if the bare-name slot holds a custom collection (a
+future bug, a cold-cache path, a legacy registration), `get()` refuses to serve it and logs a
+warning instead, rather than risk handing one tenant's schema/data to another tenant's lookup.
+This holds whether or not a tenant context is bound at call time. See
+`ConcurrentCollectionRegistryTest$TenantIsolationTests` for the pinning tests (same name, two
+tenants, either registration order, cache refresh of one tenant not affecting the other, and the
+bare-name-slot-never-serves-a-custom-collection cases) and
+`CollectionRegistryTenantScopingScenarioTest` (`kelta-test-harness`) for the real-DB, real-stack
+version through `DashboardComponentValidator`, `ListViewConfigHook`, and `DashboardDataService`.
+
+**For future callers**: never register a custom (non-system) `CollectionDefinition` with a null
+`tenantId` expecting `get()` to serve it back out globally — it won't. A collection meant to be
+visible to every tenant must be declared in `SystemCollectionDefinitions` (`systemCollection =
+true`), not merely omit `tenantId`.
+
 ## Frontend Layers (kelta-ui/app/)
 
 - **Context Providers**: `src/context/` — AuthContext, ApiContext, TenantContext, CollectionStoreContext, ThemeContext, I18nContext, PluginContext
