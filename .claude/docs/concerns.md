@@ -6,8 +6,10 @@ at the bottom so reviewers can see what's already been addressed.
 ## Security Risks
 
 **Row-level security was configured on 111 control-plane tables and enforced on none
-(found 2026-09-16, fixed in code the same day; production enforcement is an operational
-step — see `playbooks.md` §8).** Every tenant-scoped table has had `tenant_isolation`
+(found 2026-09-16, fixed in code the same day, enforced in production 2026-09-17 04:10Z —
+`ALTER ROLE emf NOBYPASSRLS`, playbook §8; verified: a tenant's `users` metric fell from 14 to its own 6,
+another tenant's page no longer renders by slug, the platform tenant's custom collections no longer
+list for other tenants, flows in four tenants ran clean, zero RLS violations in the worker log).** Every tenant-scoped table has had `tenant_isolation`
 (`tenant_id = current_setting('app.current_tenant_id', true)`) and `admin_bypass` (`''`)
 policies since V77, with `FORCE ROW LEVEL SECURITY`, and the worker's
 `TenantAwareDataSource` binds the setting per operation — but the production application
