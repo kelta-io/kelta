@@ -450,29 +450,39 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   (not a fault to retry) and a thrown handler is 500 (retry). Like the other webhook paths it
   bypasses `TenantIpAllowlistFilter`, and it carries its own per-IP rate-limit budget (300 per
   window). The sibling `/api/modules/**` administration and module-route paths stay authenticated.
-- **Member watch API** (consumer-alerting slice 5): `/api/watches/**` is a static route, so
+- **Member watch API** (consumer-alerting slices 5, K-8): `/api/watches/**` is a static route, so
   only `API_ACCESS` is checked at the gateway and **all** member scoping is in
-  `WatchController`. Every endpoint acts on the calling member from `X-User-Id`; a foreign
-  watch id returns **404, not 403**, because 403 would confirm the id exists and let a member
-  enumerate others' watches by probing. Mutations are self-only — internal staff holding
-  `MANAGE_DATA` may pass `?memberId=` to *read* a member's watches for support, but not to
-  write them. Writes go through `QueryEngine`, not the repository, so `WatchGuardHook` and
-  `MemberEntitlementQuotaHook` both fire. `WatchGuardHook` (BeforeSaveHook on `watches`,
-  order -100) covers the **generic dynamic route**, which bypasses the controller entirely —
-  it blocks creating/editing/deleting another member's watch and, notably, re-owning one; it
-  **fails closed** on an unresolvable identity (unlike the fail-open quota hook: this protects
-  other members' data, not revenue) and admits internal-tier writes with no HTTP identity.
-- **Member win API + ticker** (consumer-alerting slice 9): `/api/wins/**` is a static route
-  (`API_ACCESS` only; scoping in `WinController`). `POST /api/wins` and `GET /api/wins` are
-  self-only (owner from `X-User-Id`); writes go through `QueryEngine` so `WinGuardHook`
-  (BeforeSaveHook on `wins`, order -100, mirror of `WatchGuardHook`, **fails closed**) locks the
-  generic route against creating/re-owning/publishing/deleting another member's win.
-  `GET /api/wins/recent` is the **live-wins ticker** — deliberately cross-member (social proof)
-  but returns ONLY opt-in `isPublic` rows and ONLY redacted fields (first-name claimant label,
-  summary, category, quantity, time), never `memberId`. `GET /api/wins/stats?targetId=` is an
-  aggregate COUNT. The realtime ticker reuses the existing `kelta.record.changed.<tenant>.wins`
-  bridge (invalidation → refetch `/recent`) — no new subject. Anonymous ticker access is
-  deferred to the public read-surface slice.
+  `WatchController`, including `GET /api/watches/{id}` (the controller defines its own `/{id}`
+  handler now — it used to fall through unguarded to the generic route's tenant-only scoping).
+  Every endpoint acts on the calling member from `X-User-Id`; a foreign watch id returns **404,
+  not 403**, because 403 would confirm the id exists and let a member enumerate others' watches
+  by probing. Mutations are self-only — internal staff holding `MANAGE_DATA` may pass
+  `?memberId=` to *read* a member's watches for support, but not to write them. Naming **no**
+  `memberId` on `list`/`get` while holding `MANAGE_DATA` instead returns the tenant's full
+  JSON:API view (paging, `filter[field][op]`, `sort`, `meta.totalCount`), delegated verbatim to
+  `DynamicCollectionRouter` rather than reimplemented — `hasSupportPermission` short-circuits a
+  PORTAL caller to `false` before any profile lookup, so a portal profile that happens to grant
+  `MANAGE_DATA` still gets the owner-scoped view, and a non-support INTERNAL caller is 403 rather
+  than silently scoped to an empty self. Writes go through `QueryEngine`, not the repository, so
+  `WatchGuardHook` and `MemberEntitlementQuotaHook` both fire. `WatchGuardHook` (BeforeSaveHook on
+  `watches`, order -100) covers the **generic dynamic route**, which bypasses the controller
+  entirely for writes — it blocks creating/editing/deleting another member's watch and, notably,
+  re-owning one; it **fails closed** on an unresolvable identity (unlike the fail-open quota
+  hook: this protects other members' data, not revenue) and admits internal-tier writes with no
+  HTTP identity.
+- **Member win API + ticker** (consumer-alerting slices 9, K-8): `/api/wins/**` is a static route
+  (`API_ACCESS` only; scoping in `WinController`). `POST /api/wins`, `GET /api/wins` and
+  `GET /api/wins/{id}` are self-only (owner from `X-User-Id`) with the same
+  `?memberId=`/full-tenant-view support-mode branching as `WatchController` (mirrored idiom,
+  including the PORTAL short-circuit and the 403 for a non-support INTERNAL caller); writes go
+  through `QueryEngine` so `WinGuardHook` (BeforeSaveHook on `wins`, order -100, mirror of
+  `WatchGuardHook`, **fails closed**) locks the generic route against creating/re-owning/
+  publishing/deleting another member's win. `GET /api/wins/recent` is the **live-wins ticker** —
+  deliberately cross-member (social proof) but returns ONLY opt-in `isPublic` rows and ONLY
+  redacted fields (first-name claimant label, summary, category, quantity, time), never
+  `memberId`. `GET /api/wins/stats?targetId=` is an aggregate COUNT. The realtime ticker reuses
+  the existing `kelta.record.changed.<tenant>.wins` bridge (invalidation → refetch `/recent`) —
+  no new subject. Anonymous ticker access is deferred to the public read-surface slice.
 - **SEO read surface** (consumer-alerting slice 11): the `seo-pages` read-only aggregate
   collection (`SeoPageGenerationService` nightly sweep) is served by its ordinary authenticated
   `/api/seo-pages` dynamic route — **no new gateway route, and no anonymous endpoint**. A static

@@ -4,11 +4,14 @@ import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.router.DynamicCollectionRouter;
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.worker.controller.WinController.CreateWinRequest;
+import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.WinRepository;
 import io.kelta.worker.repository.WinRepository.TargetStats;
 import io.kelta.worker.repository.WinRepository.Win;
+import io.kelta.worker.service.CerbosPermissionResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -39,6 +42,8 @@ class WinControllerTest {
     private QueryEngine queryEngine;
     private CollectionRegistry collectionRegistry;
     private UserIdResolver userIdResolver;
+    private CerbosPermissionResolver permissionResolver;
+    private BootstrapRepository bootstrapRepository;
     private WinController controller;
 
     @BeforeEach
@@ -47,7 +52,10 @@ class WinControllerTest {
         queryEngine = mock(QueryEngine.class);
         collectionRegistry = mock(CollectionRegistry.class);
         userIdResolver = mock(UserIdResolver.class);
-        controller = new WinController(winRepository, queryEngine, collectionRegistry, userIdResolver);
+        permissionResolver = mock(CerbosPermissionResolver.class);
+        bootstrapRepository = mock(BootstrapRepository.class);
+        controller = new WinController(winRepository, queryEngine, collectionRegistry, userIdResolver,
+                permissionResolver, bootstrapRepository, mock(DynamicCollectionRouter.class));
 
         when(collectionRegistry.get("wins")).thenReturn(mock(CollectionDefinition.class));
         when(userIdResolver.resolve(any(), eq(TENANT))).thenReturn(CALLER);
@@ -63,6 +71,7 @@ class WinControllerTest {
     private MockHttpServletRequest requestFrom(String userId) {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-User-Id", userId);
+        request.addHeader("X-User-Type", "PORTAL");
         return request;
     }
 
@@ -148,8 +157,8 @@ class WinControllerTest {
         when(winRepository.findByMember(TENANT, CALLER)).thenReturn(List.of(mine));
 
         @SuppressWarnings("unchecked")
-        List<Map<String, Object>> data =
-                (List<Map<String, Object>>) controller.list(requestFrom("marcus@example.com")).get("data");
+        List<Map<String, Object>> data = (List<Map<String, Object>>) controller
+                .list(null, null, requestFrom("marcus@example.com")).getBody().get("data");
 
         assertThat(data).hasSize(1);
         assertThat(data.get(0)).containsEntry("summary", "my win");

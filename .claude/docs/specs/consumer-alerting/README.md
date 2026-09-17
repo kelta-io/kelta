@@ -199,6 +199,20 @@ Every new stream gets its own `ensureStream(...)` in `JetStreamInitializer`; eve
   watch/billing collections are denied to `user_type=PORTAL`; generic-route writes are
   owner-guarded by hook. Slice 1 and 3 reviews must confirm the seeded Portal User profile
   cannot reach another member's rows through the dynamic API; add owner-guard hooks if it can.
+- **`WatchController`/`WinController` `list`/`get` have two response modes (K-8 support-list
+  slice).** A PORTAL caller, or an INTERNAL caller naming a specific `?memberId=`, gets exactly
+  today's owner-scoped shape: `{"data": [...]}` (list) or `{"data": {...}}` (get by id), no
+  `meta`, filtered to that one member — a foreign id on `get` is 404, not 403, so the endpoint
+  is never an existence oracle. An INTERNAL caller holding `MANAGE_DATA` (`hasSupportPermission`
+  — PORTAL short-circuits to `false` before any profile lookup, so a portal profile that happens
+  to grant the permission still gets the owner-scoped view) who names **no** `memberId` instead
+  gets the tenant's full JSON:API view, delegated verbatim to `DynamicCollectionRouter` rather
+  than reimplemented: paging, `filter[field][op]`, `sort`, `fields[...]` and `meta.totalCount`
+  all behave exactly like every other collection. An INTERNAL caller lacking `MANAGE_DATA` is
+  403, not silently scoped to an (empty) self. The admin UI's related-list widget
+  (`useRelatedRecords`) already calls `GET /api/watches?filter[memberId][eq]=<userId>` — the
+  same `/api/watches` path — so a `watches.memberId` related list under a `users` layout reaches
+  the full-tenant branch automatically and needs no special-casing.
 - **Public-surface controls ship before public signup is enabled.** Self-signup is per-tenant
   opt-in (default off) and slice 7 — Redis-backed per-IP budgets on public paths,
   entitlement-driven per-user budgets on authenticated traffic, and a pluggable bot challenge

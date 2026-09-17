@@ -6,6 +6,7 @@ import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.router.DynamicCollectionRouter;
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.worker.controller.WatchController.CreateWatchRequest;
 import io.kelta.worker.controller.WatchController.UpdateWatchRequest;
@@ -67,12 +68,13 @@ class WatchControllerTest {
     private CollectionRegistry registry;
     private EntitlementService entitlements;
     private UserIdResolver userIdResolver;
+    private DynamicCollectionRouter dynamicCollectionRouter;
 
     /** A controller whose promotable-source allowlist is the given comma list. */
     private WatchController controllerWithPromotable(String sources) {
         return new WatchController(watchRepository, targetRepository, queryEngine,
                 registry, entitlements, userIdResolver, permissionResolver,
-                bootstrapRepository, new ObjectMapper(), sources);
+                bootstrapRepository, new ObjectMapper(), dynamicCollectionRouter, sources);
     }
 
     @BeforeEach
@@ -98,6 +100,7 @@ class WatchControllerTest {
         this.registry = registry;
         this.entitlements = entitlements;
         this.userIdResolver = userIdResolver;
+        this.dynamicCollectionRouter = mock(DynamicCollectionRouter.class);
         controller = controllerWithPromotable("");
         TenantContext.set(TENANT);
 
