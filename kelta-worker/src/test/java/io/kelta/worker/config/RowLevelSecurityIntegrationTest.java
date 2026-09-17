@@ -80,23 +80,36 @@ class RowLevelSecurityIntegrationTest {
     @BeforeAll
     static void migrateAndSeed() {
         DriverManagerDataSource superDs = dataSource(POSTGRES.getUsername(), POSTGRES.getPassword());
+        admin = new JdbcTemplate(superDs);
+
+        // Only a superuser may install an extension, so both the baseline's pg_trgm and the
+        // vector the storage adapter asks for go in up front; CREATE EXTENSION IF NOT EXISTS
+        // short-circuits before its privilege check, so the migration is then a no-op.
+        admin.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+        admin.execute("CREATE EXTENSION IF NOT EXISTS vector");
+        admin.execute("CREATE ROLE app_rls LOGIN PASSWORD 'app_rls' NOBYPASSRLS");
+        // Ownership of the schema, not merely CREATE on it: the baseline is a pg_dump and
+        // carries COMMENT ON SCHEMA public, which only the schema's owner may execute, and
+        // since Postgres 15 public belongs to pg_database_owner. Without this the first
+        // migration fails with "must be owner of schema public".
+        admin.execute("GRANT ALL ON SCHEMA public TO app_rls");
+        admin.execute("ALTER SCHEMA public OWNER TO app_rls");
+        // The production role default: a session that never binds a tenant is a platform
+        // session (admin_bypass), not a session that sees nothing.
+        admin.execute("ALTER ROLE app_rls SET app.current_tenant_id = ''");
+
+        // Migrate as the application role, the way the deploy-time migrate Job and the
+        // cross-service harness do. Running Flyway as the superuser instead would leave
+        // every table owned by a role that is exempt from its own FORCE'd policies, and
+        // would hide any privilege the migrations need and the application role lacks.
         Flyway.configure()
-                .dataSource(superDs)
+                .dataSource(dataSource("app_rls", "app_rls"))
                 .locations("classpath:db/migration")
                 .baselineOnMigrate(true)
                 .baselineVersion("0")
                 .placeholderReplacement(false)
                 .load()
                 .migrate();
-        admin = new JdbcTemplate(superDs);
-
-        admin.execute("CREATE ROLE app_rls LOGIN PASSWORD 'app_rls' NOBYPASSRLS");
-        admin.execute("GRANT USAGE ON SCHEMA public TO app_rls");
-        admin.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_rls");
-        admin.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_rls");
-        // The production role default: a session that never binds a tenant is a platform
-        // session (admin_bypass), not a session that sees nothing.
-        admin.execute("ALTER ROLE app_rls SET app.current_tenant_id = ''");
 
         for (String[] t : new String[][]{{TENANT_A, "tenant-a"}, {TENANT_B, "tenant-b"}}) {
             admin.update("INSERT INTO tenant (id, slug, name) VALUES (?, ?, ?)", t[0], t[1], t[1]);

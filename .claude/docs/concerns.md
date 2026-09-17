@@ -178,6 +178,29 @@ The four gaps that survived those two passes were closed on 2026-09-17 (PLT-264)
   after the CI run's schema; `release-db.sh` drops it) and the services connect as it, so
   every scenario test exercises the real policies. `ScenarioBase.openAppDbConnection()` is
   that role; `openDbConnection()` remains the superuser for planting fixtures.
+  **Flyway runs as that role too**, which means the harness (and `RowLevelSecurityIntegrationTest`,
+  which now migrates the same way) is the only place the migrations are exercised by a
+  non-superuser. Two consequences to respect when adding one: extensions must be installed
+  by the provisioning step, not by a migration (`CREATE EXTENSION` is superuser-only;
+  `IF NOT EXISTS` then short-circuits), and the role is made the **owner** of the target
+  schema, because the baseline is a `pg_dump` and carries `COMMENT ON SCHEMA public` —
+  an ownership-level operation that since Postgres 15 belongs to `pg_database_owner`.
+  Omitting the handover fails the first migration with *must be owner of schema public*,
+  the worker never reports healthy, and the stack does not come up.
+
+Enforcement also exposed a latent bug in tenant provisioning. `TenantProvisioningHook` runs
+inside the request that created the tenant, and rebound the tenant with the **legacy**
+`TenantContext.set(id)` — but `TenantContext.get()` prefers a bound `ScopedValue` over the
+ThreadLocal, and the worker's request filter has already bound the *creating* tenant. The
+setting was therefore ignored, and every row the hook seeds (profiles, OIDC provider, admin
+user + credential) was written under the wrong tenant: invisible while RLS was bypassed,
+rejected by `tenant_isolation`'s WITH CHECK the moment it was not. It now seeds inside
+`TenantContext.runWithTenant(id, slug, …)`, which shadows the outer binding — the
+cross-tenant form Critical Rule 3 prescribes. **`TenantContext.set(...)` is only safe where
+nothing is bound** (NATS listeners, bootstrap runners); on a request path it is a silent
+no-op. Remaining call sites — `DynamicCollectionRouter`, `SearchController`,
+`SubmitForApprovalActionHandler`, `CollectionLifecycleManager`, `CerbosPolicySyncService`,
+`InternalBootstrapController` — all set the tenant that is already bound, or run unbound.
 
 Still open: the in-code tenant predicate for direct `queryEngine.executeQuery` callers
 (PLT-260 in the RZWare tracker) remains the first line of defence — RLS is the backstop, not

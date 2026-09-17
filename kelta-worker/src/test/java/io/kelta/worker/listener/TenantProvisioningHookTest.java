@@ -1,5 +1,6 @@
 package io.kelta.worker.listener;
 
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.service.CerbosPolicySyncService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -7,6 +8,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -69,6 +71,35 @@ class TenantProvisioningHookTest {
                     .thenThrow(new RuntimeException("DB connection failed"));
 
             assertDoesNotThrow(() -> hook.afterCreate(record, TENANT_ID));
+        }
+
+        @Test
+        @DisplayName("Should seed under the new tenant's scope, not the creating tenant's")
+        void shouldSeedUnderTheNewTenantsScope() {
+            // The hook runs inside the request that created the tenant, so TenantContext is
+            // already bound to whoever created it. Every row it seeds belongs to the new
+            // tenant, and TenantAwareDataSource turns whatever is bound here into the
+            // connection's app.current_tenant_id — bind the wrong one and row-level security
+            // rejects the inserts. A ThreadLocal set() cannot fix that: the bound ScopedValue
+            // wins over it.
+            String newTenantId = "tenant-456";
+            String newTenantSlug = "beta";
+            Map<String, Object> record =
+                    new HashMap<>(Map.of("id", newTenantId, "slug", newTenantSlug));
+
+            List<String> seen = new ArrayList<>();
+            when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any()))
+                    .thenAnswer(inv -> {
+                        seen.add(TenantContext.get());
+                        return 0;
+                    });
+
+            TenantContext.runWithTenant(TENANT_ID, TENANT_SLUG,
+                    () -> hook.afterCreate(record, TENANT_ID));
+
+            assertFalse(seen.isEmpty(), "expected the hook to reach the database");
+            assertEquals(List.of(newTenantId), seen.stream().distinct().toList());
+            verify(cerbosPolicySyncService).syncTenant(newTenantId);
         }
     }
 

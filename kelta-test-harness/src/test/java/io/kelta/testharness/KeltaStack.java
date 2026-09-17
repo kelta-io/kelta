@@ -23,10 +23,12 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Singleton stack of Testcontainers that backs all harness scenario tests.
@@ -86,6 +88,9 @@ public final class KeltaStack {
      */
     static final String APP_ROLE = applicationRoleName();
     static final String APP_PASSWORD = "harness-app-role";
+
+    /** How much of a failed service's log to print. Enough to carry a stack trace. */
+    private static final int LOG_TAIL_LINES = 120;
 
     static {
         try {
@@ -334,17 +339,17 @@ public final class KeltaStack {
 
         // Phase 2: worker (owns Flyway migrations)
         log.info("Phase 2: starting kelta-worker...");
-        WORKER.start();
+        startService("kelta-worker", WORKER);
         log.info("kelta-worker healthy (Flyway complete)");
 
         // Phase 3: auth (needs DB + worker)
         log.info("Phase 3: starting kelta-auth...");
-        AUTH.start();
+        startService("kelta-auth", AUTH);
         log.info("kelta-auth healthy");
 
         // Phase 4: gateway (needs auth JWKS + worker routes)
         log.info("Phase 4: starting kelta-gateway...");
-        GATEWAY.start();
+        startService("kelta-gateway", GATEWAY);
         log.info("kelta-gateway healthy");
 
         // Phase 5: seed the ecommerce fixture tenant via the admin API. The Flyway
@@ -355,6 +360,56 @@ public final class KeltaStack {
         log.info("Phase 5: seeding ecommerce fixture tenant...");
         new io.kelta.testharness.fixtures.EcommerceSeedFixture().seedOnce();
         log.info("ecommerce fixture seeded — stack ready");
+    }
+
+    /**
+     * Starts a service container and, if it never reports healthy, logs the tail of its
+     * output before rethrowing.
+     *
+     * <p>The wait strategy is an HTTP probe on {@code /actuator/health}, so a service that
+     * dies during boot looks exactly like one that is merely slow: Testcontainers polls
+     * until the startup timeout and then throws a {@code ContainerLaunchException} that says
+     * nothing about why. Everything that matters — a Flyway error, a failed connection, a
+     * missing privilege — is in the container's own log, which is otherwise discarded with
+     * the container. One {@code docker logs} call at the point of failure is what makes a
+     * red CI run diagnosable.
+     */
+    private static void startService(String name, GenericContainer<?> container) {
+        try {
+            container.start();
+        } catch (RuntimeException e) {
+            log.error("{} did not become healthy — last {} lines of its log follow:\n{}",
+                    name, LOG_TAIL_LINES, tailLogs(container));
+            throw e;
+        }
+    }
+
+    /**
+     * Fetches the tail of a container's log, on a daemon thread with a deadline. The fetch
+     * is a one-shot {@code docker logs} rather than a follow, but this runs on the failure
+     * path of a start that is already timing out — a diagnostic must not be able to become
+     * the next hang.
+     */
+    private static String tailLogs(GenericContainer<?> container) {
+        var executor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "kelta-stack-logs");
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            return executor.submit(() -> {
+                String[] lines = container.getLogs().split("\n");
+                int from = Math.max(0, lines.length - LOG_TAIL_LINES);
+                return String.join("\n", Arrays.asList(lines).subList(from, lines.length));
+            }).get(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "(interrupted while reading container logs)";
+        } catch (Exception e) {
+            return "(could not read container logs: " + e + ")";
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     public static void stop() {
@@ -381,15 +436,27 @@ public final class KeltaStack {
     /**
      * Creates the role the services connect as, with row-level security enforced.
      *
-     * <p>Run as the bootstrap superuser, because two of these steps need one: creating a role,
-     * and installing {@code pg_trgm} — the baseline migration's
-     * {@code CREATE EXTENSION IF NOT EXISTS} would fail for an ordinary role, but becomes a
-     * no-op once the extension is already there.
+     * <p>Run as the bootstrap superuser, because three of these steps need one: creating a
+     * role, installing the extensions, and handing the schema over.
      *
-     * <p>The role gets CREATE on the target schema and on the database, and nothing else:
-     * Flyway runs as it, so every table is created by it and owned by it. That matters — a
-     * table's owner is exempt from its own policies unless the table says FORCE, which is
-     * exactly why the migrations force RLS rather than merely enabling it.
+     * <p>Extensions are installed here rather than by the application: an ordinary role
+     * cannot {@code CREATE EXTENSION}, but {@code IF NOT EXISTS} short-circuits before the
+     * privilege check, so the baseline's {@code pg_trgm} and
+     * {@code PhysicalTableStorageAdapter}'s {@code vector} both become no-ops.
+     *
+     * <p>The role is made the schema's <b>owner</b>, not merely granted CREATE on it. The
+     * baseline is a {@code pg_dump}, and a dump of {@code public} carries
+     * {@code COMMENT ON SCHEMA public}; COMMENT is an ownership-level operation, and since
+     * Postgres 15 {@code public} belongs to {@code pg_database_owner}, which an ordinary
+     * application role is no member of. Without the handover the very first migration dies
+     * with <i>must be owner of schema public</i>, the worker never reports healthy, and the
+     * whole stack fails to start.
+     *
+     * <p>Beyond that the role gets CREATE on the database (for the per-tenant schemas the
+     * worker creates at runtime) and nothing else: Flyway runs as it, so every table is
+     * created by it and owned by it. That matters — a table's owner is exempt from its own
+     * policies unless the table says FORCE, which is exactly why the migrations force RLS
+     * rather than merely enabling it.
      *
      * <p>{@code app.current_tenant_id = ''} is the production role default: a connection that
      * binds no tenant is a platform session ({@code admin_bypass}), not one that sees nothing.
@@ -399,6 +466,7 @@ public final class KeltaStack {
         log.info("Provisioning NOBYPASSRLS application role '{}' on schema '{}'", APP_ROLE, schema);
         try (Connection conn = adminConnection(); Statement st = conn.createStatement()) {
             st.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+            installVectorExtension(st);
             // Idempotent: a re-run inside the same CI schema reuses the role rather than
             // failing on the objects it already owns.
             st.execute("DO $$ BEGIN "
@@ -410,6 +478,11 @@ public final class KeltaStack {
                     + "    LOGIN PASSWORD " + literal(APP_PASSWORD) + " NOBYPASSRLS; "
                     + "END IF; END $$;");
             st.execute("GRANT ALL ON SCHEMA " + ident(schema) + " TO " + ident(APP_ROLE));
+            // Ownership, not just CREATE — see the javadoc: the baseline dump comments on
+            // the schema, which only its owner may do. Granting the role to the current
+            // user first is what lets a non-superuser CI pool user hand it over too.
+            st.execute("GRANT " + ident(APP_ROLE) + " TO CURRENT_USER");
+            st.execute("ALTER SCHEMA " + ident(schema) + " OWNER TO " + ident(APP_ROLE));
             // Per-tenant collection tables live in a schema named after the tenant slug, which
             // the worker creates at runtime — that needs CREATE on the database, which PUBLIC
             // does not have.
@@ -423,6 +496,22 @@ public final class KeltaStack {
                     "Could not provision the harness application role '" + APP_ROLE + "'. The harness "
                             + "runs the stack as a NOBYPASSRLS role so RLS is actually exercised; the "
                             + "bootstrap user must be able to CREATE ROLE.", e);
+        }
+    }
+
+    /**
+     * Installs pgvector if the server has it. {@code PhysicalTableStorageAdapter} issues
+     * {@code CREATE EXTENSION IF NOT EXISTS vector} the first time a collection gets a
+     * vector field, which an ordinary role cannot do — so it is done here, once, as the
+     * superuser. Absence is not fatal: only the semantic-search path needs it, and the
+     * adapter already reports a clear error of its own when it is missing.
+     */
+    private static void installVectorExtension(Statement st) {
+        try {
+            st.execute("CREATE EXTENSION IF NOT EXISTS vector");
+        } catch (SQLException e) {
+            log.warn("pgvector not available on this server ({}); vector-field scenarios will "
+                    + "fail if any run", e.getMessage());
         }
     }
 

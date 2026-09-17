@@ -76,20 +76,32 @@ public class TenantProvisioningHook implements BeforeSaveHook {
             return;
         }
 
-        // Set tenant context so RLS policies filter correctly for the new tenant
-        TenantContext.set(id);
-        try {
-            seedDefaultProfiles(id);
-            seedOidcProvider(id);
-            seedAdminUser(id, slug);
-            syncCerbosPolicies(id);
-            activateTenant(id);
-            log.info("Tenant provisioning complete for tenant '{}' (slug={})", id, slug);
-        } catch (Exception e) {
-            log.error("Tenant provisioning failed for tenant '{}' (slug={}): {}",
-                    id, slug, e.getMessage(), e);
-        } finally {
-            TenantContext.clear();
+        // Every row below belongs to the tenant being created, not to the tenant whose
+        // admin created it, so the connection must carry the new tenant's id or row-level
+        // security refuses the writes outright. The ScopedValue binding is what
+        // TenantContext.get() reads (the legacy ThreadLocal set() is only consulted when no
+        // ScopedValue is bound — on this path the request filter has already bound the
+        // *creating* tenant, so set() would be silently ignored and every insert here would
+        // be rejected by the tenant_isolation WITH CHECK).
+        Runnable provision = () -> {
+            try {
+                seedDefaultProfiles(id);
+                seedOidcProvider(id);
+                seedAdminUser(id, slug);
+                syncCerbosPolicies(id);
+                activateTenant(id);
+                log.info("Tenant provisioning complete for tenant '{}' (slug={})", id, slug);
+            } catch (Exception e) {
+                log.error("Tenant provisioning failed for tenant '{}' (slug={}): {}",
+                        id, slug, e.getMessage(), e);
+            }
+        };
+        // The slug goes in the scope too where there is one: leaving the creating tenant's
+        // slug bound would point any schema-qualified write at the wrong tenant's schema.
+        if (slug != null) {
+            TenantContext.runWithTenant(id, slug, provision);
+        } else {
+            TenantContext.runWithTenant(id, provision);
         }
     }
 
