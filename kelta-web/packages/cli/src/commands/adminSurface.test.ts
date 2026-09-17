@@ -438,6 +438,63 @@ describe('layouts get --tree / apply', () => {
       run(layoutsOnly(), 'apply', { collection: 'orders', file: join(dir, 'missing.json') }, axios)
     ).rejects.toThrow(/Cannot read file/);
   });
+
+  it('apply strips collectionName from an apply_layout-shaped file before forwarding', async () => {
+    const tree = {
+      collectionName: 'orders',
+      name: 'Main',
+      sections: [{ heading: 'Overview', columns: 2, fields: [{ name: 'name' }] }],
+    };
+    const file = join(dir, 'tree.json');
+    writeFileSync(file, JSON.stringify(tree));
+
+    const axios = fakeAxios();
+    axios.put.mockResolvedValueOnce({
+      data: { layoutId: 'L1', created: 1, updated: 0, deleted: 0, unchanged: 0 },
+    });
+
+    await run(layoutsOnly(), 'apply', { collection: 'orders', file }, axios);
+
+    expect(axios.put).toHaveBeenCalledWith('/api/collections/orders/layouts/Main/tree', {
+      name: 'Main',
+      sections: tree.sections,
+    });
+  });
+
+  it('apply rejects a collectionName that disagrees with the positional collection', async () => {
+    const file = join(dir, 'tree.json');
+    writeFileSync(file, JSON.stringify({ collectionName: 'invoices', name: 'Main', sections: [] }));
+    const axios = fakeAxios();
+
+    await expect(
+      run(layoutsOnly(), 'apply', { collection: 'orders', file }, axios)
+    ).rejects.toThrow(/"collectionName" \("invoices"\).*"orders"/);
+    expect(axios.put).not.toHaveBeenCalled();
+  });
+
+  it('apply addresses a file with layoutId via the by-id endpoint, stripping layoutId from the body', async () => {
+    const tree = {
+      layoutId: 'L1',
+      collectionName: 'orders',
+      name: 'Main',
+      sections: [{ heading: 'Overview', columns: 2, fields: [{ name: 'name' }] }],
+    };
+    const file = join(dir, 'tree.json');
+    writeFileSync(file, JSON.stringify(tree));
+
+    const axios = fakeAxios();
+    axios.put.mockResolvedValueOnce({
+      data: { layoutId: 'L1', created: 0, updated: 1, deleted: 0, unchanged: 0 },
+    });
+
+    const result = await run(layoutsOnly(), 'apply', { collection: 'orders', file }, axios);
+
+    expect(axios.put).toHaveBeenCalledWith('/api/page-layouts/L1/tree', {
+      name: 'Main',
+      sections: tree.sections,
+    });
+    expect(result.ids).toEqual(['L1']);
+  });
 });
 
 describe('flows', () => {
