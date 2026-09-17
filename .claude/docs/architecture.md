@@ -618,14 +618,24 @@ jobs. RLS then scopes every query automatically.
   services via direct JDBC, so no write path ever evicts their entries; the router serves them
   uncached (previously each pod served stale per-pod version/history lists until the TTL —
   Activity vs History tab count mismatch, flapping across refreshes).
-- **Tenant scoping for tenant-scoped system collections**: `injectTenantFilter` adds a
-  `tenantId = <caller>` predicate for list reads; `fields` and `collections` are the two
-  exceptions that get `tenantId IN (<caller>, SYSTEM_TENANT_ID)` instead, so a system
-  collection's own rows (and its built-in fields) stay visible to every tenant. Get-by-id
-  applies the same rule after the fetch (`visibleToTenant`: another tenant's row → 404, never
-  a 403 existence oracle). RLS enforces the real boundary underneath (strict per-tenant
-  `tenant_isolation` policy — the router-side predicate/check makes the answer identical
-  where RLS is a no-op, e.g. superuser DB roles in local dev). `fields` gained a
+- **Tenant scoping for tenant-scoped system collections** is enforced **once, at
+  `PhysicalTableStorageAdapter.query()`** (also `aggregate()`/`semanticSearch()`), not per
+  caller: with a tenant bound, the adapter ANDs `tenant_id = <caller>` — or
+  `tenant_id IN (<caller>, SYSTEM_TENANT_ID)` for the collections
+  `SystemCollectionTenancy.sharesSystemRows` names (`collections`, `fields`), so a system
+  collection's own rows and its built-in fields stay visible to every tenant. The `COUNT(*)`
+  behind `totalCount` carries the same predicate. This is why the six direct
+  `queryEngine.executeQuery` callers (`DashboardDataService`, `ReportExecutionService`,
+  `PageRenderService`, `DataExportService`, `BulkOperationService`, `CampaignRunnerService`)
+  need no tenant logic of their own — they had none, and read across tenants until PLT-260
+  (concerns.md). A collection whose table has no `tenant_id` column is left alone (eleven of
+  them hang off a parent FK), and an unbound read is left unfiltered but logged at WARN off
+  scheduler threads. `injectTenantFilter` keeps adding the same predicate at the router as a
+  second layer; get-by-id applies the rule after the fetch (`visibleToTenant`: another
+  tenant's row → 404, never a 403 existence oracle) and is still router-only. RLS enforces
+  the real boundary underneath (strict per-tenant `tenant_isolation` policy — the
+  application-side predicates make the answer identical where RLS is a no-op, e.g. superuser
+  DB roles in local dev). `fields` gained a
   denormalised `tenant_id` column for this (V198, KLT-206; see concerns.md) — it was
   previously `.tenantScoped(false)` with no `tenant_id` column at all, so `GET /api/fields`
   leaked every tenant's field metadata.

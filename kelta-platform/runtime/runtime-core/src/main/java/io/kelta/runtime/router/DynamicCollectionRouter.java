@@ -7,6 +7,7 @@ import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.SystemCollectionTenancy;
 import io.kelta.runtime.query.FilterCondition;
 import io.kelta.runtime.query.FilterOperator;
 import io.kelta.runtime.query.Pagination;
@@ -917,7 +918,7 @@ public class DynamicCollectionRouter {
         // and system records so that system collections (and their fields) are visible
         // alongside custom ones.
         List<FilterCondition> filters = new ArrayList<>(queryRequest.filters());
-        if (sharesSystemRows(definition)) {
+        if (SystemCollectionTenancy.sharesSystemRows(definition)) {
             filters.add(new FilterCondition("tenantId", FilterOperator.IN,
                     List.of(tenantId, SystemCollectionDefinitions.SYSTEM_TENANT_ID)));
         } else {
@@ -927,19 +928,11 @@ public class DynamicCollectionRouter {
     }
 
     /**
-     * Tenant-scoped system collections whose {@code SYSTEM_TENANT_ID} rows are visible to
-     * every tenant alongside its own: a system collection's definition and its built-in
-     * fields must be readable by the tenants that use it.
-     */
-    private static boolean sharesSystemRows(CollectionDefinition definition) {
-        return "collections".equals(definition.name()) || "fields".equals(definition.name());
-    }
-
-    /**
      * Get-by-id counterpart of {@link #injectTenantFilter}: a tenant-scoped system record
      * is visible only to its owning tenant (plus the platform's own rows for the collections
-     * in {@link #sharesSystemRows}). Non-tenant-scoped definitions, requests without a
-     * tenant header and rows without a {@code tenantId} pass through, matching the list path.
+     * {@link SystemCollectionTenancy#sharesSystemRows} names). Non-tenant-scoped definitions,
+     * requests without a tenant header and rows without a {@code tenantId} pass through, matching
+     * the list path.
      */
     private boolean visibleToTenant(Map<String, Object> record, CollectionDefinition definition,
                                     HttpServletRequest request) {
@@ -956,7 +949,7 @@ public class DynamicCollectionRouter {
         }
         String ownerId = String.valueOf(owner);
         return tenantId.equals(ownerId)
-                || (sharesSystemRows(definition)
+                || (SystemCollectionTenancy.sharesSystemRows(definition)
                         && SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(ownerId));
     }
 
