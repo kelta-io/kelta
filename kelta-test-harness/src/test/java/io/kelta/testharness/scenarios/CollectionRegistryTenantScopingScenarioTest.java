@@ -165,6 +165,7 @@ class CollectionRegistryTenantScopingScenarioTest extends ScenarioBase {
         return id;
     }
 
+    @SuppressWarnings("unchecked")
     private void addStringField(String token, String slug, String collectionId, String fieldName) {
         Map<String, Object> body = Map.of("data", Map.of(
                 "type", "fields",
@@ -172,11 +173,15 @@ class CollectionRegistryTenantScopingScenarioTest extends ScenarioBase {
                         "collectionId", collectionId,
                         "name", fieldName,
                         "type", "STRING")));
-        ResponseEntity<Void> response = gatewayClientWithToken(token).post()
+        ResponseEntity<Map> response = gatewayClientWithToken(token).post()
                 .uri("/" + slug + "/api/fields")
                 .contentType(MediaType.APPLICATION_JSON).body(body)
-                .retrieve().toBodilessEntity();
-        assertThat(response.getStatusCode()).as("add field '" + fieldName + "'").isEqualTo(HttpStatus.CREATED);
+                .retrieve()
+                .onStatus(s -> true, (req, resp) -> { /* inspect status manually */ })
+                .toEntity(Map.class);
+        assertThat(response.getStatusCode())
+                .as("add field '" + fieldName + "' -- response body: " + response.getBody())
+                .isEqualTo(HttpStatus.CREATED);
     }
 
     /** Polls the fields list until {@code fieldName} is present (route + registry propagation). */
@@ -223,8 +228,12 @@ class CollectionRegistryTenantScopingScenarioTest extends ScenarioBase {
                 .post().uri("/" + slug + "/api/" + collection)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("data", Map.of("type", collection, "attributes", attributes)))
-                .retrieve().toEntity(Map.class);
-        assertThat(created.getStatusCode()).as(collection + " create").isEqualTo(HttpStatus.CREATED);
+                .retrieve()
+                .onStatus(s -> true, (req, resp) -> { /* inspect status manually */ })
+                .toEntity(Map.class);
+        assertThat(created.getStatusCode())
+                .as(collection + " create -- response body: " + created.getBody())
+                .isEqualTo(HttpStatus.CREATED);
         Map<String, Object> data = (Map<String, Object>) created.getBody().get("data");
         String id = (String) data.get("id");
         assertThat(id).as("created " + collection + " has an id").isNotBlank();
@@ -276,8 +285,12 @@ class CollectionRegistryTenantScopingScenarioTest extends ScenarioBase {
         ResponseEntity<Map> response = gatewayClientWithToken(token).post()
                 .uri("/" + slug + "/api/dashboards/" + UUID.randomUUID() + "/validate")
                 .contentType(MediaType.APPLICATION_JSON).body(body)
-                .retrieve().toEntity(Map.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+                .retrieve()
+                .onStatus(s -> true, (req, resp) -> { /* inspect status manually */ })
+                .toEntity(Map.class);
+        assertThat(response.getStatusCode())
+                .as("dashboard validate -- response body: " + response.getBody())
+                .isEqualTo(HttpStatus.OK);
         return response.getBody();
     }
 
@@ -293,8 +306,12 @@ class CollectionRegistryTenantScopingScenarioTest extends ScenarioBase {
         ResponseEntity<Map> response = gatewayClientWithToken(token).post()
                 .uri("/" + slug + "/api/list-views")
                 .contentType(MediaType.APPLICATION_JSON).body(body)
-                .retrieve().toEntity(Map.class);
-        assertThat(response.getStatusCode()).as("create list-view").isEqualTo(HttpStatus.CREATED);
+                .retrieve()
+                .onStatus(s -> true, (req, resp) -> { /* inspect status manually */ })
+                .toEntity(Map.class);
+        assertThat(response.getStatusCode())
+                .as("create list-view -- response body: " + response.getBody())
+                .isEqualTo(HttpStatus.CREATED);
         return (String) ((Map<String, Object>) response.getBody().get("data")).get("id");
     }
 
@@ -325,8 +342,12 @@ class CollectionRegistryTenantScopingScenarioTest extends ScenarioBase {
                         + "/components/" + componentId + "/data")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of())
-                .retrieve().toEntity(Map.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+                .retrieve()
+                .onStatus(s -> true, (req, resp) -> { /* inspect status manually */ })
+                .toEntity(Map.class);
+        assertThat(response.getStatusCode())
+                .as("widget data -- response body: " + response.getBody())
+                .isEqualTo(HttpStatus.OK);
         Map<String, Object> attributes =
                 (Map<String, Object>) ((Map<String, Object>) response.getBody().get("data")).get("attributes");
         assertThat(attributes.get("error")).as("widget executed without error").isNull();
