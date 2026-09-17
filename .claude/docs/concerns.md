@@ -5,6 +5,65 @@ at the bottom so reviewers can see what's already been addressed.
 
 ## Security Risks
 
+**Tenant scoping of system collections lived only in the JSON:API router, so every direct
+`queryEngine.executeQuery` caller read across tenants (found 2026-09-16, fixed 2026-09-17,
+PLT-260).** `DynamicCollectionRouter.injectTenantFilter` added `tenant_id` to list queries on
+tenant-scoped system collections (`users`, `login-history`, `credentials`, `watches`, `wins`,
+`seo-pages`, `analytics-events`, `ui-pages`, …) — but only on the router's own path. Every
+service that calls the query engine directly bypassed it:
+
+| Direct `queryEngine.executeQuery` caller | What leaked |
+|---|---|
+| `DashboardDataService` (metric/chart/table/recent widgets, reference-label resolution) | a `users` / `userType = PORTAL` metric read 14 for a tenant with 6 portal users; a table widget listed every tenant's email |
+| `ReportExecutionService` (rows, grouping, export) | a report on `users` listed and counted every tenant's rows |
+| `PageRenderService` | `GET /api/pages/home/render` filtered on slug/published/active only, so the first match won regardless of tenant — one tenant rendered another's home page, config, data sources and deep links included |
+| `DataExportService` | an export of a system collection spanned tenants |
+| `BulkOperationService` | a bulk selection could span tenants |
+| `CampaignRunnerService` | an audience query could span tenants |
+
+**Tenant scoping is now enforced once, at `PhysicalTableStorageAdapter.query()` — not per
+caller.** The six services above (and every future one) are scoped without knowing it: the
+adapter appends `tenant_id = ?`, or `tenant_id IN (?, SYSTEM_TENANT_ID)` for the collections
+`SystemCollectionTenancy.sharesSystemRows` names (`collections`, `fields` — a system
+collection's definition and its built-in fields must stay readable by the tenants that use
+them, matching the `system_rows_read` policy V200 added). `aggregate()` and `semanticSearch()`
+get the same predicate, and the `COUNT(*)` behind `QueryResult.metadata().totalCount()` is
+scoped too — that count *is* what a metric widget reports. The predicate is **appended**, never
+substituted, so a caller that supplies its own `tenantId` filter can only narrow to the empty
+set, not widen. The router keeps its injection as a second layer, and both now read the
+shared-rows list from `SystemCollectionTenancy` in runtime-core instead of each holding a copy.
+
+Two things the choke point deliberately does not do. **Eleven tenant-scoped system collections
+have no `tenant_id` column** (`package-items`, `record-type-picklists`, `script-triggers`,
+`approval-steps`, `approval-step-instances`, `connected-app-tokens`, `job-execution-logs`,
+`bulk-job-results`, `collection-versions`, `field-versions`, `migration-steps`) — they hang off
+a parent row and are isolated through its foreign key. Appending the predicate to those would
+turn a working query into `column "tenant_id" does not exist`, so the adapter introspects
+`information_schema.columns` once per table and caches the answer; an inconclusive
+introspection scopes anyway (a loud SQL error beats a silent cross-tenant read). Note this also
+means `DynamicCollectionRouter`'s injection has always produced a SQL error for those eleven on
+the JSON:API list path — pre-existing, untouched here. And **by-id and write paths remain
+guarded by the router alone**: `getById`, `update` and `delete` take no tenant predicate, so
+`visibleToTenant` (`GET /:id`) and `injectTenantId` (writes) are still the only application-layer
+check there. A direct caller can therefore still load a single system record belonging to another
+tenant by guessing its id; anything it queries *through* that record is scoped. Closing that is a
+follow-up — it needs a pass over the cross-tenant write paths (provisioning, promotion, the
+create read-back) that legitimately touch a tenant other than the bound one.
+
+Reads with **no tenant bound** are left unfiltered — that is the platform path (Flyway,
+bootstrap) and the RLS `admin_bypass` sentinel depends on it. To keep that from hiding the next
+bug, the adapter logs a WARN naming the collection and the thread whenever a tenant-scoped
+system collection is read with no tenant context, demoted to DEBUG on scheduler threads
+(`scheduler-`, `scheduling-`), where cross-tenant sweeps run unbound by design.
+
+Relationship to RLS: with `NOBYPASSRLS` in force (see the entry below) Postgres now refuses
+these reads at the database as well. This is the application-layer half — the platform should
+not be one `BYPASSRLS` grant, one superuser connection, or one direct DB login away from a
+cross-tenant read. Covered by `PhysicalTableStorageAdapterTenantScopingTest` (runtime-core) and
+`SystemCollectionTenantScopingScenarioTest` (kelta-test-harness: two tenants with portal users,
+both publishing a page on the same slug with tenant A's created first, so a regression
+reproduces the original symptom exactly).
+
 **The gateway resolved collection routes by path alone, so any two tenants with a same-named
 collection shadowed each other in authorization (found 2026-09-17, fixed the same day).**
 `RouteRegistry` kept one `RouteDefinition` per `/api/<name>/**`; the last collection registered

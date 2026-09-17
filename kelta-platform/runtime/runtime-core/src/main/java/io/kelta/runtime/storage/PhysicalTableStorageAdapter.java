@@ -4,6 +4,8 @@ import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.FieldType;
+import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.SystemCollectionTenancy;
 import io.kelta.runtime.query.AggregationSpec;
 import io.kelta.runtime.query.FilterCondition;
 import io.kelta.runtime.query.FilterOperator;
@@ -34,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 
@@ -90,9 +93,27 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
                     .collect(Collectors.toUnmodifiableMap(
                             Map.Entry::getKey, e -> getBaseTableName(e.getValue())));
 
+    /**
+     * Thread-name prefixes that mark a background scheduler. A tenant-scoped system collection
+     * read with no bound tenant is expected there (cross-tenant sweeps bind each tenant in turn,
+     * and the outer pass runs unbound); anywhere else it is the leak {@link #tenantScope} exists
+     * to stop, so it is logged at WARN. {@code scheduler-} is kelta-worker's {@code SchedulerConfig}
+     * prefix, {@code scheduling-} Spring's default.
+     */
+    private static final List<String> SCHEDULER_THREAD_PREFIXES = List.of("scheduler-", "scheduling-");
+
     private final JdbcTemplate jdbcTemplate;
     private final SchemaMigrationEngine migrationEngine;
     private final tools.jackson.databind.ObjectMapper objectMapper;
+
+    /**
+     * Whether a physical table carries a {@code tenant_id} column, keyed by its SQL identifier.
+     * Introspected once per table and cached: eleven tenant-scoped system collections
+     * ({@code approval-steps}, {@code field-versions}, {@code migration-steps}, …) are isolated
+     * through their parent's foreign key and have no such column, and appending the predicate to
+     * those would turn a working query into a SQL error.
+     */
+    private final Map<String, Boolean> tenantColumnByTable = new ConcurrentHashMap<>();
 
     /**
      * Creates a new PhysicalTableStorageAdapter.
@@ -501,15 +522,19 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         sql.append(buildSelectClause(request.fields(), definition));
         sql.append(" FROM ").append(tableRef.toSql());
 
-        // Build WHERE clause for filters
+        // Build WHERE clause for filters, narrowed to the calling tenant for tenant-scoped
+        // system collections. This is the single choke point: every direct executeQuery caller
+        // (dashboards, reports, page render, exports, bulk ops, campaigns) is scoped here,
+        // whether or not it went through the JSON:API router.
         List<FilterCondition> allFilters = new ArrayList<>();
         if (request.hasFilters()) {
             allFilters.addAll(request.filters());
         }
+        TenantScope tenantScope = tenantScope(definition, tableRef);
 
-        if (!allFilters.isEmpty()) {
-            sql.append(" WHERE ");
-            sql.append(buildWhereClause(allFilters, definition, params));
+        String whereClause = buildWhereClause(allFilters, tenantScope, definition, params);
+        if (!whereClause.isEmpty()) {
+            sql.append(" WHERE ").append(whereClause);
         }
 
         // Build ORDER BY clause. Unsorted queries get a deterministic creation-order
@@ -540,8 +565,8 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             // Reconstruct companion column values into structured fields
             reconstructCompanionColumns(definition, data);
 
-            // Get total count
-            long totalCount = getTotalCount(tableRef, allFilters, definition);
+            // Get total count — same predicate, or a metric widget counts every tenant's rows
+            long totalCount = getTotalCount(tableRef, allFilters, tenantScope, definition);
 
             return QueryResult.of(data, totalCount, pagination);
         } catch (DataAccessException e) {
@@ -567,8 +592,10 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         params.add(queryVectorLiteral);
         sql.append(" FROM ").append(tableRef.toSql());
         sql.append(" WHERE ").append(vectorIdent).append(" IS NOT NULL");
-        if (filters != null && !filters.isEmpty()) {
-            sql.append(" AND ").append(buildWhereClause(filters, definition, params));
+        String semanticWhere = buildWhereClause(
+                filters == null ? List.of() : filters, tenantScope(definition, tableRef), definition, params);
+        if (!semanticWhere.isEmpty()) {
+            sql.append(" AND ").append(semanticWhere);
         }
         sql.append(" ORDER BY _distance ASC LIMIT ?");
         params.add(limit);
@@ -612,9 +639,10 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         sql.append(selectList);
         sql.append(" FROM ").append(tableRef.toSql());
 
-        if (filters != null && !filters.isEmpty()) {
-            sql.append(" WHERE ");
-            sql.append(buildWhereClause(filters, definition, params));
+        String whereClause = buildWhereClause(
+                filters == null ? List.of() : filters, tenantScope(definition, tableRef), definition, params);
+        if (!whereClause.isEmpty()) {
+            sql.append(" WHERE ").append(whereClause);
         }
 
         try {
@@ -1057,6 +1085,100 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         return values;
     }
 
+    /**
+     * A rendered {@code tenant_id} predicate and its bind values, ANDed into a read's WHERE clause.
+     *
+     * @param sql the predicate SQL, e.g. {@code tenant_id = ?}
+     * @param params its bind values, in placeholder order
+     */
+    private record TenantScope(String sql, List<Object> params) {}
+
+    /**
+     * The tenant predicate for a read of {@code definition}, or {@code null} when none applies.
+     *
+     * <p>Tenant-scoped system collections all live in Flyway-managed tables in {@code public},
+     * shared by every tenant and discriminated by {@code tenant_id} — unlike user collections,
+     * which are isolated by schema. Scoping them here rather than in each caller is the whole
+     * point: {@code DynamicCollectionRouter} injected the filter only on the JSON:API path, so
+     * {@code DashboardDataService}, {@code ReportExecutionService}, {@code PageRenderService},
+     * {@code DataExportService}, {@code BulkOperationService} and {@code CampaignRunnerService}
+     * all read across tenants (a {@code users} metric widget counted every tenant's portal users;
+     * {@code /api/pages/home/render} served another tenant's page). Same pattern as
+     * {@link #isUnique}, which has scoped uniqueness checks this way all along.
+     *
+     * @param definition the collection being read
+     * @param tableRef its resolved table
+     * @return the predicate to AND in, or {@code null} when the read needs no tenant narrowing
+     */
+    private TenantScope tenantScope(CollectionDefinition definition, TableRef tableRef) {
+        if (!SystemCollectionTenancy.isTenantScoped(definition)) {
+            return null;
+        }
+        String tenantId = TenantContext.get();
+        if (tenantId == null || tenantId.isBlank()) {
+            warnUnscopedRead(definition);
+            return null;
+        }
+        if (!hasTenantColumn(tableRef)) {
+            return null;
+        }
+        if (SystemCollectionTenancy.sharesSystemRows(definition)) {
+            return new TenantScope("tenant_id IN (?, ?)",
+                    List.of(tenantId, SystemCollectionDefinitions.SYSTEM_TENANT_ID));
+        }
+        return new TenantScope("tenant_id = ?", List.of(tenantId));
+    }
+
+    /**
+     * Whether {@code tableRef} has a {@code tenant_id} column, introspected once and cached.
+     *
+     * <p>Not every tenant-scoped system collection has one: {@code approval-steps},
+     * {@code field-versions}, {@code migration-steps} and friends hang off a parent row and are
+     * isolated through its foreign key. Appending {@code tenant_id = ?} to those would turn a
+     * working query into {@code column "tenant_id" does not exist}.
+     *
+     * <p>When the introspection tells us nothing — unknown table, unreadable catalog — the answer
+     * is {@code true}. Guessing "no column" there would silently drop the tenant predicate, which
+     * is the failure mode this whole change exists to remove; guessing "column" at worst surfaces
+     * a loud SQL error.
+     */
+    private boolean hasTenantColumn(TableRef tableRef) {
+        return tenantColumnByTable.computeIfAbsent(tableRef.toSql(), key -> {
+            try {
+                Set<String> columns = migrationEngine.getExistingColumns(
+                        tableRef.schema(), tableRef.tableName());
+                return columns == null || columns.isEmpty() || columns.contains("tenant_id");
+            } catch (DataAccessException e) {
+                log.warn("Could not introspect {} for a tenant_id column ({}) — scoping the read anyway",
+                        key, e.getMessage());
+                return true;
+            }
+        });
+    }
+
+    /**
+     * A tenant-scoped system collection read with no bound tenant returns every tenant's rows.
+     * Genuine platform paths do that deliberately (Flyway, bootstrap, and the scheduler threads
+     * that sweep tenant by tenant), so those are logged at DEBUG; anywhere else it is a leak
+     * waiting to be reported and gets a WARN naming the collection and the thread.
+     */
+    private void warnUnscopedRead(CollectionDefinition definition) {
+        String threadName = Thread.currentThread().getName();
+        if (isSchedulerThread(threadName)) {
+            log.debug("Tenant-scoped system collection '{}' read with no tenant context on scheduler "
+                    + "thread '{}' — not tenant-filtered", definition.name(), threadName);
+            return;
+        }
+        log.warn("Tenant-scoped system collection '{}' read with no tenant context on thread '{}' — "
+                        + "the query is NOT tenant-filtered and returns rows from every tenant",
+                definition.name(), threadName);
+    }
+
+    private static boolean isSchedulerThread(String threadName) {
+        return threadName != null
+                && SCHEDULER_THREAD_PREFIXES.stream().anyMatch(threadName::startsWith);
+    }
+
     @Override
     public boolean isUnique(CollectionDefinition definition, String fieldName, Object value, String excludeId) {
         TableRef tableRef = getTableRef(definition);
@@ -1440,18 +1562,28 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
     }
 
     /**
-     * Builds the WHERE clause from filter conditions.
+     * Builds the WHERE clause from filter conditions with {@code tenantScope} ANDed in.
      *
-     * @param filters the filter conditions
+     * <p>The tenant predicate is appended, never substituted: a caller that supplies its own
+     * {@code tenantId} filter cannot widen the scope, only narrow it to the empty set.
+     *
+     * @param filters the filter conditions (may be empty)
+     * @param tenantScope the tenant predicate, or {@code null} when none applies
      * @param definition the collection definition (used for column name mapping)
-     * @param params the parameter list to populate
-     * @return the WHERE clause (without the WHERE keyword)
+     * @param params the parameter list to populate, in clause order
+     * @return the WHERE clause (without the WHERE keyword), empty when there is nothing to filter
      */
-    private String buildWhereClause(List<FilterCondition> filters, CollectionDefinition definition,
-                                     List<Object> params) {
-        return filters.stream()
-            .map(filter -> buildFilterCondition(filter, definition, params))
-            .collect(Collectors.joining(" AND "));
+    private String buildWhereClause(List<FilterCondition> filters, TenantScope tenantScope,
+                                     CollectionDefinition definition, List<Object> params) {
+        List<String> predicates = new ArrayList<>();
+        for (FilterCondition filter : filters) {
+            predicates.add(buildFilterCondition(filter, definition, params));
+        }
+        if (tenantScope != null) {
+            predicates.add(tenantScope.sql());
+            params.addAll(tenantScope.params());
+        }
+        return String.join(" AND ", predicates);
     }
 
     /**
@@ -1669,18 +1801,20 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
      *
      * @param tableRef the table reference
      * @param filters the filter conditions
+     * @param tenantScope the tenant predicate to AND in, or {@code null} for none
      * @param definition the collection definition (used for column name mapping)
      * @return the total count
      */
     private long getTotalCount(TableRef tableRef, List<FilterCondition> filters,
-                                CollectionDefinition definition) {
+                                TenantScope tenantScope, CollectionDefinition definition) {
         StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM ");
         sql.append(tableRef.toSql());
 
         List<Object> params = new ArrayList<>();
-        if (filters != null && !filters.isEmpty()) {
-            sql.append(" WHERE ");
-            sql.append(buildWhereClause(filters, definition, params));
+        String whereClause = buildWhereClause(
+                filters == null ? List.of() : filters, tenantScope, definition, params);
+        if (!whereClause.isEmpty()) {
+            sql.append(" WHERE ").append(whereClause);
         }
 
         Long count = jdbcTemplate.queryForObject(sql.toString(), Long.class, params.toArray());
