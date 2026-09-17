@@ -13,8 +13,18 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Thread-safe in-memory registry for route definitions.
  *
- * Routes are indexed by their path pattern for efficient lookup.
- * All operations are thread-safe using ConcurrentHashMap.
+ * <p>Routes are indexed by path pattern, and under each path by owning tenant. A
+ * collection name is only unique within a tenant, so two tenants (a parent and its
+ * sandbox clone, two customers who both have "orders") legitimately register the same
+ * path with different collection ids. Keying by path alone made the last registration
+ * win for <em>every</em> tenant: authorization then ran against another tenant's
+ * collection id and its Cerbos policy, denying the older tenant outright (observed
+ * 2026-09-17 — a sandbox clone silenced its parent tenant's whole agent fleet for 13
+ * hours). {@link #findByPath(String, String)} resolves the caller's own tenant first,
+ * then a platform-wide ({@code static-}) route, then any other tenant's route so that
+ * authorization still runs (and denies) rather than falling through unchecked.
+ *
+ * <p>All operations are thread-safe using ConcurrentHashMap.
  *
  * This registry is updated dynamically through:
  * - Initial bootstrap from the worker service
@@ -52,10 +62,22 @@ public class RouteRegistry {
             // signed-JAR upload, file serving and image transforms all hang off these.
             "/api/modules/**", "/api/files/**", "/api/images/**");
 
-    private final ConcurrentHashMap<String, RouteDefinition> routes;
+    /** Key under a path for routes that belong to no tenant (static / platform-wide). */
+    static final String GLOBAL = "*";
+
+    /** path → (tenantId or {@link #GLOBAL}) → route. */
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, RouteDefinition>> routes;
 
     public RouteRegistry() {
         this.routes = new ConcurrentHashMap<>();
+    }
+
+    private static String tenantKey(RouteDefinition route) {
+        return route.getTenantId() == null || route.getTenantId().isBlank() ? GLOBAL : route.getTenantId();
+    }
+
+    private static String tenantKey(String tenantId) {
+        return tenantId == null || tenantId.isBlank() ? GLOBAL : tenantId;
     }
 
     private static boolean isStaticRoute(RouteDefinition route) {
@@ -97,7 +119,9 @@ public class RouteRegistry {
             return;
         }
 
-        RouteDefinition previous = routes.put(route.getPath(), route);
+        RouteDefinition previous = routes
+                .computeIfAbsent(route.getPath(), k -> new ConcurrentHashMap<>())
+                .put(tenantKey(route), route);
         if (previous != null) {
             logger.info("Updated existing route for path '{}': {}", route.getPath(), route);
         } else {
@@ -116,13 +140,16 @@ public class RouteRegistry {
             return;
         }
         
-        // Find and remove the route with matching ID
+        // Find and remove the route with matching ID; drop the path once it has no tenants left
         routes.entrySet().removeIf(entry -> {
-            if (routeId.equals(entry.getValue().getId())) {
-                logger.info("Removed route with ID '{}' at path '{}'", routeId, entry.getKey());
-                return true;
-            }
-            return false;
+            entry.getValue().entrySet().removeIf(byTenant -> {
+                if (routeId.equals(byTenant.getValue().getId())) {
+                    logger.info("Removed route with ID '{}' at path '{}'", routeId, entry.getKey());
+                    return true;
+                }
+                return false;
+            });
+            return entry.getValue().isEmpty();
         });
     }
     
@@ -152,18 +179,25 @@ public class RouteRegistry {
             return;
         }
 
-        RouteDefinition previous = routes.put(route.getPath(), route);
+        RouteDefinition previous = routes
+                .computeIfAbsent(route.getPath(), k -> new ConcurrentHashMap<>())
+                .put(tenantKey(route), route);
 
         // Prune entries for the same collection left at an old path (rename case).
         // Doing this AFTER the put means the collection always has at least one
         // live route; a brief overlap of old+new path is harmless (same backend).
         routes.entrySet().removeIf(entry -> {
-            if (route.getId().equals(entry.getValue().getId())
-                    && !entry.getKey().equals(route.getPath())) {
-                logger.info("Pruned stale route for ID '{}' at old path '{}'", route.getId(), entry.getKey());
-                return true;
+            if (entry.getKey().equals(route.getPath())) {
+                return false;
             }
-            return false;
+            entry.getValue().entrySet().removeIf(byTenant -> {
+                if (route.getId().equals(byTenant.getValue().getId())) {
+                    logger.info("Pruned stale route for ID '{}' at old path '{}'", route.getId(), entry.getKey());
+                    return true;
+                }
+                return false;
+            });
+            return entry.getValue().isEmpty();
         });
 
         if (previous != null) {
@@ -174,31 +208,73 @@ public class RouteRegistry {
     }
     
     /**
-     * Finds a route whose path pattern matches the given request path.
-     * Supports exact match, /** (multi-segment wildcard), and /* (single-segment wildcard).
+     * Finds a route whose path pattern matches the given request path, with no tenant
+     * preference: a platform-wide route wins, otherwise whichever tenant's route is found
+     * first. Use {@link #findByPath(String, String)} wherever the caller's tenant is known —
+     * this overload only tells you <em>a</em> collection lives at the path.
      *
      * @param path The request path to match against registered route patterns
      * @return Optional containing the matching route if found, empty otherwise
      */
     public Optional<RouteDefinition> findByPath(String path) {
+        return findByPath(path, null);
+    }
+
+    /**
+     * Finds the route for a request path as seen by one tenant: the tenant's own
+     * collection at that path, else a platform-wide ({@code static-}) route, else another
+     * tenant's route (so authorization still runs against a real collection and denies,
+     * instead of the request slipping through as "not a collection call").
+     *
+     * <p>Supports exact match, /** (multi-segment wildcard), and /* (single-segment wildcard).
+     *
+     * @param path     The request path to match against registered route patterns
+     * @param tenantId The caller's resolved tenant id (null for none)
+     * @return Optional containing the matching route if found, empty otherwise
+     */
+    public Optional<RouteDefinition> findByPath(String path, String tenantId) {
         if (path == null || path.isEmpty()) {
             return Optional.empty();
         }
 
         // Try exact match first (most efficient)
-        RouteDefinition exact = routes.get(path);
+        ConcurrentHashMap<String, RouteDefinition> exact = routes.get(path);
         if (exact != null) {
-            return Optional.of(exact);
+            Optional<RouteDefinition> chosen = pick(exact, tenantId);
+            if (chosen.isPresent()) {
+                return chosen;
+            }
         }
 
         // Try wildcard matching against all registered patterns
-        for (RouteDefinition route : routes.values()) {
-            if (matchesPath(path, route.getPath())) {
-                return Optional.of(route);
+        for (var entry : routes.entrySet()) {
+            if (matchesPath(path, entry.getKey())) {
+                Optional<RouteDefinition> chosen = pick(entry.getValue(), tenantId);
+                if (chosen.isPresent()) {
+                    return chosen;
+                }
             }
         }
 
         return Optional.empty();
+    }
+
+    /** Tenant's own route, else the platform-wide one, else any. */
+    private static Optional<RouteDefinition> pick(ConcurrentHashMap<String, RouteDefinition> byTenant,
+                                                  String tenantId) {
+        if (byTenant.isEmpty()) {
+            return Optional.empty();
+        }
+        String key = tenantKey(tenantId);
+        RouteDefinition own = GLOBAL.equals(key) ? null : byTenant.get(key);
+        if (own != null) {
+            return Optional.of(own);
+        }
+        RouteDefinition global = byTenant.get(GLOBAL);
+        if (global != null) {
+            return Optional.of(global);
+        }
+        return byTenant.values().stream().findFirst();
     }
 
     /**
@@ -242,7 +318,24 @@ public class RouteRegistry {
      * @return A list of all route definitions (copy to prevent external modification)
      */
     public List<RouteDefinition> getAllRoutes() {
-        return new ArrayList<>(routes.values());
+        List<RouteDefinition> all = new ArrayList<>();
+        for (var byTenant : routes.values()) {
+            all.addAll(byTenant.values());
+        }
+        return all;
+    }
+
+    /**
+     * Returns one route per registered path — what the proxy layer needs: every tenant's
+     * collection at a path is served by the same backend, so a single Spring Cloud
+     * Gateway route per path is enough (and duplicates would only add predicate work).
+     */
+    public List<RouteDefinition> getRoutesByPath() {
+        List<RouteDefinition> perPath = new ArrayList<>();
+        for (var byTenant : routes.values()) {
+            pick(byTenant, null).ifPresent(perPath::add);
+        }
+        return perPath;
     }
     
     /**

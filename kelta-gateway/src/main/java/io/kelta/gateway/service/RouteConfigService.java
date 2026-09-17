@@ -149,7 +149,10 @@ public class RouteConfigService {
                 collectionId,
                 path,
                 workerServiceUrl,
-                collectionName
+                collectionName,
+                null,
+                0,
+                collection.getTenantId()
             );
 
             logger.debug("Parsed collection '{}' to route: {}", collectionId, route);

@@ -17,7 +17,7 @@ import java.util.Optional;
 public class BootstrapRepository {
 
     private static final String SELECT_ACTIVE_COLLECTIONS = """
-            SELECT id, name, path, system_collection
+            SELECT id, name, path, system_collection, tenant_id
             FROM collection WHERE active = true
             """;
 

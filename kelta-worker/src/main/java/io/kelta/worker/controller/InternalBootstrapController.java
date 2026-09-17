@@ -491,6 +491,10 @@ public class InternalBootstrapController {
             Map<String, Object> collection = new LinkedHashMap<>();
             collection.put("id", row.get("id"));
             collection.put("name", name);
+            // The gateway keys routes by (path, tenant): a collection name is only unique
+            // within a tenant, and a same-named collection in another tenant (a sandbox
+            // clone, say) must not shadow this one in authorization.
+            collection.put("tenantId", row.get("tenant_id"));
             collection.put("path", row.get("path"));
             collection.put("systemCollection", Boolean.TRUE.equals(row.get("system_collection")));
             collections.add(collection);

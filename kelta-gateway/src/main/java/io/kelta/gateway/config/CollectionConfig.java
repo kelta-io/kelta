@@ -16,6 +16,8 @@ public class CollectionConfig {
     private String workerBaseUrl;
     private List<FieldConfig> fields;
     private boolean systemCollection;
+    /** Owning tenant; system collections carry the platform tenant. */
+    private String tenantId;
 
     public CollectionConfig() {
     }
@@ -83,5 +85,13 @@ public class CollectionConfig {
                ", path='" + path + '\'' +
                ", fields=" + (fields != null ? fields.size() : 0) + " fields" +
                '}';
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
     }
 }

@@ -53,7 +53,7 @@ public class DynamicRouteLocator implements RouteLocator {
     public Flux<Route> getRoutes() {
         logger.debug("Loading routes from registry");
         
-        return Flux.fromIterable(routeRegistry.getAllRoutes())
+        return Flux.fromIterable(routeRegistry.getRoutesByPath())
                 .map(this::convertToRoute)
                 .doOnNext(route -> logger.debug("Loaded route: {}", route.getId()))
                 .doOnComplete(() -> logger.debug("Completed loading {} routes", routeRegistry.size()));

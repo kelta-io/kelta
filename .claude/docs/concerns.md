@@ -5,6 +5,31 @@ at the bottom so reviewers can see what's already been addressed.
 
 ## Security Risks
 
+**The gateway resolved collection routes by path alone, so any two tenants with a same-named
+collection shadowed each other in authorization (found 2026-09-17, fixed the same day).**
+`RouteRegistry` kept one `RouteDefinition` per `/api/<name>/**`; the last collection registered
+at a path — from bootstrap order or a live `collection.changed` event — supplied the collection
+id that `RouteAuthorizationFilter` handed to Cerbos for *every* tenant. Collection names are
+only unique within a tenant, and a sandbox clones every name of its parent by design, so the
+K-9 retest sandbox (`rzware--k9-retest`) silently 403'd the whole RZWare agent fleet for 13 h
+(`ceo`, `planner`, `dispatcher`, `duty-officer` all denied on `tasks`, `fleet-state`,
+`decisions`), and `spotopened--billing-stripe-verify` did the same to spotopened's
+`field-reports`/`facility-photos`; the demo tenants (`orders`, `customers`, `payments`) had
+collided for months. Deny, not grant — Cerbos resource policies are tenant-scoped — but a
+full outage for the older tenant.
+
+Fix: routes are keyed by (path, tenant). The worker's `/internal/bootstrap` rows carry
+`tenantId`; `ConfigEventListener` reads it from the event envelope (and now removes the route
+of a collection that turns `active=false` instead of re-registering it); `RouteRegistry`
+resolves the caller's own tenant first, then a platform-wide `static-` route, then any other
+tenant's route so authorization still runs (and denies) rather than falling through unchecked.
+The proxy layer keeps one Spring Cloud Gateway route per path (`getRoutesByPath()`).
+`RouteRegistryTest` covers two tenants at one path, shadowing, removal of one tenant's entry,
+rename pruning; `ConfigEventListenerTest` the envelope tenant and deactivation;
+`RouteAuthorizationFilterTest` that the lookup is made for the caller's tenant. Mitigation in
+production before the deploy: the two sandboxes' cloned collections were set `active=false`
+and the gateway restarted; they can be reactivated once this ships.
+
 **Row-level security was configured on 111 control-plane tables and enforced on none
 (found 2026-09-16, fixed in code the same day, enforced in production 2026-09-17 04:10Z —
 `ALTER ROLE emf NOBYPASSRLS`, playbook §8; verified: a tenant's `users` metric fell from 14 to its own 6,
