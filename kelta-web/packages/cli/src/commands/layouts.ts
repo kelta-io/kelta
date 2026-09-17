@@ -158,7 +158,10 @@ const layoutApply = defineCommand({
   options: [
     {
       flag: '--file <path>',
-      description: 'Layout tree JSON file — see `layouts get <id> --tree` for the shape',
+      description:
+        'Layout tree JSON file — see `layouts get <id> --tree` for the shape. Also accepts ' +
+        'an `apply_layout` (MCP) argument file as-is: `collectionName`/`layoutId` are ' +
+        'stripped before forwarding, and a `layoutId` addresses the layout by id.',
     },
     {
       flag: '--name <name>',
@@ -182,8 +185,22 @@ const layoutApply = defineCommand({
         exitCode: EXIT.USAGE,
       });
     }
-    const body = { ...tree, name };
-    const path = `/api/collections/${encodeURIComponent(input.collection)}/layouts/${encodeURIComponent(name)}/tree`;
+    // Accept the same file `apply_layout` (MCP) takes: it addresses the layout via
+    // top-level `collectionName`/`layoutId`, which the tree PUT body rejects as unknown
+    // properties. Strip them here and use `layoutId` (if present) to address by id.
+    const { collectionName: fileCollectionName, layoutId: fileLayoutId, ...treeBody } = tree;
+    if (typeof fileCollectionName === 'string' && fileCollectionName !== input.collection) {
+      throw new CliError(
+        `Tree file's "collectionName" ("${fileCollectionName}") does not match the given ` +
+          `collection argument ("${input.collection}")`,
+        { code: 'INVALID_ARGUMENTS', exitCode: EXIT.USAGE }
+      );
+    }
+    const body = { ...treeBody, name };
+    const path =
+      typeof fileLayoutId === 'string' && fileLayoutId.length > 0
+        ? `/api/page-layouts/${encodeURIComponent(fileLayoutId)}/tree`
+        : `/api/collections/${encodeURIComponent(input.collection)}/layouts/${encodeURIComponent(name)}/tree`;
     const response = await ctx.client.getAxiosInstance().put<{
       layoutId?: string;
       created?: number;

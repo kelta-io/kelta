@@ -256,7 +256,7 @@ Get a page layout by id
 
 Apply a layout tree file (sections, fields, related lists) to a collection
 
-- `--file <path>` — Layout tree JSON file — see `layouts get <id> --tree` for the shape
+- `--file <path>` — Layout tree JSON file — see `layouts get <id> --tree` for the shape. Also accepts an `apply_layout` (MCP) argument file as-is: `collectionName`/`layoutId` are stripped before forwarding, and a `layoutId` addresses the layout by id.
 - `--name <name>` — Layout name (overrides the file's own "name"; addresses the layout within the collection, creating it if it does not exist yet)
 
 ### `kelta layouts update <layoutId>`

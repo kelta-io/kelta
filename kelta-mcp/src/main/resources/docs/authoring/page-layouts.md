@@ -90,9 +90,16 @@ ids.
   instead of stacking every field in column 0 (the tree endpoint's own
   default for an omitted `column`).
 - `kelta layouts apply <collection> --file <tree.json> [--name <name>]`
-  and `kelta layouts get <layoutId> --tree` (CLI) — the file is exactly
-  the body below; `--name` overrides the file's own `name` and addresses
-  the layout within the collection.
+  and `kelta layouts get <layoutId> --tree` (CLI) — one tree file works
+  across `apply_layout`, `kelta layouts apply`, and the raw PUT: the CLI
+  accepts an `apply_layout`-shaped file as-is, stripping `collectionName`/
+  `layoutId` before forwarding the body (the raw endpoint rejects those as
+  unknown tree properties). A `layoutId` in the file addresses that layout
+  by id (`PUT /api/page-layouts/{layoutId}/tree`) instead of by
+  collection+name; a `collectionName` that disagrees with the positional
+  `<collection>` argument is a usage error naming both values. `--name`
+  overrides the file's own `name` and addresses the layout within the
+  collection when no `layoutId` is present.
 
 ### Body shape
 
