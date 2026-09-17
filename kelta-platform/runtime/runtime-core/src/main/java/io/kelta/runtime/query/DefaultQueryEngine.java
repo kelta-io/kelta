@@ -474,7 +474,7 @@ public class DefaultQueryEngine implements QueryEngine {
                 throw new ValidationException(ValidationResult.failure(hookResult.getErrors().stream()
                         .map(e -> new FieldError(
                                 e.field() != null ? e.field() : "_record",
-                                e.message(), "beforeSaveHook"))
+                                e.message(), hookErrorCode(e)))
                         .toList()));
             }
         }
@@ -744,6 +744,15 @@ public class DefaultQueryEngine implements QueryEngine {
     }
 
     /**
+     * Resolves the {@link FieldError#constraint()} for a hook validation error: the hook's
+     * own code when it supplied one, else blank so {@code GlobalExceptionHandler} falls back
+     * to its generic {@code VALIDATION_FAILED} default — never the hook-kind literal.
+     */
+    private static String hookErrorCode(BeforeSaveResult.ValidationError error) {
+        return error.code() != null && !error.code().isBlank() ? error.code() : "";
+    }
+
+    /**
      * Evaluates before-create hooks for the collection. If any hook returns errors,
      * a ValidationException is thrown. If hooks return field updates, they are merged
      * into the record data.
@@ -758,7 +767,7 @@ public class DefaultQueryEngine implements QueryEngine {
             throw new ValidationException(ValidationResult.failure(result.getErrors().stream()
                     .map(e -> new FieldError(
                             e.field() != null ? e.field() : "_record",
-                            e.message(), "beforeSaveHook"))
+                            e.message(), hookErrorCode(e)))
                     .toList()));
         }
         if (result.hasFieldUpdates()) {
@@ -783,7 +792,7 @@ public class DefaultQueryEngine implements QueryEngine {
             throw new ValidationException(ValidationResult.failure(result.getErrors().stream()
                     .map(e -> new FieldError(
                             e.field() != null ? e.field() : "_record",
-                            e.message(), "beforeSaveHook"))
+                            e.message(), hookErrorCode(e)))
                     .toList()));
         }
         if (result.hasFieldUpdates()) {

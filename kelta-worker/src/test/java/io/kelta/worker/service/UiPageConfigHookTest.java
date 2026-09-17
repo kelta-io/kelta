@@ -49,6 +49,7 @@ class UiPageConfigHookTest {
         assertThat(result.getErrors()).singleElement().satisfies(error -> {
             assertThat(error.field()).isEqualTo("config/components/0/type");
             assertThat(error.message()).contains("nope");
+            assertThat(error.code()).isNotEqualTo("beforeSaveHook");
         });
     }
 

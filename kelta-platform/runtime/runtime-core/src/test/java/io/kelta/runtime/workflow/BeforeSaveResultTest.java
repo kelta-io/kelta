@@ -97,5 +97,14 @@ class BeforeSaveResultTest {
         BeforeSaveResult.ValidationError error = new BeforeSaveResult.ValidationError("field1", "msg1");
         assertEquals("field1", error.field());
         assertEquals("msg1", error.message());
+        assertNull(error.code(), "the 2-arg constructor should default code to null");
+    }
+
+    @Test
+    @DisplayName("ValidationError record should carry an explicit code when given")
+    void validationErrorShouldCarryExplicitCode() {
+        BeforeSaveResult.ValidationError error =
+            new BeforeSaveResult.ValidationError("field1", "msg1", "SOME_CODE");
+        assertEquals("SOME_CODE", error.code());
     }
 }

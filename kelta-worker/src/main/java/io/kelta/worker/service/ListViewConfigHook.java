@@ -124,7 +124,7 @@ public class ListViewConfigHook implements BeforeSaveHook {
         Integer rowLimit = asInteger(record.get("rowLimit"));
         if (rowLimit != null && !ALLOWED_ROW_LIMITS.contains(rowLimit)) {
             errors.add(new BeforeSaveResult.ValidationError("rowLimit",
-                    "rowLimit must be one of: 10, 25, 50, 100"));
+                    "rowLimit must be one of: 10, 25, 50, 100", "INVALID_ROW_LIMIT"));
         }
     }
 

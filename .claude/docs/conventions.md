@@ -104,6 +104,27 @@ counting a write it cannot make.
 Prefer the field-level flag for new fields in the declared field list;
 collection-level covers fields outside it (`tenantId`, join keys).
 
+#### BeforeSaveHook validation error codes
+
+`BeforeSaveResult.ValidationError` carries an optional `code` (nullable, defaulting
+to `null` via the 2-arg constructor) that `DefaultQueryEngine` threads through as
+the resulting `FieldError.constraint` for all three hook call sites (before-create,
+before-update, before-delete). A hook that supplies no code falls through blank,
+and `GlobalExceptionHandler.handleValidationException` defaults `code` to
+`VALIDATION_FAILED` — the hook's own kind (e.g. `beforeSaveHook`) must never leak
+into the response as `code`.
+
+Give a hook validation error a specific `UPPER_SNAKE_CASE` code only when the
+constraint is obviously distinct from generic field validation; otherwise let it
+fall back to `VALIDATION_FAILED`. Codes returned today:
+
+- `INVALID_ROW_LIMIT` — `ListViewConfigHook`, a `list-views.rowLimit` outside
+  `{10, 25, 50, 100}`.
+- `VALIDATION_FAILED` (default) — every other check in `ListViewConfigHook`,
+  `DashboardComponentConfigHook`/`DashboardComponentValidator`, and
+  `UiPageConfigHook` (unknown field/column/operator, bad grid position, unknown
+  widget type, etc).
+
 ### Javadoc
 - Required for public classes and methods
 - Include `@param`, `@returns`, `@throws`
