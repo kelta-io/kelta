@@ -1189,11 +1189,38 @@ class DefaultQueryEngineTest {
 
             Map<String, Object> data = new HashMap<>(Map.of("name", "Forbidden", "price", 0.0));
 
-            assertThrows(ValidationException.class, () ->
+            ValidationException ex = assertThrows(ValidationException.class, () ->
                 engineWithHooks.create(testCollection, data));
+
+            // A hook that supplies no code must not carry the hook-kind literal "beforeSaveHook" --
+            // it falls through blank so GlobalExceptionHandler defaults to VALIDATION_FAILED.
+            String constraint = ex.getValidationResult().errors().get(0).constraint();
+            assertNotEquals("beforeSaveHook", constraint);
+            assertTrue(constraint == null || constraint.isBlank());
 
             // Verify storage was never called
             verify(storageAdapter, never()).create(any(CollectionDefinition.class), any());
+        }
+
+        @Test
+        @DisplayName("Should pass through a hook-supplied code as the FieldError constraint")
+        void shouldPassThroughHookSuppliedCode() {
+            hookRegistry.register(new BeforeSaveHook() {
+                @Override
+                public String getCollectionName() { return "products"; }
+                @Override
+                public BeforeSaveResult beforeCreate(Map<String, Object> record, String tenantId) {
+                    return BeforeSaveResult.errors(List.of(
+                        new BeforeSaveResult.ValidationError("name", "Product name is forbidden", "NAME_FORBIDDEN")));
+                }
+            });
+
+            Map<String, Object> data = new HashMap<>(Map.of("name", "Forbidden", "price", 0.0));
+
+            ValidationException ex = assertThrows(ValidationException.class, () ->
+                engineWithHooks.create(testCollection, data));
+
+            assertEquals("NAME_FORBIDDEN", ex.getValidationResult().errors().get(0).constraint());
         }
 
         @Test
@@ -1350,6 +1377,33 @@ class DefaultQueryEngineTest {
                 "Before-delete hook should receive the context tenant");
             assertEquals(contextTenant, afterHookTenant.get(),
                 "After-delete hook should receive the context tenant");
+        }
+
+        @Test
+        @DisplayName("Should block delete when before-delete hook returns error, without the 'beforeSaveHook' literal")
+        void shouldBlockDeleteOnHookErrorWithoutLiteralCode() {
+            hookRegistry.register(new BeforeSaveHook() {
+                @Override
+                public String getCollectionName() { return "products"; }
+                @Override
+                public BeforeSaveResult beforeDelete(String id, String tenantId) {
+                    return BeforeSaveResult.error("_record", "Product is referenced elsewhere");
+                }
+            });
+
+            String id = UUID.randomUUID().toString();
+            Map<String, Object> existingRecord = new HashMap<>(Map.of(
+                "id", id, "name", "Widget", "price", 9.99));
+            when(storageAdapter.getById(any(CollectionDefinition.class), eq(id)))
+                .thenReturn(Optional.of(existingRecord));
+
+            ValidationException ex = assertThrows(ValidationException.class, () ->
+                engineWithHooks.delete(testCollection, id));
+
+            String constraint = ex.getValidationResult().errors().get(0).constraint();
+            assertNotEquals("beforeSaveHook", constraint);
+            assertTrue(constraint == null || constraint.isBlank());
+            verify(storageAdapter, never()).delete(any(CollectionDefinition.class), eq(id));
         }
     }
 

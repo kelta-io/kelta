@@ -97,6 +97,7 @@ class ListViewConfigHookTest {
         assertThat(result.getErrors()).hasSize(1);
         assertThat(result.getErrors().get(0).field()).isEqualTo("rowLimit");
         assertThat(result.getErrors().get(0).message()).contains("10", "25", "50", "100");
+        assertThat(result.getErrors().get(0).code()).isEqualTo("INVALID_ROW_LIMIT");
     }
 
     @Test

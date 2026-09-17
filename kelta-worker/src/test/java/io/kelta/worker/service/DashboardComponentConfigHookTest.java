@@ -50,6 +50,7 @@ class DashboardComponentConfigHookTest {
         assertFalse(result.isSuccess());
         assertEquals(1, result.getErrors().size());
         assertEquals("config/collectionName", result.getErrors().get(0).field());
+        assertNotEquals("beforeSaveHook", result.getErrors().get(0).code());
     }
 
     @Test

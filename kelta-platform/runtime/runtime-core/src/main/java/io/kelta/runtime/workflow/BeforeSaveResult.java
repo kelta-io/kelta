@@ -105,7 +105,21 @@ public class BeforeSaveResult {
      *
      * @param field the field name (null for record-level errors)
      * @param message the error message
+     * @param code a stable UPPER_SNAKE_CASE contract code for the constraint that was
+     *             violated (e.g. {@code INVALID_ROW_LIMIT}), or {@code null} to let the
+     *             caller fall back to a generic default (e.g. {@code VALIDATION_FAILED})
      */
-    public record ValidationError(String field, String message) {
+    public record ValidationError(String field, String message, String code) {
+
+        /**
+         * Convenience constructor for hooks that don't have a specific contract code —
+         * {@link #code()} defaults to {@code null}.
+         *
+         * @param field the field name (null for record-level errors)
+         * @param message the error message
+         */
+        public ValidationError(String field, String message) {
+            this(field, message, null);
+        }
     }
 }
