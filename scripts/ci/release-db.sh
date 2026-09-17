@@ -27,17 +27,19 @@ if [[ -z "${CI_DB_SCHEMA:-}" ]]; then
   exit 0
 fi
 
-# KeltaStack names its application role after the run's schema. The role owns the
-# schema's tables, so it must go before (or with) the schema — DROP OWNED BY does
-# both. The role is per-run, so this never touches a concurrent run's objects.
+# KeltaStack names its application role after the run's schema, and hands it ownership
+# of that schema and everything Flyway creates in it. So the role goes first: DROP OWNED
+# BY takes the schema with it, and the DROP SCHEMA after it is then a no-op. The other
+# order would fail for a non-superuser CI user, which no longer owns the schema it made.
+# The role is per-run, so this never touches a concurrent run's objects.
 APP_ROLE="app_${CI_DB_SCHEMA}"
 
-echo "[release-db] dropping schema $CI_DB_SCHEMA and role $APP_ROLE on instance ${CI_DB_INSTANCE:-?}" >&2
+echo "[release-db] dropping role $APP_ROLE and schema $CI_DB_SCHEMA on instance ${CI_DB_INSTANCE:-?}" >&2
 PGPASSWORD="$CI_DB_PASSWORD" psql \
   -h "$CI_DB_HOST" -p "$CI_DB_PORT" -U "$CI_DB_USER" -d "$CI_DB_DATABASE" \
   -v ON_ERROR_STOP=1 \
-  -c "DROP SCHEMA IF EXISTS \"$CI_DB_SCHEMA\" CASCADE;" \
-  -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$APP_ROLE') THEN EXECUTE 'DROP OWNED BY \"$APP_ROLE\" CASCADE'; EXECUTE 'DROP ROLE \"$APP_ROLE\"'; END IF; END \$\$;" >&2 \
+  -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$APP_ROLE') THEN EXECUTE 'DROP OWNED BY \"$APP_ROLE\" CASCADE'; EXECUTE 'DROP ROLE \"$APP_ROLE\"'; END IF; END \$\$;" \
+  -c "DROP SCHEMA IF EXISTS \"$CI_DB_SCHEMA\" CASCADE;" >&2 \
   || echo "[release-db] cleanup failed (instance may be down); leaving for next sweep" >&2
 
 rm -f "$ENV_FILE"
