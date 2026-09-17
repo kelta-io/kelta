@@ -380,3 +380,12 @@ flow switches `TenantContext` per tenant). Watch the worker log for
 under a tenant context, which the policy now refuses.
 
 Rollback (instant, no restart): `ALTER ROLE emf BYPASSRLS;`.
+
+**Direct database logins** (a person's read-only role, a BI tool, the per-tenant Superset
+users): the GUC is a plain custom setting any session can `SET`, so it is never their
+boundary. Pin the role instead — `INSERT INTO tenant_db_role (role_name, tenant_id) VALUES
+('<role>', '<tenant id>')` — and the policies use that tenant for `session_user` no matter
+what the session sets (`kelta_pinned_tenant()`, V201; `SupersetDatabaseUserService` pins its
+roles automatically). Grant such a role `SELECT` only on tables that have a `tenant_id`
+column (RLS-scoped) — never `ALL TABLES IN SCHEMA public`, which includes `user_credential`,
+`oauth2_*` and the tenant-less child/log tables RLS cannot scope.

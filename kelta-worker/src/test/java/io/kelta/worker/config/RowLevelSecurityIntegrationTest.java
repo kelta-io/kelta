@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -118,6 +119,13 @@ class RowLevelSecurityIntegrationTest {
         admin.update("INSERT INTO ui_page (id, tenant_id, name, path, slug) VALUES (?, ?, ?, ?, ?)",
                 PAGE_B, TENANT_B, "Home", "/p/home", "home");
 
+        // A direct per-tenant login of the kind SupersetDatabaseUserService creates: public SELECT,
+        // no wrapper, and pinned to tenant A through tenant_db_role (V201) rather than the GUC.
+        admin.execute("CREATE ROLE pinned_a LOGIN PASSWORD 'pinned_a' NOBYPASSRLS");
+        admin.execute("GRANT USAGE ON SCHEMA public TO pinned_a");
+        admin.execute("GRANT SELECT ON page_layout, platform_user, ui_page, collection, field TO pinned_a");
+        admin.update("INSERT INTO tenant_db_role (role_name, tenant_id) VALUES ('pinned_a', ?)", TENANT_A);
+
         // One pooled physical connection, reused by every borrow — the shape in which a
         // tenant setting could leak from one operation to the next.
         HikariDataSource pool = new HikariDataSource();
@@ -178,6 +186,9 @@ class RowLevelSecurityIntegrationTest {
                 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
                 WHERE n.nspname = 'public' AND c.relkind = 'r'
+                  -- tenant_db_role is the pin itself: platform-owned, PUBLIC revoked, read only
+                  -- through kelta_pinned_tenant() (a policy on it would recurse into that function)
+                  AND c.relname <> 'tenant_db_role'
                   AND EXISTS (SELECT 1 FROM information_schema.columns col
                               WHERE col.table_schema = 'public' AND col.table_name = c.relname
                                 AND col.column_name = 'tenant_id')
@@ -280,6 +291,54 @@ class RowLevelSecurityIntegrationTest {
                 own, TENANT_A, COLLECTION_A, "Order (edit)"));
         assertThat(inserted).isEqualTo(1);
         admin.update("DELETE FROM page_layout WHERE id = ?", own);
+    }
+
+    // ------------------------------------------------------------------ pinned direct logins
+
+    @Test
+    @DisplayName("a role pinned in tenant_db_role cannot hop tenants by setting the GUC — SET '' or another id changes nothing")
+    void pinnedRoleCannotHopTenantsBySettingTheGuc() {
+        SingleConnectionDataSource direct = new SingleConnectionDataSource(
+                POSTGRES.getJdbcUrl(), "pinned_a", "pinned_a", true);
+        direct.setDriverClassName("org.postgresql.Driver");
+        try {
+            JdbcTemplate pinned = new JdbcTemplate(direct);
+            // No GUC at all: the pin alone scopes the session.
+            assertThat(pinned.queryForObject("SELECT current_setting('app.current_tenant_id', true)", String.class))
+                    .satisfiesAnyOf(v -> assertThat(v).isNull(), v -> assertThat(v).isEmpty());
+            assertThat(pinned.queryForList("SELECT id FROM page_layout WHERE id IN (?, ?)", String.class, LAYOUT_A, LAYOUT_B))
+                    .containsExactly(LAYOUT_A);
+
+            // The escape hatch that works for an unpinned role: blank the setting (admin_bypass) …
+            pinned.execute("SET app.current_tenant_id = ''");
+            assertThat(pinned.queryForList("SELECT email FROM platform_user WHERE id IN (?, ?)", String.class, USER_A, USER_B))
+                    .containsExactly("alice@tenant-a.example");
+            // … or name another tenant outright.
+            pinned.execute("SET app.current_tenant_id = '" + TENANT_B + "'");
+            assertThat(pinned.queryForList("SELECT id FROM ui_page WHERE id IN (?, ?)", String.class, PAGE_A, PAGE_B))
+                    .containsExactly(PAGE_A);
+            assertThat(pinned.queryForList("SELECT id FROM page_layout WHERE id IN (?, ?)", String.class, LAYOUT_A, LAYOUT_B))
+                    .containsExactly(LAYOUT_A);
+
+            // Shared system rows stay readable; the mapping table itself is not.
+            assertThat(pinned.queryForList("SELECT id FROM collection WHERE id IN (?, ?, ?)", String.class,
+                    SYSTEM_COLLECTION, COLLECTION_A, COLLECTION_B))
+                    .containsExactlyInAnyOrder(SYSTEM_COLLECTION, COLLECTION_A);
+            assertThatThrownBy(() -> pinned.queryForObject("SELECT count(*) FROM tenant_db_role", Integer.class))
+                    .rootCause().hasMessageContaining("permission denied");
+        } finally {
+            direct.destroy();
+        }
+    }
+
+    @Test
+    @DisplayName("the application role is unpinned: the GUC still drives it exactly as before")
+    void unpinnedApplicationRoleStillFollowsTheGuc() {
+        assertThat(app.queryForObject("SELECT kelta_pinned_tenant()", String.class)).isNull();
+        assertThat(asTenant(TENANT_B, () -> ids("SELECT id FROM page_layout WHERE id IN (?, ?)", LAYOUT_A, LAYOUT_B)))
+                .containsExactly(LAYOUT_B);
+        assertThat(ids("SELECT id FROM page_layout WHERE id IN (?, ?)", LAYOUT_A, LAYOUT_B))
+                .containsExactly(LAYOUT_A, LAYOUT_B);
     }
 
     // ------------------------------------------------------------------ transaction paths

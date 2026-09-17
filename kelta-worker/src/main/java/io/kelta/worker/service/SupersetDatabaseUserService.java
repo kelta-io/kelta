@@ -146,6 +146,14 @@ public class SupersetDatabaseUserService {
                     "ALTER DEFAULT PRIVILEGES IN SCHEMA " + schemaIdent
                             + " GRANT SELECT ON TABLES TO " + userIdent);
 
+            // Pin the role to its tenant inside the RLS policies (V201): the role default
+            // above is a convenience, not a boundary — any session can SET the GUC. The
+            // policies prefer the pinned tenant for session_user, which SET cannot change.
+            jdbcTemplate.update(
+                    "INSERT INTO tenant_db_role (role_name, tenant_id) VALUES (?, ?) "
+                            + "ON CONFLICT (role_name) DO UPDATE SET tenant_id = EXCLUDED.tenant_id",
+                    username, tenantId);
+
             log.info("Configured Superset DB user '{}' with tenant_id={}, schema={}",
                     username, tenantId, tenantSlug);
             return password;
@@ -185,6 +193,7 @@ public class SupersetDatabaseUserService {
                     "REVOKE USAGE ON SCHEMA " + schemaIdent + " FROM " + userIdent);
             jdbcTemplate.execute(
                     "DROP ROLE IF EXISTS " + userIdent);
+            jdbcTemplate.update("DELETE FROM tenant_db_role WHERE role_name = ?", username);
 
             log.info("Dropped Superset DB user '{}'", username);
         } catch (Exception e) {
