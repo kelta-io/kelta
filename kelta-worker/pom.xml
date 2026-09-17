@@ -26,6 +26,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <protobuf.version>4.32.0</protobuf.version>
         <aws.sdk.version>2.30.1</aws.sdk.version>
+        <testcontainers.version>1.20.4</testcontainers.version>
     </properties>
 
     <dependencyManagement>
@@ -34,6 +35,14 @@
                 <groupId>software.amazon.awssdk</groupId>
                 <artifactId>bom</artifactId>
                 <version>${aws.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Testcontainers BOM (same version as kelta-platform) -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -252,6 +261,23 @@
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers: RowLevelSecurityIntegrationTest runs the real migrations on Postgres
+             as a role without BYPASSRLS (skipped without Docker) -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
