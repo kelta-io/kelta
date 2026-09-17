@@ -8,7 +8,9 @@ import io.kelta.worker.service.PackageService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.*;
 import org.springframework.http.HttpStatus;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -232,13 +234,50 @@ class PackageControllerTest {
         }
 
         @Test
-        @DisplayName("Should return 400 for empty file")
+        @DisplayName("Should reject an empty file with no JSON alternative as MultipartException")
         void shouldReturn400ForEmptyFile() {
             MockMultipartFile file = new MockMultipartFile("file", "empty.json",
                     "application/json", new byte[0]);
 
-            var response = controller.previewImport(file, request);
-            assertThat(response.getStatusCode().value()).isEqualTo(400);
+            assertThatThrownBy(() -> controller.previewImport(file, request))
+                    .isInstanceOf(MultipartException.class)
+                    .hasMessageContaining("multipart/form-data with a file part is required");
+        }
+
+        @Test
+        @DisplayName("Should reject a non-multipart, non-JSON request as MultipartException")
+        void shouldRejectNonMultipartNonJsonRequest() {
+            MockHttpServletRequest plainRequest = new MockHttpServletRequest();
+            plainRequest.setContentType("text/plain");
+            when(permissionResolver.getProfileId(plainRequest)).thenReturn("profile-1");
+
+            assertThatThrownBy(() -> controller.previewImport(null, plainRequest))
+                    .isInstanceOf(MultipartException.class)
+                    .hasMessageContaining("multipart/form-data with a file part is required");
+        }
+
+        @Test
+        @DisplayName("Should accept a raw JSON body as an alternative to multipart")
+        void shouldAcceptJsonBody() throws Exception {
+            Map<String, Object> preview = Map.of(
+                    "creates", List.of(),
+                    "updates", List.of(),
+                    "conflicts", List.of());
+            when(packageService.previewImport(eq("t1"), any())).thenReturn(preview);
+
+            String packageJson = objectMapper.writeValueAsString(Map.of(
+                    "name", "test-pkg", "version", "1.0.0", "items", List.of()));
+            MockHttpServletRequest jsonRequest = new MockHttpServletRequest();
+            jsonRequest.setContentType("application/json");
+            jsonRequest.setContent(packageJson.getBytes());
+            when(permissionResolver.getProfileId(jsonRequest)).thenReturn("profile-1");
+
+            var response = controller.previewImport(null, jsonRequest);
+            assertThat(response.getStatusCode().value()).isEqualTo(200);
+
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getBody();
+            assertThat(body).containsKeys("creates", "updates", "conflicts");
         }
     }
 
@@ -300,6 +339,36 @@ class PackageControllerTest {
             var response = controller.importPackage(file, false, "merge", null, request);
             assertThat(response.getStatusCode().value()).isEqualTo(400);
             verifyNoInteractions(packageService);
+        }
+
+        @Test
+        @DisplayName("Should reject a request with neither a file nor a JSON body")
+        void shouldRejectMissingPayload() {
+            MockHttpServletRequest plainRequest = new MockHttpServletRequest();
+            when(permissionResolver.getProfileId(plainRequest)).thenReturn("profile-1");
+
+            assertThatThrownBy(() -> controller.importPackage(null, false, "skip", null, plainRequest))
+                    .isInstanceOf(MultipartException.class)
+                    .hasMessageContaining("multipart/form-data with a file part is required");
+            verifyNoInteractions(packageService);
+        }
+
+        @Test
+        @DisplayName("Should accept a raw JSON body as an alternative to multipart")
+        void shouldAcceptJsonBody() throws Exception {
+            when(packageService.importPackage(eq("t1"), any(),
+                    any(PackageImportService.ImportOptions.class)))
+                    .thenReturn(Map.of("success", true, "created", 1, "errors", List.of()));
+
+            String packageJson = objectMapper.writeValueAsString(Map.of(
+                    "name", "test-pkg", "version", "1.0.0", "items", List.of()));
+            MockHttpServletRequest jsonRequest = new MockHttpServletRequest();
+            jsonRequest.setContentType("application/json");
+            jsonRequest.setContent(packageJson.getBytes());
+            when(permissionResolver.getProfileId(jsonRequest)).thenReturn("profile-1");
+
+            var response = controller.importPackage(null, false, "skip", "user-1", jsonRequest);
+            assertThat(response.getStatusCode().value()).isEqualTo(200);
         }
     }
 }

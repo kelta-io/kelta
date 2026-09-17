@@ -30,6 +30,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -172,6 +173,21 @@ class GlobalExceptionHandlerTest {
         assertThat(str(e, "code")).isEqualTo("INVALID_PAYLOAD");
         assertThat(str(e, "title")).isEqualTo("Bad Request");
         assertThat(str(e, "detail")).contains("could not be parsed");
+        assertThat(meta(e)).containsEntry("path", "/api/widgets");
+    }
+
+    @Test
+    void multipartException_emits400WithInvalidPayload() {
+        MultipartException ex = new MultipartException("Current request is not a multipart request");
+
+        ResponseEntity<Map<String, Object>> response = handler.handleMultipartException(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        Map<String, Object> e = firstError(response);
+        assertThat(str(e, "status")).isEqualTo("400");
+        assertThat(str(e, "code")).isEqualTo("INVALID_PAYLOAD");
+        assertThat(str(e, "title")).isEqualTo("Bad Request");
+        assertThat(str(e, "detail")).isEqualTo("multipart/form-data with a file part is required");
         assertThat(meta(e)).containsEntry("path", "/api/widgets");
     }
 

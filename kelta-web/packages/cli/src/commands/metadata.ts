@@ -62,7 +62,11 @@ async function uploadPackage(client: AxiosInstance, url: string, file: string) {
   const form = new FormData();
   const name = file.split('/').pop() ?? 'package.json';
   form.append('file', new Blob([new Uint8Array(buffer)], { type: 'application/json' }), name);
-  const res = await client.post(url, form);
+  // The client defaults to Content-Type: application/json; left in place, axios's
+  // transformRequest sees that as the request's content type and JSON-stringifies this
+  // FormData into `{"file":{}}` instead of streaming a multipart body (axios only picks
+  // its own multipart/form-data + boundary header when no Content-Type is preset).
+  const res = await client.post(url, form, { headers: { 'Content-Type': undefined } });
   if (res.status !== 200) {
     throw new Error(`Request failed (status ${String(res.status)}): ${JSON.stringify(res.data)}`);
   }
