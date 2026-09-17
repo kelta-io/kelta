@@ -157,6 +157,147 @@ class ApplyMenuToolTest {
         wm.verify(0, WireMock.patchRequestedFor(WireMock.urlMatching("/api/ui-menu-items/.*")));
     }
 
+    /**
+     * A tree of three top-level items where only the middle one's {@code path} differs from what's
+     * stored reports {@code updated} with {@code changed:["path"]} for that item only — the other
+     * items and the menu itself report {@code unchanged}.
+     */
+    @Test
+    void reportsUpdatedWithChangedPathForOnlyTheItemWhosePathDiffers() {
+        String itemA = "IA";
+        String itemB = "IB";
+        String itemC = "IC";
+
+        wm.stubFor(get(urlEqualTo("/api/ui-menus?filter[name][eq]=Main&page[size]=1"))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":[{\"id\":\"" + MENU_ID + "\"}]}")));
+        wm.stubFor(get(urlEqualTo("/api/ui-menus/" + MENU_ID))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":{\"id\":\"" + MENU_ID + "\",\"attributes\":{\"name\":\"Main\"}}}")));
+        wm.stubFor(get(urlEqualTo("/api/ui-menu-items?filter[menuId][eq]=" + MENU_ID + "&page[size]=200"))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":["
+                                + "{\"id\":\"" + itemA + "\",\"attributes\":{\"label\":\"A\","
+                                + "\"path\":\"/resources/a\",\"displayOrder\":0}},"
+                                + "{\"id\":\"" + itemB + "\",\"attributes\":{\"label\":\"B\","
+                                + "\"path\":\"/resources/old\",\"displayOrder\":1}},"
+                                + "{\"id\":\"" + itemC + "\",\"attributes\":{\"label\":\"C\","
+                                + "\"path\":\"/resources/c\",\"displayOrder\":2}}"
+                                + "]}")));
+        wm.stubFor(WireMock.patch(urlEqualTo("/api/ui-menu-items/" + itemB))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":{\"id\":\"" + itemB + "\"}}")));
+
+        CallToolResult result = call(Map.of(
+                "name", "Main",
+                "items", List.of(
+                        Map.of("label", "A", "path", "/resources/a"),
+                        Map.of("label", "B", "path", "/resources/new"),
+                        Map.of("label", "C", "path", "/resources/c"))));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        String text = ((TextContent) result.content().get(0)).text();
+        assertThat(text).contains("\"action\":\"unchanged\",\"id\":\"" + MENU_ID + "\"");
+        assertThat(text).contains("\"label\":\"A\",\"action\":\"unchanged\"");
+        assertThat(text).contains(
+                "\"label\":\"B\",\"action\":\"updated\",\"id\":\"" + itemB + "\",\"changed\":[\"path\"]");
+        assertThat(text).contains("\"label\":\"C\",\"action\":\"unchanged\"");
+
+        wm.verify(1, WireMock.patchRequestedFor(urlEqualTo("/api/ui-menu-items/" + itemB)));
+        wm.verify(0, WireMock.patchRequestedFor(urlEqualTo("/api/ui-menu-items/" + itemA)));
+        wm.verify(0, WireMock.patchRequestedFor(urlEqualTo("/api/ui-menu-items/" + itemC)));
+        wm.verify(0, WireMock.patchRequestedFor(urlEqualTo("/api/ui-menus/" + MENU_ID)));
+    }
+
+    /**
+     * The menu row itself diffs on {@code description}, {@code icon}, {@code isDefault} and
+     * {@code active} the same way an item does — only the keys that actually differ from the
+     * stored record are reported as {@code changed} and PATCHed.
+     */
+    @Test
+    void reportsChangedMenuAttributesForDescriptionIconIsDefaultAndActive() {
+        wm.stubFor(get(urlEqualTo("/api/ui-menus?filter[name][eq]=Main&page[size]=1"))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":[{\"id\":\"" + MENU_ID + "\"}]}")));
+        wm.stubFor(get(urlEqualTo("/api/ui-menus/" + MENU_ID))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":{\"id\":\"" + MENU_ID + "\",\"attributes\":{\"name\":\"Main\","
+                                + "\"description\":\"old desc\",\"icon\":\"old-icon\","
+                                + "\"isDefault\":false,\"active\":true}}}")));
+        wm.stubFor(get(urlEqualTo("/api/ui-menu-items?filter[menuId][eq]=" + MENU_ID + "&page[size]=200"))
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":[]}")));
+        wm.stubFor(WireMock.patch(urlEqualTo("/api/ui-menus/" + MENU_ID))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":{\"id\":\"" + MENU_ID + "\"}}")));
+
+        CallToolResult result = call(Map.of(
+                "name", "Main",
+                "description", "new desc",
+                "icon", "new-icon",
+                "isDefault", true,
+                "active", false,
+                "items", List.of()));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        String text = ((TextContent) result.content().get(0)).text();
+        assertThat(text).contains("\"action\":\"updated\",\"id\":\"" + MENU_ID + "\"")
+                .contains("\"changed\":[\"description\",\"icon\",\"isDefault\",\"active\"]");
+
+        wm.verify(1, WireMock.patchRequestedFor(urlEqualTo("/api/ui-menus/" + MENU_ID))
+                .withRequestBody(matchingJsonPath("$.data.attributes.description", equalTo("new desc")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.icon", equalTo("new-icon")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.isDefault", equalTo("true")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.active", equalTo("false"))));
+    }
+
+    /**
+     * Applying the identical body twice in a row: the first call creates the menu and its item,
+     * the second call — against the now-existing state — reports {@code unchanged} for both and
+     * issues no PATCH (or further POST) at all.
+     */
+    @Test
+    void secondIdenticalApplyIssuesNoWrites() {
+        String itemId = "I1";
+        Map<String, Object> body = Map.of(
+                "name", "Main",
+                "items", List.of(Map.of("label", "Tasks", "path", "/resources/tasks")));
+
+        wm.stubFor(get(urlEqualTo("/api/ui-menus?filter[name][eq]=Main&page[size]=1"))
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":[]}")));
+        wm.stubFor(post(urlEqualTo("/api/ui-menus"))
+                .willReturn(aResponse().withStatus(201).withBody(
+                        "{\"data\":{\"id\":\"" + MENU_ID + "\"}}")));
+        wm.stubFor(get(urlEqualTo("/api/ui-menu-items?filter[menuId][eq]=" + MENU_ID + "&page[size]=200"))
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":[]}")));
+        wm.stubFor(post(urlEqualTo("/api/ui-menu-items"))
+                .willReturn(aResponse().withStatus(201).withBody(
+                        "{\"data\":{\"id\":\"" + itemId + "\"}}")));
+
+        CallToolResult first = call(body);
+        assertThat(((TextContent) first.content().get(0)).text()).contains("\"action\":\"created\"");
+
+        wm.stubFor(get(urlEqualTo("/api/ui-menus?filter[name][eq]=Main&page[size]=1"))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":[{\"id\":\"" + MENU_ID + "\"}]}")));
+        wm.stubFor(get(urlEqualTo("/api/ui-menus/" + MENU_ID))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":{\"id\":\"" + MENU_ID + "\",\"attributes\":{\"name\":\"Main\"}}}")));
+        wm.stubFor(get(urlEqualTo("/api/ui-menu-items?filter[menuId][eq]=" + MENU_ID + "&page[size]=200"))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":[{\"id\":\"" + itemId + "\",\"attributes\":{\"label\":\"Tasks\","
+                                + "\"path\":\"/resources/tasks\",\"displayOrder\":0}}]}")));
+
+        CallToolResult second = call(body);
+        String secondText = ((TextContent) second.content().get(0)).text();
+        assertThat(secondText).contains("\"action\":\"unchanged\",\"id\":\"" + MENU_ID + "\"");
+        assertThat(secondText).contains("\"label\":\"Tasks\",\"action\":\"unchanged\"");
+
+        wm.verify(0, WireMock.patchRequestedFor(WireMock.urlMatching("/api/ui-menu-items/.*")));
+        wm.verify(0, WireMock.patchRequestedFor(WireMock.urlMatching("/api/ui-menus/.*")));
+        wm.verify(1, WireMock.postRequestedFor(urlEqualTo("/api/ui-menus")));
+        wm.verify(1, WireMock.postRequestedFor(urlEqualTo("/api/ui-menu-items")));
+    }
+
     /** Removing the child and re-applying with prune:true deletes the stale ui-menu-item row. */
     @Test
     void prunesRemovedChildWhenPruneTrue() {
