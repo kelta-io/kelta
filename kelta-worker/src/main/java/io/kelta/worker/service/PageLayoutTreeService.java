@@ -71,9 +71,13 @@ public class PageLayoutTreeService {
 
     private static final int MAX_COLUMNS = 4;
 
+    // Every lookup carries the caller's tenant. page_layout has no tenant column of its own,
+    // so a layout belongs to whichever tenant owns its collection; a layout id or collection
+    // name from another tenant must read as "not found", never as a row this call may edit.
     private static final String SELECT_LAYOUT = """
-            SELECT id, collection_id, name, description, layout_type, is_default, header_config
-            FROM page_layout WHERE id = ?
+            SELECT pl.id, pl.collection_id, pl.name, pl.description, pl.layout_type, pl.is_default, pl.header_config
+            FROM page_layout pl JOIN collection c ON c.id = pl.collection_id
+            WHERE pl.id = ? AND c.tenant_id = ?
             """;
 
     private static final String SELECT_LAYOUTS_BY_COLLECTION = """
@@ -81,11 +85,11 @@ public class PageLayoutTreeService {
             """;
 
     private static final String SELECT_COLLECTION_ID_BY_NAME = """
-            SELECT id FROM collection WHERE name = ? AND active = true LIMIT 1
+            SELECT id FROM collection WHERE name = ? AND active = true AND tenant_id = ? LIMIT 1
             """;
 
     private static final String SELECT_COLLECTION_NAME_BY_ID = """
-            SELECT name FROM collection WHERE id = ? AND active = true LIMIT 1
+            SELECT name FROM collection WHERE id = ? AND active = true AND tenant_id = ? LIMIT 1
             """;
 
     private static final String SELECT_FIELDS_BY_COLLECTION = """
@@ -818,8 +822,17 @@ public class PageLayoutTreeService {
         queryEngine.delete(definition(collectionName), id);
     }
 
+    /** The caller's tenant; a tree call outside a tenant context has nothing it may touch. */
+    private static String tenantId() {
+        String tenantId = TenantContext.get();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new LayoutNotFoundException("No tenant context");
+        }
+        return tenantId;
+    }
+
     private Map<String, Object> loadLayout(String layoutId) {
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(SELECT_LAYOUT, layoutId);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(SELECT_LAYOUT, layoutId, tenantId());
         if (rows.isEmpty()) {
             throw new LayoutNotFoundException("Page layout '" + layoutId + "' not found");
         }
@@ -836,13 +849,13 @@ public class PageLayoutTreeService {
 
     private String findCollectionIdByName(String collectionName) {
         List<Map<String, Object>> rows =
-                jdbcTemplate.queryForList(SELECT_COLLECTION_ID_BY_NAME, collectionName);
+                jdbcTemplate.queryForList(SELECT_COLLECTION_ID_BY_NAME, collectionName, tenantId());
         return rows.isEmpty() ? null : asString(rows.get(0).get("id"));
     }
 
     private String collectionNameById(String collectionId) {
         List<Map<String, Object>> rows =
-                jdbcTemplate.queryForList(SELECT_COLLECTION_NAME_BY_ID, collectionId);
+                jdbcTemplate.queryForList(SELECT_COLLECTION_NAME_BY_ID, collectionId, tenantId());
         if (rows.isEmpty()) {
             throw new LayoutNotFoundException("Collection '" + collectionId + "' not found");
         }

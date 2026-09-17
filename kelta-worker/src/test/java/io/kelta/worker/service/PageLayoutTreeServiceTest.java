@@ -71,14 +71,15 @@ class PageLayoutTreeServiceTest {
 
         // Every unstubbed lookup is "nothing there" — a fresh layout on a fresh collection.
         when(jdbcTemplate.queryForList(anyString(), any(Object.class))).thenReturn(List.of());
+        when(jdbcTemplate.queryForList(anyString(), any(Object.class), any(Object.class))).thenReturn(List.of());
 
-        when(jdbcTemplate.queryForList(contains("FROM page_layout WHERE id"), eq(LAYOUT_ID)))
+        when(jdbcTemplate.queryForList(contains("FROM page_layout pl"), eq(LAYOUT_ID), eq(TENANT)))
                 .thenReturn(List.of(row("id", LAYOUT_ID, "collection_id", COLLECTION_ID,
                         "name", "Contact Detail", "description", null,
                         "layout_type", "DETAIL", "is_default", true, "header_config", null)));
-        when(jdbcTemplate.queryForList(contains("SELECT name FROM collection WHERE id"), eq(COLLECTION_ID)))
+        when(jdbcTemplate.queryForList(contains("SELECT name FROM collection WHERE id"), eq(COLLECTION_ID), eq(TENANT)))
                 .thenReturn(List.of(row("name", COLLECTION)));
-        when(jdbcTemplate.queryForList(contains("FROM collection WHERE name"), eq(COLLECTION)))
+        when(jdbcTemplate.queryForList(contains("FROM collection WHERE name"), eq(COLLECTION), eq(TENANT)))
                 .thenReturn(List.of(row("id", COLLECTION_ID)));
         when(jdbcTemplate.queryForList(contains("FROM field WHERE collection_id"), eq(COLLECTION_ID)))
                 .thenReturn(List.of(
@@ -245,7 +246,7 @@ class PageLayoutTreeServiceTest {
                 "relationship_field_name", "contact"));
         stubRelatedCollection();
 
-        Map<String, Object> tree = service.readTree(LAYOUT_ID);
+        Map<String, Object> tree = TenantContext.callWithTenant(TENANT, () -> service.readTree(LAYOUT_ID));
 
         assertThat(tree).containsEntry("collection", COLLECTION).containsEntry("name", "Contact Detail");
         assertThat(sections(tree).get(0)).containsEntry("heading", "Overview");
@@ -265,7 +266,7 @@ class PageLayoutTreeServiceTest {
 
     /** `notes.contact` is a lookup back to the layout's collection — a valid related list. */
     private void stubRelatedCollection() {
-        when(jdbcTemplate.queryForList(contains("FROM collection WHERE name"), eq("notes")))
+        when(jdbcTemplate.queryForList(contains("FROM collection WHERE name"), eq("notes"), eq(TENANT)))
                 .thenReturn(List.of(row("id", "coll-2")));
         when(jdbcTemplate.queryForList(contains("FROM field WHERE collection_id"), eq("coll-2")))
                 .thenReturn(List.of(
@@ -444,4 +445,40 @@ class PageLayoutTreeServiceTest {
     private static List<Map<String, Object>> relatedLists(Map<String, Object> tree) {
         return (List<Map<String, Object>>) tree.get("relatedLists");
     }
+
+    // ---- tenant scoping: another tenant's layout or collection reads as "not found" ----
+
+    @Test
+    @DisplayName("a layout id from another tenant is not found, not edited")
+    void foreignLayoutIdIsNotFound() {
+        assertThatThrownBy(() -> TenantContext.callWithTenant("tenant-2", () -> service.applyTree(LAYOUT_ID, twoFieldBody())))
+                .isInstanceOf(PageLayoutTreeService.LayoutNotFoundException.class)
+                .hasMessageContaining(LAYOUT_ID);
+        assertThatThrownBy(() -> TenantContext.callWithTenant("tenant-2", () -> service.readTree(LAYOUT_ID)))
+                .isInstanceOf(PageLayoutTreeService.LayoutNotFoundException.class);
+        verify(queryEngine, never()).create(any(), any());
+        verify(queryEngine, never()).update(any(), any(), any());
+        verify(queryEngine, never()).delete(any(), any());
+    }
+
+    @Test
+    @DisplayName("a collection name that exists only in another tenant is not found — never resolved across tenants")
+    void foreignCollectionNameIsNotFound() {
+        assertThatThrownBy(() -> TenantContext.callWithTenant("tenant-2",
+                () -> service.applyTreeByName(COLLECTION, "Contact Detail", twoFieldBody())))
+                .isInstanceOf(PageLayoutTreeService.LayoutNotFoundException.class)
+                .hasMessageContaining(COLLECTION);
+        verify(queryEngine, never()).create(any(), any());
+        verify(jdbcTemplate, never()).queryForList(contains("FROM collection WHERE name"), eq(COLLECTION), eq(TENANT));
+    }
+
+    @Test
+    @DisplayName("no tenant context → not found, nothing read or written")
+    void noTenantContextIsNotFound() {
+        assertThatThrownBy(() -> service.applyTree(LAYOUT_ID, twoFieldBody()))
+                .isInstanceOf(PageLayoutTreeService.LayoutNotFoundException.class)
+                .hasMessageContaining("tenant");
+        verify(queryEngine, never()).create(any(), any());
+    }
 }
+
