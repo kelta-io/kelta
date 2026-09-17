@@ -19,8 +19,11 @@ collided for months. Deny, not grant — Cerbos resource policies are tenant-sco
 full outage for the older tenant.
 
 Fix: routes are keyed by (path, tenant). The worker's `/internal/bootstrap` rows carry
-`tenantId`; `ConfigEventListener` reads it from the event envelope (and now removes the route
-of a collection that turns `active=false` instead of re-registering it); `RouteRegistry`
+`tenantId`; `ConfigEventListener` reads it from the event envelope (a collection that turns
+`active=false` still keeps its route until the next bootstrap: four publishers send UPDATED
+without the `active` flag, so it cannot be trusted as a removal signal — a first cut that did
+remove on `active=false` dropped every collection's route on its first field change in the
+harness); `RouteRegistry`
 resolves the caller's own tenant first, then a platform-wide `static-` route, then any other
 tenant's route so authorization still runs (and denies) rather than falling through unchecked.
 The proxy layer keeps one Spring Cloud Gateway route per path (`getRoutesByPath()`).

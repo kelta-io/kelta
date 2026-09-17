@@ -114,21 +114,20 @@ class ConfigEventListenerTest {
         }
 
         @Test
-        @DisplayName("A deactivated collection's route is removed, not re-registered")
-        void shouldRemoveRouteWhenCollectionDeactivated() throws Exception {
+        @DisplayName("An UPDATED event without `active` (field/rule hooks send none) keeps the route")
+        void shouldKeepRouteWhenUpdatedEventCarriesNoActiveFlag() throws Exception {
             CollectionChangedPayload payload = new CollectionChangedPayload();
-            payload.setId("collection-off");
-            payload.setName("tasks");
-            payload.setActive(false);
-            payload.setChangeType(ChangeType.UPDATED);
+            payload.setId("collection-1");
+            payload.setName("customers");
+            payload.setChangeType(ChangeType.UPDATED);   // active left at its primitive default
             PlatformEvent<CollectionChangedPayload> event = new PlatformEvent<>(
                 UUID.randomUUID().toString(), "config.collection.changed", "tenant-1",
                 UUID.randomUUID().toString(), null, Instant.now(), payload);
 
             listener.handleCollectionChanged(toJson(event));
 
-            verify(routeRegistry).removeRoute("collection-off");
-            verify(routeRegistry, never()).updateRoute(any());
+            verify(routeRegistry).updateRoute(any());
+            verify(routeRegistry, never()).removeRoute(any());
         }
 
         @Test

@@ -71,13 +71,11 @@ public class ConfigEventListener {
                 routeRegistry.removeRoute(payload.getId());
                 logger.info("Removed route for deleted collection: id={}, name={}",
                            payload.getId(), payload.getName());
-            } else if (!payload.isActive() && payload.getChangeType() == ChangeType.UPDATED) {
-                // A deactivated collection is gone from the bootstrap list on the next
-                // restart; take it out now so it cannot keep occupying its path.
-                routeRegistry.removeRoute(payload.getId());
-                logger.info("Removed route for deactivated collection: id={}, name={}",
-                           payload.getId(), payload.getName());
             } else {
+                // Note: an UPDATED event does not reliably carry `active` — several publishers
+                // (field, validation-rule and approval hooks) send UPDATED with the primitive
+                // default of false — so a collection that turns inactive keeps its route until
+                // the next bootstrap. Do not treat active=false as a removal here.
                 RouteDefinition route = buildRouteFromCollection(payload, tenantId);
 
                 if (route != null) {
