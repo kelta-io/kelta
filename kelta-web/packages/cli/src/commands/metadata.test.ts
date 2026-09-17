@@ -87,7 +87,9 @@ describe('runDiff / runApply', () => {
     writeFileSync(file, '{"name":"app"}');
     const post = vi.fn().mockResolvedValue({ status: 200, data: { changes: [] } });
     expect(await runDiff(client(post), file)).toEqual({ changes: [] });
-    expect(post).toHaveBeenCalledWith('/api/packages/import/preview', expect.any(FormData));
+    expect(post).toHaveBeenCalledWith('/api/packages/import/preview', expect.any(FormData), {
+      headers: { 'Content-Type': undefined },
+    });
   });
 
   it('passes dryRun as a query param', async () => {
@@ -95,7 +97,9 @@ describe('runDiff / runApply', () => {
     writeFileSync(file, '{}');
     const post = vi.fn().mockResolvedValue({ status: 200, data: { applied: false } });
     await runApply(client(post), file, { dryRun: true });
-    expect(post).toHaveBeenCalledWith('/api/packages/import?dryRun=true', expect.any(FormData));
+    expect(post).toHaveBeenCalledWith('/api/packages/import?dryRun=true', expect.any(FormData), {
+      headers: { 'Content-Type': undefined },
+    });
   });
 
   it('passes the conflict mode as conflictMode', async () => {
@@ -105,7 +109,8 @@ describe('runDiff / runApply', () => {
     await runApply(client(post), file, { conflict: 'overwrite' });
     expect(post).toHaveBeenCalledWith(
       '/api/packages/import?conflictMode=overwrite',
-      expect.any(FormData)
+      expect.any(FormData),
+      { headers: { 'Content-Type': undefined } }
     );
   });
 
@@ -116,7 +121,8 @@ describe('runDiff / runApply', () => {
     await runApply(client(post), file, { dryRun: true, conflict: 'skip' });
     expect(post).toHaveBeenCalledWith(
       '/api/packages/import?dryRun=true&conflictMode=skip',
-      expect.any(FormData)
+      expect.any(FormData),
+      { headers: { 'Content-Type': undefined } }
     );
   });
 
@@ -125,7 +131,9 @@ describe('runDiff / runApply', () => {
     writeFileSync(file, '{}');
     const post = vi.fn().mockResolvedValue({ status: 200, data: {} });
     await runApply(client(post), file, {});
-    expect(post).toHaveBeenCalledWith('/api/packages/import', expect.any(FormData));
+    expect(post).toHaveBeenCalledWith('/api/packages/import', expect.any(FormData), {
+      headers: { 'Content-Type': undefined },
+    });
   });
 
   it('throws with the response body on failure', async () => {

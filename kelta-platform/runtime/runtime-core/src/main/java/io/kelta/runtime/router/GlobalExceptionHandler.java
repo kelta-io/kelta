@@ -26,6 +26,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -369,6 +370,29 @@ public class GlobalExceptionHandler {
         JsonApiError error = new JsonApiError(
             "400", "INVALID_PAYLOAD", "Bad Request",
             "Request body is missing or could not be parsed as JSON");
+        error.setMeta(Map.of("requestId", requestId, "path", request.getRequestURI()));
+
+        return ResponseEntity.badRequest().body(errorBody(error));
+    }
+
+    /**
+     * Handles a request that is, or was expected to be, {@code multipart/form-data} but
+     * has no usable file part — thrown explicitly by controllers that accept a file
+     * upload with a raw-JSON-body alternative (e.g. {@code PackageController}) when
+     * neither is present, and by Spring's own multipart resolution for a request that
+     * declares {@code multipart/form-data} but fails to parse.
+     * Returns 400 Bad Request in JSON:API format instead of the generic 500.
+     */
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<Map<String, Object>> handleMultipartException(
+            MultipartException ex, HttpServletRequest request) {
+
+        String requestId = generateRequestId();
+        logger.warn("Multipart request rejected [requestId={}]: {}", requestId, ex.getMessage());
+
+        JsonApiError error = new JsonApiError(
+            "400", "INVALID_PAYLOAD", "Bad Request",
+            "multipart/form-data with a file part is required");
         error.setMeta(Map.of("requestId", requestId, "path", request.getRequestURI()));
 
         return ResponseEntity.badRequest().body(errorBody(error));

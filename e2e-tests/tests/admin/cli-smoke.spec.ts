@@ -160,6 +160,33 @@ test.describe("kelta CLI smoke", () => {
     expect(row.name).toBe(rows[0].name);
   });
 
+  // Regression coverage for KLT-253: `metadata export` writes a package file,
+  // then `metadata diff`/`metadata apply --dry-run` must accept that same file
+  // as a multipart upload (the SDK client's default JSON Content-Type header
+  // previously made axios silently JSON-stringify the multipart body, which
+  // the worker rejected as a 500 instead of a usable response).
+  test("metadata export -> diff -> apply --dry-run round-trips against the tenant", () => {
+    const file = path.join(configDir, "metadata-round-trip.json");
+
+    const exported = runCli(["metadata", "export", "--out", file]);
+    expect(exported.status, exported.stderr).toBe(0);
+    expect(existsSync(file)).toBe(true);
+
+    const diffed = runCli(["metadata", "diff", file, "--output", "json"]);
+    expect(diffed.status, diffed.stderr).toBe(0);
+    const diff = JSON.parse(diffed.stdout) as {
+      creates?: unknown[];
+      updates?: unknown[];
+      conflicts?: unknown[];
+    };
+    expect(diff).toHaveProperty("creates");
+    expect(diff).toHaveProperty("updates");
+    expect(diff).toHaveProperty("conflicts");
+
+    const applied = runCli(["metadata", "apply", file, "--dry-run", "--output", "json"]);
+    expect(applied.status, applied.stderr).toBe(0);
+  });
+
   test("missing auth fails with the machine-readable error contract and exit 3", () => {
     const result = runCli(["collections", "list", "--output", "json"], {
       KELTA_TOKEN: undefined,

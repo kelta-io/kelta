@@ -10,6 +10,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.MultipartFile;
 import tools.jackson.databind.ObjectMapper;
 
@@ -100,20 +101,17 @@ public class PackageController {
 
     @PostMapping("/import/preview")
     @SuppressWarnings("unchecked")
-    public ResponseEntity<?> previewImport(@RequestParam("file") MultipartFile file,
+    public ResponseEntity<?> previewImport(@RequestParam(value = "file", required = false) MultipartFile file,
                                            jakarta.servlet.http.HttpServletRequest request) {
         String tenantId = TenantContext.get();
         if (tenantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
         }
         requirePermission(request);
-
-        if (file.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "File is required"));
-        }
+        requirePackagePayload(file, request);
 
         try {
-            Map<String, Object> pkg = objectMapper.readValue(file.getInputStream(), Map.class);
+            Map<String, Object> pkg = readPackagePayload(file, request);
             Map<String, Object> preview = packageService.previewImport(tenantId, pkg);
             return ResponseEntity.ok(preview);
         } catch (Exception e) {
@@ -125,7 +123,7 @@ public class PackageController {
     @PostMapping("/import")
     @SuppressWarnings("unchecked")
     public ResponseEntity<?> importPackage(
-            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "file", required = false) MultipartFile file,
             @RequestParam(value = "dryRun", defaultValue = "false") boolean dryRun,
             @RequestParam(value = "conflictMode", defaultValue = "skip") String conflictMode,
             @RequestHeader(value = "X-User-Id", required = false) String userId,
@@ -135,10 +133,7 @@ public class PackageController {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
         }
         requirePermission(request);
-
-        if (file.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "File is required"));
-        }
+        requirePackagePayload(file, request);
 
         PackageImportService.ConflictMode mode;
         try {
@@ -148,7 +143,7 @@ public class PackageController {
         }
 
         try {
-            Map<String, Object> pkg = objectMapper.readValue(file.getInputStream(), Map.class);
+            Map<String, Object> pkg = readPackagePayload(file, request);
             Map<String, Object> result = packageService.importPackage(tenantId, pkg,
                     new PackageImportService.ImportOptions(mode, dryRun, null, null, userId));
             return ResponseEntity.ok(result);
@@ -156,6 +151,38 @@ public class PackageController {
             log.error("Failed to import package", e);
             return ResponseEntity.badRequest().body(Map.of("error", "Import failed: " + e.getMessage()));
         }
+    }
+
+    /**
+     * A package payload arrives either as {@code multipart/form-data} with a {@code file}
+     * part (the CLI / browser upload path) or as a raw JSON body (the
+     * {@code kelta api POST ... --data @package.json} path). Neither present means the
+     * request is missing its payload entirely — throw so {@code GlobalExceptionHandler}
+     * maps it to a 400 {@code INVALID_PAYLOAD} instead of the multipart resolver's own
+     * uncaught {@link MultipartException} surfacing as a 500.
+     */
+    private void requirePackagePayload(MultipartFile file, jakarta.servlet.http.HttpServletRequest request) {
+        boolean hasFile = file != null && !file.isEmpty();
+        if (!hasFile && !isJsonContentType(request)) {
+            throw new MultipartException("multipart/form-data with a file part is required");
+        }
+    }
+
+    private boolean isJsonContentType(jakarta.servlet.http.HttpServletRequest request) {
+        String contentType = request.getContentType();
+        if (contentType == null || contentType.isBlank()) {
+            return false;
+        }
+        return MediaType.parseMediaType(contentType).isCompatibleWith(MediaType.APPLICATION_JSON);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readPackagePayload(MultipartFile file, jakarta.servlet.http.HttpServletRequest request)
+            throws java.io.IOException {
+        if (file != null && !file.isEmpty()) {
+            return objectMapper.readValue(file.getInputStream(), Map.class);
+        }
+        return objectMapper.readValue(request.getInputStream(), Map.class);
     }
 
     @SuppressWarnings("unchecked")
