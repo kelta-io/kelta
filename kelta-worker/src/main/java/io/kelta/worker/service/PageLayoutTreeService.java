@@ -71,25 +71,31 @@ public class PageLayoutTreeService {
 
     private static final int MAX_COLUMNS = 4;
 
-    // Every lookup carries the caller's tenant. page_layout has no tenant column of its own,
-    // so a layout belongs to whichever tenant owns its collection; a layout id or collection
-    // name from another tenant must read as "not found", never as a row this call may edit.
+    // Every lookup carries the caller's tenant. A layout belongs to the tenant that authored it
+    // (page_layout.tenant_id), even when its collection is a shared system collection — those
+    // live once, in the platform tenant, and every tenant may lay them out. So a layout id from
+    // another tenant reads as "not found", and a collection name resolves to the caller's own
+    // collection or to a system collection, never to another tenant's.
     private static final String SELECT_LAYOUT = """
-            SELECT pl.id, pl.collection_id, pl.name, pl.description, pl.layout_type, pl.is_default, pl.header_config
-            FROM page_layout pl JOIN collection c ON c.id = pl.collection_id
-            WHERE pl.id = ? AND c.tenant_id = ?
+            SELECT id, collection_id, name, description, layout_type, is_default, header_config
+            FROM page_layout WHERE id = ? AND tenant_id = ?
             """;
 
     private static final String SELECT_LAYOUTS_BY_COLLECTION = """
-            SELECT id, name FROM page_layout WHERE collection_id = ?
+            SELECT id, name FROM page_layout WHERE collection_id = ? AND tenant_id = ?
             """;
 
+    // A tenant's own collection wins over a system collection of the same name.
     private static final String SELECT_COLLECTION_ID_BY_NAME = """
-            SELECT id FROM collection WHERE name = ? AND active = true AND tenant_id = ? LIMIT 1
+            SELECT id FROM collection WHERE name = ? AND active = true
+              AND (tenant_id = ? OR system_collection = true)
+            ORDER BY system_collection LIMIT 1
             """;
 
     private static final String SELECT_COLLECTION_NAME_BY_ID = """
-            SELECT name FROM collection WHERE id = ? AND active = true AND tenant_id = ? LIMIT 1
+            SELECT name FROM collection WHERE id = ? AND active = true
+              AND (tenant_id = ? OR system_collection = true)
+            LIMIT 1
             """;
 
     private static final String SELECT_FIELDS_BY_COLLECTION = """
@@ -863,7 +869,7 @@ public class PageLayoutTreeService {
     }
 
     private String findLayoutIdByName(String collectionId, String layoutName) {
-        return jdbcTemplate.queryForList(SELECT_LAYOUTS_BY_COLLECTION, collectionId).stream()
+        return jdbcTemplate.queryForList(SELECT_LAYOUTS_BY_COLLECTION, collectionId, tenantId()).stream()
                 .filter(row -> layoutName.equals(asString(row.get("name"))))
                 .map(row -> asString(row.get("id")))
                 .findFirst().orElse(null);
