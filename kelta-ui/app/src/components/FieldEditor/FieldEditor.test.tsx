@@ -16,7 +16,7 @@
 
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { FieldEditor } from './FieldEditor'
 import type { FieldDefinition, CollectionSummary, FetchCollectionFields } from './FieldEditor'
@@ -1039,7 +1039,12 @@ describe('FieldEditor Integration', () => {
 
     renderWithProviders(<TestComponent />)
 
-    await user.type(screen.getByTestId('field-name-input'), 'my_field')
+    // fireEvent.change instead of user.type: per-keystroke typing (~8 renders) is
+    // what starved this test under concurrent GraalVM native builds on the CI
+    // runner (same root cause + fix as Chat.test.tsx's MessageComposer, see
+    // concerns.md -> "Frontend suite starves under concurrent image builds").
+    // A single change event commits the same form value without the render count.
+    fireEvent.change(screen.getByTestId('field-name-input'), { target: { value: 'my_field' } })
     await user.click(screen.getByTestId('field-editor-submit'))
 
     // Should show loading state
