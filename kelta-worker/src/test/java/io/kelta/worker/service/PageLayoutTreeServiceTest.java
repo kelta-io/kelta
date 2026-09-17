@@ -73,7 +73,7 @@ class PageLayoutTreeServiceTest {
         when(jdbcTemplate.queryForList(anyString(), any(Object.class))).thenReturn(List.of());
         when(jdbcTemplate.queryForList(anyString(), any(Object.class), any(Object.class))).thenReturn(List.of());
 
-        when(jdbcTemplate.queryForList(contains("FROM page_layout pl"), eq(LAYOUT_ID), eq(TENANT)))
+        when(jdbcTemplate.queryForList(contains("FROM page_layout WHERE id"), eq(LAYOUT_ID), eq(TENANT)))
                 .thenReturn(List.of(row("id", LAYOUT_ID, "collection_id", COLLECTION_ID,
                         "name", "Contact Detail", "description", null,
                         "layout_type", "DETAIL", "is_default", true, "header_config", null)));
@@ -480,5 +480,48 @@ class PageLayoutTreeServiceTest {
                 .hasMessageContaining("tenant");
         verify(queryEngine, never()).create(any(), any());
     }
-}
 
+    @Test
+    @DisplayName("a system collection (shared, owned by the platform tenant) lays out for any tenant")
+    void systemCollectionLaysOutForAnyTenant() {
+        // The collection lookup admits system collections regardless of the caller's tenant …
+        when(jdbcTemplate.queryForList(contains("system_collection = true"), eq("users"), eq("tenant-2")))
+                .thenReturn(List.of(row("id", "sys-users")));
+        when(jdbcTemplate.queryForList(contains("FROM field WHERE collection_id"), eq("sys-users")))
+                .thenReturn(List.of(row("id", "u1", "name", "firstName"), row("id", "u2", "name", "lastName")));
+
+        ApplyResult result = TenantContext.callWithTenant("tenant-2", () ->
+                service.applyTreeByName("users", "Member", twoFieldBody()));
+
+        // … and the layout it creates belongs to the caller, not to the platform tenant.
+        assertThat(result.counts().created()).isEqualTo(4);
+        ArgumentCaptor<Map<String, Object>> records = ArgumentCaptor.forClass(Map.class);
+        verify(queryEngine).create(argThat(def -> "page-layouts".equals(def.name())), records.capture());
+        assertThat(records.getValue())
+                .containsEntry("collectionId", "sys-users")
+                .containsEntry("tenantId", "tenant-2");
+    }
+
+    @Test
+    @DisplayName("PUT by name only matches the caller's own layouts on a collection — never another tenant's")
+    void layoutByNameIsScopedToTheTenant() {
+        when(jdbcTemplate.queryForList(contains("FROM page_layout WHERE collection_id"), eq(COLLECTION_ID), eq(TENANT)))
+                .thenReturn(List.of(row("id", LAYOUT_ID, "name", "Contact Detail")));
+        when(jdbcTemplate.queryForList(contains("FROM collection WHERE name"), eq(COLLECTION), eq("tenant-2")))
+                .thenReturn(List.of(row("id", COLLECTION_ID)));
+
+        // The owning tenant addresses its existing layout by name and updates it in place.
+        ApplyResult own = TenantContext.callWithTenant(TENANT, () ->
+                service.applyTreeByName(COLLECTION, "Contact Detail", twoFieldBody()));
+        assertThat(own.layoutId()).isEqualTo(LAYOUT_ID);
+        verify(queryEngine, never()).create(argThat(def -> "page-layouts".equals(def.name())), any());
+
+        // Another tenant using the same layout name on the same (shared) collection gets its own row.
+        ApplyResult other = TenantContext.callWithTenant("tenant-2", () ->
+                service.applyTreeByName(COLLECTION, "Contact Detail", twoFieldBody()));
+        assertThat(other.layoutId()).isNotEqualTo(LAYOUT_ID);
+        verify(queryEngine).create(argThat(def -> "page-layouts".equals(def.name())),
+                argThat(record -> "tenant-2".equals(record.get("tenantId"))));
+        verify(jdbcTemplate, never()).queryForList(contains("FROM page_layout WHERE collection_id"), eq(COLLECTION_ID));
+    }
+}
