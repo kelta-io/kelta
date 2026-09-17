@@ -138,13 +138,50 @@ tenants — demonstrated from a tenant login (10 visible users → 66). V201 add
 GUC-based policy to `COALESCE((SELECT kelta_pinned_tenant()), current_setting(...))` — an
 InitPlan, one lookup per query — with `admin_bypass` only for unpinned roles;
 `SupersetDatabaseUserService` pins its roles and the existing ones are backfilled
-(`pinnedRoleCannotHopTenantsBySettingTheGuc`). Still open: kelta-auth and kelta-ai run as
-platform sessions (they filter in SQL); the harness runs as the container superuser; the
-tenant-less child/log tables (`flow_step_log`, `job_execution_log`, `alert_delivery`,
-`kelta_migrations`, …) have no RLS and are fully readable by any role granted
-`ALL TABLES IN SCHEMA public` — the Superset users are; and the in-code tenant predicate for
-direct `queryEngine.executeQuery` callers (PLT-260 in the RZWare tracker) remains the first
-line of defence — RLS is the backstop, not the predicate.
+(`pinnedRoleCannotHopTenantsBySettingTheGuc`).
+
+The four gaps that survived those two passes were closed on 2026-09-17 (PLT-264):
+- **Tenant-less child/log tables had no policy at all** — they hold tenant data but store no
+  `tenant_id`, so the V200 catalog sweep (keyed on that column) never saw them, and any role
+  granted `ALL TABLES IN SCHEMA public` read all of them across every tenant. `V202` gives
+  the pair to 21 tables: 18 keyed on an `EXISTS` against the tenant-scoped parent
+  (`flow_step_log`→`flow_execution`, `user_credential`/`user_totp_secret`/
+  `user_recovery_code`/`password_history`→`platform_user`, `collection_version`→`collection`,
+  `field_version` two hops through it, `approval_step`, `approval_step_instance`,
+  `alert_delivery`, `bulk_job_result`, `connected_app_token`, `flow_version`,
+  `job_execution_log`, `migration_step`, `package_item`, `record_type_picklist`,
+  `script_trigger`) and 3 on a denormalised column (`kelta_migrations` and the legacy
+  `emf_migrations`, defaulted from the session's tenant; `livekit_webhook_event`, whose claim
+  now happens after the room resolves so the row can record its tenant).
+  `everyTenantDerivedTableIsCovered` replaces the `tenant_id`-column sweep with a recursive
+  catalog walk — a `tenant_id` column, or an `ON DELETE CASCADE` FK to something with one
+  (an audit `created_by → platform_user` is `NO ACTION` and correctly not ownership) — so the
+  next child table cannot ship without a policy either.
+- **Superset logins were granted the whole `public` schema**, `user_credential` and
+  `oauth2_*` included, plus `ALTER DEFAULT PRIVILEGES … GRANT SELECT` so every future table
+  followed automatically. The grant is now table by table, on tables with a `tenant_id`
+  column that RLS is enforcing; `supersetRoleIsGrantedOnlyTenantScopedTables` asserts from
+  the catalog that nothing else in `public` is readable by such a role. Not granting beats
+  trusting a policy.
+- **kelta-auth and kelta-ai ran every query as the platform session.** Both resolved the
+  request's tenant into a `ScopedValue` and neither had a DataSource binder, so the
+  `connection-init-sql: SET app.current_tenant_id = ''` was the only value the setting ever
+  took (kelta-ai's `ChatController` comment claiming otherwise was aspirational).
+  `TenantAwareDataSource` moved to runtime-core and all three services register it;
+  kelta-auth's `TenantContextFilter` now resolves the session's tenant (slug or UUID, cached)
+  on every request, and kelta-ai's `ai_*` tables get `FORCE` + `admin_bypass` in its own
+  `V6` — they were owned by the app role and merely `ENABLE`d, so their policies had never
+  run either. `TenantBindingIntegrationTest` in each service proves a request scoped to
+  tenant A cannot read tenant B's rows as a `NOBYPASSRLS` role.
+- **The harness proved nothing about the database layer**, running the whole stack as the
+  container superuser. `KeltaStack` now provisions a `NOBYPASSRLS` application role (named
+  after the CI run's schema; `release-db.sh` drops it) and the services connect as it, so
+  every scenario test exercises the real policies. `ScenarioBase.openAppDbConnection()` is
+  that role; `openDbConnection()` remains the superuser for planting fixtures.
+
+Still open: the in-code tenant predicate for direct `queryEngine.executeQuery` callers
+(PLT-260 in the RZWare tracker) remains the first line of defence — RLS is the backstop, not
+the predicate.
 
 **FIXED (2026-09-14) — the platform had no dependency vulnerability scanning at all, and the
 one scanner that was configured had never run.** OWASP dependency-check sat in
@@ -1159,9 +1196,9 @@ The ArgoCD image bump + post-deploy health check that used to live in
 - **Tenant-scoped connection** (non-empty tenant in `TenantContext`): if the borrowed connection is in autocommit mode, autocommit is turned off (begins a transaction), `SET LOCAL app.current_tenant_id = '<id>'` is issued, and a thin commit-on-close proxy commits + restores autocommit when the connection is released. If a Spring-managed transaction already owns the connection, only `SET LOCAL` is issued and the proxy defers commit/rollback to the owner (it watches the owner's `commit()`/`rollback()` to avoid a double-commit). Because the variable is set per transaction on the same backend that serves the query, it survives PgBouncer `pool_mode = transaction`. Connection-hold time is unchanged — the connection is released right after the operation, exactly like the previous autocommit model.
 - **Admin/bypass connection** (no tenant — Flyway, internal, cross-tenant work): keeps the legacy session `SET app.current_tenant_id = ''`. Empty already maps to `admin_bypass`, so transaction scoping is irrelevant to isolation and these paths are unchanged.
 
-Regression guard: `TenantAwareDataSourceTest` asserts tenant connections use transaction-local `SET LOCAL` (not session `SET`) and commit/restore correctly; `RowLevelSecurityIntegrationTest` proves the policies themselves as a role without BYPASSRLS (the harness `TenantIsolationScenarioTest` runs as the container superuser, which bypasses RLS, so it exercises the gateway/JWT boundary, not the database one).
+Regression guard: `TenantAwareDataSourceTest` (runtime-core, beside the class since PLT-264 moved it there) asserts tenant connections use transaction-local `SET LOCAL` (not session `SET`) and commit/restore correctly; `RowLevelSecurityIntegrationTest` proves the policies themselves as a role without BYPASSRLS, and `TenantIsolationScenarioTest` now does too — the harness stack runs as a `NOBYPASSRLS` role, so it covers the database boundary as well as the gateway/JWT one.
 
-**Remaining caveat — kelta-ai:** `kelta-ai/src/main/resources/application.yml` still uses `hikari.connection-init-sql: SET app.current_tenant_id = ''` (a session-level set to the bypass value). kelta-ai runs in admin/bypass mode and filters tenants explicitly in SQL rather than relying on RLS tenant isolation, so it is not a leak vector — but if kelta-ai ever begins relying on RLS for tenant-scoped reads, it must adopt the same transaction-scoped `SET LOCAL` mechanism before being placed behind a transaction-pool. Tracked as a follow-up.
+**Resolved for kelta-ai and kelta-auth (2026-09-17, PLT-264):** both now register `TenantAwareDataSourcePostProcessor` (runtime-core), so a request's tenant becomes a transaction-scoped `SET LOCAL` on the connection and only the genuinely tenant-less paths keep the `''` sentinel. The `hikari.connection-init-sql` line stays as the pre-wrapper default, not as the isolation mechanism.
 
 - **Compose healthchecks for kelta-worker and kelta-ai can never fail.** Both set
   `management.endpoint.health.show-details: always`, so `/actuator/health` returns every

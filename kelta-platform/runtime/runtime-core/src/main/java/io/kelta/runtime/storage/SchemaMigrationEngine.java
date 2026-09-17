@@ -172,6 +172,13 @@ public class SchemaMigrationEngine {
     
     /**
      * Initializes the migration history table if it doesn't exist.
+     *
+     * <p>Deliberately without the {@code tenant_id} column the table carries in Postgres:
+     * that column and its {@code app.current_tenant_id} default are owned by Flyway
+     * (V202, which also puts RLS on the table), and Flyway runs before any pod does DDL.
+     * Declaring the default here too would break the embedded-H2 tests, which have no such
+     * setting; omitting the column entirely lets the insert below fall through to the
+     * default on Postgres and to NULL everywhere else.
      */
     private void initializeMigrationTable() {
         String sql = """

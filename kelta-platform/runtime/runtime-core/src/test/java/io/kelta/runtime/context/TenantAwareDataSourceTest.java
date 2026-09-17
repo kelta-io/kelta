@@ -1,6 +1,5 @@
-package io.kelta.worker.config;
+package io.kelta.runtime.context;
 
-import io.kelta.runtime.context.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,7 +32,7 @@ class TenantAwareDataSourceTest {
     private DataSource delegate;
     private Connection conn;
     private Statement stmt;
-    private TenantAwareDataSourceConfig.TenantAwareDataSource tenantDataSource;
+    private TenantAwareDataSource tenantDataSource;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -43,7 +42,7 @@ class TenantAwareDataSourceTest {
         when(delegate.getConnection()).thenReturn(conn);
         when(conn.createStatement()).thenReturn(stmt);
         when(conn.isClosed()).thenReturn(false);
-        tenantDataSource = new TenantAwareDataSourceConfig.TenantAwareDataSource(delegate);
+        tenantDataSource = new TenantAwareDataSource(delegate);
         TenantContext.clear();
     }
 

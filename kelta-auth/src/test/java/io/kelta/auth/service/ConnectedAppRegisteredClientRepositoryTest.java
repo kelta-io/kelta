@@ -1,5 +1,6 @@
 package io.kelta.auth.service;
 
+import io.kelta.runtime.context.TenantContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -134,5 +135,30 @@ class ConnectedAppRegisteredClientRepositoryTest {
         assertThat(repository.findByClientId("klt_x")).isSameAs(other);
         verify(delegate).findByClientId("klt_x");
         verify(delegate, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void cacheIsScopedToTheTenantTheLookupRanUnder() {
+        // The query carries no tenant predicate — row-level security on connected_app is
+        // what scopes it, so what one tenant's /authorize resolved must not be served to
+        // the next tenant's request from cache.
+        when(jdbcTemplate.queryForList(anyString(), eq("klt_shared")))
+                .thenReturn(List.of(appRow("app-a", "klt_shared", "[\"client_credentials\"]", false)))
+                .thenReturn(List.of(appRow("app-b", "klt_shared", "[\"client_credentials\"]", false)));
+
+        RegisteredClient forA = TenantContext.callWithTenant(
+                "tenant-a", () -> repository.findByClientId("klt_shared"));
+        RegisteredClient forB = TenantContext.callWithTenant(
+                "tenant-b", () -> repository.findByClientId("klt_shared"));
+
+        assertThat(forA.getId()).isEqualTo("app-a");
+        assertThat(forB.getId()).isEqualTo("app-b");
+        verify(jdbcTemplate, times(2)).queryForList(anyString(), eq("klt_shared"));
+
+        // Within one tenant the cache still spares the database.
+        RegisteredClient againForA = TenantContext.callWithTenant(
+                "tenant-a", () -> repository.findByClientId("klt_shared"));
+        assertThat(againForA.getId()).isEqualTo("app-a");
+        verify(jdbcTemplate, times(2)).queryForList(anyString(), eq("klt_shared"));
     }
 }

@@ -108,6 +108,59 @@ collection-level covers fields outside it (`tenantId`, join keys).
 - Required for public classes and methods
 - Include `@param`, `@returns`, `@throws`
 
+### Row-level security: scoping tenant data in the database
+
+Postgres RLS is the last line of tenant isolation, and the application role runs
+`NOBYPASSRLS` in production and in `kelta-test-harness`. Three rules follow.
+
+**1. Every table that holds tenant data needs the policy pair, enabled *and* forced.**
+
+```sql
+ALTER TABLE <t> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ONLY <t> FORCE ROW LEVEL SECURITY;   -- without FORCE the owner is exempt,
+                                                 -- and the app role owns what it created
+CREATE POLICY tenant_isolation ON <t> USING (<tenant predicate>);
+CREATE POLICY admin_bypass     ON <t>
+    USING ((SELECT kelta_pinned_tenant()) IS NULL
+           AND current_setting('app.current_tenant_id', true) = '');
+```
+
+The tenant predicate depends on how the row reaches its tenant:
+
+| Shape | Predicate | Examples |
+|-------|-----------|----------|
+| Own `tenant_id` column | `(tenant_id)::text = COALESCE((SELECT kelta_pinned_tenant()), current_setting('app.current_tenant_id', true))` | most tables (V200) |
+| Child of a tenant-scoped row | `EXISTS (SELECT 1 FROM <parent> p WHERE p.id = <t>.<fk> AND (p.tenant_id)::text = <same expression>)` | `flow_step_log`, `user_credential`, `collection_version` (V202) |
+| No parent to join | denormalise a `tenant_id`, defaulted from the session when the writer passes none | `kelta_migrations`, `livekit_webhook_event` (V202) |
+
+`admin_bypass` is not optional: the genuinely tenant-less paths (Flyway, deploy-time
+bootstrap) bind no tenant, which is the `''` sentinel — a table with only
+`tenant_isolation` returns zero rows to them and silently drops their writes.
+`kelta_pinned_tenant()` (V201) makes a per-tenant database login unable to `SET` its way
+out; prefer it over the raw GUC, falling back to the GUC alone only where the function may
+not exist (`kelta-ai`'s own migrations).
+
+`RowLevelSecurityIntegrationTest.everyTenantDerivedTableIsCovered` derives the set of
+tables this applies to from the catalog — a `tenant_id` column, or an `ON DELETE CASCADE`
+foreign key to something that has one — so a new table without a policy fails the build
+rather than shipping. A table the rule cannot derive (a `NO ACTION` FK, a denormalised
+column) goes in the explicit list beside it.
+
+**2. A service that queries the control plane binds the request's tenant to the connection.**
+Register `TenantAwareDataSourcePostProcessor` (runtime-core) from the service's own
+configuration — kelta-worker, kelta-auth and kelta-ai each do. It turns the
+`TenantContext` the service's `TenantContextFilter` resolved into a transaction-scoped
+`SET LOCAL app.current_tenant_id`, and issues `SET app.current_tenant_id = ''` when no
+tenant is bound. A `connection-init-sql` that pins `''` is **not** a substitute: it makes
+every request a platform session, leaving the `WHERE tenant_id = ?` in each query as the
+only isolation there is.
+
+**3. A direct database login gets privileges on tenant-scoped tables only.**
+`SupersetDatabaseUserService` grants SELECT in `public` table by table, on those with a
+`tenant_id` column that RLS is enforcing — never `ALL TABLES IN SCHEMA public`, and never
+`ALTER DEFAULT PRIVILEGES … GRANT`, which hands over every table added later. Not granting
+`user_credential` and `oauth2_*` is stronger than trusting a policy to hide them.
+
 ### BeforeSaveHook signatures
 
 `BeforeSaveHook` exposes two parallel signatures for each lifecycle method: the **legacy** form without a collection name (`beforeCreate(record, tenantId)`, `beforeUpdate(id, record, previous, tenantId)`, `afterCreate(record, tenantId)`, …) and the **collection-name-aware** form that takes `collectionName` as the first argument. Both `BeforeSaveHookRegistry.evaluateBeforeCreate/Update` and `invokeAfterCreate/Update/Delete` dispatch the collection-name-aware variant, whose default delegates to the legacy variant — so existing hooks remain source-compatible.

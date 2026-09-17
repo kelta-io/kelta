@@ -18,6 +18,10 @@ import java.security.KeyPairGenerator;
 import java.security.SecureRandom;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.interfaces.RSAPublicKey;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.Properties;
@@ -68,6 +72,20 @@ public final class KeltaStack {
      * a Testcontainers PG (local dev fallback).
      */
     static final HarnessDbConfig DB_CONFIG = HarnessDbConfig.resolve(System::getenv);
+
+    /**
+     * The role the services connect as. Deliberately <b>not</b> {@link HarnessDbConfig#username()}:
+     * that is the image's bootstrap superuser, and a superuser never evaluates a row-level
+     * security policy — so every scenario the harness has ever run proved nothing about
+     * tenant isolation at the database layer. This role is created NOBYPASSRLS, like
+     * production's, so the policies are live for the whole stack.
+     *
+     * <p>Named after the run's schema on the shared CI pool, where several runs share one
+     * Postgres instance and a fixed name would collide. {@code scripts/ci/release-db.sh}
+     * drops it alongside the schema.
+     */
+    static final String APP_ROLE = applicationRoleName();
+    static final String APP_PASSWORD = "harness-app-role";
 
     static {
         try {
@@ -146,8 +164,8 @@ public final class KeltaStack {
             .withNetworkAliases("kelta-worker")
             .withNetwork(NETWORK)
             .withEnv("SPRING_DATASOURCE_URL",      DB_CONFIG.jdbcUrl())
-            .withEnv("SPRING_DATASOURCE_USERNAME", DB_CONFIG.username())
-            .withEnv("SPRING_DATASOURCE_PASSWORD", DB_CONFIG.password())
+            .withEnv("SPRING_DATASOURCE_USERNAME", APP_ROLE)
+            .withEnv("SPRING_DATASOURCE_PASSWORD", APP_PASSWORD)
             .withEnv("SPRING_DATA_REDIS_HOST",     "redis")
             .withEnv("SPRING_DATA_REDIS_PORT",     "6379")
             .withEnv("NATS_URL",                   "nats://nats:4222")
@@ -174,8 +192,8 @@ public final class KeltaStack {
             .withNetworkAliases("kelta-auth")
             .withNetwork(NETWORK)
             .withEnv("SPRING_DATASOURCE_URL",      DB_CONFIG.jdbcUrl())
-            .withEnv("SPRING_DATASOURCE_USERNAME", DB_CONFIG.username())
-            .withEnv("SPRING_DATASOURCE_PASSWORD", DB_CONFIG.password())
+            .withEnv("SPRING_DATASOURCE_USERNAME", APP_ROLE)
+            .withEnv("SPRING_DATASOURCE_PASSWORD", APP_PASSWORD)
             .withEnv("SPRING_DATA_REDIS_HOST",    "redis")
             .withEnv("SPRING_DATA_REDIS_PORT",    "6379")
             .withEnv("KELTA_AUTH_ISSUER_URI",     "http://kelta-auth:8080")
@@ -238,12 +256,24 @@ public final class KeltaStack {
         return DB_CONFIG.external() ? DB_CONFIG.jdbcUrl() : POSTGRES.getJdbcUrl();
     }
 
+    /** The bootstrap superuser — test-side admin access, bypasses RLS. */
     public static String dbUsername() {
         return DB_CONFIG.username();
     }
 
+    /** @see #dbUsername() */
     public static String dbPassword() {
         return DB_CONFIG.password();
+    }
+
+    /** The NOBYPASSRLS role the services run as. Connect as this to observe RLS. */
+    public static String appDbUsername() {
+        return APP_ROLE;
+    }
+
+    /** @see #appDbUsername() */
+    public static String appDbPassword() {
+        return APP_PASSWORD;
     }
 
     // ── Startup ──────────────────────────────────────────────────────────────
@@ -300,6 +330,8 @@ public final class KeltaStack {
         }
         log.info("Infrastructure healthy");
 
+        provisionApplicationRole();
+
         // Phase 2: worker (owns Flyway migrations)
         log.info("Phase 2: starting kelta-worker...");
         WORKER.start();
@@ -332,10 +364,105 @@ public final class KeltaStack {
         CERBOS.stop();
         NATS.stop();
         REDIS.stop();
+        if (DB_CONFIG.external()) {
+            // The local Testcontainers PG is thrown away wholesale; the shared CI instance is
+            // not, so the run's role must go with the run. release-db.sh repeats this in case
+            // the JVM never reaches here.
+            dropApplicationRole();
+        }
         if (POSTGRES != null) {
             POSTGRES.stop();
         }
         NETWORK.close();
+    }
+
+    // ── Application role (NOBYPASSRLS) ───────────────────────────────────────
+
+    /**
+     * Creates the role the services connect as, with row-level security enforced.
+     *
+     * <p>Run as the bootstrap superuser, because two of these steps need one: creating a role,
+     * and installing {@code pg_trgm} — the baseline migration's
+     * {@code CREATE EXTENSION IF NOT EXISTS} would fail for an ordinary role, but becomes a
+     * no-op once the extension is already there.
+     *
+     * <p>The role gets CREATE on the target schema and on the database, and nothing else:
+     * Flyway runs as it, so every table is created by it and owned by it. That matters — a
+     * table's owner is exempt from its own policies unless the table says FORCE, which is
+     * exactly why the migrations force RLS rather than merely enabling it.
+     *
+     * <p>{@code app.current_tenant_id = ''} is the production role default: a connection that
+     * binds no tenant is a platform session ({@code admin_bypass}), not one that sees nothing.
+     */
+    private static void provisionApplicationRole() {
+        String schema = targetSchema();
+        log.info("Provisioning NOBYPASSRLS application role '{}' on schema '{}'", APP_ROLE, schema);
+        try (Connection conn = adminConnection(); Statement st = conn.createStatement()) {
+            st.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+            // Idempotent: a re-run inside the same CI schema reuses the role rather than
+            // failing on the objects it already owns.
+            st.execute("DO $$ BEGIN "
+                    + "IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = " + literal(APP_ROLE) + ") THEN "
+                    + "  ALTER ROLE " + ident(APP_ROLE)
+                    + "    WITH LOGIN PASSWORD " + literal(APP_PASSWORD) + " NOBYPASSRLS; "
+                    + "ELSE "
+                    + "  CREATE ROLE " + ident(APP_ROLE)
+                    + "    LOGIN PASSWORD " + literal(APP_PASSWORD) + " NOBYPASSRLS; "
+                    + "END IF; END $$;");
+            st.execute("GRANT ALL ON SCHEMA " + ident(schema) + " TO " + ident(APP_ROLE));
+            // Per-tenant collection tables live in a schema named after the tenant slug, which
+            // the worker creates at runtime — that needs CREATE on the database, which PUBLIC
+            // does not have.
+            st.execute("DO $$ BEGIN EXECUTE format("
+                    + "'GRANT CREATE, CONNECT, TEMPORARY ON DATABASE %I TO %I', "
+                    + "current_database(), " + literal(APP_ROLE) + "); END $$;");
+            st.execute("ALTER ROLE " + ident(APP_ROLE) + " SET app.current_tenant_id = ''");
+            st.execute("ALTER ROLE " + ident(APP_ROLE) + " SET search_path = " + ident(schema));
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "Could not provision the harness application role '" + APP_ROLE + "'. The harness "
+                            + "runs the stack as a NOBYPASSRLS role so RLS is actually exercised; the "
+                            + "bootstrap user must be able to CREATE ROLE.", e);
+        }
+    }
+
+    private static void dropApplicationRole() {
+        try (Connection conn = adminConnection(); Statement st = conn.createStatement()) {
+            st.execute("DROP OWNED BY " + ident(APP_ROLE) + " CASCADE");
+            st.execute("DROP ROLE IF EXISTS " + ident(APP_ROLE));
+        } catch (SQLException e) {
+            log.warn("Could not drop harness application role '{}': {}", APP_ROLE, e.getMessage());
+        }
+    }
+
+    private static Connection adminConnection() throws SQLException {
+        return DriverManager.getConnection(dbJdbcUrl(), DB_CONFIG.username(), DB_CONFIG.password());
+    }
+
+    /** {@code app_<run schema>} on the shared CI pool, a fixed name on a throwaway local PG. */
+    private static String applicationRoleName() {
+        String schema = targetSchema();
+        return "public".equals(schema) ? "kelta_app" : "app_" + schema;
+    }
+
+    /** The schema the services' JDBC URL pins, or {@code public} when it pins none. */
+    private static String targetSchema() {
+        String url = DB_CONFIG.jdbcUrl();
+        int at = url.indexOf("currentSchema=");
+        if (at < 0) {
+            return "public";
+        }
+        String rest = url.substring(at + "currentSchema=".length());
+        int end = rest.indexOf('&');
+        return end < 0 ? rest : rest.substring(0, end);
+    }
+
+    private static String ident(String name) {
+        return "\"" + name.replace("\"", "\"\"") + "\"";
+    }
+
+    private static String literal(String value) {
+        return "'" + value.replace("'", "''") + "'";
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────

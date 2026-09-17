@@ -1,8 +1,9 @@
 package io.kelta.worker.config;
 
 import com.zaxxer.hikari.HikariDataSource;
+import io.kelta.runtime.context.TenantAwareDataSource;
 import io.kelta.runtime.context.TenantContext;
-import io.kelta.worker.config.TenantAwareDataSourceConfig.TenantAwareDataSource;
+import io.kelta.worker.service.SupersetDatabaseUserService;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -65,6 +66,10 @@ class RowLevelSecurityIntegrationTest {
     static final String USER_B = "bbbbbbbb-0000-0000-0000-00000000e001";
     static final String PAGE_A = "aaaaaaaa-0000-0000-0000-00000000d001";
     static final String PAGE_B = "bbbbbbbb-0000-0000-0000-00000000d001";
+    static final String VERSION_A = "aaaaaaaa-0000-0000-0000-000000005001";
+    static final String VERSION_B = "bbbbbbbb-0000-0000-0000-000000005001";
+    static final String CREDENTIAL_A = "aaaaaaaa-0000-0000-0000-000000000c01";
+    static final String CREDENTIAL_B = "bbbbbbbb-0000-0000-0000-000000000c01";
 
     /** Container superuser: runs the migrations and plants the fixtures (bypasses RLS). */
     static JdbcTemplate admin;
@@ -118,6 +123,18 @@ class RowLevelSecurityIntegrationTest {
                 PAGE_A, TENANT_A, "Home", "/p/home", "home");
         admin.update("INSERT INTO ui_page (id, tenant_id, name, path, slug) VALUES (?, ?, ?, ?, ?)",
                 PAGE_B, TENANT_B, "Home", "/p/home", "home");
+
+        // Rows on tables that carry no tenant_id of their own and reach the tenant only
+        // through their parent (V202): collection_version through collection,
+        // user_credential through platform_user.
+        admin.update("INSERT INTO collection_version (id, collection_id, version) VALUES (?, ?, 1)",
+                VERSION_A, COLLECTION_A);
+        admin.update("INSERT INTO collection_version (id, collection_id, version) VALUES (?, ?, 1)",
+                VERSION_B, COLLECTION_B);
+        admin.update("INSERT INTO user_credential (id, user_id, password_hash) VALUES (?, ?, ?)",
+                CREDENTIAL_A, USER_A, "hash-a");
+        admin.update("INSERT INTO user_credential (id, user_id, password_hash) VALUES (?, ?, ?)",
+                CREDENTIAL_B, USER_B, "hash-b");
 
         // A direct per-tenant login of the kind SupersetDatabaseUserService creates: public SELECT,
         // no wrapper, and pinned to tenant A through tenant_db_role (V201) rather than the GUC.
@@ -179,34 +196,76 @@ class RowLevelSecurityIntegrationTest {
     }
 
     @Test
-    @DisplayName("every table with a tenant_id column has RLS enabled, forced, and both policies")
-    void everyTenantScopedTableIsCovered() {
+    @DisplayName("every table that is — or cascades from — a tenant-scoped table has RLS enabled, forced, and both policies")
+    void everyTenantDerivedTableIsCovered() {
+        // "Holds tenant data" is not the same as "has a tenant_id column". A child table
+        // reaches its tenant through its parent, and the structural marker for that is an
+        // ON DELETE CASCADE foreign key: the row is meaningless once the parent is gone, so
+        // it belongs to the parent's tenant. An audit reference (created_by → platform_user)
+        // is NO ACTION and is correctly not treated as ownership.
         List<String> uncovered = admin.queryForList("""
+                WITH RECURSIVE tenant_derived(relid) AS (
+                    SELECT c.oid
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE n.nspname = 'public' AND c.relkind = 'r'
+                      AND EXISTS (SELECT 1 FROM pg_attribute a
+                                  WHERE a.attrelid = c.oid AND a.attname = 'tenant_id'
+                                    AND a.attnum > 0 AND NOT a.attisdropped)
+                  UNION
+                    SELECT con.conrelid
+                    FROM pg_constraint con
+                    JOIN tenant_derived td ON td.relid = con.confrelid
+                    WHERE con.contype = 'f' AND con.confdeltype = 'c'
+                      AND con.conrelid <> con.confrelid
+                )
                 SELECT c.relname
-                FROM pg_class c
-                JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = 'public' AND c.relkind = 'r'
+                FROM tenant_derived td
+                JOIN pg_class c ON c.oid = td.relid
+                WHERE c.relnamespace = 'public'::regnamespace
                   -- tenant_db_role is the pin itself: platform-owned, PUBLIC revoked, read only
                   -- through kelta_pinned_tenant() (a policy on it would recurse into that function)
                   AND c.relname <> 'tenant_db_role'
-                  AND EXISTS (SELECT 1 FROM information_schema.columns col
-                              WHERE col.table_schema = 'public' AND col.table_name = c.relname
-                                AND col.column_name = 'tenant_id')
                   AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity
                        OR NOT EXISTS (SELECT 1 FROM pg_policies p
-                                      WHERE p.tablename = c.relname AND p.policyname = 'tenant_isolation')
+                                      WHERE p.schemaname = 'public' AND p.tablename = c.relname
+                                        AND p.policyname = 'tenant_isolation')
                        OR NOT EXISTS (SELECT 1 FROM pg_policies p
-                                      WHERE p.tablename = c.relname AND p.policyname = 'admin_bypass'))
+                                      WHERE p.schemaname = 'public' AND p.tablename = c.relname
+                                        AND p.policyname = 'admin_bypass'))
                 ORDER BY 1
                 """, String.class);
         assertThat(uncovered)
-                .as("tables with a tenant_id column but no enforced RLS policy pair — add them to the migration")
+                .as("tables holding tenant data with no enforced RLS policy pair — add them to the migration")
                 .isEmpty();
         // Sanity: the check is not vacuous.
         assertThat(admin.queryForObject(
                 "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
                         + "WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity", Integer.class))
-                .isGreaterThan(120);
+                .isGreaterThan(135);
+    }
+
+    @Test
+    @DisplayName("the tenant-scoped tables the structural rule cannot derive are covered too")
+    void tablesWithoutACascadeParentAreCovered() {
+        // These hold tenant data but the catalog cannot prove it: a plain (NO ACTION) foreign
+        // key, or no foreign key at all and a denormalised tenant_id instead (V202). Listing
+        // them here means dropping one of their policies fails this test rather than shipping.
+        List<String> named = List.of(
+                "job_execution_log", "kelta_migrations", "livekit_webhook_event",
+                "password_history", "user_recovery_code", "user_totp_secret");
+        for (String table : named) {
+            assertThat(admin.queryForObject(
+                    "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class c "
+                            + "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                            + "WHERE n.nspname = 'public' AND c.relname = ?", Boolean.class, table))
+                    .as("%s must have RLS enabled and forced", table)
+                    .isTrue();
+            assertThat(admin.queryForList(
+                    "SELECT policyname FROM pg_policies WHERE tablename = ?", String.class, table))
+                    .as("%s policies", table)
+                    .contains("tenant_isolation", "admin_bypass");
+        }
     }
 
     // ------------------------------------------------------------------ reads
@@ -226,6 +285,42 @@ class RowLevelSecurityIntegrationTest {
         assertThat(asTenant(TENANT_A, () -> app.queryForObject(
                 "SELECT tenant_id FROM ui_page WHERE slug = 'home' LIMIT 1", String.class)))
                 .isEqualTo(TENANT_A);
+    }
+
+    @Test
+    @DisplayName("a child table with no tenant_id of its own is scoped by its parent's tenant")
+    void childRowsFollowTheirParentsTenant() {
+        // collection_version reaches its tenant through collection; user_credential through
+        // platform_user. Neither stores a tenant_id, and before V202 neither had a policy —
+        // every tenant could read every other tenant's schema history and password hashes.
+        assertThat(asTenant(TENANT_A, () -> ids(
+                "SELECT id FROM collection_version WHERE id IN (?, ?)", VERSION_A, VERSION_B)))
+                .containsExactly(VERSION_A);
+        assertThat(asTenant(TENANT_B, () -> ids(
+                "SELECT id FROM collection_version WHERE id IN (?, ?)", VERSION_A, VERSION_B)))
+                .containsExactly(VERSION_B);
+
+        assertThat(asTenant(TENANT_A, () -> ids(
+                "SELECT password_hash FROM user_credential WHERE id IN (?, ?)", CREDENTIAL_A, CREDENTIAL_B)))
+                .containsExactly("hash-a");
+        // The unqualified lookup an auth query makes if it forgets the tenant join.
+        assertThat(asTenant(TENANT_B, () -> ids("SELECT password_hash FROM user_credential")))
+                .containsExactly("hash-b");
+
+        // Writes are bounded the same way: tenant A cannot touch tenant B's child row, and
+        // cannot attach a new one to tenant B's parent.
+        assertThat(asTenant(TENANT_A, () -> app.update(
+                "UPDATE user_credential SET password_hash = 'stolen' WHERE id = ?", CREDENTIAL_B)))
+                .isZero();
+        String smuggled = UUID.randomUUID().toString();
+        assertThatThrownBy(() -> asTenant(TENANT_A, () -> app.update(
+                "INSERT INTO collection_version (id, collection_id, version) VALUES (?, ?, 2)",
+                smuggled, COLLECTION_B)))
+                .rootCause().hasMessageContaining("violates row-level security policy");
+
+        // The platform session still sees both, so the migration/bootstrap paths are unchanged.
+        assertThat(ids("SELECT id FROM collection_version WHERE id IN (?, ?)", VERSION_A, VERSION_B))
+                .containsExactly(VERSION_A, VERSION_B);
     }
 
     @Test
@@ -339,6 +434,52 @@ class RowLevelSecurityIntegrationTest {
                 .containsExactly(LAYOUT_B);
         assertThat(ids("SELECT id FROM page_layout WHERE id IN (?, ?)", LAYOUT_A, LAYOUT_B))
                 .containsExactly(LAYOUT_A, LAYOUT_B);
+    }
+
+    @Test
+    @DisplayName("the Superset role is granted tenant-scoped tables only — not user_credential, not oauth2_*")
+    void supersetRoleIsGrantedOnlyTenantScopedTables() {
+        // The real grant path, against the real catalog: SupersetDatabaseUserService decides
+        // what a reporting login may read from `public`, and `public` is the control plane.
+        admin.execute("CREATE SCHEMA IF NOT EXISTS \"tenant-a\"");
+        SupersetDatabaseUserService superset =
+                new SupersetDatabaseUserService(admin, POSTGRES.getDatabaseName());
+        superset.ensureTenantUser(TENANT_A, "tenant-a");
+        String role = "superset_tenant_a";
+
+        assertThat(granted(role, "page_layout")).as("tenant-scoped table").isTrue();
+        assertThat(granted(role, "ui_page")).as("tenant-scoped table").isTrue();
+        assertThat(granted(role, "user_credential")).as("password hashes").isFalse();
+        assertThat(granted(role, "oauth2_registered_client")).as("OAuth2 client secrets").isFalse();
+        assertThat(granted(role, "oauth2_authorization")).as("live OAuth2 tokens").isFalse();
+        assertThat(granted(role, "tenant")).as("every tenant's row, with no RLS to hide them").isFalse();
+        assertThat(granted(role, "tenant_db_role")).as("the pin itself").isFalse();
+
+        // Nothing in public is granted that RLS is not enforcing a tenant_id on.
+        assertThat(admin.queryForList("""
+                SELECT c.relname
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relkind = 'r'
+                  AND has_table_privilege(?, c.oid, 'SELECT')
+                  AND NOT (c.relrowsecurity AND EXISTS (SELECT 1 FROM pg_attribute a
+                           WHERE a.attrelid = c.oid AND a.attname = 'tenant_id'
+                             AND a.attnum > 0 AND NOT a.attisdropped))
+                ORDER BY 1
+                """, String.class, role))
+                .as("tables a tenant login can read that RLS cannot scope to its tenant")
+                .isEmpty();
+
+        superset.dropTenantUser("tenant-a");
+        assertThat(admin.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = ?)", Boolean.class, role))
+                .as("dropTenantUser must leave no role behind — default privileges block DROP ROLE")
+                .isFalse();
+    }
+
+    private static boolean granted(String role, String table) {
+        return Boolean.TRUE.equals(admin.queryForObject(
+                "SELECT has_table_privilege(?, ?, 'SELECT')", Boolean.class, role, "public." + table));
     }
 
     // ------------------------------------------------------------------ transaction paths

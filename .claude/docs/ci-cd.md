@@ -160,7 +160,10 @@ auto-rollbacks, re-apply bumps) are in `scripts/dora/README.md`.
 - `build-runner-image.yml` — builds the self-hosted CI runner image.
 - `dora-metrics.yml` — see above.
 - `.github/workflows/README.md` and `scripts/ci/README.md` — runner + shared CI DB
-  (`kelta-ci-db`, schema-isolated per run) notes.
+  (`kelta-ci-db`, schema-isolated per run) notes. `checkout-db.sh` claims the schema;
+  `release-db.sh` drops it **and** the run's `app_<schema>` role — the harness runs the
+  stack as a per-run `NOBYPASSRLS` application role so row-level security is actually
+  exercised (`KeltaStack.provisionApplicationRole`), and that role owns the schema's tables.
 
 ## Container registry & deploy
 

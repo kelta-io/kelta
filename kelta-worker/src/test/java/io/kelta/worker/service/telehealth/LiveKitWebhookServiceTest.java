@@ -33,8 +33,9 @@ class LiveKitWebhookServiceTest {
         eventPublisher = mock(PlatformEventPublisher.class);
         archiveService = mock(ArchiveService.class);
         service = new LiveKitWebhookService(jdbcTemplate, eventPublisher, archiveService);
-        // Idempotency claim succeeds by default.
-        when(jdbcTemplate.update(contains("livekit_webhook_event"), anyString(), anyString()))
+        // Idempotency claim succeeds by default. The claim carries the tenant the room
+        // resolved to, so it is taken after the session lookup, not before it.
+        when(jdbcTemplate.update(contains("livekit_webhook_event"), anyString(), anyString(), anyString()))
                 .thenReturn(1);
     }
 
@@ -117,13 +118,25 @@ class LiveKitWebhookServiceTest {
     @Test
     @DisplayName("duplicate event ids are claimed once and skipped after")
     void idempotent() {
-        when(jdbcTemplate.update(contains("livekit_webhook_event"), eq("EV_DUP"), anyString()))
+        stubSession();
+        when(jdbcTemplate.update(contains("livekit_webhook_event"), eq("EV_DUP"), anyString(), anyString()))
                 .thenReturn(0);
 
         service.process("{\"event\":\"room_started\",\"id\":\"EV_DUP\",\"room\":{\"name\":\"t_t1_room\"}}");
 
-        verify(jdbcTemplate, never()).queryForList(contains("FROM video_session"), anyString());
+        verify(jdbcTemplate, never()).update(contains("SET status = 'ACTIVE'"), anyString());
         verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    @DisplayName("the idempotency claim records the tenant its room belongs to")
+    void claimCarriesTheTenant() {
+        stubSession();
+        service.process("{\"event\":\"room_started\",\"id\":\"EV_T\",\"room\":{\"name\":\"t_t1_room\"}}");
+
+        verify(jdbcTemplate).update(
+                contains("INSERT INTO livekit_webhook_event (event_id, event_type, tenant_id, processed_at)"),
+                eq("EV_T"), eq("room_started"), eq("t1"));
     }
 
     @Test

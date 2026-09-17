@@ -74,7 +74,9 @@ public class ChatController {
         emitter.onError(ex -> sseMetrics.streamClosed(AiSseMetrics.CloseReason.ERROR));
 
         // Run the streaming on a virtual thread; propagate the caller's tenant
-        // ScopedValue so downstream DB queries see the right app.current_tenant_id.
+        // ScopedValue, which TenantAwareDataSourceConfig turns into the connection's
+        // app.current_tenant_id — so a query issued off the request thread stays inside
+        // the same tenant's RLS scope instead of falling back to the platform session.
         Thread.startVirtualThread(TenantPropagatingExecutors.wrap(() -> chatService.chatStream(
                 tenantId, userId, conversationId,
                 message, contextType, contextId, emitter)));

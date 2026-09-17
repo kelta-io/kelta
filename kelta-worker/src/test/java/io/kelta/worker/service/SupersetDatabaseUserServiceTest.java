@@ -3,7 +3,10 @@ package io.kelta.worker.service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -59,9 +62,9 @@ class SupersetDatabaseUserServiceTest {
         verify(jdbcTemplate).execute(contains("GRANT USAGE ON SCHEMA public"));
         verify(jdbcTemplate).execute(contains("GRANT USAGE ON SCHEMA \"acme\""));
 
-        // Verify SELECT grants
-        verify(jdbcTemplate).execute(contains("GRANT SELECT ON ALL TABLES IN SCHEMA public"));
+        // Verify SELECT grants: the tenant's own schema wholesale, public table by table
         verify(jdbcTemplate).execute(contains("GRANT SELECT ON ALL TABLES IN SCHEMA \"acme\""));
+        verify(jdbcTemplate).execute(contains("GRANT SELECT ON public.%I TO %I"));
 
         // Verify database name is quoted and matches the configured value
         verify(jdbcTemplate).execute(contains("GRANT CONNECT ON DATABASE \"emf_control_plane\""));
@@ -102,6 +105,11 @@ class SupersetDatabaseUserServiceTest {
         verify(jdbcTemplate).execute(contains("REVOKE USAGE ON SCHEMA \"acme\" FROM \"superset_acme\""));
         verify(jdbcTemplate).execute(contains("DROP ROLE IF EXISTS \"superset_acme\""));
         verify(jdbcTemplate).update(contains("DELETE FROM tenant_db_role"), eq("superset_acme"));
+        // Both are DROP ROLE dependencies: the role survives the drop without them.
+        verify(jdbcTemplate).execute(contains(
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM \"superset_acme\""));
+        verify(jdbcTemplate).execute(contains(
+                "REVOKE ALL ON DATABASE \"emf_control_plane\" FROM \"superset_acme\""));
     }
 
     @Test
@@ -189,5 +197,65 @@ class SupersetDatabaseUserServiceTest {
         assertEquals("'it''s'", SupersetDatabaseUserService.quoteLiteral("it's"));
         assertEquals("'''; DROP--'",
                 SupersetDatabaseUserService.quoteLiteral("'; DROP--"));
+    }
+
+    // =========================================================================
+    // Grant-scope tests — public is the control plane, not the tenant's data
+    // =========================================================================
+
+    /** Every statement the service issued, in order. */
+    private List<String> executedSql() {
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate, atLeastOnce()).execute(sql.capture());
+        return sql.getAllValues();
+    }
+
+    @Test
+    @DisplayName("never grants the whole public schema, and revokes an earlier blanket grant")
+    void narrowsPublicSchemaGrants() {
+        when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class), anyString())).thenReturn(false);
+
+        service.ensureTenantUser(TENANT_UUID, "acme");
+
+        List<String> sql = executedSql();
+        assertTrue(sql.stream().noneMatch(s -> s.contains("GRANT SELECT ON ALL TABLES IN SCHEMA public")),
+                "public must be granted table by table, never wholesale: " + sql);
+        assertTrue(sql.stream().noneMatch(s ->
+                        s.contains("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT")),
+                "future public tables must not be granted automatically: " + sql);
+        assertTrue(sql.stream().anyMatch(s ->
+                        s.contains("REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM \"superset_acme\"")),
+                "a role created before the narrowing must lose its blanket grant: " + sql);
+        assertTrue(sql.stream().anyMatch(s ->
+                        s.contains("ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM \"superset_acme\"")),
+                "the earlier future-table grant must be revoked too: " + sql);
+    }
+
+    @Test
+    @DisplayName("grants only tenant-scoped public tables — user_credential and oauth2_* are not granted")
+    void doesNotGrantPlatformWideTables() {
+        when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class), anyString())).thenReturn(false);
+
+        service.ensureTenantUser(TENANT_UUID, "acme");
+
+        List<String> sql = executedSql();
+        String grant = sql.stream()
+                .filter(s -> s.contains("GRANT SELECT ON public.%I TO %I"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no per-table public grant issued: " + sql));
+
+        // The grant is driven by the catalog, so the guarantee is in its predicate: a table
+        // is granted only if it has a tenant_id column that row-level security is enforcing
+        // on. user_credential (tenant only via platform_user) and every oauth2_* table have
+        // no tenant_id, so neither can be selected by it.
+        assertTrue(grant.contains("a.attname = 'tenant_id'"), grant);
+        assertTrue(grant.contains("c.relrowsecurity"), grant);
+        assertTrue(grant.contains("n.nspname = 'public'"), grant);
+        assertTrue(grant.contains("c.relname <> 'tenant_db_role'"), grant);
+        assertTrue(grant.contains("'superset_acme'"), "the grant must name the role: " + grant);
+
+        // And nothing anywhere names them outright.
+        assertTrue(sql.stream().noneMatch(s -> s.contains("user_credential")), sql.toString());
+        assertTrue(sql.stream().noneMatch(s -> s.contains("oauth2_")), sql.toString());
     }
 }

@@ -617,6 +617,35 @@ controller, **read** `TenantContext` (or accept `@RequestHeader("X-Tenant-ID")`)
 call `TenantContext.runWithTenant(...)` on a request path; that's for background / cross-tenant
 jobs. RLS then scopes every query automatically.
 
+### Tenant context → database connection (all three JDBC services)
+
+What makes "RLS then scopes every query automatically" true is one bean, not the
+`ScopedValue` by itself. `TenantAwareDataSourcePostProcessor` (runtime-core) wraps the
+`dataSource` bean in a `TenantAwareDataSource`, which on each borrow issues
+`SET LOCAL app.current_tenant_id = '<tenant>'` inside a transaction when a tenant is bound,
+and a session-level `SET app.current_tenant_id = ''` (the `admin_bypass` sentinel) when none
+is. Transaction-scoped rather than session-scoped so it survives PgBouncer's
+`pool_mode = transaction`.
+
+Every service that talks to the control-plane database registers it from its own
+configuration — `kelta-{worker,auth,ai}/.../config/TenantAwareDataSourceConfig`. It is
+deliberately not an auto-configuration: kelta-gateway is reactive and has no DataSource, and
+a service should not acquire connection-level behaviour it never asked for.
+
+Each service resolves its tenant from a different place, and that is the only part that
+differs:
+
+| Service | Where the request's tenant comes from |
+|---------|----------------------------------------|
+| kelta-worker | `X-Tenant-ID` / `X-Tenant-Slug` from the gateway (`filter/TenantContextFilter`) |
+| kelta-ai | `X-Tenant-ID` from the gateway (`filter/TenantContextFilter`); propagated onto the SSE virtual thread by `TenantPropagatingExecutors.wrap` |
+| kelta-auth | the login session's `tenantId` attribute — slug or UUID, resolved to a UUID and cached (`config/TenantContextFilter`); a request with no session (the client back-channel token exchange, startup client registration) binds nothing and keeps the platform session |
+
+Before 2026-09-17 only kelta-worker had the binder, so kelta-auth and kelta-ai ran every
+statement as the platform session and their RLS policies never evaluated — see
+`concerns.md`. Adding a fourth JDBC service means adding this bean and a tenant resolution
+for it, not just a `ScopedValue`.
+
 ## Worker Layers
 
 - **Controllers**: `kelta-worker/src/main/java/io/kelta/controller/` — Admin REST endpoints

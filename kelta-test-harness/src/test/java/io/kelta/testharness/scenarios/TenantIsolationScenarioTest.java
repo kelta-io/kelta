@@ -1,5 +1,6 @@
 package io.kelta.testharness.scenarios;
 
+import io.kelta.testharness.KeltaStack;
 import io.kelta.testharness.ScenarioBase;
 import io.kelta.testharness.fixtures.TenantFixture;
 import org.junit.jupiter.api.DisplayName;
@@ -8,6 +9,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.web.client.HttpClientErrorException;
 
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -29,6 +34,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *       via the admin API, with customers/orders/products collections</li>
  * </ul>
  * Each tenant has an admin account (password {@code password}); see {@code AuthFixture}.
+ *
+ * <p>The stack runs against a NOBYPASSRLS application role ({@code KeltaStack.APP_ROLE}), so
+ * the isolation the gateway enforces above is backed by row-level security underneath: the
+ * last two tests here assert that directly, on the same connection the services use.
  */
 @DisplayName("Tenant Isolation Scenario")
 class TenantIsolationScenarioTest extends ScenarioBase {
@@ -159,5 +168,66 @@ class TenantIsolationScenarioTest extends ScenarioBase {
                 .body(Map.class);
 
         assertThat(body).containsKey("data");
+    }
+
+    // ── database-layer isolation (the services' own role) ────────────────────
+
+    /**
+     * The premise every RLS assertion in this class rests on. A superuser — which is what
+     * the harness used to hand the services — never evaluates a policy, so before this the
+     * whole stack could have had no RLS at all and every test here would still have passed.
+     */
+    @Test
+    @DisplayName("the services connect as a role that row-level security applies to")
+    void servicesRunWithoutBypassRls() throws Exception {
+        try (Connection conn = openAppDbConnection(); Statement st = conn.createStatement()) {
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getBoolean(1))
+                        .as("%s must be NOBYPASSRLS and not a superuser, or the policies are decoration",
+                                KeltaStack.appDbUsername())
+                        .isFalse();
+            }
+        }
+    }
+
+    /**
+     * Reads {@code platform_user} directly, as the services do, with each tenant bound in
+     * turn: the rows a tenant can see must be its own. A query that forgets its
+     * {@code WHERE tenant_id = ?} is contained by the database rather than by the caller.
+     */
+    @Test
+    @DisplayName("bound to tenant A, the application role cannot read tenant B's rows")
+    void databaseDeniesCrossTenantReads() throws Exception {
+        String defaultId   = tenants.tenantIdForSlug(TenantFixture.DEFAULT_SLUG);
+        String ecommerceId = tenants.tenantIdForSlug(TenantFixture.ECOMMERCE_SLUG);
+
+        assertThat(tenantIdsVisibleTo(defaultId)).containsExactly(defaultId);
+        assertThat(tenantIdsVisibleTo(ecommerceId)).containsExactly(ecommerceId);
+
+        // The platform session (no tenant bound) still sees both — that is what Flyway and
+        // the cross-tenant bootstrap paths run as.
+        assertThat(tenantIdsVisibleTo("")).contains(defaultId, ecommerceId);
+    }
+
+    /** Distinct platform_user.tenant_id values visible with {@code tenantId} bound. */
+    private List<String> tenantIdsVisibleTo(String tenantId) throws Exception {
+        try (Connection conn = openAppDbConnection()) {
+            conn.setAutoCommit(false);
+            try (Statement st = conn.createStatement()) {
+                st.execute("SET LOCAL app.current_tenant_id = '" + tenantId.replace("'", "''") + "'");
+                List<String> seen = new ArrayList<>();
+                try (ResultSet rs = st.executeQuery(
+                        "SELECT DISTINCT tenant_id FROM platform_user ORDER BY 1")) {
+                    while (rs.next()) {
+                        seen.add(rs.getString(1));
+                    }
+                }
+                return seen;
+            } finally {
+                conn.rollback();
+            }
+        }
     }
 }
