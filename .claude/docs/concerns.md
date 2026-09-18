@@ -255,10 +255,12 @@ platform that otherwise enforces RLS, Cerbos, FLS and data masking.
 
 The **npm** side is now gated by `dependency-audit`, wired into `quality-gate`'s `needs`
 **and** its result loop. The gate diffs against
-`ci/npm-audit-baseline.json` rather than using a flat threshold, because 33 known
+`ci/npm-audit-baseline.json` rather than using a flat threshold, because 33 then-known
 high/critical advisories would otherwise fail the build on day one. **The baseline is debt,
-not an allowlist** — the 33 entries are the burn-down list, and the 2 criticals are the place
-to start.
+not an allowlist** — it was 33 entries at introduction and is **26** today (8 `kelta-web`, 18
+`kelta-ui/app`); #1472 cleared both criticals (`protobufjs` RCE via an npm override, `maplibre-gl`
+XSS via a 5.x→6.x bump), so what remains is `axios` / `react-router` / `form-data` / `fast-uri`
+highs shared across both packages. Refresh the count here whenever the baseline moves.
 
 **Java dependencies are still unscanned.** Wiring dependency-check up is blocked on the
 `NVD_API_KEY` secret: it *is* configured, but the NVD API rejects it —
