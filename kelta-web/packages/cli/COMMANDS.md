@@ -354,7 +354,7 @@ Create a UI page (draft — unpublished until `pages publish`)
 
 ### `kelta pages apply <file>`
 
-Validate then create-or-update a UI page from a JSON file, keyed on path **(destructive — needs --yes off-TTY)**
+Validate then create-or-update a UI page from a JSON file, keyed on path. Returns {action, id, path, changed, published} like apply_page — pass --raw for the full ui-pages record instead. **(destructive — needs --yes off-TTY)**
 
 - `--dry-run` — Validate config only; write nothing
 
@@ -376,7 +376,7 @@ Delete a UI page **(destructive — needs --yes off-TTY)**
 
 ### `kelta pages publish <path>`
 
-Publish the UI page served at a route path (sets published=true)
+Publish the UI page served at a route path (sets published=true). Returns {action: "published"|"unchanged", id, path}.
 
 ## menus
 

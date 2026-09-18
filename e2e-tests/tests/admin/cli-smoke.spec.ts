@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,6 +116,33 @@ test.describe("kelta CLI smoke", () => {
     expect(result.status, result.stderr).toBe(0);
     const row = JSON.parse(result.stdout) as { id?: string; path?: string };
     expect(row.path).toBe(rows[0].path);
+  });
+
+  // Regression coverage for KLT-263: `pages apply` reports {action, id, path,
+  // changed, published} instead of echoing the full ui-pages record, so a
+  // caller can tell whether a re-apply actually changed anything without
+  // diffing the record itself.
+  test("pages apply applied twice reports created then unchanged", () => {
+    const uniquePath = `/e2e-cli-smoke-${String(Date.now())}`;
+    const file = path.join(configDir, "cli-smoke-page.json");
+    writeFileSync(file, JSON.stringify({ name: "CLI Smoke Page", path: uniquePath, config: {} }));
+
+    let pageId: string | undefined;
+    try {
+      const first = runCli(["pages", "apply", file, "--yes", "--output", "json"]);
+      expect(first.status, first.stderr).toBe(0);
+      const firstResult = JSON.parse(first.stdout) as { action?: string; id?: string };
+      expect(firstResult.action).toBe("created");
+      pageId = firstResult.id;
+
+      const second = runCli(["pages", "apply", file, "--yes", "--output", "json"]);
+      expect(second.status, second.stderr).toBe(0);
+      const secondResult = JSON.parse(second.stdout) as { action?: string; id?: string };
+      expect(secondResult.action).toBe("unchanged");
+      expect(secondResult.id).toBe(pageId);
+    } finally {
+      if (pageId) runCli(["pages", "delete", pageId, "--yes", "--output", "json"]);
+    }
   });
 
   test("menus get --tree nests items under their group", () => {

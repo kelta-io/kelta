@@ -170,5 +170,10 @@ only the keys that actually differ.
 
 The CLI mirrors this: `kelta pages apply <file.json>` runs the same
 validate-then-upsert sequence (`--dry-run` runs validation only and
-writes nothing), and `kelta pages publish <path>` sets `published: true`
-on the page served at that route.
+writes nothing) and prints the same summary shape as `apply_page` —
+`{action, id, path, changed, published}` — instead of the full record;
+`changed` names only the keys that actually differ, counting a changed
+`config` once rather than per nested key. Pass `--raw` to print the full
+`ui-pages` record instead of the summary. `kelta pages publish <path>`
+sets `published: true` on the page served at that route and prints
+`{action: "published"|"unchanged", id, path}`.
