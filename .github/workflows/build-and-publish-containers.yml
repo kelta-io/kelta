@@ -12,6 +12,7 @@ on:
       - 'kelta-auth/**'
       - 'kelta-web/**'
       - 'kelta-ui/**'
+      - 'kelta-marketing/**'
       - 'e2e-tests/**'
       - '.github/workflows/build-and-publish-containers.yml'
       - '.github/path-filters.yml'
@@ -66,6 +67,7 @@ jobs:
       web: ${{ steps.resolved.outputs.web }}
       ui: ${{ steps.resolved.outputs.ui }}
       cli_downloads: ${{ steps.resolved.outputs.cli_downloads }}
+      marketing: ${{ steps.resolved.outputs.marketing }}
       any_java: ${{ steps.resolved.outputs.any_java }}
       workflows: ${{ steps.resolved.outputs.workflows }}
     steps:
@@ -97,6 +99,7 @@ jobs:
             echo "web=$(resolve '${{ steps.filter.outputs.web }}')"
             echo "ui=$(resolve '${{ steps.filter.outputs.ui }}')"
             echo "cli_downloads=$(resolve '${{ steps.filter.outputs.cli_downloads }}')"
+            echo "marketing=$(resolve '${{ steps.filter.outputs.marketing }}')"
             echo "any_java=$(resolve '${{ steps.filter.outputs.any_java }}')"
             echo "workflows=${{ steps.filter.outputs.workflows }}"
           } >> "$GITHUB_OUTPUT"
@@ -347,6 +350,14 @@ jobs:
             dockerfile: kelta-cli-downloads/Dockerfile
             image: kelta-cli-downloads
             changed: ${{ needs.changes.outputs.cli_downloads }}
+          # Astro static site behind nginx. Unlike every other image its build
+          # context is the module directory, not the repo root — the Dockerfile
+          # COPYs package.json/package-lock.json from the context root.
+          - service: marketing
+            dockerfile: kelta-marketing/Dockerfile
+            context: kelta-marketing
+            image: kelta-marketing
+            changed: ${{ needs.changes.outputs.marketing }}
     steps:
       - name: Skip if unchanged
         if: matrix.changed != 'true' && needs.changes.outputs.workflows != 'true'
@@ -384,7 +395,7 @@ jobs:
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ${{ matrix.context || '.' }}
           file: ${{ matrix.dockerfile }}
           push: ${{ github.event_name != 'workflow_dispatch' || inputs.push_images }}
           tags: |
@@ -468,6 +479,11 @@ jobs:
           token: ${{ secrets.ARGOCD_REPO_TOKEN }}
           path: homelab-argo
 
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          path: emf-src
+
       - name: Get short SHA
         id: sha
         run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
@@ -480,6 +496,29 @@ jobs:
           fi
           kustomize version
 
+      # The marketing site's Deployment/Service/Ingress are authored in this repo
+      # (kelta-marketing/k8s/deployment.yaml) and mirrored into the emf kustomize
+      # overlay here, because ArgoCD only watches homelab-argo. Every other
+      # service's manifests are hand-maintained over there; this one is generated,
+      # so an edit in homelab-argo is overwritten on the next deploy. The copy is
+      # unconditional (not gated on `marketing` changing) so a drifted overlay
+      # heals itself; when nothing changed the copy is a no-op and `git diff`
+      # finds nothing to commit.
+      - name: Sync kelta-marketing manifests into the ArgoCD overlay
+        working-directory: homelab-argo
+        run: |
+          if [ ! -f emf/kustomization.yaml ]; then
+            echo "::error::homelab-argo/emf/kustomization.yaml not found — cannot register the marketing manifests."
+            exit 1
+          fi
+          cp ../emf-src/kelta-marketing/k8s/deployment.yaml emf/kelta-marketing.yaml
+          if ! grep -q '^ *- *kelta-marketing\.yaml$' emf/kustomization.yaml; then
+            (cd emf && kustomize edit add resource kelta-marketing.yaml)
+            echo "Registered kelta-marketing.yaml as a kustomize resource."
+          fi
+          # Fails the step (and so skips the commit) if the overlay no longer renders.
+          kustomize build emf/ >/dev/null
+
       - name: Update image tags via kustomize
         working-directory: homelab-argo
         env:
@@ -490,6 +529,7 @@ jobs:
           MCP_CHANGED: ${{ needs.changes.outputs.mcp }}
           UI_CHANGED: ${{ needs.changes.outputs.ui }}
           CLI_DOWNLOADS_CHANGED: ${{ needs.changes.outputs.cli_downloads }}
+          MARKETING_CHANGED: ${{ needs.changes.outputs.marketing }}
           WORKFLOWS_CHANGED: ${{ needs.changes.outputs.workflows }}
           HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
           HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
@@ -558,6 +598,7 @@ jobs:
             bump "harbor.rzware.com/emf/emf-ai"             "$AI_CHANGED"
             bump "harbor.rzware.com/emf/emf-mcp"            "$MCP_CHANGED"
             bump "harbor.rzware.com/emf/emf-cli-downloads"  "$CLI_DOWNLOADS_CHANGED"
+            bump "harbor.rzware.com/emf/emf-marketing"      "$MARKETING_CHANGED"
             cd ..
           fi
 
@@ -727,6 +768,44 @@ jobs:
           }
           echo "CLI downloads smoke OK: ${EXPECT} served and executable."
 
+      # Marketing site (kelta.io). Checked through the in-cluster Service so the
+      # result does not depend on public DNS or the TLS cert. Two assertions, both
+      # acceptance criteria of KLT-268: the site answers 200, and /pricing does not
+      # exist (CHARTER.md §2 red zone — nginx must 404 it, not SPA-fallback to 200).
+      - name: Verify marketing site (when built)
+        if: needs.changes.outputs.marketing == 'true'
+        run: |
+          NS=${{ steps.k8s.outputs.ns }}
+          DEPLOY=kelta-marketing
+          if ! kubectl -n ${NS} get deploy ${DEPLOY} >/dev/null 2>&1; then
+            echo "::warning::${DEPLOY} not deployed in ${NS} yet (argo sync pending) — skipping marketing smoke."
+            exit 0
+          fi
+          BASE="http://${DEPLOY}.${NS}.svc.cluster.local"
+
+          # ArgoCD applies the bump asynchronously, so poll rather than one-shot.
+          DEADLINE=$(( $(date +%s) + 300 ))
+          CODE=""
+          until [ "$(date +%s)" -ge "${DEADLINE}" ]; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/" || true)
+            if [ "${CODE}" = "200" ]; then
+              break
+            fi
+            echo "waiting for ${DEPLOY} to serve / (currently '${CODE:-unreachable}')…"
+            sleep 10
+          done
+          if [ "${CODE}" != "200" ]; then
+            echo "::error::${BASE}/ returned ${CODE:-unreachable} after 5m — marketing site is not serving."
+            exit 1
+          fi
+
+          PRICING=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/pricing" || true)
+          if [ "${PRICING}" != "404" ]; then
+            echo "::error::${BASE}/pricing returned ${PRICING}, expected 404 — the pricing route must not be publicly reachable."
+            exit 1
+          fi
+          echo "Marketing smoke OK: / is 200 and /pricing is 404."
+
       # DORA: the release is live and healthy — stamp merge→healthy for this SHA
       # (scripts/dora/README.md). Best-effort: the script always exits 0.
       - name: Checkout (DORA emitter)
@@ -882,6 +961,7 @@ jobs:
         working-directory: e2e-tests
         env:
           E2E_BASE_URL: https://app.kelta.io
+          E2E_MARKETING_URL: https://kelta.io
           E2E_API_BASE_URL: https://api.kelta.io
           E2E_TENANT_SLUG: default
           # Hardcoded post-kelta.io cutover — the secret was set before #943

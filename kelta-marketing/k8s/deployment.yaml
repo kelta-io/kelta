@@ -1,3 +1,11 @@
+# Marketing site (kelta.io / www.kelta.io).
+#
+# This file is the source of truth for the manifests. The `deploy` job of
+# .github/workflows/build-and-publish-containers.yml copies it into
+# homelab-argo/emf/ and registers it as a kustomize resource, so ArgoCD applies
+# it — edit it here, not in homelab-argo, or the next deploy overwrites it.
+# The image tag below stays `:latest`; the same job's `kustomize edit set image`
+# pins it to main-<sha>, exactly as for every other emf-* image.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,7 +25,7 @@ spec:
     spec:
       containers:
         - name: kelta-marketing
-          image: ghcr.io/cklinker/kelta-marketing:latest
+          image: harbor.rzware.com/emf/emf-marketing:latest
           ports:
             - containerPort: 80
               protocol: TCP
@@ -64,6 +72,9 @@ metadata:
   namespace: kelta
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Must name the same ClusterIssuer the other kelta.io hosts (api./app.) use;
+    # that name is not knowable from this repo — verify against homelab-argo.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
   rules:

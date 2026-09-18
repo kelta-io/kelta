@@ -14,9 +14,9 @@ MAVEN_OPTS=-Dmaven.wagon.http.retryHandler.count=10 ...
 - npm cache key: `npm-${runner.os}-${hashFiles('kelta-web/package-lock.json')}` over `~/.npm`.
 - Change detection: `.github/path-filters.yml` drives a `changes` job that outputs which
   services changed (`runtime`, `gateway`, `worker`, `auth`, `ai`, `mcp`, `web`, `ui`,
-  `any_java`, `e2e`, `runtime_modules`, `quickstart`, `workflows`). Downstream jobs run only
-  for changed paths; a `quality-gate` job passes if every *triggered* job passed (skipped
-  jobs are allowed).
+  `cli_downloads`, `marketing`, `any_java`, `e2e`, `runtime_modules`, `quickstart`,
+  `workflows`). Downstream jobs run only for changed paths; a `quality-gate` job passes if
+  every *triggered* job passed (skipped jobs are allowed).
 
 ## `ci.yml` — Pull-request CI
 
@@ -32,6 +32,7 @@ Trigger: `pull_request` → `main`, plus `workflow_dispatch`.
 | `e2e` | Builds JVM service images (`Dockerfile.jvm`), spins up the full stack via `docker-compose.yml -f docker-compose.ci.yml`, runs Playwright (`mcr.microsoft.com/playwright:v1.58.2-noble`) inside the compose network. Timeout 45 min. Uploads HTML report + traces. **Readiness gating:** `up -d --wait` is the only barrier before the tests run, so it has to be trustworthy. The gateway's healthcheck targets `/actuator/health/readiness`, which stays 503 until its route table is loaded — `RouteInitializer` is an `ApplicationRunner` and runs *after* the web server starts, so plain `/actuator/health` reports UP while every `/api/**` still 404s. That window used to surface as the first few minutes of specs failing and everything afterwards passing, which reads like a broken page but is pure startup ordering. See `architecture.md` → Gateway startup & readiness. |
 | `quickstart` | K-3's CI enforcement of the README [Quickstart](../../README.md#quickstart): same JVM-image build (`docker-compose.ci.yml`) as `e2e`, then `timeout 300` around `ci/quickstart-run.sh` — `docker compose up -d --wait` followed by a login-and-create-collection check (`ci/quickstart-check.sh`, piped over stdin — not bind-mounted, the remote runner daemon can't see the filesystem — into a `curlimages/curl` container on the compose network) — direct-login as the seeded admin, then `POST /default/api/collections`. Only that sequence is timed; image build happens first and isn't part of the 300s budget. Default profile only (no `--profile ai`), matching what a first-time `docker compose up` actually starts. Timeout 20 min. |
 | `dependency-audit` | `node ci/dependency-audit.mjs` — `npm audit --omit=dev` over `kelta-web` + `kelta-ui/app`, diffed against `ci/npm-audit-baseline.json`. Fails on any **new** high/critical advisory in a production dependency. Deliberately a delta gate, not `--audit-level=high`: production deps already carry **33** high/critical advisories, so a threshold gate would fail on day one, and a red `main` is a deploy outage rather than a signal. The baseline is debt to burn down — refresh it with `node ci/dependency-audit.mjs --update`, and only ever add an entry with a written reason. Needs no `node_modules` (audit resolves from the lockfile), so it skips the installs. |
+| `test-marketing` | In `kelta-marketing` (Node **22**, matching its Dockerfile — every other frontend job is on 20): `npm ci`, `npm test` (Vitest route/deploy guards), `npm run build` (Astro static). The guards are what keep `/pricing` off the public site (CHARTER.md §2 red zone) and the k8s manifest pointed at Harbor. |
 | `lint-workflows` | `actionlint` over `.github/workflows/`, pinned to 1.7.12, runner labels declared in `.github/actionlint.yaml`. Exists because a `secrets` context in an `if:` condition broke the whole of `ci.yml` — GitHub exposes `secrets` only to `with:`, `env:` and `run:`, never to `if:`. That failure does not look like a red build: the file does not parse, so **no jobs run at all** (not even `Detect Changes`), the run is named after the file path rather than "CI", and the PR reads as though CI simply has not started. A YAML parse calls the broken file valid; actionlint reports `context "secrets" is not allowed here`. **shellcheck is deliberately off** (`-shellcheck=`) — the workflows carry 22 shell findings (19× SC2086, 2× SC2129, 1× SC2034), all info/style/warning and none errors; cleaning them is its own change, and gating on them here would only have blocked this one. Drop the flag once they are fixed. The `constant expression "false"` ignore is narrow: two CI-DB steps are disabled on purpose and actionlint's advice to delete their `if:` is wrong for them. |
 | `quality-gate` | Green iff all triggered jobs passed. |
 
@@ -47,8 +48,12 @@ Trigger: `push` → `main` (path-filtered), plus `workflow_dispatch`.
    `build-and-push` gates on all three test jobs (`result != 'failure'`), so a runtime-module
    regression stops images from building rather than shipping.
 2. **`build-and-push`** — matrix `[gateway, worker, worker-migrate, auth, ui, ai, mcp,
-   cli-downloads]`. Docker buildx → pushes to `harbor.rzware.com/emf/emf-<svc>:latest` and
-   `:main-<short-sha>`. Per-service GHA cache scope. Immediately after each leg's "Build and
+   cli-downloads, marketing]`. Docker buildx → pushes to
+   `harbor.rzware.com/emf/emf-<svc>:latest` and `:main-<short-sha>`. Every leg builds from the
+   repo root except `marketing`, whose matrix entry sets `context: kelta-marketing` (its
+   Dockerfile `COPY`s `package.json` from the context root); the shared step passes
+   `context: ${{ matrix.context || '.' }}`, so the default is unchanged for everything else.
+   Per-service GHA cache scope. Immediately after each leg's "Build and
    push ${{ matrix.service }}" step, a **"Verify image pushed to Harbor"** step re-queries the
    manifest it just pushed (up to 6 attempts, 5s apart, ~30s budget) and fails *that leg* if the
    tag never becomes queryable — catching a lagging or silently-failed push at the leg that has
@@ -170,7 +175,9 @@ auto-rollbacks, re-apply bumps) are in `scripts/dora/README.md`.
 
 - Registry: `harbor.rzware.com/emf/emf-<service>`.
 - Manifests: `homelab-argo` (kustomize), synced by **ArgoCD** to the local K8s cluster,
-  namespace **`kelta`**. In-cluster service DNS is `emf-<service>` (e.g. `emf-gateway`).
+  namespace **`kelta`**. In-cluster service DNS is `emf-<service>` (e.g. `emf-gateway`) —
+  except the marketing site, whose Deployment/Service are named `kelta-marketing` and whose
+  manifests are generated from this repo (see below).
 - **Schema gate.** `emf/worker-migrate-job.yaml` is an ArgoCD `PreSync` hook with
   `backoffLimit: 0`, so the sync halts before any Deployment is touched if it fails. It runs, in
   order: Flyway migrations → `SystemCollectionSeeder` (`@Order(5)`) → `SchemaBootstrapRunner`
@@ -180,6 +187,40 @@ auto-rollbacks, re-apply bumps) are in `scripts/dora/README.md`.
   run no Flyway and no collection DDL.
 - Local dev never touches CI: `make up` / `docker-compose.yml`. CI overrides live in
   `docker-compose.ci.yml` (no fixed host ports, JVM Dockerfiles, CI-only cerbos image).
+
+## Marketing site (kelta-marketing)
+
+The Astro site at **kelta.io / www.kelta.io**. Built and shipped like any other image
+(`emf-marketing`), with two things no other service does:
+
+- **Its k8s manifests are generated, not hand-maintained.**
+  `kelta-marketing/k8s/deployment.yaml` (Deployment + Service + Ingress) is the source of
+  truth in *this* repo; the `deploy` job checks the repo out beside `homelab-argo`, copies
+  the file to `homelab-argo/emf/kelta-marketing.yaml`, registers it once via
+  `kustomize edit add resource`, and re-renders the overlay (`kustomize build emf/`) before
+  any commit — a broken overlay fails the step instead of pushing an unappliable manifest.
+  The copy is unconditional, so an edit made directly in `homelab-argo` is overwritten on the
+  next deploy: **change the manifest here.** The image tag in the file stays `:latest`; the
+  same job's `kustomize edit set image emf-marketing` pins `main-<sha>` like every other image.
+  Every other service's manifests are still authored in `homelab-argo` by hand.
+- **Its cert-manager ClusterIssuer is unverified from this repo.** The Ingress asks for
+  `letsencrypt-prod`; if the other kelta.io hosts use a different issuer name, `kelta-io-tls`
+  is never issued and the site serves ingress-nginx's default certificate. Check it against
+  homelab-argo when touching TLS.
+
+Smoke (`smoke-test`, only when `marketing == 'true'`) hits the in-cluster Service, so it
+depends on neither public DNS nor the cert: it polls `/` for 200 (≤5 min, ArgoCD syncs
+asynchronously) and asserts `/pricing` is **404**. nginx deliberately has no SPA fallback
+(`try_files … =404` + `error_page 404 /404.html`) — with one, a removed route answers 200
+with the home page and "not published" stops being observable. The post-deploy `e2e-test`
+job additionally runs `tests/marketing/marketing-site.spec.ts` against the public hosts; it
+self-skips unless `E2E_MARKETING_URL` is set, which only that job does.
+
+`kelta-marketing/package.json` carries an `overrides` entry pinning `@astrojs/tailwind`'s
+`astro` peer to the installed version. The integration's declared peer range stops at Astro 5
+while the site runs Astro 6, and without the override `npm ci` fails ERESOLVE — which is why
+the image had never been built. The real fix is dropping the deprecated integration for
+Tailwind v4's `@tailwindcss/vite`; see `concerns.md`.
 
 ## CLI downloads image (kelta-cli-downloads)
 

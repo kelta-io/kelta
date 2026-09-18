@@ -43,6 +43,10 @@ cli_downloads:
   - *web
   - 'kelta-cli-downloads/**'
 
+# Astro marketing site (kelta.io). Self-contained — no runtime or kelta-web dependency.
+marketing:
+  - 'kelta-marketing/**'
+
 # Any Java service change triggers integration tests.
 any_java:
   - *runtime
