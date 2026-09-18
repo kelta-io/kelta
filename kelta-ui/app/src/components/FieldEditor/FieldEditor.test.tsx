@@ -1056,6 +1056,18 @@ describe('FieldEditor Integration', () => {
     await waitFor(() => {
       expect(onSave).toHaveBeenCalled()
     })
+
+    // Wait for the 100ms mock to resolve and the wrapper's `finally` to flip
+    // isSubmitting back, otherwise that setState lands after this test has
+    // returned. Distinct root cause from the render-storm fix above: the
+    // dangling real setTimeout leaks past the test boundary and its resolve()
+    // callback then fires during whichever test runs next, competing for the
+    // same starved event loop right as that test does its own waitFor — the
+    // kind of interaction only `--repeat`-style rerunning surfaces. Same
+    // hardening as CollectionForm.test.tsx's "should work with async submission".
+    await waitFor(() => {
+      expect(screen.getByTestId('field-editor-submit')).toBeEnabled()
+    })
   })
 
   describe('Rollup Summary configuration', () => {

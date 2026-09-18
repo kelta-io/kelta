@@ -1406,6 +1406,27 @@ existing `asyncUtilTimeout: 5000` in `vitest.setup.ts`), and the composer tests 
 Still open: the underlying starvation (consider giving the frontend job its own runner
 or serialising it against the native builds).
 
+**Distinct cause found under the same umbrella (2026-09-18, PLT-266):**
+`FieldEditor.test.tsx > FieldEditor Integration > should work with async submission`
+already carried the `fireEvent.change` fix above but still failed CI on
+`expect(field-editor-submit).toBeDisabled()` (run 35287145483). Two separate gaps,
+both now fixed:
+1. `FieldEditor`'s `useForm` called `zodResolver(fieldEditorSchema)` with no
+   `resolverOptions`, so `@hookform/resolvers` defaulted to Zod's `parseAsync` even
+   though every `.refine()` on that schema is a plain sync predicate — an unforced
+   Promise hop sitting between the submit click and the parent flipping
+   `isSubmitting`, i.e. exactly one more scheduling point for a starved runner to
+   stall on. Fixed by passing `{ mode: 'sync' }`, which runs `schema.parse()`
+   directly; validation can no longer be why the disabled state lags the click.
+2. The test asserted `onSave` was called but never waited for the wrapper's
+   `finally { setIsSubmitting(false) }` to land, so the mock's real 100ms
+   `setTimeout` was still pending when the test returned. Harmless in isolation,
+   but under repeated/rerun execution (e.g. `--repeat 20`) the dangling timer from
+   one iteration resolves mid-flight during a later iteration, adding one more
+   source of event-loop contention right as that iteration runs its own
+   `waitFor`. Fixed by waiting for the button to re-enable before the test ends —
+   the same pattern already used by `CollectionForm.test.tsx`'s sibling test.
+
 ## Collections become undeletable once used; e2e leaked litter into a product tenant (2026-08-06)
 
 `PhysicalTableStorageAdapter.delete` issues a raw `DELETE` on the `collection`
