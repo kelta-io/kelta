@@ -28,6 +28,9 @@ class RedisRateLimiterTest {
     @Mock
     private ReactiveRedisTemplate<String, String> redisTemplate;
 
+    @Mock
+    private org.springframework.data.redis.core.ReactiveValueOperations<String, String> valueOps;
+
     private RedisRateLimiter newLimiter() {
         return new RedisRateLimiter(redisTemplate);
     }
@@ -198,6 +201,44 @@ class RedisRateLimiterTest {
         ArgumentCaptor<List<String>> argsCaptor = ArgumentCaptor.forClass(List.class);
         verify(redisTemplate).execute(any(RedisScript.class), anyList(), argsCaptor.capture());
         assertThat(argsCaptor.getValue()).containsExactly("30");
+    }
+
+    @Nested
+    @DisplayName("incrementPatUsageCounter — per-PAT request metering")
+    class IncrementPatUsageCounter {
+
+        @Test
+        @DisplayName("first increment sets the TTL")
+        void firstIncrementSetsTtl() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.increment("pat-usage:abc123")).thenReturn(Mono.just(1L));
+            when(redisTemplate.expire(eq("pat-usage:abc123"), any(Duration.class))).thenReturn(Mono.just(true));
+
+            StepVerifier.create(newLimiter().incrementPatUsageCounter("abc123")).verifyComplete();
+
+            verify(redisTemplate).expire(eq("pat-usage:abc123"), any(Duration.class));
+        }
+
+        @Test
+        @DisplayName("subsequent increments do not refresh the TTL")
+        void subsequentIncrementsSkipTtl() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.increment("pat-usage:abc123")).thenReturn(Mono.just(2L));
+
+            StepVerifier.create(newLimiter().incrementPatUsageCounter("abc123")).verifyComplete();
+
+            verify(redisTemplate, never()).expire(anyString(), any(Duration.class));
+        }
+
+        @Test
+        @DisplayName("fails open (completes without error) when Redis is unavailable")
+        void failsOpenOnRedisError() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.increment("pat-usage:abc123"))
+                    .thenReturn(Mono.error(new RuntimeException("Redis connection failed")));
+
+            StepVerifier.create(newLimiter().incrementPatUsageCounter("abc123")).verifyComplete();
+        }
     }
 
     @Nested

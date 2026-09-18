@@ -1,6 +1,7 @@
 package io.kelta.gateway.auth;
 
 import io.kelta.gateway.metrics.GatewayMetrics;
+import io.kelta.gateway.ratelimit.RedisRateLimiter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -44,13 +45,17 @@ class PatAuthenticationFilterTest {
     @Mock
     private GatewayFilterChain filterChain;
 
+    @Mock
+    private RedisRateLimiter redisRateLimiter;
+
     private PatAuthenticationFilter filter;
 
     @BeforeEach
     void setUp() {
         WebClient.Builder builder = WebClient.builder();
-        filter = new PatAuthenticationFilter(redisTemplate, builder, "http://localhost", 300, metrics);
+        filter = new PatAuthenticationFilter(redisTemplate, builder, "http://localhost", 300, metrics, redisRateLimiter);
         lenient().when(filterChain.filter(any(ServerWebExchange.class))).thenReturn(Mono.empty());
+        lenient().when(redisRateLimiter.incrementPatUsageCounter(any())).thenReturn(Mono.empty());
     }
 
     @Test
@@ -133,6 +138,20 @@ class PatAuthenticationFilterTest {
         }
 
         @Test
+        @DisplayName("a successful authentication increments the per-token usage counter")
+        void successfulAuthIncrementsUsageCounter() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get("pat:revoked:" + HASH)).thenReturn(Mono.empty());
+            when(valueOps.get("pat:" + HASH)).thenReturn(Mono.just(PAT_JSON));
+
+            MockServerWebExchange exchange = exchangeFor("/api/titles");
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            verify(redisRateLimiter).incrementPatUsageCounter(HASH);
+        }
+
+        @Test
         @DisplayName("a token in neither Redis nor the worker is rejected as unknown")
         void unknownTokenIsRejected() {
             when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -174,7 +193,7 @@ class PatAuthenticationFilterTest {
                     .exchangeFunction(req -> Mono.error(
                             new RuntimeException("Simulated worker outage (connection refused)")));
             graceFilter = new PatAuthenticationFilter(
-                    redisTemplate, outageBuilder, "http://worker", 300, metrics);
+                    redisTemplate, outageBuilder, "http://worker", 300, metrics, redisRateLimiter);
         }
 
         private MockServerWebExchange exchangeFor(String path) {

@@ -421,6 +421,18 @@ An unrecognized token throws `InvalidFilterException` naming the token and listi
 names — callers must not fall back to `EQ` on an unknown operator (a dashboard widget filter
 with a bad operator is a widget error, not a silently-wrong query).
 
+## REST API: PAT usage metering
+
+`GET /api/me/tokens` carries a `requestCount` attribute per token — a lifetime count of
+authenticated requests made with that PAT, distinct from the tenant's shared daily governor
+count (`apiCallsPerDay`). The gateway's `RedisRateLimiter.incrementPatUsageCounter` increments
+it (Redis key `pat-usage:<sha256(token)>`) on every successful `PatAuthenticationFilter`
+authentication, mirroring the existing `incrementDailyCounter`/`api-calls-daily:` pattern; the
+worker reads it back the same way `GovernorLimitsController` reads the daily counter — by
+constructing the same Redis key and calling `opsForValue().get(...)`, never by round-tripping
+through the gateway. Read-only, single-collection PAT scoping (profiles + Cerbos, not the PAT's
+own `scopes` field) is documented in `docs/authoring/api-access.md`.
+
 ## TypeScript
 
 ### Naming
