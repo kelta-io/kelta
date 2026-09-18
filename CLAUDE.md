@@ -109,7 +109,9 @@ kelta-ai        Anthropic Claude integration (chat, proposals, token tracking); 
 kelta-mcp       MCP server — kelta-admin + kelta-user toolsets over HTTP, PAT auth, stateless
 kelta-web       Frontend SDK monorepo: @kelta/{sdk,components,plugin-sdk,cli,formula}
 kelta-ui/app    Admin/builder + end-user UI (React 19 + Vite)
-kelta-marketing Astro marketing site (not part of platform deploy)
+kelta-marketing Astro marketing site (kelta.io) — built as `emf-marketing`; its k8s
+                manifests live in `kelta-marketing/k8s/` and the deploy job generates them
+                into homelab-argo (`ci-cd.md` → Marketing site)
 kelta-modules/  Runtime-installable modules — built, signed and versioned SEPARATELY from the
                 platform (no parent pom, NOT in the kelta-platform reactor) and uploaded into a
                 tenant via `POST /api/modules/install-jar`. `billing/` is the reference impl.

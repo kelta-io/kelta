@@ -34,6 +34,8 @@ dist/
 build/
 .npm
 .eslintcache
+# Astro build cache (kelta-marketing)
+.astro/
 
 # Java
 *.class

@@ -1111,8 +1111,32 @@ The ArgoCD image bump + post-deploy health check that used to live in
 `homelab-argo`, rewriting `main-<sha>` tags by regex) are documented there; this repo's
 `build-and-publish-containers.yml` deploy job is the authoritative bump for `emf` images.
 
+### Marketing-site manifests are generated into homelab-argo
+
+`kelta-marketing/k8s/deployment.yaml` is the source of truth for the marketing site's
+Deployment/Service/Ingress, and the `deploy` job copies it into
+`homelab-argo/emf/kelta-marketing.yaml` on **every** main deploy (KLT-268). That is the only
+generated manifest in an otherwise hand-authored overlay, so two things bite:
+
+- An edit made directly in `homelab-argo` survives until the next deploy and then vanishes.
+  Change it here.
+- The Ingress annotation `cert-manager.io/cluster-issuer: letsencrypt-prod` was written
+  **without being able to read the cluster** — nothing in this repo names the ClusterIssuer
+  the other kelta.io hosts use. If it is wrong, `kelta-io-tls` is never issued and the site
+  answers HTTPS with ingress-nginx's default certificate while everything else looks healthy
+  (the in-cluster smoke check talks to the Service, so it stays green). Verify against
+  homelab-argo and fix the name here.
+
 ## Dependency Risks
 
+- **`kelta-marketing` only installs because of an `overrides` pin.** `@astrojs/tailwind@6`
+  declares `peer astro ^3||^4||^5` while the site runs Astro 6, so a plain `npm ci` fails
+  ERESOLVE — which is why the image had never been built at all before KLT-268.
+  `package.json` now pins the peer (`overrides: {"@astrojs/tailwind": {"astro": "$astro"}}`);
+  the build itself works. The real fix is dropping the deprecated integration for Tailwind
+  v4's `@tailwindcss/vite`, which also means migrating `tailwind.config.mjs` (custom `kelta-*`
+  palette, Inter/JetBrains Mono) to the CSS-first `@theme` form — a visual-regression risk
+  that did not belong in a deploy-wiring change. Until then, do not remove the override.
 - **`make up` needs ~24 GB allocated to Docker.** Compose builds `kelta-auth`, `kelta-worker` and
   `kelta-gateway` concurrently from their native `Dockerfile`s, and `native-image` sizes its heap to
   ~80% of whatever the cgroup reports — so on a 12 GB Docker Desktop three builders each claim ~9 GB
