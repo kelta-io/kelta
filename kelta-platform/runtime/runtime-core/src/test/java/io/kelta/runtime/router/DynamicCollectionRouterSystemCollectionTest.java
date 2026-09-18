@@ -223,6 +223,28 @@ class DynamicCollectionRouterSystemCollectionTest {
         }
 
         @Test
+        @DisplayName("Should leave an unbound (no X-Tenant-ID) collections list unfiltered, like injectTenantFilter/visibleToTenant")
+        void list_leavesUnboundReadUnfiltered() throws Exception {
+            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();
+            when(registry.get("collections")).thenReturn(def);
+
+            String systemTenantId = io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID;
+
+            Map<String, Object> strayCustomRow = new HashMap<>();
+            strayCustomRow.put("id", "col-stray-1");
+            strayCustomRow.put("name", "e2e_wizard_123");
+            strayCustomRow.put("tenantId", systemTenantId);
+            strayCustomRow.put("systemCollection", false);
+
+            QueryResult unfilteredResult = QueryResult.of(List.of(strayCustomRow), 1, Pagination.defaults());
+            when(queryEngine.executeQuery(eq(def), any(QueryRequest.class))).thenReturn(unfilteredResult);
+
+            mockMvc.perform(get("/api/collections"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[?(@.id=='col-stray-1')]").exists());
+        }
+
+        @Test
         @DisplayName("Should exclude fields of a stray platform-tenant custom collection from another tenant's list")
         void list_excludesFieldsOfStrayPlatformTenantCollection() throws Exception {
             CollectionDefinition fieldsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();

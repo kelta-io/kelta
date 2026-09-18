@@ -985,11 +985,19 @@ public class DynamicCollectionRouter {
      * Drops SYSTEM_TENANT_ID rows from {@code rows} that don't actually belong to a system
      * collection. Rows owned by the caller's own tenant are never touched. See
      * {@link #restrictSharedSystemRows} for why this can't be pushed into the SQL filter.
+     *
+     * <p>No-ops when the request carries no {@code X-Tenant-ID}, matching {@link #visibleToTenant}
+     * and {@link #injectTenantFilter}: an unbound read is a platform/internal read (Flyway,
+     * bootstrap, scheduler sweeps) that is deliberately left unscoped, not a tenant's list view.
      */
     private List<Map<String, Object>> filterSharedSystemRows(CollectionDefinition definition,
                                                                List<Map<String, Object>> rows,
                                                                HttpServletRequest request) {
         if (!SystemCollectionTenancy.sharesSystemRows(definition) || rows.isEmpty()) {
+            return rows;
+        }
+        String tenantId = request.getHeader("X-Tenant-ID");
+        if (tenantId == null || tenantId.isBlank()) {
             return rows;
         }
         boolean hasSystemTenantRow = rows.stream()
