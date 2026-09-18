@@ -503,7 +503,16 @@ export function FieldEditor({
     control,
     formState: { errors, isDirty },
   } = useForm<FieldEditorFormData>({
-    resolver: zodResolver(fieldEditorSchema) as never,
+    // `{ mode: 'sync' }`: every refine() on fieldEditorSchema is a plain sync
+    // predicate, but @hookform/resolvers' zodResolver defaults to Zod's
+    // parseAsync, wrapping submit validation in a Promise chain for no
+    // reason. That's real async work sitting between the click and the
+    // parent flipping `isSubmitting` (see handleFormSubmit below), which
+    // under CI CPU contention (concerns.md -> "Frontend suite starves under
+    // concurrent image builds") is one more scheduling point that can get
+    // starved. Sync mode runs schema.parse() directly, so validation can no
+    // longer be the reason the disabled state lags the click.
+    resolver: zodResolver(fieldEditorSchema, undefined, { mode: 'sync' }) as never,
     defaultValues: {
       name: field?.name ?? '',
       displayName: field?.displayName ?? '',
