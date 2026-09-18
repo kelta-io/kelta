@@ -956,6 +956,32 @@ jobs:
           echo "::error::Worker did not serve data within ~4 min of deploy; failing fast instead of an 18-min Playwright timeout. Check the worker rollout / Flyway migration."
           exit 1
 
+      # tests/marketing/marketing-site.spec.ts hits the PUBLIC apex/www hosts (unlike
+      # smoke-test's "Verify marketing site" step, which deliberately stays in-cluster to
+      # avoid depending on DNS/TLS). A fresh ArgoCD sync doesn't guarantee public DNS,
+      # ingress and cert-manager have converged the instant this job starts, so poll both
+      # hosts until they actually resolve and serve before handing off to Playwright —
+      # same shape as the worker-readiness wait above. No "|| true": a real DNS/ingress
+      # outage must still fail the job, not race straight into a Playwright DNS error.
+      - name: Wait for public DNS to serve the marketing site (post-deploy readiness)
+        run: |
+          for host in "https://kelta.io" "https://www.kelta.io"; do
+            echo "Waiting for ${host}/ to resolve and serve …"
+            for i in $(seq 1 30); do
+              code=$(curl -sk -m 10 -o /dev/null -w '%{http_code}' "${host}/" || echo 000)
+              if [ "${code}" = "200" ]; then
+                echo "${host} serving (HTTP 200) after ~$((i*10))s."
+                break
+              fi
+              echo "attempt ${i}/30: HTTP ${code} — ${host} not ready, retrying in 10s"
+              sleep 10
+              if [ "${i}" = "30" ]; then
+                echo "::error::${host} did not resolve/serve within ~5 min of deploy. Check public DNS, ingress and cert-manager for the marketing site."
+                exit 1
+              fi
+            done
+          done
+
       - name: Run E2E tests
         timeout-minutes: 18
         working-directory: e2e-tests

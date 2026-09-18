@@ -216,6 +216,18 @@ with the home page and "not published" stops being observable. The post-deploy `
 job additionally runs `tests/marketing/marketing-site.spec.ts` against the public hosts; it
 self-skips unless `E2E_MARKETING_URL` is set, which only that job does.
 
+Unlike smoke-test, that spec hits `https://kelta.io`/`https://www.kelta.io` directly, so
+it *does* depend on public DNS/ingress/cert-manager having converged — a just-synced
+ArgoCD deploy doesn't guarantee that the instant the job starts. `e2e-test`'s "Wait for
+public DNS to serve the marketing site" step (right before "Run E2E tests", same shape as
+"Wait for the worker to serve data" above it) polls both hosts for HTTP 200 for up to ~5
+min and fails the job with `::error::` — not a silent skip — if they never come up, so a
+genuine DNS/ingress outage still fails CI instead of racing straight into a Playwright DNS
+error (PLT-272). It runs unconditionally rather than gated on `marketing == 'true'`: the
+marketing Playwright spec itself always runs when `E2E_MARKETING_URL` is set, regardless of
+whether this run rebuilt the marketing image, and `e2e-test` doesn't otherwise depend on the
+`changes` job.
+
 `kelta-marketing/package.json` carries an `overrides` entry pinning `@astrojs/tailwind`'s
 `astro` peer to the installed version. The integration's declared peer range stops at Astro 5
 while the site runs Astro 6, and without the override `npm ci` fails ERESOLVE — which is why
