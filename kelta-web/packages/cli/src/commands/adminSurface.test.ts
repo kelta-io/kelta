@@ -43,10 +43,10 @@ function fakeAxios(getRoutes: Record<string, unknown> = {}): FakeAxios {
   };
 }
 
-function ctx(axios: FakeAxios): CommandContext {
+function ctx(axios: FakeAxios, opts: { raw?: boolean } = {}): CommandContext {
   return {
     profile: { name: 'test' },
-    global: { raw: false, quiet: false, yes: true },
+    global: { raw: opts.raw ?? false, quiet: false, yes: true },
     log: vi.fn(),
     client: { getAxiosInstance: () => axios },
   } as unknown as CommandContext;
@@ -62,10 +62,11 @@ async function run(
   defs: RegisteredCommand[],
   name: string,
   input: Record<string, unknown>,
-  axios: FakeAxios
+  axios: FakeAxios,
+  opts: { raw?: boolean } = {}
 ) {
   const def = command(defs, name);
-  return def.handler(ctx(axios), def.input.parse(input) as never);
+  return def.handler(ctx(axios, opts), def.input.parse(input) as never);
 }
 
 const COLLECTION_ROUTE = { '/api/collections/invoices': { data: { id: CID } } };
@@ -819,7 +820,7 @@ describe('pages', () => {
     expect(axios.delete).toHaveBeenCalledWith('/api/ui-pages/p1');
   });
 
-  it('publish resolves the page by path and PATCHes published=true', async () => {
+  it('publish resolves the page by path, PATCHes published=true, and reports {action, id, path}', async () => {
     const axios = fakeAxios({
       '/api/ui-pages?filter[path][eq]=%2Fhome': { data: [{ id: 'p1' }] },
     });
@@ -827,6 +828,7 @@ describe('pages', () => {
     expect(axios.patch).toHaveBeenCalledWith('/api/ui-pages/p1', {
       data: { type: 'ui-pages', id: 'p1', attributes: { published: true } },
     });
+    expect(result.data).toEqual({ action: 'published', id: 'p1', path: '/home' });
     expect(result.ids).toEqual(['p1']);
   });
 
@@ -845,7 +847,7 @@ describe('pages', () => {
     });
     const result = await run(pageCommands, 'publish', { path: '/home' }, axios);
     expect(axios.patch).not.toHaveBeenCalled();
-    expect(result.data).toMatchObject({ action: 'unchanged', id: 'p1' });
+    expect(result.data).toEqual({ action: 'unchanged', id: 'p1', path: '/home' });
   });
 });
 
@@ -866,7 +868,7 @@ describe('pages apply', () => {
     return file;
   }
 
-  it('validates then creates when no page exists at the path', async () => {
+  it('validates then creates when no page exists at the path, reporting action: "created"', async () => {
     const file = writePage({ name: 'Home', path: '/home', config: { schemaVersion: 2 } });
     const axios = fakeAxios({
       '/api/ui-pages?filter[path][eq]=%2Fhome': { data: [] },
@@ -888,10 +890,11 @@ describe('pages apply', () => {
         attributes: { name: 'Home', path: '/home', config: { schemaVersion: 2 } },
       },
     });
+    expect(result.data).toEqual({ action: 'created', id: 'p1', path: '/home', published: false });
     expect(result.ids).toEqual(['p1']);
   });
 
-  it('validates then updates when a page already exists at the path', async () => {
+  it('validates then updates when a page already exists at the path, reporting the changed keys', async () => {
     const file = writePage({
       name: 'Home',
       path: '/home',
@@ -912,7 +915,85 @@ describe('pages apply', () => {
         attributes: { name: 'Home', path: '/home', config: { schemaVersion: 2 }, published: true },
       },
     });
+    expect(result.data).toEqual({
+      action: 'updated',
+      id: 'p1',
+      path: '/home',
+      changed: ['name', 'path', 'config', 'published'],
+      published: true,
+    });
     expect(result.ids).toEqual(['p1']);
+  });
+
+  it('changing just the title reports action: "updated", changed: ["title"]', async () => {
+    const file = writePage({
+      name: 'Home',
+      path: '/home',
+      title: 'New Title',
+      config: { schemaVersion: 2 },
+    });
+    const axios = fakeAxios({
+      '/api/ui-pages?filter[path][eq]=%2Fhome': {
+        data: [
+          {
+            id: 'p1',
+            attributes: {
+              name: 'Home',
+              path: '/home',
+              config: { schemaVersion: 2 },
+              title: 'Old Title',
+            },
+          },
+        ],
+      },
+    });
+    axios.post.mockResolvedValue({ data: { valid: true, errors: [] } });
+
+    const result = await run(pageCommands, 'apply', { file, dryRun: false }, axios);
+
+    expect(axios.patch).toHaveBeenCalledWith('/api/ui-pages/p1', {
+      data: { type: 'ui-pages', id: 'p1', attributes: { title: 'New Title' } },
+    });
+    expect(result.data).toEqual({
+      action: 'updated',
+      id: 'p1',
+      path: '/home',
+      changed: ['title'],
+      published: false,
+    });
+  });
+
+  it('a changed config counts once as "config" in changed, not per nested key', async () => {
+    const file = writePage({
+      name: 'Home',
+      path: '/home',
+      config: { schemaVersion: 2, components: [{ id: 'a' }, { id: 'b' }] },
+    });
+    const axios = fakeAxios({
+      '/api/ui-pages?filter[path][eq]=%2Fhome': {
+        data: [
+          {
+            id: 'p1',
+            attributes: {
+              name: 'Home',
+              path: '/home',
+              config: { schemaVersion: 2, components: [{ id: 'a' }] },
+            },
+          },
+        ],
+      },
+    });
+    axios.post.mockResolvedValue({ data: { valid: true, errors: [] } });
+
+    const result = await run(pageCommands, 'apply', { file, dryRun: false }, axios);
+
+    expect(result.data).toEqual({
+      action: 'updated',
+      id: 'p1',
+      path: '/home',
+      changed: ['config'],
+      published: false,
+    });
   });
 
   it('reports unchanged and PATCHes nothing when the page already matches', async () => {
@@ -929,7 +1010,42 @@ describe('pages apply', () => {
     const result = await run(pageCommands, 'apply', { file, dryRun: false }, axios);
 
     expect(axios.patch).not.toHaveBeenCalled();
-    expect(result.data).toMatchObject({ action: 'unchanged', id: 'p1' });
+    expect(result.data).toEqual({ action: 'unchanged', id: 'p1', path: '/home', published: false });
+  });
+
+  it('applying an identical file a second time returns action: "unchanged"', async () => {
+    const file = writePage({ name: 'Home', path: '/home', config: { schemaVersion: 2 } });
+    const axios = fakeAxios({
+      '/api/ui-pages?filter[path][eq]=%2Fhome': { data: [] },
+    });
+    axios.post.mockImplementation((url: string) => {
+      if (url === '/api/ui-pages/validate')
+        return Promise.resolve({ data: { valid: true, errors: [] } });
+      return Promise.resolve({ data: { data: { id: 'p1' } } });
+    });
+
+    const first = await run(pageCommands, 'apply', { file, dryRun: false }, axios);
+    expect(first.data).toMatchObject({ action: 'created' });
+
+    axios.get.mockImplementation((url: string) => {
+      if (url.startsWith('/api/ui-pages?filter[path][eq]=%2Fhome')) {
+        return Promise.resolve({
+          data: {
+            data: [
+              {
+                id: 'p1',
+                attributes: { name: 'Home', path: '/home', config: { schemaVersion: 2 } },
+              },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: { data: [] } });
+    });
+
+    const second = await run(pageCommands, 'apply', { file, dryRun: false }, axios);
+    expect(second.data).toMatchObject({ action: 'unchanged', id: 'p1' });
+    expect(axios.patch).not.toHaveBeenCalled();
   });
 
   it('reports unchanged when the page was published out-of-band and the file has no "published" key', async () => {
@@ -956,7 +1072,24 @@ describe('pages apply', () => {
     const result = await run(pageCommands, 'apply', { file, dryRun: false }, axios);
 
     expect(axios.patch).not.toHaveBeenCalled();
-    expect(result.data).toMatchObject({ action: 'unchanged', id: 'p1' });
+    expect(result.data).toEqual({ action: 'unchanged', id: 'p1', path: '/home', published: true });
+  });
+
+  it('--raw returns the full ui-pages record instead of the summary', async () => {
+    const file = writePage({ name: 'Home', path: '/home', config: { schemaVersion: 2 } });
+    const axios = fakeAxios({
+      '/api/ui-pages?filter[path][eq]=%2Fhome': { data: [] },
+    });
+    const createdRecord = { data: { id: 'p1', type: 'ui-pages', attributes: { name: 'Home' } } };
+    axios.post.mockImplementation((url: string) => {
+      if (url === '/api/ui-pages/validate')
+        return Promise.resolve({ data: { valid: true, errors: [] } });
+      return Promise.resolve({ data: createdRecord });
+    });
+
+    const result = await run(pageCommands, 'apply', { file, dryRun: false }, axios, { raw: true });
+
+    expect(result.data).toEqual(createdRecord);
   });
 
   it('--dry-run validates only and writes nothing', async () => {

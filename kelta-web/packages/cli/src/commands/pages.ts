@@ -132,7 +132,10 @@ const pageCreate = defineCommand({
 const pageApply = defineCommand({
   group: 'pages',
   name: 'apply',
-  summary: 'Validate then create-or-update a UI page from a JSON file, keyed on path',
+  summary:
+    'Validate then create-or-update a UI page from a JSON file, keyed on path. ' +
+    'Returns {action, id, path, changed, published} like apply_page — pass --raw ' +
+    'for the full ui-pages record instead.',
   dangerous: (input) => !input.dryRun,
   positionals: [
     {
@@ -201,9 +204,16 @@ const pageApply = defineCommand({
       const changed = Object.keys(attributes).filter(
         (key) => !deepEqual(existing?.attributes?.[key], attributes[key])
       );
+      const published =
+        typeof attributes.published === 'boolean'
+          ? attributes.published
+          : ((existing.attributes?.published as boolean | undefined) ?? false);
+
       if (changed.length === 0) {
         return {
-          data: { action: 'unchanged', id: existing.id },
+          data: ctx.global.raw
+            ? { data: existing }
+            : { action: 'unchanged', id: existing.id, path: doc.path, published },
           message: `Page "${doc.path}" unchanged`,
           ids: [existing.id],
         };
@@ -213,15 +223,29 @@ const pageApply = defineCommand({
       const response = await axios.patch<unknown>(`/api/ui-pages/${existing.id}`, {
         data: { type: 'ui-pages', id: existing.id, attributes: patchAttrs },
       });
-      return { data: response.data, message: `Page "${doc.path}" updated`, ids: [existing.id] };
+      return {
+        data: ctx.global.raw
+          ? response.data
+          : { action: 'updated', id: existing.id, path: doc.path, changed, published },
+        message: `Page "${doc.path}" updated`,
+        ids: [existing.id],
+      };
     }
     const response = await axios.post<{ data?: { id?: string } }>('/api/ui-pages', {
       data: { type: 'ui-pages', attributes },
     });
+    const createdId = response.data.data?.id;
     return {
-      data: response.data,
+      data: ctx.global.raw
+        ? response.data
+        : {
+            action: 'created',
+            id: createdId,
+            path: doc.path,
+            published: (attributes.published as boolean | undefined) ?? false,
+          },
       message: `Page "${doc.path}" created`,
-      ids: response.data.data?.id ? [response.data.data.id] : [],
+      ids: createdId ? [createdId] : [],
     };
   },
 });
@@ -294,7 +318,9 @@ const pageDelete = defineCommand({
 const pagePublish = defineCommand({
   group: 'pages',
   name: 'publish',
-  summary: 'Publish the UI page served at a route path (sets published=true)',
+  summary:
+    'Publish the UI page served at a route path (sets published=true). ' +
+    'Returns {action: "published"|"unchanged", id, path}.',
   positionals: [{ name: 'path', description: 'Route the page is served at', required: true }],
   input: z.object({ path: z.string().min(1) }),
   handler: async (ctx, input) => {
@@ -308,15 +334,19 @@ const pagePublish = defineCommand({
     }
     if (page.attributes?.published === true) {
       return {
-        data: { action: 'unchanged', id: page.id },
+        data: { action: 'unchanged', id: page.id, path: input.path },
         message: `Page "${input.path}" already published`,
         ids: [page.id],
       };
     }
-    const updated = await axios.patch<unknown>(`/api/ui-pages/${page.id}`, {
+    await axios.patch<unknown>(`/api/ui-pages/${page.id}`, {
       data: { type: 'ui-pages', id: page.id, attributes: { published: true } },
     });
-    return { data: updated.data, message: `Page "${input.path}" published`, ids: [page.id] };
+    return {
+      data: { action: 'published', id: page.id, path: input.path },
+      message: `Page "${input.path}" published`,
+      ids: [page.id],
+    };
   },
 });
 

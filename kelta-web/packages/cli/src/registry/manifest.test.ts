@@ -111,4 +111,15 @@ describe('kelta manifest', () => {
     expect(byName.get('kelta manifest')?.requiresAuth).toBe(false);
     expect(byName.get('kelta profile list')?.requiresAuth).toBe(false);
   });
+
+  it('documents the pages apply/publish {action, id, changed} output shape (KLT-263)', () => {
+    const byName = new Map(manifest.commands.map((c) => [c.command, c]));
+    expect(byName.get('kelta pages apply')?.summary).toMatch(
+      /\{action, id, path, changed, published\}/
+    );
+    expect(byName.get('kelta pages apply')?.summary).toMatch(/--raw/);
+    expect(byName.get('kelta pages publish')?.summary).toMatch(
+      /\{action: "published"\|"unchanged", id, path\}/
+    );
+  });
 });
