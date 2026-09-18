@@ -686,7 +686,19 @@ for it, not just a `ScopedValue`.
   DB roles in local dev). `fields` gained a
   denormalised `tenant_id` column for this (V198, KLT-206; see concerns.md) — it was
   previously `.tenantScoped(false)` with no `tenant_id` column at all, so `GET /api/fields`
-  leaked every tenant's field metadata.
+  leaked every tenant's field metadata. `injectTenantFilter`'s `tenant_id IN (<caller>,
+  SYSTEM_TENANT_ID)` list predicate can only express membership, not "and that
+  SYSTEM_TENANT_ID row is actually a system collection" — the generic filter grammar
+  (`FilterCondition`/`FilterOperator`) is AND-only, with no OR. A custom collection created
+  directly in the platform tenant (e.g. by a misconfigured e2e run) would otherwise pass the
+  `IN` filter and leak to every tenant's `GET /api/collections`/`GET /api/fields`, as it did in
+  production (PLT-262). `restrictSharedSystemRows`/`filterSharedSystemRows` narrow the router's
+  already-fetched list result afterward instead — a `collections` row must have
+  `systemCollection=true`, a `fields` row's `collectionId` must resolve to one — applied at all
+  three list call sites (`list`, `listChildren`, `queryChildRecords` for `?include=`).
+  `visibleToTenant` (get-by-id) is intentionally unchanged: it only ever gates on
+  `sharesSystemRows` + owner == SYSTEM_TENANT_ID, so a stray row is reachable by guessed ID —
+  a narrower, accepted gap left for a future pass.
 - **Services**: `kelta-worker/src/main/java/io/kelta/service/` — Business logic (CollectionLifecycleManager, CerbosAuthorizationService, SearchIndexService, S3StorageService)
 - **Listeners**: `kelta-worker/src/main/java/io/kelta/listener/` — NATS subscribers (CollectionSchemaListener, SearchIndexListener, CerbosCacheInvalidationListener, SvixWebhookPublisher)
 - **Data**: `kelta-worker/src/main/java/io/kelta/repository/` — JdbcTemplate + JPA repositories
