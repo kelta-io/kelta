@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -51,13 +50,7 @@ public class OpenApiController {
                     .body(Map.of("error", "Authentication required"));
         }
 
-        List<CollectionDefinition> collections = new ArrayList<>();
-        for (String name : collectionRegistry.getAllCollectionNames()) {
-            CollectionDefinition def = collectionRegistry.get(name);
-            if (def != null) {
-                collections.add(def);
-            }
-        }
+        List<CollectionDefinition> collections = collectionRegistry.getAllForCurrentTenant();
 
         Map<String, Object> spec = openApiGenerator.generate(collections, serverUrl);
         return ResponseEntity.ok(spec);

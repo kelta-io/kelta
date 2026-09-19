@@ -5,7 +5,9 @@ import io.kelta.runtime.model.CollectionDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -154,14 +156,60 @@ public class ConcurrentCollectionRegistry implements CollectionRegistry {
             }
         }
 
-        // Fall back to name-only key (system collections or legacy registrations)
-        return collections.get(collectionName);
+        // Fall back to the bare-name key. Per CollectionDefinition.registryKey(), only
+        // definitions with a null tenantId are ever stored there -- which is meant to be
+        // exclusively system collections (see registryKey() javadoc). A custom collection
+        // must never be servable through this slot to a tenant that doesn't own it, so this
+        // is a hard restriction, not a heuristic: a bare-name hit that isn't systemCollection()
+        // is refused and logged rather than returned, however it got there.
+        CollectionDefinition fallback = collections.get(collectionName);
+        if (fallback == null) {
+            return null;
+        }
+        if (fallback.systemCollection()) {
+            return fallback;
+        }
+        // A direct hit on the caller's own full "tenantId:name" key is not a bare-name fallback
+        // -- the definition is tenant-owned and the owner is the bound tenant. Serve it.
+        if (fallback.tenantId() != null && fallback.tenantId().equals(tenantId)) {
+            return fallback;
+        }
+
+        if (tenantId != null && !tenantId.isBlank()) {
+            logger.warn("Refusing bare-name fallback: '{}' resolved to a custom collection owned by "
+                    + "tenant '{}' while resolving for tenant '{}' -- this would have been a "
+                    + "cross-tenant leak; returning null instead",
+                    collectionName, fallback.tenantId(), tenantId);
+        } else {
+            logger.warn("Refusing bare-name fallback: '{}' resolved to a custom collection owned by "
+                    + "tenant '{}' with no tenant context bound -- returning null instead",
+                    collectionName, fallback.tenantId());
+        }
+        return null;
     }
     
     @Override
     public Set<String> getAllCollectionNames() {
         // No lock needed - the keySet of an immutable map is also immutable
         return collections.keySet();
+    }
+
+    @Override
+    public List<CollectionDefinition> getAllForCurrentTenant() {
+        // No lock needed - reading volatile reference to immutable map. Filters on the
+        // definition's own tenantId rather than on key shape, so the result mirrors exactly
+        // what get(name) would serve to this tenant: system collections plus its own.
+        String tenantId = TenantContext.get();
+        boolean tenantBound = tenantId != null && !tenantId.isBlank();
+        List<CollectionDefinition> visible = new ArrayList<>();
+        for (CollectionDefinition def : collections.values()) {
+            if (def.systemCollection()) {
+                visible.add(def);
+            } else if (tenantBound && tenantId.equals(def.tenantId())) {
+                visible.add(def);
+            }
+        }
+        return List.copyOf(visible);
     }
     
     @Override

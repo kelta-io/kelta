@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
 import java.util.Map;
-import java.util.Set;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -50,8 +50,7 @@ class OpenApiControllerTest {
 
         @Test
         void shouldReturnSpecForValidTenant() {
-            when(collectionRegistry.getAllCollectionNames()).thenReturn(Set.of("contacts"));
-            when(collectionRegistry.get("contacts")).thenReturn(null);
+            when(collectionRegistry.getAllForCurrentTenant()).thenReturn(List.of());
             when(openApiGenerator.generate(any(), eq("https://api.kelta.io")))
                     .thenReturn(Map.of("openapi", "3.0.3"));
 

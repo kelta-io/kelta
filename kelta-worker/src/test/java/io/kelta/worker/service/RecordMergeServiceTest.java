@@ -19,7 +19,6 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -66,7 +65,7 @@ class RecordMergeServiceTest {
     private void stubTopology() {
         when(collectionRegistry.get("contacts")).thenReturn(contactsDef);
         when(collectionRegistry.get("orders")).thenReturn(ordersDef);
-        when(collectionRegistry.getAllCollectionNames()).thenReturn(Set.of("contacts", "orders"));
+        when(collectionRegistry.getAllForCurrentTenant()).thenReturn(List.of(contactsDef, ordersDef));
         when(queryEngine.getById(any(), anyString()))
                 .thenAnswer(inv -> Optional.of(Map.of("id", inv.getArgument(1))));
         when(queryEngine.delete(any(), anyString())).thenReturn(true);
@@ -149,7 +148,7 @@ class RecordMergeServiceTest {
 
         when(collectionRegistry.get("contacts")).thenReturn(contactsDef);
         when(collectionRegistry.get("orders")).thenReturn(immutableOrdersDef);
-        when(collectionRegistry.getAllCollectionNames()).thenReturn(Set.of("contacts", "orders"));
+        when(collectionRegistry.getAllForCurrentTenant()).thenReturn(List.of(contactsDef, immutableOrdersDef));
         when(queryEngine.getById(any(), anyString()))
                 .thenAnswer(inv -> Optional.of(Map.of("id", inv.getArgument(1))));
         when(queryEngine.delete(any(), anyString())).thenReturn(true);

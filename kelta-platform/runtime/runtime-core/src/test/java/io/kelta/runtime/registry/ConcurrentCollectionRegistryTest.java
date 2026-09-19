@@ -1,5 +1,6 @@
 package io.kelta.runtime.registry;
 
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,6 +40,15 @@ class ConcurrentCollectionRegistryTest {
         registry = new ConcurrentCollectionRegistry();
     }
     
+    /**
+     * A generic registered collection with no tenantId, used throughout this file to exercise
+     * plain registry mechanics (register/update/version/listener behavior) independent of the
+     * tenant-scoping contract. Per {@link CollectionDefinition#registryKey()}, a null tenantId
+     * always lands in the bare-name registry slot -- which {@link ConcurrentCollectionRegistry#get}
+     * only ever serves back out for {@code systemCollection() == true} definitions (KLT-259), so
+     * these are marked as system collections to match. Tenant-isolation behavior for *custom*
+     * collections is covered separately in {@code TenantIsolationTests} below.
+     */
     private CollectionDefinition createCollection(String name) {
         return new CollectionDefinition(
             name,
@@ -49,10 +60,11 @@ class ConcurrentCollectionRegistryTest {
             AuthzConfig.disabled(),
             1L,
             NOW,
-            NOW
+            NOW,
+            true, true, false, Set.of(), Map.of()
         );
     }
-    
+
     private CollectionDefinition createCollectionWithVersion(String name, long version) {
         return new CollectionDefinition(
             name,
@@ -64,7 +76,8 @@ class ConcurrentCollectionRegistryTest {
             AuthzConfig.disabled(),
             version,
             NOW,
-            NOW
+            NOW,
+            true, true, false, Set.of(), Map.of()
         );
     }
 
@@ -106,7 +119,8 @@ class ConcurrentCollectionRegistryTest {
                 AuthzConfig.disabled(),
                 1L,
                 NOW,
-                NOW
+                NOW,
+                true, true, false, Set.of(), Map.of()
             );
             
             registry.register(updated);
@@ -179,6 +193,178 @@ class ConcurrentCollectionRegistryTest {
         @DisplayName("Should return null for null collection name")
         void shouldReturnNullForNullCollectionName() {
             assertNull(registry.get(null));
+        }
+    }
+
+    /**
+     * KLT-259: {@code ConcurrentCollectionRegistry.get}'s bare-name fallback exists "for system
+     * collections or legacy registrations" (see the method's own comment) -- these tests pin
+     * down that a *custom* collection is never reachable through it, no matter how it got into
+     * the bare-name slot or what order/state the cache is in, while a genuine system collection
+     * still is.
+     */
+    @Nested
+    @DisplayName("Tenant Isolation Tests (KLT-259)")
+    class TenantIsolationTests {
+
+        private static final String TENANT_A = "11111111-1111-1111-1111-111111111111";
+        private static final String TENANT_B = "22222222-2222-2222-2222-222222222222";
+
+        /** A custom (non-system), tenant-owned collection -- registers under {@code tenantId:name}. */
+        private CollectionDefinition tenantCollection(String tenantId, String name, String displayName,
+                                                        String fieldName) {
+            return new CollectionDefinition(
+                name, displayName, "Description for " + name,
+                List.of(FieldDefinition.requiredString(fieldName)),
+                StorageConfig.physicalTable("tbl_" + tenantId + "_" + name),
+                ApiConfig.allEnabled("/api/" + name),
+                AuthzConfig.disabled(),
+                1L, NOW, NOW,
+                false, true, false, Set.of(), Map.of(), null, tenantId
+            );
+        }
+
+        @Test
+        @DisplayName("two tenants registering a custom collection with the same name never cross-resolve")
+        void sameNameCustomCollectionsNeverCrossResolve() {
+            registry.register(tenantCollection(TENANT_A, "orders", "Tenant A Orders", "a_only_field"));
+            registry.register(tenantCollection(TENANT_B, "orders", "Tenant B Orders", "b_only_field"));
+
+            CollectionDefinition seenByA = TenantContext.callWithTenant(TENANT_A, () -> registry.get("orders"));
+            CollectionDefinition seenByB = TenantContext.callWithTenant(TENANT_B, () -> registry.get("orders"));
+
+            assertEquals("Tenant A Orders", seenByA.displayName());
+            assertTrue(seenByA.hasField("a_only_field"));
+            assertFalse(seenByA.hasField("b_only_field"));
+
+            assertEquals("Tenant B Orders", seenByB.displayName());
+            assertTrue(seenByB.hasField("b_only_field"));
+            assertFalse(seenByB.hasField("a_only_field"));
+        }
+
+        @Test
+        @DisplayName("registration order does not change which tenant sees which definition")
+        void registrationOrderDoesNotAffectResolution() {
+            // B registers first this time -- the opposite order from the test above.
+            registry.register(tenantCollection(TENANT_B, "orders", "Tenant B Orders", "b_only_field"));
+            registry.register(tenantCollection(TENANT_A, "orders", "Tenant A Orders", "a_only_field"));
+
+            CollectionDefinition seenByA = TenantContext.callWithTenant(TENANT_A, () -> registry.get("orders"));
+            CollectionDefinition seenByB = TenantContext.callWithTenant(TENANT_B, () -> registry.get("orders"));
+
+            assertEquals("Tenant A Orders", seenByA.displayName());
+            assertEquals("Tenant B Orders", seenByB.displayName());
+        }
+
+        @Test
+        @DisplayName("re-registering (cache refresh) one tenant's collection never changes what another tenant sees")
+        void cacheRefreshOfOneTenantDoesNotLeakToAnother() {
+            registry.register(tenantCollection(TENANT_A, "orders", "Tenant A Orders v1", "a_only_field"));
+            registry.register(tenantCollection(TENANT_B, "orders", "Tenant B Orders", "b_only_field"));
+
+            // Simulate tenant A's collection being refreshed (e.g. a field added elsewhere).
+            registry.register(tenantCollection(TENANT_A, "orders", "Tenant A Orders v2", "a_only_field"));
+
+            CollectionDefinition seenByB = TenantContext.callWithTenant(TENANT_B, () -> registry.get("orders"));
+            assertEquals("Tenant B Orders", seenByB.displayName());
+        }
+
+        @Test
+        @DisplayName("a custom collection landing in the bare-name slot is never served, to any tenant or no tenant at all")
+        void bareNameSlotNeverServesACustomCollection() {
+            // Simulates the historical risk this task audits: a custom collection registered
+            // with a null tenantId lands in the bare-name slot via registryKey().
+            CollectionDefinition leaked = new CollectionDefinition(
+                "orders", "Leaked Orders", "desc",
+                List.of(FieldDefinition.requiredString("secret_field")),
+                StorageConfig.physicalTable("tbl_leaked_orders"),
+                ApiConfig.allEnabled("/api/orders"),
+                AuthzConfig.disabled(),
+                1L, NOW, NOW,
+                false, true, false, Set.of(), Map.of(), null, null
+            );
+            registry.register(leaked);
+
+            // A tenant whose own tenant-scoped key misses must not fall through to it --
+            // this is the cross-tenant leak the fallback must refuse to serve.
+            CollectionDefinition seenByOtherTenant =
+                TenantContext.callWithTenant(TENANT_A, () -> registry.get("orders"));
+            assertNull(seenByOtherTenant);
+
+            // Nor is it reachable with no tenant context bound at all.
+            assertNull(registry.get("orders"));
+        }
+
+        @Test
+        @DisplayName("a tenant addressing its own collection by full registry key is served; another tenant is not")
+        void fullRegistryKeyIsServedOnlyToTheOwningTenant() {
+            CollectionDefinition aOrders = tenantCollection(TENANT_A, "orders", "Tenant A Orders", "a_only_field");
+            registry.register(aOrders);
+            String fullKey = aOrders.registryKey();
+            assertEquals(TENANT_A + ":orders", fullKey);
+
+            // Enumeration callers historically walked getAllCollectionNames() and get(key) --
+            // the owner resolving its own full key is a direct hit, not a bare-name fallback.
+            CollectionDefinition seenByOwner = TenantContext.callWithTenant(TENANT_A, () -> registry.get(fullKey));
+            assertNotNull(seenByOwner);
+            assertEquals("Tenant A Orders", seenByOwner.displayName());
+
+            // Another tenant naming A's full key must still get nothing.
+            assertNull(TenantContext.callWithTenant(TENANT_B, () -> registry.get(fullKey)));
+        }
+
+        @Test
+        @DisplayName("getAllForCurrentTenant returns system collections plus the bound tenant's own, nothing else")
+        void getAllForCurrentTenantIsTenantScoped() {
+            CollectionDefinition systemDef = new CollectionDefinition(
+                "collections", "Collections", "desc",
+                List.of(FieldDefinition.requiredString("name")),
+                StorageConfig.physicalTable("collection"),
+                ApiConfig.allEnabled("/api/collections"),
+                AuthzConfig.disabled(),
+                1L, NOW, NOW,
+                true, true, false, Set.of(), Map.of(), null, null
+            );
+            registry.register(systemDef);
+            registry.register(tenantCollection(TENANT_A, "orders", "Tenant A Orders", "a_only_field"));
+            registry.register(tenantCollection(TENANT_B, "orders", "Tenant B Orders", "b_only_field"));
+            registry.register(tenantCollection(TENANT_B, "invoices", "Tenant B Invoices", "b_inv_field"));
+
+            List<String> seenByA = TenantContext.callWithTenant(TENANT_A,
+                () -> registry.getAllForCurrentTenant().stream().map(CollectionDefinition::displayName).sorted().toList());
+            List<String> seenByB = TenantContext.callWithTenant(TENANT_B,
+                () -> registry.getAllForCurrentTenant().stream().map(CollectionDefinition::displayName).sorted().toList());
+            List<String> seenUnbound = registry.getAllForCurrentTenant().stream()
+                .map(CollectionDefinition::displayName).sorted().toList();
+
+            assertEquals(List.of("Collections", "Tenant A Orders"), seenByA);
+            assertEquals(List.of("Collections", "Tenant B Invoices", "Tenant B Orders"), seenByB);
+            assertEquals(List.of("Collections"), seenUnbound);
+        }
+
+        @Test
+        @DisplayName("a genuine system collection under the bare name is still served to every tenant")
+        void systemCollectionStillServedThroughBareNameFallback() {
+            CollectionDefinition systemDef = new CollectionDefinition(
+                "collections", "Collections", "desc",
+                List.of(FieldDefinition.requiredString("name")),
+                StorageConfig.physicalTable("collection"),
+                ApiConfig.allEnabled("/api/collections"),
+                AuthzConfig.disabled(),
+                1L, NOW, NOW,
+                true, true, false, Set.of(), Map.of(), null, null
+            );
+            registry.register(systemDef);
+
+            CollectionDefinition seenByA =
+                TenantContext.callWithTenant(TENANT_A, () -> registry.get("collections"));
+            CollectionDefinition seenByB =
+                TenantContext.callWithTenant(TENANT_B, () -> registry.get("collections"));
+            CollectionDefinition seenWithNoContext = registry.get("collections");
+
+            assertNotNull(seenByA);
+            assertNotNull(seenByB);
+            assertNotNull(seenWithNoContext);
         }
     }
 
