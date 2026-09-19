@@ -1,8 +1,6 @@
 import { test, expect } from "../../../fixtures";
 import { CollectionsListPage } from "../../../pages/collections-list.page";
 import { CollectionWizardPage } from "../../../pages/collection-wizard.page";
-import { DataFactory } from "../../../helpers/data-factory";
-import { attemptDirectLogin, toSessionTokens } from "../../../helpers/direct-login";
 
 const tenantSlug = process.env.E2E_TENANT_SLUG || "default";
 
@@ -106,53 +104,11 @@ test.describe("Collection Wizard", () => {
     ).toBeVisible();
   });
 
-  test("completes wizard and creates collection in a dedicated tenant", async ({
+  test("completes wizard and creates collection", async ({
     page,
     dataFactory,
-    apiBaseUrl,
   }) => {
-    // The wizard drives the admin UI, not the API, so nothing tracks the collection
-    // it creates for teardown unless the test registers it. Worse: the shared
-    // `tenantSlug` tenant is, for the default e2e config, the platform tenant
-    // (SYSTEM_TENANT_ID) — a collection created there leaks into every other
-    // tenant's GET /api/collections (kelta-io/kelta#1536, the e2e_wizard_* rows
-    // that prompted this fix). Provision a throwaway tenant per run instead so
-    // this test can never write into shared platform data.
-    const tenant = await dataFactory.createTenant();
-    const wizardTenantSlug = tenant.attributes.slug as string;
-
-    const authBaseUrl =
-      process.env.E2E_AUTH_DIRECT_LOGIN_URL ||
-      process.env.E2E_AUTH_BASE_URL ||
-      "";
-    const loginResult = await attemptDirectLogin({
-      authBaseUrl,
-      username: `${wizardTenantSlug}-admin@kelta.local`,
-      password: "password",
-      tenantSlug: wizardTenantSlug,
-    });
-    if (!loginResult) {
-      throw new Error(
-        `Direct login failed for dedicated wizard tenant '${wizardTenantSlug}' — ` +
-          "is DIRECT_LOGIN_ENABLED set on kelta-auth?",
-      );
-    }
-
-    // Overrides the tokens the `page` fixture already seeded (for `tenantSlug`)
-    // with ones scoped to the dedicated tenant, for the navigation below.
-    await page.addInitScript((tokens: Record<string, string>) => {
-      for (const [key, value] of Object.entries(tokens)) {
-        sessionStorage.setItem(key, value);
-      }
-    }, toSessionTokens(loginResult));
-
-    const wizardTenantDataFactory = new DataFactory({
-      baseUrl: apiBaseUrl,
-      token: loginResult.access_token,
-      tenantSlug: wizardTenantSlug,
-    });
-
-    const wizardPage = new CollectionWizardPage(page, wizardTenantSlug);
+    const wizardPage = new CollectionWizardPage(page, tenantSlug);
     await wizardPage.goto();
 
     const uniqueName = `e2e_wizard_${Date.now()}`;
@@ -178,12 +134,12 @@ test.describe("Collection Wizard", () => {
     // Submit the wizard
     await wizardPage.submit();
 
-    // Should redirect to collection detail or list page, within the dedicated tenant
-    await expect(page).toHaveURL(new RegExp(`/${wizardTenantSlug}/collections`));
+    // Should redirect to collection detail or list page
+    await expect(page).toHaveURL(new RegExp(`/${tenantSlug}/collections`));
 
-    // Register the UI-created collection so it is force-deleted before the
-    // dedicated tenant itself is torn down (dataFactory.cleanup(), fixtures/index.ts).
-    await wizardTenantDataFactory.trackCollectionByName(uniqueName);
-    await wizardTenantDataFactory.cleanup();
+    // The wizard creates the collection through the UI, so nothing tracks it for
+    // teardown — that is what leaked e2e_wizard_* collections into the target tenant.
+    // Register it so the data-factory cleanup force-deletes it after the test.
+    await dataFactory.trackCollectionByName(uniqueName);
   });
 });

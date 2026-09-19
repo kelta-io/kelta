@@ -222,39 +222,6 @@ export class DataFactory {
     return resource;
   }
 
-  /**
-   * Create a dedicated tenant for a test that must not write into the shared
-   * `tenantSlug` tenant (e.g. a UI flow that creates a record directly, with no
-   * data-factory tracking of its own). `tenants` is not tenant-scoped, so this
-   * POST is issued through whatever tenant this factory is bound to.
-   *
-   * Tenant creation synchronously provisions default profiles, an admin user
-   * (`<slug>-admin@kelta.local`, password `password` — see
-   * TenantProvisioningHook.DEFAULT_PASSWORD_HASH) and Cerbos policies, then
-   * flips status to ACTIVE, so the returned tenant is immediately usable for
-   * direct-login. Tracked for cleanup like every other created entity.
-   */
-  async createTenant(
-    overrides: Record<string, unknown> = {},
-  ): Promise<JsonApiResource> {
-    const uniqueSlug = `e2e-wiz-${Date.now()}`;
-    const result = await this.request("POST", "/api/tenants", {
-      data: {
-        type: "tenants",
-        attributes: {
-          slug: uniqueSlug,
-          name: `E2E Wizard ${uniqueSlug}`,
-          edition: "PROFESSIONAL",
-          ...overrides,
-        },
-      },
-    });
-
-    const resource = result.data as JsonApiResource;
-    this.createdEntities.push({ type: "tenants", id: resource.id });
-    return resource;
-  }
-
   async addField(
     collectionId: string,
     field: {
