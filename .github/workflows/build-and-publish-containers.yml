@@ -772,21 +772,29 @@ jobs:
       # result does not depend on public DNS or the TLS cert. Two assertions, both
       # acceptance criteria of KLT-268: the site answers 200, and /pricing does not
       # exist (CHARTER.md §2 red zone — nginx must 404 it, not SPA-fallback to 200).
+      #
+      # A missing Deployment is a FAILURE, not a warning. KLT-268 shipped a manifest
+      # naming a namespace that does not exist, so nothing was ever created — and the
+      # old `::warning:: … exit 0` skip made every deploy since report green while
+      # kelta.io answered the ingress default backend (PLT-278). The poll below waits
+      # for the object to appear as well as to serve, so an async ArgoCD sync still
+      # gets its full five minutes.
       - name: Verify marketing site (when built)
         if: needs.changes.outputs.marketing == 'true'
         run: |
           NS=${{ steps.k8s.outputs.ns }}
-          DEPLOY=kelta-marketing
-          if ! kubectl -n ${NS} get deploy ${DEPLOY} >/dev/null 2>&1; then
-            echo "::warning::${DEPLOY} not deployed in ${NS} yet (argo sync pending) — skipping marketing smoke."
-            exit 0
-          fi
+          DEPLOY=emf-marketing
           BASE="http://${DEPLOY}.${NS}.svc.cluster.local"
 
           # ArgoCD applies the bump asynchronously, so poll rather than one-shot.
           DEADLINE=$(( $(date +%s) + 300 ))
           CODE=""
           until [ "$(date +%s)" -ge "${DEADLINE}" ]; do
+            if ! kubectl -n "${NS}" get deploy "${DEPLOY}" >/dev/null 2>&1; then
+              echo "waiting for Deployment ${NS}/${DEPLOY} to exist (ArgoCD sync pending)…"
+              sleep 10
+              continue
+            fi
             CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/" || true)
             if [ "${CODE}" = "200" ]; then
               break
@@ -794,6 +802,10 @@ jobs:
             echo "waiting for ${DEPLOY} to serve / (currently '${CODE:-unreachable}')…"
             sleep 10
           done
+          if ! kubectl -n "${NS}" get deploy "${DEPLOY}" >/dev/null 2>&1; then
+            echo "::error::Deployment ${NS}/${DEPLOY} does not exist after 5m. ArgoCD could not apply kelta-marketing/k8s/deployment.yaml — check the emf Application's sync status for a per-resource error (a manifest naming a namespace or object that the cluster does not have fails that resource while the rest of the sync succeeds)."
+            exit 1
+          fi
           if [ "${CODE}" != "200" ]; then
             echo "::error::${BASE}/ returned ${CODE:-unreachable} after 5m — marketing site is not serving."
             exit 1
@@ -976,7 +988,8 @@ jobs:
               echo "attempt ${i}/30: HTTP ${code} — ${host} not ready, retrying in 10s"
               sleep 10
               if [ "${i}" = "30" ]; then
-                echo "::error::${host} did not resolve/serve within ~5 min of deploy. Check public DNS, ingress and cert-manager for the marketing site."
+                echo "::error::${host} did not resolve/serve within ~5 min of deploy."
+                echo "::error::HTTP 000 on every attempt means the name did not resolve or nothing accepted the connection — that is DNS, not TLS (curl -k ignores certificate problems, and an unrouted host answers 404 from the Traefik default backend, not 000). This runner resolves through the cluster's CoreDNS, so BOTH the split-horizon record and the public record have to be right; see concerns.md → 'kelta.io apex and www are not resolvable from the cluster'."
                 exit 1
               fi
             done

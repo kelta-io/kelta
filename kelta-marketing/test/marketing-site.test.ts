@@ -44,4 +44,37 @@ describe('deploy wiring', () => {
     expect(manifests).toContain('image: harbor.rzware.com/emf/emf-marketing:latest');
     expect(manifests).not.toContain('ghcr.io');
   });
+
+  // PLT-278: the manifest KLT-268 shipped named a namespace and workload the
+  // cluster does not have, so ArgoCD never created anything and kelta.io answered
+  // the ingress default backend for a day. These three guards pin the cluster
+  // contract that was verified against the live cluster; see the manifest header.
+  it('deploys into the emf namespace under the emf-<service> convention', () => {
+    const manifests = read('kelta-marketing', 'k8s', 'deployment.yaml');
+    const namespaces = [...manifests.matchAll(/^\s*namespace: (\S+)$/gm)].map((m) => m[1]);
+    expect(namespaces).toHaveLength(3); // Deployment + Service + Ingress
+    expect(new Set(namespaces)).toEqual(new Set(['emf']));
+
+    const names = [...manifests.matchAll(/^\s*-? ?name: (\S+)$/gm)].map((m) => m[1]);
+    expect(names).not.toContain('kelta-marketing');
+    expect(new Set(names)).toEqual(new Set(['emf-marketing']));
+  });
+
+  it('targets Traefik: no nginx ingress class and no nginx-only annotations', () => {
+    const manifests = read('kelta-marketing', 'k8s', 'deployment.yaml');
+    expect(manifests).not.toMatch(/^\s*ingressClassName:/m);
+    expect(manifests).not.toMatch(/^\s*nginx\.ingress\.kubernetes\.io\//m);
+  });
+
+  it('leaves TLS to the wildcard certificate Traefik already serves', () => {
+    const manifests = read('kelta-marketing', 'k8s', 'deployment.yaml');
+    expect(manifests).not.toMatch(/^\s*cert-manager\.io\/cluster-issuer:/m);
+    expect(manifests).not.toMatch(/^\s*secretName: kelta-io-tls$/m);
+  });
+
+  it('smoke-fails instead of skipping when the marketing Deployment is absent', () => {
+    const workflow = read('.github', 'workflows', 'build-and-publish-containers.yml');
+    expect(workflow).toContain('DEPLOY=emf-marketing');
+    expect(workflow).not.toContain('not deployed in ${NS} yet (argo sync pending)');
+  });
 });
