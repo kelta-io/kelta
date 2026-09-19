@@ -1,0 +1,240 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import UiMockup from '../components/UiMockup.astro';
+
+// Counts and names come from kelta-ui/app/src/pages (162 page components) and
+// the Setup home taxonomy (SetupHomePage). Keep this page honest: if an area is
+// removed from the admin console, remove it here.
+const adminAreas = [
+  {
+    title: 'Data model',
+    icon: '🗃️',
+    items: [
+      'Collection wizard — create a collection, its fields, and a default layout in one pass',
+      'Field editor for all 28 types: lookups, master-detail, formulas, rollups, auto-numbers, rich text',
+      'Picklists with dependencies and record-type overrides',
+      'Page layouts: drag sections and fields, per-profile assignment',
+      'List views with saved filters, column choosers, and sharing',
+      'Validation rules and unique constraints with a live tester',
+    ],
+  },
+  {
+    title: 'Security',
+    icon: '🔒',
+    items: [
+      'Users, profiles, permission sets, groups, and delegated admins',
+      'Object CRUD and field-level security editors with an authorization tester',
+      'OIDC providers, password and MFA policies, network access rules',
+      'Login history, security audit, and the setup audit trail with before/after values',
+      'Personal access tokens with scopes and revocation',
+    ],
+  },
+  {
+    title: 'Automation',
+    icon: '🔄',
+    items: [
+      'Flow designer — a React Flow canvas for the 8 state types and 19 action handlers',
+      'Execution log per run, step by step, with input and output snapshots',
+      'Approval processes with multi-step approvers and an approvals inbox',
+      'Scheduled jobs with cron, timezone, and next-run visibility',
+      'AI agents: define a governed agent, its tools, and its budget, then run it',
+      'Scripts (server-side hooks) and email templates',
+    ],
+  },
+  {
+    title: 'Integration',
+    icon: '🔌',
+    items: [
+      'Connected apps (OAuth clients) and a vaulted credential store',
+      'API specs: import an OpenAPI document, browse it, materialize endpoints as collections',
+      'Inbound and outbound webhooks with delivery history',
+      'Support mailboxes and campaigns for email in and out',
+      'Runtime-installable modules and plugins',
+    ],
+  },
+  {
+    title: 'Experience',
+    icon: '🎨',
+    items: [
+      'Page builder: drag-and-drop widgets — layout, tabs, nav, forms, data tables, charts, metrics, images, links, chat, video visits, appointment scheduling',
+      'Menu builder for app navigation, per profile',
+      'Dashboards and reports over any collection',
+      'Translations for every label the runtime shows',
+      'Analytics settings for embedded Superset',
+    ],
+  },
+  {
+    title: 'Platform',
+    icon: '🛠️',
+    items: [
+      'Environments: create, refresh, diff, and promote sandboxes',
+      'Packages and migrations for metadata as versioned artifacts',
+      'Monitoring: request log, endpoint performance, error dashboard, log viewer, config health',
+      'Governor limits with live usage per tenant',
+      'Tenant dashboard, search index, bulk jobs, deduplication',
+    ],
+  },
+];
+
+const appFeatures = [
+  {
+    title: 'Lists that fit the work',
+    description:
+      'Every collection gets table, kanban, gallery, and calendar views out of the box. Filter builder, column chooser, inline editing, CSV import, and saved list views that admins can share by profile.',
+  },
+  {
+    title: 'Records with everything attached',
+    description:
+      'Layout-driven detail pages with sections, related lists, attachments, notes, activity timeline, and field history. Quick actions and approval buttons live where the record is.',
+  },
+  {
+    title: 'Realtime, not refresh',
+    description:
+      'Presence avatars show who else has the record open; live updates arrive over WebSocket. Chat console and video visits (LiveKit) are built in for teams that talk to their customers.',
+  },
+  {
+    title: 'Home, search, and custom pages',
+    description:
+      'A per-user home dashboard, global search across every collection (⌘K), and any page the admin built in the page builder rendered from its configuration at runtime.',
+  },
+  {
+    title: 'Dashboards, reports, analytics',
+    description:
+      'Metric, chart, and record widgets on dashboards; saved reports; an analytics hub that embeds Apache Superset for the heavy lifting.',
+  },
+  {
+    title: 'Ask the assistant',
+    description:
+      'The in-app AI panel knows the tenant schema. It answers questions about data, drafts records, and proposes schema changes that an admin approves before anything happens.',
+  },
+];
+
+const foundations = [
+  ['React 19 · Vite 7 · TypeScript · Tailwind 4', 'One codebase for admin and runtime; lazy-loaded routes per page.'],
+  ['Multi-tenant routing', '/{tenant}/… for setup, /{tenant}/app/… for users, custom domains supported.'],
+  ['RBAC everywhere', 'Route-level and field-level guards; the backend enforces every permission again.'],
+  ['WCAG 2.1 AA', 'Skip links, live regions, focus management, keyboard shortcuts, dark and light themes.'],
+  ['⌘K command palette', 'Jump to any setup page or record; the same palette powers global search.'],
+  ['Same API as everyone else', 'The UI is a client of the public JSON:API — nothing it does is off-limits to your code or your agent.'],
+];
+---
+
+<BaseLayout
+  title="Admin Console & App Runtime"
+  description="The Kelta admin console (setup, security, automation, integration, experience, platform) and the end-user app runtime it generates: lists, records, dashboards, realtime, and an AI assistant."
+>
+  <!-- Hero -->
+  <section class="bg-gradient-to-b from-kelta-50 to-white py-20">
+    <div class="mx-auto max-w-7xl px-6 text-center">
+      <p class="mb-3 text-sm font-semibold uppercase tracking-wider text-cyan">Two interfaces, one platform</p>
+      <h1 class="text-4xl font-extrabold text-navy md:text-5xl">Admin console &amp; app runtime</h1>
+      <p class="mx-auto mt-4 max-w-3xl text-lg text-kelta-700">
+        Admins configure the platform in a 160-page console. Users get an application generated from that
+        configuration — lists, records, dashboards, pages, chat — with no code in between.
+      </p>
+    </div>
+  </section>
+
+  <!-- Admin console -->
+  <section class="py-20">
+    <div class="mx-auto max-w-7xl px-6">
+      <div class="grid items-center gap-12 lg:grid-cols-5">
+        <div class="lg:col-span-2">
+          <p class="mb-2 text-sm font-semibold uppercase tracking-wider text-cyan">For admins</p>
+          <h2 class="text-3xl font-bold text-navy">The admin console</h2>
+          <p class="mt-4 leading-relaxed text-kelta-700">
+            Everything a Salesforce admin expects, and the things they wish they had: a flow canvas, a page
+            builder, sandboxes with diff and promote, an OpenAPI importer, and monitoring that shows the actual
+            requests. Every setting is metadata, so what you click is what the API, the CLI, and your AI agent
+            see.
+          </p>
+          <p class="mt-4 text-sm text-kelta-700">
+            Lives at <code class="rounded bg-gray-50 px-1 font-mono text-xs">/{'{tenant}'}/…</code>; the app at <code class="rounded bg-gray-50 px-1 font-mono text-xs">/{'{tenant}'}/app/…</code>. Setup is searchable: <kbd class="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 font-mono text-xs">⌘K</kbd>
+            jumps to any of the areas below.
+          </p>
+        </div>
+        <div class="lg:col-span-3">
+          <UiMockup kind="admin" title="Admin console: the invoices collection with its fields, layouts, validation, and versions" />
+        </div>
+      </div>
+
+      <div class="mt-16 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {adminAreas.map((area) => (
+          <div class="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+            <div class="mb-3 flex items-center gap-3">
+              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-kelta-50 text-xl">{area.icon}</div>
+              <h3 class="text-lg font-semibold text-navy">{area.title}</h3>
+            </div>
+            <ul class="space-y-2">
+              {area.items.map((item) => (
+                <li class="flex items-start gap-2 text-sm text-kelta-700">
+                  <span class="mt-0.5 text-cyan">&#10003;</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- App runtime -->
+  <section class="bg-kelta-50 py-20">
+    <div class="mx-auto max-w-7xl px-6">
+      <div class="grid items-center gap-12 lg:grid-cols-5">
+        <div class="order-2 lg:order-1 lg:col-span-3">
+          <UiMockup kind="app" title="End-user app: an overdue-invoices list in kanban view with live presence" />
+        </div>
+        <div class="order-1 lg:order-2 lg:col-span-2">
+          <p class="mb-2 text-sm font-semibold uppercase tracking-wider text-cyan">For users</p>
+          <h2 class="text-3xl font-bold text-navy">The app your users get</h2>
+          <p class="mt-4 leading-relaxed text-kelta-700">
+            Define a collection and it is immediately browsable, editable, and searchable — with the layouts,
+            list views, menus, and pages the admin chose. Change the metadata and the app changes; nobody
+            redeploys anything.
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-16 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {appFeatures.map((f) => (
+          <div class="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+            <h3 class="mb-2 text-lg font-semibold text-navy">{f.title}</h3>
+            <p class="text-sm leading-relaxed text-kelta-700">{f.description}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- Foundations -->
+  <section class="py-20">
+    <div class="mx-auto max-w-7xl px-6">
+      <h2 class="mb-10 text-center text-3xl font-bold text-navy">Built on the same rules everywhere</h2>
+      <div class="grid gap-x-12 gap-y-6 md:grid-cols-2">
+        {foundations.map(([head, body]) => (
+          <div class="border-l-2 border-cyan pl-4">
+            <h3 class="font-semibold text-navy">{head}</h3>
+            <p class="mt-1 text-sm text-kelta-700">{body}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="bg-navy py-20 text-white">
+    <div class="mx-auto max-w-4xl px-6 text-center">
+      <h2 class="text-3xl font-bold">See both sides in ten minutes</h2>
+      <p class="mt-4 text-lg text-gray-300">
+        Run the stack with docker compose, sign in as the tenant admin, build a collection, then open the app as
+        a user — or let your AI agent do the building over MCP.
+      </p>
+      <div class="mt-8 flex flex-wrap justify-center gap-4">
+        <a href="https://github.com/kelta-io/kelta#readme" class="rounded-lg bg-gradient-to-r from-cyan to-blue px-8 py-3 text-base font-semibold text-white transition-all hover:shadow-lg">Quick start</a>
+        <a href="/features" class="rounded-lg border border-gray-600 px-8 py-3 text-base font-semibold text-white transition-colors hover:border-cyan hover:text-cyan">All capabilities</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
