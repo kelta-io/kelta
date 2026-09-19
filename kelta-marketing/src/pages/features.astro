@@ -5,7 +5,7 @@ const capabilities = [
   {
     title: 'Dynamic Schema Engine',
     items: [
-      '27 field types covering every enterprise need',
+      '28 field types covering every enterprise need',
       'LOOKUP and MASTER_DETAIL relationships with automatic FK management',
       'Formula expressions and rollup summaries (COUNT, SUM, MIN, MAX, AVG)',
       'Field-level validation rules with regex, min/max, and custom expressions',
@@ -20,7 +20,7 @@ const capabilities = [
       'Relationship includes with multi-level transitive resolution',
       'Sparse fieldsets, filtering, sorting, and pagination',
       'Atomic operations for bulk create/update/delete',
-      'WebSocket realtime subscriptions via Kafka bridge',
+      'WebSocket realtime subscriptions via NATS bridge',
       'Auto-generated OpenAPI 3.0 docs with Swagger UI',
       'Global full-text search via PostgreSQL tsvector',
     ],
@@ -29,9 +29,9 @@ const capabilities = [
     title: 'Visual Flow Builder',
     items: [
       '8 state types: Task, Choice, Parallel, Map, Wait, Pass, Succeed, Fail',
-      '16 built-in action handlers for data, comms, integration, and flow control',
+      '19 built-in action handlers for data, comms, integration, and flow control',
       'Durable execution — every state transition persisted, survives pod restarts',
-      'Record-triggered, webhook, and scheduled (cron) triggers',
+      'Record-triggered, webhook, scheduled (cron), NATS-message, and autolaunched triggers',
       'Full JSONPath data flow with InputPath, ResultPath, OutputPath',
       'React Flow-based visual designer with drag-and-drop',
     ],
@@ -71,7 +71,7 @@ const capabilities = [
   {
     title: 'Observability & Monitoring',
     items: [
-      'OpenTelemetry distributed tracing with Jaeger and OpenSearch',
+      'OpenTelemetry traces, logs, and metrics over OTLP (Grafana Tempo, Loki, Mimir out of the box)',
       'Structured log aggregation with MDC enrichment',
       'Metrics dashboard: request counts, error rates, latency percentiles',
       'Setup audit trail with before/after values',
@@ -84,7 +84,7 @@ const capabilities = [
     items: [
       'HTTP callouts with header, method, and body templating',
       'Inbound and outbound webhooks (Svix-powered)',
-      'Kafka event streaming from any flow',
+      'NATS event publishing from any flow',
       'Per-tenant SMTP email with async delivery and templates',
       'Embedded analytics via Apache Superset',
       'On-the-fly image transformations via URL parameters',
@@ -93,13 +93,13 @@ const capabilities = [
 ];
 
 const architecture = [
-  { service: 'Gateway', tech: 'Java 21, Spring Cloud Gateway', purpose: 'API ingress, auth, tenant routing, rate limiting, WebSocket' },
-  { service: 'Auth', tech: 'Java 21, Spring Authorization Server', purpose: 'OIDC provider, identity federation, MFA, sessions' },
-  { service: 'Worker', tech: 'Java 21, Spring Boot 3.2', purpose: 'Business logic, CRUD, flows, schema, integrations' },
-  { service: 'Admin UI', tech: 'React 19, Vite, TypeScript, Tailwind', purpose: '70+ page admin console and app runtime' },
-  { service: 'PostgreSQL', tech: 'v15', purpose: 'Primary data store with RLS and full-text search' },
+  { service: 'Gateway', tech: 'Java 25, Spring Cloud Gateway', purpose: 'API ingress, auth, tenant routing, rate limiting, WebSocket' },
+  { service: 'Auth', tech: 'Java 25, Spring Authorization Server', purpose: 'OIDC provider, identity federation, MFA, sessions' },
+  { service: 'Worker', tech: 'Java 25, Spring Boot 4', purpose: 'Business logic, CRUD, flows, schema, integrations' },
+  { service: 'Admin UI', tech: 'React 19, Vite 7, TypeScript, Tailwind 4', purpose: '160+ page admin console and app runtime' },
+  { service: 'PostgreSQL', tech: 'v18', purpose: 'Primary data store with RLS and full-text search' },
   { service: 'Redis', tech: 'v7', purpose: 'Rate limiting, caching, session storage' },
-  { service: 'Kafka', tech: 'v3.7 (KRaft)', purpose: 'Event streaming, realtime bridge, config propagation' },
+  { service: 'NATS', tech: 'JetStream', purpose: 'Event streaming, realtime bridge, config propagation' },
   { service: 'Cerbos', tech: 'PDP', purpose: 'Fine-grained ABAC policy engine' },
 ];
 ---
@@ -174,7 +174,7 @@ const architecture = [
       <h2 class="text-3xl font-bold text-navy">See it in action</h2>
       <p class="mt-4 text-kelta-700">Clone the repo, run docker-compose up, and explore the full platform.</p>
       <a
-        href="https://github.com/cklinker/emf"
+        href="https://github.com/kelta-io/kelta"
         class="mt-8 inline-block rounded-lg bg-navy px-8 py-3 text-base font-semibold text-white hover:bg-kelta-800"
       >
         Get Started on GitHub
