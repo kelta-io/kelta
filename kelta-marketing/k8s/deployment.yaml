@@ -20,14 +20,17 @@
 #     with Traefik's `providers.kubernetesIngress.ingressClass` unset (the
 #     default) it processes Ingresses that carry no class. See
 #     CustomDomainProvisioner's javadoc for the same cluster's Traefik contract.
-#   * No cert-manager annotation and no `tls:` block. Traefik already serves a
-#     Let's Encrypt wildcard (`*.kelta.io`, `kelta.io`) for these exact SNIs,
-#     and the websecure entrypoint terminates TLS for every router. Naming a
-#     ClusterIssuer here would mint a second, two-name certificate into
-#     `kelta-io-tls`; if that is the existing wildcard's secret it would break
-#     TLS for api./app./auth./downloads.kelta.io. The only ClusterIssuer this
-#     cluster has is `letsencrypt-http01` (HTTP-01), which cannot serve the
-#     apex while its public A record is stale — see concerns.md.
+#   * No cert-manager annotation. TLS comes from two things, both required:
+#       - `traefik.ingress.kubernetes.io/router.tls: "true"` — Traefik's
+#         websecure entrypoint does NOT enable TLS by default (every
+#         IngressRoute opts in with `tls:`), and in Traefik v3 the Ingress
+#         provider sets router TLS ONLY from this annotation; `spec.tls` alone
+#         just loads certificates into the store. Without it the router is
+#         plaintext, never matches an HTTPS request, and kelta.io 404s at
+#         Traefik (access log shows router "-").
+#       - `spec.tls` referencing the existing `emf-tls` Secret (cert-manager
+#         Certificate `emf-tls` in the emf namespace: `kelta.io`, `*.kelta.io`)
+#         so the wildcard is served for these SNIs. Nothing is re-issued.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -45,6 +48,11 @@ spec:
       labels:
         app: emf-marketing
     spec:
+      # The emf Harbor project is private; every other emf-* Deployment pulls
+      # with this secret. Without it the kubelet gets "pull access denied" and
+      # the site sits in ImagePullBackOff (0/2) even though CI verified the tag.
+      imagePullSecrets:
+        - name: harbor-registry
       containers:
         - name: emf-marketing
           image: harbor.rzware.com/emf/emf-marketing:latest
@@ -94,7 +102,14 @@ metadata:
   namespace: emf
   labels:
     app: emf-marketing
+  annotations:
+    traefik.ingress.kubernetes.io/router.tls: "true"
 spec:
+  tls:
+    - hosts:
+        - kelta.io
+        - www.kelta.io
+      secretName: emf-tls
   rules:
     - host: www.kelta.io
       http:
