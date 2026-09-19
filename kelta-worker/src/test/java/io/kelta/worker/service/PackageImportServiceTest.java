@@ -256,6 +256,94 @@ class PackageImportServiceTest {
     }
 
     // ------------------------------------------------------------------
+    // Collection displayFieldId (KLT-284)
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("collection displayFieldId remapping")
+    class DisplayFieldRemapping {
+
+        @Test
+        @DisplayName("creates the collection with displayFieldId unset, then patches it once the field exists")
+        void selfReferencingDisplayFieldImportsFromScratch() {
+            when(queryEngine.create(any(),
+                    ArgumentMatchers.<Map<String, Object>>argThat(
+                            m -> m != null && "orders".equals(m.get("name")) && m.containsKey("systemCollection"))))
+                    .thenReturn(Map.of("id", "tgt-orders"));
+            when(queryEngine.create(any(),
+                    ArgumentMatchers.<Map<String, Object>>argThat(
+                            m -> m != null && "name".equals(m.get("name")) && m.containsKey("collectionId"))))
+                    .thenReturn(Map.of("id", "tgt-field"));
+
+            Map<String, Object> collection = collectionData("orders");
+            collection.put("display_field_id", "src-field-1");
+            collection.put("display_field_name", "name");
+
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("id", "src-field-1");
+            field.put("collection_id", "src-orders");
+            field.put("collection_name", "orders");
+            field.put("name", "name");
+            field.put("type", "STRING");
+
+            var report = service.importPackage(TENANT,
+                    pkg(item("COLLECTION", collection), item("FIELD", field)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isZero();
+            assertThat(report.created()).isEqualTo(2);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> createCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine, times(2)).create(any(), createCaptor.capture());
+            Map<String, Object> collectionCreate = createCaptor.getAllValues().get(0);
+            assertThat(collectionCreate.get("name")).isEqualTo("orders");
+            assertThat(collectionCreate)
+                    .as("the source tenant's raw field id must not ride straight through")
+                    .doesNotContainKey("displayFieldId");
+
+            ArgumentCaptor<CollectionDefinition> updateDefCaptor = ArgumentCaptor.forClass(CollectionDefinition.class);
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> updateDataCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).update(updateDefCaptor.capture(), eq("tgt-orders"), updateDataCaptor.capture());
+            assertThat(updateDefCaptor.getValue().name()).isEqualTo("collections");
+            assertThat(updateDataCaptor.getValue()).containsEntry("displayFieldId", "tgt-field");
+        }
+
+        @Test
+        @DisplayName("leaves displayFieldId unset when the named field is missing in the target")
+        void leavesUnsetWhenFieldMissing() {
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-orders"));
+
+            Map<String, Object> collection = collectionData("orders");
+            collection.put("display_field_id", "src-field-1");
+            collection.put("display_field_name", "ghost");
+
+            var report = service.importPackage(TENANT, pkg(item("COLLECTION", collection)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isZero();
+            assertThat(report.created()).isEqualTo(1);
+            verify(queryEngine, never()).update(any(), anyString(), anyMap());
+        }
+
+        @Test
+        @DisplayName("skips the patch for a dry run — nothing was actually written")
+        void dryRunSkipsPatch() {
+            Map<String, Object> collection = collectionData("orders");
+            collection.put("display_field_id", "src-field-1");
+            collection.put("display_field_name", "name");
+
+            var report = service.importPackage(TENANT, pkg(item("COLLECTION", collection)),
+                    new PackageImportService.ImportOptions(
+                            PackageImportService.ConflictMode.SKIP, true, null, null, null));
+
+            assertThat(report.created()).isEqualTo(1);
+            verifyNoInteractions(queryEngine);
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Per-item isolation
     // ------------------------------------------------------------------
 

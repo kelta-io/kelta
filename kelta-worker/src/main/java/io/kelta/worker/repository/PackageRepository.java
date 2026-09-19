@@ -58,6 +58,7 @@ public class PackageRepository {
         );
     }
 
+    /** Collections enriched with the display field's name for cross-tenant remap (KLT-284). */
     public List<Map<String, Object>> findCollectionsByIds(String tenantId, List<String> ids) {
         if (ids.isEmpty()) return List.of();
         String placeholders = String.join(",", ids.stream().map(i -> "?").toList());
@@ -65,7 +66,9 @@ public class PackageRepository {
         params[0] = tenantId;
         for (int i = 0; i < ids.size(); i++) params[i + 1] = ids.get(i);
         return jdbcTemplate.queryForList(
-                "SELECT * FROM collection WHERE tenant_id = ? AND id IN (" + placeholders + ")",
+                "SELECT c.*, df.name AS display_field_name FROM collection c " +
+                        "LEFT JOIN field df ON c.display_field_id = df.id " +
+                        "WHERE c.tenant_id = ? AND c.id IN (" + placeholders + ")",
                 params
         );
     }

@@ -187,6 +187,16 @@ export async function runSandboxRefresh(client: AxiosInstance, envId: string): P
   if (!isSuccess(res.status)) throw requestError(res);
 }
 
+/**
+ * Delete an environment — DELETE /api/environments/{id}. Archives the
+ * environment row; for a local tenant-backed sandbox this also decommissions
+ * the backing tenant.
+ */
+export async function runSandboxDelete(client: AxiosInstance, envId: string): Promise<void> {
+  const res = await client.delete<unknown>(`/api/environments/${envId}`);
+  if (!isSuccess(res.status)) throw requestError(res);
+}
+
 /** Create a promotion — POST /api/promotions. */
 export async function runPromoteCreate(
   client: AxiosInstance,
@@ -389,6 +399,19 @@ const sandboxRefresh = defineCommand({
   },
 });
 
+const sandboxDelete = defineCommand({
+  group: 'sandbox',
+  name: 'delete',
+  summary: 'Delete a sandbox environment (archives it; decommissions the backing tenant)',
+  dangerous: true,
+  positionals: [{ name: 'envId', description: 'Environment id', required: true }],
+  input: z.object({ envId: z.string().min(1) }),
+  handler: async (ctx, input) => {
+    await runSandboxDelete(ctx.client.getAxiosInstance(), input.envId);
+    return { message: `Environment ${input.envId} deleted.` };
+  },
+});
+
 const promoteCreate = defineCommand({
   group: 'promote',
   name: 'create',
@@ -525,6 +548,7 @@ export const environmentCommands: RegisteredCommand[] = [
   sandboxList,
   sandboxStatus,
   sandboxRefresh,
+  sandboxDelete,
   promoteCreate,
   promotePreview,
   promoteApprove,

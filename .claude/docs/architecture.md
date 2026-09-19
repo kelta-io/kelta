@@ -587,6 +587,21 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   so a caller can tell "wrong password" from "right password, account still needs a forced
   change" apart. `kelta sandbox create`'s human-readable output states the `POST
   /auth/direct-login` login path alongside the printed credentials.
+- **Collection `displayFieldId` import ordering (fixed 2026-09-19, KLT-284):**
+  `PackageService.exportPackage` exports each `COLLECTION` item's display field by **name**
+  (`display_field_name`, joined alongside the raw `display_field_id`) — the same natural-key
+  pattern a `FIELD` item already uses for `reference_collection_name`. `TYPE_ORDER` imports
+  `COLLECTION` strictly before `FIELD`, so the source tenant's raw `display_field_id` UUID can
+  never resolve on the target during a first-pass create — `PackageImportService.importCollection`
+  now always strips it and creates/updates the collection with `displayFieldId` unset. Once the
+  `FIELD` pass has run, a second pass (`patchDisplayFields`) resolves each collection's
+  `display_field_name` via `ctx.fieldIdByKey()` (`<collection>.<field>` — a collection's display
+  field is always one of its own fields) and `PATCH`es `displayFieldId` in. This is the shared
+  `PackageService`/`PackageImportService` path used by `kelta sandbox create`/`refresh`,
+  `kelta metadata apply`, and metadata promotion alike — before this fix, cloning/importing any
+  tenant whose collections had a `displayFieldId` set failed the whole `COLLECTION` item with
+  `Referenced record ... does not exist in collection 'fields'`, which cascaded into `FIELD`
+  imports failing too (`Collection not found in target`, since the collection was never created).
 
 **Worker-side system-permission check — how (use the existing pattern, don't reinvent):**
 - Enforce a specific system permission **in the controller/service** with a DB lookup against

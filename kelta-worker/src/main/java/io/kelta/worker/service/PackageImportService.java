@@ -140,6 +140,8 @@ public class PackageImportService {
             }
         }
 
+        patchDisplayFields(ctx, byType.getOrDefault("COLLECTION", List.of()), options);
+
         int created = 0, updated = 0, skipped = 0, failed = 0;
         for (var r : results) {
             switch (r.action()) {
@@ -150,6 +152,43 @@ public class PackageImportService {
             }
         }
         return new ImportReport(created, updated, skipped, failed, results);
+    }
+
+    /**
+     * Second pass over already-imported collections: resolves each
+     * {@code display_field_name} (natural key, same pattern as a FIELD's
+     * {@code reference_collection_name}) against the just-imported FIELD rows
+     * and patches {@code displayFieldId} now that the target field exists.
+     * Skipped for a collection whose own import failed or was excluded by a
+     * filter, and entirely for dry runs (nothing was actually written).
+     */
+    @SuppressWarnings("unchecked")
+    private void patchDisplayFields(ImportContext ctx, List<Map<String, Object>> collectionItems,
+                                    ImportOptions options) {
+        if (options.dryRun() || collectionItems.isEmpty()) {
+            return;
+        }
+        CollectionDefinition def = systemDef("COLLECTION");
+        for (var item : collectionItems) {
+            Map<String, Object> data = (Map<String, Object>) item.get("data");
+            String collectionName = (String) data.get("name");
+            Object displayFieldName = data.get("display_field_name");
+            if (displayFieldName == null || !included("COLLECTION", collectionName, options)) {
+                continue;
+            }
+            String collectionId = ctx.collectionIdByName().get(collectionName);
+            if (collectionId == null) {
+                continue; // the collection's own import failed — nothing to patch
+            }
+            String fieldKey = collectionName + "." + displayFieldName;
+            String fieldId = ctx.fieldIdByKey().get(fieldKey);
+            if (fieldId == null) {
+                log.warn("Display field not found in target, leaving unset: {} (collection={})",
+                        fieldKey, collectionName);
+                continue;
+            }
+            queryEngine.update(def, collectionId, Map.of("displayFieldId", fieldId));
+        }
     }
 
     private boolean included(String type, String naturalKey, ImportOptions options) {
@@ -236,6 +275,10 @@ public class PackageImportService {
         Map<String, Object> mapped = mapRowToFields(def, data);
         mapped.put("tenantId", ctx.tenantId);
         mapped.put("systemCollection", false);
+        // The source tenant's raw field UUID never resolves in the target, and
+        // FIELD imports strictly after COLLECTION per TYPE_ORDER anyway — leave
+        // it unset here and patch it once fields exist (patchDisplayFields).
+        mapped.remove("displayFieldId");
 
         return upsertViaEngine(ctx, "COLLECTION", key, def, existingId, mapped,
                 id -> ctx.collectionIdByName().put(name, id));

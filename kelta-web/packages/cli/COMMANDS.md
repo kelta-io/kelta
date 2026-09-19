@@ -734,6 +734,10 @@ Show environment status (with --wait, poll until ACTIVE or FAILED)
 
 Refresh a sandbox environment from its source **(destructive — needs --yes off-TTY)**
 
+### `kelta sandbox delete <envId>`
+
+Delete a sandbox environment (archives it; decommissions the backing tenant) **(destructive — needs --yes off-TTY)**
+
 ## promote
 
 ### `kelta promote create`
