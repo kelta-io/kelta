@@ -2,29 +2,51 @@
 #
 # This file is the source of truth for the manifests. The `deploy` job of
 # .github/workflows/build-and-publish-containers.yml copies it into
-# homelab-argo/emf/ and registers it as a kustomize resource, so ArgoCD applies
-# it — edit it here, not in homelab-argo, or the next deploy overwrites it.
-# The image tag below stays `:latest`; the same job's `kustomize edit set image`
-# pins it to main-<sha>, exactly as for every other emf-* image.
+# homelab-argo/emf/kelta-marketing.yaml and registers it as a kustomize
+# resource, so ArgoCD applies it — edit it here, not in homelab-argo, or the
+# next deploy overwrites it. The image tag below stays `:latest`; the same job's
+# `kustomize edit set image` pins it to main-<sha>, exactly as for every other
+# emf-* image.
+#
+# Cluster contract (PLT-278 — KLT-268 guessed these three and got all three
+# wrong, so the site was never deployed at all):
+#   * Namespace is `emf` and workloads are named `emf-<service>` — the same
+#     convention `emf-gateway`, `emf-ui`, `emf-auth`, `emf-ai`, `emf-mcp` and
+#     `emf-cli-downloads` already use. `namespace: kelta` does not exist, so
+#     ArgoCD could not apply these objects.
+#   * The ingress controller is **Traefik v3**, not ingress-nginx, so there is
+#     no `nginx` IngressClass to select and `nginx.ingress.kubernetes.io/*`
+#     annotations are no-ops. `ingressClassName` is deliberately omitted:
+#     with Traefik's `providers.kubernetesIngress.ingressClass` unset (the
+#     default) it processes Ingresses that carry no class. See
+#     CustomDomainProvisioner's javadoc for the same cluster's Traefik contract.
+#   * No cert-manager annotation and no `tls:` block. Traefik already serves a
+#     Let's Encrypt wildcard (`*.kelta.io`, `kelta.io`) for these exact SNIs,
+#     and the websecure entrypoint terminates TLS for every router. Naming a
+#     ClusterIssuer here would mint a second, two-name certificate into
+#     `kelta-io-tls`; if that is the existing wildcard's secret it would break
+#     TLS for api./app./auth./downloads.kelta.io. The only ClusterIssuer this
+#     cluster has is `letsencrypt-http01` (HTTP-01), which cannot serve the
+#     apex while its public A record is stale — see concerns.md.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kelta-marketing
-  namespace: kelta
+  name: emf-marketing
+  namespace: emf
   labels:
-    app: kelta-marketing
+    app: emf-marketing
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: kelta-marketing
+      app: emf-marketing
   template:
     metadata:
       labels:
-        app: kelta-marketing
+        app: emf-marketing
     spec:
       containers:
-        - name: kelta-marketing
+        - name: emf-marketing
           image: harbor.rzware.com/emf/emf-marketing:latest
           ports:
             - containerPort: 80
@@ -52,10 +74,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: kelta-marketing
-  namespace: kelta
+  name: emf-marketing
+  namespace: emf
   labels:
-    app: kelta-marketing
+    app: emf-marketing
 spec:
   type: ClusterIP
   ports:
@@ -63,20 +85,16 @@ spec:
       targetPort: 80
       protocol: TCP
   selector:
-    app: kelta-marketing
+    app: emf-marketing
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: kelta-marketing
-  namespace: kelta
-  annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    # Must name the same ClusterIssuer the other kelta.io hosts (api./app.) use;
-    # that name is not knowable from this repo — verify against homelab-argo.
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+  name: emf-marketing
+  namespace: emf
+  labels:
+    app: emf-marketing
 spec:
-  ingressClassName: nginx
   rules:
     - host: www.kelta.io
       http:
@@ -85,7 +103,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: kelta-marketing
+                name: emf-marketing
                 port:
                   number: 80
     - host: kelta.io
@@ -95,11 +113,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: kelta-marketing
+                name: emf-marketing
                 port:
                   number: 80
-  tls:
-    - hosts:
-        - www.kelta.io
-        - kelta.io
-      secretName: kelta-io-tls

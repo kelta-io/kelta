@@ -1120,12 +1120,40 @@ generated manifest in an otherwise hand-authored overlay, so two things bite:
 
 - An edit made directly in `homelab-argo` survives until the next deploy and then vanishes.
   Change it here.
-- The Ingress annotation `cert-manager.io/cluster-issuer: letsencrypt-prod` was written
-  **without being able to read the cluster** — nothing in this repo names the ClusterIssuer
-  the other kelta.io hosts use. If it is wrong, `kelta-io-tls` is never issued and the site
-  answers HTTPS with ingress-nginx's default certificate while everything else looks healthy
-  (the in-cluster smoke check talks to the Service, so it stays green). Verify against
-  homelab-argo and fix the name here.
+- **The manifest is written blind, and KLT-268 got all three cluster facts wrong** (PLT-278).
+  Nothing in this repo renders or applies it, so a wrong value is only observable in the
+  cluster. The verified contract, now pinned by guards in
+  `kelta-marketing/test/marketing-site.test.ts`, is: namespace **`emf`** with **`emf-<service>`**
+  names (there is no `kelta` namespace — ArgoCD failed that one resource while the rest of the
+  sync succeeded, so deploys looked fine); the ingress controller is **Traefik v3**, so
+  `ingressClassName: nginx` selects nothing and `nginx.ingress.kubernetes.io/*` annotations are
+  no-ops; and **no cert-manager annotation belongs on it** — Traefik already serves a Let's
+  Encrypt wildcard (`*.kelta.io`, `kelta.io`) for these SNIs, and pointing an issuer at
+  `secretName: kelta-io-tls` risks overwriting that wildcard with a two-name certificate and
+  breaking TLS for api./app./auth./downloads.kelta.io. This cluster's only ClusterIssuer is
+  **`letsencrypt-http01`**, not `letsencrypt-prod` (see `CustomDomainProvisioner`'s javadoc,
+  which is the one place in this repo that records the cluster's Traefik + cert-manager
+  contract). When touching this manifest, verify against the cluster or against that javadoc —
+  do not guess a fourth time.
+
+### kelta.io apex and www are not resolvable from the cluster
+
+**Open — needs a DNS change nobody can make from this repo.** `e2e-test`'s "Wait for public
+DNS to serve the marketing site" step runs on the in-cluster `k8s-runner` and therefore
+resolves through the cluster's CoreDNS. Two records are wrong, and until both are fixed that
+step reports `HTTP 000` on all 30 attempts however correct the manifests are (PLT-278):
+
+- **Split-horizon (internal).** CoreDNS answers `api/app/auth.kelta.io → 192.168.0.22` (the
+  MetalLB VIP in front of Traefik) but **SERVFAILs `kelta.io`, `www.kelta.io` and
+  `downloads.kelta.io`** — the internal kelta.io zone carries only the three names it was
+  seeded with. Add the apex and `www` (and `downloads`) pointing at the same VIP.
+- **Public.** Every kelta.io host is a CNAME onto the homelab at `71.218.137.106`, *except*
+  the apex, which is a stale `A 174.16.114.174` that no longer answers on :443. Repoint it.
+
+Neither is a TLS problem: `curl -k` ignores certificates, and a host that resolves but has no
+route answers **404 from Traefik's default backend**, not 000. `000` for both hosts means the
+name did not resolve. Hairpin NAT does work from inside the cluster, so once the internal
+records exist the public path resolves and serves.
 
 ## Dependency Risks
 

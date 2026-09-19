@@ -175,9 +175,17 @@ auto-rollbacks, re-apply bumps) are in `scripts/dora/README.md`.
 
 - Registry: `harbor.rzware.com/emf/emf-<service>`.
 - Manifests: `homelab-argo` (kustomize), synced by **ArgoCD** to the local K8s cluster,
-  namespace **`kelta`**. In-cluster service DNS is `emf-<service>` (e.g. `emf-gateway`) —
-  except the marketing site, whose Deployment/Service are named `kelta-marketing` and whose
-  manifests are generated from this repo (see below).
+  namespace **`emf`** — in-cluster service DNS is `emf-<service>.emf.svc.cluster.local`
+  (`emf-gateway`, `emf-ui`, `emf-auth`, `emf-ai`, `emf-mcp`, `emf-cli-downloads`,
+  `emf-marketing`). There is no `kelta` namespace; the workflow's `ns` detection step probes
+  for one and falls through to `emf`. Every manifest is hand-authored over there except the
+  marketing site's, which is generated from this repo (see below).
+- Ingress is **Traefik v3** behind a MetalLB VIP, not ingress-nginx: `ingressClassName: nginx`
+  selects nothing and `nginx.ingress.kubernetes.io/*` annotations are no-ops. Traefik's
+  `websecure` entrypoint terminates TLS for every router and already holds a Let's Encrypt
+  wildcard for `*.kelta.io`/`kelta.io`, so a `*.kelta.io` host needs no per-host certificate;
+  the cluster's ClusterIssuer (`letsencrypt-http01`, used for tenant custom domains — see
+  `CustomDomainProvisioner`) is for domains the wildcard does not cover.
 - **Schema gate.** `emf/worker-migrate-job.yaml` is an ArgoCD `PreSync` hook with
   `backoffLimit: 0`, so the sync halts before any Deployment is touched if it fails. It runs, in
   order: Flyway migrations → `SystemCollectionSeeder` (`@Order(5)`) → `SchemaBootstrapRunner`
@@ -203,14 +211,20 @@ The Astro site at **kelta.io / www.kelta.io**. Built and shipped like any other 
   next deploy: **change the manifest here.** The image tag in the file stays `:latest`; the
   same job's `kustomize edit set image emf-marketing` pins `main-<sha>` like every other image.
   Every other service's manifests are still authored in `homelab-argo` by hand.
-- **Its cert-manager ClusterIssuer is unverified from this repo.** The Ingress asks for
-  `letsencrypt-prod`; if the other kelta.io hosts use a different issuer name, `kelta-io-tls`
-  is never issued and the site serves ingress-nginx's default certificate. Check it against
-  homelab-argo when touching TLS.
+- **Its cluster contract is written blind, so it is pinned by tests.** Nothing in this repo
+  applies the manifest, so a wrong namespace, workload name, ingress class or ClusterIssuer is
+  invisible until the site 404s. KLT-268 got all four wrong and the objects were never created
+  at all; `kelta-marketing/test/marketing-site.test.ts` now asserts namespace `emf`,
+  `emf-marketing` names, no `ingressClassName`/nginx annotations (the controller is Traefik)
+  and no `cert-manager.io/cluster-issuer` (the `*.kelta.io` wildcard already covers both
+  hosts). The manifest header explains each. See `concerns.md`.
 
 Smoke (`smoke-test`, only when `marketing == 'true'`) hits the in-cluster Service, so it
-depends on neither public DNS nor the cert: it polls `/` for 200 (≤5 min, ArgoCD syncs
-asynchronously) and asserts `/pricing` is **404**. nginx deliberately has no SPA fallback
+depends on neither public DNS nor the cert: within one ≤5 min budget it waits for the
+Deployment to exist (ArgoCD syncs asynchronously) and for `/` to answer 200, then asserts
+`/pricing` is **404**. A Deployment that never appears **fails** the job — it used to emit a
+`::warning::` and `exit 0`, which is why a manifest that created nothing reported green for a
+day (PLT-278). nginx deliberately has no SPA fallback
 (`try_files … =404` + `error_page 404 /404.html`) — with one, a removed route answers 200
 with the home page and "not published" stops being observable. The post-deploy `e2e-test`
 job additionally runs `tests/marketing/marketing-site.spec.ts` against the public hosts; it
@@ -223,7 +237,11 @@ public DNS to serve the marketing site" step (right before "Run E2E tests", same
 "Wait for the worker to serve data" above it) polls both hosts for HTTP 200 for up to ~5
 min and fails the job with `::error::` — not a silent skip — if they never come up, so a
 genuine DNS/ingress outage still fails CI instead of racing straight into a Playwright DNS
-error (PLT-272). It runs unconditionally rather than gated on `marketing == 'true'`: the
+error (PLT-272). The runner is in-cluster, so it resolves through CoreDNS: **both** the
+split-horizon and the public records have to be right, and neither is today — see
+`concerns.md` → "kelta.io apex and www are not resolvable from the cluster". `HTTP 000` there
+is always DNS, never TLS (`curl -k` ignores certificates, and an unrouted host answers 404
+from Traefik's default backend). It runs unconditionally rather than gated on `marketing == 'true'`: the
 marketing Playwright spec itself always runs when `E2E_MARKETING_URL` is set, regardless of
 whether this run rebuilt the marketing image, and `e2e-test` doesn't otherwise depend on the
 `changes` job.
