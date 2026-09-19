@@ -6,6 +6,8 @@ This software is available under the GNU Affero General Public License v3.0 (AGP
 
 Kelta is a platform for building dynamic, runtime-configurable enterprise applications. It provides a metadata-driven architecture where collections (tables), fields, validation rules, relationships, and workflows are all defined and managed at runtime — no redeployment required.
 
+See the [public roadmap](https://www.kelta.io/roadmap) for what's shipped, in progress, and next.
+
 ## Architecture
 
 ```
