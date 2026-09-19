@@ -45,6 +45,11 @@ spec:
       labels:
         app: emf-marketing
     spec:
+      # The emf Harbor project is private; every other emf-* Deployment pulls
+      # with this secret. Without it the kubelet gets "pull access denied" and
+      # the site sits in ImagePullBackOff (0/2) even though CI verified the tag.
+      imagePullSecrets:
+        - name: harbor-registry
       containers:
         - name: emf-marketing
           image: harbor.rzware.com/emf/emf-marketing:latest
