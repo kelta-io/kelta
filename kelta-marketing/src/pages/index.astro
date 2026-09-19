@@ -29,6 +29,16 @@ const features = [
     icon: '🏢',
   },
   {
+    title: 'AI-Native Setup via MCP',
+    description: 'A built-in Model Context Protocol server exposes 54 tools — 39 for configuration, 15 for data. Point Claude Code or any MCP client at your tenant and have it create collections, fields, flows, layouts, and pages for you, or query and update records. One command to connect.',
+    icon: '🤖',
+  },
+  {
+    title: 'Sandboxes, Promotion & CLI',
+    description: 'Clone a tenant into a sandbox, change it safely, then export, diff, and promote metadata between environments — all from the kelta CLI. Generate a typed SDK for your collections in one command.',
+    icon: '🚀',
+  },
+  {
     title: 'Full Observability Stack',
     description: 'OpenTelemetry traces, logs, and metrics over OTLP to any backend — Grafana Tempo, Loki, and Mimir out of the box. Request metrics with P50/P75/P95/P99 latency breakdowns. Audit trails for every change.',
     icon: '📊',
@@ -43,7 +53,7 @@ const stats = [
 ];
 
 const howItWorks = [
-  { step: '1', title: 'Define your schema', description: 'Create collections and fields through the admin UI or API. Relationships, validations, and computed fields configure in seconds.' },
+  { step: '1', title: 'Define your schema', description: 'Create collections and fields through the admin UI, the CLI, or by describing them to your AI agent over MCP. Relationships, validations, and computed fields configure in seconds.' },
   { step: '2', title: 'Get APIs instantly', description: 'Every collection exposes a full REST API with filtering, sorting, pagination, and bulk operations. No code generation step.' },
   { step: '3', title: 'Add automation', description: 'Build workflows visually with the flow canvas. Trigger on record changes, schedules, or webhooks. Chain data operations, HTTP callouts, emails, and custom logic.' },
   { step: '4', title: 'Ship with confidence', description: 'Multi-tenant isolation, RBAC, encryption, rate limiting, and observability are built in from day one. Not bolted on later.' },
@@ -127,6 +137,54 @@ const howItWorks = [
             <p class="text-sm leading-relaxed text-kelta-700">{item.description}</p>
           </div>
         ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- AI / MCP -->
+  <section class="bg-navy py-24 text-white">
+    <div class="mx-auto max-w-7xl px-6">
+      <div class="grid items-center gap-12 lg:grid-cols-2">
+        <div>
+          <p class="mb-3 text-sm font-semibold uppercase tracking-wider text-cyan">Model Context Protocol</p>
+          <h2 class="text-3xl font-bold md:text-4xl">Configure it by talking to it</h2>
+          <p class="mt-4 text-lg leading-relaxed text-gray-300">
+            Every Kelta tenant ships two MCP endpoints. Connect Claude Code, Claude Desktop, Cursor, or any MCP client and
+            your agent gets typed tools for the whole platform — not a generic HTTP wrapper.
+          </p>
+          <ul class="mt-6 space-y-3 text-sm text-gray-300">
+            <li class="flex items-start gap-3"><span class="mt-0.5 text-cyan">&#10003;</span><span><strong class="text-white">Admin plane</strong> — 39 tools: create and evolve collections, fields, picklists, validation rules, flows, layouts, list views, pages, menus, and dashboards. Import an OpenAPI spec and materialize it as a collection.</span></li>
+            <li class="flex items-start gap-3"><span class="mt-0.5 text-cyan">&#10003;</span><span><strong class="text-white">Data plane</strong> — 15 tools: query, create, update, and bulk-apply records; run flows and follow their runs; submit and list approvals; keyword and semantic search.</span></li>
+            <li class="flex items-start gap-3"><span class="mt-0.5 text-cyan">&#10003;</span><span><strong class="text-white">Resources</strong> — the agent can read your schema, the generated OpenAPI, and the authoring docs straight from the server.</span></li>
+            <li class="flex items-start gap-3"><span class="mt-0.5 text-cyan">&#10003;</span><span><strong class="text-white">Governed</strong> — authenticated with a personal access token, scoped to one tenant, subject to the same RBAC and rate limits as the UI. Admin tools are not reachable from the data endpoint.</span></li>
+          </ul>
+          <p class="mt-6 text-sm text-gray-400">
+            The same runtime powers the in-app assistant and governed agents: schema-aware, tenant-scoped, with a bounded tool-use loop and token accounting per tenant.
+          </p>
+        </div>
+        <div class="rounded-xl border border-gray-700 bg-kelta-950 p-6 font-mono text-xs shadow-2xl md:text-sm">
+          <div class="mb-4 flex gap-1.5">
+            <span class="h-3 w-3 rounded-full bg-error"></span><span class="h-3 w-3 rounded-full bg-warning"></span><span class="h-3 w-3 rounded-full bg-success"></span>
+          </div>
+          <pre class="overflow-x-auto leading-relaxed text-gray-300"><code><span class="text-gray-500"># connect your tenant to Claude Code</span>
+<span class="text-cyan">$</span> kelta mcp install claude-code
+
+<span class="text-gray-500"># then, in the agent:</span>
+<span class="text-blue">&gt;</span> Create an "invoices" collection with a
+  customer lookup, a currency amount, a due
+  date, and a status picklist (draft, sent,
+  paid, void). Email the customer when status
+  becomes "sent", and add an overdue-invoices
+  list view to the finance menu.
+
+<span class="text-success">&#10003;</span> create_collection   invoices
+<span class="text-success">&#10003;</span> add_field &times;4         customer, amount, …
+<span class="text-success">&#10003;</span> create_picklist     invoice-status
+<span class="text-success">&#10003;</span> create_flow         invoice-sent-email
+<span class="text-success">&#10003;</span> create_listview     overdue-invoices
+<span class="text-success">&#10003;</span> apply_menu          finance</code></pre>
+          <p class="mt-4 text-xs text-gray-500">Endpoints <span class="text-gray-300">/{'{tenant}'}/mcp/admin</span> · <span class="text-gray-300">/{'{tenant}'}/mcp/user</span> — streamable HTTP, Bearer PAT.</p>
+        </div>
       </div>
     </div>
   </section>

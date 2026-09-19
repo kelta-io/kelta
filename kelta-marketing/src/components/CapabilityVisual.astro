@@ -1,0 +1,380 @@
+---
+/**
+ * Schematic illustration for one capability on /features. Pure inline SVG in
+ * the brand palette (navy #0F172A, cyan #06B6D4, blue #3B82F6, slate text)
+ * so the page stays a single request and the visuals track the theme.
+ * Each `kind` maps to one drawing; an unknown kind renders nothing so a typo
+ * fails visibly in the layout rather than falling back to a placeholder.
+ */
+interface Props {
+  kind:
+    | 'schema'
+    | 'api'
+    | 'flows'
+    | 'auth'
+    | 'rbac'
+    | 'tenancy'
+    | 'observability'
+    | 'mcp'
+    | 'promotion'
+    | 'integration';
+  title: string;
+}
+
+const { kind, title } = Astro.props;
+
+const navy = '#0F172A';
+const cyan = '#06B6D4';
+const blue = '#3B82F6';
+const slate = '#334155';
+const muted = '#94A3B8';
+const line = '#CBD5E1';
+const success = '#10B981';
+const warning = '#F59E0B';
+const error = '#EF4444';
+---
+
+<svg
+  viewBox="0 0 480 300"
+  role="img"
+  aria-labelledby={`visual-${kind}-title`}
+  class="h-auto w-full max-w-md"
+  xmlns="http://www.w3.org/2000/svg"
+  font-family="Inter, system-ui, sans-serif"
+>
+  <title id={`visual-${kind}-title`}>{title}</title>
+
+  {kind === 'schema' && (
+    <g>
+      <!-- collection card -->
+      <rect x="40" y="40" width="200" height="220" rx="12" fill="#fff" stroke={line} />
+      <rect x="40" y="40" width="200" height="40" rx="12" fill={navy} />
+      <rect x="40" y="68" width="200" height="12" fill={navy} />
+      <text x="56" y="65" fill="#fff" font-size="13" font-weight="600">invoices</text>
+      <text x="196" y="65" fill={cyan} font-size="11" font-family="JetBrains Mono, monospace">v14</text>
+      {[
+        ['customer', 'LOOKUP', cyan],
+        ['amount', 'CURRENCY', blue],
+        ['dueDate', 'DATE', blue],
+        ['status', 'PICKLIST', blue],
+        ['total', 'FORMULA', success],
+        ['lineCount', 'ROLLUP', success],
+      ].map(([name, type, color], i) => (
+        <g transform={`translate(56 ${104 + i * 26})`}>
+          <circle cx="0" cy="0" r="4" fill={color} />
+          <text x="12" y="4" fill={slate} font-size="12">{name}</text>
+          <text x="168" y="4" fill={muted} font-size="9" text-anchor="end" font-family="JetBrains Mono, monospace">{type}</text>
+        </g>
+      ))}
+      <!-- related collection -->
+      <rect x="300" y="90" width="140" height="120" rx="12" fill="#fff" stroke={line} />
+      <rect x="300" y="90" width="140" height="34" rx="12" fill={navy} />
+      <rect x="300" y="112" width="140" height="12" fill={navy} />
+      <text x="314" y="112" fill="#fff" font-size="12" font-weight="600">customers</text>
+      <text x="314" y="150" fill={slate} font-size="12">name</text>
+      <text x="314" y="174" fill={slate} font-size="12">email</text>
+      <text x="314" y="198" fill={slate} font-size="12">invoices ↺</text>
+      <!-- relationship -->
+      <path d="M240 104 C 270 104, 270 150, 300 150" fill="none" stroke={cyan} stroke-width="2" stroke-dasharray="4 3" />
+      <circle cx="300" cy="150" r="4" fill={cyan} />
+      <!-- runtime badge -->
+      <rect x="288" y="228" width="164" height="30" rx="15" fill="#ECFEFF" stroke={cyan} />
+      <text x="370" y="247" fill={navy} font-size="10" text-anchor="middle" font-weight="600">changed at runtime — no deploy</text>
+    </g>
+  )}
+
+  {kind === 'api' && (
+    <g font-family="JetBrains Mono, monospace">
+      <rect x="30" y="30" width="420" height="240" rx="12" fill={navy} />
+      <circle cx="52" cy="52" r="5" fill={error} /><circle cx="70" cy="52" r="5" fill={warning} /><circle cx="88" cy="52" r="5" fill={success} />
+      <text x="50" y="90" fill={cyan} font-size="12">GET</text>
+      <text x="82" y="90" fill="#E2E8F0" font-size="12">/acme/invoices</text>
+      <text x="50" y="110" fill={muted} font-size="11">  ?filter[status][eq]=overdue</text>
+      <text x="50" y="128" fill={muted} font-size="11">  &amp;include=customer&amp;sort=-dueDate</text>
+      <text x="50" y="146" fill={muted} font-size="11">  &amp;fields[invoices]=amount,dueDate&amp;page[size]=25</text>
+      <line x1="50" y1="160" x2="430" y2="160" stroke="#1E293B" />
+      <text x="50" y="184" fill={success} font-size="11">200 OK</text>
+      <text x="110" y="184" fill={muted} font-size="11">application/vnd.api+json</text>
+      <text x="50" y="206" fill="#E2E8F0" font-size="11">{'{ "data": [ { "type": "invoices", "id": "…",'}</text>
+      <text x="50" y="224" fill="#E2E8F0" font-size="11">{'    "attributes": { "amount": 1240.00, … },'}</text>
+      <text x="50" y="242" fill="#E2E8F0" font-size="11">{'    "relationships": { "customer": … } } ],'}</text>
+      <text x="50" y="260" fill="#E2E8F0" font-size="11">{'  "included": [ … ], "meta": { "total": 12 } }'}</text>
+      <rect x="330" y="72" width="100" height="24" rx="12" fill="#0E7490" />
+      <text x="380" y="88" fill="#fff" font-size="10" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-weight="600">auto-generated</text>
+    </g>
+  )}
+
+  {kind === 'flows' && (
+    <g>
+      <!-- trigger -->
+      <rect x="28" y="126" width="96" height="48" rx="24" fill={cyan} />
+      <text x="76" y="146" fill="#fff" font-size="10" text-anchor="middle" font-weight="600">TRIGGER</text>
+      <text x="76" y="162" fill="#fff" font-size="10" text-anchor="middle">invoice.updated</text>
+      <path d="M124 150 H 156" stroke={slate} stroke-width="2" marker-end="url(#arrow)" />
+      <!-- choice -->
+      <g transform="translate(200 150) rotate(45)">
+        <rect x="-30" y="-30" width="60" height="60" rx="8" fill="#fff" stroke={navy} stroke-width="2" />
+      </g>
+      <text x="200" y="147" fill={navy} font-size="10" text-anchor="middle" font-weight="600">Choice</text>
+      <text x="200" y="160" fill={muted} font-size="9" text-anchor="middle">status?</text>
+      <!-- branches -->
+      <path d="M242 150 C 270 150, 270 80, 300 80" fill="none" stroke={slate} stroke-width="2" marker-end="url(#arrow)" />
+      <path d="M242 150 C 270 150, 270 220, 300 220" fill="none" stroke={slate} stroke-width="2" marker-end="url(#arrow)" />
+      <text x="262" y="108" fill={muted} font-size="9">= sent</text>
+      <text x="262" y="200" fill={muted} font-size="9">= paid</text>
+      <!-- tasks -->
+      {[
+        [80, 'Task', 'EMAIL_ALERT', blue],
+        [220, 'Task', 'UPDATE_RECORD', blue],
+      ].map(([y, kindLabel, handler, color]) => (
+        <g>
+          <rect x="300" y={Number(y) - 22} width="120" height="44" rx="8" fill="#fff" stroke={color} stroke-width="2" />
+          <text x="360" y={Number(y) - 4} fill={color} font-size="9" text-anchor="middle" font-weight="600">{kindLabel}</text>
+          <text x="360" y={Number(y) + 12} fill={slate} font-size="10" text-anchor="middle" font-family="JetBrains Mono, monospace">{handler}</text>
+        </g>
+      ))}
+      <path d="M420 80 C 440 80, 440 150, 452 150" fill="none" stroke={slate} stroke-width="2" />
+      <path d="M420 220 C 440 220, 440 150, 452 150" fill="none" stroke={slate} stroke-width="2" />
+      <circle cx="456" cy="150" r="8" fill={success} />
+      <text x="456" y="153" fill="#fff" font-size="9" text-anchor="middle" font-weight="700">✓</text>
+      <!-- durable strip -->
+      <rect x="28" y="250" width="424" height="26" rx="13" fill="#F1F5F9" />
+      <text x="240" y="267" fill={slate} font-size="10" text-anchor="middle">every transition persisted · survives pod restarts · JSONPath in / out</text>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill={slate} /></marker>
+      </defs>
+    </g>
+  )}
+
+  {kind === 'auth' && (
+    <g>
+      <!-- kelta-auth in the middle -->
+      <rect x="170" y="100" width="140" height="100" rx="14" fill={navy} />
+      <text x="240" y="132" fill="#fff" font-size="12" text-anchor="middle" font-weight="600">kelta-auth</text>
+      <text x="240" y="150" fill={cyan} font-size="10" text-anchor="middle">OIDC provider</text>
+      <text x="240" y="170" fill={muted} font-size="9" text-anchor="middle">sessions · MFA · PATs</text>
+      <text x="240" y="184" fill={muted} font-size="9" text-anchor="middle">password policy · lockout</text>
+      <!-- federated IdPs -->
+      {['Google', 'Okta', 'Azure AD', 'any OIDC'].map((name, i) => (
+        <g>
+          <rect x="30" y={40 + i * 56} width="96" height="36" rx="8" fill="#fff" stroke={line} />
+          <text x="78" y={63 + i * 56} fill={slate} font-size="11" text-anchor="middle">{name}</text>
+          <path d={`M126 ${58 + i * 56} C 150 ${58 + i * 56}, 150 150, 170 150`} fill="none" stroke={blue} stroke-width="1.5" stroke-dasharray="3 3" />
+        </g>
+      ))}
+      <text x="78" y="270" fill={muted} font-size="9" text-anchor="middle">federated brokering</text>
+      <!-- second factors -->
+      <rect x="340" y="60" width="110" height="52" rx="8" fill="#fff" stroke={line} />
+      <text x="395" y="80" fill={navy} font-size="11" text-anchor="middle" font-weight="600">TOTP</text>
+      <text x="395" y="98" fill={muted} font-size="9" text-anchor="middle">QR enrol · recovery codes</text>
+      <rect x="340" y="124" width="110" height="52" rx="8" fill="#fff" stroke={line} />
+      <text x="395" y="144" fill={navy} font-size="11" text-anchor="middle" font-weight="600">SMS OTP</text>
+      <text x="395" y="162" fill={muted} font-size="9" text-anchor="middle">rate-limited · E.164</text>
+      <rect x="340" y="188" width="110" height="52" rx="8" fill="#fff" stroke={line} />
+      <text x="395" y="208" fill={navy} font-size="11" text-anchor="middle" font-weight="600">PAT</text>
+      <text x="395" y="226" fill={muted} font-size="9" text-anchor="middle" font-family="JetBrains Mono, monospace">klt_… · SHA-256</text>
+      <path d="M310 150 H 340" stroke={cyan} stroke-width="2" />
+    </g>
+  )}
+
+  {kind === 'rbac' && (
+    <g>
+      <!-- user -->
+      <circle cx="60" cy="150" r="22" fill={navy} />
+      <circle cx="60" cy="142" r="8" fill="#fff" />
+      <path d="M44 166 a16 10 0 0 1 32 0" fill="#fff" />
+      <text x="60" y="190" fill={slate} font-size="10" text-anchor="middle">user</text>
+      <!-- three sources, OR'ed -->
+      {[
+        [60, 'Profile', 'Solution Manager', navy],
+        [150, 'Permission Sets', '+ export, + billing', blue],
+        [240, 'Groups', 'finance-eu', cyan],
+      ].map(([y, label, val, color]) => (
+        <g>
+          <rect x="120" y={Number(y) - 22} width="150" height="44" rx="8" fill="#fff" stroke={color} stroke-width="2" />
+          <text x="132" y={Number(y) - 4} fill={color} font-size="10" font-weight="600">{label}</text>
+          <text x="132" y={Number(y) + 12} fill={slate} font-size="10">{val}</text>
+          <path d={`M82 150 C 100 150, 100 ${y}, 120 ${y}`} fill="none" stroke={line} stroke-width="1.5" />
+          <path d={`M270 ${y} C 290 ${y}, 290 150, 306 150`} fill="none" stroke={line} stroke-width="1.5" />
+        </g>
+      ))}
+      <circle cx="318" cy="150" r="14" fill="#F1F5F9" stroke={line} />
+      <text x="318" y="154" fill={slate} font-size="10" text-anchor="middle" font-weight="700">OR</text>
+      <!-- decision -->
+      <rect x="340" y="70" width="130" height="160" rx="10" fill="#fff" stroke={line} />
+      <text x="405" y="92" fill={navy} font-size="10" text-anchor="middle" font-weight="600">effective access</text>
+      {[
+        ['invoices', 'CRUD', success],
+        ['amount', 'READ_ONLY', warning],
+        ['margin', 'HIDDEN', error],
+        ['payroll', '—', error],
+      ].map(([obj, perm, color], i) => (
+        <g transform={`translate(352 ${116 + i * 26})`}>
+          <circle cx="0" cy="0" r="4" fill={color} />
+          <text x="10" y="4" fill={slate} font-size="10">{obj}</text>
+          <text x="108" y="4" fill={muted} font-size="8" text-anchor="end" font-family="JetBrains Mono, monospace">{perm}</text>
+        </g>
+      ))}
+      <path d="M332 150 H 340" stroke={slate} stroke-width="2" />
+      <text x="405" y="252" fill={muted} font-size="9" text-anchor="middle">+ Cerbos ABAC rules (CEL)</text>
+    </g>
+  )}
+
+  {kind === 'tenancy' && (
+    <g>
+      <!-- gateway -->
+      <rect x="30" y="120" width="90" height="60" rx="10" fill={navy} />
+      <text x="75" y="145" fill="#fff" font-size="11" text-anchor="middle" font-weight="600">gateway</text>
+      <text x="75" y="162" fill={cyan} font-size="9" text-anchor="middle">tenant resolution</text>
+      <text x="75" y="106" fill={muted} font-size="9" text-anchor="middle">api.kelta.io/acme/…</text>
+      <text x="75" y="200" fill={muted} font-size="9" text-anchor="middle">crm.acme.com (CNAME)</text>
+      <!-- tenants -->
+      {[
+        [50, 'acme', '82%', cyan],
+        [130, 'globex', '41%', blue],
+        [210, 'initech', '12%', blue],
+      ].map(([y, slug, usage, color]) => (
+        <g>
+          <path d={`M120 150 C 150 150, 150 ${Number(y) + 20}, 180 ${Number(y) + 20}`} fill="none" stroke={line} stroke-width="1.5" />
+          <rect x="180" y={y} width="270" height="56" rx="10" fill="#fff" stroke={line} />
+          <rect x="180" y={y} width="6" height="56" rx="3" fill={color} />
+          <text x="198" y={Number(y) + 22} fill={navy} font-size="11" font-weight="600">{slug}</text>
+          <text x="198" y={Number(y) + 40} fill={muted} font-size="9" font-family="JetBrains Mono, monospace">RLS · tenant_id</text>
+          <text x="345" y={Number(y) + 22} fill={muted} font-size="9">API calls / day</text>
+          <rect x="345" y={Number(y) + 30} width="80" height="8" rx="4" fill="#F1F5F9" />
+          <rect x="345" y={Number(y) + 30} width={Math.round(parseInt(String(usage)) * 0.8)} height="8" rx="4" fill={color} />
+          <text x="440" y={Number(y) + 38} fill={slate} font-size="9" text-anchor="end">{usage}</text>
+        </g>
+      ))}
+      <text x="315" y="285" fill={muted} font-size="9" text-anchor="middle">one database · row-level security · per-tenant governor limits</text>
+    </g>
+  )}
+
+  {kind === 'observability' && (
+    <g>
+      <!-- latency chart -->
+      <rect x="30" y="30" width="420" height="150" rx="12" fill="#fff" stroke={line} />
+      <text x="46" y="52" fill={navy} font-size="11" font-weight="600">request latency</text>
+      {['p50', 'p95', 'p99'].map((p, i) => (
+        <g>
+          <rect x={330 + i * 40} y="42" width="10" height="10" rx="2" fill={[cyan, blue, navy][i]} />
+          <text x={344 + i * 40} y="51" fill={muted} font-size="9">{p}</text>
+        </g>
+      ))}
+      <polyline points="46,150 90,146 134,140 178,144 222,130 266,134 310,126 354,128 398,120 434,122" fill="none" stroke={cyan} stroke-width="2" />
+      <polyline points="46,130 90,124 134,126 178,110 222,118 266,104 310,112 354,98 398,106 434,100" fill="none" stroke={blue} stroke-width="2" />
+      <polyline points="46,110 90,98 134,104 178,80 222,96 266,74 310,90 354,66 398,84 434,72" fill="none" stroke={navy} stroke-width="2" />
+      <line x1="46" y1="160" x2="434" y2="160" stroke={line} />
+      <!-- pillars -->
+      {[
+        [30, 'traces', 'OTLP → Tempo', cyan],
+        [175, 'logs', 'OTLP → Loki', blue],
+        [320, 'metrics', 'OTLP → Mimir', navy],
+      ].map(([x, label, dest, color]) => (
+        <g>
+          <rect x={x} y="200" width="130" height="70" rx="10" fill="#fff" stroke={line} />
+          <rect x={x} y="200" width="130" height="4" rx="2" fill={color} />
+          <text x={Number(x) + 65} y="230" fill={navy} font-size="11" text-anchor="middle" font-weight="600">{label}</text>
+          <text x={Number(x) + 65} y="250" fill={muted} font-size="9" text-anchor="middle" font-family="JetBrains Mono, monospace">{dest}</text>
+        </g>
+      ))}
+      <text x="240" y="290" fill={muted} font-size="9" text-anchor="middle">OpenTelemetry end to end · audit trail on every setup change</text>
+    </g>
+  )}
+
+  {kind === 'mcp' && (
+    <g>
+      <!-- agent -->
+      <rect x="30" y="100" width="120" height="100" rx="14" fill={navy} />
+      <text x="90" y="134" fill="#fff" font-size="12" text-anchor="middle" font-weight="600">AI agent</text>
+      <text x="90" y="152" fill={muted} font-size="9" text-anchor="middle">Claude Code · Cursor</text>
+      <text x="90" y="166" fill={muted} font-size="9" text-anchor="middle">Claude Desktop · …</text>
+      <rect x="54" y="176" width="72" height="14" rx="7" fill="#0E7490" />
+      <text x="90" y="186" fill="#fff" font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">Bearer klt_…</text>
+      <!-- MCP transport -->
+      <path d="M150 130 H 200" stroke={cyan} stroke-width="2" marker-end="url(#arrow-mcp)" />
+      <path d="M150 170 H 200" stroke={blue} stroke-width="2" marker-end="url(#arrow-mcp)" />
+      <text x="175" y="122" fill={cyan} font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">MCP</text>
+      <text x="175" y="188" fill={blue} font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">MCP</text>
+      <!-- endpoints -->
+      <rect x="200" y="50" width="250" height="90" rx="10" fill="#fff" stroke={cyan} stroke-width="2" />
+      <text x="214" y="72" fill={navy} font-size="10" font-weight="600" font-family="JetBrains Mono, monospace">/{'{tenant}'}/mcp/admin</text>
+      <text x="438" y="72" fill={cyan} font-size="9" text-anchor="end" font-weight="600">39 tools</text>
+      {['create_collection', 'add_field', 'create_flow', 'apply_layout', 'apply_page', 'apply_menu', 'import_api_spec', 'create_picklist'].map((t, i) => (
+        <text x={214 + (i % 3) * 78} y={94 + Math.floor(i / 3) * 16} fill={slate} font-size="8" font-family="JetBrains Mono, monospace">{t}</text>
+      ))}
+      <rect x="200" y="160" width="250" height="90" rx="10" fill="#fff" stroke={blue} stroke-width="2" />
+      <text x="214" y="182" fill={navy} font-size="10" font-weight="600" font-family="JetBrains Mono, monospace">/{'{tenant}'}/mcp/user</text>
+      <text x="438" y="182" fill={blue} font-size="9" text-anchor="end" font-weight="600">15 tools</text>
+      {['query_collection', 'create_record', 'bulk_apply', 'execute_flow', 'list_approvals', 'semantic_search'].map((t, i) => (
+        <text x={214 + (i % 3) * 78} y={204 + Math.floor(i / 3) * 16} fill={slate} font-size="8" font-family="JetBrains Mono, monospace">{t}</text>
+      ))}
+      <text x="325" y="278" fill={muted} font-size="9" text-anchor="middle">same RBAC, rate limits, and audit trail as the UI · resources: schema, OpenAPI, docs</text>
+      <defs>
+        <marker id="arrow-mcp" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill={slate} /></marker>
+      </defs>
+    </g>
+  )}
+
+  {kind === 'promotion' && (
+    <g>
+      <!-- environments -->
+      {[
+        [30, 'sandbox', 'acme--feature-x', cyan],
+        [190, 'staging', 'acme--staging', blue],
+        [350, 'production', 'acme', navy],
+      ].map(([x, label, slug, color]) => (
+        <g>
+          <rect x={x} y="60" width="100" height="120" rx="12" fill="#fff" stroke={color} stroke-width="2" />
+          <rect x={x} y="60" width="100" height="28" rx="12" fill={color} />
+          <rect x={x} y="76" width="100" height="12" fill={color} />
+          <text x={Number(x) + 50} y="79" fill="#fff" font-size="10" text-anchor="middle" font-weight="600">{label}</text>
+          <text x={Number(x) + 50} y="110" fill={muted} font-size="8" text-anchor="middle" font-family="JetBrains Mono, monospace">{slug}</text>
+          {[0, 1, 2, 3].map((r) => (
+            <rect x={Number(x) + 14} y={122 + r * 12} width={72 - r * 10} height="6" rx="3" fill="#F1F5F9" />
+          ))}
+        </g>
+      ))}
+      <!-- promote arrows -->
+      <path d="M130 120 H 190" stroke={slate} stroke-width="2" marker-end="url(#arrow-promo)" />
+      <path d="M290 120 H 350" stroke={slate} stroke-width="2" marker-end="url(#arrow-promo)" />
+      <text x="160" y="112" fill={slate} font-size="9" text-anchor="middle">promote</text>
+      <text x="320" y="112" fill={slate} font-size="9" text-anchor="middle">promote</text>
+      <!-- refresh back -->
+      <path d="M400 190 C 400 230, 80 230, 80 190" fill="none" stroke={line} stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow-promo)" />
+      <text x="240" y="238" fill={muted} font-size="9" text-anchor="middle">sandbox refresh from source</text>
+      <!-- CLI strip -->
+      <rect x="30" y="252" width="420" height="30" rx="8" fill={navy} />
+      <text x="44" y="271" fill={cyan} font-size="10" font-family="JetBrains Mono, monospace">$</text>
+      <text x="58" y="271" fill="#E2E8F0" font-size="10" font-family="JetBrains Mono, monospace">kelta metadata diff · kelta promote preview → approve → execute · kelta sdk</text>
+      <defs>
+        <marker id="arrow-promo" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill={slate} /></marker>
+      </defs>
+    </g>
+  )}
+
+  {kind === 'integration' && (
+    <g>
+      <!-- hub -->
+      <circle cx="240" cy="150" r="46" fill={navy} />
+      <text x="240" y="146" fill="#fff" font-size="12" text-anchor="middle" font-weight="600">flow</text>
+      <text x="240" y="162" fill={cyan} font-size="9" text-anchor="middle">action handlers</text>
+      <!-- spokes -->
+      {[
+        [240, 40, 'HTTP callout', 'any REST API'],
+        [400, 90, 'Webhooks', 'Svix in/out'],
+        [400, 210, 'NATS', 'publish events'],
+        [240, 260, 'Email', 'per-tenant SMTP'],
+        [80, 210, 'Superset', 'embedded analytics'],
+        [80, 90, 'Images', 'URL transforms'],
+      ].map(([x, y, label, sub]) => (
+        <g>
+          <line x1="240" y1="150" x2={x} y2={y} stroke={line} stroke-width="1.5" />
+          <rect x={Number(x) - 52} y={Number(y) - 20} width="104" height="40" rx="8" fill="#fff" stroke={line} />
+          <text x={x} y={Number(y) - 3} fill={navy} font-size="10" text-anchor="middle" font-weight="600">{label}</text>
+          <text x={x} y={Number(y) + 11} fill={muted} font-size="8" text-anchor="middle">{sub}</text>
+        </g>
+      ))}
+    </g>
+  )}
+</svg>
