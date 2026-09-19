@@ -223,6 +223,45 @@ class DynamicCollectionRouterSystemCollectionTest {
         }
 
         @Test
+        @DisplayName("Should leave the platform tenant's own custom collections and fields in its own list")
+        void list_platformTenantSeesItsOwnCustomRows() throws Exception {
+            // The harness/e2e "default" tenant IS the platform tenant: a custom collection created
+            // there has tenantId = SYSTEM_TENANT_ID and systemCollection = false. It is the caller's
+            // own row, not a shared system row, and must not be narrowed away.
+            CollectionDefinition collectionsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();
+            CollectionDefinition fieldsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            when(registry.get("collections")).thenReturn(collectionsDef);
+            when(registry.get("fields")).thenReturn(fieldsDef);
+
+            String systemTenantId = io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID;
+
+            Map<String, Object> ownCustomRow = new HashMap<>();
+            ownCustomRow.put("id", "col-own-custom");
+            ownCustomRow.put("name", "migrtest");
+            ownCustomRow.put("tenantId", systemTenantId);
+            ownCustomRow.put("systemCollection", false);
+            when(queryEngine.executeQuery(eq(collectionsDef), any(QueryRequest.class)))
+                    .thenReturn(QueryResult.of(List.of(ownCustomRow), 1, Pagination.defaults()));
+
+            mockMvc.perform(get("/api/collections")
+                            .header("X-Tenant-ID", systemTenantId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[?(@.id=='col-own-custom')]").exists());
+
+            Map<String, Object> ownFieldRow = new HashMap<>();
+            ownFieldRow.put("id", "field-own-custom");
+            ownFieldRow.put("collectionId", "col-own-custom");
+            ownFieldRow.put("tenantId", systemTenantId);
+            when(queryEngine.executeQuery(eq(fieldsDef), any(QueryRequest.class)))
+                    .thenReturn(QueryResult.of(List.of(ownFieldRow), 1, Pagination.defaults()));
+
+            mockMvc.perform(get("/api/fields")
+                            .header("X-Tenant-ID", systemTenantId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[?(@.id=='field-own-custom')]").exists());
+        }
+
+        @Test
         @DisplayName("Should leave an unbound (no X-Tenant-ID) collections list unfiltered, like injectTenantFilter/visibleToTenant")
         void list_leavesUnboundReadUnfiltered() throws Exception {
             CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();

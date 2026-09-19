@@ -1000,6 +1000,11 @@ public class DynamicCollectionRouter {
         if (tenantId == null || tenantId.isBlank()) {
             return rows;
         }
+        // The platform tenant reading its own rows: every SYSTEM_TENANT_ID row is the caller's
+        // own (custom collections created directly in that tenant included) — nothing to narrow.
+        if (SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(tenantId)) {
+            return rows;
+        }
         boolean hasSystemTenantRow = rows.stream()
                 .anyMatch(row -> SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(
                         String.valueOf(row.get("tenantId"))));

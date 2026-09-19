@@ -695,7 +695,11 @@ for it, not just a `ScopedValue`.
   production (PLT-262). `restrictSharedSystemRows`/`filterSharedSystemRows` narrow the router's
   already-fetched list result afterward instead — a `collections` row must have
   `systemCollection=true`, a `fields` row's `collectionId` must resolve to one — applied at all
-  three list call sites (`list`, `listChildren`, `queryChildRecords` for `?include=`).
+  three list call sites (`list`, `listChildren`, `queryChildRecords` for `?include=`). The
+  narrowing is skipped when the caller **is** the platform tenant (`X-Tenant-ID ==
+  SYSTEM_TENANT_ID`) — there every SYSTEM_TENANT_ID row is the caller's own, and the e2e /
+  test-harness "default" tenant is exactly that tenant (its custom collections' fields vanished
+  from `GET /api/fields`, timing out every `waitForField`).
   `visibleToTenant` (get-by-id) is intentionally unchanged: it only ever gates on
   `sharesSystemRows` + owner == SYSTEM_TENANT_ID, so a stray row is reachable by guessed ID —
   a narrower, accepted gap left for a future pass.
