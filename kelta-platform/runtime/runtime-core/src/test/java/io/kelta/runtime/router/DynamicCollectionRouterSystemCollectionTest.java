@@ -182,6 +182,153 @@ class DynamicCollectionRouterSystemCollectionTest {
         }
 
         @Test
+        @DisplayName("Should exclude a non-system collection row owned by the platform tenant from another tenant's list")
+        void list_excludesStrayNonSystemCollectionOwnedByPlatformTenant() throws Exception {
+            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();
+            when(registry.get("collections")).thenReturn(def);
+
+            String systemTenantId = io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID;
+
+            Map<String, Object> genuineSystemRow = new HashMap<>();
+            genuineSystemRow.put("id", "col-system-1");
+            genuineSystemRow.put("name", "profiles");
+            genuineSystemRow.put("tenantId", systemTenantId);
+            genuineSystemRow.put("systemCollection", true);
+
+            Map<String, Object> strayCustomRow = new HashMap<>();
+            strayCustomRow.put("id", "col-stray-1");
+            strayCustomRow.put("name", "e2e_wizard_123");
+            strayCustomRow.put("tenantId", systemTenantId);
+            strayCustomRow.put("systemCollection", false);
+
+            Map<String, Object> ownRow = new HashMap<>();
+            ownRow.put("id", "col-own-1");
+            ownRow.put("name", "orders");
+            ownRow.put("tenantId", "tenant-123");
+            ownRow.put("systemCollection", false);
+
+            QueryResult mixedResult = QueryResult.of(
+                    List.of(genuineSystemRow, strayCustomRow, ownRow), 3, Pagination.defaults());
+            when(queryEngine.executeQuery(eq(def), any(QueryRequest.class))).thenReturn(mixedResult);
+
+            MvcResult mvcResult = mockMvc.perform(get("/api/collections")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[?(@.id=='col-system-1')]").exists())
+                    .andExpect(jsonPath("$.data[?(@.id=='col-own-1')]").exists())
+                    .andExpect(jsonPath("$.data[?(@.id=='col-stray-1')]").doesNotExist())
+                    .andReturn();
+
+            assertNotNull(mvcResult);
+        }
+
+        @Test
+        @DisplayName("Should leave the platform tenant's own custom collections and fields in its own list")
+        void list_platformTenantSeesItsOwnCustomRows() throws Exception {
+            // The harness/e2e "default" tenant IS the platform tenant: a custom collection created
+            // there has tenantId = SYSTEM_TENANT_ID and systemCollection = false. It is the caller's
+            // own row, not a shared system row, and must not be narrowed away.
+            CollectionDefinition collectionsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();
+            CollectionDefinition fieldsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            when(registry.get("collections")).thenReturn(collectionsDef);
+            when(registry.get("fields")).thenReturn(fieldsDef);
+
+            String systemTenantId = io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID;
+
+            Map<String, Object> ownCustomRow = new HashMap<>();
+            ownCustomRow.put("id", "col-own-custom");
+            ownCustomRow.put("name", "migrtest");
+            ownCustomRow.put("tenantId", systemTenantId);
+            ownCustomRow.put("systemCollection", false);
+            when(queryEngine.executeQuery(eq(collectionsDef), any(QueryRequest.class)))
+                    .thenReturn(QueryResult.of(List.of(ownCustomRow), 1, Pagination.defaults()));
+
+            mockMvc.perform(get("/api/collections")
+                            .header("X-Tenant-ID", systemTenantId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[?(@.id=='col-own-custom')]").exists());
+
+            Map<String, Object> ownFieldRow = new HashMap<>();
+            ownFieldRow.put("id", "field-own-custom");
+            ownFieldRow.put("collectionId", "col-own-custom");
+            ownFieldRow.put("tenantId", systemTenantId);
+            when(queryEngine.executeQuery(eq(fieldsDef), any(QueryRequest.class)))
+                    .thenReturn(QueryResult.of(List.of(ownFieldRow), 1, Pagination.defaults()));
+
+            mockMvc.perform(get("/api/fields")
+                            .header("X-Tenant-ID", systemTenantId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[?(@.id=='field-own-custom')]").exists());
+        }
+
+        @Test
+        @DisplayName("Should leave an unbound (no X-Tenant-ID) collections list unfiltered, like injectTenantFilter/visibleToTenant")
+        void list_leavesUnboundReadUnfiltered() throws Exception {
+            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();
+            when(registry.get("collections")).thenReturn(def);
+
+            String systemTenantId = io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID;
+
+            Map<String, Object> strayCustomRow = new HashMap<>();
+            strayCustomRow.put("id", "col-stray-1");
+            strayCustomRow.put("name", "e2e_wizard_123");
+            strayCustomRow.put("tenantId", systemTenantId);
+            strayCustomRow.put("systemCollection", false);
+
+            QueryResult unfilteredResult = QueryResult.of(List.of(strayCustomRow), 1, Pagination.defaults());
+            when(queryEngine.executeQuery(eq(def), any(QueryRequest.class))).thenReturn(unfilteredResult);
+
+            mockMvc.perform(get("/api/collections"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[?(@.id=='col-stray-1')]").exists());
+        }
+
+        @Test
+        @DisplayName("Should exclude fields of a stray platform-tenant custom collection from another tenant's list")
+        void list_excludesFieldsOfStrayPlatformTenantCollection() throws Exception {
+            CollectionDefinition fieldsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            CollectionDefinition collectionsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();
+            when(registry.get("fields")).thenReturn(fieldsDef);
+            when(registry.get("collections")).thenReturn(collectionsDef);
+
+            String systemTenantId = io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID;
+
+            Map<String, Object> systemCollectionRow = new HashMap<>();
+            systemCollectionRow.put("id", "col-system-1");
+            systemCollectionRow.put("systemCollection", true);
+            QueryResult systemCollectionsResult = QueryResult.of(
+                    List.of(systemCollectionRow), 1, new Pagination(1, Pagination.MAX_PAGE_SIZE));
+            when(queryEngine.executeQuery(eq(collectionsDef), any(QueryRequest.class)))
+                    .thenReturn(systemCollectionsResult);
+
+            Map<String, Object> systemFieldRow = new HashMap<>();
+            systemFieldRow.put("id", "field-system-1");
+            systemFieldRow.put("collectionId", "col-system-1");
+            systemFieldRow.put("tenantId", systemTenantId);
+
+            Map<String, Object> strayFieldRow = new HashMap<>();
+            strayFieldRow.put("id", "field-stray-1");
+            strayFieldRow.put("collectionId", "col-stray-1");
+            strayFieldRow.put("tenantId", systemTenantId);
+
+            Map<String, Object> ownFieldRow = new HashMap<>();
+            ownFieldRow.put("id", "field-own-1");
+            ownFieldRow.put("collectionId", "col-own-1");
+            ownFieldRow.put("tenantId", "tenant-123");
+
+            QueryResult fieldsResult = QueryResult.of(
+                    List.of(systemFieldRow, strayFieldRow, ownFieldRow), 3, Pagination.defaults());
+            when(queryEngine.executeQuery(eq(fieldsDef), any(QueryRequest.class))).thenReturn(fieldsResult);
+
+            mockMvc.perform(get("/api/fields")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[?(@.id=='field-system-1')]").exists())
+                    .andExpect(jsonPath("$.data[?(@.id=='field-own-1')]").exists())
+                    .andExpect(jsonPath("$.data[?(@.id=='field-stray-1')]").doesNotExist());
+        }
+
+        @Test
         @DisplayName("Should not inject tenant filter for non-tenant-scoped collection list")
         void list_noTenantFilter_forNonTenantScopedCollection() throws Exception {
             // Create a system collection that is NOT tenant-scoped

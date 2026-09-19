@@ -11,6 +11,7 @@ import io.kelta.runtime.model.system.SystemCollectionTenancy;
 import io.kelta.runtime.query.FilterCondition;
 import io.kelta.runtime.query.FilterOperator;
 import io.kelta.runtime.query.Pagination;
+import io.kelta.runtime.query.PaginationMetadata;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.query.QueryRequest;
 import io.kelta.runtime.query.QueryResult;
@@ -195,6 +196,7 @@ public class DynamicCollectionRouter {
             }
 
             QueryResult result = queryEngine.executeQuery(definition, queryRequest);
+            result = restrictSharedSystemRows(definition, result, request);
 
             Map<String, Object> response = toJsonApiListResponse(
                     result, collectionName, definition, request.getRequestURI(), params);
@@ -605,6 +607,7 @@ public class DynamicCollectionRouter {
             queryRequest = injectTenantFilter(queryRequest, relation.childDef(), request);
 
             QueryResult result = queryEngine.executeQuery(relation.childDef(), queryRequest);
+            result = restrictSharedSystemRows(relation.childDef(), result, request);
 
             return ResponseEntity.ok(toJsonApiListResponse(
                     result, childName, relation.childDef(), request.getRequestURI(), params));
@@ -951,6 +954,97 @@ public class DynamicCollectionRouter {
         return tenantId.equals(ownerId)
                 || (SystemCollectionTenancy.sharesSystemRows(definition)
                         && SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(ownerId));
+    }
+
+    /**
+     * List-query counterpart of the SYSTEM_TENANT_ID leak fixed here: {@link #injectTenantFilter}
+     * can only express {@code tenantId IN (caller, SYSTEM_TENANT_ID)} — the generic filter
+     * grammar ({@link FilterCondition}/{@link FilterOperator}) is AND-only and has no OR, so it
+     * cannot also require "and that SYSTEM_TENANT_ID row is actually a system collection" in the
+     * same query. This narrows the SQL-filtered result afterward instead: a custom collection (or
+     * one of its fields) created directly in the platform tenant must not leak to every tenant's
+     * list (kelta-io/kelta#1536).
+     */
+    private QueryResult restrictSharedSystemRows(CollectionDefinition definition, QueryResult result,
+                                                  HttpServletRequest request) {
+        if (!SystemCollectionTenancy.sharesSystemRows(definition) || result.data().isEmpty()) {
+            return result;
+        }
+        List<Map<String, Object>> filtered = filterSharedSystemRows(definition, result.data(), request);
+        if (filtered.size() == result.data().size()) {
+            return result;
+        }
+        PaginationMetadata meta = result.metadata();
+        long newTotal = Math.max(0, meta.totalCount() - (result.data().size() - filtered.size()));
+        int newTotalPages = (int) Math.ceil((double) newTotal / meta.pageSize());
+        return new QueryResult(filtered,
+                new PaginationMetadata(newTotal, meta.currentPage(), meta.pageSize(), newTotalPages));
+    }
+
+    /**
+     * Drops SYSTEM_TENANT_ID rows from {@code rows} that don't actually belong to a system
+     * collection. Rows owned by the caller's own tenant are never touched. See
+     * {@link #restrictSharedSystemRows} for why this can't be pushed into the SQL filter.
+     *
+     * <p>No-ops when the request carries no {@code X-Tenant-ID}, matching {@link #visibleToTenant}
+     * and {@link #injectTenantFilter}: an unbound read is a platform/internal read (Flyway,
+     * bootstrap, scheduler sweeps) that is deliberately left unscoped, not a tenant's list view.
+     */
+    private List<Map<String, Object>> filterSharedSystemRows(CollectionDefinition definition,
+                                                               List<Map<String, Object>> rows,
+                                                               HttpServletRequest request) {
+        if (!SystemCollectionTenancy.sharesSystemRows(definition) || rows.isEmpty()) {
+            return rows;
+        }
+        String tenantId = request.getHeader("X-Tenant-ID");
+        if (tenantId == null || tenantId.isBlank()) {
+            return rows;
+        }
+        // The platform tenant reading its own rows: every SYSTEM_TENANT_ID row is the caller's
+        // own (custom collections created directly in that tenant included) — nothing to narrow.
+        if (SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(tenantId)) {
+            return rows;
+        }
+        boolean hasSystemTenantRow = rows.stream()
+                .anyMatch(row -> SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(
+                        String.valueOf(row.get("tenantId"))));
+        if (!hasSystemTenantRow) {
+            return rows;
+        }
+        if ("fields".equals(definition.name())) {
+            Set<String> systemCollectionIds = fetchSystemCollectionIds();
+            return rows.stream()
+                    .filter(row -> !SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(
+                                    String.valueOf(row.get("tenantId")))
+                            || systemCollectionIds.contains(String.valueOf(row.get("collectionId"))))
+                    .collect(Collectors.toList());
+        }
+        // "collections": the row itself carries systemCollection.
+        return rows.stream()
+                .filter(row -> !SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(
+                                String.valueOf(row.get("tenantId")))
+                        || Boolean.TRUE.equals(row.get("systemCollection")))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * IDs of the platform-tenant collections that are genuine system collections, for narrowing
+     * shared {@code fields} rows in {@link #filterSharedSystemRows}.
+     */
+    private Set<String> fetchSystemCollectionIds() {
+        CollectionDefinition collectionsDef = registry.get("collections");
+        if (collectionsDef == null) {
+            return Set.of();
+        }
+        List<FilterCondition> filters = List.of(
+                new FilterCondition("tenantId", FilterOperator.EQ, SystemCollectionDefinitions.SYSTEM_TENANT_ID),
+                new FilterCondition("systemCollection", FilterOperator.EQ, true));
+        QueryRequest query = new QueryRequest(
+                new Pagination(1, Pagination.MAX_PAGE_SIZE), List.of(), List.of("id"), filters);
+        QueryResult result = queryEngine.executeQuery(collectionsDef, query);
+        return result.data().stream()
+                .map(row -> String.valueOf(row.get("id")))
+                .collect(Collectors.toSet());
     }
 
     /**
@@ -1919,7 +2013,7 @@ public class DynamicCollectionRouter {
                 if (data.isEmpty()) {
                     break;
                 }
-                aggregated.addAll(data);
+                aggregated.addAll(filterSharedSystemRows(childDef, data, request));
                 if (data.size() < INCLUDE_PAGE_SIZE) {
                     break;
                 }
