@@ -27,6 +27,14 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
  * the printed credential authenticates immediately, and that a separate account
  * still stuck with {@code force_change_on_login = true} gets a distinguishable
  * {@code credentials_expired} response instead of a generic {@code invalid_credentials}.
+ *
+ * <p>KLT-285: a token being issued scoped to the sandbox tenant is necessary but not
+ * sufficient — {@code printedCredentialLogsIn} also drives that token through the
+ * gateway against a real sandbox-tenant route ({@code GET /api/collections}), proving
+ * KLT-252 actually unblocks reachability end to end rather than just token issuance.
+ * A parent-tenant PAT/session is refused on that same sandbox-tenant path (kelta#1539,
+ * unit-regression-tested in {@code RouteAuthorizationFilterTest} — reproducing it here
+ * would need a second tenant's credentials, out of scope for this scenario).
  */
 @DisplayName("Sandbox Admin Login Scenario")
 class SandboxAdminLoginScenarioTest extends ScenarioBase {
@@ -97,6 +105,20 @@ class SandboxAdminLoginScenarioTest extends ScenarioBase {
         assertThat(auth.extractTenantId(token))
                 .as("issued token is scoped to the sandbox tenant, not the parent")
                 .isEqualTo(sandboxTenantId);
+
+        // The token alone proves nothing about reachability — drive it through the
+        // gateway against a real sandbox-tenant route to prove KLT-252 actually
+        // unblocks the sandbox, not just that a correctly-scoped token gets issued.
+        RestClient sandboxClient = gatewayClientWithToken(token);
+        waitForStatus(sandboxClient, "/" + sandboxSlug + "/api/collections", HttpStatus.OK, 20);
+
+        ResponseEntity<Map> collections = sandboxClient.get()
+                .uri("/" + sandboxSlug + "/api/collections")
+                .retrieve()
+                .toEntity(Map.class);
+        assertThat(collections.getStatusCode())
+                .as("sandbox admin token reaches a sandbox-tenant API route through the gateway")
+                .isEqualTo(HttpStatus.OK);
     }
 
     @Test

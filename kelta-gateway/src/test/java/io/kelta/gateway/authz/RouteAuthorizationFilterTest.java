@@ -204,6 +204,32 @@ class RouteAuthorizationFilterTest {
         }
 
         @Test
+        @DisplayName("Should deny a parent-tenant principal with no membership in the sandbox "
+                + "tenant on a sandbox-tenant path (kelta#1539)")
+        void shouldDenyParentTenantPrincipalOnSandboxPath() {
+            // A parent-tenant PAT carries the parent's tenantId from its own claims
+            // (PatAuthenticationFilter.withTenantId), but UserIdentityResolutionFilter only
+            // resolves profileId/profileName by looking up the caller's email against the
+            // *target* tenant of the request. When that target is a sandbox the parent-tenant
+            // caller has no membership in, the lookup finds no profile and leaves it unset —
+            // there is no "run as platform tenant" fallback into a sandbox.
+            GatewayPrincipal principal = new GatewayPrincipal("parent-admin@test.com", List.of("USER"), Map.of())
+                    .withTenantId("parent-tenant");
+            MockServerHttpRequest request = MockServerHttpRequest.get("/api/collections").build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+            exchange.getAttributes().put(PRINCIPAL_ATTR, principal);
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "sandbox-tenant");
+
+            StepVerifier.create(filter.filter(exchange, filterChain))
+                    .expectComplete()
+                    .verify();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            verifyNoInteractions(cerbosService);
+            verify(filterChain, never()).filter(any());
+        }
+
+        @Test
         @DisplayName("Should deny when missing API_ACCESS system permission")
         void shouldDenyWithoutApiAccess() {
             GatewayPrincipal principal = principalWithIdentity("user@test.com");
