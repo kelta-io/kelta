@@ -2,6 +2,7 @@ package io.kelta.runtime.registry;
 
 import io.kelta.runtime.model.CollectionDefinition;
 
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -73,6 +74,21 @@ public interface CollectionRegistry {
      * @return an immutable set of all registered collection names
      */
     Set<String> getAllCollectionNames();
+
+    /**
+     * Gets every collection definition visible to the current tenant: the system collections
+     * plus the custom collections owned by the tenant bound in
+     * {@link io.kelta.runtime.context.TenantContext}. With no tenant bound, only system
+     * collections are returned.
+     *
+     * <p>This is the enumeration counterpart of {@link #get(String)}. Callers that need "all
+     * collections" for a request must use it rather than walking {@link #getAllCollectionNames()}
+     * — that set holds the raw registry keys of <em>every</em> tenant, so iterating it and calling
+     * {@code get} on each key serves another tenant's schema to this one.
+     *
+     * @return an immutable snapshot of the definitions visible to the current tenant
+     */
+    List<CollectionDefinition> getAllForCurrentTenant();
     
     /**
      * Removes a collection definition from the registry.

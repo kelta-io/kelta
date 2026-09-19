@@ -296,6 +296,53 @@ class ConcurrentCollectionRegistryTest {
         }
 
         @Test
+        @DisplayName("a tenant addressing its own collection by full registry key is served; another tenant is not")
+        void fullRegistryKeyIsServedOnlyToTheOwningTenant() {
+            CollectionDefinition aOrders = tenantCollection(TENANT_A, "orders", "Tenant A Orders", "a_only_field");
+            registry.register(aOrders);
+            String fullKey = aOrders.registryKey();
+            assertEquals(TENANT_A + ":orders", fullKey);
+
+            // Enumeration callers historically walked getAllCollectionNames() and get(key) --
+            // the owner resolving its own full key is a direct hit, not a bare-name fallback.
+            CollectionDefinition seenByOwner = TenantContext.callWithTenant(TENANT_A, () -> registry.get(fullKey));
+            assertNotNull(seenByOwner);
+            assertEquals("Tenant A Orders", seenByOwner.displayName());
+
+            // Another tenant naming A's full key must still get nothing.
+            assertNull(TenantContext.callWithTenant(TENANT_B, () -> registry.get(fullKey)));
+        }
+
+        @Test
+        @DisplayName("getAllForCurrentTenant returns system collections plus the bound tenant's own, nothing else")
+        void getAllForCurrentTenantIsTenantScoped() {
+            CollectionDefinition systemDef = new CollectionDefinition(
+                "collections", "Collections", "desc",
+                List.of(FieldDefinition.requiredString("name")),
+                StorageConfig.physicalTable("collection"),
+                ApiConfig.allEnabled("/api/collections"),
+                AuthzConfig.disabled(),
+                1L, NOW, NOW,
+                true, true, false, Set.of(), Map.of(), null, null
+            );
+            registry.register(systemDef);
+            registry.register(tenantCollection(TENANT_A, "orders", "Tenant A Orders", "a_only_field"));
+            registry.register(tenantCollection(TENANT_B, "orders", "Tenant B Orders", "b_only_field"));
+            registry.register(tenantCollection(TENANT_B, "invoices", "Tenant B Invoices", "b_inv_field"));
+
+            List<String> seenByA = TenantContext.callWithTenant(TENANT_A,
+                () -> registry.getAllForCurrentTenant().stream().map(CollectionDefinition::displayName).sorted().toList());
+            List<String> seenByB = TenantContext.callWithTenant(TENANT_B,
+                () -> registry.getAllForCurrentTenant().stream().map(CollectionDefinition::displayName).sorted().toList());
+            List<String> seenUnbound = registry.getAllForCurrentTenant().stream()
+                .map(CollectionDefinition::displayName).sorted().toList();
+
+            assertEquals(List.of("Collections", "Tenant A Orders"), seenByA);
+            assertEquals(List.of("Collections", "Tenant B Invoices", "Tenant B Orders"), seenByB);
+            assertEquals(List.of("Collections"), seenUnbound);
+        }
+
+        @Test
         @DisplayName("a genuine system collection under the bare name is still served to every tenant")
         void systemCollectionStillServedThroughBareNameFallback() {
             CollectionDefinition systemDef = new CollectionDefinition(

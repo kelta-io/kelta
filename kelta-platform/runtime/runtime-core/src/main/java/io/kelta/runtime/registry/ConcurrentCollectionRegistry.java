@@ -5,7 +5,9 @@ import io.kelta.runtime.model.CollectionDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -167,6 +169,11 @@ public class ConcurrentCollectionRegistry implements CollectionRegistry {
         if (fallback.systemCollection()) {
             return fallback;
         }
+        // A direct hit on the caller's own full "tenantId:name" key is not a bare-name fallback
+        // -- the definition is tenant-owned and the owner is the bound tenant. Serve it.
+        if (fallback.tenantId() != null && fallback.tenantId().equals(tenantId)) {
+            return fallback;
+        }
 
         if (tenantId != null && !tenantId.isBlank()) {
             logger.warn("Refusing bare-name fallback: '{}' resolved to a custom collection owned by "
@@ -185,6 +192,24 @@ public class ConcurrentCollectionRegistry implements CollectionRegistry {
     public Set<String> getAllCollectionNames() {
         // No lock needed - the keySet of an immutable map is also immutable
         return collections.keySet();
+    }
+
+    @Override
+    public List<CollectionDefinition> getAllForCurrentTenant() {
+        // No lock needed - reading volatile reference to immutable map. Filters on the
+        // definition's own tenantId rather than on key shape, so the result mirrors exactly
+        // what get(name) would serve to this tenant: system collections plus its own.
+        String tenantId = TenantContext.get();
+        boolean tenantBound = tenantId != null && !tenantId.isBlank();
+        List<CollectionDefinition> visible = new ArrayList<>();
+        for (CollectionDefinition def : collections.values()) {
+            if (def.systemCollection()) {
+                visible.add(def);
+            } else if (tenantBound && tenantId.equals(def.tenantId())) {
+                visible.add(def);
+            }
+        }
+        return List.copyOf(visible);
     }
     
     @Override

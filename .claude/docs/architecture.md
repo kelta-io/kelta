@@ -715,6 +715,14 @@ version through `DashboardComponentValidator`, `ListViewConfigHook`, and `Dashbo
 visible to every tenant must be declared in `SystemCollectionDefinitions` (`systemCollection =
 true`), not merely omit `tenantId`.
 
+**Enumerating "all collections" for a request**: use `CollectionRegistry.getAllForCurrentTenant()`
+(system collections + the bound tenant's own; system-only when no tenant is bound). Do **not** walk
+`getAllCollectionNames()` and `get()` each key — that set holds the raw `tenantId:name` keys of
+*every* tenant, so the loop served other tenants' schemas (`/api/docs/openapi.json` listed them)
+and, once the fallback was restricted, silently found nothing (`RecordMergeService` stopped
+re-parenting inbound FKs). A tenant resolving its **own** full `tenantId:name` key is still a
+direct hit, not a bare-name fallback, and is served.
+
 ## Frontend Layers (kelta-ui/app/)
 
 - **Context Providers**: `src/context/` — AuthContext, ApiContext, TenantContext, CollectionStoreContext, ThemeContext, I18nContext, PluginContext

@@ -174,11 +174,7 @@ public class RecordMergeService {
      */
     private List<InboundRef> findInboundReferences(String targetCollection) {
         List<InboundRef> refs = new ArrayList<>();
-        for (String name : collectionRegistry.getAllCollectionNames()) {
-            CollectionDefinition def = collectionRegistry.get(name);
-            if (def == null) {
-                continue;
-            }
+        for (CollectionDefinition def : collectionRegistry.getAllForCurrentTenant()) {
             for (FieldDefinition field : def.fields()) {
                 if ((field.type() == FieldType.LOOKUP || field.type() == FieldType.MASTER_DETAIL)
                         && field.referenceConfig() != null
