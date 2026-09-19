@@ -777,8 +777,20 @@ jobs:
       # naming a namespace that does not exist, so nothing was ever created — and the
       # old `::warning:: … exit 0` skip made every deploy since report green while
       # kelta.io answered the ingress default backend (PLT-278). The poll below waits
-      # for the object to appear as well as to serve, so an async ArgoCD sync still
-      # gets its full five minutes.
+      # for the object to appear as well as to serve.
+      #
+      # PLT-282: existence and serving each get their OWN deadline instead of sharing
+      # one. A single shared 300s budget let ArgoCD's first-ever sync of this manifest
+      # (~4m33s, run 35412065789) starve the serve-wait phase down to ~30s — nowhere
+      # near enough for a brand-new pod's first image pull + readiness probe
+      # (initialDelaySeconds 3, periodSeconds 10). Existence keeps the full 5 minutes
+      # ArgoCD may need to sync; serving gets its own fresh 3 minutes once the
+      # Deployment is confirmed to exist (the hard part — getting ArgoCD to sync — is
+      # already done at that point, so a smaller budget is enough for the pod to pull
+      # its image and pass readiness). Worst case for this step is 5m + 3m = 8m, inside
+      # the job's 10-minute timeout-minutes even stacked after the gateway/worker
+      # health steps above, which in practice resolve quickly here because "Wait for
+      # rollout" already waited on those two Deployments before this step ever runs.
       - name: Verify marketing site (when built)
         if: needs.changes.outputs.marketing == 'true'
         run: |
@@ -786,30 +798,33 @@ jobs:
           DEPLOY=emf-marketing
           BASE="http://${DEPLOY}.${NS}.svc.cluster.local"
 
-          # ArgoCD applies the bump asynchronously, so poll rather than one-shot.
-          DEADLINE=$(( $(date +%s) + 300 ))
-          CODE=""
-          until [ "$(date +%s)" -ge "${DEADLINE}" ]; do
-            if ! kubectl -n "${NS}" get deploy "${DEPLOY}" >/dev/null 2>&1; then
-              echo "waiting for Deployment ${NS}/${DEPLOY} to exist (ArgoCD sync pending)…"
-              sleep 10
-              continue
+          # Phase 1: wait for ArgoCD to sync the Deployment into existence (up to 5m).
+          EXISTENCE_DEADLINE=$(( $(date +%s) + 300 ))
+          until kubectl -n "${NS}" get deploy "${DEPLOY}" >/dev/null 2>&1; do
+            if [ "$(date +%s)" -ge "${EXISTENCE_DEADLINE}" ]; then
+              echo "::error::Deployment ${NS}/${DEPLOY} does not exist after 5m. ArgoCD could not apply kelta-marketing/k8s/deployment.yaml — check the emf Application's sync status for a per-resource error (a manifest naming a namespace or object that the cluster does not have fails that resource while the rest of the sync succeeds)."
+              exit 1
             fi
+            echo "waiting for Deployment ${NS}/${DEPLOY} to exist (ArgoCD sync pending)…"
+            sleep 10
+          done
+
+          # Phase 2: now that the Deployment exists, wait for it to serve (its own
+          # fresh 3m budget — does not inherit whatever phase 1 already spent).
+          SERVE_DEADLINE=$(( $(date +%s) + 180 ))
+          CODE=""
+          until [ "${CODE}" = "200" ]; do
             CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/" || true)
             if [ "${CODE}" = "200" ]; then
               break
             fi
+            if [ "$(date +%s)" -ge "${SERVE_DEADLINE}" ]; then
+              echo "::error::${BASE}/ returned ${CODE:-unreachable} after 3m — marketing site is not serving."
+              exit 1
+            fi
             echo "waiting for ${DEPLOY} to serve / (currently '${CODE:-unreachable}')…"
             sleep 10
           done
-          if ! kubectl -n "${NS}" get deploy "${DEPLOY}" >/dev/null 2>&1; then
-            echo "::error::Deployment ${NS}/${DEPLOY} does not exist after 5m. ArgoCD could not apply kelta-marketing/k8s/deployment.yaml — check the emf Application's sync status for a per-resource error (a manifest naming a namespace or object that the cluster does not have fails that resource while the rest of the sync succeeds)."
-            exit 1
-          fi
-          if [ "${CODE}" != "200" ]; then
-            echo "::error::${BASE}/ returned ${CODE:-unreachable} after 5m — marketing site is not serving."
-            exit 1
-          fi
 
           PRICING=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/pricing" || true)
           if [ "${PRICING}" != "404" ]; then
