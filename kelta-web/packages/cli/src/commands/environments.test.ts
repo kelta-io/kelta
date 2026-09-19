@@ -6,13 +6,19 @@ import {
   runPromoteCreate,
   runPromoteExecute,
   runSandboxCreate,
+  runSandboxDelete,
   runSandboxList,
 } from './environments.js';
 
-function client(overrides: { get?: ReturnType<typeof vi.fn>; post?: ReturnType<typeof vi.fn> }) {
+function client(overrides: {
+  get?: ReturnType<typeof vi.fn>;
+  post?: ReturnType<typeof vi.fn>;
+  delete?: ReturnType<typeof vi.fn>;
+}) {
   return {
     get: overrides.get ?? vi.fn(),
     post: overrides.post ?? vi.fn(),
+    delete: overrides.delete ?? vi.fn(),
   } as unknown as AxiosInstance;
 }
 
@@ -54,6 +60,25 @@ describe('sandbox ops', () => {
   it('lists environments defensively', async () => {
     const get = vi.fn().mockResolvedValue({ status: 200, data: { data: [{ id: 'e1' }] } });
     expect(await runSandboxList(client({ get }))).toEqual([{ id: 'e1' }]);
+  });
+
+  it('deletes a FAILED sandbox', async () => {
+    const del = vi.fn().mockResolvedValue({ status: 200, data: { status: 'archived' } });
+    await runSandboxDelete(client({ delete: del }), 'env-failed');
+    expect(del).toHaveBeenCalledWith('/api/environments/env-failed');
+  });
+
+  it('deletes an ACTIVE sandbox', async () => {
+    const del = vi.fn().mockResolvedValue({ status: 200, data: { status: 'archived' } });
+    await runSandboxDelete(client({ delete: del }), 'env-active');
+    expect(del).toHaveBeenCalledWith('/api/environments/env-active');
+  });
+
+  it('throws on failure statuses', async () => {
+    const del = vi.fn().mockResolvedValue({ status: 403, data: {} });
+    await expect(runSandboxDelete(client({ delete: del }), 'env1')).rejects.toThrow(
+      /Request failed/
+    );
   });
 });
 
