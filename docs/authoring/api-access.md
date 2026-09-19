@@ -247,6 +247,16 @@ last_used_at` yet (the gateway validates PATs Redis-first and never
 touches the row; see `concerns.md`), so treat `requestCount`, not
 `lastUsedAt`, as the liveness signal for a key.
 
+**Revoking the key.** `DELETE /api/me/tokens/{id}` as the owner (the PAT
+itself can authenticate that call) is the only thing that stops a PAT
+before it expires: the worker writes `pat:revoked:<hash>` and the gateway
+checks it first on every request. Setting the owning user to `INACTIVE`
+does **not** — the gateway serves a cached `pat:<hash>` entry for the
+token's whole lifetime and only re-reads the user's status on a cache
+miss (`concerns.md`). If the plaintext is gone and the owner cannot log
+in, pull `API_ACCESS` from the profile instead: Cerbos evaluates that on
+every call, so it takes effect immediately for every key on that profile.
+
 The redistribution-rights review per data source, the pricing page, and
 outbound emails to prospective API consumers are out of scope here (a
 separate, later effort) — this page covers only the read-only API
