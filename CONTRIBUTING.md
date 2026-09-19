@@ -9,6 +9,16 @@ Everything merged here must be a generic platform feature (Critical Rule 0 in `C
 
 ---
 
+## Response times
+
+Maintainers respond to new issues and pull requests from outside contributors within
+**48 hours** — a first response (triage, question, or review), not necessarily a
+resolution. Use the [bug report](.github/ISSUE_TEMPLATE/bug_report.md) or
+[feature request](.github/ISSUE_TEMPLATE/feature_request.md) template so we have what
+we need to respond quickly.
+
+---
+
 ## How to run locally
 
 Clone the repo and start the full stack with one command:

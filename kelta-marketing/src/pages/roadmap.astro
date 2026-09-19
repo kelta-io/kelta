@@ -1,0 +1,81 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const columns = [
+  {
+    title: 'Shipped',
+    accent: 'border-t-cyan',
+    items: [
+      'Runtime data platform — collections, fields, relationships, validation, and an auto-generated JSON:API REST API',
+      'Visual workflow automation with a drag-and-drop flow canvas and a library of built-in action handlers',
+      'Enterprise security — role-based access control, field-level security and data masking, row-level multi-tenancy',
+      'Realtime collaboration — presence, live record updates, in-app chat and video',
+      'Consumer alerting — availability watches, matching, and push notifications for end users',
+      'AI integration — in-app assistant and an MCP server so AI agents can operate the platform directly',
+      'Cross-platform CLI with self-updating binaries',
+      'Runtime-installable modules, so capabilities can be added without redeploying the platform',
+    ],
+  },
+  {
+    title: 'In progress',
+    accent: 'border-t-blue',
+    items: [
+      'A first-class module marketplace — provenance, permissions, and consent for installed modules',
+      'A generated documentation site (this docs page is a placeholder for it)',
+      'Public, SEO-friendly pages generated from tenant data for consumer-facing use cases',
+    ],
+  },
+  {
+    title: 'Exploring',
+    accent: 'border-t-navy',
+    items: [
+      'More worked examples and end-to-end tutorials',
+      'A fully managed, hosted version of Kelta — see the waitlist below',
+    ],
+  },
+];
+---
+
+<BaseLayout title="Roadmap" description="What's shipped, in progress, and next for Kelta — the open-source enterprise application platform.">
+  <section class="bg-gradient-to-b from-kelta-50 to-white py-20">
+    <div class="mx-auto max-w-7xl px-6 text-center">
+      <h1 class="text-4xl font-extrabold text-navy md:text-5xl">Roadmap</h1>
+      <p class="mx-auto mt-4 max-w-2xl text-lg text-kelta-700">
+        A high-level, always-evolving view of where Kelta is headed. This page tracks themes,
+        not dates — for exact status, watch
+        <a href="https://github.com/cklinker/emf" class="font-semibold text-cyan hover:text-blue" target="_blank" rel="noopener noreferrer">the repository</a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="py-20">
+    <div class="mx-auto max-w-7xl px-6">
+      <div class="grid gap-8 md:grid-cols-3">
+        {columns.map((column) => (
+          <div class={`rounded-xl border border-gray-100 border-t-4 ${column.accent} bg-white p-8 shadow-sm`}>
+            <h2 class="mb-4 text-xl font-bold text-navy">{column.title}</h2>
+            <ul class="space-y-3 text-sm leading-relaxed text-kelta-700">
+              {column.items.map((item) => (
+                <li class="flex gap-2">
+                  <span aria-hidden="true">&#8226;</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <div class="mt-12 rounded-xl border border-kelta-100 bg-kelta-50 p-8 text-center">
+        <p class="text-sm text-navy">
+          Have a request that isn't here?
+          <a href="https://github.com/cklinker/emf/issues/new/choose" class="font-semibold underline" target="_blank" rel="noopener noreferrer">
+            Open a feature request
+          </a>
+          — see <a href="https://github.com/cklinker/emf/blob/main/CONTRIBUTING.md" class="font-semibold underline" target="_blank" rel="noopener noreferrer">CONTRIBUTING.md</a>
+          for our response-time commitment. Want early access to a hosted Kelta?
+          <a href="/waitlist" class="font-semibold underline">Join the waitlist</a>.
+        </p>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

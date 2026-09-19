@@ -1,0 +1,71 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const WAITLIST_EMAIL = 'waitlist@kelta.io';
+---
+
+<BaseLayout title="Waitlist" description="Get early access to Kelta Cloud, a fully managed, hosted version of the Kelta enterprise application platform.">
+  <section class="bg-gradient-to-b from-kelta-50 to-white py-20">
+    <div class="mx-auto max-w-3xl px-6 text-center">
+      <h1 class="text-4xl font-extrabold text-navy md:text-5xl">Get early access to Kelta Cloud</h1>
+      <p class="mt-6 text-lg leading-relaxed text-kelta-700">
+        Kelta is open source and self-hostable today —
+        <a href="https://github.com/cklinker/emf" class="font-semibold text-cyan hover:text-blue" target="_blank" rel="noopener noreferrer">clone the repo</a>
+        and run it on your own infrastructure right now. We're also building a fully managed,
+        hosted version of the platform. Leave your email and we'll reach out when early access
+        opens — no pricing has been announced yet.
+      </p>
+
+      <form id="waitlist-form" class="mx-auto mt-10 flex max-w-md flex-col gap-3 sm:flex-row" novalidate>
+        <label for="waitlist-email" class="sr-only">Email address</label>
+        <input
+          id="waitlist-email"
+          name="email"
+          type="email"
+          required
+          placeholder="you@company.com"
+          class="w-full flex-1 rounded-lg border border-gray-200 px-4 py-3 text-sm text-navy placeholder:text-gray-400 focus:border-cyan focus:outline-none focus:ring-2 focus:ring-cyan/30"
+        />
+        <button
+          type="submit"
+          class="rounded-lg bg-navy px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-kelta-800"
+        >
+          Join the waitlist
+        </button>
+      </form>
+      <p id="waitlist-status" class="mt-4 min-h-[1.5rem] text-sm text-kelta-700" role="status" aria-live="polite"></p>
+      <noscript>
+        <p class="mt-4 text-sm text-kelta-700">
+          JavaScript is required for this form. Email us directly at
+          <a href={`mailto:${WAITLIST_EMAIL}`} class="font-semibold text-cyan hover:text-blue">{WAITLIST_EMAIL}</a>
+          to join the waitlist.
+        </p>
+      </noscript>
+    </div>
+  </section>
+
+  <script define:vars={{ WAITLIST_EMAIL }}>
+    const form = document.getElementById('waitlist-form');
+    const input = document.getElementById('waitlist-email');
+    const status = document.getElementById('waitlist-status');
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    form?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const email = input.value.trim();
+
+      if (!emailPattern.test(email)) {
+        status.textContent = 'Enter a valid email address.';
+        status.classList.add('text-red-600');
+        return;
+      }
+
+      status.classList.remove('text-red-600');
+      const subject = encodeURIComponent('Kelta Cloud waitlist');
+      const body = encodeURIComponent(`Please add ${email} to the Kelta Cloud waitlist.`);
+      window.location.href = `mailto:${WAITLIST_EMAIL}?subject=${subject}&body=${body}`;
+      status.textContent = `Your email app should now open with ${WAITLIST_EMAIL} pre-filled — send it to confirm your spot. If nothing opens, email us directly at ${WAITLIST_EMAIL}.`;
+      form.reset();
+    });
+  </script>
+</BaseLayout>
