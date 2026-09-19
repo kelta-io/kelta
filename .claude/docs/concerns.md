@@ -1531,3 +1531,18 @@ shows `lastUsedAt: null` (observed 2026-09-19 on a live tenant while running the
 is wired — cheapest is a throttled write from the same fire-and-forget path that bumps
 `pat-usage:<hash>` — `requestCount` is the only liveness signal, and any "revoke unused keys"
 job must not key off `lastUsedAt`.
+
+### Deactivating a user does not invalidate its PATs
+
+`PersonalAccessTokenController` caches `pat:<hash>` in Redis with a TTL equal to the
+token's remaining lifetime, and `PatAuthenticationFilter` builds the principal from that
+JSON on a hit. The `u.status = 'ACTIVE'` check lives only in the worker's
+`/validate/{hash}` fallback, which runs on a Redis miss. So a PAT keeps working after its
+user is set `INACTIVE` (observed 2026-09-19: status flipped, key still answered `200`) until
+the token expires, Redis is flushed, or the token is explicitly revoked via
+`DELETE /api/me/tokens/{id}` — which is owner-only; there is no admin revoke endpoint
+(`AdminPersonalAccessTokenController` only mints). Two fixes, either sufficient: on user
+status change, delete every `pat:<hash>` for that user (or write `pat:revoked:<hash>`); and an
+admin `DELETE /api/admin/users/{id}/tokens/{tokenId}` so an operator can kill a key whose
+plaintext is gone. Until then, pulling `API_ACCESS` from the profile is the immediate kill
+switch.
