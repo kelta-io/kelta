@@ -5,7 +5,7 @@ import FeatureCard from '../components/FeatureCard.astro';
 const features = [
   {
     title: 'Dynamic Schema Engine',
-    description: 'Define and modify your data model at runtime. 27 field types, relationships, computed fields, validation rules, and schema versioning — all without touching code or restarting services.',
+    description: 'Define and modify your data model at runtime. 28 field types, relationships, computed fields, validation rules, and schema versioning — all without touching code or restarting services.',
     icon: '🗃️',
   },
   {
@@ -15,7 +15,7 @@ const features = [
   },
   {
     title: 'Visual Workflow Builder',
-    description: 'Design automation with a drag-and-drop flow canvas inspired by AWS Step Functions. 8 state types, 16 built-in action handlers, durable execution, and triggers for record events, webhooks, or cron schedules.',
+    description: 'Design automation with a drag-and-drop flow canvas inspired by AWS Step Functions. 8 state types, 19 built-in action handlers, durable execution, and triggers for record events, webhooks, cron schedules, or NATS messages.',
     icon: '🔄',
   },
   {
@@ -30,16 +30,16 @@ const features = [
   },
   {
     title: 'Full Observability Stack',
-    description: 'Distributed tracing via OpenTelemetry and Jaeger. Structured logging to OpenSearch. Request metrics with P50/P75/P95/P99 latency breakdowns. Audit trails for every change.',
+    description: 'OpenTelemetry traces, logs, and metrics over OTLP to any backend — Grafana Tempo, Loki, and Mimir out of the box. Request metrics with P50/P75/P95/P99 latency breakdowns. Audit trails for every change.',
     icon: '📊',
   },
 ];
 
 const stats = [
-  { value: '27', label: 'Field types' },
-  { value: '70+', label: 'Admin pages' },
-  { value: '16', label: 'Workflow handlers' },
-  { value: '111', label: 'DB migrations' },
+  { value: '28', label: 'Field types' },
+  { value: '160+', label: 'Admin pages' },
+  { value: '19', label: 'Workflow handlers' },
+  { value: '8', label: 'Flow state types' },
 ];
 
 const howItWorks = [
@@ -64,7 +64,7 @@ const howItWorks = [
         </p>
         <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
           <a
-            href="https://github.com/cklinker/emf"
+            href="https://github.com/kelta-io/kelta"
             class="rounded-lg bg-navy px-8 py-3 text-base font-semibold text-white shadow-lg transition-all hover:bg-kelta-800 hover:shadow-xl"
           >
             Get Started on GitHub
@@ -153,7 +153,7 @@ const howItWorks = [
         <div class="rounded-xl border border-gray-100 bg-white p-8">
           <h3 class="mb-3 text-lg font-semibold text-navy">Standards-based, not proprietary</h3>
           <p class="text-sm leading-relaxed text-kelta-700">
-            JSON:API for REST. OIDC for auth. OpenTelemetry for observability. Kafka for events. PostgreSQL for persistence. Kelta builds on the tools your team already knows — no vendor lock-in, no custom query languages.
+            JSON:API for REST. OIDC for auth. OpenTelemetry for observability. NATS for events. PostgreSQL for persistence. Kelta builds on the tools your team already knows — no vendor lock-in, no custom query languages.
           </p>
         </div>
         <div class="rounded-xl border border-gray-100 bg-white p-8">
@@ -179,12 +179,12 @@ const howItWorks = [
             </tr>
           </thead>
           <tbody>
-            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Backend</td><td class="py-3 font-mono text-xs text-kelta-700">Java 21, Spring Boot 3.2</td></tr>
-            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Frontend</td><td class="py-3 font-mono text-xs text-kelta-700">TypeScript, React, Vite, Tailwind CSS</td></tr>
-            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Data</td><td class="py-3 font-mono text-xs text-kelta-700">PostgreSQL 15, Redis 7</td></tr>
-            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Events</td><td class="py-3 font-mono text-xs text-kelta-700">Kafka 3.7 (KRaft)</td></tr>
-            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Auth</td><td class="py-3 font-mono text-xs text-kelta-700">Keycloak (OIDC)</td></tr>
-            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Observability</td><td class="py-3 font-mono text-xs text-kelta-700">OpenTelemetry, Jaeger, OpenSearch</td></tr>
+            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Backend</td><td class="py-3 font-mono text-xs text-kelta-700">Java 25, Spring Boot 4</td></tr>
+            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Frontend</td><td class="py-3 font-mono text-xs text-kelta-700">TypeScript, React 19, Vite 7, Tailwind CSS 4</td></tr>
+            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Data</td><td class="py-3 font-mono text-xs text-kelta-700">PostgreSQL 18, Redis 7</td></tr>
+            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Events</td><td class="py-3 font-mono text-xs text-kelta-700">NATS JetStream</td></tr>
+            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Auth</td><td class="py-3 font-mono text-xs text-kelta-700">Built-in OIDC provider (Spring Authorization Server)</td></tr>
+            <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Observability</td><td class="py-3 font-mono text-xs text-kelta-700">OpenTelemetry (OTLP) → Grafana Tempo, Loki, Mimir</td></tr>
             <tr class="border-b border-gray-100"><td class="py-3 pr-6 font-medium text-navy">Deployment</td><td class="py-3 font-mono text-xs text-kelta-700">Docker, Kubernetes, ArgoCD</td></tr>
           </tbody>
         </table>
@@ -201,7 +201,7 @@ const howItWorks = [
       </p>
       <div class="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
         <a
-          href="https://github.com/cklinker/emf"
+          href="https://github.com/kelta-io/kelta"
           class="rounded-lg bg-gradient-to-r from-cyan to-blue px-8 py-3 text-base font-semibold text-white transition-all hover:shadow-lg"
         >
           View on GitHub
