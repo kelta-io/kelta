@@ -1520,3 +1520,14 @@ records before the collection.
 3. **DONE (2026-08-08).** The 11 stuck `e2e_*` collections (10 `e2e_test_*` + 1 `e2e_cli_*`,
    plus 2 more that leaked mid-cleanup) were force-deleted from couchpicks once V181+V182 and
    the guard were live; only the 14 real domain collections remain.
+
+### PAT `lastUsedAt` is never written
+
+`GET /api/me/tokens` returns `lastUsedAt` from `personal_access_token.last_used_at`, but no
+code path updates that column: `PatAuthenticationFilter` validates Redis-first and falls back
+to the worker's lookup, and neither side writes back. A key used thousands of times still
+shows `lastUsedAt: null` (observed 2026-09-19 on a live tenant while running the
+`docs/authoring/api-access.md` recipe; `requestCount` moved, `lastUsedAt` did not). Until it
+is wired — cheapest is a throttled write from the same fire-and-forget path that bumps
+`pat-usage:<hash>` — `requestCount` is the only liveness signal, and any "revoke unused keys"
+job must not key off `lastUsedAt`.

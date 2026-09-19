@@ -41,8 +41,14 @@ and no less.
 
 To scope access to read-only on a single collection:
 
-1. **Create a profile** (`profiles` system collection) with no elevated
-   system permissions — e.g. `POST /api/profiles` with `{"name": "..."}`.
+1. **Create a profile** (`profiles` system collection) — e.g.
+   `POST /api/profiles` with `{"name": "..."}` — and grant it exactly one
+   system permission, **`API_ACCESS`**, on `profile-system-permissions`
+   (`profileId`, `permissionName: "API_ACCESS"`, `granted: true`). The
+   gateway's `RouteAuthorizationFilter` checks `API_ACCESS` before it
+   looks at any object grant; without it every `/api/**` call — reads
+   included, and `GET /api/me/tokens` — is refused with `403 API access
+   not permitted`. Nothing else: no `VIEW_ALL_DATA`, no `MANAGE_*`.
 2. **Grant object permissions for exactly one collection** on
    `profile-object-permissions`: `profileId`, `collectionId`, `canRead:
    true`, and `canCreate`/`canEdit`/`canDelete` all `false` (they default
@@ -154,23 +160,27 @@ build-time fetch from a static site. None of this is platform code; it's
 ordinary tenant metadata, created the same way any tenant would create it
 (API, CLI, or MCP).
 
-**This is a recipe to follow, not a transcript of a run that already
-happened.** The commands below use placeholder ids and a placeholder host
-because this repo (and the agent authoring this doc) has no credentials
-for, and makes no request against, `rzware`'s live tenant — issuing the
-real PAT and running these commands against production is an operational
-step for whoever owns that tenant, not a platform code change. The
-mechanism itself — read-allow, write-deny for exactly this profile shape,
-and the counter incrementing on every authenticated request — is what's
-actually verified end-to-end in this repo, by the automated tests cited
-throughout this page (real Cerbos PDP evaluation in
-`CerbosGeneratedPolicyIT`, PAT auth + counter increment in
-`PatAuthenticationFilterTest`/`RedisRateLimiterTest`, read-back in
-`PersonalAccessTokenControllerTest`) rather than by a manual curl session:
+The commands below use placeholder ids and a placeholder host. The
+mechanism — read-allow, write-deny for exactly this profile shape, and
+the counter incrementing on every authenticated request — is verified in
+this repo by the automated tests cited throughout this page (real Cerbos
+PDP evaluation in `CerbosGeneratedPolicyIT`, PAT auth + counter increment
+in `PatAuthenticationFilterTest`/`RedisRateLimiterTest`, read-back in
+`PersonalAccessTokenControllerTest`). It was also run once by hand, on
+2026-09-19, against a live tenant holding a ~31k-row `titles` collection,
+by that tenant's admin (not by this repo, which holds no tenant
+credentials); what was observed is recorded after the commands.
 
 ```bash
-# 1. A profile with no system permissions and no other object grants
+# 1. A profile with API_ACCESS and nothing else — no other system
+#    permission, no object grant on any other collection
 kelta api POST /api/profiles --data '{"data":{"type":"profiles","attributes":{"name":"couchpicks-readonly"}}}' --yes
+kelta api POST /api/profile-system-permissions --data '{
+  "data": { "type": "profile-system-permissions", "attributes": {
+    "profileId": "<couchpicks-readonly profile id>",
+    "permissionName": "API_ACCESS", "granted": true
+  } }
+}' --yes
 
 # 2. Read-only grant on exactly one collection (replace with the real ids)
 kelta api POST /api/profile-object-permissions --data '{
@@ -203,10 +213,39 @@ curl -X POST -H "Authorization: Bearer <the minted PAT>" \
 ```
 
 To confirm the usage counter moved, read it back as the token owner:
-authenticate as step 3's service user and call `GET /api/me/tokens`,
-checking `requestCount` on the `couchpicks-feed` entry. There is no
-admin-facing listing of another user's tokens — usage is only readable
-by the token's own owner, the same as the token list itself.
+`GET /api/me/tokens` **with the PAT itself as the bearer** (the PAT
+authenticates as its owner, so no password login is needed), checking
+`requestCount` on the `couchpicks-feed` entry. There is no admin-facing
+listing of another user's tokens — usage is only readable by the token's
+own owner, the same as the token list itself.
+
+### Observed on a live run (2026-09-19)
+
+Profile with `API_ACCESS` + `canRead` on `titles` only; PAT minted through
+`POST /api/admin/users/{id}/tokens`; every call path-prefixed with the
+tenant slug and authenticated with that PAT alone:
+
+| Step | Call | Result |
+|---|---|---|
+| before the profile had `API_ACCESS` | `GET /api/titles` | `403 API access not permitted` (and `GET /api/me/tokens` the same) |
+| 0 | `GET /api/me/tokens` | `requestCount: 10` (the earlier refused calls counted too — the counter is per authenticated request, not per allowed one) |
+| 1 | `GET /api/titles?page[size]=2` | `200`, 2 rows, `totalCount: 30996` |
+| 2 | `GET /api/titles?page[size]=1` | `200` |
+| 3 | `GET /api/me/tokens` | `requestCount: 13` |
+| 4 | `POST /api/titles` | `403 Insufficient permissions for create on titles` |
+| 5 | `PATCH /api/titles/{id}` | `403 Insufficient permissions for edit on titles` |
+| 6 | `DELETE /api/titles/{id}` | `403 Insufficient permissions for delete on titles` |
+| 7 | `GET /api/providers` (no grant) | `403 Insufficient permissions for read on providers` |
+| 8 | `GET /api/me/tokens` | `requestCount: 18` |
+
+Two things worth knowing from that run: the counter increments on
+refused requests as well as served ones (it measures authenticated calls
+against the key, which is the right number for metering, but not a count
+of successful reads); and `lastUsedAt` on the token stayed `null`
+throughout — nothing in the platform writes `personal_access_token.
+last_used_at` yet (the gateway validates PATs Redis-first and never
+touches the row; see `concerns.md`), so treat `requestCount`, not
+`lastUsedAt`, as the liveness signal for a key.
 
 The redistribution-rights review per data source, the pricing page, and
 outbound emails to prospective API consumers are out of scope here (a
