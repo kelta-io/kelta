@@ -587,6 +587,22 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   so a caller can tell "wrong password" from "right password, account still needs a forced
   change" apart. `kelta sandbox create`'s human-readable output states the `POST
   /auth/direct-login` login path alongside the printed credentials.
+- **Sandbox auth is per-tenant-profile, never the parent's PAT (kelta#1539, regression-tested
+  KLT-285):** a sandbox is a full tenant of its own. `GatewayPrincipal.tenantId`/`profileId` are
+  resolved by `UserIdentityResolutionFilter` against the *request's* target tenant
+  (`TenantResolutionFilter.getTenantId`), not the caller's home tenant — a parent-tenant PAT
+  carries the parent's `tenantId` from its claims and has no `platform_user` row in the sandbox
+  tenant, so the identity lookup against the sandbox tenant resolves no profile.
+  `RouteAuthorizationFilter` then denies with `403 User identity not resolved` before any Cerbos
+  call runs; there is no "run as platform tenant" path into a sandbox (see Critical Rule 3 — the
+  same reasoning that killed `runAsPlatform`/`callAsPlatform`). To reach a sandbox, authenticate
+  to it directly: `POST /auth/direct-login` with the one-time admin credential `kelta sandbox
+  create` prints (`kelta-web/packages/cli/COMMANDS.md` → `## sandbox`), or a browser login
+  (`kelta auth login`) against the sandbox slug followed by `kelta token create`.
+  `RouteAuthorizationFilterTest` regression-tests the refusal; `SandboxAdminLoginScenarioTest`
+  (kelta-test-harness) proves the printed admin credential authenticates end to end and the
+  resulting token reaches `GET /api/collections` scoped to the sandbox tenant — i.e. that KLT-252
+  actually unblocks reachability, not just that a token gets issued.
 - **Collection `displayFieldId` import ordering (fixed 2026-09-19, KLT-284):**
   `PackageService.exportPackage` exports each `COLLECTION` item's display field by **name**
   (`display_field_name`, joined alongside the raw `display_field_id`) — the same natural-key

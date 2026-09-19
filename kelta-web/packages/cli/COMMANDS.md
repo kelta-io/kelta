@@ -713,6 +713,8 @@ Apply a package file to this tenant **(destructive — needs --yes off-TTY)**
 
 ## sandbox
 
+A sandbox is its own tenant with its own users, not a view into the parent tenant — the parent's PAT or session has no membership there and is refused on sandbox-tenant paths. `sandbox create` prints a one-time admin credential for the new tenant; authenticate with it via `POST /auth/direct-login` (`username`, `password`, `tenantSlug` from the printed output), or run `kelta auth login` against the sandbox slug (browser login) and then `kelta token create` to mint a PAT scoped to it.
+
 ### `kelta sandbox create`
 
 Create a sandbox environment (prints one-time admin credentials)
