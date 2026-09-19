@@ -1138,6 +1138,17 @@ generated manifest in an otherwise hand-authored overlay, so two things bite:
   contract). When touching this manifest, verify against the cluster or against that javadoc —
   do not guess a fourth time.
 
+**A first-ever ArgoCD sync of a new resource can eat most of a shared deadline.** The
+smoke-test's "Verify marketing site (when built)" step (`.github/workflows/build-and-publish-containers.yml`)
+used to poll "Deployment exists" and "`/` returns 200" against one shared 300s `DEADLINE`.
+When run 35412065789 first made the manifest valid, ArgoCD's initial sync took ~4m33s just to
+create the Deployment object, leaving ~30s of the same deadline for a brand-new pod's first
+image pull + readiness probe — nowhere near enough, so the step failed with "not serving" even
+though nothing was actually wrong (PLT-282). Fixed by giving the existence-wait and serve-wait
+phases their own independent deadlines (5m / 3m) instead of one shared budget. If you touch this
+step's timeouts again, keep them independent — recombining them into a single shared deadline
+reintroduces the starvation bug.
+
 ### kelta.io apex and www are not resolvable from the cluster
 
 **Open — needs a DNS change nobody can make from this repo.** `e2e-test`'s "Wait for public
