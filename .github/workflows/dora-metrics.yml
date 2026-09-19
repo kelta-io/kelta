@@ -102,8 +102,13 @@ jobs:
             --push-loki \
             --push-otlp "$OTLP_URL" \
             $KELTA_FLAG \
-            --out dora.json 2> collector.log
+            --out dora.json 2> collector.log || rc=$?
+          # Print the log on failure too: under `set -e` the old `cat` never ran when the
+          # collector exited non-zero, so the job's only visible line was "exit code 1"
+          # and the real error (run 35205426638: a 403 from the Kelta sink) sat in the
+          # artifact. Autopilot files CI failures from the job log, not the artifact.
           cat collector.log
+          exit "${rc:-0}"
 
       - name: Job summary
         if: always()
