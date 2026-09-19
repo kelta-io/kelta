@@ -74,6 +74,45 @@ class PersonalAccessTokenControllerTest {
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         }
+
+        @Test
+        void shouldIncludeUsageCountFromRedis() {
+            when(jdbcTemplate.queryForList(contains("user_api_token"), eq("user-1"), eq("tenant-1")))
+                    .thenReturn(List.of(
+                            Map.of("id", "tok-1", "name", "Test Token", "token_prefix", "klt_ABCD",
+                                    "token_hash", "hash-abc")));
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get("pat-usage:hash-abc")).thenReturn("42");
+
+            var response = controller.listTokens("user-1");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = (Map<String, Object>) response.getBody();
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tokens = (List<Map<String, Object>>) body.get("data");
+            assertThat(tokens).hasSize(1);
+            assertThat(tokens.get(0).get("requestCount")).isEqualTo(42L);
+            assertThat(tokens.get(0)).doesNotContainKey("tokenHash");
+        }
+
+        @Test
+        void shouldDefaultUsageCountToZeroWhenRedisHasNoEntry() {
+            when(jdbcTemplate.queryForList(contains("user_api_token"), eq("user-1"), eq("tenant-1")))
+                    .thenReturn(List.of(
+                            Map.of("id", "tok-1", "name", "Test Token", "token_prefix", "klt_ABCD",
+                                    "token_hash", "hash-abc")));
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get("pat-usage:hash-abc")).thenReturn(null);
+
+            var response = controller.listTokens("user-1");
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = (Map<String, Object>) response.getBody();
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tokens = (List<Map<String, Object>>) body.get("data");
+            assertThat(tokens.get(0).get("requestCount")).isEqualTo(0L);
+        }
     }
 
     @Nested

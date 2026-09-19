@@ -5,6 +5,7 @@ import tools.jackson.databind.ObjectMapper;
 import io.kelta.gateway.error.ResponseHelpers;
 import io.kelta.gateway.filter.TenantResolutionFilter;
 import io.kelta.gateway.metrics.GatewayMetrics;
+import io.kelta.gateway.ratelimit.RedisRateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -66,6 +67,7 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
     private final WebClient workerClient;
     private final GatewayMetrics metrics;
     private final Duration graceTtl;
+    private final RedisRateLimiter redisRateLimiter;
 
     // Short-TTL in-memory fallback keyed by token hash. Populated on every
     // successful PAT resolution (Redis hit or worker call) so requests can
@@ -85,11 +87,13 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
             WebClient.Builder webClientBuilder,
             @Value("${kelta.gateway.worker-service-url:http://kelta-worker:80}") String workerServiceUrl,
             @Value("${kelta.gateway.pat-grace-ttl-seconds:300}") int graceTtlSeconds,
-            GatewayMetrics metrics) {
+            GatewayMetrics metrics,
+            RedisRateLimiter redisRateLimiter) {
         this.redisTemplate = redisTemplate;
         this.workerClient = webClientBuilder.baseUrl(workerServiceUrl).build();
         this.graceTtl = Duration.ofSeconds(graceTtlSeconds);
         this.metrics = metrics;
+        this.redisRateLimiter = redisRateLimiter;
     }
 
     @Override
@@ -138,7 +142,7 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
                             .doOnNext(patJson ->
                                     graceCache.put(tokenHash, new CachedPat(patJson, Instant.now())))
                             .flatMap(patJson ->
-                                    authenticateWithPat(patJson, exchange, chain, path, tenantSlug)
+                                    authenticateWithPat(patJson, exchange, chain, path, tenantSlug, tokenHash)
                                             .thenReturn(Boolean.TRUE))
                             .defaultIfEmpty(Boolean.FALSE)
                             .flatMap(recognized -> {
@@ -184,7 +188,8 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
     }
 
     private Mono<Void> authenticateWithPat(String patJson, ServerWebExchange exchange,
-                                            GatewayFilterChain chain, String path, String tenantSlug) {
+                                            GatewayFilterChain chain, String path, String tenantSlug,
+                                            String tokenHash) {
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> patData = OBJECT_MAPPER.readValue(patJson, Map.class);
@@ -223,6 +228,9 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
             mutatedExchange.getAttributes().put(PRINCIPAL_ATTRIBUTE, principal);
 
             log.debug("PAT authenticated user {} for path: {}", email, path);
+            // Fire-and-forget, mirroring RateLimitFilter's incrementDailyCounter — must
+            // not delay or fail the request if Redis is briefly unavailable.
+            redisRateLimiter.incrementPatUsageCounter(tokenHash).subscribe();
             return chain.filter(mutatedExchange);
         } catch (JacksonException e) {
             log.error("Failed to parse PAT data", e);

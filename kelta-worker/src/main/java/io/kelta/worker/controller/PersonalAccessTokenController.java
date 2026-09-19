@@ -45,6 +45,7 @@ public class PersonalAccessTokenController {
     private static final int MAX_TOKENS_PER_USER = 10;
     private static final String PAT_KEY_PREFIX = "pat:";
     private static final String REVOCATION_KEY_PREFIX = "pat:revoked:";
+    private static final String USAGE_KEY_PREFIX = "pat-usage:";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final JdbcTemplate jdbcTemplate;
@@ -78,7 +79,28 @@ public class PersonalAccessTokenController {
         result.put("expiresAt", row.get("expires_at") != null ? row.get("expires_at").toString() : null);
         result.put("lastUsedAt", row.get("last_used_at") != null ? row.get("last_used_at").toString() : null);
         result.put("createdAt", row.get("created_at") != null ? row.get("created_at").toString() : null);
+        result.put("requestCount", getUsageCount((String) row.get("token_hash")));
         return result;
+    }
+
+    /**
+     * Reads the per-token request count from Redis.
+     *
+     * <p>The gateway's {@code PatAuthenticationFilter} increments this counter (via
+     * {@code RedisRateLimiter.incrementPatUsageCounter}) on every authenticated PAT
+     * request, keyed {@code pat-usage:<tokenHash>}. Never returns the hash itself.
+     */
+    private long getUsageCount(String tokenHash) {
+        if (tokenHash == null) {
+            return 0L;
+        }
+        try {
+            String raw = redisTemplate.opsForValue().get(USAGE_KEY_PREFIX + tokenHash);
+            return raw != null ? Long.parseLong(raw) : 0L;
+        } catch (Exception e) {
+            log.warn("Failed to read PAT usage count from Redis: {}", e.getMessage());
+            return 0L;
+        }
     }
 
     /**
@@ -93,7 +115,7 @@ public class PersonalAccessTokenController {
         String userId = resolveUserId(userIdentifier, tenantId);
 
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT id, name, token_prefix, scopes, expires_at, last_used_at, created_at " +
+                "SELECT id, name, token_prefix, scopes, expires_at, last_used_at, created_at, token_hash " +
                         "FROM user_api_token WHERE user_id = ? AND tenant_id = ? AND revoked = false " +
                         "ORDER BY created_at DESC",
                 userId, tenantId);

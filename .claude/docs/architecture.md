@@ -187,6 +187,15 @@ that passes during an outage is an open door on the exact endpoint it protects.
 or CIDR ranges that bypass **both** limiters — uptime probes, in-cluster callers, a payment
 processor's webhook egress. A bare address means a single host (`/32`/`/128`); invalid entries
 are logged and skipped, and an empty list (the default) exempts nobody.
+
+**Per-PAT usage metering (separate from rate limiting).** `PatAuthenticationFilter` increments a
+per-token request counter (`RedisRateLimiter.incrementPatUsageCounter`, key
+`pat-usage:<sha256(token)>`) on every successful PAT authentication — fire-and-forget, same
+posture as `incrementDailyCounter`. This does not enforce a limit; it is a usage readout the
+token owner can see on `GET /api/me/tokens` (`requestCount`). It's what makes a scoped,
+read-only PAT viable as a lightweight public data API: a tenant can hand out a read-only-profile
+PAT (see `docs/authoring/api-access.md`) and the holder can see how much it's actually being
+used, on top of the shared `apiCallsPerDay` governor budget above.
 `RateLimitExemptionService` and `TenantIpAllowlistFilter` share one `CidrBlock` matcher
 (`io.kelta.gateway.net`), which parses address **literals** only so a hostname in a forwarded
 header can never trigger a DNS lookup. Caveat: exemption is evaluated against the same resolved

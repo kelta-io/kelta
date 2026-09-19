@@ -25,6 +25,8 @@ public class RedisRateLimiter {
     private static final Logger log = LoggerFactory.getLogger(RedisRateLimiter.class);
     private static final String KEY_PREFIX = "ratelimit:";
     private static final String DAILY_KEY_PREFIX = "api-calls-daily:";
+    private static final String PAT_USAGE_KEY_PREFIX = "pat-usage:";
+    private static final Duration PAT_USAGE_TTL = Duration.ofDays(400);
 
     /**
      * Atomically increments the window counter and sets its TTL only when the
@@ -158,6 +160,37 @@ public class RedisRateLimiter {
                 .onErrorResume(error -> {
                     log.warn("Failed to increment daily API call counter for tenant {}: {}",
                             tenantId, error.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    /**
+     * Increments the per-PAT request counter.
+     *
+     * <p>Uses a Redis key {@code pat-usage:<tokenHash>}, mirroring
+     * {@link #incrementDailyCounter(String)}. The TTL (400 days, longer than the
+     * maximum 365-day token life) is set only on the first increment so it isn't
+     * refreshed — and therefore never expires — on every request. This counter is
+     * read back by the worker's {@code PersonalAccessTokenController} to show the
+     * token owner their usage.
+     *
+     * @param tokenHash the SHA-256 hash of the PAT (never the raw token)
+     * @return Mono that completes when the counter is incremented
+     */
+    public Mono<Void> incrementPatUsageCounter(String tokenHash) {
+        String key = PAT_USAGE_KEY_PREFIX + tokenHash;
+
+        return redisTemplate.opsForValue()
+                .increment(key)
+                .flatMap(count -> {
+                    if (count == 1) {
+                        return redisTemplate.expire(key, PAT_USAGE_TTL).then();
+                    }
+                    return Mono.<Void>empty();
+                })
+                .onErrorResume(error -> {
+                    log.warn("Failed to increment PAT usage counter for key={}: {}",
+                            key, error.getMessage());
                     return Mono.empty();
                 });
     }
