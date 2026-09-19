@@ -1,9 +1,11 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import CapabilityVisual from '../components/CapabilityVisual.astro';
 
 const capabilities = [
   {
     title: 'Dynamic Schema Engine',
+    visual: 'schema',
     items: [
       '28 field types covering every enterprise need',
       'LOOKUP and MASTER_DETAIL relationships with automatic FK management',
@@ -15,6 +17,7 @@ const capabilities = [
   },
   {
     title: 'Auto-Generated REST API',
+    visual: 'api',
     items: [
       'Full CRUD at /{tenant}/{collection} — JSON:API compliant',
       'Relationship includes with multi-level transitive resolution',
@@ -27,6 +30,7 @@ const capabilities = [
   },
   {
     title: 'Visual Flow Builder',
+    visual: 'flows',
     items: [
       '8 state types: Task, Choice, Parallel, Map, Wait, Pass, Succeed, Fail',
       '19 built-in action handlers for data, comms, integration, and flow control',
@@ -38,6 +42,7 @@ const capabilities = [
   },
   {
     title: 'Authentication & Identity',
+    visual: 'auth',
     items: [
       'Internal OIDC provider — no external identity server required',
       'Federated identity brokering (Google, Okta, Azure AD, any OIDC)',
@@ -49,6 +54,7 @@ const capabilities = [
   },
   {
     title: 'Role-Based Access Control',
+    visual: 'rbac',
     items: [
       'Profiles, Permission Sets, and Groups with OR resolution',
       '15 system permission types and per-object CRUD permissions',
@@ -60,6 +66,7 @@ const capabilities = [
   },
   {
     title: 'Multi-Tenancy & Governor Limits',
+    visual: 'tenancy',
     items: [
       'URL-based or custom domain (CNAME) tenant routing',
       'PostgreSQL schema isolation with Row Level Security',
@@ -70,6 +77,7 @@ const capabilities = [
   },
   {
     title: 'Observability & Monitoring',
+    visual: 'observability',
     items: [
       'OpenTelemetry traces, logs, and metrics over OTLP (Grafana Tempo, Loki, Mimir out of the box)',
       'Structured log aggregation with MDC enrichment',
@@ -80,7 +88,34 @@ const capabilities = [
     ],
   },
   {
+    title: 'AI & Model Context Protocol',
+    visual: 'mcp',
+    items: [
+      'Built-in MCP server — two endpoints per tenant: /{tenant}/mcp/admin and /{tenant}/mcp/user',
+      '39 admin tools: collections, fields, picklists, validation rules, unique constraints, flows, layouts, list views, pages, menus, dashboards',
+      '15 data tools: query, get, create, update, delete, bulk apply, execute flow, flow runs, approvals, keyword and semantic search',
+      'Import an OpenAPI spec and materialize it as a live collection from the agent',
+      'MCP resources expose your schema, the generated OpenAPI, and the authoring docs to the model',
+      'PAT-authenticated, tenant-scoped, rate-limited; admin tools unreachable from the data endpoint',
+      'kelta mcp install <client> — one command for Claude Code, Claude Desktop, Cursor, and others; local stdio bridge adds sandbox, promote, and metadata tools',
+      'In-app assistant and governed agents on the same runtime: schema-aware prompts, proposals you approve, bounded tool-use loops, per-tenant token accounting',
+    ],
+  },
+  {
+    title: 'Sandboxes, Promotion & CLI',
+    visual: 'promotion',
+    items: [
+      'Clone a tenant into an isolated sandbox tenant; refresh it from its source at any time',
+      'Export tenant metadata as a package; diff sandbox against production by natural key',
+      'Promote changes between environments with preview, approval, execute, and rollback',
+      'Apply metadata from files — CI-friendly, idempotent',
+      'Generate typed SDK artifacts for your collections with kelta sdk',
+      'Self-updating cross-platform CLI; every command also available as an MCP tool',
+    ],
+  },
+  {
     title: 'Integration',
+    visual: 'integration',
     items: [
       'HTTP callouts with header, method, and body templating',
       'Inbound and outbound webhooks (Svix-powered)',
@@ -101,6 +136,9 @@ const architecture = [
   { service: 'Redis', tech: 'v7', purpose: 'Rate limiting, caching, session storage' },
   { service: 'NATS', tech: 'JetStream', purpose: 'Event streaming, realtime bridge, config propagation' },
   { service: 'Cerbos', tech: 'PDP', purpose: 'Fine-grained ABAC policy engine' },
+  { service: 'MCP Server', tech: 'Java 25, MCP Java SDK', purpose: 'Admin + data tool endpoints per tenant for AI agents' },
+  { service: 'AI', tech: 'Java 25, Anthropic API', purpose: 'In-app assistant, proposals, governed agent runtime' },
+  { service: 'CLI', tech: 'TypeScript, single binary', purpose: 'Metadata export/diff/apply, sandboxes, promotion, SDK generation, MCP bridge' },
 ];
 ---
 
@@ -132,8 +170,8 @@ const architecture = [
                 ))}
               </ul>
             </div>
-            <div class="flex flex-1 items-center justify-center rounded-xl border border-gray-100 bg-gray-50 p-12">
-              <span class="text-sm text-gray-400">Visual coming soon</span>
+            <div class="flex flex-1 items-center justify-center rounded-xl border border-gray-100 bg-gray-50 p-8">
+              <CapabilityVisual kind={cap.visual} title={cap.title} />
             </div>
           </div>
         ))}
