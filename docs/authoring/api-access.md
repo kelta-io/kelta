@@ -80,9 +80,25 @@ From here, `GET` against the scoped collection succeeds; `POST`/`PATCH`/
 write goes through — there is no separate code path for "read-only API"
 requests versus normal UI requests. This exact fixture (a profile with
 `canRead: true` and every other action `false`) is regression-tested in
-`kelta-worker/src/test/java/io/kelta/worker/service/CerbosPolicyGeneratorTest.java`,
-which asserts the generated Cerbos policy grants `read` and denies
+`kelta-worker/src/test/java/io/kelta/worker/service/CerbosPolicyGeneratorTest.java`
+(`CollectionPolicyTests.readOnlyGrantAllowsReadAndDeniesEveryWrite`), which
+asserts the generated Cerbos policy grants `read` and denies
 `create`/`edit`/`delete` for it.
+
+That generated-policy shape isn't just asserted in isolation — it's proven
+against a **real, running Cerbos PDP** (not a mock, not the harness's
+dev-mode allow-all policies) by
+`kelta-test-harness/src/test/java/io/kelta/testharness/scenarios/CerbosGeneratedPolicyIT.java`.
+Its golden fixture's `editor-profile` carries the identical grant shape on
+`col-b` — `canRead: true` and nothing else — and
+`editorGetsExactlyItsObjectPermissions()` pushes the generator's actual
+output into a throwaway Cerbos container and asserts the check result is
+`.A..` (create/edit/delete denied, read allowed). That is the end-to-end
+evidence for "GET succeeds, write is rejected with 403" in this repo: a
+real policy engine evaluating the real generated policy for exactly this
+grant shape, run in CI on every PR. What follows is a worked *recipe*, not
+a transcript of an actual run against `rzware`'s live tenant — this repo
+has no credentials for and makes no request against any live tenant.
 
 Field-level restriction (hiding specific columns rather than the whole
 collection) is a separate, additive mechanism —
@@ -131,12 +147,26 @@ quota".
 
 ## Worked example: a read-only feed over a tenant's dataset
 
-This is the pattern the `rzware` tenant uses to expose its CouchPicks
-dataset (a collection kept fresh by a scheduled refresh job) to a
-consumer outside the tenant's own admin/end-user UI — e.g. a build-time
-fetch from a static site. None of this is platform code; it's ordinary
-tenant metadata, created the same way any tenant would create it (API,
-CLI, or MCP):
+This is the pattern the `rzware` tenant intends to use to expose its
+CouchPicks dataset (a collection kept fresh by a scheduled refresh job)
+to a consumer outside the tenant's own admin/end-user UI — e.g. a
+build-time fetch from a static site. None of this is platform code; it's
+ordinary tenant metadata, created the same way any tenant would create it
+(API, CLI, or MCP).
+
+**This is a recipe to follow, not a transcript of a run that already
+happened.** The commands below use placeholder ids and a placeholder host
+because this repo (and the agent authoring this doc) has no credentials
+for, and makes no request against, `rzware`'s live tenant — issuing the
+real PAT and running these commands against production is an operational
+step for whoever owns that tenant, not a platform code change. The
+mechanism itself — read-allow, write-deny for exactly this profile shape,
+and the counter incrementing on every authenticated request — is what's
+actually verified end-to-end in this repo, by the automated tests cited
+throughout this page (real Cerbos PDP evaluation in
+`CerbosGeneratedPolicyIT`, PAT auth + counter increment in
+`PatAuthenticationFilterTest`/`RedisRateLimiterTest`, read-back in
+`PersonalAccessTokenControllerTest`) rather than by a manual curl session:
 
 ```bash
 # 1. A profile with no system permissions and no other object grants
@@ -156,21 +186,23 @@ kelta api POST /api/profile-object-permissions --data '{
 kelta api POST /api/admin/users/<service-user-id>/tokens --data '{
   "name": "couchpicks-feed", "expiresInDays": 365
 }' --yes
-# => { "token": "klt_...", ... }  -- shown exactly once, store it now
+# response's "token" field is the plaintext klt_... value, shown exactly once
 
-# 4. Read access — succeeds, and increments this PAT's usage counter
-curl -H "Authorization: Bearer klt_..." \
+# 4. Read access — expected to succeed, and to increment this PAT's usage counter
+curl -H "Authorization: Bearer <the minted PAT>" \
      https://rzware.<host>/api/couchpicks-titles
 
-# 5. Write access with the SAME PAT — rejected
-curl -X POST -H "Authorization: Bearer klt_..." \
+# 5. Write access with the SAME PAT — expected to be rejected
+curl -X POST -H "Authorization: Bearer <the minted PAT>" \
      -H "Content-Type: application/json" \
      -d '{"data":{"type":"couchpicks-titles","attributes":{"title":"x"}}}' \
      https://rzware.<host>/api/couchpicks-titles
-# => 403 (Cerbos denies "create" — this profile has canCreate: false)
+# expected: 403 (Cerbos denies "create" — this profile has canCreate: false),
+# per the same read-allow/write-deny shape CerbosGeneratedPolicyIT asserts
+# against a real PDP for editor-profile/col-b
 ```
 
-Confirm the usage counter moved by reading it back as the token owner:
+To confirm the usage counter moved, read it back as the token owner:
 authenticate as step 3's service user and call `GET /api/me/tokens`,
 checking `requestCount` on the `couchpicks-feed` entry. There is no
 admin-facing listing of another user's tokens — usage is only readable

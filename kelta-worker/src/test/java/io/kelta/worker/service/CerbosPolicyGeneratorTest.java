@@ -200,6 +200,32 @@ class CerbosPolicyGeneratorTest {
         }
 
         @Test
+        @DisplayName("a canRead-only grant on one collection allows read and denies every write")
+        @SuppressWarnings("unchecked")
+        void readOnlyGrantAllowsReadAndDeniesEveryWrite() {
+            // Mirrors the "scope a PAT to read-only on one collection" recipe in
+            // docs/authoring/api-access.md: a profile with canRead: true and every
+            // other object-permission action false, granted on exactly one collection.
+            Map<String, Object> policy = generator.generateCollectionPolicy(
+                    TENANT_ID, List.of(readOnlyProfile()), List.of("col-1", "col-2"));
+
+            Map<String, Map<String, List<String>>> perms =
+                    (Map<String, Map<String, List<String>>>) constants(policy).get("perms");
+            Map<String, List<String>> readOnlyPerms = perms.get("readonly-profile");
+
+            assertThat(readOnlyPerms.get("read")).containsExactly("col-1");
+            assertThat(readOnlyPerms.get("create")).isEmpty();
+            assertThat(readOnlyPerms.get("edit")).isEmpty();
+            assertThat(readOnlyPerms.get("delete")).isEmpty();
+            // Never granted on col-2, which the profile has no object-permission row for.
+            assertThat(readOnlyPerms.get("read")).doesNotContain("col-2");
+
+            // This exact grant shape (canRead: true, nothing else, one collection) is what
+            // CerbosGeneratedPolicyIT#editorGetsExactlyItsObjectPermissions asserts against a
+            // real Cerbos PDP for editor-profile/col-b — read allowed, every write denied.
+        }
+
+        @Test
         @DisplayName("per-action CEL guards tenant, profile membership and collection membership")
         void perActionCelShape() {
             Map<String, Object> policy = generator.generateCollectionPolicy(
