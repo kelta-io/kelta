@@ -1,5 +1,6 @@
 package io.kelta.runtime.flow;
 
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandler;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
@@ -923,6 +924,61 @@ class FlowEngineTest {
         }
 
         @Test
+        @DisplayName("resume binds the tenant slug so post-Wait steps resolve tenant-schema tables (#1577)")
+        void resumeBindsTenantSlug() throws Exception {
+            // The poller resumes from outside any tenant scope, so the slug cannot be
+            // inherited; PhysicalTableStorageAdapter falls back to `public` without it.
+            List<String> seenSlugs = Collections.synchronizedList(new ArrayList<>());
+            handlerRegistry.register(new ActionHandler() {
+                @Override
+                public String getActionTypeKey() { return "CAPTURE_SLUG"; }
+
+                @Override
+                public ActionResult execute(ActionContext context) {
+                    seenSlugs.add(TenantContext.getSlug());
+                    return ActionResult.success(Map.of());
+                }
+            });
+            String json = """
+                {
+                    "StartAt": "Sleep",
+                    "States": {
+                        "Sleep": { "Type": "Wait", "Seconds": 60, "Next": "AfterWait" },
+                        "AfterWait": { "Type": "Task", "Resource": "CAPTURE_SLUG", "Next": "Done" },
+                        "Done": { "Type": "Succeed" }
+                    }
+                }
+                """;
+            flowStore.registerTenant("t1", "acme");
+            flowStore.registerFlow("t1", "flow-slug", "SlugWaiter", json);
+            engine.executeSynchronous("t1", "flow-slug", json, Map.of(), "u1");
+            FlowExecutionData waiting = flowStore.getAllExecutions().get(0);
+            assertEquals(FlowExecutionData.STATUS_WAITING, waiting.status());
+
+            engine.resumeExecution(waiting.id());
+            FlowExecutionData resumed = awaitStatus(waiting.id(), FlowExecutionData.STATUS_COMPLETED);
+
+            assertEquals(FlowExecutionData.STATUS_COMPLETED, resumed.status());
+            assertEquals(List.of("acme"), seenSlugs, "post-Wait step must run with the tenant slug bound");
+        }
+
+        @Test
+        @DisplayName("resume fails the execution when the tenant is gone")
+        void resumeMissingTenantFails() throws Exception {
+            flowStore.registerFlow("t1", "flow-wait", "Waiter", LONG_WAIT_FLOW);
+            engine.executeSynchronous("t1", "flow-wait", LONG_WAIT_FLOW, Map.of(), "u1");
+            FlowExecutionData waiting = flowStore.getAllExecutions().get(0);
+            flowStore.removeTenant("t1");
+
+            engine.resumeExecution(waiting.id());
+            FlowExecutionData failed = awaitStatus(waiting.id(), FlowExecutionData.STATUS_FAILED);
+
+            assertEquals(FlowExecutionData.STATUS_FAILED, failed.status());
+            assertTrue(failed.errorMessage().contains("tenant t1 no longer exists"));
+            assertTrue(flowStore.getPendingResumes().isEmpty());
+        }
+
+        @Test
         @DisplayName("resume fails the execution when the flow definition is gone")
         void resumeMissingDefinitionFails() throws Exception {
             // Not registered in flowsById — findFlowDefinitionById returns empty
@@ -1112,6 +1168,27 @@ class FlowEngineTest {
         // Key: tenantId + "::" + flowId (or flowName); Value: definition JSON
         private final Map<String, String> flowsById = new ConcurrentHashMap<>();
         private final Map<String, String> flowsByName = new ConcurrentHashMap<>();
+
+        // Tenant slugs for resume tests. Unknown tenants resolve to "<id>-slug" so the
+        // existing tests need no setup; removeTenant() simulates a deleted tenant.
+        private final Map<String, String> tenantSlugs = new ConcurrentHashMap<>();
+        private final Set<String> removedTenants = ConcurrentHashMap.newKeySet();
+
+        void registerTenant(String tenantId, String slug) {
+            tenantSlugs.put(tenantId, slug);
+        }
+
+        void removeTenant(String tenantId) {
+            removedTenants.add(tenantId);
+        }
+
+        @Override
+        public Optional<String> findTenantSlug(String tenantId) {
+            if (removedTenants.contains(tenantId)) {
+                return Optional.empty();
+            }
+            return Optional.of(tenantSlugs.getOrDefault(tenantId, tenantId + "-slug"));
+        }
 
         void registerFlow(String tenantId, String flowId, String flowName, String definitionJson) {
             if (flowId != null) {
