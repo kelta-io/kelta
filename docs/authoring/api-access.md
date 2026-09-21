@@ -103,7 +103,7 @@ output into a throwaway Cerbos container and asserts the check result is
 evidence for "GET succeeds, write is rejected with 403" in this repo: a
 real policy engine evaluating the real generated policy for exactly this
 grant shape, run in CI on every PR. What follows is a worked *recipe*, not
-a transcript of an actual run against `rzware`'s live tenant — this repo
+a transcript of an actual run against a live tenant — this repo
 has no credentials for and makes no request against any live tenant.
 
 Field-level restriction (hiding specific columns rather than the whole
@@ -134,7 +134,7 @@ usage back as `requestCount` on `GET /api/me/tokens`:
   "data": [
     {
       "id": "...",
-      "name": "couchpicks-readonly",
+      "name": "catalog-readonly",
       "tokenPrefix": "klt_AbCd",
       "scopes": ["api"],
       "expiresAt": "...",
@@ -153,8 +153,8 @@ quota".
 
 ## Worked example: a read-only feed over a tenant's dataset
 
-This is the pattern the `rzware` tenant intends to use to expose its
-CouchPicks dataset (a collection kept fresh by a scheduled refresh job)
+This is the pattern a tenant might use to expose a
+product catalog (a collection kept fresh by a scheduled refresh job)
 to a consumer outside the tenant's own admin/end-user UI — e.g. a
 build-time fetch from a static site. None of this is platform code; it's
 ordinary tenant metadata, created the same way any tenant would create it
@@ -167,17 +167,17 @@ this repo by the automated tests cited throughout this page (real Cerbos
 PDP evaluation in `CerbosGeneratedPolicyIT`, PAT auth + counter increment
 in `PatAuthenticationFilterTest`/`RedisRateLimiterTest`, read-back in
 `PersonalAccessTokenControllerTest`). It was also run once by hand, on
-2026-09-19, against a live tenant holding a ~31k-row `titles` collection,
+2026-09-19, against a live tenant holding a ~31k-row `products` collection,
 by that tenant's admin (not by this repo, which holds no tenant
 credentials); what was observed is recorded after the commands.
 
 ```bash
 # 1. A profile with API_ACCESS and nothing else — no other system
 #    permission, no object grant on any other collection
-kelta api POST /api/profiles --data '{"data":{"type":"profiles","attributes":{"name":"couchpicks-readonly"}}}' --yes
+kelta api POST /api/profiles --data '{"data":{"type":"profiles","attributes":{"name":"catalog-readonly"}}}' --yes
 kelta api POST /api/profile-system-permissions --data '{
   "data": { "type": "profile-system-permissions", "attributes": {
-    "profileId": "<couchpicks-readonly profile id>",
+    "profileId": "<catalog-readonly profile id>",
     "permissionName": "API_ACCESS", "granted": true
   } }
 }' --yes
@@ -185,8 +185,8 @@ kelta api POST /api/profile-system-permissions --data '{
 # 2. Read-only grant on exactly one collection (replace with the real ids)
 kelta api POST /api/profile-object-permissions --data '{
   "data": { "type": "profile-object-permissions", "attributes": {
-    "profileId": "<couchpicks-readonly profile id>",
-    "collectionId": "<couchpicks collection id>",
+    "profileId": "<catalog-readonly profile id>",
+    "collectionId": "<products collection id>",
     "canCreate": false, "canRead": true, "canEdit": false, "canDelete": false
   } }
 }' --yes
@@ -194,19 +194,19 @@ kelta api POST /api/profile-object-permissions --data '{
 # 3. A service user carrying that profile (or reuse an existing one),
 #    then mint its PAT as an admin holding MANAGE_USERS
 kelta api POST /api/admin/users/<service-user-id>/tokens --data '{
-  "name": "couchpicks-feed", "expiresInDays": 365
+  "name": "catalog-feed", "expiresInDays": 365
 }' --yes
 # response's "token" field is the plaintext klt_... value, shown exactly once
 
 # 4. Read access — expected to succeed, and to increment this PAT's usage counter
 curl -H "Authorization: Bearer <the minted PAT>" \
-     https://rzware.<host>/api/couchpicks-titles
+     https://acme.<host>/api/products
 
 # 5. Write access with the SAME PAT — expected to be rejected
 curl -X POST -H "Authorization: Bearer <the minted PAT>" \
      -H "Content-Type: application/json" \
-     -d '{"data":{"type":"couchpicks-titles","attributes":{"title":"x"}}}' \
-     https://rzware.<host>/api/couchpicks-titles
+     -d '{"data":{"type":"products","attributes":{"title":"x"}}}' \
+     https://acme.<host>/api/products
 # expected: 403 (Cerbos denies "create" — this profile has canCreate: false),
 # per the same read-allow/write-deny shape CerbosGeneratedPolicyIT asserts
 # against a real PDP for editor-profile/col-b
@@ -215,26 +215,26 @@ curl -X POST -H "Authorization: Bearer <the minted PAT>" \
 To confirm the usage counter moved, read it back as the token owner:
 `GET /api/me/tokens` **with the PAT itself as the bearer** (the PAT
 authenticates as its owner, so no password login is needed), checking
-`requestCount` on the `couchpicks-feed` entry. There is no admin-facing
+`requestCount` on the `catalog-feed` entry. There is no admin-facing
 listing of another user's tokens — usage is only readable by the token's
 own owner, the same as the token list itself.
 
 ### Observed on a live run (2026-09-19)
 
-Profile with `API_ACCESS` + `canRead` on `titles` only; PAT minted through
+Profile with `API_ACCESS` + `canRead` on `products` only; PAT minted through
 `POST /api/admin/users/{id}/tokens`; every call path-prefixed with the
 tenant slug and authenticated with that PAT alone:
 
 | Step | Call | Result |
 |---|---|---|
-| before the profile had `API_ACCESS` | `GET /api/titles` | `403 API access not permitted` (and `GET /api/me/tokens` the same) |
+| before the profile had `API_ACCESS` | `GET /api/products` | `403 API access not permitted` (and `GET /api/me/tokens` the same) |
 | 0 | `GET /api/me/tokens` | `requestCount: 10` (the earlier refused calls counted too — the counter is per authenticated request, not per allowed one) |
-| 1 | `GET /api/titles?page[size]=2` | `200`, 2 rows, `totalCount: 30996` |
-| 2 | `GET /api/titles?page[size]=1` | `200` |
+| 1 | `GET /api/products?page[size]=2` | `200`, 2 rows, `totalCount: 30996` |
+| 2 | `GET /api/products?page[size]=1` | `200` |
 | 3 | `GET /api/me/tokens` | `requestCount: 13` |
-| 4 | `POST /api/titles` | `403 Insufficient permissions for create on titles` |
-| 5 | `PATCH /api/titles/{id}` | `403 Insufficient permissions for edit on titles` |
-| 6 | `DELETE /api/titles/{id}` | `403 Insufficient permissions for delete on titles` |
+| 4 | `POST /api/products` | `403 Insufficient permissions for create on products` |
+| 5 | `PATCH /api/products/{id}` | `403 Insufficient permissions for edit on products` |
+| 6 | `DELETE /api/products/{id}` | `403 Insufficient permissions for delete on products` |
 | 7 | `GET /api/providers` (no grant) | `403 Insufficient permissions for read on providers` |
 | 8 | `GET /api/me/tokens` | `requestCount: 18` |
 
