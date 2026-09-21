@@ -395,12 +395,12 @@ jobs:
             dockerfile: kelta-cli-downloads/Dockerfile
             image: kelta-cli-downloads
             changed: ${{ needs.changes.outputs.cli_downloads }}
-          # Astro static site behind nginx. Unlike every other image its build
-          # context is the module directory, not the repo root — the Dockerfile
-          # COPYs package.json/package-lock.json from the context root.
+          # Astro static site behind nginx. Root context like every other image:
+          # the docs engine renders docs/authoring/*.md and the generated CLI docs
+          # from outside the module (kelta-marketing/Dockerfile.dockerignore
+          # allowlists exactly those paths).
           - service: marketing
             dockerfile: kelta-marketing/Dockerfile
-            context: kelta-marketing
             image: kelta-marketing
             changed: ${{ needs.changes.outputs.marketing }}
     steps:
@@ -876,7 +876,14 @@ jobs:
             echo "::error::${BASE}/pricing returned ${PRICING}, expected 404 — the pricing route must not be publicly reachable."
             exit 1
           fi
-          echo "Marketing smoke OK: / is 200 and /pricing is 404."
+          for path in /docs/ /docs/reference/jsonapi/ /pagefind/pagefind-entry.json; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}${path}" || true)
+            if [ "${CODE}" != "200" ]; then
+              echo "::error::${BASE}${path} returned ${CODE}, expected 200 — the docs site or its search index did not build into the image."
+              exit 1
+            fi
+          done
+          echo "Marketing smoke OK: / and /docs/ are 200, search index present, /pricing is 404."
 
       # DORA: the release is live and healthy — stamp merge→healthy for this SHA
       # (scripts/dora/README.md). Best-effort: the script always exits 0.

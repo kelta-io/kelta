@@ -1,0 +1,37 @@
+---
+import type { DocPage } from '../../docs/sidebar';
+
+interface Props {
+  sidebar: Array<{ id: string; label: string; pages: DocPage[] }>;
+  currentHref: string;
+}
+
+const { sidebar, currentHref } = Astro.props;
+---
+
+<nav aria-label="Documentation" data-pagefind-ignore class="text-sm">
+  {sidebar.map((section) => (
+    <div class="mb-6">
+      <h3 class="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-gray-400">{section.label}</h3>
+      <ul class="space-y-0.5">
+        {section.pages.map((page) => {
+          const active = page.href === currentHref;
+          return (
+            <li>
+              <a
+                href={page.href}
+                aria-current={active ? 'page' : undefined}
+                class:list={[
+                  'block rounded-md px-2 py-1.5 leading-snug transition-colors',
+                  active ? 'bg-kelta-100 font-medium text-navy' : 'text-kelta-700 hover:bg-kelta-50 hover:text-navy',
+                ]}
+              >
+                {page.title}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  ))}
+</nav>

@@ -1,0 +1,12 @@
+# BuildKit reads <Dockerfile>.dockerignore next to the Dockerfile. The build
+# context is the REPO ROOT, so allowlist only what the image needs.
+*
+!kelta-marketing/
+!docs/authoring/
+!kelta-web/packages/cli/COMMANDS.md
+!kelta-web/packages/cli/AGENTS.md
+kelta-marketing/node_modules
+kelta-marketing/dist
+kelta-marketing/.astro
+kelta-marketing/k8s
+kelta-marketing/test

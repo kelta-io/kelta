@@ -1,0 +1,48 @@
+---
+// Pagefind indexes `dist/` in the `postbuild` step, so /pagefind/* only exists in
+// a built site. In `astro dev` the loader 404s; the onerror handler swaps the
+// search box for a note instead of leaving a dead input.
+//
+// The layout mounts this twice (mobile <details> + desktop sidebar), so each
+// instance gets its own id and the loader script is shared via a window promise.
+interface Props {
+  id: string;
+}
+
+const { id } = Astro.props;
+---
+
+<link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
+<div id={id} data-docs-search data-pagefind-ignore class="mb-6"></div>
+
+<script is:inline define:vars={{ id }}>
+  (function () {
+    var mount = document.getElementById(id);
+    if (!mount) return;
+    if (!window.__keltaPagefind) {
+      window.__keltaPagefind = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = '/pagefind/pagefind-ui.js';
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    window.__keltaPagefind.then(
+      function () {
+        new PagefindUI({
+          element: '#' + id,
+          showSubResults: true,
+          showImages: false,
+          excerptLength: 20,
+          translations: { placeholder: 'Search the docs' },
+        });
+      },
+      function () {
+        mount.innerHTML =
+          '<p class="rounded-md border border-dashed border-gray-200 px-3 py-2 text-xs text-gray-400">' +
+          'Search is available in the built site (<code>npm run build &amp;&amp; npm run preview</code>).</p>';
+      },
+    );
+  })();
+</script>

@@ -1,0 +1,76 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import DocsBreadcrumb from '../components/docs/DocsBreadcrumb.astro';
+import DocsPager from '../components/docs/DocsPager.astro';
+import DocsSearch from '../components/docs/DocsSearch.astro';
+import DocsSidebar from '../components/docs/DocsSidebar.astro';
+import DocsToc from '../components/docs/DocsToc.astro';
+import { editUrlFor } from '../docs/github';
+import { loadDocsPages } from '../docs/pages';
+import { buildSidebar, sectionLabel, type DocPage } from '../docs/sidebar';
+import type { MarkdownHeading } from 'astro';
+
+interface Props {
+  page: DocPage;
+  headings: MarkdownHeading[];
+  prev: DocPage | null;
+  next: DocPage | null;
+}
+
+const { page, headings, prev, next } = Astro.props;
+const sidebar = buildSidebar(await loadDocsPages());
+const label = sectionLabel(page.section);
+const editUrl = editUrlFor(page.repoPath);
+const generated = page.collection === 'cli';
+---
+
+<BaseLayout title={page.title} description={page.description}>
+  <div class="mx-auto max-w-7xl px-6 py-8 lg:grid lg:grid-cols-[16rem_minmax(0,1fr)_14rem] lg:gap-10">
+    <aside class="mb-8 lg:mb-0">
+      <details class="rounded-lg border border-gray-200 lg:hidden">
+        <summary class="cursor-pointer px-4 py-2 text-sm font-medium text-navy">Documentation menu</summary>
+        <div class="border-t border-gray-100 p-4">
+          <DocsSearch id="docs-search-mobile" />
+          <DocsSidebar sidebar={sidebar} currentHref={page.href} />
+        </div>
+      </details>
+      <div class="hidden lg:sticky lg:top-24 lg:block lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:pr-2">
+        <DocsSearch id="docs-search" />
+        <DocsSidebar sidebar={sidebar} currentHref={page.href} />
+      </div>
+    </aside>
+
+    <article data-pagefind-body class="min-w-0">
+      <DocsBreadcrumb sectionLabel={label} title={page.title} />
+      <h1 data-pagefind-meta="title" class="text-3xl font-extrabold tracking-tight text-navy md:text-4xl">{page.title}</h1>
+      <p class="mt-3 text-lg text-kelta-700">{page.description}</p>
+      {page.status === 'partial' && (
+        <div class="mt-6 rounded-lg border border-warning/40 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-pagefind-ignore>
+          <strong>Partially available.</strong> Parts of this feature are still being completed; the page calls out what
+          works today and what is still in progress.
+        </div>
+      )}
+      <div class="prose prose-slate mt-8 max-w-none">
+        <slot />
+      </div>
+      <p class="mt-10 text-sm text-gray-400" data-pagefind-ignore>
+        {generated ? (
+          <>
+            Generated from the CLI command registry —
+            <a href={editUrl} class="underline hover:text-cyan" target="_blank" rel="noopener noreferrer">view the source</a>
+            and run <code>npm run gen:docs</code> in <code>kelta-web</code> to update.
+          </>
+        ) : (
+          <a href={editUrl} class="underline hover:text-cyan" target="_blank" rel="noopener noreferrer">Edit this page on GitHub</a>
+        )}
+      </p>
+      <DocsPager prev={prev} next={next} />
+    </article>
+
+    <aside class="hidden lg:block">
+      <div class="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto">
+        <DocsToc headings={headings} />
+      </div>
+    </aside>
+  </div>
+</BaseLayout>

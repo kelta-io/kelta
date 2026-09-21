@@ -1,9 +1,0 @@
-# The image build context is this directory (see the `marketing` leg of
-# build-and-publish-containers.yml), so keep local build output out of it —
-# `COPY . .` runs after `npm ci` and would otherwise clobber the installed
-# node_modules with the host's.
-node_modules
-dist
-.astro
-k8s
-test
