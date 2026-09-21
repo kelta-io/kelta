@@ -185,6 +185,7 @@ describe('docs build wiring', () => {
 
     const workflow = read('.github', 'workflows', 'build-and-publish-containers.yml');
     expect(workflow).not.toContain('context: kelta-marketing');
+    expect(workflow).not.toContain('matrix.context'); // no entry defines it — actionlint rejects the reference
   });
 
   it('rebuilds the site when the external doc sources change', () => {

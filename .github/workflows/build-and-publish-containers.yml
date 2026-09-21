@@ -440,7 +440,7 @@ jobs:
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
         uses: docker/build-push-action@v5
         with:
-          context: ${{ matrix.context || '.' }}
+          context: .
           file: ${{ matrix.dockerfile }}
           push: ${{ github.event_name != 'workflow_dispatch' || inputs.push_images }}
           tags: |

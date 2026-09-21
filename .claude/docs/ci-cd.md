@@ -64,9 +64,9 @@ which forces every leg to build — so merging a change to this file redeploys e
 2. **`build-and-push`** — matrix `[gateway, worker, worker-migrate, auth, ui, ai, mcp,
    cli-downloads, marketing]`. Docker buildx → pushes to
    `harbor.rzware.com/emf/emf-<svc>:latest` and `:main-<short-sha>`. Every leg builds from the
-   repo root (the shared step still passes `context: ${{ matrix.context || '.' }}` so a leg
-   *could* override it; `marketing` used to, and stopped when its docs engine started reading
-   `docs/authoring/` and the generated CLI docs from outside the module — see *Marketing site*).
+   repo root (`context: .` — `marketing` used to override it to its module dir, and stopped when
+   its docs engine started reading `docs/authoring/` and the generated CLI docs from outside the
+   module; see *Marketing site*. actionlint rejects `matrix.context` once no entry defines it).
    Per-service GHA cache scope. Immediately after each leg's "Build and
    push ${{ matrix.service }}" step, a **"Verify image pushed to Harbor"** step re-queries the
    manifest it just pushed (up to 6 attempts, 5s apart, ~30s budget) and fails *that leg* if the
