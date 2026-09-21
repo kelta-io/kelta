@@ -35,4 +35,47 @@ test.describe("Marketing site", () => {
     const response = await request.get(`${MARKETING_URL}/pricing`);
     expect(response.status()).toBe(404);
   });
+
+  // The documentation site: authored pages, the canonical authoring docs read
+  // from docs/authoring in place, and the Pagefind index built in postbuild.
+  test("serves the documentation site", async ({ request }) => {
+    const index = await request.get(`${MARKETING_URL}/docs/`);
+    expect(index.status()).toBe(200);
+    expect(await index.text()).toContain("Documentation");
+
+    const reference = await request.get(`${MARKETING_URL}/docs/reference/jsonapi/`);
+    expect(reference.status()).toBe(200);
+    expect(await reference.text()).toContain("JSON:API");
+
+    const guide = await request.get(`${MARKETING_URL}/docs/getting-started/quickstart/`);
+    expect(guide.status()).toBe(200);
+  });
+
+  // ScimDiscoveryController advertises https://kelta.io/docs/scim as the SCIM
+  // documentationUri; the page lives under /docs/security/scim/ and the short
+  // URL is a static redirect page.
+  test("answers the advertised SCIM documentation URL", async ({ request }) => {
+    const redirect = await request.get(`${MARKETING_URL}/docs/scim/`, { maxRedirects: 0 });
+    expect(redirect.status()).toBe(200);
+    expect(await redirect.text()).toContain("/docs/security/scim/");
+
+    const page = await request.get(`${MARKETING_URL}/docs/security/scim/`);
+    expect(page.status()).toBe(200);
+    expect(await page.text()).toContain("SCIM");
+  });
+
+  test("ships the search index", async ({ request }) => {
+    const entry = await request.get(`${MARKETING_URL}/pagefind/pagefind-entry.json`);
+    expect(entry.status()).toBe(200);
+    expect(entry.headers()["content-type"]).toContain("application/json");
+
+    const loader = await request.get(`${MARKETING_URL}/pagefind/pagefind.js`);
+    expect(loader.status()).toBe(200);
+  });
+
+  // No SPA fallback under /docs either: an unknown page is a real 404.
+  test("answers 404 for an unknown docs page", async ({ request }) => {
+    const response = await request.get(`${MARKETING_URL}/docs/definitely-not-a-page/`);
+    expect(response.status()).toBe(404);
+  });
 });

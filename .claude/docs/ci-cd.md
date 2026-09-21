@@ -32,7 +32,7 @@ Trigger: `pull_request` → `main`, plus `workflow_dispatch`.
 | `e2e` | Builds JVM service images (`Dockerfile.jvm`), spins up the full stack via `docker-compose.yml -f docker-compose.ci.yml`, runs Playwright (`mcr.microsoft.com/playwright:v1.58.2-noble`) inside the compose network. Timeout 45 min. Uploads HTML report + traces. **Readiness gating:** `up -d --wait` is the only barrier before the tests run, so it has to be trustworthy. The gateway's healthcheck targets `/actuator/health/readiness`, which stays 503 until its route table is loaded — `RouteInitializer` is an `ApplicationRunner` and runs *after* the web server starts, so plain `/actuator/health` reports UP while every `/api/**` still 404s. That window used to surface as the first few minutes of specs failing and everything afterwards passing, which reads like a broken page but is pure startup ordering. See `architecture.md` → Gateway startup & readiness. |
 | `quickstart` | K-3's CI enforcement of the README [Quickstart](../../README.md#quickstart): same JVM-image build (`docker-compose.ci.yml`) as `e2e`, then `timeout 300` around `ci/quickstart-run.sh` — `docker compose up -d --wait` followed by a login-and-create-collection check (`ci/quickstart-check.sh`, piped over stdin — not bind-mounted, the remote runner daemon can't see the filesystem — into a `curlimages/curl` container on the compose network) — direct-login as the seeded admin, then `POST /default/api/collections`. Only that sequence is timed; image build happens first and isn't part of the 300s budget. Default profile only (no `--profile ai`), matching what a first-time `docker compose up` actually starts. Timeout 20 min. |
 | `dependency-audit` | `node ci/dependency-audit.mjs` — `npm audit --omit=dev` over `kelta-web` + `kelta-ui/app`, diffed against `ci/npm-audit-baseline.json`. Fails on any **new** high/critical advisory in a production dependency. Deliberately a delta gate, not `--audit-level=high`: production deps already carried **33** high/critical advisories when the gate went in (**26** now — 8 in `kelta-web`, 18 in `kelta-ui/app`, after #1472 cleared both criticals), so a threshold gate would fail on day one, and a red `main` is a deploy outage rather than a signal. The baseline is debt to burn down — refresh it with `node ci/dependency-audit.mjs --update`, and only ever add an entry with a written reason. Needs no `node_modules` (audit resolves from the lockfile), so it skips the installs. |
-| `test-marketing` | In `kelta-marketing` (Node **22**, matching its Dockerfile — every other frontend job is on 20): `npm ci`, `npm test` (Vitest route/deploy guards), `npm run build` (Astro static). The guards are what keep `/pricing` off the public site (CHARTER.md §2 red zone) and the k8s manifest pointed at Harbor. |
+| `test-marketing` | In `kelta-marketing` (Node **22**, matching its Dockerfile — every other frontend job is on 20): `npm ci`, `npm test` (Vitest route/deploy guards + `docs-engine.test.ts` content/wiring guards), `npm run build` (Astro static + Pagefind index; the docs collections read `../docs/authoring` and `../kelta-web/packages/cli`, present in the full checkout). The guards are what keep `/pricing` off the public site (CHARTER.md §2 red zone) and the k8s manifest pointed at Harbor. |
 | `lint-workflows` | `actionlint` over `.github/workflows/`, pinned to 1.7.12, runner labels declared in `.github/actionlint.yaml`. Exists because a `secrets` context in an `if:` condition broke the whole of `ci.yml` — GitHub exposes `secrets` only to `with:`, `env:` and `run:`, never to `if:`. That failure does not look like a red build: the file does not parse, so **no jobs run at all** (not even `Detect Changes`), the run is named after the file path rather than "CI", and the PR reads as though CI simply has not started. A YAML parse calls the broken file valid; actionlint reports `context "secrets" is not allowed here`. **shellcheck is deliberately off** (`-shellcheck=`) — the workflows carry 22 shell findings (19× SC2086, 2× SC2129, 1× SC2034), all info/style/warning and none errors; cleaning them is its own change, and gating on them here would only have blocked this one. Drop the flag once they are fixed. The `constant expression "false"` ignore is narrow: two CI-DB steps are disabled on purpose and actionlint's advice to delete their `if:` is wrong for them. |
 | `quality-gate` | Green iff all triggered jobs passed. |
 
@@ -64,9 +64,9 @@ which forces every leg to build — so merging a change to this file redeploys e
 2. **`build-and-push`** — matrix `[gateway, worker, worker-migrate, auth, ui, ai, mcp,
    cli-downloads, marketing]`. Docker buildx → pushes to
    `harbor.rzware.com/emf/emf-<svc>:latest` and `:main-<short-sha>`. Every leg builds from the
-   repo root except `marketing`, whose matrix entry sets `context: kelta-marketing` (its
-   Dockerfile `COPY`s `package.json` from the context root); the shared step passes
-   `context: ${{ matrix.context || '.' }}`, so the default is unchanged for everything else.
+   repo root (the shared step still passes `context: ${{ matrix.context || '.' }}` so a leg
+   *could* override it; `marketing` used to, and stopped when its docs engine started reading
+   `docs/authoring/` and the generated CLI docs from outside the module — see *Marketing site*).
    Per-service GHA cache scope. Immediately after each leg's "Build and
    push ${{ matrix.service }}" step, a **"Verify image pushed to Harbor"** step re-queries the
    manifest it just pushed (up to 6 attempts, 5s apart, ~30s budget) and fails *that leg* if the
@@ -233,10 +233,25 @@ The Astro site at **kelta.io / www.kelta.io**. Built and shipped like any other 
   and no `cert-manager.io/cluster-issuer` (the `*.kelta.io` wildcard already covers both
   hosts). The manifest header explains each. See `concerns.md`.
 
+- **Its Docker context is the repo root, trimmed by `Dockerfile.dockerignore`.** The docs
+  engine (`src/content.config.ts`) reads `../docs/authoring/*.md` and
+  `../kelta-web/packages/cli/{COMMANDS,AGENTS}.md` in place, so the image must be built from
+  the repo root like every other service. BuildKit honours the `Dockerfile.dockerignore`
+  beside the Dockerfile, which allowlists only `kelta-marketing/`, `docs/authoring/` and the
+  two CLI files — the other eight root-context images are untouched, and there is still no
+  root `.dockerignore`. The `marketing` path filter therefore also matches `docs/authoring/**`
+  and the two CLI md files, so a doc edit redeploys the site. `npm run build` runs Pagefind in
+  `postbuild` (`@pagefind/linux-x64` is musl-static, so the alpine build stage is fine) —
+  which also means **never regenerate `kelta-marketing/package-lock.json` on macOS**: pagefind
+  ships platform optional deps and a mac-generated lock drops the linux one, breaking `npm ci`
+  in CI (regenerate in a `node:22` container with the repo mounted).
+
 Smoke (`smoke-test`, only when `marketing == 'true'`) hits the in-cluster Service, so it
 depends on neither public DNS nor the cert: within one ≤5 min budget it waits for the
 Deployment to exist (ArgoCD syncs asynchronously) and for `/` to answer 200, then asserts
-`/pricing` is **404**. A Deployment that never appears **fails** the job — it used to emit a
+`/pricing` is **404** and that `/docs/`, `/docs/reference/jsonapi/` and
+`/pagefind/pagefind-entry.json` are 200 (the docs engine and its search index built into the
+image). A Deployment that never appears **fails** the job — it used to emit a
 `::warning::` and `exit 0`, which is why a manifest that created nothing reported green for a
 day (PLT-278). nginx deliberately has no SPA fallback
 (`try_files … =404` + `error_page 404 /404.html`) — with one, a removed route answers 200

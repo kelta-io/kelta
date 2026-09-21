@@ -24,7 +24,7 @@ we need to respond quickly.
 Clone the repo and start the full stack with one command:
 
 ```bash
-git clone https://github.com/rzware-labs/kelta.git
+git clone https://github.com/kelta-io/kelta.git
 cd kelta
 make setup   # first time only: copies .env, generates keys
 make up      # starts all services via docker-compose.yml
