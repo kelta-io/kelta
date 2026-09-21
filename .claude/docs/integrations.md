@@ -197,7 +197,11 @@ event waits). The worker's `FlowResumePollerConfig` (10s default,
 `kelta.flow.resume.poll-interval-ms`; disable with `kelta.flow.resume.enabled=false`)
 claims due rows with `SELECT FOR UPDATE SKIP LOCKED` — exactly one pod resumes an
 execution — and `FlowEngine.resumeExecution` re-loads the flow definition and continues
-from the Wait's `Next` (a terminal Wait completes). Event-based waits resume through
+from the Wait's `Next` (a terminal Wait completes). The poller runs outside any tenant
+scope, so `resumeExecution` resolves the slug itself (`FlowStore.findTenantSlug`) and
+binds `runWithTenant(id, slug, …)` — an ID-only scope makes `PhysicalTableStorageAdapter`
+fall back to `public`, where tenant collections don't exist (#1577). A missing tenant
+fails the execution with `Cannot resume: tenant … no longer exists`. Event-based waits resume through
 `claimPendingResumeByEvent` when an event source calls it. Waits inside Parallel/Map
 branch sub-definitions are **not** resumable (their state ids aren't in the top-level
 definition) — the resume fails the execution with a clear error instead of hanging.

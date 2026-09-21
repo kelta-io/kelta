@@ -152,6 +152,19 @@ public interface FlowStore {
      */
     Optional<String> findFlowDefinitionByName(String tenantId, String flowName);
 
+    /**
+     * Resolves a tenant's URL slug from its ID.
+     * <p>
+     * Needed by code paths that enter a tenant scope from outside any request or
+     * event context (Wait-state resume): schema-per-tenant table resolution in the
+     * storage adapter keys off {@code TenantContext.getSlug()}, and a scope bound
+     * with the ID alone silently falls back to the {@code public} schema.
+     *
+     * @param tenantId the tenant ID
+     * @return the tenant slug, or empty if the tenant does not exist
+     */
+    Optional<String> findTenantSlug(String tenantId);
+
     // -------------------------------------------------------------------------
     // Execution Queries
     // -------------------------------------------------------------------------

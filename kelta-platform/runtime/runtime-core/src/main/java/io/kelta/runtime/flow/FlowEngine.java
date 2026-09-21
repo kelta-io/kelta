@@ -181,7 +181,18 @@ public class FlowEngine {
         }
 
         final String resumeTenantId = execution.tenantId();
-        threadPool.submit(() -> TenantContext.runWithTenant(resumeTenantId, () -> {
+        // The poller calls this from outside any tenant scope, so nothing is inherited
+        // through the propagating executor. Bind the slug explicitly: schema-per-tenant
+        // table resolution keys off it, and an ID-only scope falls back to `public`,
+        // where tenant collections do not exist (#1577).
+        Optional<String> tenantSlug = flowStore.findTenantSlug(resumeTenantId);
+        if (tenantSlug.isEmpty()) {
+            failResume(executionId, execution,
+                "Cannot resume: tenant " + resumeTenantId + " no longer exists");
+            return;
+        }
+
+        threadPool.submit(() -> TenantContext.runWithTenant(resumeTenantId, tenantSlug.get(), () -> {
             long start = System.currentTimeMillis();
             String flowId = execution.flowId();
             try {
