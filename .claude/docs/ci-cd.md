@@ -42,6 +42,20 @@ Trigger: `pull_request` → `main`, plus `workflow_dispatch`.
 
 Trigger: `push` → `main` (path-filtered), plus `workflow_dispatch`.
 
+Concurrency is `build-deploy-<ref>` with **`cancel-in-progress: false`** — runs queue behind
+the in-flight one. It used to cancel: #1579's worker fix merged, #1581 (gateway-only) landed
+15 minutes later, cancelled #1579's run, and #1581's run path-diffed only its own push, so the
+worker was never rebuilt and sat undeployed with a green `main`. Queueing alone is not enough —
+GitHub collapses the *pending* queue to the newest run, so a push that lands during a build
+may still never get a run of its own. That is why this workflow's `changes` job differs from
+CI's: a "Resolve diff base" step asks the Actions API for the newest **successful** run of this
+workflow on the branch and passes its `head_sha` to `dorny/paths-filter` as `base`. Whatever
+run does execute therefore diffs against what is actually deployed and picks up every commit
+since. Falls back to `github.event.before` (the push range) when no prior success exists or
+the API is unreachable; `force_build_all` on dispatch still overrides everything. The job holds
+`actions: read` for that API call. Note a `.github/workflows/**` change sets `workflows=true`,
+which forces every leg to build — so merging a change to this file redeploys everything.
+
 1. `changes`, `test-java`, `test-runtime`, `test-frontend` — same as CI. `test-frontend` here
    previously ran **kelta-web only**, so `kelta-ui/app` was validated nowhere on `main`; it now
    mirrors CI (build packages → install → typecheck → `test:run`).
