@@ -1,6 +1,7 @@
 package io.kelta.gateway.listener;
 
 import io.kelta.gateway.cache.GatewayCacheManager;
+import io.kelta.gateway.route.RouteRefresher;
 import io.kelta.gateway.route.RouteRegistry;
 import io.kelta.runtime.event.ChangeType;
 import io.kelta.runtime.event.EventFactory;
@@ -12,11 +13,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
-import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Map;
 
@@ -35,7 +33,7 @@ class SystemCollectionRouteListenerTest {
     private RouteRegistry routeRegistry;
 
     @Mock
-    private ApplicationEventPublisher applicationEventPublisher;
+    private RouteRefresher routeRefresher;
 
     @Mock
     private GatewayCacheManager cacheManager;
@@ -47,7 +45,7 @@ class SystemCollectionRouteListenerTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         listener = new SystemCollectionRouteListener(
-                routeRegistry, applicationEventPublisher, objectMapper, cacheManager
+                routeRegistry, routeRefresher, objectMapper, cacheManager
         );
     }
 
@@ -71,9 +69,7 @@ class SystemCollectionRouteListenerTest {
 
             listener.onRecordChanged(message);
 
-            ArgumentCaptor<RefreshRoutesEvent> eventCaptor = ArgumentCaptor.forClass(RefreshRoutesEvent.class);
-            verify(applicationEventPublisher).publishEvent(eventCaptor.capture());
-            assertNotNull(eventCaptor.getValue());
+            verify(routeRefresher).refresh();
         }
 
         @Test
@@ -83,7 +79,7 @@ class SystemCollectionRouteListenerTest {
 
             listener.onRecordChanged(message);
 
-            verify(applicationEventPublisher, never()).publishEvent(any(RefreshRoutesEvent.class));
+            verify(routeRefresher, never()).refresh();
         }
 
         @Test
@@ -93,7 +89,7 @@ class SystemCollectionRouteListenerTest {
 
             listener.onRecordChanged(message);
 
-            verify(applicationEventPublisher, never()).publishEvent(any(RefreshRoutesEvent.class));
+            verify(routeRefresher, never()).refresh();
         }
     }
 
@@ -233,7 +229,7 @@ class SystemCollectionRouteListenerTest {
             String message = objectMapper.writeValueAsString(event);
 
             assertDoesNotThrow(() -> listener.onRecordChanged(message));
-            verifyNoInteractions(applicationEventPublisher);
+            verifyNoInteractions(routeRefresher);
         }
     }
 }

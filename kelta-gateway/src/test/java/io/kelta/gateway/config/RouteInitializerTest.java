@@ -2,6 +2,7 @@ package io.kelta.gateway.config;
 
 import io.kelta.gateway.cache.GatewayCacheManager;
 import io.kelta.gateway.health.RouteReadinessHealthIndicator;
+import io.kelta.gateway.route.RouteRefresher;
 import io.kelta.gateway.route.RouteRegistry;
 import io.kelta.gateway.service.RouteConfigService;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,8 +12,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.health.contributor.Status;
-import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
-import org.springframework.context.ApplicationEventPublisher;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,7 +25,7 @@ import static org.mockito.Mockito.*;
  * <ul>
  *   <li>Tenant slug cache is primed via GatewayCacheManager</li>
  *   <li>Dynamic routes are fetched from the worker service</li>
- *   <li>A RefreshRoutesEvent is published</li>
+ *   <li>The route cache is refreshed</li>
  * </ul>
  */
 @ExtendWith(MockitoExtension.class)
@@ -39,7 +38,7 @@ class RouteInitializerTest {
     private RouteConfigService routeConfigService;
 
     @Mock
-    private ApplicationEventPublisher eventPublisher;
+    private RouteRefresher routeRefresher;
 
     @Mock
     private GatewayCacheManager cacheManager;
@@ -58,7 +57,7 @@ class RouteInitializerTest {
         routeInitializer = new RouteInitializer(
             routeRegistry,
             routeConfigService,
-            eventPublisher,
+            routeRefresher,
             cacheManager,
             routeReadiness
         );
@@ -107,10 +106,10 @@ class RouteInitializerTest {
     }
 
     @Test
-    void testRun_PublishesRefreshRoutesEvent() {
+    void testRun_RefreshesRoutes() {
         routeInitializer.run(applicationArguments);
 
-        verify(eventPublisher).publishEvent(any(RefreshRoutesEvent.class));
+        verify(routeRefresher).refresh();
     }
 
     @Test
@@ -121,7 +120,7 @@ class RouteInitializerTest {
 
         // Should still attempt to refresh routes
         verify(routeConfigService).refreshRoutes();
-        verify(eventPublisher).publishEvent(any(RefreshRoutesEvent.class));
+        verify(routeRefresher).refresh();
     }
 
     @Test
@@ -131,6 +130,6 @@ class RouteInitializerTest {
         routeInitializer.run(applicationArguments);
 
         // Should still publish refresh event
-        verify(eventPublisher).publishEvent(any(RefreshRoutesEvent.class));
+        verify(routeRefresher).refresh();
     }
 }

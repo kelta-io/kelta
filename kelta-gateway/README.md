@@ -76,7 +76,7 @@ kelta.gateway:
 **Startup:**
 1. `RouteInitializer` primes the `GatewayCacheManager` tenant slug cache by calling the worker
 2. Fetches initial routes and governor limits via `POST {worker}/internal/bootstrap`
-3. Populates `RouteRegistry` and publishes `RefreshRoutesEvent`
+3. Populates `RouteRegistry` and rebuilds the gateway route cache via `RouteRefresher` (the one serialized publisher of `RefreshRoutesEvent`)
 
 **Runtime:**
 - Routes are **not** hardcoded -- they are discovered from the worker at startup and updated dynamically via NATS events without restart

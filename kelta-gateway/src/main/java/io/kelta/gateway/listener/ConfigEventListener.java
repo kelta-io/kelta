@@ -1,6 +1,7 @@
 package io.kelta.gateway.listener;
 
 import io.kelta.gateway.route.RouteDefinition;
+import io.kelta.gateway.route.RouteRefresher;
 import io.kelta.gateway.route.RouteRegistry;
 import io.kelta.runtime.event.ChangeType;
 import io.kelta.runtime.event.CollectionChangedPayload;
@@ -8,8 +9,6 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -34,16 +33,16 @@ public class ConfigEventListener {
 
     private final RouteRegistry routeRegistry;
     private final ObjectMapper objectMapper;
-    private final ApplicationEventPublisher applicationEventPublisher;
+    private final RouteRefresher routeRefresher;
     private final String workerServiceUrl;
 
     public ConfigEventListener(RouteRegistry routeRegistry,
                               ObjectMapper objectMapper,
-                              ApplicationEventPublisher applicationEventPublisher,
+                              RouteRefresher routeRefresher,
                               @org.springframework.beans.factory.annotation.Value("${kelta.gateway.worker-service-url:http://emf-worker:80}") String workerServiceUrl) {
         this.routeRegistry = routeRegistry;
         this.objectMapper = objectMapper;
-        this.applicationEventPublisher = applicationEventPublisher;
+        this.routeRefresher = routeRefresher;
         this.workerServiceUrl = workerServiceUrl;
     }
 
@@ -88,7 +87,7 @@ public class ConfigEventListener {
                 }
             }
 
-            applicationEventPublisher.publishEvent(new RefreshRoutesEvent(this));
+            routeRefresher.refresh();
 
         } catch (Exception e) {
             logger.error("Error processing collection changed event: {}", e.getMessage(), e);
@@ -216,7 +215,7 @@ public class ConfigEventListener {
                             path, workerServiceUrl);
             }
 
-            applicationEventPublisher.publishEvent(new RefreshRoutesEvent(this));
+            routeRefresher.refresh();
 
         } catch (Exception e) {
             logger.error("Error processing worker assignment event: {}", e.getMessage(), e);

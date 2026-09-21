@@ -46,6 +46,7 @@ exchange.getAttributes().put("tenantId", tenantId);
 Routes are loaded from worker at startup and updated via NATS events:
 - `RouteRegistry` — in-memory route store
 - `DynamicRouteLocator` — bridges RouteRegistry with Spring Cloud Gateway
+- `RouteRefresher` — the only place that publishes `RefreshRoutesEvent`; `synchronized` so concurrent refreshes cannot lose the newer registry snapshot (`concerns.md` → Resolved). Mutate `RouteRegistry` first, then `refresh()`
 - `listener/ConfigEventListener` — subscribes to `kelta.config.collection.changed.*` and updates routes
 - `listener/CerbosCacheInvalidationListener` — invalidates the principal authz cache on policy changes
 
