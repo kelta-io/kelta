@@ -188,6 +188,21 @@ describe('docs build wiring', () => {
     expect(workflow).not.toContain('matrix.context'); // no entry defines it — actionlint rejects the reference
   });
 
+  // Run 35576779660: the docs probes ran while the Service still fronted the previous
+  // image, 404'd, and the auto-rollback reverted every service. The smoke must wait for
+  // ArgoCD to roll the pushed tag before asserting docs content.
+  it('smoke-tests the docs only after the pushed image has rolled out', () => {
+    const workflow = read('.github', 'workflows', 'build-and-publish-containers.yml');
+    const marketing = workflow.slice(workflow.indexOf('DEPLOY=emf-marketing'));
+    const smoke = marketing.slice(0, marketing.indexOf('Marketing smoke OK'));
+    const docsProbe = smoke.indexOf('for path in /docs/ /docs/reference/jsonapi/');
+    expect(docsProbe).toBeGreaterThan(0);
+    const gate = smoke.indexOf('rollout status deploy/"${DEPLOY}"');
+    expect(gate).toBeGreaterThan(0);
+    expect(gate).toBeLessThan(docsProbe);
+    expect(smoke.slice(0, gate)).toContain('PUSHED_TAG="main-$(echo "${GITHUB_SHA}" | cut -c1-7)"');
+  });
+
   it('rebuilds the site when the external doc sources change', () => {
     const filters = read('.github', 'path-filters.yml');
     const marketing = filters.slice(filters.indexOf('\nmarketing:'));

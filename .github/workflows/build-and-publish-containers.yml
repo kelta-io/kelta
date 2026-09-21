@@ -876,6 +876,32 @@ jobs:
             echo "::error::${BASE}/pricing returned ${PRICING}, expected 404 — the pricing route must not be publicly reachable."
             exit 1
           fi
+
+          # Phase 3: the docs probes below assert content that only the image built by THIS
+          # run has, but "/ answers 200" is satisfied by the previous image too — ArgoCD applies
+          # the tag bump asynchronously, so the Service can still be fronting old pods here.
+          # Run 35576779660 probed /docs/reference/jsonapi/ against the old hub page, got 404,
+          # and the auto-rollback reverted a healthy bump of every service. Same shape as the
+          # cli-downloads check: wait until the Deployment targets the pushed tag and its
+          # rollout is complete, then assert.
+          PUSHED_TAG="main-$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          SYNC_DEADLINE=$(( $(date +%s) + 300 ))
+          RUNNING_TAG=""
+          until [ "${RUNNING_TAG}" = "${PUSHED_TAG}" ]; do
+            RUNNING_TAG=$(kubectl -n "${NS}" get deploy "${DEPLOY}" \
+              -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | sed 's/.*://')
+            if [ "${RUNNING_TAG}" = "${PUSHED_TAG}" ]; then
+              break
+            fi
+            if [ "$(date +%s)" -ge "${SYNC_DEADLINE}" ]; then
+              echo "::error::${DEPLOY} still targets '${RUNNING_TAG:-unknown}' after 5m, expected ${PUSHED_TAG} — ArgoCD sync stalled."
+              exit 1
+            fi
+            echo "waiting for ArgoCD to point ${DEPLOY} at ${PUSHED_TAG} (currently '${RUNNING_TAG:-unknown}')…"
+            sleep 10
+          done
+          kubectl -n "${NS}" rollout status deploy/"${DEPLOY}" --timeout=180s
+
           for path in /docs/ /docs/reference/jsonapi/ /pagefind/pagefind-entry.json; do
             CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}${path}" || true)
             if [ "${CODE}" != "200" ]; then
