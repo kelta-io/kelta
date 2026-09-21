@@ -48,7 +48,7 @@ class SystemCollectionDescriptionsTest {
                 "page-layouts.layoutType", List.of("DETAIL", "EDIT", "MINI", "LIST"),
                 "list-views.visibility", List.of("PRIVATE", "PUBLIC", "GROUP"),
                 "list-views.sortDirection", List.of("ASC", "DESC"),
-                "profile-field-permissions.visibility", List.of("VISIBLE", "READ_ONLY", "HIDDEN"),
+                "profile-field-permissions.visibility", List.of("VISIBLE", "READ_ONLY", "HIDDEN", "MASKED"),
                 "dashboard-components.componentType", List.of("metric", "chart", "table", "recent"),
                 "reports.reportType", List.of("TABULAR", "SUMMARY", "MATRIX"),
                 "reports.accessLevel", List.of("PRIVATE", "PUBLIC", "HIDDEN"),
