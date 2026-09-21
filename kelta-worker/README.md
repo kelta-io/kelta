@@ -83,7 +83,7 @@ kelta:
 
 ## Database Migrations
 
-Flyway migrations are in `src/main/resources/db/migration/` (V1 through V142). Key migrations:
+Flyway migrations are in `src/main/resources/db/migration/`. The baseline was flattened into `V1__baseline` (#1189); check the directory for the current head before adding one (deployed history keeps the pre-flatten numbering, so the ranges below describe *what* landed, not files that still exist). Key migrations:
 
 | Range | Content |
 |-------|---------|
@@ -103,17 +103,7 @@ Flyway migrations are in `src/main/resources/db/migration/` (V1 through V142). K
 
 ## Governor Limits
 
-Default per-tenant limits tracked via `GovernorLimitsController`:
-
-| Limit | Default |
-|-------|---------|
-| API calls/day | 100,000 |
-| Storage | 10 GB |
-| Max users | 100 |
-| Max collections | 200 |
-| Max fields/collection | 500 |
-| Max workflows | 50 |
-| Max reports | 200 |
+Per-tenant limits are tracked via `GovernorLimitsController` (`GET /api/governor-limits`, `PUT /api/governor-limits/tier`, `PUT /api/governor-limits`). Defaults come from the tenant's edition (`FREE`, `PROFESSIONAL`, `ENTERPRISE`, `UNLIMITED`) in `TenantTierQuotas`; keys: `apiCallsPerDay`, `storageGb`, `maxUsers`, `maxPortalUsers`, `maxCollections`, `maxFieldsPerCollection`, `maxWorkflows`, `maxReports`, `aiEnabled`, `aiTokensPerMonth`, `campaignEmailsPerDay`, `telehealthEnabled`, `videoMinutesPerMonth`, `archiveAfterDays`, `retentionYears`, `purgeLiveAfterDays`. See `TenantTierQuotas.java` for the per-edition numbers.
 
 ## Metrics
 

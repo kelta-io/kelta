@@ -2834,8 +2834,8 @@ public final class SystemCollectionDefinitions {
                 .withDescription("Field this row refers to."))
             .addField(FieldDefinition.requiredString("visibility", 20)
                 .withDefault("VISIBLE")
-                .withEnumValues(List.of("VISIBLE", "READ_ONLY", "HIDDEN"))
-                .withDescription("Field access granted: VISIBLE, READ_ONLY or HIDDEN."))
+                .withEnumValues(List.of("VISIBLE", "READ_ONLY", "HIDDEN", "MASKED"))
+                .withDescription("Field access granted: VISIBLE, READ_ONLY, HIDDEN or MASKED (masked values render redacted; see fieldTypeConfig.masking)."))
             .build();
     }
 

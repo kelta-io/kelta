@@ -1,0 +1,83 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import DocsSearch from '../../components/docs/DocsSearch.astro';
+import { loadDocsPages } from '../../docs/pages';
+import { buildSidebar } from '../../docs/sidebar';
+
+const sidebar = buildSidebar(await loadDocsPages());
+
+const quickLinks = [
+  { label: 'Quickstart with Docker Compose', href: '/docs/getting-started/quickstart/' },
+  { label: 'Tutorial: your first app', href: '/docs/getting-started/first-app/' },
+  { label: 'REST API overview', href: '/docs/api/overview/' },
+  { label: 'Connect an MCP client', href: '/docs/mcp/connecting/' },
+  { label: 'CLI command reference', href: '/docs/cli/commands/' },
+  { label: 'Deploy on Kubernetes', href: '/docs/deploy/kubernetes/' },
+];
+---
+
+<BaseLayout title="Documentation" description="Guides, concepts and reference documentation for building, automating and operating applications on Kelta.">
+  <section class="bg-gradient-to-b from-kelta-50 to-white py-16">
+    <div class="mx-auto max-w-3xl px-6 text-center">
+      <h1 class="text-4xl font-extrabold text-navy md:text-5xl">Documentation</h1>
+      <p class="mt-4 text-lg text-kelta-700">
+        Everything you need to model data, automate work, secure it, and ship it — in the console, over the API, from
+        the CLI, or through an AI agent.
+      </p>
+      <div class="mx-auto mt-8 max-w-xl text-left">
+        <DocsSearch id="docs-search" />
+      </div>
+    </div>
+  </section>
+
+  <section class="pb-8">
+    <div class="mx-auto max-w-7xl px-6">
+      <div class="rounded-xl border border-kelta-100 bg-kelta-50 p-6">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-gray-500">Start here</h2>
+        <ul class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {quickLinks.map((link) => (
+            <li>
+              <a href={link.href} class="flex items-center gap-2 text-sm font-medium text-cyan hover:text-blue">
+                <span>&#8594;</span>
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="py-12">
+    <div class="mx-auto max-w-7xl px-6">
+      <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {sidebar.map((section) => (
+          <div class="rounded-xl border border-gray-100 p-6">
+            <h2 class="mb-3 text-lg font-bold text-navy">{section.label}</h2>
+            <ul class="space-y-2">
+              {section.pages.map((page) => (
+                <li>
+                  <a href={page.href} class="text-sm text-kelta-700 hover:text-cyan">{page.title}</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-navy py-16 text-white">
+    <div class="mx-auto max-w-7xl px-6 text-center">
+      <h2 class="text-2xl font-bold">Docs that agents read too</h2>
+      <p class="mx-auto mt-3 max-w-2xl text-kelta-200">
+        The authoring reference on this site is the same Markdown the CLI prints with <code>kelta docs</code> and the MCP
+        server serves as <code>kelta://docs/*</code> resources — one source, three surfaces.
+      </p>
+      <div class="mt-6 flex flex-wrap justify-center gap-3">
+        <a href="/docs/cli/agents/" class="rounded-lg bg-gradient-to-r from-cyan to-blue px-5 py-2.5 text-sm font-semibold text-white">CLI agent guide</a>
+        <a href="/docs/mcp/overview/" class="rounded-lg border border-white/30 px-5 py-2.5 text-sm font-semibold text-white hover:bg-white/10">MCP server</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

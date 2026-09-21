@@ -23,8 +23,8 @@ Admin and end-user UI for the Kelta platform. Built with React 19, TypeScript, V
 | Collections | `/collections`, `/collections/new` (wizard), `/collections/:id`, `/collections/:id/edit` |
 | Data | `/resources`, `/resources/:collection`, `/resources/:collection/new`, `/resources/:collection/:id` |
 | Schema | `/picklists`, `/layouts`, `/listviews` |
-| Automation | `/workflow-rules`, `/workflow-action-types`, `/approvals`, `/flows`, `/scheduled-jobs`, `/email-templates` |
-| Security | `/users`, `/users/:id`, `/profiles`, `/profiles/:id`, `/permission-sets`, `/permission-sets/:id` |
+| Automation | `/approvals`, `/flows`, `/flows/:id/design`, `/scheduled-jobs`, `/ai-agents`, `/email-templates` |
+| Security | `/users`, `/users/:id`, `/profiles`, `/profiles/:id`, `/delegated-admins`, `/password-policy`, `/mfa-policy`, `/network-access` |
 | Audit | `/audit-trail`, `/login-history`, `/security-audit` |
 | Integration | `/connected-apps`, `/scripts`, `/webhooks`, `/oidc-providers` |
 | Platform | `/pages`, `/menus`, `/packages`, `/migrations`, `/plugins` |

@@ -10,3 +10,40 @@
     @apply bg-white text-gray-900 antialiased;
   }
 }
+
+/* Documentation pages */
+@layer components {
+  .prose :where(pre) {
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+  }
+  .prose :where(table) {
+    display: block;
+    overflow-x: auto;
+  }
+  .prose :where(.heading-anchor) {
+    margin-left: 0.4em;
+    color: #cbd5e1;
+    font-weight: 400;
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .prose :where(h2, h3, h4):hover .heading-anchor,
+  .prose :where(.heading-anchor):focus {
+    opacity: 1;
+  }
+}
+
+/* Pagefind search UI, themed to the site palette */
+:root {
+  --pagefind-ui-scale: 0.85;
+  --pagefind-ui-primary: #06b6d4;
+  --pagefind-ui-text: #0f172a;
+  --pagefind-ui-background: #ffffff;
+  --pagefind-ui-border: #e2e8f0;
+  --pagefind-ui-tag: #f8fafc;
+  --pagefind-ui-border-width: 1px;
+  --pagefind-ui-border-radius: 0.5rem;
+  --pagefind-ui-font: 'Inter', system-ui, -apple-system, sans-serif;
+}

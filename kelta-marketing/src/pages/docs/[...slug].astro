@@ -1,0 +1,28 @@
+---
+import { render } from 'astro:content';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { loadDocsPages, type LoadedDocPage } from '../../docs/pages';
+import { buildSidebar, flatten } from '../../docs/sidebar';
+
+export async function getStaticPaths() {
+  const flat = flatten(buildSidebar(await loadDocsPages()));
+  return flat.map((page, i) => ({
+    params: { slug: page.href.replace(/^\/docs\//, '').replace(/\/$/, '') },
+    props: { page, prev: flat[i - 1] ?? null, next: flat[i + 1] ?? null },
+  }));
+}
+
+interface Props {
+  page: LoadedDocPage;
+  prev: LoadedDocPage | null;
+  next: LoadedDocPage | null;
+}
+
+const { page, prev, next } = Astro.props;
+const { Content, headings } = await render(page.entry);
+const toc = headings.filter((h) => h.depth >= 2 && h.depth <= page.tocDepth);
+---
+
+<DocsLayout page={page} headings={toc} prev={prev} next={next}>
+  <Content />
+</DocsLayout>
