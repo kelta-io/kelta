@@ -249,9 +249,13 @@ The Astro site at **kelta.io / www.kelta.io**. Built and shipped like any other 
 Smoke (`smoke-test`, only when `marketing == 'true'`) hits the in-cluster Service, so it
 depends on neither public DNS nor the cert: within one ≤5 min budget it waits for the
 Deployment to exist (ArgoCD syncs asynchronously) and for `/` to answer 200, then asserts
-`/pricing` is **404** and that `/docs/`, `/docs/reference/jsonapi/` and
-`/pagefind/pagefind-entry.json` are 200 (the docs engine and its search index built into the
-image). A Deployment that never appears **fails** the job — it used to emit a
+`/pricing` is **404**. It then **waits for ArgoCD to point the Deployment at this run's
+`main-<sha>` tag and for that rollout to complete** before asserting `/docs/`,
+`/docs/reference/jsonapi/` and `/pagefind/pagefind-entry.json` are 200 — those probe content
+only the new image has, while "`/` is 200" is satisfied by the old pods the Service still fronts
+during the async sync. Run 35576779660 skipped that gate, 404'd against the previous image, and
+the auto-rollback reverted a healthy bump of **every** service (the rollback reverts the whole
+commit). `docs-engine.test.ts` pins the gate's position ahead of the probes. A Deployment that never appears **fails** the job — it used to emit a
 `::warning::` and `exit 0`, which is why a manifest that created nothing reported green for a
 day (PLT-278). nginx deliberately has no SPA fallback
 (`try_files … =404` + `error_page 404 /404.html`) — with one, a removed route answers 200
