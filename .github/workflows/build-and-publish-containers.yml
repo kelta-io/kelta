@@ -34,9 +34,15 @@ on:
         default: 'false'
         type: boolean
 
+# Queue, never cancel: a run that is cancelled mid-flight has already been "the push"
+# for its commit range, and the run that replaces it only path-diffs its own push, so
+# the cancelled commit's services were never rebuilt (#1579's worker fix sat undeployed
+# behind #1581's gateway-only build). GitHub still collapses the *pending* queue to the
+# newest run, which is why `changes` below diffs against the last successful deploy
+# rather than `github.event.before`.
 concurrency:
   group: build-deploy-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   JAVA_VERSION: '25'
@@ -51,12 +57,20 @@ env:
 
 jobs:
   # ===========================================================================
-  # Detect which paths changed since the previous push to main.
+  # Detect which paths changed since the LAST SUCCESSFUL RUN of this workflow on the
+  # branch — not since the previous push. With queued (not cancelled) concurrency GitHub
+  # keeps only the newest pending run, so a push that lands while a build is in flight
+  # may never get a run of its own; diffing against the last deploy makes whichever run
+  # does execute pick up every commit since. Falls back to the push's own range when
+  # no prior success exists (first run, or API unavailable).
   # workflow_dispatch with force_build_all=true treats every service as changed.
   # ===========================================================================
   changes:
     name: Detect Changes
     runs-on: k8s-runner
+    permissions:
+      contents: read
+      actions: read
     outputs:
       runtime: ${{ steps.resolved.outputs.runtime }}
       gateway: ${{ steps.resolved.outputs.gateway }}
@@ -76,11 +90,42 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve diff base (last successful deploy on this branch)
+        id: base
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          fallback='${{ github.event.before }}'
+          branch='${{ github.ref_name }}'
+          # Newest completed+successful run of THIS workflow on this branch. Its head is
+          # what is currently deployed (deploy is the last job), so everything after it
+          # is undeployed and must be rebuilt.
+          api="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/workflows/build-and-publish-containers.yml/runs?branch=${branch}&status=success&per_page=1"
+          last=$(curl -sS --max-time 20 \
+                   -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                   -H "Accept: application/vnd.github+json" \
+                   "$api" \
+                 | jq -r '.workflow_runs[0].head_sha // empty' \
+                 || true)
+          if [[ -n "$last" ]] && git cat-file -e "${last}^{commit}" 2>/dev/null \
+             && git merge-base --is-ancestor "$last" "$GITHUB_SHA"; then
+            echo "base=$last" >> "$GITHUB_OUTPUT"
+            echo "Diffing against last successful deploy ${last} (fallback would have been ${fallback})"
+          elif [[ -n "$fallback" && "$fallback" != "0000000000000000000000000000000000000000" ]]; then
+            echo "base=$fallback" >> "$GITHUB_OUTPUT"
+            echo "::warning::No prior successful deploy found on ${branch}; diffing against the push range ${fallback}..${GITHUB_SHA}"
+          else
+            echo "base=" >> "$GITHUB_OUTPUT"
+            echo "::warning::No usable diff base; paths-filter will use its default"
+          fi
+
       - name: Filter paths
         id: filter
         uses: dorny/paths-filter@v3
         with:
           filters: .github/path-filters.yml
+          base: ${{ steps.base.outputs.base }}
 
       - name: Resolve overrides
         id: resolved
