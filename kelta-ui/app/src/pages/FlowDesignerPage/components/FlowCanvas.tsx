@@ -12,15 +12,19 @@ import {
   type Node,
   type Edge,
   type NodeTypes,
+  type EdgeTypes,
   type Connection,
   BackgroundVariant,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
+import { autoLayout } from '../autoLayout'
+import { catchLayoutEdges } from '../definitionConverter'
 import { TaskNode } from './nodes/TaskNode'
 import { ChoiceNode } from './nodes/ChoiceNode'
 import { TerminalNode } from './nodes/TerminalNode'
 import { ControlNode } from './nodes/ControlNode'
+import { FlowEdge, FLOW_EDGE_TYPE } from './edges/FlowEdge'
 
 const NODE_TYPES: NodeTypes = {
   task: TaskNode,
@@ -29,12 +33,24 @@ const NODE_TYPES: NodeTypes = {
   control: ControlNode,
 }
 
+const EDGE_TYPES: EdgeTypes = {
+  [FLOW_EDGE_TYPE]: FlowEdge,
+}
+
 interface FlowCanvasProps {
   initialNodes: Node[]
   initialEdges: Edge[]
   onNodesChange?: (nodes: Node[]) => void
   onEdgesChange?: (edges: Edge[]) => void
   onNodeSelect?: (node: Node | null) => void
+  /**
+   * Monotonic counter — every increment re-runs auto layout over the live
+   * canvas state (the canvas owns node positions, so the parent can't set them
+   * directly). 0 / undefined means "never requested".
+   */
+  layoutRequest?: number
+  /** Root state of the definition; ranked at the top by auto layout. */
+  startAt?: string
 }
 
 let nodeIdCounter = 0
@@ -99,6 +115,8 @@ function FlowCanvasInner({
   onNodesChange: onNodesChangeProp,
   onEdgesChange: onEdgesChangeProp,
   onNodeSelect,
+  layoutRequest = 0,
+  startAt,
 }: FlowCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const reactFlowInstance = useReactFlow()
@@ -141,6 +159,35 @@ function FlowCanvasInner({
       onEdgesChangeProp?.(edges)
     }
   }, [edges, onEdgesChangeProp])
+
+  // Auto layout: recompute positions from the current graph, then refit the view.
+  // Runs only when the counter advances — never on mount — so opening a flow
+  // does not disturb a saved layout.
+  const lastLayoutRef = useRef(layoutRequest)
+  useEffect(() => {
+    if (layoutRequest === lastLayoutRef.current) return
+    lastLayoutRef.current = layoutRequest
+    setNodes((nds) => {
+      const positions = autoLayout(
+        nds.map((n) => ({
+          id: n.id,
+          type: n.type,
+          width: n.measured?.width,
+          height: n.measured?.height,
+        })),
+        [...edges, ...catchLayoutEdges(nds)],
+        { startAt }
+      )
+      return nds.map((n) => {
+        const p = positions[n.id]
+        if (!p || (p.x === n.position.x && p.y === n.position.y)) return n
+        return { ...n, position: p }
+      })
+    })
+    requestAnimationFrame(() => {
+      void reactFlowInstance.fitView({ padding: 0.2, duration: 300 })
+    })
+  }, [layoutRequest, edges, startAt, setNodes, reactFlowInstance])
 
   const onConnect: OnConnect = useCallback(
     (connection: Connection) => {
@@ -195,7 +242,7 @@ function FlowCanvasInner({
   const defaultEdgeOptions = useMemo(
     () => ({
       style: { strokeWidth: 2, stroke: 'var(--color-border)' },
-      type: 'smoothstep' as const,
+      type: FLOW_EDGE_TYPE,
     }),
     []
   )
@@ -213,6 +260,7 @@ function FlowCanvasInner({
         onInit={handleInit}
         onSelectionChange={onSelectionChange}
         nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
         defaultEdgeOptions={defaultEdgeOptions}
         fitView
         snapToGrid

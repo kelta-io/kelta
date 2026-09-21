@@ -8,6 +8,7 @@ import {
   type Node,
   type Edge,
   type NodeTypes,
+  type EdgeTypes,
   type NodeMouseHandler,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -16,12 +17,17 @@ import { TaskNode } from './nodes/TaskNode'
 import { ChoiceNode } from './nodes/ChoiceNode'
 import { TerminalNode } from './nodes/TerminalNode'
 import { ControlNode } from './nodes/ControlNode'
+import { FlowEdge, FLOW_EDGE_TYPE } from './edges/FlowEdge'
 
 const NODE_TYPES: NodeTypes = {
   task: TaskNode,
   choice: ChoiceNode,
   terminal: TerminalNode,
   control: ControlNode,
+}
+
+const EDGE_TYPES: EdgeTypes = {
+  [FLOW_EDGE_TYPE]: FlowEdge,
 }
 
 interface StepLog {
@@ -175,6 +181,7 @@ export function FlowExecutionViewer({
         nodes={decoratedNodes}
         edges={decoratedEdges}
         nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
         fitView

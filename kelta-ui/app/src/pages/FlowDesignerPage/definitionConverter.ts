@@ -12,6 +12,8 @@ import type {
   WaitMode,
 } from './types'
 import { CHOICE_OPERATORS } from './types'
+import { autoLayout, type LayoutEdge } from './autoLayout'
+import { FLOW_EDGE_TYPE } from './components/edges/FlowEdge'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -180,12 +182,15 @@ export function definitionToNodesAndEdges(definition: FlowDefinition | null): {
   }
 
   const positions = definition._metadata?.nodePositions || {}
+  const hasSavedPositions = Object.keys(positions).length > 0
   const stateIds = Object.keys(definition.States)
   const nodes: Node[] = []
   const edges: Edge[] = []
 
   stateIds.forEach((stateId, index) => {
     const state = definition.States[stateId]
+    // Nodes missing from a partially-saved map keep the legacy column fallback so a
+    // user's hand-placed layout is never reflowed under them.
     const pos = positions[stateId] || { x: 250, y: index * 120 }
 
     // Build node data based on state type
@@ -202,7 +207,38 @@ export function definitionToNodesAndEdges(definition: FlowDefinition | null): {
     buildEdges(stateId, state, edges)
   })
 
+  // No saved positions at all (API/MCP/AI-created flow): open it already laid out.
+  if (!hasSavedPositions && nodes.length > 0) {
+    const laid = autoLayout(
+      nodes.map((n) => ({ id: n.id, type: n.type })),
+      [...edges, ...catchLayoutEdges(nodes)],
+      { startAt: definition.StartAt }
+    )
+    for (const node of nodes) {
+      const p = laid[node.id]
+      if (p) node.position = p
+    }
+  }
+
   return { nodes, edges }
+}
+
+/**
+ * Layout-only edges for `Catch[].Next` targets. Catch handlers are stored in
+ * `node.data.catch` (not as canvas edges — `nodesToDefinition` derives `Next`
+ * from the edge list), but the layout needs them so error handlers rank below
+ * the step that raises them instead of floating as disconnected roots.
+ */
+export function catchLayoutEdges(nodes: Node[]): LayoutEdge[] {
+  const out: LayoutEdge[] = []
+  for (const node of nodes) {
+    const rules = (node.data as { catch?: CatchRule[] }).catch
+    if (!Array.isArray(rules)) continue
+    for (const rule of rules) {
+      if (rule?.next) out.push({ source: node.id, target: rule.next })
+    }
+  }
+  return out
 }
 
 /** Builds the full node.data object for a given state. */
@@ -302,7 +338,7 @@ function buildEdges(stateId: string, state: StateConfig, edges: Edge[]): void {
       id: `${stateId}->${state.Next}`,
       source: stateId,
       target: state.Next,
-      type: 'smoothstep',
+      type: FLOW_EDGE_TYPE,
       style: { strokeWidth: 2 },
     })
   }
@@ -315,7 +351,7 @@ function buildEdges(stateId: string, state: StateConfig, edges: Edge[]): void {
           id: `${stateId}->choice-${ci}->${choice.Next}`,
           source: stateId,
           target: choice.Next as string,
-          type: 'smoothstep',
+          type: FLOW_EDGE_TYPE,
           label: `Rule ${ci + 1}`,
           style: { strokeWidth: 2 },
         })
@@ -327,7 +363,7 @@ function buildEdges(stateId: string, state: StateConfig, edges: Edge[]): void {
       id: `${stateId}->default->${state.Default}`,
       source: stateId,
       target: state.Default,
-      type: 'smoothstep',
+      type: FLOW_EDGE_TYPE,
       label: 'Default',
       style: { strokeWidth: 2, strokeDasharray: '5,5' },
     })

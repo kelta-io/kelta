@@ -54,6 +54,7 @@ export function FlowDesignerPage() {
   const [testDialogOpen, setTestDialogOpen] = useState(false)
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [layoutRequest, setLayoutRequest] = useState(0)
 
   const {
     data: flow,
@@ -282,6 +283,7 @@ export function FlowDesignerPage() {
         onTest={() => setTestDialogOpen(true)}
         onPublish={() => publishMutation.mutate()}
         onGenerate={() => setGenerateDialogOpen(true)}
+        onAutoLayout={() => setLayoutRequest((v) => v + 1)}
       />
 
       {/* Tab Navigation */}
@@ -378,6 +380,8 @@ export function FlowDesignerPage() {
               onNodesChange={handleNodesChange}
               onEdgesChange={handleEdgesChange}
               onNodeSelect={handleNodeSelect}
+              layoutRequest={layoutRequest}
+              startAt={parsedDefinition?.StartAt}
             />
           </div>
         </ReactFlowProvider>
