@@ -1,6 +1,7 @@
 package io.kelta.gateway.listener;
 
 import io.kelta.gateway.route.RouteDefinition;
+import io.kelta.gateway.route.RouteRefresher;
 import io.kelta.gateway.route.RouteRegistry;
 import io.kelta.runtime.event.ChangeType;
 import io.kelta.runtime.event.CollectionChangedPayload;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -37,6 +39,9 @@ class ConfigEventListenerTest {
     @Mock
     private RouteRegistry routeRegistry;
 
+    @Mock
+    private RouteRefresher routeRefresher;
+
     private ObjectMapper objectMapper;
     private ConfigEventListener listener;
 
@@ -45,7 +50,7 @@ class ConfigEventListenerTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        listener = new ConfigEventListener(routeRegistry, objectMapper, event -> {}, WORKER_SERVICE_URL);
+        listener = new ConfigEventListener(routeRegistry, objectMapper, routeRefresher, WORKER_SERVICE_URL);
     }
 
     private String toJson(Object obj) {
@@ -91,6 +96,25 @@ class ConfigEventListenerTest {
             assertEquals("users", capturedRoute.getCollectionName());
             assertEquals("/api/users/**", capturedRoute.getPath());
             assertEquals(WORKER_SERVICE_URL, capturedRoute.getBackendUrl());
+        }
+
+        @Test
+        @DisplayName("Should refresh the route cache only after the route is registered")
+        void shouldRefreshAfterRegisteringRoute() throws Exception {
+            // The refresh snapshots the registry; refreshing first would cache a
+            // snapshot without the new collection.
+            CollectionChangedPayload payload = new CollectionChangedPayload();
+            payload.setId("collection-1");
+            payload.setName("users");
+            payload.setChangeType(ChangeType.CREATED);
+
+            listener.handleCollectionChanged(toJson(new PlatformEvent<>(
+                UUID.randomUUID().toString(), "config.collection.changed", null,
+                UUID.randomUUID().toString(), null, Instant.now(), payload)));
+
+            InOrder inOrder = inOrder(routeRegistry, routeRefresher);
+            inOrder.verify(routeRegistry).updateRoute(any(RouteDefinition.class));
+            inOrder.verify(routeRefresher).refresh();
         }
 
         @Test

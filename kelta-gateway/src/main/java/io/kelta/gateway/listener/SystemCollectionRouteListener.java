@@ -2,13 +2,12 @@ package io.kelta.gateway.listener;
 
 import io.kelta.gateway.cache.GatewayCacheManager;
 import io.kelta.gateway.filter.SystemCollectionResponseCacheFilter;
+import io.kelta.gateway.route.RouteRefresher;
 import io.kelta.gateway.route.RouteRegistry;
 import io.kelta.runtime.event.RecordChangedPayload;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 /**
@@ -31,16 +30,16 @@ public class SystemCollectionRouteListener {
     private static final Logger log = LoggerFactory.getLogger(SystemCollectionRouteListener.class);
 
     private final RouteRegistry routeRegistry;
-    private final ApplicationEventPublisher applicationEventPublisher;
+    private final RouteRefresher routeRefresher;
     private final ObjectMapper objectMapper;
     private final GatewayCacheManager cacheManager;
 
     public SystemCollectionRouteListener(RouteRegistry routeRegistry,
-                                          ApplicationEventPublisher applicationEventPublisher,
+                                          RouteRefresher routeRefresher,
                                           ObjectMapper objectMapper,
                                           GatewayCacheManager cacheManager) {
         this.routeRegistry = routeRegistry;
-        this.applicationEventPublisher = applicationEventPublisher;
+        this.routeRefresher = routeRefresher;
         this.objectMapper = objectMapper;
         this.cacheManager = cacheManager;
     }
@@ -61,7 +60,7 @@ public class SystemCollectionRouteListener {
             if ("collections".equals(collectionName)) {
                 log.info("Collection definition changed (recordId={}, changeType={}), refreshing routes",
                         payload.getRecordId(), payload.getChangeType());
-                applicationEventPublisher.publishEvent(new RefreshRoutesEvent(this));
+                routeRefresher.refresh();
             }
 
             if ("tenants".equals(collectionName)) {

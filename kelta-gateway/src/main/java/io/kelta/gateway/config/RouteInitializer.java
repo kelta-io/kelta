@@ -3,6 +3,7 @@ package io.kelta.gateway.config;
 import io.kelta.gateway.cache.GatewayCacheManager;
 import io.kelta.gateway.health.RouteReadinessHealthIndicator;
 import io.kelta.gateway.route.RouteDefinition;
+import io.kelta.gateway.route.RouteRefresher;
 import io.kelta.gateway.route.RouteRegistry;
 import io.kelta.gateway.service.RouteConfigService;
 import org.slf4j.Logger;
@@ -10,8 +11,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 /**
@@ -21,7 +20,7 @@ import org.springframework.stereotype.Component;
  * <ol>
  *   <li>Primes the tenant slug cache from the worker service</li>
  *   <li>Fetches dynamic routes from the worker's internal bootstrap endpoint</li>
- *   <li>Publishes a {@link RefreshRoutesEvent} to update Spring Cloud Gateway</li>
+ *   <li>Refreshes the Spring Cloud Gateway route cache via {@link RouteRefresher}</li>
  * </ol>
  *
  * <p>All collections are routed to the worker service.
@@ -33,7 +32,7 @@ public class RouteInitializer implements ApplicationRunner {
 
     private final RouteRegistry routeRegistry;
     private final RouteConfigService routeConfigService;
-    private final ApplicationEventPublisher eventPublisher;
+    private final RouteRefresher routeRefresher;
     private final GatewayCacheManager cacheManager;
     private final RouteReadinessHealthIndicator routeReadiness;
 
@@ -48,19 +47,19 @@ public class RouteInitializer implements ApplicationRunner {
      *
      * @param routeRegistry      The route registry to populate
      * @param routeConfigService Service for fetching routes from the worker
-     * @param eventPublisher     Event publisher for triggering route refresh
+     * @param routeRefresher     Serialized route-cache refresh
      * @param cacheManager       Gateway cache manager to prime on startup
      * @param routeReadiness     Readiness gate flipped once routes are loaded
      */
     public RouteInitializer(
             RouteRegistry routeRegistry,
             RouteConfigService routeConfigService,
-            ApplicationEventPublisher eventPublisher,
+            RouteRefresher routeRefresher,
             GatewayCacheManager cacheManager,
             RouteReadinessHealthIndicator routeReadiness) {
         this.routeRegistry = routeRegistry;
         this.routeConfigService = routeConfigService;
-        this.eventPublisher = eventPublisher;
+        this.routeRefresher = routeRefresher;
         this.cacheManager = cacheManager;
         this.routeReadiness = routeReadiness;
     }
@@ -87,8 +86,8 @@ public class RouteInitializer implements ApplicationRunner {
         }
 
         // Trigger Spring Cloud Gateway to refresh its route cache
-        logger.info("Publishing RefreshRoutesEvent to update Gateway route cache");
-        eventPublisher.publishEvent(new RefreshRoutesEvent(this));
+        logger.info("Refreshing Gateway route cache");
+        routeRefresher.refresh();
 
         // Only now is the gateway able to route /api/** — the web server has been
         // accepting requests since before this runner started. Flip readiness last,
