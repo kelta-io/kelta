@@ -49,8 +49,9 @@ function localDocs(): LocalDoc[] {
     });
 }
 
+/** First `# ` heading outside fenced code blocks (a bash `# comment` inside a fence is not a heading). */
 function firstH1(source: string): string | undefined {
-  return source.match(/^# (.+)$/m)?.[1];
+  return source.replace(/^```[\s\S]*?^```/gm, '').match(/^# (.+)$/m)?.[1];
 }
 
 describe('docs engine sources', () => {
