@@ -39,6 +39,43 @@ test.describe("Flows", () => {
     }
   });
 
+  test("auto layout rearranges the diagram without overlapping steps", async ({
+    page,
+  }) => {
+    const flowsPage = new FlowsListPage(page);
+    await flowsPage.goto();
+    await flowsPage.waitForTableLoaded();
+
+    const rowCount = await flowsPage.getRowCount();
+    test.skip(rowCount === 0, "no existing flow to open");
+
+    await flowsPage.clickEdit(0);
+    const designerPage = new FlowDesignerPage(page);
+    await expect(designerPage.canvas).toBeVisible();
+    await expect(designerPage.nodes.first()).toBeVisible();
+    await expect(designerPage.saveButton).toBeDisabled();
+
+    await designerPage.autoLayout();
+
+    // Positions changed -> flow is dirty -> Save enabled (persists into _metadata.nodePositions).
+    // A flow that was already tidy may not move, so only assert the invariant every layout
+    // must satisfy: no two steps overlap.
+    const boxes = await designerPage.nodeBoxes();
+    const ids = Object.keys(boxes);
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = boxes[ids[i]];
+        const b = boxes[ids[j]];
+        const overlaps =
+          a.x < b.x + b.width &&
+          b.x < a.x + a.width &&
+          a.y < b.y + b.height &&
+          b.y < a.y + a.height;
+        expect(overlaps, `${ids[i]} overlaps ${ids[j]}`).toBe(false);
+      }
+    }
+  });
+
   test("SQL Query step is offered in the resource picker", async ({ page }) => {
     const flowsPage = new FlowsListPage(page);
     await flowsPage.goto();

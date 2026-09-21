@@ -1,4 +1,13 @@
-import { ArrowLeft, Save, Code, CheckCircle, Play, Upload, Sparkles } from 'lucide-react'
+import {
+  ArrowLeft,
+  Save,
+  Code,
+  CheckCircle,
+  Play,
+  Upload,
+  Sparkles,
+  LayoutGrid,
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 
@@ -17,6 +26,7 @@ interface FlowToolbarProps {
   onTest?: () => void
   onPublish?: () => void
   onGenerate?: () => void
+  onAutoLayout?: () => void
 }
 
 const flowTypeLabels: Record<string, string> = {
@@ -42,11 +52,16 @@ export function FlowToolbar({
   onTest,
   onPublish,
   onGenerate,
+  onAutoLayout,
 }: FlowToolbarProps) {
   const navigate = useNavigate()
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-card px-4">
+    <div
+      role="toolbar"
+      aria-label="Flow actions"
+      className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-card px-4"
+    >
       <div className="flex items-center gap-3">
         <button
           onClick={() => navigate('../..', { relative: 'path' })}
@@ -93,6 +108,17 @@ export function FlowToolbar({
           <Code className="mr-1 h-3.5 w-3.5" />
           JSON
         </Button>
+        {onAutoLayout && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onAutoLayout}
+            title="Rearrange steps top-to-bottom and untangle connections"
+          >
+            <LayoutGrid className="mr-1 h-3.5 w-3.5" />
+            Auto layout
+          </Button>
+        )}
         {onTest && (
           <Button variant="outline" size="sm" onClick={onTest}>
             <Play className="mr-1 h-3.5 w-3.5" />
