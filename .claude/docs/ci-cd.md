@@ -271,10 +271,11 @@ public DNS to serve the marketing site" step (right before "Run E2E tests", same
 min and fails the job with `::error::` — not a silent skip — if they never come up, so a
 genuine DNS/ingress outage still fails CI instead of racing straight into a Playwright DNS
 error (PLT-272). The runner is in-cluster, so it resolves through CoreDNS: **both** the
-split-horizon and the public records have to be right, and neither is today — see
-`concerns.md` → "kelta.io apex and www are not resolvable from the cluster". `HTTP 000` there
-is always DNS, never TLS (`curl -k` ignores certificates, and an unrouted host answers 404
-from Traefik's default backend). It runs unconditionally rather than gated on `marketing == 'true'`: the
+split-horizon and the public records have to be right — see `concerns.md` → "kelta.io
+apex/www/downloads SERVFAIL'd from inside the cluster" for the CoreDNS `hosts`/`fallthrough`
+bug that broke split-horizon resolution (fixed by homelab-argo PR #312, re-verified live
+2026-09-22). `HTTP 000` there is always DNS, never TLS (`curl -k` ignores certificates, and
+an unrouted host answers 404 from Traefik's default backend). It runs unconditionally rather than gated on `marketing == 'true'`: the
 marketing Playwright spec itself always runs when `E2E_MARKETING_URL` is set, regardless of
 whether this run rebuilt the marketing image, and `e2e-test` doesn't otherwise depend on the
 `changes` job.
