@@ -200,8 +200,8 @@ use the same value; the kelta-auth one also sets `SERVER_PORT=8081`. (Browsers a
 **Upgrading an existing dev database.** On startup the worker repairs the `default` tenant's
 baseline identity providers (`BaselineIdentityProviderReconciler`). Tenants *you* created before
 the issuer moved to `auth.localhost:8081` still carry `http://kelta-auth:8080` in their internal
-`oidc_provider` row — `make reset-jvm` (or `make reset`) starts clean, or update that row's
-`issuer`/`jwks_uri`.
+`oidc_provider` row — wipe the dev volumes (`make down && docker compose down -v`, then
+`make up-jvm`) to start clean, or update that row's `issuer`/`jwks_uri`.
 
 **Secrets in run configs** — the `.run/*.run.xml` files use `$VAR_NAME$` for
 secrets (`KELTA_ENCRYPTION_KEY`, `JWK_SET`, `ANTHROPIC_API_KEY`). Set them in
