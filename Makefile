@@ -168,7 +168,7 @@ debug:
 	@echo ""
 	@echo "▶  $(SVC) container stopped."
 	@echo "   Launch it from IntelliJ using .run/$(SVC).run.xml"
-	@echo "   (Ensure 127.0.0.1 kelta-auth is in /etc/hosts if needed)"
+	@echo "   (Issuer is http://auth.localhost:8081 — see README → hybrid mode)"
 
 ## ps: show running containers
 ps:

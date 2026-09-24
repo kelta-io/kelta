@@ -193,7 +193,15 @@ everywhere: inside Docker `auth.localhost` is a network alias of the kelta-auth 
 `*.localhost` name to loopback (RFC 6761), reaching the published port 8081. One URL on both
 sides is what lets the browser follow kelta-auth's discovery endpoints *and* the gateway accept
 the tokens it issues (it validates `iss` against this exact value). The `.run/*.run.xml` configs
-use the same value; the kelta-auth one also sets `SERVER_PORT=8081`.
+use the same value; the kelta-auth one also sets `SERVER_PORT=8081`. (Browsers and macOS resolve
+`*.localhost` themselves; a minimal Linux without `nss-myhostname`/systemd-resolved may not — add
+`127.0.0.1 auth.localhost` to `/etc/hosts` there for services you run from the IDE.)
+
+**Upgrading an existing dev database.** On startup the worker repairs the `default` tenant's
+baseline identity providers (`BaselineIdentityProviderReconciler`). Tenants *you* created before
+the issuer moved to `auth.localhost:8081` still carry `http://kelta-auth:8080` in their internal
+`oidc_provider` row — `make reset-jvm` (or `make reset`) starts clean, or update that row's
+`issuer`/`jwks_uri`.
 
 **Secrets in run configs** — the `.run/*.run.xml` files use `$VAR_NAME$` for
 secrets (`KELTA_ENCRYPTION_KEY`, `JWK_SET`, `ANTHROPIC_API_KEY`). Set them in

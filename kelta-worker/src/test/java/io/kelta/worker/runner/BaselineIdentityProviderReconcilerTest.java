@@ -21,7 +21,6 @@ import static io.kelta.worker.runner.BaselineIdentityProviderReconciler.DEFAULT_
 import static io.kelta.worker.runner.BaselineIdentityProviderReconciler.REPAIR_INTERNAL;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -98,6 +97,10 @@ class BaselineIdentityProviderReconcilerTest {
             assertThat(e.getTenantId()).isEqualTo(DEFAULT_TENANT_ID);
             assertThat(e.getPayload().getCollectionName()).isEqualTo("oidc-providers");
         });
+        assertThat(events.getAllValues())
+                .filteredOn(e -> e.getPayload().getRecordId().equals(BASELINE_INTERNAL_PROVIDER_ID))
+                .singleElement()
+                .satisfies(e -> assertThat(e.getPayload().getData()).containsEntry("issuer", LOCAL_ISSUER));
     }
 
     @Test
@@ -107,8 +110,29 @@ class BaselineIdentityProviderReconcilerTest {
 
         assertThat(reconciler(LOCAL_ISSUER).reconcile()).isEmpty();
 
-        verify(jdbc, never()).update(eq(DEACTIVATE_EXTERNAL), anyString(), anyString(), anyString());
+        verify(jdbc, never()).update(eq(DEACTIVATE_EXTERNAL), any(Object[].class));
         verifyNoInteractions(publisher);
+    }
+
+    @Test
+    @DisplayName("repair still succeeds when no event publisher is available")
+    void repairsWithoutPublisher() {
+        when(publisherProvider.getIfAvailable()).thenReturn(null);
+        when(jdbc.update(eq(REPAIR_INTERNAL), any(Object[].class))).thenReturn(1);
+        when(jdbc.update(eq(DEACTIVATE_EXTERNAL), any(Object[].class))).thenReturn(0);
+
+        assertThat(reconciler(LOCAL_ISSUER).reconcile()).containsExactly(BASELINE_INTERNAL_PROVIDER_ID);
+    }
+
+    @Test
+    @DisplayName("a publish failure does not undo or abort the repair")
+    void publishFailureIsSwallowed() {
+        when(jdbc.update(eq(REPAIR_INTERNAL), any(Object[].class))).thenReturn(1);
+        when(jdbc.update(eq(DEACTIVATE_EXTERNAL), any(Object[].class))).thenReturn(1);
+        org.mockito.Mockito.doThrow(new IllegalStateException("nats down")).when(publisher).publish(any());
+
+        assertThat(reconciler(LOCAL_ISSUER).reconcile()).hasSize(3);
+        verify(publisher, times(3)).publish(any());
     }
 
     @Test

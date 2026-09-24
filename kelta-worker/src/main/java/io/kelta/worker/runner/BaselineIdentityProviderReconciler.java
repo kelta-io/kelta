@@ -144,8 +144,17 @@ public class BaselineIdentityProviderReconciler implements ApplicationRunner {
         try {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("id", providerId);
+            List<String> changedFields;
+            if (BASELINE_INTERNAL_PROVIDER_ID.equals(providerId)) {
+                data.put("issuer", configuredIssuer);
+                data.put("jwksUri", configuredIssuer + "/oauth2/jwks");
+                changedFields = List.of("issuer", "jwksUri");
+            } else {
+                data.put("active", false);
+                changedFields = List.of("active");
+            }
             RecordChangedPayload payload = RecordChangedPayload.updated(
-                    COLLECTION, providerId, data, null, List.of("issuer", "jwksUri", "active"));
+                    COLLECTION, providerId, data, null, changedFields);
             PlatformEvent<RecordChangedPayload> event = EventFactory.createRecordEvent(
                     "record.updated", DEFAULT_TENANT_ID, null, payload);
             RecordEventPublisher publisher = recordEventPublisher.getIfAvailable();

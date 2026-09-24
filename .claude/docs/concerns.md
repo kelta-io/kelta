@@ -1085,7 +1085,18 @@ dropping the alias, or pointing any one service at a different issuer. Chromium 
 needs `E2E_BROWSER_HOST_RULES=MAP auth.localhost kelta-auth` (CI sets it). The `default`
 tenant's baseline `oidc_provider` rows (production issuer + two unreachable IdPs) are repaired on
 startup by `BaselineIdentityProviderReconciler` whenever the configured issuer differs from
-production's; `e2e-tests/tests/auth/real-sign-in.spec.ts` is the guard.
+production's; `e2e-tests/tests/auth/real-sign-in.spec.ts` is the guard (opt-in via
+`E2E_REAL_SIGN_IN`; CI also passes `E2E_BROWSER_SECURE_ORIGINS=http://kelta-ui:8080`, because an
+http container origin is not a secure context and the SPA's PKCE needs `crypto.subtle`).
+The cross-site hop `localhost:5173 → auth.localhost:8081` works only because kelta-auth's form
+login uses the servlet container's in-memory `JSESSIONID` (no `Secure`, browser-default
+`SameSite=Lax`): the `spring.session.*` block in its `application.yml` (`store-type: redis`,
+`same-site: strict`) is **inert** — Boot 4 moved Spring Session auto-configuration to the
+`spring-boot-session-data-redis` module, which is not on kelta-auth's classpath. Wiring it up
+with `same-site: strict` would drop the cookie on that hop and break local sign-in again (and it
+means multi-replica kelta-auth has no shared sessions today). The cross-service harness still uses
+`http://kelta-auth:8080` consistently (auth keeps its default port there); the reconciler fires in
+it too, harmlessly.
 
 ### `DynamicCollectionRouter` shadows any `/**` mapping under `/api` (GET only)
 

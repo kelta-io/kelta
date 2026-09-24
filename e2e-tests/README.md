@@ -41,6 +41,8 @@ cp e2e-tests/.env.local.example e2e-tests/.env.local
 | `E2E_AUTH_BASE_URL` | `http://localhost:8081` | Auth |
 | `E2E_AUTH_DIRECT_LOGIN_URL` | `http://localhost:8081` | When set, [helpers/direct-login.ts](helpers/direct-login.ts) skips OIDC and POSTs to `/auth/direct-login` for tokens. Requires `DIRECT_LOGIN_ENABLED=true` on `kelta-auth` (set in [docker-compose.yml](../docker-compose.yml)). |
 | `E2E_BROWSER_HOST_RULES` | *(unset)* | Chromium `--host-resolver-rules`, e.g. `MAP auth.localhost kelta-auth`. Only needed when the browser runs in a container beside the stack (CI): Chromium resolves every `*.localhost` name to its own loopback, so the local issuer `http://auth.localhost:8081` must be pointed at the kelta-auth container. |
+| `E2E_BROWSER_SECURE_ORIGINS` | *(unset)* | Chromium `--unsafely-treat-insecure-origin-as-secure`, e.g. `http://kelta-ui:8080`. The SPA's PKCE needs `crypto.subtle`, which only exists in a secure context; `http://localhost` is one, a container name is not. |
+| `E2E_REAL_SIGN_IN` | *(unset)* | `true` runs `tests/auth/real-sign-in.spec.ts` (real browser sign-in through kelta-auth's form). Needs a password user with no MFA. |
 | `E2E_TENANT_SLUG` | `default` | Seeded by Flyway `V102__seed_default_admin_users.sql` |
 | `E2E_TEST_USERNAME` | `admin` | Seeded by V102 |
 | `E2E_TEST_PASSWORD` | `password` | Seeded by V102 |

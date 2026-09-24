@@ -14,6 +14,10 @@
  *   2. signs in with the e2e admin credentials,
  *   3. asserts the SPA lands on an authenticated page and STAYS there — a redirect
  *      loop that bounces back to /login is the failure this must catch.
+ *
+ * Opt-in via E2E_REAL_SIGN_IN=true (the CI stack sets it). It needs E2E_TEST_USERNAME to be a
+ * kelta-auth password user with no MFA challenge; enable it for the post-deploy run once the
+ * production e2e account is confirmed to be one — that is exactly where #1388 happened.
  */
 import { test, expect } from "@playwright/test";
 import { loginViaInternalForm } from "../../helpers/internal-login";
@@ -23,6 +27,11 @@ const tenantSlug = process.env.E2E_TENANT_SLUG || "default";
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test.describe("Real sign-in", () => {
+  test.skip(
+    process.env.E2E_REAL_SIGN_IN !== "true",
+    "set E2E_REAL_SIGN_IN=true where the e2e user can sign in through kelta-auth's form",
+  );
+
   test("signs in through kelta-auth's form and stays signed in", async ({ page }) => {
     test.setTimeout(120_000);
 
