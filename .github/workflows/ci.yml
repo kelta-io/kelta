@@ -135,7 +135,17 @@ jobs:
 
       - name: Test ${{ matrix.service }}
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
+        env:
+          # Ryuk (Testcontainers' reaper) can't be reached on this runner's shared Docker
+          # daemon, and without this Testcontainers reports "no Docker" — every
+          # @Testcontainers(disabledWithoutDocker = true) suite is then SKIPPED and the job
+          # stays green. Same setting as the harness job below.
+          TESTCONTAINERS_RYUK_DISABLED: "true"
         run: mvn verify -f kelta-${{ matrix.service }}/pom.xml -B
+
+      - name: Assert integration tests ran (not skipped)
+        if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
+        run: scripts/ci/assert-integration-tests-ran.sh kelta-${{ matrix.service }}/target/surefire-reports kelta-${{ matrix.service }}/target/failsafe-reports
 
       - name: Upload test results
         # Artifact upload occasionally hits transient ENOTFOUND on the self-
@@ -208,7 +218,12 @@ jobs:
         run: rm -rf ~/.m2/repository/io/kelta
 
       - name: Test runtime modules
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"   # see the test-java job
         run: mvn test -f kelta-platform/pom.xml -pl runtime/runtime-core,runtime/runtime-events,runtime/runtime-messaging-nats,runtime/runtime-jsonapi,runtime/runtime-module-core,runtime/runtime-module-integration,runtime/runtime-module-schema -am -B
+
+      - name: Assert integration tests ran (not skipped)
+        run: scripts/ci/assert-integration-tests-ran.sh kelta-platform/runtime/*/target/surefire-reports
 
       - name: Upload test results
         # Artifact upload occasionally hits transient ENOTFOUND on the self-

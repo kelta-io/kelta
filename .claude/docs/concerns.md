@@ -1314,6 +1314,18 @@ Regression guard: `TenantAwareDataSourceTest` (runtime-core, beside the class si
 
 ## Test Coverage Gaps
 
+- **FIXED — the RLS proof never ran in CI.** `RowLevelSecurityIntegrationTest` (13 tests: tenant
+  isolation for a role *without* BYPASSRLS, the guarantee behind "RLS enforced in production") is
+  `@Testcontainers(disabledWithoutDocker = true)`, and in the `test-java` job it reported
+  `Tests run: 13, Skipped: 13` on every run — Ryuk could not be reached on the k8s-runner's shared
+  Docker daemon, Testcontainers declared Docker unavailable, and the suite skipped with the job
+  green. The same applied to runtime-core's two storage-adapter ITs and auth/ai's
+  `TenantBindingIntegrationTest`. The harness job already set `TESTCONTAINERS_RYUK_DISABLED=true`;
+  `test-java` and the runtime-modules job now do too, and
+  `scripts/ci/assert-integration-tests-ran.sh` fails the job if any `*IntegrationTest` suite skips
+  every test, so a runner change cannot quietly turn them off again. Known local caveat: Docker
+  Engine 29+ needs `-Dapi.version=1.44` with Testcontainers 1.20.4 (`testing.md`).
+
 - **FIXED (2026-09-15) — nothing validated the workflow files, and a broken one produces
   *silence*, not a red build.** Adding a `secrets` context to an `if:` condition made `ci.yml`
   unparseable; GitHub exposes `secrets` to `with:`, `env:` and `run:` only. The result is worse

@@ -17,6 +17,17 @@ Boots a full mini-stack (Postgres, Redis, NATS, Cerbos, worker, auth, gateway) v
 
 **Standalone `*IT.java`** also run under that profile without the full stack. `CerbosGeneratedPolicyIT` starts only a Cerbos container (sqlite in-memory + admin API, pinned to the production image), pushes the worker's golden generated policies (`kelta-worker/src/test/resources/cerbos/golden/`, kept in sync with `CerbosPolicyGenerator` by `CerbosPolicyGeneratorTest.GoldenFixtureTests`) and asserts an allow/deny matrix — the pattern for "a real PDP must accept and evaluate what we generate", since the KeltaStack Cerbos is allow-all. Run one with `mvn verify -f kelta-test-harness/pom.xml -Pintegration-tests -Dit.test=CerbosGeneratedPolicyIT`.
 
+**Service-module Testcontainers tests** (`*IntegrationTest` in kelta-worker/auth/ai and
+runtime-core — e.g. `RowLevelSecurityIntegrationTest`) run under plain surefire, not the
+harness profile, and are `@Testcontainers(disabledWithoutDocker = true)`: without a usable Docker
+they are **skipped**, not failed. In CI that is caught by `scripts/ci/assert-integration-tests-ran.sh`,
+which fails the job when an `*IntegrationTest` suite skipped every test; CI also sets
+`TESTCONTAINERS_RYUK_DISABLED=true`, since Ryuk is unreachable on the k8s-runner's shared daemon and
+Testcontainers otherwise reports Docker as unavailable. Locally on Docker Engine 29+, Testcontainers
+1.20.4 fails its API handshake (it speaks API 1.32; the engine's minimum is 1.40) and skips too —
+run with `-Dapi.version=1.44` (e.g. `JAVA_TOOL_OPTIONS=-Dapi.version=1.44`) until the dependency is
+bumped.
+
 **When the stack won't start**: `KeltaStack.startService(...)` prints the tail of a service
 container's log before rethrowing. The wait strategy is an HTTP probe on `/actuator/health`,
 so a service that dies during boot is indistinguishable from a slow one — Testcontainers just
