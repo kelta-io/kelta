@@ -12,11 +12,12 @@
       <env name="SPRING_DATA_REDIS_PORT" value="6379" />
       <!--
         CRITICAL: kelta-auth must issue tokens with the same issuer URI that kelta-gateway
-        validates against. When running in the IDE alongside a compose stack, both must use
-        http://kelta-auth:8080. Add to /etc/hosts (one-time):
-            127.0.0.1  kelta-auth
+        validates against — the compose stack's http://auth.localhost:8081. *.localhost
+        resolves to loopback without an /etc/hosts entry (RFC 6761), and kelta-auth listens
+        on 8081 here just as it does in its container.
       -->
-      <env name="KELTA_AUTH_ISSUER_URI" value="http://kelta-auth:8080" />
+      <env name="KELTA_AUTH_ISSUER_URI" value="http://auth.localhost:8081" />
+      <env name="SERVER_PORT" value="8081" />
       <env name="WORKER_SERVICE_URL" value="http://localhost:8083" />
       <!-- Session / CORS -->
       <env name="COOKIE_DOMAIN" value="localhost" />

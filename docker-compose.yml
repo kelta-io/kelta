@@ -14,9 +14,12 @@
 #   seed          runs the one-shot kelta-bootstrap healthcheck/info container
 #
 # Issuer URI note:
-#   KELTA_AUTH_ISSUER_URI=http://kelta-auth:8080 is used everywhere INSIDE
-#   Docker (container DNS). For hybrid IDE debug add to /etc/hosts:
-#     127.0.0.1  kelta-auth
+#   KELTA_AUTH_ISSUER_URI=http://auth.localhost:8081 is the ONE URL for kelta-auth,
+#   from the browser and from every container. Browsers and the macOS/glibc host
+#   resolvers map *.localhost to loopback (RFC 6761) → the published 8081 port;
+#   inside Docker, `auth.localhost` is a network alias of kelta-auth, which listens
+#   on 8081 in the container too. The issuer must be identical on both sides: the
+#   SPA follows its discovery endpoints, and the gateway validates `iss` against it.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -125,7 +128,7 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
       # CRITICAL: issuer URI must match what tokens are issued with inside Docker
-      KELTA_AUTH_ISSUER_URI: http://kelta-auth:8080
+      KELTA_AUTH_ISSUER_URI: http://auth.localhost:8081
       WORKER_SERVICE_URL: http://kelta-worker:8080
       # Session cookies
       COOKIE_DOMAIN: localhost
@@ -134,10 +137,13 @@ services:
       # Enable direct login for bootstrap/e2e (safe because DIRECT_LOGIN_ENABLED
       # defaults to false in production)
       DIRECT_LOGIN_ENABLED: "true"
+      # Listen on 8081 inside the container too, so http://auth.localhost:8081 is
+      # the same URL for the browser (published port) and for containers (alias).
+      SERVER_PORT: "8081"
       LOG_LEVEL: INFO
       SECURITY_LOG_LEVEL: WARN
     ports:
-      - "8081:8080"
+      - "8081:8081"
     depends_on:
       postgres:
         condition: service_healthy
@@ -146,13 +152,15 @@ services:
       kelta-worker:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q UP || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 60s
     networks:
-      - kelta-network
+      kelta-network:
+        aliases:
+          - auth.localhost
 
   kelta-worker:
     build:
@@ -181,7 +189,7 @@ services:
       # NATS
       NATS_URL: nats://nats:4222
       # Auth
-      KELTA_AUTH_ISSUER_URI: http://kelta-auth:8080
+      KELTA_AUTH_ISSUER_URI: http://auth.localhost:8081
       EXTERNAL_BASE_URL: http://localhost:8080
       # Cerbos
       CERBOS_HOST: cerbos
@@ -229,7 +237,7 @@ services:
       # NATS
       NATS_URL: nats://nats:4222
       # CRITICAL: must match kelta-auth's KELTA_AUTH_ISSUER_URI exactly
-      KELTA_AUTH_ISSUER_URI: http://kelta-auth:8080
+      KELTA_AUTH_ISSUER_URI: http://auth.localhost:8081
       WORKER_SERVICE_URL: http://kelta-worker:8080
       AI_SERVICE_URL: http://kelta-ai:8080
       # Cerbos
@@ -355,7 +363,7 @@ services:
     container_name: kelta-bootstrap
     environment:
       GATEWAY_URL: http://kelta-gateway:8080
-      AUTH_URL: http://kelta-auth:8080
+      AUTH_URL: http://kelta-auth:8081
       WORKER_URL: http://kelta-worker:8080
     depends_on:
       kelta-gateway:

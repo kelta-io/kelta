@@ -1067,6 +1067,26 @@ for removal ("inline the current value"). Findings:
 
 ## Fragile Areas
 
+### The local auth issuer must be one URL for the browser and for every container
+
+Locally, `KELTA_AUTH_ISSUER_URI` is `http://auth.localhost:8081` in kelta-auth, the worker and
+the gateway (`docker-compose.yml`, `.run/*.run.xml`). The SPA signs in by fetching
+`<internal provider issuer>/.well-known/openid-configuration` **from the browser** and following
+its endpoints, and kelta-auth builds those endpoints from its configured issuer; the gateway then
+accepts only tokens whose `iss` is exactly that value and fetches `<iss>/oauth2/jwks` **from its
+container**. So the issuer must resolve to kelta-auth on both sides. It was
+`http://kelta-auth:8080` until #1591: container DNS only, and `:8080` on the host is the gateway —
+browser sign-in on a local stack could not work at all, and nothing noticed because CI and e2e
+sign in through kelta-auth's direct-login API. It works now because `auth.localhost` is a network
+alias of the kelta-auth container, kelta-auth listens on 8081 *inside* the container too
+(`SERVER_PORT`), and browsers/OS resolvers map `*.localhost` to loopback (RFC 6761) → the
+published `8081`. Breakers: publishing kelta-auth on a different host port than it listens on,
+dropping the alias, or pointing any one service at a different issuer. Chromium in a container
+needs `E2E_BROWSER_HOST_RULES=MAP auth.localhost kelta-auth` (CI sets it). The `default`
+tenant's baseline `oidc_provider` rows (production issuer + two unreachable IdPs) are repaired on
+startup by `BaselineIdentityProviderReconciler` whenever the configured issuer differs from
+production's; `e2e-tests/tests/auth/real-sign-in.spec.ts` is the guard.
+
 ### `DynamicCollectionRouter` shadows any `/**` mapping under `/api` (GET only)
 
 `runtime-core/.../router/DynamicCollectionRouter` is `@RequestMapping("/api")` and declares

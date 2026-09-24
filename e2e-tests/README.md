@@ -40,6 +40,7 @@ cp e2e-tests/.env.local.example e2e-tests/.env.local
 | `E2E_API_BASE_URL` | `http://localhost:8080` | Gateway |
 | `E2E_AUTH_BASE_URL` | `http://localhost:8081` | Auth |
 | `E2E_AUTH_DIRECT_LOGIN_URL` | `http://localhost:8081` | When set, [helpers/direct-login.ts](helpers/direct-login.ts) skips OIDC and POSTs to `/auth/direct-login` for tokens. Requires `DIRECT_LOGIN_ENABLED=true` on `kelta-auth` (set in [docker-compose.yml](../docker-compose.yml)). |
+| `E2E_BROWSER_HOST_RULES` | *(unset)* | Chromium `--host-resolver-rules`, e.g. `MAP auth.localhost kelta-auth`. Only needed when the browser runs in a container beside the stack (CI): Chromium resolves every `*.localhost` name to its own loopback, so the local issuer `http://auth.localhost:8081` must be pointed at the kelta-auth container. |
 | `E2E_TENANT_SLUG` | `default` | Seeded by Flyway `V102__seed_default_admin_users.sql` |
 | `E2E_TEST_USERNAME` | `admin` | Seeded by V102 |
 | `E2E_TEST_PASSWORD` | `password` | Seeded by V102 |

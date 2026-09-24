@@ -13,10 +13,10 @@
       <!-- NATS -->
       <env name="NATS_URL" value="nats://localhost:4222" />
       <!--
-        See /etc/hosts note in kelta-auth.run.xml — both gateway and worker resolve
+        See the issuer note in kelta-auth.run.xml — both gateway and worker resolve
         kelta-auth tokens against this issuer URI.
       -->
-      <env name="KELTA_AUTH_ISSUER_URI" value="http://kelta-auth:8080" />
+      <env name="KELTA_AUTH_ISSUER_URI" value="http://auth.localhost:8081" />
       <env name="EXTERNAL_BASE_URL" value="http://localhost:8080" />
       <!-- Cerbos (from compose stack) -->
       <env name="CERBOS_HOST" value="localhost" />
