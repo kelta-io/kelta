@@ -83,7 +83,8 @@ known to work. `make up` builds GraalVM native images — what production runs �
 **~24 GB allocated to Docker**; on a default allocation it fails with
 `cannot allocate memory`. See [Native vs JVM images](#native-vs-jvm-images).
 
-1. Open **http://localhost:5173** and sign in with `admin@kelta.local` / `password` (tenant `default`).
+1. Open **http://localhost:5173/default/** and sign in with `admin@kelta.local` / `password`. The
+   `/default/` path is the tenant — the bare `http://localhost:5173` shows a *Tenant Required* page.
 2. Go to **Setup → Data Model → Collections**, click **Create Collection**, fill in
    the wizard (Basics → Fields → Authorization → Review), then click **Create
    Collection** on the Review step.
@@ -109,7 +110,7 @@ Default credentials (seeded by Flyway migrations):
 
 | Field | Value |
 |-------|-------|
-| URL | http://localhost:5173 |
+| URL | http://localhost:5173/default/ |
 | Email | `admin@kelta.local` |
 | Password | `password` (force-change on first login) |
 | Tenant slug | `default` |

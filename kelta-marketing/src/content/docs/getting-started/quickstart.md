@@ -51,7 +51,8 @@ the volumes.
 
 ## Sign in
 
-Open **http://localhost:5173** and sign in with the seeded administrator:
+Open **http://localhost:5173/default/** and sign in with the seeded administrator. The `/default/` path is the
+tenant; the bare `http://localhost:5173` shows a *Tenant Required* page instead:
 
 | Field | Value |
 |---|---|
