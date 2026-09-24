@@ -971,7 +971,7 @@ suite above pre-merge.
 
 > **DB-constraint test-gap guard:** N/A — this slice adds no write path, DDL, or constraint. It is a
 > read/render concern; the on-load fetch is a plain authorized GET. The
-> [guard](../../../projects/-Users-craigklinker-GitHub-emf/memory/feedback_db-constraint-test-gap.md)
+> [guard](../../testing.md#real-db-guard-for-constraint-bearing-writes)
 > applies to constraint-bearing writes, which this is not.
 
 ---

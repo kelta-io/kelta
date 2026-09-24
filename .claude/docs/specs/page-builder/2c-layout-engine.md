@@ -1081,7 +1081,7 @@ delta (`+40px`) → **no** `setSpan` (rounds to 0). Persists only `span` (no px)
 
 **N/A — FE-only, no DB write path.** No new server constraint is exercised (the tree round-trips through the
 existing `config` JSON pass-through unchanged), so the DB-constraint integration guard
-(`feedback_db-constraint-test-gap`) does not apply here.
+([real-DB guard](../../testing.md#real-db-guard-for-constraint-bearing-writes)) does not apply here.
 
 ---
 

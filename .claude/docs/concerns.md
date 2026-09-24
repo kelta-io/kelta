@@ -967,7 +967,7 @@ marker is disabled and every pod seeds as before. Metric: `cerbos.policy.seed.sk
 never matched, so any profile lacking `VIEW_ALL_DATA` (e.g. the seeded **Standard User**) had
 **every record filtered out** of reads and denied on writes — except explicitly record-shared
 rows. The harness runs Cerbos in allow-all mode and e2e runs as admin, so neither caught it (same
-blind spot as the field-permission bug, per `feedback_db-constraint-test-gap`). Fix: the record
+blind spot as the field-permission bug: a permissive test environment hid a real authz gap). Fix: the record
 policy CEL (and its custom-rule CEL) now key on the collection **name** via a `collectionIdToName`
 map; the **collection** policy stays UUID-keyed because the gateway's `checkObjectPermission`
 passes the UUID (`route.getId()`). See `architecture.md` → Cerbos `collectionId` keying.
