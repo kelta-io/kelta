@@ -175,16 +175,19 @@ debugging something native-specific — reachability metadata, `reflect-config.j
 gaps, or build-time initialization (see `.claude/docs/concerns.md`).
 
 Ports, container names, healthchecks and env are identical in both modes — the
-overlay (`docker-compose.jvm.yml`) swaps `build.dockerfile` and points the build at
-public sources. Switching modes recreates the containers but keeps volumes, so your data
-survives.
+overlay (`docker-compose.jvm.yml`) only swaps `build.dockerfile`. Switching modes
+recreates the containers but keeps volumes, so your data survives.
 
-**Where `make up-jvm` downloads from.** Base images come from Docker Hub and Maven
-dependencies from Maven Central. The `Dockerfile.jvm` files default to the project's own
+**Where local builds download from.** Every local build — `make up`, `make up-jvm` and
+`make seed` — pulls base images from Docker Hub and Maven (the distribution and all
+dependencies) from Maven Central. The Dockerfiles themselves default to the project's own
 pull-through caches (`harbor.rzware.com`, `nexus.rzware.com`), which is what CI and
-production builds use; the JVM overlay overrides that with the `BASE_REGISTRY` and
+production builds use; `docker-compose.yml` overrides that with the `BASE_REGISTRY` and
 `MAVEN_MIRROR` build args, so a local build neither needs those hosts to be reachable nor
-downloads the whole dependency tree through them.
+downloads the whole dependency tree through them. CI layers `docker-compose.ci.yml` on top,
+which resets those args back to the defaults. The optional `tools`, `telehealth` and
+`observability` profile images (pgAdmin, Redis Commander, LiveKit, OpenSearch, Jaeger) are
+still pulled through `harbor.rzware.com`, which serves them anonymously.
 
 ### Debugging a service in the IDE (hybrid mode)
 

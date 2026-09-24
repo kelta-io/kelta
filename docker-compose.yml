@@ -19,6 +19,15 @@
 #     127.0.0.1  kelta-auth
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Public sources for local builds. Every Dockerfile defaults BASE_REGISTRY / MAVEN_MIRROR
+# to the homelab Harbor/Nexus caches that CI and production rely on; passing these HERE
+# means `make up` / `make up-jvm` / `make seed` work for anyone without the homelab.
+# docker-compose.ci.yml `!reset`s these args, so CI (which layers it on this file) keeps
+# the homelab defaults, and the deploy workflow never reads compose at all.
+x-public-build-args: &public-build-args
+  BASE_REGISTRY: docker.io/library   # official images straight from Docker Hub
+  MAVEN_MIRROR: central              # no mirror: resolve from Maven Central directly
+
 services:
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -108,6 +117,7 @@ services:
     build:
       context: .
       dockerfile: kelta-auth/Dockerfile
+      args: *public-build-args
     container_name: kelta-auth
     restart: unless-stopped
     env_file: .env
@@ -158,6 +168,7 @@ services:
     build:
       context: .
       dockerfile: kelta-worker/Dockerfile
+      args: *public-build-args
     container_name: kelta-worker
     restart: unless-stopped
     env_file: .env
@@ -220,6 +231,7 @@ services:
     build:
       context: .
       dockerfile: kelta-gateway/Dockerfile
+      args: *public-build-args
     container_name: kelta-gateway
     restart: unless-stopped
     environment:
@@ -290,6 +302,7 @@ services:
       dockerfile: kelta-ui/Dockerfile
       args:
         VITE_API_BASE_URL: http://localhost:8080
+        BASE_REGISTRY: docker.io/library
     container_name: kelta-ui
     restart: unless-stopped
     ports:
@@ -314,6 +327,7 @@ services:
     build:
       context: .
       dockerfile: kelta-ai/Dockerfile
+      args: *public-build-args
     container_name: kelta-ai
     restart: unless-stopped
     env_file: .env
@@ -352,6 +366,8 @@ services:
   kelta-bootstrap:
     build:
       context: docker/bootstrap
+      args:
+        BASE_REGISTRY: docker.io/library
     container_name: kelta-bootstrap
     environment:
       GATEWAY_URL: http://kelta-gateway:8080

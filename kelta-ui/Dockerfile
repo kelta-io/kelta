@@ -1,13 +1,17 @@
 # Multi-stage build for Kelta Admin UI
 # Build context must be the repo root (same as other Dockerfiles)
 
+# Default is the homelab Docker Hub cache (CI and production); local compose passes
+# docker.io/library (docker-compose.yml), and docker-compose.ci.yml overrides it back.
+ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
+
 # =============================================================================
 # Stage 1: Install dependencies and build
 # =============================================================================
 # Node 20 (not 18, which is EOL): vite-plugin-pwa's Workbox needs the Web Crypto
 # API as a process global — Node 18 doesn't expose it, so the service-worker
 # generation step fails with "crypto is not defined".
-FROM harbor.rzware.com/dockerhub-cache/library/node:20-alpine AS builder
+FROM ${BASE_REGISTRY}/node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -58,7 +62,7 @@ RUN npx vite build
 # =============================================================================
 # Stage 2: Runtime with Nginx
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/nginx:1.25-alpine
+FROM ${BASE_REGISTRY}/nginx:1.25-alpine
 
 LABEL org.opencontainers.image.title="Kelta Admin UI"
 LABEL org.opencontainers.image.description="Admin/Builder UI for Kelta Platform"
