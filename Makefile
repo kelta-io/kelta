@@ -1,7 +1,7 @@
 # Kelta Local Development
 # ─────────────────────────────────────────────────────────────────────────────
 # First time:   make setup
-# Every day:    make up
+# Every day:    make up-jvm   (or `make up` for native images — needs ~24 GB for Docker)
 # After setup:  make seed   ← confirms health + prints credentials
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -28,7 +28,8 @@ COMPOSE_JVM_FULL  := docker compose $(JVM_FILES) --profile ai --profile tools
 ## setup: copy .env.example → .env and generate dev RSA key (idempotent)
 setup: copy-env gen-keys
 	@echo ""
-	@echo "✅  Setup complete. Run 'make up' to start the stack."
+	@echo "✅  Setup complete. Run 'make up-jvm' to start the stack"
+	@echo "    ('make up' builds GraalVM native images and needs ~24 GB allocated to Docker)."
 
 ## copy-env: copy .env.example to .env if it doesn't already exist
 copy-env:
@@ -137,7 +138,13 @@ reset: down
 
 ## seed: run the bootstrap container to confirm health + print credentials
 seed:
-	$(COMPOSE) --profile seed run --rm kelta-bootstrap
+	@# --no-deps: kelta-bootstrap's seed.sh polls each service's /actuator/health itself
+	@# (with its own timeout), so the compose depends_on adds nothing — and without this
+	@# flag `run` resolves kelta-gateway from the BASE compose file. After `make up-jvm`
+	@# that is the native Dockerfile, so compose sees config drift and can recreate the
+	@# gateway as a GraalVM build — the ~24 GB native-image OOM, on the Quickstart's last
+	@# step. With --no-deps, seed only checks the stack; it works after either target.
+	$(COMPOSE) --profile seed run --rm --no-deps kelta-bootstrap
 
 # ─── Per-service operations ──────────────────────────────────────────────────
 

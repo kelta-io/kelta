@@ -61,7 +61,7 @@ provided by the internal `kelta-auth` service — no external identity server re
 
 - Java 25 (GraalVM Community 25.0.2; see `.tool-versions`)
 - Maven 3.9+
-- Node.js 18+
+- Node.js 20.19+ (pinned by `kelta-ui/app`'s `engines`; on 18 its test suite cannot start)
 - Docker & Docker Compose
   - `make up` builds GraalVM native images and needs **~24 GB allocated to Docker**.
     With less, use `make up-jvm` — see [Native vs JVM images](#native-vs-jvm-images).
@@ -72,9 +72,16 @@ Clone the repo, start the stack, open the UI, and create your first collection.
 
 ```bash
 make setup   # first time only: copies .env, generates dev signing keys
-make up      # starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
+make up-jvm  # starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
 make seed    # waits for the stack to be healthy, prints login info
 ```
+
+`make up-jvm` builds the Java services as ordinary JVM images, which fit a default Docker
+Desktop memory allocation and build in a few minutes. It is the same image type the
+`quickstart` CI job builds and times on every relevant PR, so this is the path that is
+known to work. `make up` builds GraalVM native images — what production runs — but needs
+**~24 GB allocated to Docker**; on a default allocation it fails with
+`cannot allocate memory`. See [Native vs JVM images](#native-vs-jvm-images).
 
 1. Open **http://localhost:5173** and sign in with `admin@kelta.local` / `password` (tenant `default`).
 2. Go to **Setup → Data Model → Collections**, click **Create Collection**, fill in
@@ -82,9 +89,7 @@ make seed    # waits for the stack to be healthy, prints login info
    Collection** on the Review step.
 
 That's it — a running, runtime-configurable Kelta instance with your first collection.
-First build compiling native images can take a while; see
-[Native vs JVM images](#native-vs-jvm-images) for a faster local build, or
-[Local Development](#local-development) below for ports, debugging, and the full
+See [Local Development](#local-development) below for ports, debugging, and the full
 service list.
 
 ## Local Development
