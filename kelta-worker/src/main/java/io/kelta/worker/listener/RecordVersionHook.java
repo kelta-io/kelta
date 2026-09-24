@@ -68,7 +68,9 @@ public class RecordVersionHook implements BeforeSaveHook {
      * {@code after*}. Writing it in {@code beforeDelete} inverted that order, so a delete and an
      * update of the same record inside two concurrent transactions could deadlock. Hooks run
      * synchronously on the caller's thread (DefaultQueryEngine), and before/after calls
-     * alternate per record, so at most one entry is pending per thread.
+     * alternate per record, so at most one entry is pending per thread. This assumes deletes do
+     * not re-enter on the same thread between the two calls (no hook deletes from inside a
+     * delete today); a cascading-delete hook would need a keyed map instead of clear().
      */
     private final ThreadLocal<Map<String, Map<String, Object>>> pendingDeletes =
             ThreadLocal.withInitial(HashMap::new);

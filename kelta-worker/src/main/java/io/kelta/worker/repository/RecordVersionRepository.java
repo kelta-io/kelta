@@ -16,7 +16,8 @@ import java.util.UUID;
  * only shrank the window, and still dropped versions and logged a Postgres ERROR per
  * collision). So each insert first takes a per-record {@code pg_advisory_xact_lock} inside a
  * transaction: the next writer blocks until the previous one commits, and its INSERT then runs
- * with a fresh READ COMMITTED snapshot that sees the committed MAX. Runs under the request's tenant context, so Postgres RLS scopes
+ * with a fresh READ COMMITTED snapshot that sees the committed MAX. (A caller running this in a
+ * REPEATABLE READ / SERIALIZABLE transaction would read a stale MAX — none does today.) Runs under the request's tenant context, so Postgres RLS scopes
  * every row to the tenant. Follows the hand-written-SQL {@code JdbcTemplate} idiom (see
  * {@link FieldHistoryRepository}) — no JPA.
  */
