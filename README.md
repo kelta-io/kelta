@@ -175,8 +175,16 @@ debugging something native-specific — reachability metadata, `reflect-config.j
 gaps, or build-time initialization (see `.claude/docs/concerns.md`).
 
 Ports, container names, healthchecks and env are identical in both modes — the
-overlay (`docker-compose.jvm.yml`) only swaps `build.dockerfile`. Switching modes
-recreates the containers but keeps volumes, so your data survives.
+overlay (`docker-compose.jvm.yml`) swaps `build.dockerfile` and points the build at
+public sources. Switching modes recreates the containers but keeps volumes, so your data
+survives.
+
+**Where `make up-jvm` downloads from.** Base images come from Docker Hub and Maven
+dependencies from Maven Central. The `Dockerfile.jvm` files default to the project's own
+pull-through caches (`harbor.rzware.com`, `nexus.rzware.com`), which is what CI and
+production builds use; the JVM overlay overrides that with the `BASE_REGISTRY` and
+`MAVEN_MIRROR` build args, so a local build neither needs those hosts to be reachable nor
+downloads the whole dependency tree through them.
 
 ### Debugging a service in the IDE (hybrid mode)
 
