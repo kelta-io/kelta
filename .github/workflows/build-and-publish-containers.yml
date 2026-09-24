@@ -194,7 +194,7 @@ jobs:
         run: |
           if ! command -v mvn &> /dev/null; then
             curl -fsSL https://archive.apache.org/dist/maven/maven-3/${{ env.MAVEN_VERSION }}/binaries/apache-maven-${{ env.MAVEN_VERSION }}-bin.tar.gz | tar xz -C /opt
-            echo "/opt/apache-maven-${{ env.MAVEN_VERSION }}/bin" >> $GITHUB_PATH
+            echo "/opt/apache-maven-${{ env.MAVEN_VERSION }}/bin" >> "$GITHUB_PATH"
           fi
           # Route all Maven traffic through the homelab Nexus proxy so direct
           # mvn calls on the runner share the same mirror as the Docker builds.
@@ -251,7 +251,7 @@ jobs:
         run: |
           if ! command -v mvn &> /dev/null; then
             curl -fsSL https://archive.apache.org/dist/maven/maven-3/${{ env.MAVEN_VERSION }}/binaries/apache-maven-${{ env.MAVEN_VERSION }}-bin.tar.gz | tar xz -C /opt
-            echo "/opt/apache-maven-${{ env.MAVEN_VERSION }}/bin" >> $GITHUB_PATH
+            echo "/opt/apache-maven-${{ env.MAVEN_VERSION }}/bin" >> "$GITHUB_PATH"
           fi
           mkdir -p ~/.m2
           cp ci/maven-settings.xml ~/.m2/settings.xml
@@ -429,12 +429,12 @@ jobs:
       - name: Get short SHA
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
         id: sha
-        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
 
       - name: Determine legacy image name
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
         id: legacy
-        run: echo "image=emf-${{ matrix.service }}" >> $GITHUB_OUTPUT
+        run: echo "image=emf-${{ matrix.service }}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push ${{ matrix.service }}
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
@@ -531,7 +531,7 @@ jobs:
 
       - name: Get short SHA
         id: sha
-        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
 
       - name: Install kustomize
         run: |
@@ -678,17 +678,21 @@ jobs:
         id: k8s
         run: |
           if kubectl -n kelta get deploy kelta-gateway &>/dev/null; then
-            echo "ns=kelta" >> $GITHUB_OUTPUT
-            echo "gateway=kelta-gateway" >> $GITHUB_OUTPUT
-            echo "worker=kelta-worker" >> $GITHUB_OUTPUT
-            echo "ui=kelta-ui" >> $GITHUB_OUTPUT
+            {
+              echo "ns=kelta"
+              echo "gateway=kelta-gateway"
+              echo "worker=kelta-worker"
+              echo "ui=kelta-ui"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "ns=emf" >> $GITHUB_OUTPUT
-            echo "gateway=emf-gateway" >> $GITHUB_OUTPUT
-            echo "worker=emf-worker" >> $GITHUB_OUTPUT
-            echo "ui=emf-ui" >> $GITHUB_OUTPUT
+            {
+              echo "ns=emf"
+              echo "gateway=emf-gateway"
+              echo "worker=emf-worker"
+              echo "ui=emf-ui"
+            } >> "$GITHUB_OUTPUT"
           fi
-          echo "Using namespace: $(grep ns= $GITHUB_OUTPUT | cut -d= -f2)"
+          echo "Using namespace: $(grep ns= "$GITHUB_OUTPUT" | cut -d= -f2)"
 
       - name: Wait for rollout
         run: |
@@ -1137,7 +1141,7 @@ jobs:
           mkdir -p _bug-context
           NS=$(kubectl get ns kelta -o name 2>/dev/null && echo kelta || echo emf)
           for d in gateway worker auth ai ui; do
-            kubectl -n "$NS" logs -l app=${NS}-$d --tail=100 > "_bug-context/${d}.log" 2>/dev/null || true
+            kubectl -n "$NS" logs -l "app=${NS}-${d}" --tail=100 > "_bug-context/${d}.log" 2>/dev/null || true
           done
           ls -la _bug-context
 
