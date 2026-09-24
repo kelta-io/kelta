@@ -97,7 +97,7 @@ make logs SVC=kelta-gateway        # tail one service
 make rebuild SVC=kelta-worker      # rebuild + restart one service (rebuild-jvm for JVM mode)
 make ps                            # container status
 make down                          # stop everything, keep data
-make reset                         # stop, wipe volumes, start clean
+make reset-jvm                     # stop, wipe volumes, start clean (JVM images)
 make help                          # every target
 ```
 

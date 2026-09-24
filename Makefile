@@ -21,7 +21,7 @@ COMPOSE_JVM_FULL  := docker compose $(JVM_FILES) --profile ai --profile tools
 
 .PHONY: setup gen-keys copy-env up up-ai up-full up-telehealth \
         up-jvm up-jvm-ai up-jvm-full rebuild-jvm \
-        down reset seed rebuild logs debug ps help
+        down reset reset-jvm seed rebuild logs debug ps help
 
 # ─── First-time setup ────────────────────────────────────────────────────────
 
@@ -134,6 +134,12 @@ down:
 reset: down
 	$(COMPOSE) --profile ai --profile tools --profile observability down -v
 	$(MAKE) up
+	$(MAKE) seed
+
+## reset-jvm: same as reset, but restarts with JVM images (use this if you run up-jvm)
+reset-jvm: down
+	$(COMPOSE) --profile ai --profile tools --profile observability down -v
+	$(MAKE) up-jvm
 	$(MAKE) seed
 
 ## seed: run the bootstrap container to confirm health + print credentials

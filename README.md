@@ -141,7 +141,8 @@ make up-telehealth   # default stack + LiveKit SFU (video visits, dev keys built
 make rebuild SVC=kelta-worker   # rebuild + restart one service
 make logs SVC=kelta-gateway     # tail logs
 make down            # stop all containers
-make reset           # wipe volumes and restart clean
+make reset           # wipe volumes and restart clean (native images)
+make reset-jvm       # same, restarting with JVM images — use this if you run up-jvm
 
 make gen-vapid       # generate a dev VAPID key pair for browser Web Push
 
