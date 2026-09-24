@@ -163,7 +163,8 @@ public class RecordVersionHook implements BeforeSaveHook {
             versionRepository.recordVersion(tenantId, collectionId, recordId, changeType,
                     toJson(snapshot), toJson(changedFields), changedBy, changeSource(changedBy));
         } catch (RuntimeException e) {
-            log.warn("Failed to record version for {}/{}: {}", collectionId, recordId, e.getMessage());
+            // A lost version is a gap in the History tab that nothing else reports (#1578).
+            log.error("Failed to record version for {}/{}: {}", collectionId, recordId, e.getMessage());
         }
     }
 

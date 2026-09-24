@@ -1,8 +1,8 @@
 package io.kelta.worker.repository;
 
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
@@ -10,20 +10,28 @@ import java.util.UUID;
  * Writes the {@code record_version} log of full-record snapshots for collections with
  * collection-level {@code track_history} enabled.
  *
- * <p>Version numbers are 1-based per record and assigned atomically with a single
- * {@code INSERT ... SELECT COALESCE(MAX(version_number), 0) + 1} statement; the
- * {@code uq_record_version} unique constraint catches the rare concurrent-writer race and
- * the insert is retried. Runs under the request's tenant context, so Postgres RLS scopes
+ * <p>Version numbers are 1-based per record, computed as
+ * {@code COALESCE(MAX(version_number), 0) + 1}. Concurrent writers to the same record would
+ * both read the same MAX and collide on {@code uq_record_version} (#1578 — a retry loop here
+ * only shrank the window, and still dropped versions and logged a Postgres ERROR per
+ * collision). So each insert first takes a per-record {@code pg_advisory_xact_lock} inside a
+ * transaction: the next writer blocks until the previous one commits, and its INSERT then runs
+ * with a fresh READ COMMITTED snapshot that sees the committed MAX. Runs under the request's tenant context, so Postgres RLS scopes
  * every row to the tenant. Follows the hand-written-SQL {@code JdbcTemplate} idiom (see
  * {@link FieldHistoryRepository}) — no JPA.
  */
 @Repository
 public class RecordVersionRepository {
 
-    /** Retries after a {@link DuplicateKeyException} from a concurrent version insert. */
-    private static final int MAX_RETRIES = 2;
+    /**
+     * Serializes version inserts per record until the transaction ends. The key is a 64-bit hash
+     * of tenant/collection/record; a hash collision only makes two unrelated records wait on each
+     * other briefly, never produces a wrong version number.
+     */
+    static final String LOCK_RECORD =
+            "SELECT pg_advisory_xact_lock(hashtextextended(? || ':' || ? || ':' || ?, 0))";
 
-    private static final String INSERT_VERSION = """
+    static final String INSERT_VERSION = """
             INSERT INTO record_version
                 (id, tenant_id, collection_id, record_id, version_number, change_type,
                  snapshot, changed_fields, changed_by, changed_at, change_source)
@@ -43,23 +51,18 @@ public class RecordVersionRepository {
      * Inserts the next version for a record. {@code snapshotJson} and {@code changedFieldsJson}
      * are pre-serialized JSON (an object and an array of field names respectively).
      *
-     * @throws DuplicateKeyException when concurrent writers exhaust the retries
+     * <p>{@code @Transactional} is load-bearing: {@code pg_advisory_xact_lock} is released at
+     * transaction end, so without a surrounding transaction the lock would be dropped before the
+     * INSERT runs. Joins the caller's transaction when there is one.
      */
+    @Transactional
     public void recordVersion(String tenantId, String collectionId, String recordId,
                               String changeType, String snapshotJson, String changedFieldsJson,
                               String changedBy, String changeSource) {
-        DuplicateKeyException last = null;
-        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                jdbc.update(INSERT_VERSION,
-                        UUID.randomUUID().toString(), tenantId, collectionId, recordId,
-                        changeType, snapshotJson, changedFieldsJson, changedBy, changeSource,
-                        tenantId, collectionId, recordId);
-                return;
-            } catch (DuplicateKeyException e) {
-                last = e;
-            }
-        }
-        throw last;
+        jdbc.queryForObject(LOCK_RECORD, Object.class, tenantId, collectionId, recordId);
+        jdbc.update(INSERT_VERSION,
+                UUID.randomUUID().toString(), tenantId, collectionId, recordId,
+                changeType, snapshotJson, changedFieldsJson, changedBy, changeSource,
+                tenantId, collectionId, recordId);
     }
 }
