@@ -11,6 +11,7 @@ import io.kelta.worker.service.CollectionLifecycleManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -58,6 +59,19 @@ public class RecordVersionHook implements BeforeSaveHook {
     private final CollectionLifecycleManager lifecycleManager;
     private final QueryEngine queryEngine;
     private final ObjectMapper objectMapper;
+
+    /**
+     * Snapshot captured in {@link #beforeDelete} and written in {@link #afterDelete}. The
+     * version insert takes a per-record advisory lock ({@code RecordVersionRepository}); writing
+     * it <em>after</em> the delete means every path takes the record's row lock first and the
+     * advisory lock second — the same order as create/update, whose versions are written in
+     * {@code after*}. Writing it in {@code beforeDelete} inverted that order, so a delete and an
+     * update of the same record inside two concurrent transactions could deadlock. Hooks run
+     * synchronously on the caller's thread (DefaultQueryEngine), and before/after calls
+     * alternate per record, so at most one entry is pending per thread.
+     */
+    private final ThreadLocal<Map<String, Map<String, Object>>> pendingDeletes =
+            ThreadLocal.withInitial(HashMap::new);
 
     public RecordVersionHook(RecordVersionRepository versionRepository,
                              CollectionRegistry collectionRegistry,
@@ -121,16 +135,36 @@ public class RecordVersionHook implements BeforeSaveHook {
         if (ctx == null || id == null) {
             return BeforeSaveResult.ok();
         }
+        Map<String, Map<String, Object>> pending = pendingDeletes.get();
+        // A leftover entry means an earlier delete on this thread was vetoed or failed and never
+        // reached afterDelete — drop it rather than let it leak.
+        pending.clear();
         try {
             Map<String, Object> record = queryEngine.getById(ctx.definition, id).orElse(null);
             if (record != null) {
-                write(tenantId, ctx.collectionId, id, "DELETED", record, List.of(),
-                        resolveUser(record));
+                pending.put(pendingKey(collectionName, id), record);
             }
         } catch (RuntimeException e) {
             log.warn("Failed to capture delete version for {}/{}: {}", collectionName, id, e.getMessage());
         }
         return BeforeSaveResult.ok();
+    }
+
+    @Override
+    public void afterDelete(String collectionName, String id, String tenantId) {
+        Map<String, Object> record = pendingDeletes.get().remove(pendingKey(collectionName, id));
+        if (record == null) {
+            return;
+        }
+        Context ctx = context(collectionName);
+        if (ctx == null) {
+            return;
+        }
+        write(tenantId, ctx.collectionId, id, "DELETED", record, List.of(), resolveUser(record));
+    }
+
+    private static String pendingKey(String collectionName, String id) {
+        return collectionName + '\u0000' + id;
     }
 
     /** Resolves the collection when collection-level tracking applies, or null to skip. */
