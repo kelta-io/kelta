@@ -17,7 +17,9 @@ const CI = !!process.env.CI;
 //    http://auth.localhost:8081 must be pointed at the kelta-auth container explicitly.
 //  - E2E_BROWSER_SECURE_ORIGINS, e.g. "http://kelta-ui:8080": an http origin that is not
 //    localhost is not a secure context, so crypto.subtle is undefined and the SPA's PKCE
-//    code_challenge (AuthContext) throws before it can redirect to kelta-auth.
+//    code_challenge (AuthContext) throws before it can redirect to kelta-auth. Only full
+//    Chromium honours this flag (not the default headless shell) — real-sign-in.spec.ts
+//    switches to channel "chromium" when it is set.
 const browserArgs = [
   process.env.E2E_BROWSER_HOST_RULES &&
     `--host-resolver-rules=${process.env.E2E_BROWSER_HOST_RULES}`,

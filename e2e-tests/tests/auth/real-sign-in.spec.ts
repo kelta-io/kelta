@@ -24,7 +24,14 @@ import { loginViaInternalForm } from "../../helpers/internal-login";
 
 const tenantSlug = process.env.E2E_TENANT_SLUG || "default";
 
-test.use({ storageState: { cookies: [], origins: [] } });
+test.use({
+  storageState: { cookies: [], origins: [] },
+  // Playwright's default headless browser (chromium-headless-shell) ignores
+  // --unsafely-treat-insecure-origin-as-secure, so on an http container origin (CI) the SPA
+  // has no crypto.subtle and its PKCE step throws. Full Chromium in new-headless mode honours
+  // the flag — verified in mcr.microsoft.com/playwright:v1.58.2-noble. Only this spec switches.
+  ...(process.env.E2E_BROWSER_SECURE_ORIGINS ? { channel: "chromium" } : {}),
+});
 
 test.describe("Real sign-in", () => {
   test.skip(
