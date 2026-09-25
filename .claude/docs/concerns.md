@@ -1360,6 +1360,28 @@ Regression guard: `TenantAwareDataSourceTest` (runtime-core, beside the class si
 
 ## Test Coverage Gaps
 
+- **FIXED — the RLS proof never ran in CI.** `RowLevelSecurityIntegrationTest` (13 tests: tenant
+  isolation for a role *without* BYPASSRLS, the guarantee behind "RLS enforced in production") is
+  `@Testcontainers(disabledWithoutDocker = true)`, and in the `test-java` job it reported
+  `Tests run: 13, Skipped: 13` on every run — Ryuk could not be reached on the k8s-runner's shared
+  Docker daemon, Testcontainers declared Docker unavailable, and the suite skipped with the job
+  green. The same applied to runtime-core's two storage-adapter ITs and kelta-ai's
+  `TenantBindingIntegrationTest`. Disabling Ryuk alone was not enough on `k8s-runner`: the
+  container starts but its mapped port is "Connection refused" from the job. The harness job,
+  which reaches its containers the same way (`getHost()`/`getMappedPort()`), runs on
+  `k8s-runner-integration`; `test-java` (worker, ai) and the runtime-modules job now run there too, with
+  `TESTCONTAINERS_RYUK_DISABLED=true` like the harness, and
+  `scripts/ci/assert-integration-tests-ran.sh` fails the job if any `*IntegrationTest` suite skips
+  every test, so a runner change cannot quietly turn them off again. Known local caveat: Docker
+  Engine 29+ needs `-Dapi.version=1.44` with Testcontainers 1.20.4 (`testing.md`).
+- **OPEN — kelta-auth and kelta-gateway integration tests never run in CI.** Both poms exclude
+  `**/*IntegrationTest.java` from surefire and run them only through failsafe with `skipITs`
+  flipped by the `integration-tests` profile, which `test-java`'s `mvn verify -f kelta-<svc>/pom.xml`
+  does not activate. That covers auth's `TenantBindingIntegrationTest` (Testcontainers) and
+  gateway's ~14 `*IntegrationTest` classes — not skipped, never attempted, so
+  `assert-integration-tests-ran.sh` finds no report to judge. Fix: run those two with
+  `-Pintegration-tests` (expect some suites to need attention first).
+
 - **FIXED (2026-09-15) — nothing validated the workflow files, and a broken one produces
   *silence*, not a red build.** Adding a `secrets` context to an `if:` condition made `ci.yml`
   unparseable; GitHub exposes `secrets` to `with:`, `env:` and `run:` only. The result is worse
