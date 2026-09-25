@@ -5,7 +5,7 @@
 # collection through the same API a first-time user's browser session hits.
 set -eu
 
-AUTH_URL="${AUTH_URL:-http://kelta-auth:8080}"
+AUTH_URL="${AUTH_URL:-http://kelta-auth:8081}"
 GATEWAY_URL="${GATEWAY_URL:-http://kelta-gateway:8080}"
 TENANT_SLUG="${TENANT_SLUG:-default}"
 

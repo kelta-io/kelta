@@ -624,8 +624,11 @@ jobs:
             -e CI=true \
             -e E2E_BASE_URL=http://kelta-ui:8080 \
             -e E2E_API_BASE_URL=http://kelta-gateway:8080 \
-            -e E2E_AUTH_BASE_URL=http://kelta-auth:8080 \
-            -e E2E_AUTH_DIRECT_LOGIN_URL=http://kelta-auth:8080 \
+            -e E2E_AUTH_BASE_URL=http://kelta-auth:8081 \
+            -e E2E_AUTH_DIRECT_LOGIN_URL=http://kelta-auth:8081 \
+            -e "E2E_BROWSER_HOST_RULES=MAP auth.localhost kelta-auth" \
+            -e E2E_BROWSER_SECURE_ORIGINS=http://kelta-ui:8080 \
+            -e E2E_REAL_SIGN_IN=true \
             -e E2E_TENANT_SLUG=default \
             -e E2E_TEST_USERNAME=admin \
             -e E2E_TEST_PASSWORD=password \

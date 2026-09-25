@@ -42,6 +42,39 @@ describe('buildItemTree', () => {
   })
 })
 
+describe('fetchBootstrapConfig — oidc providers', () => {
+  afterEach(() => {
+    clearBootstrapCache()
+    vi.restoreAllMocks()
+  })
+
+  it('offers only active identity providers as sign-in options', async () => {
+    const provider = (id: string, attributes: Record<string, unknown>) => ({ id, attributes })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: url.includes('/api/oidc-providers')
+              ? [
+                  provider('internal', { name: 'Internal', isInternal: true, active: true }),
+                  provider('dead', { name: 'Deactivated IdP', isInternal: false, active: false }),
+                  provider('legacy', { name: 'No active attribute', isInternal: false }),
+                ]
+              : [],
+          }),
+        } as Response)
+      )
+    )
+
+    const config = (await fetchBootstrapConfig()) as { oidcProviders: Array<{ id: string }> }
+
+    expect(config.oidcProviders.map((p) => p.id)).toEqual(['internal', 'legacy'])
+  })
+})
+
 describe('fetchBootstrapConfig — tenant translations', () => {
   afterEach(() => {
     clearBootstrapCache()

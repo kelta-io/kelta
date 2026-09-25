@@ -36,12 +36,19 @@ public class CookieDomainResolver {
     }
 
     /**
-     * Returns {@code true} when cookies should set {@code Secure}. Localhost
-     * is excluded so developer logins over plain http still work.
+     * Returns {@code true} when cookies should set {@code Secure}. Loopback hosts —
+     * {@code localhost}, any {@code *.localhost} name (RFC 6761; the local stack serves
+     * kelta-auth as {@code auth.localhost}) and {@code 127.0.0.1} — are excluded so
+     * developer logins over plain http still work.
      */
     public boolean secureForRequest(HttpServletRequest request) {
         if (request == null) return true;
-        String h = request.getServerName();
-        return h != null && !"localhost".equalsIgnoreCase(h) && !"127.0.0.1".equals(h);
+        return !isLoopbackHost(request.getServerName());
+    }
+
+    static boolean isLoopbackHost(String host) {
+        if (host == null) return false;
+        String h = host.toLowerCase();
+        return "localhost".equals(h) || h.endsWith(".localhost") || "127.0.0.1".equals(h);
     }
 }

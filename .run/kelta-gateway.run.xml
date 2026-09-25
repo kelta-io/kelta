@@ -11,9 +11,9 @@
       <!--
         CRITICAL: must exactly match KELTA_AUTH_ISSUER_URI in kelta-auth.
         The gateway validates all JWTs against this URI — only kelta-auth-issued
-        tokens are accepted. See /etc/hosts note in kelta-auth.run.xml.
+        tokens are accepted. See the issuer note in kelta-auth.run.xml.
       -->
-      <env name="KELTA_AUTH_ISSUER_URI" value="http://kelta-auth:8080" />
+      <env name="KELTA_AUTH_ISSUER_URI" value="http://auth.localhost:8081" />
       <!-- Route to worker and AI on host ports -->
       <env name="WORKER_SERVICE_URL" value="http://localhost:8083" />
       <env name="AI_SERVICE_URL" value="http://localhost:8084" />

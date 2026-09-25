@@ -9,7 +9,7 @@
 set -euo pipefail
 
 GATEWAY_URL="${GATEWAY_URL:-http://kelta-gateway:8080}"
-AUTH_URL="${AUTH_URL:-http://kelta-auth:8080}"
+AUTH_URL="${AUTH_URL:-http://kelta-auth:8081}"
 WORKER_URL="${WORKER_URL:-http://kelta-worker:8080}"
 MAX_WAIT="${MAX_WAIT:-300}"
 INTERVAL=5

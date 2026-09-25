@@ -104,7 +104,7 @@ EXPOSE 8080
 
 # Native startup is ~50ms — start-period can be much tighter than JVM
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:8080/actuator/health || exit 1
+  CMD curl -f http://localhost:${SERVER_PORT:-8080}/actuator/health || exit 1
 
 # OTEL is configured via OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_SERVICE_NAME env vars;
 # Spring Boot's native opentelemetry starter exports OTLP directly — no Java agent needed.

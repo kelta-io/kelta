@@ -249,7 +249,10 @@ export function fetchBootstrapConfig(): Promise<unknown> {
     .then(([pagesRes, menusRes, providersRes, tenantsRes, translationsRes]) => {
       const pages = unwrapList(pagesRes)
       const menus = unwrapMenusWithItems(menusRes)
-      const oidcProviders = unwrapList(providersRes)
+      // Only active providers are sign-in options. /api/oidc-providers returns every row, so
+      // without this an IdP an admin deactivated stayed on the login page — and a fresh
+      // install's dead baseline IdPs kept the single-internal-provider auto-login off (#1591).
+      const oidcProviders = unwrapList(providersRes).filter((p) => p.active !== false)
       const tenants = unwrapList(tenantsRes)
       const tenantId = tenants.length > 0 ? (tenants[0].id as string) : undefined
       const tenantName = tenants.length > 0 ? (tenants[0].name as string) : undefined
