@@ -69,7 +69,11 @@ jobs:
   test-java:
     name: Test ${{ matrix.service }}
     needs: changes
-    runs-on: k8s-runner
+    # k8s-runner-integration, like the harness job: its Docker publishes container ports where
+    # the job can reach them. On k8s-runner, Testcontainers starts the container but
+    # getHost():getMappedPort() is "Connection refused", so the Testcontainers ITs
+    # (RowLevelSecurityIntegrationTest, …) cannot run there — they used to be skipped instead.
+    runs-on: k8s-runner-integration
     strategy:
       fail-fast: false
       matrix:
@@ -185,7 +189,7 @@ jobs:
   test-runtime:
     name: Test Runtime Modules
     needs: changes
-    runs-on: k8s-runner
+    runs-on: k8s-runner-integration   # Testcontainers ITs — see test-java
     if: needs.changes.outputs.runtime == 'true' || needs.changes.outputs.workflows == 'true'
     steps:
       - name: Checkout code

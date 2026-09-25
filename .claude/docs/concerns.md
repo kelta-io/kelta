@@ -1320,8 +1320,11 @@ Regression guard: `TenantAwareDataSourceTest` (runtime-core, beside the class si
   `Tests run: 13, Skipped: 13` on every run — Ryuk could not be reached on the k8s-runner's shared
   Docker daemon, Testcontainers declared Docker unavailable, and the suite skipped with the job
   green. The same applied to runtime-core's two storage-adapter ITs and kelta-ai's
-  `TenantBindingIntegrationTest`. The harness job already set `TESTCONTAINERS_RYUK_DISABLED=true`;
-  `test-java` and the runtime-modules job now do too, and
+  `TenantBindingIntegrationTest`. Disabling Ryuk alone was not enough on `k8s-runner`: the
+  container starts but its mapped port is "Connection refused" from the job. The harness job,
+  which reaches its containers the same way (`getHost()`/`getMappedPort()`), runs on
+  `k8s-runner-integration`; `test-java` and the runtime-modules job now run there too, with
+  `TESTCONTAINERS_RYUK_DISABLED=true` like the harness, and
   `scripts/ci/assert-integration-tests-ran.sh` fails the job if any `*IntegrationTest` suite skips
   every test, so a runner change cannot quietly turn them off again. Known local caveat: Docker
   Engine 29+ needs `-Dapi.version=1.44` with Testcontainers 1.20.4 (`testing.md`).
