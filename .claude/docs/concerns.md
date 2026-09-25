@@ -1151,6 +1151,20 @@ reintroduces the starvation bug.
 
 ## Dependency Risks
 
+- **Local builds used to depend on the homelab; CI and production still do, by design.**
+  `ci/maven-settings.xml` (mirror of Central on `nexus.rzware.com`) was `COPY`'d into every
+  Dockerfile, and base images came from `harbor.rzware.com/dockerhub-cache`, so an outside
+  contributor's `make up-jvm` resolved its whole Maven tree through the homelab over the WAN —
+  measured at 4.6–46 kB/s, most of a 14-minute first build — and could not build at all if the
+  homelab was unreachable. The four `Dockerfile.jvm` files now take `BASE_REGISTRY` and
+  `MAVEN_MIRROR` build args whose **defaults are the homelab values**, so every build that
+  passes no args (the deploy workflow, `docker-compose.ci.yml` for e2e/quickstart) is unchanged;
+  only `docker-compose.jvm.yml` overrides them to Docker Hub + Maven Central. **Still
+  homelab-bound:** the native `Dockerfile`s (`make up`, production images) and
+  `docker/bootstrap/Dockerfile` (`make seed`) — the native path is the production-parity one and
+  needs ~24 GB anyway, and the bootstrap image is a small Alpine pull. Worth doing the same for
+  them before relying on public contributors building native.
+
 - **`kelta-marketing` only installs because of an `overrides` pin.** `@astrojs/tailwind@6`
   declares `peer astro ^3||^4||^5` while the site runs Astro 6, so a plain `npm ci` fails
   ERESOLVE — which is why the image had never been built at all before KLT-268.

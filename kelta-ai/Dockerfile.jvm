@@ -4,12 +4,23 @@
 # =============================================================================
 # Stage 1: Build runtime-platform dependencies
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/maven:3.9-eclipse-temurin-25 AS runtime-builder
+# Base-image registry and Maven mirror are build args. The DEFAULTS are the homelab
+# pull-through caches that CI and production builds use (LAN speed, and no Docker Hub /
+# Maven Central rate limits when several images build in parallel) — builds that pass no
+# args behave exactly as before. Local `make up-jvm` overrides both to public sources
+# (docker-compose.jvm.yml), so an outside contributor's build neither depends on the
+# homelab being reachable nor downloads the dependency tree through it over the WAN.
+ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
+
+FROM ${BASE_REGISTRY}/maven:3.9-eclipse-temurin-25 AS runtime-builder
 
 WORKDIR /kelta-platform
 
 # Route Maven Central through Google's GCS mirror to dodge 429 rate limits.
-COPY ci/maven-settings.xml /root/.m2/settings.xml
+ARG MAVEN_MIRROR=nexus
+COPY ci/maven-settings.xml /tmp/maven-settings.xml
+RUN mkdir -p /root/.m2 && \
+    if [ "$MAVEN_MIRROR" = "nexus" ]; then cp /tmp/maven-settings.xml /root/.m2/settings.xml; fi
 
 COPY kelta-platform/pom.xml ./
 COPY kelta-platform/runtime/pom.xml ./runtime/
@@ -40,12 +51,15 @@ RUN mvn clean install -DskipTests -B \
 # =============================================================================
 # Stage 2: Build the service jar
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/maven:3.9-eclipse-temurin-25 AS builder
+FROM ${BASE_REGISTRY}/maven:3.9-eclipse-temurin-25 AS builder
 
 WORKDIR /build
 
 # Route Maven Central through Google's GCS mirror to dodge 429 rate limits.
-COPY ci/maven-settings.xml /root/.m2/settings.xml
+ARG MAVEN_MIRROR=nexus
+COPY ci/maven-settings.xml /tmp/maven-settings.xml
+RUN mkdir -p /root/.m2 && \
+    if [ "$MAVEN_MIRROR" = "nexus" ]; then cp /tmp/maven-settings.xml /root/.m2/settings.xml; fi
 
 COPY --from=runtime-builder /root/.m2/repository/io/kelta /root/.m2/repository/io/kelta
 
@@ -59,7 +73,7 @@ RUN mvn clean package -DskipTests -B && \
 # =============================================================================
 # Stage 3: Runtime
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/eclipse-temurin:25-jre-alpine
+FROM ${BASE_REGISTRY}/eclipse-temurin:25-jre-alpine
 
 WORKDIR /app
 
