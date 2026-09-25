@@ -19,7 +19,13 @@ for dir in "$@"; do
   for report in "$dir"/TEST-*IntegrationTest.xml; do
     [ -f "$report" ] || continue
     found=$((found + 1))
-    header=$(grep -m1 -o '<testsuite [^>]*>' "$report")
+    header=$(grep -m1 -o '<testsuite [^>]*>' "$report" || true)
+    if [ -z "$header" ]; then
+      # A truncated/empty report (e.g. a crashed fork) — say so instead of aborting silently.
+      echo "::error file=$report::$(basename "$report") has no <testsuite> element — truncated report?"
+      failed=$((failed + 1))
+      continue
+    fi
     tests=$(sed -n 's/.* tests="\([0-9]*\)".*/\1/p' <<<"$header")
     skipped=$(sed -n 's/.* skipped="\([0-9]*\)".*/\1/p' <<<"$header")
     if [ "${tests:-0}" -gt 0 ] && [ "${skipped:-0}" -eq "${tests:-0}" ]; then
@@ -31,5 +37,5 @@ for dir in "$@"; do
   done
 done
 
-echo "Checked ${found} integration test report(s); ${failed} fully skipped."
+echo "Checked ${found} integration test report(s); ${failed} fully skipped or unreadable."
 [ "$failed" -eq 0 ]

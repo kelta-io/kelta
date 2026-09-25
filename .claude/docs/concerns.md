@@ -1319,12 +1319,19 @@ Regression guard: `TenantAwareDataSourceTest` (runtime-core, beside the class si
   `@Testcontainers(disabledWithoutDocker = true)`, and in the `test-java` job it reported
   `Tests run: 13, Skipped: 13` on every run — Ryuk could not be reached on the k8s-runner's shared
   Docker daemon, Testcontainers declared Docker unavailable, and the suite skipped with the job
-  green. The same applied to runtime-core's two storage-adapter ITs and auth/ai's
+  green. The same applied to runtime-core's two storage-adapter ITs and kelta-ai's
   `TenantBindingIntegrationTest`. The harness job already set `TESTCONTAINERS_RYUK_DISABLED=true`;
   `test-java` and the runtime-modules job now do too, and
   `scripts/ci/assert-integration-tests-ran.sh` fails the job if any `*IntegrationTest` suite skips
   every test, so a runner change cannot quietly turn them off again. Known local caveat: Docker
   Engine 29+ needs `-Dapi.version=1.44` with Testcontainers 1.20.4 (`testing.md`).
+- **OPEN — kelta-auth and kelta-gateway integration tests never run in CI.** Both poms exclude
+  `**/*IntegrationTest.java` from surefire and run them only through failsafe with `skipITs`
+  flipped by the `integration-tests` profile, which `test-java`'s `mvn verify -f kelta-<svc>/pom.xml`
+  does not activate. That covers auth's `TenantBindingIntegrationTest` (Testcontainers) and
+  gateway's ~14 `*IntegrationTest` classes — not skipped, never attempted, so
+  `assert-integration-tests-ran.sh` finds no report to judge. Fix: run those two with
+  `-Pintegration-tests` (expect some suites to need attention first).
 
 - **FIXED (2026-09-15) — nothing validated the workflow files, and a broken one produces
   *silence*, not a red build.** Adding a `secrets` context to an `if:` condition made `ci.yml`
