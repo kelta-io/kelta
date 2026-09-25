@@ -7,7 +7,7 @@
 - **AssertJ** fluent assertions
 - **Mockito** 5.21.0
 - **jqwik** 1.8.2 — property-based testing
-- **Testcontainers** 1.21.3 in `kelta-test-harness` (1.20.4 elsewhere via `kelta-platform`) — Docker-based integration tests. 1.21.x is required on hosts running Docker Engine 29+ (min API 1.44; older docker-java pings `/v1.32` and gets a 400 → "Could not find a valid Docker environment").
+- **Testcontainers** 1.21.4 everywhere (`kelta-platform`, `kelta-{worker,auth,ai}`, `kelta-test-harness`) — Docker-based integration tests. **1.21.4 specifically** is required on hosts running Docker Engine 29+ (min API 1.44): earlier versions ping `/v1.32`, get a 400, and report "Could not find a valid Docker environment" — which `@Testcontainers(disabledWithoutDocker = true)` turns into a silent skip. The fix is Testcontainers' own API-version negotiation (testcontainers-java #11346, first released in 1.21.4), not a docker-java bump. Spring Boot 4.0.5's BOM would pull Testcontainers 2.0.x; each module pins 1.21.x on purpose, because 2.0 renames the modules (`postgresql` → `testcontainers-postgresql`) and moves packages — a migration of its own.
 - **MockWebServer** — HTTP service mocks
 - **Awaitility** — async assertions
 
