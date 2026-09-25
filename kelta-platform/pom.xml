@@ -29,7 +29,7 @@
         <mockito.version>5.21.0</mockito.version>
         <byte-buddy.version>1.17.6</byte-buddy.version>
         <jqwik.version>1.8.2</jqwik.version>
-        <testcontainers.version>1.20.4</testcontainers.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
 
     <dependencyManagement>

@@ -34,7 +34,7 @@
         <!-- 1.21.x bundles docker-java 3.5+, required for Docker Engine 29 (min API 1.44 —
              older clients get 400 on their /v1.32 ping and Testcontainers reports
              "Could not find a valid Docker environment"). -->
-        <testcontainers.version>1.21.3</testcontainers.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
         <skipITs>true</skipITs>
         <!-- Maven resource filtering injects these into harness.properties -->
         <harness.basedir>${project.basedir}</harness.basedir>

@@ -21,7 +21,7 @@
     <properties>
         <java.version>25</java.version>
         <skipITs>true</skipITs>
-        <testcontainers.version>1.20.4</testcontainers.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
 
     <dependencyManagement>
