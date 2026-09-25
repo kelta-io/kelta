@@ -163,7 +163,7 @@ visual system.
 | Search/Audit | PostgreSQL (`tsvector` full-text, `pgvector` semantic, audit tables) | — | `integrations.md` |
 | AI | `anthropic-java` SDK | 2.18.0 (model via `AI_DEFAULT_MODEL`) | `kelta-ai/pom.xml`, `application.yml` |
 | Frontend | React | 19.2 | `kelta-ui/app/package.json` |
-| Frontend build | Vite / Vitest | web 5.1/1.3, ui 7.2/4.0 | package.json (npm, Node 18 in CI) |
+| Frontend build | Vite / Vitest | web 5.1/1.3, ui 7.2/4.0 | package.json (npm, Node 20 in CI — `kelta-ui/app` `engines` requires ≥ 20.19) |
 | E2E | Playwright | 1.50 | `e2e-tests/package.json` |
 | CLI binaries | Bun (compile-only) | 1.2.19 (pinned in `kelta-cli-downloads/Dockerfile`) | `kelta-web/scripts/build-binaries.mjs` |
 | Migrations | Flyway | baseline **V1__baseline** (#1189 flatten); check the migration directory for the current head before adding one (deployed history keeps pre-flatten numbering) | `kelta-worker/.../db/migration/` |

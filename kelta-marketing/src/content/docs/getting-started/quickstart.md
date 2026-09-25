@@ -12,9 +12,9 @@ evaluate Kelta or develop against it. For production, see [Kubernetes deployment
 
 - Docker and Docker Compose (Docker Desktop or the Docker Engine plugin).
 - `make` and `git`.
-- **Memory.** The default build produces GraalVM native images for the three Java services and builds them
-  concurrently, which needs roughly **24 GB allocated to Docker**. If you have less, use the JVM images
-  (`make up-jvm`) — same behaviour, faster build, slower startup.
+- **Memory.** A default Docker Desktop allocation is enough — the commands below build JVM images. The
+  GraalVM native images production runs need roughly **24 GB allocated to Docker**; see
+  [Native images](#native-images) if you want them.
 
 ## Start the stack
 
@@ -22,7 +22,7 @@ evaluate Kelta or develop against it. For production, see [Kubernetes deployment
 git clone https://github.com/kelta-io/kelta.git
 cd kelta
 make setup   # first time only: copies .env and generates dev signing/encryption keys
-make up      # postgres, redis, nats, cerbos, auth, worker, gateway, ui
+make up-jvm  # postgres, redis, nats, cerbos, auth, worker, gateway, ui
 make seed    # waits for the stack to be healthy, then prints login details
 ```
 
@@ -30,12 +30,15 @@ make seed    # waits for the stack to be healthy, then prints login details
 for JWT signing (`JWK_SET`) and an AES-256 key for envelope encryption (`KELTA_ENCRYPTION_KEY`). Services that need a
 signing key fail to start without one rather than falling back to a shared value.
 
-If the native build dies with `cannot allocate memory`, that is GraalVM native-image running out of heap, not a
-code error:
+`make up-jvm` builds the same JVM images the `quickstart` CI job builds and times on every relevant change, so
+it is the path known to work on a laptop.
 
-```bash
-make up-jvm   # JVM images: fits a default Docker allocation, ~2-3 min per service
-```
+### Native images
+
+`make up` builds GraalVM native images instead — what production runs. The three Java services build
+concurrently and each sizes its heap to most of the memory Docker reports, so it needs roughly 24 GB allocated to
+Docker; with less, it fails with `cannot allocate memory`, which is native-image running out of heap rather than a
+code error. Use it when you need production parity, for example when debugging native reflection configuration.
 
 | | `make up` (native) | `make up-jvm` |
 |---|---|---|
@@ -48,7 +51,8 @@ the volumes.
 
 ## Sign in
 
-Open **http://localhost:5173** and sign in with the seeded administrator:
+Open **http://localhost:5173/default/** and sign in with the seeded administrator. The `/default/` path is the
+tenant; the bare `http://localhost:5173` shows a *Tenant Required* page instead:
 
 | Field | Value |
 |---|---|
@@ -93,7 +97,7 @@ make logs SVC=kelta-gateway        # tail one service
 make rebuild SVC=kelta-worker      # rebuild + restart one service (rebuild-jvm for JVM mode)
 make ps                            # container status
 make down                          # stop everything, keep data
-make reset                         # stop, wipe volumes, start clean
+make reset-jvm                     # stop, wipe volumes, start clean (JVM images)
 make help                          # every target
 ```
 

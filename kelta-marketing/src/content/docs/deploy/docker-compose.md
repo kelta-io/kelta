@@ -16,7 +16,7 @@ Quick commands are on the [quickstart](/docs/getting-started/quickstart/).
 | `docker-compose.yml` | every service and backing store, healthchecks, dependencies |
 | `docker-compose.jvm.yml` | overlay that swaps the three native Dockerfiles for `Dockerfile.jvm` |
 | `.env` (from `.env.example`) | secrets and toggles |
-| `Makefile` | `setup`, `gen-keys`, `gen-vapid`, `up`, `up-jvm`, `seed`, `logs`, `rebuild`, `down`, `reset` |
+| `Makefile` | `setup`, `gen-keys`, `gen-vapid`, `up`, `up-jvm`, `seed`, `logs`, `rebuild`, `down`, `reset`, `reset-jvm` |
 
 ## Image variants
 
@@ -56,8 +56,8 @@ Web Push key pair. Services that need a signing key refuse to start without one.
 
 ## Persistence
 
-Named volumes: `postgres_data`, `redis_data`, `nats_data`, `geoip-data`, `opensearch_data`. `make reset` wipes
-them. Back up `postgres_data` (or `pg_dump`) — see [Data retention and backups](/docs/platform/data-retention/).
+Named volumes: `postgres_data`, `redis_data`, `nats_data`, `geoip-data`, `opensearch_data`. `make reset` (or `make reset-jvm`)
+wipes them. Back up `postgres_data` (or `pg_dump`) — see [Data retention and backups](/docs/platform/data-retention/).
 
 ## Development-only settings
 
