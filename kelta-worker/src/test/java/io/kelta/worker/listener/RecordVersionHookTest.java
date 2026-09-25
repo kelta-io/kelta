@@ -28,6 +28,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -131,7 +132,7 @@ class RecordVersionHookTest {
     }
 
     @Test
-    @DisplayName("delete re-reads the record and writes a DELETED version with empty changed fields")
+    @DisplayName("delete snapshots the record before, and writes the DELETED version only after, the delete")
     void deleteWritesFinalSnapshot() {
         CollectionDefinition def = trackedCollection();
         when(queryEngine.getById(def, "rec-1")).thenReturn(Optional.of(new HashMap<>(Map.of(
@@ -140,11 +141,43 @@ class RecordVersionHookTest {
         var result = hook.beforeDelete("orders", "rec-1", "tenant-1");
 
         assertThat(result.isSuccess()).isTrue();
+        // Nothing written yet: the version (and its advisory lock) must come after the row lock
+        // the delete takes, the same order as create/update — see RecordVersionHook#pendingDeletes.
+        verify(versionRepository, never()).recordVersion(any(), any(), any(), any(), any(), any(), any(), any());
+
+        hook.afterDelete("orders", "rec-1", "tenant-1");
+
         CapturedVersion version = captureVersion();
         assertThat(version.changeType()).isEqualTo("DELETED");
         assertThat(version.changedFieldsJson()).isEqualTo("[]");
         assertThat(version.snapshotJson()).contains("\"status\":\"DONE\"");
         assertThat(version.changedBy()).isEqualTo("user-3");
+    }
+
+    @Test
+    @DisplayName("a vetoed or failed delete (no afterDelete) leaves nothing pending for the next one")
+    void abandonedDeleteIsDropped() {
+        CollectionDefinition def = trackedCollection();
+        when(queryEngine.getById(def, "rec-1")).thenReturn(Optional.of(new HashMap<>(Map.of("id", "rec-1"))));
+        when(queryEngine.getById(def, "rec-2")).thenReturn(Optional.of(new HashMap<>(Map.of("id", "rec-2"))));
+
+        hook.beforeDelete("orders", "rec-1", "tenant-1");   // rec-1's delete never completes
+        hook.beforeDelete("orders", "rec-2", "tenant-1");
+        hook.afterDelete("orders", "rec-2", "tenant-1");
+        hook.afterDelete("orders", "rec-1", "tenant-1");    // stray: must not write a version
+
+        verify(versionRepository, times(1)).recordVersion(any(), any(), eq("rec-2"), eq("DELETED"),
+                any(), any(), any(), any());
+        verify(versionRepository, never()).recordVersion(any(), any(), eq("rec-1"), any(),
+                any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("afterDelete without a captured snapshot writes nothing")
+    void afterDeleteWithoutSnapshot() {
+        hook.afterDelete("orders", "rec-9", "tenant-1");
+
+        verify(versionRepository, never()).recordVersion(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
