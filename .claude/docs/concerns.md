@@ -1085,7 +1085,8 @@ dropping the alias, or pointing any one service at a different issuer. Chromium 
 needs `E2E_BROWSER_HOST_RULES=MAP auth.localhost kelta-auth` (CI sets it). The `default`
 tenant's baseline `oidc_provider` rows (production issuer + two unreachable IdPs) are repaired on
 startup by `BaselineIdentityProviderReconciler` whenever the configured issuer differs from
-production's; `e2e-tests/tests/auth/real-sign-in.spec.ts` is the guard (opt-in via
+production's (the SPA's `bootstrapCache` hides `active: false` providers, which is what makes the
+deactivation visible on the login page); `e2e-tests/tests/auth/real-sign-in.spec.ts` is the guard (opt-in via
 `E2E_REAL_SIGN_IN`; CI also passes `E2E_BROWSER_SECURE_ORIGINS=http://kelta-ui:8080`, because an
 http container origin is not a secure context and the SPA's PKCE needs `crypto.subtle`).
 The cross-site hop `localhost:5173 → auth.localhost:8081` works only because kelta-auth's form
