@@ -31,10 +31,11 @@
 
     <properties>
         <java.version>25</java.version>
-        <!-- 1.21.x bundles docker-java 3.5+, required for Docker Engine 29 (min API 1.44 —
-             older clients get 400 on their /v1.32 ping and Testcontainers reports
-             "Could not find a valid Docker environment"). -->
-        <testcontainers.version>1.21.3</testcontainers.version>
+        <!-- 1.21.4 is required for Docker Engine 29 (min API 1.44): earlier versions ping
+             /v1.32, get a 400, and report "Could not find a valid Docker environment". The fix
+             is Testcontainers' API-version negotiation (testcontainers-java #11346, first in
+             1.21.4). Pinned below Spring Boot's managed 2.0.x on purpose — see testing.md. -->
+        <testcontainers.version>1.21.4</testcontainers.version>
         <skipITs>true</skipITs>
         <!-- Maven resource filtering injects these into harness.properties -->
         <harness.basedir>${project.basedir}</harness.basedir>
