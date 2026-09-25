@@ -469,7 +469,7 @@ for this pass-through slice.
 `gatewayClientWithToken(token)`, `waitForStatus(...)` before the first call). The mocked worker unit
 tests prove the *parsing* matrix but run with no DB — they cannot catch a worker-side `config` JSON
 serialization drop on the round-trip through real Postgres. Per the project's
-[DB-constraint / serialization test-gap convention](../../../projects/-Users-craigklinker-GitHub-emf/memory/feedback_db-constraint-test-gap.md)
+[DB-constraint / serialization test-gap convention](../../testing.md#real-db-guard-for-constraint-bearing-writes)
 (mocked-QueryEngine tests can't see persistence drift), this slice adds **exactly one** real-DB
 round-trip:
 

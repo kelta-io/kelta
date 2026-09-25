@@ -484,7 +484,7 @@ controller responds **404** (reuses the existing `notFound` assertion — no new
 ### 6.3 kelta-test-harness integration test — `PageRenderAuthzScenarioTest` (required)
 
 **Add a real-DB scenario.** Per the
-[DB-constraint test-gap guard](../../../projects/-Users-craigklinker-GitHub-emf/memory/feedback_db-constraint-test-gap.md),
+[DB-constraint test-gap guard](../../testing.md#real-db-guard-for-constraint-bearing-writes),
 the convention extends to any path whose correctness depends on a **real-Postgres + RLS** behavior that
 mocked worker tests cannot observe. 1h's gate is exactly that: it reads `profile_system_permission`
 under RLS (`app.current_tenant_id`) and **gates page visibility** (404-not-403). Mocked-permission

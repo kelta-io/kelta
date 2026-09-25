@@ -71,6 +71,27 @@ class GatewayMetricsTest {
 - `Mockito.inOrder(mockA, mockB)` when the bug is about *ordering* of side-effects across collaborators (e.g. "reconcile schema must run before FK constraint statements"). Plain `verify()` checks only that calls happened, not the sequence — `InOrder` is what catches re-ordering regressions. See `PhysicalTableStorageAdapterSystemCollectionTest.initializeCollection_reconcilesSchema_beforeForeignKeyStatements` for an example.
 - `doThrow(new DuplicateKeyException(...)).when(mockJdbc).execute(argThat(sql -> sql.contains("CREATE TABLE")))` to simulate PostgreSQL-only failure modes (e.g. the `pg_type_typname_nsp_index` race in concurrent `CREATE TABLE IF NOT EXISTS`) without spinning up Testcontainers. H2 won't reproduce these, so a mocked `JdbcTemplate` that throws the translated Spring exception on a matching statement is the cheapest regression guard. See `PhysicalTableStorageAdapterSystemCollectionTest.initializeCollection_swallowsDuplicateKey_fromConcurrentCreateRace`.
 
+### Real-DB guard for constraint-bearing writes
+
+A mocked `JdbcTemplate` / `QueryEngine` proves what the code *sends*, never what Postgres
+*accepts* or *returns*. Any path whose correctness depends on the real database — a `CHECK` or
+FK constraint, JSON/`jsonb` serialization surviving a round-trip, or an RLS policy — needs at
+least one `*ScenarioTest` in `kelta-test-harness` that writes through it and reads the row back.
+Mock-level assertions stay for the logic around it; they are not the regression guard for the
+database contract.
+
+- **Why:** `CredentialResolverImpl` wrote an audit verb that `chk_audit_action` rejected on every
+  insert; the unit test asserted the verb was passed to a mocked `JdbcTemplate`, and the write
+  failure was swallowed by design, so no credential access was audited on any tenant until a log
+  read found it (`concerns.md` → "Mockito audit tests passed against a table that rejected every
+  row"; guard: `SetupAuditActionScenarioTest`).
+- **When it applies:** new or changed writes into a constrained table, new DDL or constraints,
+  `config`/`jsonb` fields whose shape must survive persistence, and authorization that depends on
+  RLS or a DB-side lookup. A read/render-only change with no write, DDL or constraint does not
+  need one — say so explicitly in the spec rather than silently skipping it.
+- **Remember** the harness's direct DB connection bypasses RLS; use `openAppDbConnection()` for RLS
+  assertions (see *Direct DB assertions* above).
+
 ## TypeScript Testing
 
 ### Frameworks

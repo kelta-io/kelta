@@ -140,7 +140,7 @@ owner-stamped, so a member can only ever write their own rows.
   invisible to tenant B (RLS, verified via a non-superuser probe role); a row older than the
   cutoff is pruned by the verbatim retention DELETE and a fresh row survives, with an idempotent
   second pass. Mockito worker tests cannot cover RLS or the retention DELETE — this is the
-  required real-DB guard (`feedback_db-constraint-test-gap`). The read-only-ness of the generic
+  required real-DB guard ([`testing.md`](../../testing.md#real-db-guard-for-constraint-bearing-writes)). The read-only-ness of the generic
   route is platform-wide behavior of `readOnlySystemBuilder` collections, already covered
   generically — not re-proven per collection here.
 
