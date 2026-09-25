@@ -1156,14 +1156,23 @@ reintroduces the starvation bug.
   Dockerfile, and base images came from `harbor.rzware.com/dockerhub-cache`, so an outside
   contributor's `make up-jvm` resolved its whole Maven tree through the homelab over the WAN —
   measured at 4.6–46 kB/s, most of a 14-minute first build — and could not build at all if the
-  homelab was unreachable. The four `Dockerfile.jvm` files now take `BASE_REGISTRY` and
-  `MAVEN_MIRROR` build args whose **defaults are the homelab values**, so every build that
-  passes no args (the deploy workflow, `docker-compose.ci.yml` for e2e/quickstart) is unchanged;
-  only `docker-compose.jvm.yml` overrides them to Docker Hub + Maven Central. **Still
-  homelab-bound:** the native `Dockerfile`s (`make up`, production images) and
-  `docker/bootstrap/Dockerfile` (`make seed`) — the native path is the production-parity one and
-  needs ~24 GB anyway, and the bootstrap image is a small Alpine pull. Worth doing the same for
-  them before relying on public contributors building native.
+  homelab was unreachable. Every service Dockerfile — native `Dockerfile` and `Dockerfile.jvm`
+  for auth/worker/gateway/ai — plus `kelta-ui/Dockerfile` and `docker/bootstrap/Dockerfile` now take a `BASE_REGISTRY`
+  build arg (and the Maven ones a `MAVEN_MIRROR` arg, which in the native Dockerfiles also picks
+  where the Maven *distribution* is downloaded from), with **defaults that are the homelab
+  values**. So every build that passes no args — the deploy workflow — is unchanged.
+  `docker-compose.yml` passes Docker Hub + Maven Central for local builds (`make up`,
+  `make up-jvm` inherits them, `make seed`). **Fragile:** because CI layers
+  `docker-compose.ci.yml` on the base file (both `docker buildx bake` and `compose run` for
+  the bootstrap), that overlay must keep `args: !reset {}` on those five services and
+  `args: !override` on kelta-ui (which still needs its CI `VITE_API_BASE_URL`) — drop either
+  and CI silently switches to public sources (`docker buildx bake --print` with the reset removed
+  shows the public args). **Still homelab-bound:** the optional profile images in
+  `docker-compose.yml` (pgAdmin, Redis Commander, LiveKit, OpenSearch, Jaeger), which reference
+  `harbor.rzware.com/dockerhub-cache` directly; the cache serves them anonymously, so they work
+  for outsiders only while the homelab is up. The Dockerfiles only the deploy workflow builds
+  (kelta-mcp, kelta-marketing, kelta-cli-downloads, kelta-web, `kelta-worker/Dockerfile.migrate`)
+  also still hardcode the homelab caches — no local path builds them.
 
 - **`kelta-marketing` only installs because of an `overrides` pin.** `@astrojs/tailwind@6`
   declares `peer astro ^3||^4||^5` while the site runs Astro 6, so a plain `npm ci` fails

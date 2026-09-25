@@ -12,6 +12,10 @@
 #      SPA's API calls resolve via container DNS, not localhost.
 #   5. Allow kelta-ui origin in auth + gateway CORS.
 #
+#   6. Reset the public BASE_REGISTRY / MAVEN_MIRROR build args the base file passes
+#      for local builds (`!reset`, or `!override` where CI sets args of its own), so CI
+#      keeps the Dockerfiles' homelab-cache defaults.
+#
 # Production images continue to be built from each service's original
 # Dockerfile by build-and-publish-containers.yml on main.
 
@@ -43,6 +47,7 @@ services:
     build:
       context: .
       dockerfile: kelta-auth/Dockerfile.jvm
+      args: !reset {}
     container_name: !reset null
     ports: !reset []
     environment:
@@ -54,6 +59,7 @@ services:
     build:
       context: .
       dockerfile: kelta-worker/Dockerfile.jvm
+      args: !reset {}
     container_name: !reset null
     ports: !reset []
 
@@ -61,6 +67,7 @@ services:
     build:
       context: .
       dockerfile: kelta-gateway/Dockerfile.jvm
+      args: !reset {}
     container_name: !reset null
     ports: !reset []
     environment:
@@ -70,12 +77,14 @@ services:
     build:
       context: .
       dockerfile: kelta-ai/Dockerfile.jvm
+      args: !reset {}
     container_name: !reset null
     ports: !reset []
 
   kelta-ui:
     build:
-      args:
+      # !override (not a merge): drops the base file's public BASE_REGISTRY.
+      args: !override
         VITE_API_BASE_URL: http://kelta-gateway:8080
     container_name: !reset null
     ports: !reset []
@@ -88,4 +97,6 @@ services:
     ports: !reset []
 
   kelta-bootstrap:
+    build:
+      args: !reset {}
     container_name: !reset null

@@ -21,31 +21,22 @@
 # Usage:  make up-jvm       (or up-jvm-ai / up-jvm-full)
 # Native: make up           (unchanged — still the production-parity path)
 
-# Public sources for local builds. The Dockerfile.jvm defaults point at the homelab
-# Harbor/Nexus caches CI and production rely on; overriding them HERE — and only here —
-# means `make up-jvm` works for anyone, with nothing changed for CI (docker-compose.ci.yml
-# and the deploy workflow build the same Dockerfiles without these args).
-x-public-build-args: &public-build-args
-  BASE_REGISTRY: docker.io/library   # official images straight from Docker Hub
-  MAVEN_MIRROR: central              # no mirror: resolve from Maven Central directly
+# Build args (public BASE_REGISTRY / MAVEN_MIRROR) are inherited from the base file's
+# build stanzas — compose merges `args`, so only the dockerfile is swapped here.
 
 services:
   kelta-auth:
     build:
       dockerfile: kelta-auth/Dockerfile.jvm
-      args: *public-build-args
 
   kelta-worker:
     build:
       dockerfile: kelta-worker/Dockerfile.jvm
-      args: *public-build-args
 
   kelta-gateway:
     build:
       dockerfile: kelta-gateway/Dockerfile.jvm
-      args: *public-build-args
 
   kelta-ai:
     build:
       dockerfile: kelta-ai/Dockerfile.jvm
-      args: *public-build-args

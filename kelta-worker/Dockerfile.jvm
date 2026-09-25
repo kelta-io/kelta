@@ -22,9 +22,9 @@
 # Base-image registry and Maven mirror are build args. The DEFAULTS are the homelab
 # pull-through caches that CI and production builds use (LAN speed, and no Docker Hub /
 # Maven Central rate limits when several images build in parallel) — builds that pass no
-# args behave exactly as before. Local `make up-jvm` overrides both to public sources
-# (docker-compose.jvm.yml), so an outside contributor's build neither depends on the
-# homelab being reachable nor downloads the dependency tree through it over the WAN.
+# args behave exactly as before. Local compose builds override both to public sources
+# (docker-compose.yml; docker-compose.ci.yml resets them), so an outside contributor's
+# build neither depends on the homelab being reachable nor downloads through it over the WAN.
 ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
 
 FROM ${BASE_REGISTRY}/maven:3.9-eclipse-temurin-25 AS runtime-builder
