@@ -1323,7 +1323,7 @@ Regression guard: `TenantAwareDataSourceTest` (runtime-core, beside the class si
   `TenantBindingIntegrationTest`. Disabling Ryuk alone was not enough on `k8s-runner`: the
   container starts but its mapped port is "Connection refused" from the job. The harness job,
   which reaches its containers the same way (`getHost()`/`getMappedPort()`), runs on
-  `k8s-runner-integration`; `test-java` and the runtime-modules job now run there too, with
+  `k8s-runner-integration`; `test-java` (worker, ai) and the runtime-modules job now run there too, with
   `TESTCONTAINERS_RYUK_DISABLED=true` like the harness, and
   `scripts/ci/assert-integration-tests-ran.sh` fails the job if any `*IntegrationTest` suite skips
   every test, so a runner change cannot quietly turn them off again. Known local caveat: Docker

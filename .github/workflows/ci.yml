@@ -69,25 +69,31 @@ jobs:
   test-java:
     name: Test ${{ matrix.service }}
     needs: changes
-    # k8s-runner-integration, like the harness job: its Docker publishes container ports where
-    # the job can reach them. On k8s-runner, Testcontainers starts the container but
-    # getHost():getMappedPort() is "Connection refused", so the Testcontainers ITs
-    # (RowLevelSecurityIntegrationTest, …) cannot run there — they used to be skipped instead.
-    runs-on: k8s-runner-integration
+    # Services with Testcontainers ITs (worker: RowLevelSecurityIntegrationTest; ai:
+    # TenantBindingIntegrationTest) run on k8s-runner-integration, like the harness job: its
+    # Docker publishes container ports where the job can reach them. On k8s-runner the container
+    # starts but getHost():getMappedPort() is "Connection refused" — those suites used to be
+    # skipped instead. Services without Testcontainers stay on the lighter k8s-runner.
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - service: gateway
             changed: ${{ needs.changes.outputs.gateway }}
+            runner: k8s-runner
           - service: worker
             changed: ${{ needs.changes.outputs.worker }}
+            runner: k8s-runner-integration
           - service: auth
             changed: ${{ needs.changes.outputs.auth }}
+            runner: k8s-runner
           - service: ai
             changed: ${{ needs.changes.outputs.ai }}
+            runner: k8s-runner-integration
           - service: mcp
             changed: ${{ needs.changes.outputs.mcp }}
+            runner: k8s-runner
     if: needs.changes.outputs.any_java == 'true' || needs.changes.outputs.workflows == 'true'
     steps:
       - name: Skip if unchanged
