@@ -47,10 +47,13 @@ public class RouteRegistry {
      *
      * <p>These paths are therefore authoritative: only a {@code static-} route may
      * occupy them; a dynamic collection route for the same path is ignored. This is
-     * deliberately NOT a blanket "static always wins" — config collections
-     * (flows, reports, dashboards, …) are also registered as {@code static-} bootstrap
-     * routes yet rely on their generic route's per-resource Cerbos for protection, and
-     * must keep it. Only the member-controller routes below invert that.
+     * deliberately NOT a blanket "static always wins" at registration: a tenant's own
+     * collection at a static path keeps its route. (A system collection's bootstrap route is
+     * keyed under the platform tenant, so {@link #findByPath(String, String)} serves real
+     * tenants the static route anyway; a static route that must still be authorized against
+     * the collection declares a {@link StaticCollectionCheck} — see
+     * {@link #findCollectionRouteBehind(RouteDefinition)}.) Only the member-controller
+     * routes below drop the dynamic route outright.
      */
     private static final Set<String> AUTHORITATIVE_STATIC_PATHS = Set.of(
             "/api/watches/**", "/api/wins/**", "/api/devices/**", "/api/billing/**",
@@ -276,6 +279,28 @@ public class RouteRegistry {
             return Optional.of(global);
         }
         return byTenant.values().stream().findFirst();
+    }
+
+    /**
+     * The system collection behind a {@code static-} route: the collection route registered at
+     * the same path pattern. System collections belong to the platform tenant, so for every
+     * other tenant {@link #pick} prefers the global static route and never returns this one —
+     * which is exactly why a static route that fronts a real collection must look it up here to
+     * authorize against its collection id. A bootstrap-flagged system collection wins over any
+     * same-named tenant collection; empty when bootstrap has not delivered the collection yet.
+     */
+    public Optional<RouteDefinition> findCollectionRouteBehind(RouteDefinition staticRoute) {
+        ConcurrentHashMap<String, RouteDefinition> byTenant = routes.get(staticRoute.getPath());
+        if (byTenant == null) {
+            return Optional.empty();
+        }
+        List<RouteDefinition> candidates = byTenant.values().stream()
+                .filter(r -> !isStaticRoute(r))
+                .toList();
+        return candidates.stream()
+                .filter(RouteDefinition::isSystemCollection)
+                .findFirst()
+                .or(() -> candidates.stream().findFirst());
     }
 
     /**

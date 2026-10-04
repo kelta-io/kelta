@@ -480,4 +480,73 @@ class CerbosRecordAuthorizationAdviceTest {
         assertThat(result).isSameAs(body);
         verify(authzService, never()).batchCheckRecordAccess(any(), any(), any(), any(), anyList(), any());
     }
+
+    @Nested
+    @DisplayName("pagination counts")
+    class PaginationCounts {
+
+        /** The router's list envelope: {@code meta} and legacy {@code metadata} share one map. */
+        private Map<String, Object> listBody(List<Map<String, Object>> rows, long totalCount, int pageSize) {
+            Map<String, Object> counts = new LinkedHashMap<>();
+            counts.put("totalCount", totalCount);
+            counts.put("currentPage", 1);
+            counts.put("pageSize", pageSize);
+            counts.put("totalPages", (int) Math.ceil((double) totalCount / pageSize));
+            Map<String, Object> body = new HashMap<>();
+            body.put("data", rows);
+            body.put("meta", counts);
+            body.put("metadata", counts);
+            return body;
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> counts(Object result, String key) {
+            return (Map<String, Object>) ((Map<String, Object>) result).get(key);
+        }
+
+        @Test
+        @DisplayName("reduces totalCount/totalPages in meta and metadata by the dropped rows")
+        void reducesCountsByDroppedRows() {
+            var request = createRequest("/api/users");
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), any(), anyList(), eq("read")))
+                    .thenReturn(Set.of("1"));
+            Map<String, Object> body = listBody(List.of(
+                    Map.of("id", "1"), Map.of("id", "2"), Map.of("id", "3")), 3, 2);
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(counts(result, "metadata")).containsEntry("totalCount", 1L).containsEntry("totalPages", 1);
+            assertThat(counts(result, "meta")).isSameAs(counts(result, "metadata"));
+        }
+
+        @Test
+        @DisplayName("every row dropped leaves totalCount 0")
+        void everyRowDroppedIsZero() {
+            var request = createRequest("/api/users");
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("users"), eq("read")))
+                    .thenReturn(false);
+            Map<String, Object> body = listBody(List.of(
+                    Map.of("id", "1"), Map.of("id", "2"), Map.of("id", "3")), 3, 20);
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat((List<?>) ((Map<?, ?>) result).get("data")).isEmpty();
+            assertThat(counts(result, "metadata")).containsEntry("totalCount", 0L).containsEntry("totalPages", 0);
+            assertThat(counts(result, "meta")).containsEntry("totalCount", 0L);
+        }
+
+        @Test
+        @DisplayName("leaves counts untouched when nothing is dropped")
+        void untouchedWhenNothingDropped() {
+            var request = createRequest("/api/users");
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), any(), anyList(), eq("read")))
+                    .thenReturn(Set.of("1", "2"));
+            Map<String, Object> body = listBody(List.of(Map.of("id", "1"), Map.of("id", "2")), 7, 2);
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(counts(result, "metadata")).containsEntry("totalCount", 7L).containsEntry("totalPages", 4);
+        }
+    }
 }

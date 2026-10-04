@@ -528,4 +528,26 @@ private RouteDefinition createRoute(String id, String path) {
         assertEquals("coll-b", registry.findByPath("/api/jobs/1", "tenant-a").orElseThrow().getId(),
                 "tenant-a no longer has jobs; tenant-b's route is what remains at that path");
     }
+
+    @Test
+    void findCollectionRouteBehindReturnsTheSystemCollectionAtTheStaticPath() {
+        RouteDefinition staticUsers = new RouteDefinition("static-users", "/api/users/**", "http://worker", "users");
+        registry.addRoute(staticUsers);
+        registry.addRoute(tenantRoute("tenant-users", "/api/users/**", "users", "tenant-a"));
+        registry.addRoute(tenantRoute("users-uuid", "/api/users/**", "users", "platform-tenant")
+                .withSystemCollection(true));
+
+        assertEquals("static-users", registry.findByPath("/api/users", "tenant-b").orElseThrow().getId(),
+                "a tenant without its own users collection resolves to the static route");
+        assertEquals("users-uuid", registry.findCollectionRouteBehind(staticUsers).orElseThrow().getId(),
+                "the bootstrap-flagged system collection wins over another tenant's same-named one");
+    }
+
+    @Test
+    void findCollectionRouteBehindIsEmptyBeforeBootstrap() {
+        RouteDefinition staticUsers = new RouteDefinition("static-users", "/api/users/**", "http://worker", "users");
+        registry.addRoute(staticUsers);
+
+        assertTrue(registry.findCollectionRouteBehind(staticUsers).isEmpty());
+    }
 }

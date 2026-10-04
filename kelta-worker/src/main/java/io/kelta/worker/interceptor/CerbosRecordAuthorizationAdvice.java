@@ -168,6 +168,9 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
             // Copy into a mutable map — controllers may return Map.of(...) which is immutable.
             Map<String, Object> result = new LinkedHashMap<>(responseBody);
             result.put("data", filtered);
+            if (removed > 0) {
+                reducePaginationCounts(result, removed);
+            }
             return result;
         } else if (data instanceof Map<?, ?> singleRecord) {
             Map<String, Object> typedRecord = (Map<String, Object>) singleRecord;
@@ -180,6 +183,34 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
         }
 
         return responseBody;
+    }
+
+    /**
+     * Takes the dropped rows out of the list's pagination counts, so the response does not report
+     * rows the caller may not read ({@code data: []} with {@code totalCount: 3} confirms they
+     * exist). Same page-local arithmetic as {@code DynamicCollectionRouter.restrictSharedSystemRows}.
+     * The router emits {@code meta} and the legacy {@code metadata} as one shared map; they stay
+     * one shared (adjusted) map here.
+     */
+    private static void reducePaginationCounts(Map<String, Object> result, int removed) {
+        Map<Object, Map<String, Object>> adjusted = new IdentityHashMap<>();
+        for (String key : List.of("meta", "metadata")) {
+            if (result.get(key) instanceof Map<?, ?> counts && counts.get("totalCount") instanceof Number) {
+                result.put(key, adjusted.computeIfAbsent(counts, c -> withReducedCounts(counts, removed)));
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> withReducedCounts(Map<?, ?> counts, int removed) {
+        Map<String, Object> copy = new LinkedHashMap<>((Map<String, Object>) counts);
+        long newTotal = Math.max(0, ((Number) counts.get("totalCount")).longValue() - removed);
+        copy.put("totalCount", newTotal);
+        if (counts.get("totalPages") != null
+                && counts.get("pageSize") instanceof Number pageSize && pageSize.intValue() > 0) {
+            copy.put("totalPages", (int) Math.ceil((double) newTotal / pageSize.intValue()));
+        }
+        return copy;
     }
 
     @SuppressWarnings("unchecked")
