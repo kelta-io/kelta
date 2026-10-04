@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
@@ -31,6 +33,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @DisplayName("AlertLatencyController")
 class AlertLatencyControllerTest {
@@ -160,5 +165,36 @@ class AlertLatencyControllerTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting(e -> ((ResponseStatusException) e).getStatusCode())
                 .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    private MockMvc viewAllDataMvc() {
+        when(permissionResolver.getProfileId(any())).thenReturn("profile-metrics");
+        when(bootstrapRepository.findProfileSystemPermissions("profile-metrics")).thenReturn(
+                List.of(Map.of("permission_name", SupportPermissions.VIEW_ALL_DATA, "granted", Boolean.TRUE)));
+        return MockMvcBuilders.standaloneSetup(controller).build();
+    }
+
+    @Test
+    @DisplayName("MockMvc: an internal caller with VIEW_ALL_DATA (no MANAGE_DATA) gets the summary")
+    void viewAllDataGetsSummary() throws Exception {
+        when(deliveryRepository.findSentSince(eq(TENANT), any(), isNull())).thenReturn(List.of(
+                new DeliveryLatencyRow("a1", "push", "SENT", CREATED, CREATED.plusSeconds(4))));
+
+        viewAllDataMvc().perform(get("/api/alerts/latency")
+                        .header("X-User-Id", "metrics-1")
+                        .header("X-User-Type", "INTERNAL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.count").value(1))
+                .andExpect(jsonPath("$.data.p50Seconds").value(4.0));
+    }
+
+    @Test
+    @DisplayName("MockMvc: a PORTAL actor with VIEW_ALL_DATA on their profile is refused (403)")
+    void portalWithViewAllDataDenied() throws Exception {
+        viewAllDataMvc().perform(get("/api/alerts/latency")
+                        .header("X-User-Id", "member-1")
+                        .header("X-User-Type", "PORTAL"))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(deliveryRepository);
     }
 }

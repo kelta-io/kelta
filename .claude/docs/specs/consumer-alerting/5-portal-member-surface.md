@@ -68,7 +68,9 @@ invite-only tenants are unchanged, and production enablement waits on slice 7).
 | `GET /api/watches/{id}/alerts` | alert history for a caller-owned watch (joins `alert` + deliveries) |
 
 Actor from `X-User-Id`/`X-User-Type`. INTERNAL users holding `MANAGE_DATA` may pass
-`?memberId=` for support (in-controller gate).
+`?memberId=` for support (in-controller gate). The tenant-wide `list`/`get` (no `memberId`)
+also admits the read-only `VIEW_ALL_DATA`; naming a member and every mutation stay
+`MANAGE_DATA`-only.
 
 **Generic-route lockdown**: `WatchGuardHook` (BeforeSaveHook, `UserPreferenceGuardHook` idiom)
 owner-guards writes to `watches` arriving via dynamic routes; portal reads of `watches` and

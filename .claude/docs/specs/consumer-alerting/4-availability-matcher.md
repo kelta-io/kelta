@@ -149,7 +149,8 @@ Generic, per-tenant visibility into how fast alerts reach members. Two surfaces,
   is the parent-alert policy from V202), so the predicate does not lean on RLS alone.
   `/api/alerts/**` is a `static-` gateway route (also in `RouteRegistry`'s authoritative static
   paths), so only `API_ACCESS` is checked there; the controller requires an INTERNAL caller whose
-  profile grants `MANAGE_DATA` (same check as `WatchController.hasSupportPermission`) and denies
+  profile grants `MANAGE_DATA` or the read-only `VIEW_ALL_DATA` (`SupportPermissions.READ`, the
+  same read check as the watch/win support views) and denies
   every PORTAL actor with 403. There is no cross-tenant or write surface on `alert` /
   `alert_delivery`.
 - **Tests** — `AlertDispatchServiceTest` (Latency metric), `AlertLatencySummaryTest`,

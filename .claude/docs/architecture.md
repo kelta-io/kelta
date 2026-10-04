@@ -486,13 +486,19 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   handler now — it used to fall through unguarded to the generic route's tenant-only scoping).
   Every endpoint acts on the calling member from `X-User-Id`; a foreign watch id returns **404,
   not 403**, because 403 would confirm the id exists and let a member enumerate others' watches
-  by probing. Mutations are self-only — internal staff holding `MANAGE_DATA` may pass
-  `?memberId=` to *read* a member's watches for support, but not to write them. Naming **no**
-  `memberId` on `list`/`get` while holding `MANAGE_DATA` instead returns the tenant's full
-  JSON:API view (paging, `filter[field][op]`, `sort`, `meta.totalCount`), delegated verbatim to
-  `DynamicCollectionRouter` rather than reimplemented — `hasSupportPermission` short-circuits a
-  PORTAL caller to `false` before any profile lookup, so a portal profile that happens to grant
-  `MANAGE_DATA` still gets the owner-scoped view, and a non-support INTERNAL caller is 403 rather
+  by probing. **Which system permission grants what** (`SupportPermissions`, shared with
+  `WinController` and `AlertLatencyController`): the tenant-wide *read* views — naming **no**
+  `memberId` on `list`/`get` — accept `MANAGE_DATA` **or** the read-only `VIEW_ALL_DATA`
+  (`SupportPermissions.READ`) and return the tenant's full JSON:API view (paging,
+  `filter[field][op]`, `sort`, `meta.totalCount`), delegated verbatim to
+  `DynamicCollectionRouter` rather than reimplemented (Cerbos already maps `VIEW_ALL_DATA` to
+  `read`, so the delegated path serves the rows). Naming another member via `?memberId=` /
+  body `memberId` — on `list`, `create`, `update` or `delete` — is acting on that member's behalf
+  and requires `MANAGE_DATA` alone (`SupportPermissions.WRITE`); no mutation path consults
+  `VIEW_ALL_DATA`, so a metrics principal holding only it gets 403 there and 404 on another
+  member's watch id. Both checks short-circuit a PORTAL caller to `false` before any profile
+  lookup, so a portal profile that happens to grant either permission still gets the
+  owner-scoped view, and an INTERNAL caller holding neither is 403 rather
   than silently scoped to an empty self. Writes go through `QueryEngine`, not the repository, so
   `WatchGuardHook` and `MemberEntitlementQuotaHook` both fire. `WatchGuardHook` (BeforeSaveHook on
   `watches`, order -100) covers the **generic dynamic route**, which bypasses the controller
@@ -503,8 +509,9 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
 - **Alert delivery latency** (consumer-alerting slice-4 addendum): `GET /api/alerts/latency`
   (`AlertLatencyController`) rides the `static-alerts` route (`/api/alerts/**`, also an
   authoritative static path in `RouteRegistry`), so the gateway checks only `API_ACCESS`; the
-  controller requires an INTERNAL caller holding `MANAGE_DATA` (same check as
-  `WatchController.hasSupportPermission`, PORTAL short-circuits to 403). It is read-only and
+  controller requires an INTERNAL caller holding `MANAGE_DATA` or the read-only `VIEW_ALL_DATA`
+  (`SupportPermissions.READ`, the same read check as the watch/win support views; PORTAL
+  short-circuits to 403). It is read-only and
   scoped to the bound tenant: the query joins `alert_delivery` to `alert` with an explicit
   `alert.tenant_id = ?`, because `alert_delivery` carries no `tenant_id` (only the parent-alert
   RLS policy). Latency is `alert_delivery.sent_at - alert.created_at` — `alert.created_at` is
