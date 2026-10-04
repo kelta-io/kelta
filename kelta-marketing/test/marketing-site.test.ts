@@ -32,6 +32,65 @@ describe('public routes', () => {
   });
 });
 
+describe('compare page', () => {
+  const page = read('kelta-marketing', 'src', 'pages', 'compare.astro');
+
+  // The source of a competitor's object literal: from its `id:` to the next one.
+  const competitorSource = (id: string) => {
+    const start = page.indexOf(`id: '${id}'`);
+    expect(start).toBeGreaterThan(-1);
+    const next = page.indexOf("id: '", start + 1);
+    return page.slice(start, next === -1 ? undefined : next);
+  };
+
+  it('is linked from the site nav', () => {
+    expect(read('kelta-marketing', 'src', 'components', 'Header.astro')).toContain(
+      "{ label: 'Compare', href: '/compare' }",
+    );
+  });
+
+  it('leads with the STRATEGY.md one-liner', () => {
+    expect(page).toContain(
+      'The open-source application platform your AI agents can actually operate — schema, flows, and approvals over an API and an MCP server.',
+    );
+  });
+
+  it.each([
+    ['supabase', /https:\/\/(supabase\.com|github\.com\/supabase)\//],
+    ['appwrite', /https:\/\/(appwrite\.io|github\.com\/appwrite)\//],
+    ['pocketbase', /https:\/\/(pocketbase\.io|github\.com\/pocketbase)\//],
+    ['directus', /https:\/\/(directus\.(io|com)|github\.com\/directus)\//],
+  ])('cites %s claims from its own docs', (id, ownDomain) => {
+    const source = competitorSource(id);
+    expect(source).toMatch(ownDomain);
+
+    // Every link in the competitor's section points at that competitor.
+    const hrefs = [...source.matchAll(/href: '([^']+)'/g)].map((m) => m[1]);
+    expect(hrefs.length).toBeGreaterThanOrEqual(10);
+    expect(hrefs.filter((href) => !ownDomain.test(href))).toEqual([]);
+  });
+
+  it('covers every comparison row', () => {
+    for (const label of [
+      'Self-hosting',
+      'License',
+      'Multi-tenancy',
+      'MCP / agent support',
+      'Auth',
+      'Realtime',
+      'File storage',
+      'Admin UI',
+      'Maturity / community',
+    ]) {
+      expect(page).toContain(`label: '${label}'`);
+    }
+  });
+
+  it('states no prices', () => {
+    expect(page).not.toMatch(/\$\s?\d/);
+  });
+});
+
 describe('deploy wiring', () => {
   it('is built and pushed to Harbor by the Build and Deploy workflow', () => {
     const workflow = read('.github', 'workflows', 'build-and-publish-containers.yml');
