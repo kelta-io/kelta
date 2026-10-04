@@ -136,6 +136,12 @@ kelta:
       # GET/HEAD only. Adding a path here also bypasses TenantIpAllowlistFilter, so keep it
       # to metadata that is safe to serve to an anonymous visitor of that tenant.
       public-paths: /api/ui-pages,/api/ui-menus,/api/ui-translations,/api/oidc-providers,/api/tenants
+      # Public only to a request with NO Authorization header. /api/tenants is here because the
+      # tenants table has no tenant_id column: nothing downstream scopes it, so the anonymous view
+      # is narrowed in RouteAuthorizationFilter to the URL's own tenant, name + slug only, and a
+      # request with a token is authorized like any other API call (MANAGE_TENANTS sees all,
+      # everyone else only their own tenant's row).
+      anonymous-only-public-paths: /api/tenants
       # Paths accessible without authentication for ALL HTTP methods.
       # Used for endpoints receiving data from unauthenticated sources (e.g., browser OTEL SDK,
       # campaign open-pixel / click-redirect / unsubscribe links authenticated by HMAC token,

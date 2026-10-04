@@ -91,6 +91,9 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
 
         // Allow public paths through without principal check
         if (publicPathMatcher.isPublicRequest(exchange)) {
+            if (isTenantsPath(path)) {
+                return forwardAnonymousTenantLookup(exchange, chain, path);
+            }
             return chain.filter(exchange);
         }
 
@@ -263,20 +266,7 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
         String ownTenantId = principal.getTenantId();
         String rest = path.length() > TENANTS_PATH.length() ? path.substring(TENANTS_PATH.length()) : "";
         if (rest.isEmpty() || "/".equals(rest)) {
-            MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-            exchange.getRequest().getQueryParams().forEach((key, values) -> {
-                if (!TENANT_ID_FILTER.matcher(key).matches()) {
-                    params.put(key, values);
-                }
-            });
-            params.set("filter[id][eq]", ownTenantId);
-            URI narrowed = UriComponentsBuilder.fromUri(exchange.getRequest().getURI())
-                    .replaceQueryParams(params)
-                    .encode()
-                    .build()
-                    .toUri();
-            ServerWebExchange scoped = exchange.mutate().request(r -> r.uri(narrowed)).build();
-            return forwardWithHeaders(scoped, chain, principal);
+            return forwardWithHeaders(narrowTenantsList(exchange, ownTenantId, false), chain, principal);
         }
         String requestedId = rest.substring(1).split("/", 2)[0];
         if (!requestedId.equals(ownTenantId)) {
@@ -287,6 +277,70 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
             return notFound(exchange);
         }
         return forwardWithHeaders(exchange, chain, principal);
+    }
+
+    /**
+     * The anonymous (no {@code Authorization} header) view of {@code /api/tenants}, which exists
+     * only so the UI bootstrap can learn its own tenant's id and display name before sign-in.
+     * Narrowed to the tenant the URL names ({@link TenantResolutionFilter}), and to
+     * {@code name}/{@code slug} — never settings, limits, edition or the IP allowlist. Any other
+     * tenant's record, or a request whose URL resolves no tenant, is a 404.
+     */
+    private Mono<Void> forwardAnonymousTenantLookup(ServerWebExchange exchange,
+                                                    GatewayFilterChain chain,
+                                                    String path) {
+        String urlTenantId = TenantResolutionFilter.getTenantId(exchange);
+        if (urlTenantId == null || urlTenantId.isBlank()) {
+            return notFound(exchange);
+        }
+        String rest = path.length() > TENANTS_PATH.length() ? path.substring(TENANTS_PATH.length()) : "";
+        if (rest.isEmpty() || "/".equals(rest)) {
+            return chain.filter(narrowTenantsList(exchange, urlTenantId, true));
+        }
+        String[] segments = rest.substring(1).split("/", 2);
+        if (!segments[0].equals(urlTenantId) || segments.length > 1) {
+            return notFound(exchange);
+        }
+        return chain.filter(withQuery(exchange, anonymousFields(copyParams(exchange, false))));
+    }
+
+    /**
+     * {@code /api/tenants} list narrowed to {@code tenantId}: every caller-supplied
+     * {@code filter[id]…} parameter is dropped first so a duplicate key can never win over it.
+     */
+    private ServerWebExchange narrowTenantsList(ServerWebExchange exchange, String tenantId, boolean anonymous) {
+        MultiValueMap<String, String> params = copyParams(exchange, true);
+        params.set("filter[id][eq]", tenantId);
+        return withQuery(exchange, anonymous ? anonymousFields(params) : params);
+    }
+
+    private MultiValueMap<String, String> copyParams(ServerWebExchange exchange, boolean dropIdFilters) {
+        MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        exchange.getRequest().getQueryParams().forEach((key, values) -> {
+            if (!(dropIdFilters && TENANT_ID_FILTER.matcher(key).matches())) {
+                params.put(key, values);
+            }
+        });
+        return params;
+    }
+
+    private MultiValueMap<String, String> anonymousFields(MultiValueMap<String, String> params) {
+        params.keySet().removeIf(key -> key.toLowerCase().startsWith("fields[") || key.equalsIgnoreCase("include"));
+        params.set("fields[tenants]", "name,slug");
+        return params;
+    }
+
+    private ServerWebExchange withQuery(ServerWebExchange exchange, MultiValueMap<String, String> params) {
+        URI uri = UriComponentsBuilder.fromUri(exchange.getRequest().getURI())
+                .replaceQueryParams(params)
+                .encode()
+                .build()
+                .toUri();
+        return exchange.mutate().request(r -> r.uri(uri)).build();
+    }
+
+    private static boolean isTenantsPath(String path) {
+        return path.equals(TENANTS_PATH) || path.startsWith(TENANTS_PATH + "/");
     }
 
     private Mono<Void> notFound(ServerWebExchange exchange) {

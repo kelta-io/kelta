@@ -1,5 +1,6 @@
 package io.kelta.gateway.auth;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
@@ -22,18 +23,32 @@ import java.util.List;
  *
  * <p>Both are configured as comma-separated lists of path prefixes in application.yml
  * under {@code kelta.gateway.security}.
+ *
+ * <p>A {@code public-paths} prefix that is also listed in {@code anonymous-only-public-paths}
+ * is public only to a request <em>without</em> an {@code Authorization} header. A request that
+ * carries a token goes through normal authentication and authorization instead, so what it may
+ * read is decided by its own permissions rather than by the anonymous view.
  */
 @Component
 public class PublicPathMatcher {
 
     private final List<String> publicPaths;
     private final List<String> unauthenticatedPaths;
+    private final List<String> anonymousOnlyPublicPaths;
 
+    @Autowired
     public PublicPathMatcher(
             @Value("${kelta.gateway.security.public-paths:}") List<String> publicPaths,
-            @Value("${kelta.gateway.security.unauthenticated-paths:}") List<String> unauthenticatedPaths) {
+            @Value("${kelta.gateway.security.unauthenticated-paths:}") List<String> unauthenticatedPaths,
+            @Value("${kelta.gateway.security.anonymous-only-public-paths:}") List<String> anonymousOnlyPublicPaths) {
         this.publicPaths = publicPaths;
         this.unauthenticatedPaths = unauthenticatedPaths != null ? unauthenticatedPaths : Collections.emptyList();
+        this.anonymousOnlyPublicPaths = anonymousOnlyPublicPaths != null
+                ? anonymousOnlyPublicPaths : Collections.emptyList();
+    }
+
+    public PublicPathMatcher(List<String> publicPaths, List<String> unauthenticatedPaths) {
+        this(publicPaths, unauthenticatedPaths, Collections.emptyList());
     }
 
     /**
@@ -65,6 +80,16 @@ public class PublicPathMatcher {
         }
 
         for (String prefix : publicPaths) {
+            if (path.startsWith(prefix)) {
+                return !(isAnonymousOnly(path)
+                        && exchange.getRequest().getHeaders().getFirst("Authorization") != null);
+            }
+        }
+        return false;
+    }
+
+    private boolean isAnonymousOnly(String path) {
+        for (String prefix : anonymousOnlyPublicPaths) {
             if (path.startsWith(prefix)) {
                 return true;
             }

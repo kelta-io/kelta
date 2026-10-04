@@ -547,6 +547,66 @@ class RouteAuthorizationFilterTest {
             }
 
             @Test
+            @DisplayName("Anonymous lookups see only the URL's own tenant, name and slug only")
+            void anonymousListIsNarrowedToUrlTenantAndSafeFields() {
+                when(publicPathMatcher.isPublicRequest(any(ServerWebExchange.class))).thenReturn(true);
+                MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/tenants")
+                        .queryParam("filter[slug][eq]", "acme")
+                        .queryParam("filter[id][eq]", "victim-tenant")
+                        .queryParam("fields[tenants]", "settings,limits,ipAllowlistCidrs")
+                        .queryParam("include", "parentTenantId").build());
+                exchange.getAttributes().put("tenantId", "tenant-1");
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                var params = forwarded().getRequest().getQueryParams();
+                assertThat(params.get("filter[id][eq]")).containsExactly("tenant-1");
+                assertThat(params.get("fields[tenants]")).containsExactly("name,slug");
+                assertThat(params).doesNotContainKey("include");
+                assertThat(params.getFirst("filter[slug][eq]")).isEqualTo("acme");
+            }
+
+            @Test
+            @DisplayName("Anonymous lookup of another tenant's record is a 404")
+            void anonymousOtherTenantRecordIsNotFound() {
+                when(publicPathMatcher.isPublicRequest(any(ServerWebExchange.class))).thenReturn(true);
+                MockServerWebExchange exchange = MockServerWebExchange.from(
+                        MockServerHttpRequest.get("/api/tenants/victim-tenant").build());
+                exchange.getAttributes().put("tenantId", "tenant-1");
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+                verify(filterChain, never()).filter(any());
+            }
+
+            @Test
+            @DisplayName("Anonymous lookup with no resolved tenant is a 404")
+            void anonymousWithoutResolvedTenantIsNotFound() {
+                when(publicPathMatcher.isPublicRequest(any(ServerWebExchange.class))).thenReturn(true);
+                MockServerWebExchange exchange = MockServerWebExchange.from(
+                        MockServerHttpRequest.get("/api/tenants").build());
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+                verify(filterChain, never()).filter(any());
+            }
+
+            @Test
+            @DisplayName("Anonymous lookup of the URL's own tenant record gets name and slug only")
+            void anonymousOwnRecordGetsSafeFields() {
+                when(publicPathMatcher.isPublicRequest(any(ServerWebExchange.class))).thenReturn(true);
+                MockServerWebExchange exchange = MockServerWebExchange.from(
+                        MockServerHttpRequest.get("/api/tenants/tenant-1").build());
+                exchange.getAttributes().put("tenantId", "tenant-1");
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(forwarded().getRequest().getQueryParams().get("fields[tenants]")).containsExactly("name,slug");
+            }
+
+            @Test
             @DisplayName("A list without MANAGE_TENANTS is narrowed to the caller's own tenant")
             void listIsNarrowedToOwnTenant() {
                 GatewayPrincipal principal = principalWithIdentity("user@test.com");
