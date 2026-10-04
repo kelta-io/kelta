@@ -88,6 +88,15 @@ reads of `wins` are default-denied (same stance the watch/billing collections re
 `WinController` is the only member path — `/list` is owner-scoped, `/recent` exposes only
 opt-in-public redacted rows.
 
+**Authorization of `POST /api/wins` (PLT-331, 2026-10-04).** Members intentionally hold no
+`canCreate` on `wins`, so a gateway "403 without create" rule would refuse every member; the route
+stays `API_ACCESS`-only at the gateway. The authorization decision is a **resolvable member
+identity** (`requireActor`: `X-User-Id` present and resolvable in the tenant), and it runs before
+any body validation — the body is `@RequestBody(required = false)` so even an empty POST from an
+unidentified caller is a 403, not a 400. A resolved member with an invalid body (blank `summary`)
+still gets 400. Pinned by `WinControllerCreateAuthzMvcTest`. The request shape of a member API is
+not a secret; the point is that nothing about the body is evaluated for a caller who is not a member.
+
 ## 6. Test plan
 
 - **Unit** — `WinGuardHookTest` (mirror of `WatchGuardHookTest`: own/foreign/re-own/internal-tier/

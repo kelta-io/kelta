@@ -288,6 +288,27 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   identical to the gateway), denying the whole batch (403, fail-closed) before executing if any op is
   unauthorized. The `IdentityCollectionGuardHook` still guards identity-collection writes underneath
   (see "Delegated administration" below).
+- **Static routes that front a system collection** (`users`, `profiles`, `collections`): these
+  are `static-` routes, yet `/api/users`, `/api/profiles` and `/api/collections` are served by the
+  generic `DynamicCollectionRouter`, which has no permission check of its own (only `readOnly`) —
+  so before 2026-10-04 a least-privilege PAT reached body validation (`POST /api/users` answered a
+  field-by-field 400) and list counts on them. The system collection's own bootstrap route sits at
+  the same path but is owned by the platform tenant, so `RouteRegistry.findByPath` always prefers
+  the global static route for real tenants. `RouteConfigService.COLLECTION_CHECKED_STATIC_ROUTES`
+  now declares a `StaticCollectionCheck` per route, and `RouteAuthorizationFilter` runs the Cerbos
+  object check for the HTTP action (GET→read, POST→create, PUT/PATCH→edit, DELETE→delete) against
+  the collection id found by `RouteRegistry.findCollectionRouteBehind` — **before** the body reaches
+  the worker. It fails closed (403) when that collection route is not registered yet.
+
+  | Static route | Checked | Write override | Why reads are (not) checked |
+  |---|---|---|---|
+  | `/api/users/**` | every method | `MANAGE_USERS` (as `IdentityCollectionGuardHook`) | `read` is checked — the record advice already emptied the list for callers without it; no self-service sub-paths exist (the caller's own record is `/api/me/**`, which stays `API_ACCESS`-only) |
+  | `/api/profiles/**` | writes | `MANAGE_USERS` | **intentionally `API_ACCESS`-only**: the user admin pages (gated on `MANAGE_USERS`, not a collection grant) list profiles, and the grants themselves live in `profile-*-permissions`, whose own routes are object-checked |
+  | `/api/collections/**` | writes, except `/{name}/import`, `/duplicates`, `/merge` | `CUSTOMIZE_APPLICATION` (the setup pages' gate) | **intentionally `API_ACCESS`-only**: every record page, form and list reads collection and field metadata. The exempt sub-paths act on the named collection's records, not on the collections collection |
+
+  Every other static route still stops at `API_ACCESS`. Adding a row is a security decision —
+  check which UI flows read the route under an ordinary profile first; most seeded profiles
+  ("Standard User") hold neither `VIEW_ALL_DATA` nor per-collection grants on system collections.
 - **Collection schema** (`GET /api/collections/{name}/schema`, `CollectionSchemaController`):
   rides the existing `static-collections` route, so only `API_ACCESS` is checked. That is
   deliberate and not a new exposure — the same prefix already serves

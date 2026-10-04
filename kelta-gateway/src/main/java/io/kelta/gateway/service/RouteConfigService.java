@@ -5,12 +5,16 @@ import io.kelta.gateway.config.BootstrapConfig;
 import io.kelta.gateway.config.CollectionConfig;
 import io.kelta.gateway.route.RouteDefinition;
 import io.kelta.gateway.route.RouteRegistry;
+import io.kelta.gateway.route.StaticCollectionCheck;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+
+import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Service for fetching and managing route configuration from the worker service.
@@ -153,7 +157,7 @@ public class RouteConfigService {
                 null,
                 0,
                 collection.getTenantId()
-            );
+            ).withSystemCollection(collection.isSystemCollection());
 
             logger.debug("Parsed collection '{}' to route: {}", collectionId, route);
             return route;
@@ -272,6 +276,37 @@ public class RouteConfigService {
                 {"scim", "/scim/v2/**", "scim"},
         };
 
+    /**
+     * Static routes that front a real system collection served by the generic collection router
+     * — keyed by {@link #STATIC_ROUTES} id. Every other static route stops at {@code API_ACCESS}
+     * at the gateway; these also get the collection-level Cerbos check for the HTTP action, so a
+     * caller without the grant is refused before the body reaches the worker's validation (a
+     * least-privilege PAT got a 400 field-by-field schema from {@code POST /api/users} and a
+     * {@code totalCount} of rows it could not read — 2026-10-04).
+     *
+     * <ul>
+     *   <li>{@code users} — every method. {@code MANAGE_USERS} also admits writes, as the
+     *       worker's {@code IdentityCollectionGuardHook} does; the user admin pages are gated on
+     *       it. There are no self-service sub-paths under {@code /api/users} — a caller's own
+     *       record is {@code /api/me/**}, a separate route that stays API_ACCESS-only.</li>
+     *   <li>{@code profiles} — writes only, with the same {@code MANAGE_USERS} override. Reads stay
+     *       API_ACCESS-only on purpose: the user admin pages (gated on {@code MANAGE_USERS}, not
+     *       on a collection grant) list them, and the grants themselves live in the
+     *       {@code profile-*-permissions} collections, whose own routes are object-checked.</li>
+     *   <li>{@code collections} — writes only, with {@code CUSTOMIZE_APPLICATION} as the
+     *       override (the setup pages are gated on it). Reads stay API_ACCESS-only on purpose:
+     *       every record page, form and list reads collection and field metadata. The per-collection
+     *       data operations mounted under the prefix ({@code /api/collections/{name}/import},
+     *       {@code /duplicates}, {@code /merge}) are not writes to the collections collection —
+     *       their controllers act on the named collection's records — so they are exempt.</li>
+     * </ul>
+     */
+    static final Map<String, StaticCollectionCheck> COLLECTION_CHECKED_STATIC_ROUTES = Map.of(
+            "users", new StaticCollectionCheck(true, "MANAGE_USERS"),
+            "profiles", new StaticCollectionCheck(false, "MANAGE_USERS"),
+            "collections", new StaticCollectionCheck(false, "CUSTOMIZE_APPLICATION",
+                    Pattern.compile("^/api/collections/[^/]+/(import|duplicates|merge)(/.*)?$")));
+
     /** Registers every {@link #STATIC_ROUTES} entry against the worker service URL. */
     private void registerStaticRoutes() {
         for (String[] routeDef : STATIC_ROUTES) {
@@ -280,7 +315,7 @@ public class RouteConfigService {
                     routeDef[1],
                     workerServiceUrl,
                     routeDef[2]
-            );
+            ).withCollectionCheck(COLLECTION_CHECKED_STATIC_ROUTES.get(routeDef[0]));
             routeRegistry.addRoute(route);
             logger.debug("Registered static route: {}", route);
         }

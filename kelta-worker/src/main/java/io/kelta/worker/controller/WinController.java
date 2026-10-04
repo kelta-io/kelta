@@ -90,8 +90,14 @@ public class WinController implements SelfScopedController {
     }
 
     /** Records a win owned by the caller ("I got the spot"). */
+    /**
+     * Members hold no {@code canCreate} on wins (9-win-tracking.md), so the authorization decision
+     * here is a resolvable member identity — and it must come before any body validation, so an
+     * unauthorized caller gets a 403 rather than a 400 describing the body. The body is optional
+     * for that reason: a required one would answer an empty POST with a 400 before this runs.
+     */
     @PostMapping
-    public ResponseEntity<Map<String, Object>> create(@RequestBody CreateWinRequest body,
+    public ResponseEntity<Map<String, Object>> create(@RequestBody(required = false) CreateWinRequest body,
                                                       HttpServletRequest request) {
         String tenantId = requireTenant();
         String subject = requireActor(request, tenantId);

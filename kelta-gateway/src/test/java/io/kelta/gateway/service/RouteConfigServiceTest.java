@@ -181,6 +181,34 @@ class RouteConfigServiceTest {
     }
 
     @Test
+    void systemCollectionStaticRoutesCarryTheirCollectionCheck() throws InterruptedException {
+        mockWebServer.enqueue(new MockResponse()
+            .setBody("""
+                {"collections": [{"id": "users-uuid", "name": "users", "path": "/api/users",
+                  "tenantId": "00000000-0000-0000-0000-000000000001", "systemCollection": true}]}
+                """)
+            .addHeader("Content-Type", "application/json"));
+
+        routeConfigService.refreshRoutes();
+        Thread.sleep(500);
+
+        RouteDefinition usersRoute = routeRegistry.findByPath("/api/users", "tenant-1").orElseThrow();
+        assertEquals("static-users", usersRoute.getId());
+        assertTrue(usersRoute.getCollectionCheck().includeReads());
+        assertEquals("MANAGE_USERS", usersRoute.getCollectionCheck().writeOverridePermission());
+        RouteDefinition backing = routeRegistry.findCollectionRouteBehind(usersRoute).orElseThrow();
+        assertEquals("users-uuid", backing.getId());
+        assertTrue(backing.isSystemCollection());
+
+        RouteDefinition profilesRoute = routeRegistry.findByPath("/api/profiles", "tenant-1").orElseThrow();
+        assertFalse(profilesRoute.getCollectionCheck().includeReads());
+        RouteDefinition collectionsRoute = routeRegistry.findByPath("/api/collections", "tenant-1").orElseThrow();
+        assertEquals("CUSTOMIZE_APPLICATION", collectionsRoute.getCollectionCheck().writeOverridePermission());
+        assertNull(routeRegistry.findByPath("/api/me", "tenant-1").orElseThrow().getCollectionCheck(),
+                "every other static route stays API_ACCESS-only");
+    }
+
+    @Test
     void testRefreshRoutes_AlwaysUsesConfiguredServiceUrl() throws InterruptedException {
         // Arrange - bootstrap response includes pod-specific URLs, but gateway
         // should ignore them and always use the configured K8s Service URL.

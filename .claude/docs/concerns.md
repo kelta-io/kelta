@@ -1688,3 +1688,52 @@ lower(email_from_address) = …` inbound routing, and kelta-auth's slug→id loo
 (`TenantContextFilter`, `KeltaUserDetailsService`, `PortalLoginService`) if any run after a
 tenant is bound. Those callers must be audited before the policy ships, and Superset/pinned DB
 roles would see only their own `tenant` row (desirable). Proposed as a separate migration task.
+
+## Static routes over system collections skipped the collection check (found 2026-10-04, least-privilege PAT; PLT-331)
+
+**Symptom:** a least-privilege PAT (`API_ACCESS` + `canRead` on one tenant collection) got, on
+`POST /api/users`, a 400 listing every required field — the request reached body validation with
+no create check — and on `GET /api/users` a `200` with `data: []` but `totalCount: 3`. A valid
+body was stopped only by the worker's `IdentityCollectionGuardHook` (it admits `MANAGE_USERS` /
+`MODIFY_ALL_DATA`), i.e. after validation; `POST/PATCH/DELETE /api/profiles` and
+`/api/collections` had no gateway check at all.
+
+**Root cause:** collection CRUD permission is enforced only at the gateway, and
+`RouteAuthorizationFilter` skips the object check for every `static-` route. `users`, `profiles`
+and `collections` are static routes served by the generic `DynamicCollectionRouter` (no
+permission check, only `readOnly`). Their system-collection bootstrap routes live at the same
+path but are keyed under the platform tenant, so `RouteRegistry.findByPath` hands every real
+tenant the global static route. The worker's `CerbosRecordAuthorizationAdvice` then dropped the
+denied rows but left `meta`/`metadata` counts untouched.
+
+**What enforces it now:**
+- **Gateway:** `RouteConfigService.COLLECTION_CHECKED_STATIC_ROUTES` declares a
+  `StaticCollectionCheck` for `users` (every method), `profiles` and `collections` (writes), and
+  `RouteAuthorizationFilter` runs the Cerbos object check against the system collection's id
+  (`RouteRegistry.findCollectionRouteBehind`) before forwarding — fail-closed when it is not
+  registered. Write overrides: `MANAGE_USERS` (users, profiles), `CUSTOMIZE_APPLICATION`
+  (collections). Reads of `profiles`/`collections` stay `API_ACCESS`-only on purpose
+  (`architecture.md` → Authorizing a new endpoint has the table and reasons).
+- **Worker:** `CerbosRecordAuthorizationAdvice` reduces `totalCount`/`totalPages` in `meta` and
+  `metadata` by the rows it drops, for every collection — the same page-local arithmetic as
+  `DynamicCollectionRouter.restrictSharedSystemRows` (rows on other pages are not re-counted).
+- **`POST /api/wins`** keeps its self-scoped model (members hold no `canCreate` on wins); its
+  authorization is a resolvable member identity, now pinned ahead of body validation even for an
+  empty body (`WinControllerCreateAuthzMvcTest`).
+
+**Behaviour change to watch:** a profile without `read` on `users` (the seeded "Standard User"
+has neither `VIEW_ALL_DATA` nor a grant on it) now gets a 403 instead of an empty list from
+`/api/users` — the UI's created-by/updated-by lookups already swallow the error, and the list
+was already empty for them.
+
+**Still open (not in PLT-331):**
+- The remaining static routes that front system collections through the generic router
+  (`page-layouts`, `list-views`, `ui-menus`, `ui-pages`, `global-picklists`, `oidc-providers`,
+  `email-templates`, `scripts`, `scheduled-jobs`, `webhooks`, `connected-apps`, `flows`,
+  `approval-processes`, `reports`, `dashboards`, …) still stop at `API_ACCESS` for generic CRUD.
+  Each needs its own audit of which reads ordinary profiles depend on before it gets a row.
+- `CsvImportController` (`POST /api/collections/{name}/import/csv`, exempt above as a data
+  operation) creates records with no create-permission check on the target collection.
+- `GET /api/profiles/{id}?include=profile-system-permissions,…` returns the grant rows through
+  the profiles route, which reads at `API_ACCESS` — the `profile-*-permissions` routes' own object
+  check does not apply to an include.

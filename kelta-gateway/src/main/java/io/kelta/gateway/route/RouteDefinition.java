@@ -20,6 +20,10 @@ public class RouteDefinition {
     private final int stripPrefix;
     /** Owning tenant of a collection route; null for platform-wide (static) routes. */
     private final String tenantId;
+    /** True for a route built from a bootstrap system collection (owned by the platform tenant). */
+    private final boolean systemCollection;
+    /** For a {@code static-} route that fronts a system collection; null when it gets API_ACCESS only. */
+    private final StaticCollectionCheck collectionCheck;
 
     /**
      * Creates a new RouteDefinition.
@@ -47,6 +51,13 @@ public class RouteDefinition {
     public RouteDefinition(String id, String path,
                           String backendUrl, String collectionName,
                           RateLimitConfig rateLimit, int stripPrefix, String tenantId) {
+        this(id, path, backendUrl, collectionName, rateLimit, stripPrefix, tenantId, false, null);
+    }
+
+    private RouteDefinition(String id, String path,
+                           String backendUrl, String collectionName,
+                           RateLimitConfig rateLimit, int stripPrefix, String tenantId,
+                           boolean systemCollection, StaticCollectionCheck collectionCheck) {
         this.id = id;
         this.path = path;
         this.backendUrl = backendUrl;
@@ -54,6 +65,20 @@ public class RouteDefinition {
         this.rateLimit = rateLimit;
         this.stripPrefix = stripPrefix;
         this.tenantId = tenantId;
+        this.systemCollection = systemCollection;
+        this.collectionCheck = collectionCheck;
+    }
+
+    /** Copy of this route flagged as a bootstrap system collection. */
+    public RouteDefinition withSystemCollection(boolean systemCollection) {
+        return new RouteDefinition(id, path, backendUrl, collectionName, rateLimit, stripPrefix, tenantId,
+                systemCollection, collectionCheck);
+    }
+
+    /** Copy of this route carrying a collection-level check (see {@link StaticCollectionCheck}). */
+    public RouteDefinition withCollectionCheck(StaticCollectionCheck collectionCheck) {
+        return new RouteDefinition(id, path, backendUrl, collectionName, rateLimit, stripPrefix, tenantId,
+                systemCollection, collectionCheck);
     }
 
     /**
@@ -109,6 +134,14 @@ public class RouteDefinition {
         return tenantId;
     }
 
+    public boolean isSystemCollection() {
+        return systemCollection;
+    }
+
+    public StaticCollectionCheck getCollectionCheck() {
+        return collectionCheck;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -120,12 +153,15 @@ public class RouteDefinition {
                Objects.equals(backendUrl, that.backendUrl) &&
                Objects.equals(collectionName, that.collectionName) &&
                Objects.equals(rateLimit, that.rateLimit) &&
-               Objects.equals(tenantId, that.tenantId);
+               Objects.equals(tenantId, that.tenantId) &&
+               systemCollection == that.systemCollection &&
+               Objects.equals(collectionCheck, that.collectionCheck);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, path, backendUrl, collectionName, rateLimit, stripPrefix, tenantId);
+        return Objects.hash(id, path, backendUrl, collectionName, rateLimit, stripPrefix, tenantId,
+                systemCollection, collectionCheck);
     }
 
     @Override
@@ -138,6 +174,8 @@ public class RouteDefinition {
                ", rateLimit=" + rateLimit +
                ", stripPrefix=" + stripPrefix +
                ", tenantId='" + tenantId + '\'' +
+               ", systemCollection=" + systemCollection +
+               ", collectionCheck=" + collectionCheck +
                '}';
     }
 }

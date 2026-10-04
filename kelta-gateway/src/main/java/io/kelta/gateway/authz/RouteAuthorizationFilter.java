@@ -10,6 +10,7 @@ import io.kelta.gateway.filter.TenantResolutionFilter;
 import io.kelta.gateway.metrics.GatewayMetrics;
 import io.kelta.gateway.route.RouteDefinition;
 import io.kelta.gateway.route.RouteRegistry;
+import io.kelta.gateway.route.StaticCollectionCheck;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -163,7 +164,16 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                     String collectionName = route.get().getCollectionName();
                     exchange.getAttributes().put(RequestLoggingFilter.ROUTE_ATTR, collectionName);
 
-                    // Static routes (admin, me, metrics, search, etc.) are not
+                    // A static route that fronts a real system collection (users, profiles,
+                    // collections — declared in RouteConfigService) is authorized against that
+                    // collection, so the request is refused before the worker validates its body.
+                    StaticCollectionCheck staticCheck = route.get().getCollectionCheck();
+                    if (staticCheck != null
+                            && staticCheck.appliesTo(exchange.getRequest().getMethod(), path)) {
+                        return checkStaticCollection(exchange, chain, path, principal, route.get(), staticCheck);
+                    }
+
+                    // Other static routes (admin, me, metrics, search, etc.) are not
                     // real collections — they only require the API_ACCESS check
                     // above.  Skip the collection-level Cerbos check for them.
                     if (collectionId.startsWith("static-")) {
@@ -232,6 +242,53 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                                 }
                                 return forwardWithHeaders(exchange, chain, principal);
                             });
+                });
+    }
+
+    /**
+     * Collection-level check for a static route declared with a {@link StaticCollectionCheck}: the
+     * Cerbos object permission for the HTTP action on the system collection behind the route, or
+     * — for a write — the declared override system permission. Fails closed when the collection's
+     * route is not registered (bootstrap not loaded): without its id there is nothing to check.
+     */
+    private Mono<Void> checkStaticCollection(ServerWebExchange exchange,
+                                             GatewayFilterChain chain,
+                                             String path,
+                                             GatewayPrincipal principal,
+                                             RouteDefinition staticRoute,
+                                             StaticCollectionCheck staticCheck) {
+        String tenantSlug = TenantResolutionFilter.getTenantSlug(exchange);
+        String methodStr = exchange.getRequest().getMethod() != null ? exchange.getRequest().getMethod().name() : "unknown";
+        String collectionName = staticRoute.getCollectionName();
+        String action = mapMethodToAction(exchange.getRequest().getMethod());
+
+        Optional<RouteDefinition> backing = routeRegistry.findCollectionRouteBehind(staticRoute);
+        if (backing.isEmpty()) {
+            log.error("No collection route behind static route '{}' — denying {} on path: {}",
+                    staticRoute.getId(), action, path);
+            metrics.recordAuthzDenied(tenantSlug, collectionName, methodStr);
+            return forbidden(exchange, "Insufficient permissions for " + action + " on " + collectionName);
+        }
+
+        String override = staticCheck.writeOverridePermission();
+        Mono<Boolean> overrideAllowed = override != null
+                && StaticCollectionCheck.isWrite(exchange.getRequest().getMethod())
+                ? cerbosService.checkSystemPermission(principal, override)
+                : Mono.just(false);
+
+        return overrideAllowed
+                .flatMap(viaOverride -> viaOverride
+                        ? Mono.just(true)
+                        : cerbosService.checkObjectPermission(principal, backing.get().getId(), action))
+                .flatMap(allowed -> {
+                    if (!allowed) {
+                        log.warn("User {} denied {} on static collection route '{}' (collection id={})",
+                                principal.getUsername(), action, collectionName, backing.get().getId());
+                        metrics.recordAuthzDenied(tenantSlug, collectionName, methodStr);
+                        return forbidden(exchange,
+                                "Insufficient permissions for " + action + " on " + collectionName);
+                    }
+                    return forwardWithHeaders(exchange, chain, principal);
                 });
     }
 
@@ -354,9 +411,7 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
     }
 
     private boolean isWriteMethod(ServerWebExchange exchange) {
-        HttpMethod method = exchange.getRequest().getMethod();
-        return method == HttpMethod.POST || method == HttpMethod.PUT
-                || method == HttpMethod.PATCH || method == HttpMethod.DELETE;
+        return StaticCollectionCheck.isWrite(exchange.getRequest().getMethod());
     }
 
     private String mapMethodToAction(HttpMethod method) {

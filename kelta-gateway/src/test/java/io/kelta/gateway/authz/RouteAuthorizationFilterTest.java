@@ -8,6 +8,7 @@ import io.kelta.gateway.metrics.GatewayMetrics;
 import io.kelta.gateway.route.RouteDefinition;
 import io.kelta.gateway.filter.TenantResolutionFilter;
 import io.kelta.gateway.route.RouteRegistry;
+import io.kelta.gateway.route.StaticCollectionCheck;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -18,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.server.ServerWebExchange;
@@ -27,6 +29,7 @@ import reactor.test.StepVerifier;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -680,6 +683,221 @@ class RouteAuthorizationFilterTest {
                 assertThat(forwarded().getRequest().getQueryParams().get("filter[id][eq]"))
                         .containsExactly("other-tenant");
             }
+        }
+    }
+
+    // ================================================================
+    // Static routes that front a system collection (users, profiles, collections)
+    // ================================================================
+
+    @Nested
+    @DisplayName("Static routes that front a system collection")
+    class StaticCollectionRouteTests {
+
+        private static final String VALID_USER_BODY = """
+                {"data":{"type":"users","attributes":{"email":"new@test.com","userType":"INTERNAL",
+                "status":"ACTIVE","firstName":"New","lastName":"User"}}}
+                """;
+
+        private final RouteDefinition usersRoute = new RouteDefinition("static-users", "/api/users/**",
+                "http://worker:80", "users").withCollectionCheck(new StaticCollectionCheck(true, "MANAGE_USERS"));
+        private final RouteDefinition usersCollection = new RouteDefinition("users-uuid", "/api/users/**",
+                "http://worker:80", "users", null, 0, "platform-tenant").withSystemCollection(true);
+        private final RouteDefinition profilesRoute = new RouteDefinition("static-profiles", "/api/profiles/**",
+                "http://worker:80", "profiles").withCollectionCheck(new StaticCollectionCheck(false, "MANAGE_USERS"));
+        private final RouteDefinition profilesCollection = new RouteDefinition("profiles-uuid", "/api/profiles/**",
+                "http://worker:80", "profiles", null, 0, "platform-tenant").withSystemCollection(true);
+        private final RouteDefinition collectionsRoute = new RouteDefinition("static-collections",
+                "/api/collections/**", "http://worker:80", "collections")
+                .withCollectionCheck(new StaticCollectionCheck(false, "CUSTOMIZE_APPLICATION",
+                        Pattern.compile("^/api/collections/[^/]+/(import|duplicates|merge)(/.*)?$")));
+        private final RouteDefinition collectionsCollection = new RouteDefinition("collections-uuid",
+                "/api/collections/**", "http://worker:80", "collections", null, 0, "platform-tenant")
+                .withSystemCollection(true);
+
+        private RouteAuthorizationFilter filter;
+        private GatewayPrincipal principal;
+
+        @BeforeEach
+        void setUp() {
+            filter = new RouteAuthorizationFilter(
+                    routeRegistry, true, publicPathMatcher, metrics, new ObjectMapper(), cerbosService);
+            principal = principalWithIdentity("pat@test.com");
+            lenient().when(cerbosService.checkSystemPermission(principal, "API_ACCESS")).thenReturn(Mono.just(true));
+            lenient().when(cerbosService.checkSystemPermission(principal, "MANAGE_USERS")).thenReturn(Mono.just(false));
+            lenient().when(cerbosService.checkSystemPermission(principal, "CUSTOMIZE_APPLICATION"))
+                    .thenReturn(Mono.just(false));
+            lenient().when(routeRegistry.findCollectionRouteBehind(usersRoute)).thenReturn(Optional.of(usersCollection));
+            lenient().when(routeRegistry.findCollectionRouteBehind(profilesRoute))
+                    .thenReturn(Optional.of(profilesCollection));
+            lenient().when(routeRegistry.findCollectionRouteBehind(collectionsRoute))
+                    .thenReturn(Optional.of(collectionsCollection));
+        }
+
+        private MockServerWebExchange exchange(MockServerHttpRequest request, RouteDefinition route) {
+            when(routeRegistry.findByPath(eq(request.getPath().value()), any())).thenReturn(Optional.of(route));
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+            exchange.getAttributes().put(PRINCIPAL_ATTR, principal);
+            return exchange;
+        }
+
+        private void run(MockServerWebExchange exchange) {
+            StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+        }
+
+        private void assertDenied(MockServerWebExchange exchange) {
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            verify(filterChain, never()).filter(any());
+        }
+
+        @Test
+        @DisplayName("POST /api/users with an empty body is 403 without create — never reaches validation")
+        void postUsersEmptyBodyWithoutCreateIsForbidden() {
+            when(cerbosService.checkObjectPermission(principal, "users-uuid", "create")).thenReturn(Mono.just(false));
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.post("/api/users")
+                    .contentType(MediaType.APPLICATION_JSON).body(""), usersRoute);
+
+            run(exchange);
+
+            assertDenied(exchange);
+        }
+
+        @Test
+        @DisplayName("POST /api/users with a fully valid body is 403 without create")
+        void postUsersValidBodyWithoutCreateIsForbidden() {
+            when(cerbosService.checkObjectPermission(principal, "users-uuid", "create")).thenReturn(Mono.just(false));
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.post("/api/users")
+                    .contentType(MediaType.APPLICATION_JSON).body(VALID_USER_BODY), usersRoute);
+
+            run(exchange);
+
+            assertDenied(exchange);
+        }
+
+        @Test
+        @DisplayName("POST /api/users with create on the users collection is forwarded")
+        void postUsersWithCreateIsForwarded() {
+            when(cerbosService.checkObjectPermission(principal, "users-uuid", "create")).thenReturn(Mono.just(true));
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.post("/api/users")
+                    .contentType(MediaType.APPLICATION_JSON).body(VALID_USER_BODY), usersRoute);
+
+            run(exchange);
+
+            verify(filterChain).filter(any());
+            assertThat(exchange.getResponse().getStatusCode()).isNull();
+        }
+
+        @Test
+        @DisplayName("MANAGE_USERS admits a users write without a collection grant")
+        void manageUsersAdmitsUsersWrite() {
+            when(cerbosService.checkSystemPermission(principal, "MANAGE_USERS")).thenReturn(Mono.just(true));
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.patch("/api/users/u-1")
+                    .contentType(MediaType.APPLICATION_JSON).body(VALID_USER_BODY), usersRoute);
+
+            run(exchange);
+
+            verify(filterChain).filter(any());
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("GET /api/users list is 403 without read")
+        void getUsersListWithoutReadIsForbidden() {
+            when(cerbosService.checkObjectPermission(principal, "users-uuid", "read")).thenReturn(Mono.just(false));
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/users").build(), usersRoute);
+
+            run(exchange);
+
+            assertDenied(exchange);
+        }
+
+        @Test
+        @DisplayName("GET /api/users/{id} is 403 without read, and MANAGE_USERS does not widen reads")
+        void getUserByIdWithoutReadIsForbidden() {
+            when(cerbosService.checkObjectPermission(principal, "users-uuid", "read")).thenReturn(Mono.just(false));
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/users/u-1").build(), usersRoute);
+
+            run(exchange);
+
+            assertDenied(exchange);
+            verify(cerbosService, never()).checkSystemPermission(principal, "MANAGE_USERS");
+        }
+
+        @Test
+        @DisplayName("GET /api/users with read is forwarded")
+        void getUsersWithReadIsForwarded() {
+            when(cerbosService.checkObjectPermission(principal, "users-uuid", "read")).thenReturn(Mono.just(true));
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/users").build(), usersRoute);
+
+            run(exchange);
+
+            verify(filterChain).filter(any());
+        }
+
+        @Test
+        @DisplayName("Self-service /api/me (the caller's own user) stays API_ACCESS-only")
+        void meStaysApiAccessOnly() {
+            RouteDefinition meRoute = new RouteDefinition("static-me", "/api/me/**", "http://worker:80", "me");
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/me/permissions").build(), meRoute);
+
+            run(exchange);
+
+            verify(filterChain).filter(any());
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Fails closed when the collection behind the static route is not registered")
+        void failsClosedWithoutBackingCollection() {
+            when(routeRegistry.findCollectionRouteBehind(usersRoute)).thenReturn(Optional.empty());
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/users").build(), usersRoute);
+
+            run(exchange);
+
+            assertDenied(exchange);
+        }
+
+        @Test
+        @DisplayName("GET /api/profiles stays API_ACCESS-only; PATCH needs edit")
+        void profilesReadsOpenWritesChecked() {
+            MockServerWebExchange read = exchange(MockServerHttpRequest.get("/api/profiles").build(), profilesRoute);
+            run(read);
+            verify(filterChain).filter(any());
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+
+            when(cerbosService.checkObjectPermission(principal, "profiles-uuid", "edit")).thenReturn(Mono.just(false));
+            MockServerWebExchange write = exchange(MockServerHttpRequest.patch("/api/profiles/p-1")
+                    .contentType(MediaType.APPLICATION_JSON).body("{}"), profilesRoute);
+            run(write);
+            assertThat(write.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        }
+
+        @Test
+        @DisplayName("GET /api/collections stays open; POST needs create or CUSTOMIZE_APPLICATION")
+        void collectionsReadsOpenWritesChecked() {
+            MockServerWebExchange read = exchange(MockServerHttpRequest.get("/api/collections").build(),
+                    collectionsRoute);
+            run(read);
+            verify(filterChain).filter(any());
+
+            when(cerbosService.checkObjectPermission(principal, "collections-uuid", "create"))
+                    .thenReturn(Mono.just(false));
+            MockServerWebExchange write = exchange(MockServerHttpRequest.post("/api/collections")
+                    .contentType(MediaType.APPLICATION_JSON).body("{}"), collectionsRoute);
+            run(write);
+            assertThat(write.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        }
+
+        @Test
+        @DisplayName("Per-collection data operations under /api/collections/{name}/ are exempt")
+        void collectionDataOperationsAreExempt() {
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.post("/api/collections/orders/import/csv")
+                    .build(), collectionsRoute);
+
+            run(exchange);
+
+            verify(filterChain).filter(any());
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
         }
     }
 }
