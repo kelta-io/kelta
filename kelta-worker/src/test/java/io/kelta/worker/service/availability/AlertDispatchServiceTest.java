@@ -9,16 +9,21 @@ import io.kelta.worker.service.push.DefaultPushService;
 import io.kelta.worker.service.sms.SmsDeliveryException;
 import io.kelta.worker.service.sms.SmsMessage;
 import io.kelta.worker.service.sms.SmsProvider;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -46,6 +51,7 @@ class AlertDispatchServiceTest {
     private SmsProvider smsProvider;
     private EntitlementService entitlementService;
     private JdbcTemplate jdbcTemplate;
+    private SimpleMeterRegistry meterRegistry;
     private AlertDispatchService service;
 
     @BeforeEach
@@ -56,8 +62,9 @@ class AlertDispatchServiceTest {
         smsProvider = mock(SmsProvider.class);
         entitlementService = mock(EntitlementService.class);
         jdbcTemplate = mock(JdbcTemplate.class);
+        meterRegistry = new SimpleMeterRegistry();
         service = new AlertDispatchService(deliveryRepository, pushService, emailService,
-                smsProvider, entitlementService, jdbcTemplate, new ObjectMapper());
+                smsProvider, entitlementService, jdbcTemplate, new ObjectMapper(), meterRegistry);
 
         when(entitlementService.listLimit(anyString(), anyString(), anyString()))
                 .thenReturn(List.of("push", "email"));
@@ -74,6 +81,8 @@ class AlertDispatchServiceTest {
                 .thenReturn(List.of("member@example.com"));
     }
 
+    private static final Instant ALERT_CREATED_AT = Instant.parse("2026-08-01T12:00:00Z");
+
     private static AvailabilityMatchService.ClaimedAlert alert(String channels) {
         Watch watch = new Watch("w1", TENANT, MEMBER, "target-1", "{}", channels,
                 Watch.STATUS_ACTIVE, null);
@@ -81,7 +90,7 @@ class AlertDispatchServiceTest {
                 "Site A", "campground", "{}", true);
         return new AvailabilityMatchService.ClaimedAlert("alert-1", watch, target,
                 "2026-08-14", Instant.parse("2026-08-14T00:00:00Z"),
-                Instant.parse("2026-08-14T00:00:00Z"));
+                Instant.parse("2026-08-14T00:00:00Z"), ALERT_CREATED_AT);
     }
 
     @Nested
@@ -276,6 +285,61 @@ class AlertDispatchServiceTest {
 
             verify(deliveryRepository).markSent(eq("delivery-push"), any());
             verify(deliveryRepository, never()).markFailed(anyString(), anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("Latency metric")
+    class LatencyMetric {
+
+        private Timer timer(String channel) {
+            return meterRegistry.find(AlertDispatchService.LATENCY_METRIC)
+                    .tags("tenant", TENANT, "channel", channel).timer();
+        }
+
+        @Test
+        @DisplayName("a SENT push records one sample; a FAILED email records none")
+        void sentRecordsFailedDoesNot() {
+            when(emailService.sendByName(anyString(), anyString(), anyString(), anyMap(),
+                    anyString(), anyString())).thenThrow(new IllegalStateException("smtp down"));
+
+            service.dispatch(TENANT, alert("[\"push\",\"email\"]"));
+
+            Timer push = timer("push");
+            assertThat(push).isNotNull();
+            assertThat(push.count()).isEqualTo(1);
+            assertThat(timer("email"))
+                    .as("a failed delivery has no latency")
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("the sample is the marked sent_at minus the alert's created_at")
+        void sampleMatchesPersistedSentAt() {
+            ArgumentCaptor<Instant> sentAt = ArgumentCaptor.forClass(Instant.class);
+
+            service.dispatch(TENANT, alert("[\"push\"]"));
+
+            verify(deliveryRepository).markSent(eq("delivery-push"), sentAt.capture());
+            Duration expected = Duration.between(ALERT_CREATED_AT, sentAt.getValue());
+            assertThat(timer("push").totalTime(TimeUnit.NANOSECONDS))
+                    .as("metric and endpoint share one definition: sent_at - alert.created_at")
+                    .isEqualTo((double) expected.toNanos());
+        }
+
+        @Test
+        @DisplayName("an alert with no recorded creation time is delivered but not timed")
+        void missingCreatedAtIsNotTimed() {
+            Watch watch = new Watch("w1", TENANT, MEMBER, "target-1", "{}", "[\"push\"]",
+                    Watch.STATUS_ACTIVE, null);
+            WatchTarget target = new WatchTarget("target-1", TENANT, "recgov", "site-1",
+                    "Site A", "campground", "{}", true);
+
+            service.dispatch(TENANT, new AvailabilityMatchService.ClaimedAlert("alert-1", watch,
+                    target, "2026-08-14", null, null, null));
+
+            verify(deliveryRepository).markSent(eq("delivery-push"), any());
+            assertThat(timer("push")).isNull();
         }
     }
 

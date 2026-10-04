@@ -7,6 +7,8 @@ import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.worker.service.push.DefaultPushService;
 import io.kelta.worker.service.sms.SmsMessage;
 import io.kelta.worker.service.sms.SmsProvider;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -43,6 +45,11 @@ import java.util.Set;
  * {@code kelta.sms.provider=twilio} and the Twilio secret are configured. A member with no phone
  * number on file records a FAILED SMS delivery, exactly like a stale push token — never a
  * rollback.
+ *
+ * <p>Every SENT delivery records {@value #LATENCY_METRIC} (tags {@code tenant}, {@code channel}),
+ * measured from the alert's {@code created_at} as defined by {@link AlertLatencySummary} — the
+ * same definition {@code GET /api/alerts/latency} reports, so the metric and the endpoint agree.
+ * FAILED deliveries record nothing.
  */
 @Service
 public class AlertDispatchService {
@@ -52,6 +59,9 @@ public class AlertDispatchService {
     static final String CHANNEL_PUSH = "push";
     static final String CHANNEL_EMAIL = "email";
     static final String CHANNEL_SMS = "sms";
+
+    /** Timer of detection → delivery latency per SENT delivery. */
+    static final String LATENCY_METRIC = "kelta_alert_delivery_latency_seconds";
 
     /**
      * Channels that cost real money to deliver, and are therefore only ever sent on an
@@ -83,6 +93,7 @@ public class AlertDispatchService {
     private final EntitlementService entitlementService;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final MeterRegistry meterRegistry;
 
     public AlertDispatchService(AlertDeliveryRepository deliveryRepository,
                                 DefaultPushService pushService,
@@ -90,7 +101,8 @@ public class AlertDispatchService {
                                 SmsProvider smsProvider,
                                 EntitlementService entitlementService,
                                 JdbcTemplate jdbcTemplate,
-                                ObjectMapper objectMapper) {
+                                ObjectMapper objectMapper,
+                                MeterRegistry meterRegistry) {
         this.deliveryRepository = deliveryRepository;
         this.pushService = pushService;
         this.emailService = emailService;
@@ -98,6 +110,7 @@ public class AlertDispatchService {
         this.entitlementService = entitlementService;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.meterRegistry = meterRegistry;
     }
 
     /** Delivers one claimed alert. Never throws — a failure is recorded, not propagated. */
@@ -121,7 +134,9 @@ public class AlertDispatchService {
             String deliveryId = deliveryIds.get(i);
             try {
                 send(tenantId, alert, channel, title, body);
-                deliveryRepository.markSent(deliveryId, Instant.now());
+                Instant sentAt = Instant.now();
+                deliveryRepository.markSent(deliveryId, sentAt);
+                recordLatency(tenantId, channel, alert.createdAt(), sentAt);
             } catch (Exception e) {
                 // One channel failing must not stop the others: a member whose
                 // push token is stale should still get the email.
@@ -130,6 +145,20 @@ public class AlertDispatchService {
                 deliveryRepository.markFailed(deliveryId, e.getMessage());
             }
         }
+    }
+
+    private void recordLatency(String tenantId, String channel, Instant alertCreatedAt,
+                               Instant sentAt) {
+        if (alertCreatedAt == null) {
+            return;
+        }
+        Timer.builder(LATENCY_METRIC)
+                .description("Alert delivery latency: alert_delivery.sent_at - alert.created_at")
+                .tag("tenant", tenantId)
+                .tag("channel", channel)
+                .publishPercentileHistogram()
+                .register(meterRegistry)
+                .record(AlertLatencySummary.latency(alertCreatedAt, sentAt));
     }
 
     private void send(String tenantId, AvailabilityMatchService.ClaimedAlert alert,
