@@ -671,6 +671,10 @@ the gateway's `X-Tenant-ID` / `X-Tenant-Slug` headers (as `ScopedValue`s). In a 
 controller, **read** `TenantContext` (or accept `@RequestHeader("X-Tenant-ID")`) — do **not**
 call `TenantContext.runWithTenant(...)` on a request path; that's for background / cross-tenant
 jobs. RLS then scopes every query automatically.
+The one request-path exception is `filter/TenantManagementScopeFilter`, which rebinds the
+tenant for a `MANAGE_TENANTS` caller on `/api/tenants` (unbound for the listing, the managed
+tenant for `/api/tenants/{id}`) so the self-scoped `tenants` read still serves platform tenant
+management — see Worker Layers → tenant scoping.
 
 ### Tenant context → database connection (all three JDBC services)
 
@@ -722,7 +726,15 @@ for it, not just a `ScopedValue`.
   `queryEngine.executeQuery` callers (`DashboardDataService`, `ReportExecutionService`,
   `PageRenderService`, `DataExportService`, `BulkOperationService`, `CampaignRunnerService`)
   need no tenant logic of their own — they had none, and read across tenants until PLT-260
-  (concerns.md). A collection whose table has no `tenant_id` column is left alone (eleven of
+  (concerns.md). **Self-scoped** collections (`SystemCollectionTenancy.isSelfScoped` — only
+  `tenants`, whose primary key *is* the tenant id and which has no `tenant_id` column) get
+  `id = <caller>` instead, on the same reads **and on `getById`** (a foreign tenant id reads as
+  absent; PLT-330). A platform admin's tenant management reaches storage through
+  `TenantManagementScopeFilter` (kelta-worker, after `TenantContextFilter`): with
+  `MANAGE_TENANTS` on the caller's profile, `GET /api/tenants` runs **unbound** (full list,
+  RLS `admin_bypass`) and `/api/tenants/{id}` runs **bound to `{id}`**; everything else keeps
+  the caller's tenant. `tenants` is never served from `SystemCollectionCache`, whose key is the
+  `X-Tenant-ID` header rather than the bound context. A collection whose table has no `tenant_id` column is left alone (eleven of
   them hang off a parent FK), and an unbound read is left unfiltered but logged at WARN off
   scheduler threads. `injectTenantFilter` keeps adding the same predicate at the router as a
   second layer; get-by-id applies the rule after the fetch (`visibleToTenant`: another
