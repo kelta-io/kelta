@@ -194,6 +194,104 @@ class SystemCollectionTenantScopingScenarioTest extends ScenarioBase {
         }
     }
 
+    /**
+     * PLT-330: {@code tenants} has no {@code tenant_id} column — each row is a tenant — so the
+     * PLT-260 predicate never applied to it, and a report or metric widget over {@code tenants}
+     * listed every tenant on the platform. It is now self-scoped in storage ({@code id = caller}).
+     * A platform admin's Setup › Tenants listing must still see them all: the worker runs that
+     * request unbound ({@code TenantManagementScopeFilter}), not with a wider predicate.
+     */
+    @Test
+    @DisplayName("reports and dashboard metrics over `tenants` read only the caller's own tenant row")
+    @SuppressWarnings("unchecked")
+    void tenantsReadsAreSelfScoped() throws Exception {
+        String slugB = TenantFixture.ECOMMERCE_SLUG;
+        String tokenB = auth.loginAsAdmin(slugB);
+        String tenantB = auth.extractTenantId(tokenB);
+
+        String slugPlatform = TenantFixture.DEFAULT_SLUG;
+        String tokenPlatform = auth.loginAsAdmin(slugPlatform);
+        String tenantPlatform = auth.extractTenantId(tokenPlatform);
+        assertThat(tenantPlatform).as("two distinct tenants").isNotEqualTo(tenantB);
+
+        waitForStatus(gatewayClientWithToken(tokenB), "/" + slugB + "/api/reports", HttpStatus.OK, 240);
+
+        String suffix = Long.toHexString(System.nanoTime());
+        String dashboardId = null;
+        String metricId = null;
+        String reportId = null;
+
+        try (Connection db = openDbConnection()) {
+            String tenantsCollectionId = systemCollectionId(db, "tenants");
+            assertThat(tenantsCollectionId).as("the `tenants` system collection row exists").isNotNull();
+            try {
+                dashboardId = createRecord(tokenB, slugB, "dashboards", Map.of(
+                        "name", "PLT-330 " + suffix,
+                        "accessLevel", "PRIVATE",
+                        "columnCount", 3));
+                metricId = createRecord(tokenB, slugB, "dashboard-components", Map.of(
+                        "dashboardId", dashboardId,
+                        "componentType", "metric",
+                        "title", "Tenants",
+                        "columnPosition", 1,
+                        "rowPosition", 1,
+                        "sortOrder", 1,
+                        "config", Map.of(
+                                "collectionName", "tenants",
+                                "aggregateFunction", "COUNT")));
+                reportId = createRecord(tokenB, slugB, "reports", Map.of(
+                        "name", "PLT-330 tenants " + suffix,
+                        "reportType", "TABULAR",
+                        "primaryCollectionId", tenantsCollectionId,
+                        "columns", List.of(
+                                Map.of("fieldName", "slug", "label", "Slug", "type", "string"))));
+
+                // ---- (1) metric widget over `tenants`: the caller's own row only
+                Map<String, Object> metric = widgetData(tokenB, slugB, dashboardId, metricId);
+                assertThat(numberOf(((Map<String, Object>) metric.get("data")).get("value")))
+                        .as("a metric over `tenants` must count only the calling tenant")
+                        .isEqualTo(1L);
+
+                // ---- (2) report over `tenants`: one row, the caller's slug
+                ResponseEntity<Map> report = gatewayClientWithToken(tokenB)
+                        .post().uri("/" + slugB + "/api/reports/" + reportId + "/execute")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(Map.of())
+                        .retrieve().toEntity(Map.class);
+                assertThat(report.getStatusCode()).isEqualTo(HttpStatus.OK);
+                Map<String, Object> reportAttrs =
+                        (Map<String, Object>) ((Map<String, Object>) report.getBody().get("data")).get("attributes");
+                List<Map<String, Object>> reportRows = (List<Map<String, Object>>) reportAttrs.get("records");
+                assertThat(reportRows).extracting(row -> row.get("slug"))
+                        .as("a report over `tenants` must list only the calling tenant")
+                        .containsExactly(slugB);
+                assertThat(numberOf(((Map<String, Object>) report.getBody().get("meta")).get("totalCount")))
+                        .as("the report's totalCount is self-scoped too")
+                        .isEqualTo(1L);
+
+                // ---- (3) platform admin (MANAGE_TENANTS) still lists every tenant
+                Map<String, Object> listing = gatewayClientWithToken(tokenPlatform)
+                        .get().uri("/" + slugPlatform + "/api/tenants?page[size]=200")
+                        .retrieve().body(Map.class);
+                assertThat((List<Map<String, Object>>) listing.get("data"))
+                        .extracting(row -> row.get("id"))
+                        .as("Setup › Tenants lists every tenant for a platform admin")
+                        .contains(tenantPlatform, tenantB);
+
+                // ---- (4) ... and can still read (and so manage) another tenant's row
+                ResponseEntity<Map> other = gatewayClientWithToken(tokenPlatform)
+                        .get().uri("/" + slugPlatform + "/api/tenants/" + tenantB)
+                        .retrieve().toEntity(Map.class);
+                assertThat(other.getStatusCode()).isEqualTo(HttpStatus.OK);
+                assertThat(((Map<String, Object>) other.getBody().get("data")).get("id")).isEqualTo(tenantB);
+            } finally {
+                deleteRowById(db, "dashboard_component", metricId);
+                deleteRowById(db, "dashboard", dashboardId);
+                deleteRowById(db, "report", reportId);
+            }
+        }
+    }
+
     // ------------------------------------------------------------- Helpers
 
     @SuppressWarnings("unchecked")
