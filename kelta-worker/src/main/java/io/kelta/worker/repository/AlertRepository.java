@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -33,25 +34,34 @@ public class AlertRepository {
     }
 
     /**
-     * Claims the right to alert. Returns the new alert id, or empty when this
+     * A won claim: the new alert id and its database-assigned {@code created_at}, which is the
+     * detection time delivery latency is measured from.
+     */
+    public record Claim(String alertId, Instant createdAt) {
+    }
+
+    /**
+     * Claims the right to alert. Returns the new alert, or empty when this
      * (watch, slot, episode) was already alerted — the insert IS the claim, so
      * two pods racing on the same event produce exactly one notification.
      */
-    public Optional<String> claim(String tenantId, String watchId, String targetId,
-                                  String slotKey, String episodeId,
-                                  Instant windowStart, Instant windowEnd) {
+    public Optional<Claim> claim(String tenantId, String watchId, String targetId,
+                                 String slotKey, String episodeId,
+                                 Instant windowStart, Instant windowEnd) {
         String id = UUID.randomUUID().toString();
-        int inserted = jdbc.update("""
+        List<Instant> createdAt = jdbc.query("""
                         INSERT INTO alert
                             (id, tenant_id, watch_id, target_id, slot_key, episode_id,
                              window_start, window_end, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
                         ON CONFLICT (tenant_id, watch_id, slot_key, episode_id) DO NOTHING
+                        RETURNING created_at
                         """,
+                (rs, rowNum) -> rs.getTimestamp(1).toInstant(),
                 id, tenantId, watchId, targetId, slotKey, episodeId,
                 windowStart == null ? null : Timestamp.from(windowStart),
                 windowEnd == null ? null : Timestamp.from(windowEnd));
-        return inserted > 0 ? Optional.of(id) : Optional.empty();
+        return createdAt.isEmpty() ? Optional.empty() : Optional.of(new Claim(id, createdAt.get(0)));
     }
 
     /**

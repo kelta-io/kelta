@@ -1608,3 +1608,38 @@ status change, delete every `pat:<hash>` for that user (or write `pat:revoked:<h
 admin `DELETE /api/admin/users/{id}/tokens/{tokenId}` so an operator can kill a key whose
 plaintext is gone. Until then, pulling `API_ACCESS` from the profile is the immediate kill
 switch.
+
+## Any token could list every tenant (found and fixed 2026-10-04)
+
+**Symptom:** `GET /api/tenants` from any tenant — even a least-privilege service PAT with
+`API_ACCESS` and no grant on `tenants` — returned all 16 platform tenants with `name`, `slug`,
+`edition`, `status`, `limits`, `settings` (portal redirect URIs, self-signup flag) and the IP
+allowlist. Writes were never exposed: the gateway already required `MANAGE_TENANTS` for them,
+and a tenant admin's no-op `PATCH` of another tenant returned 403.
+
+**Root cause:** `tenants` is a system collection with no `tenant_id` column — each row *is* a
+tenant — so `PhysicalTableStorageAdapter.tenantScope()` (PLT-260) skips it by design, RLS has
+no `tenant_id` to key on, and the gateway treats `static-tenants` reads as needing only
+`API_ACCESS`.
+
+**Fix:** `RouteAuthorizationFilter` gates reads of `static-tenants` on the same
+`MANAGE_TENANTS` check that gates writes. Platform admins keep the full list (Setup › Tenants).
+Everyone else is narrowed to their own row: a list gets `filter[id][eq]=<caller tenant>` after
+every caller-supplied `filter[id]…` parameter is dropped (so a duplicate key cannot override it),
+and `GET /api/tenants/{id}` for any other id is a 404. The tenant UI's own-tenant lookups
+(`useTenantSettings`, `useTenantIpAllowlist`: `filter[slug][eq]=<own slug>`) are unaffected.
+
+**#1603 was not enough — `/api/tenants` was a public path (2026-10-04, same day).** After #1603
+deployed, the leak was still live, and wider than first measured: `kelta.gateway.security.public-paths`
+lists `/api/tenants` (the UI bootstrap reads its own tenant's id and name before sign-in), so every
+GET/HEAD bypassed authentication *and* the new check — **anyone on the internet, with no token**, could
+list all tenants with settings, limits and IP allowlists. Fix: `/api/tenants` is now also in
+`anonymous-only-public-paths`, so a request carrying a token is authenticated and authorized normally
+(the #1603 rule applies), and an anonymous request is narrowed in `RouteAuthorizationFilter` to the
+tenant its URL names, `fields[tenants]=name,slug`, no `include`; any other tenant's record, or a URL
+that resolves no tenant, is a 404. Verify with `curl` and **no** token as well as with a
+least-privilege PAT — the first verification of #1603 used only authenticated calls and missed this.
+
+**Still open:** this is the gateway layer only. Direct `queryEngine` callers in the worker
+(reports, dashboards, exports) that select the `tenants` collection are not narrowed by it; a
+storage-layer or RLS policy keyed on `id = current tenant` is the follow-up.

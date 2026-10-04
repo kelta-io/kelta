@@ -300,6 +300,11 @@ class RouteConfigServiceTest {
             .filter(r -> r.getId().equals("static-promotions")).findFirst().orElse(null);
         assertNotNull(promotionsRoute);
         assertEquals("/api/promotions/**", promotionsRoute.getPath());
+
+        // Alert delivery latency summary (AlertLatencyController)
+        RouteDefinition alertsRoute = routeRegistry.findByPath("/api/alerts/latency").orElse(null);
+        assertNotNull(alertsRoute);
+        assertEquals("static-alerts", alertsRoute.getId());
     }
 
     @Test

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
@@ -523,6 +524,162 @@ class RouteAuthorizationFilterTest {
                         && "profile-1".equals(mutated.getRequest().getHeaders().getFirst("X-User-Profile-Id"))
                         && "tenant-1".equals(mutated.getRequest().getHeaders().getFirst("X-Cerbos-Scope"));
             }));
+        }
+        @Nested
+        @DisplayName("Reads of /api/tenants")
+        class TenantsReadScopingTests {
+
+            private final RouteDefinition tenantsRoute = new RouteDefinition("static-tenants", "/api/tenants/**",
+                    "http://worker:80", "tenants");
+
+            private MockServerWebExchange exchangeFor(MockServerHttpRequest request, GatewayPrincipal principal) {
+                MockServerWebExchange exchange = MockServerWebExchange.from(request);
+                exchange.getAttributes().put(PRINCIPAL_ATTR, principal);
+                when(routeRegistry.findByPath(eq(request.getPath().value()), any())).thenReturn(Optional.of(tenantsRoute));
+                when(cerbosService.checkSystemPermission(principal, "API_ACCESS")).thenReturn(Mono.just(true));
+                return exchange;
+            }
+
+            private ServerWebExchange forwarded() {
+                ArgumentCaptor<ServerWebExchange> captor = ArgumentCaptor.forClass(ServerWebExchange.class);
+                verify(filterChain).filter(captor.capture());
+                return captor.getValue();
+            }
+
+            @Test
+            @DisplayName("Anonymous lookups see only the URL's own tenant, name and slug only")
+            void anonymousListIsNarrowedToUrlTenantAndSafeFields() {
+                when(publicPathMatcher.isPublicRequest(any(ServerWebExchange.class))).thenReturn(true);
+                MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/tenants")
+                        .queryParam("filter[slug][eq]", "acme")
+                        .queryParam("filter[id][eq]", "victim-tenant")
+                        .queryParam("fields[tenants]", "settings,limits,ipAllowlistCidrs")
+                        .queryParam("include", "parentTenantId").build());
+                exchange.getAttributes().put("tenantId", "tenant-1");
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                var params = forwarded().getRequest().getQueryParams();
+                assertThat(params.get("filter[id][eq]")).containsExactly("tenant-1");
+                assertThat(params.get("fields[tenants]")).containsExactly("name,slug");
+                assertThat(params).doesNotContainKey("include");
+                assertThat(params.getFirst("filter[slug][eq]")).isEqualTo("acme");
+            }
+
+            @Test
+            @DisplayName("Anonymous lookup of another tenant's record is a 404")
+            void anonymousOtherTenantRecordIsNotFound() {
+                when(publicPathMatcher.isPublicRequest(any(ServerWebExchange.class))).thenReturn(true);
+                MockServerWebExchange exchange = MockServerWebExchange.from(
+                        MockServerHttpRequest.get("/api/tenants/victim-tenant").build());
+                exchange.getAttributes().put("tenantId", "tenant-1");
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+                verify(filterChain, never()).filter(any());
+            }
+
+            @Test
+            @DisplayName("Anonymous lookup with no resolved tenant is a 404")
+            void anonymousWithoutResolvedTenantIsNotFound() {
+                when(publicPathMatcher.isPublicRequest(any(ServerWebExchange.class))).thenReturn(true);
+                MockServerWebExchange exchange = MockServerWebExchange.from(
+                        MockServerHttpRequest.get("/api/tenants").build());
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+                verify(filterChain, never()).filter(any());
+            }
+
+            @Test
+            @DisplayName("Anonymous lookup of the URL's own tenant record gets name and slug only")
+            void anonymousOwnRecordGetsSafeFields() {
+                when(publicPathMatcher.isPublicRequest(any(ServerWebExchange.class))).thenReturn(true);
+                MockServerWebExchange exchange = MockServerWebExchange.from(
+                        MockServerHttpRequest.get("/api/tenants/tenant-1").build());
+                exchange.getAttributes().put("tenantId", "tenant-1");
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(forwarded().getRequest().getQueryParams().get("fields[tenants]")).containsExactly("name,slug");
+            }
+
+            @Test
+            @DisplayName("A list without MANAGE_TENANTS is narrowed to the caller's own tenant")
+            void listIsNarrowedToOwnTenant() {
+                GatewayPrincipal principal = principalWithIdentity("user@test.com");
+                MockServerWebExchange exchange = exchangeFor(MockServerHttpRequest.get("/api/tenants")
+                        .queryParam("page[size]", "200").build(), principal);
+                when(cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")).thenReturn(Mono.just(false));
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                ServerWebExchange out = forwarded();
+                assertThat(out.getRequest().getQueryParams().get("filter[id][eq]")).containsExactly("tenant-1");
+                assertThat(out.getRequest().getQueryParams().getFirst("page[size]")).isEqualTo("200");
+            }
+
+            @Test
+            @DisplayName("A caller-supplied id filter is dropped so it can never override the narrowing")
+            void callerIdFilterIsDropped() {
+                GatewayPrincipal principal = principalWithIdentity("user@test.com");
+                MockServerWebExchange exchange = exchangeFor(MockServerHttpRequest.get("/api/tenants")
+                        .queryParam("filter[id][eq]", "victim-tenant")
+                        .queryParam("filter[ID]", "victim-tenant")
+                        .queryParam("filter[id][in]", "victim-tenant,tenant-1")
+                        .queryParam("filter[slug][eq]", "acme").build(), principal);
+                when(cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")).thenReturn(Mono.just(false));
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                var params = forwarded().getRequest().getQueryParams();
+                assertThat(params.get("filter[id][eq]")).containsExactly("tenant-1");
+                assertThat(params).doesNotContainKeys("filter[ID]", "filter[id][in]");
+                assertThat(params.getFirst("filter[slug][eq]")).isEqualTo("acme");
+            }
+
+            @Test
+            @DisplayName("Another tenant's record is a 404 and never reaches the worker")
+            void otherTenantRecordIsNotFound() {
+                GatewayPrincipal principal = principalWithIdentity("user@test.com");
+                MockServerWebExchange exchange = exchangeFor(
+                        MockServerHttpRequest.get("/api/tenants/victim-tenant").build(), principal);
+                when(cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")).thenReturn(Mono.just(false));
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+                verify(filterChain, never()).filter(any());
+            }
+
+            @Test
+            @DisplayName("The caller's own tenant record passes through")
+            void ownTenantRecordPasses() {
+                GatewayPrincipal principal = principalWithIdentity("user@test.com");
+                MockServerWebExchange exchange = exchangeFor(
+                        MockServerHttpRequest.get("/api/tenants/tenant-1").build(), principal);
+                when(cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")).thenReturn(Mono.just(false));
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(forwarded().getRequest().getPath().value()).isEqualTo("/api/tenants/tenant-1");
+            }
+
+            @Test
+            @DisplayName("A platform admin (MANAGE_TENANTS) keeps the full, unmodified list")
+            void platformAdminListIsUnchanged() {
+                GatewayPrincipal principal = principalWithIdentity("admin@test.com");
+                MockServerWebExchange exchange = exchangeFor(MockServerHttpRequest.get("/api/tenants")
+                        .queryParam("filter[id][eq]", "other-tenant").build(), principal);
+                when(cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")).thenReturn(Mono.just(true));
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(forwarded().getRequest().getQueryParams().get("filter[id][eq]"))
+                        .containsExactly("other-tenant");
+            }
         }
     }
 }
