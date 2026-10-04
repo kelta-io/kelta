@@ -1,0 +1,205 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+// Every competitor cell links to that product's own docs or repository. If a
+// claim cannot be cited there, it does not go on this page.
+const rows = [
+  { key: 'selfHosting', label: 'Self-hosting' },
+  { key: 'license', label: 'License' },
+  { key: 'multiTenancy', label: 'Multi-tenancy' },
+  { key: 'agents', label: 'MCP / agent support' },
+  { key: 'auth', label: 'Auth' },
+  { key: 'realtime', label: 'Realtime' },
+  { key: 'storage', label: 'File storage' },
+  { key: 'adminUi', label: 'Admin UI' },
+  { key: 'maturity', label: 'Maturity / community' },
+];
+
+const kelta = {
+  id: 'kelta',
+  name: 'Kelta',
+  cells: {
+    selfHosting: { text: 'Docker Compose for evaluation, Kubernetes for production; needs PostgreSQL, Redis, NATS and Cerbos alongside the services', href: '/docs/deploy/kubernetes/' },
+    license: { text: 'AGPLv3', href: '/docs/deploy/licensing/' },
+    multiTenancy: { text: 'Built in: tenants resolved by slug or custom domain, isolated by PostgreSQL row-level security', href: '/docs/platform/tenants/' },
+    agents: { text: 'Hosted MCP server per tenant with admin (schema, flows, layouts) and user (records, search, approvals) toolsets', href: '/docs/mcp/overview/' },
+    auth: { text: 'Built-in OIDC provider, OIDC and SAML single sign-on, TOTP and SMS MFA, personal access tokens', href: '/docs/security/sso/' },
+    realtime: { text: 'WebSocket record-change events and record presence', href: '/docs/console/realtime-and-offline/' },
+    storage: { text: 'Record attachments on S3-compatible object storage', href: '/docs/data-model/search-and-attachments/' },
+    adminUi: { text: 'Admin console for builders plus an end-user app that renders what they build', href: '/docs/console/admin-console/' },
+    maturity: { text: 'Young project with a small community; some capabilities are documented as partial', href: 'https://github.com/kelta-io/kelta' },
+  },
+};
+
+const competitors = [
+  {
+    id: 'supabase',
+    name: 'Supabase',
+    cells: {
+      selfHosting: { text: 'Docker Compose; a self-hosted install is a single project', href: 'https://supabase.com/docs/guides/self-hosting' },
+      license: { text: 'Apache 2.0', href: 'https://github.com/supabase/supabase' },
+      multiTenancy: { text: 'Not a built-in tenant model; you write Postgres row-level security policies', href: 'https://supabase.com/docs/guides/database/postgres/row-level-security' },
+      agents: { text: 'MCP server for working with your Supabase projects', href: 'https://supabase.com/docs/guides/getting-started/mcp' },
+      auth: { text: 'Supabase Auth', href: 'https://supabase.com/docs/guides/auth' },
+      realtime: { text: 'Broadcast, Presence and Postgres Changes', href: 'https://supabase.com/docs/guides/realtime' },
+      storage: { text: 'S3-compatible Storage with resumable uploads', href: 'https://supabase.com/docs/guides/storage' },
+      adminUi: { text: 'Studio dashboard', href: 'https://supabase.com/docs/guides/self-hosting' },
+      maturity: { text: 'Established project with a large open-source community', href: 'https://github.com/supabase/supabase' },
+    },
+    win: {
+      text: 'Supabase is a real Postgres database with the Postgres ecosystem behind it — extensions, tooling and SQL you already know. Its hosted platform runs that database, auth, storage and realtime for you, so there is no infrastructure to operate. If you want a managed Postgres backend today, Supabase is the stronger choice.',
+      links: [
+        { label: 'Postgres extensions', href: 'https://supabase.com/docs/guides/database/extensions' },
+        { label: 'Hosted platform', href: 'https://supabase.com/docs/guides/platform' },
+      ],
+    },
+  },
+  {
+    id: 'appwrite',
+    name: 'Appwrite',
+    cells: {
+      selfHosting: { text: 'Docker install with a setup wizard', href: 'https://appwrite.io/docs/advanced/self-hosting' },
+      license: { text: 'BSD 3-Clause', href: 'https://github.com/appwrite/appwrite' },
+      multiTenancy: { text: 'Modelled with Teams and team permissions, one team per tenant', href: 'https://appwrite.io/docs/products/auth/multi-tenancy' },
+      agents: { text: 'Hosted MCP server for its API and docs', href: 'https://appwrite.io/docs/tooling/ai/mcp-servers' },
+      auth: { text: 'Email/password, phone, magic URL, email OTP, OAuth2, anonymous, MFA', href: 'https://appwrite.io/docs/products/auth' },
+      realtime: { text: 'Realtime API subscriptions', href: 'https://appwrite.io/docs/apis/realtime' },
+      storage: { text: 'Storage buckets', href: 'https://appwrite.io/docs/products/storage' },
+      adminUi: { text: 'Appwrite Console', href: 'https://appwrite.io/docs/advanced/self-hosting' },
+      maturity: { text: 'Established project with a large open-source community', href: 'https://github.com/appwrite/appwrite' },
+    },
+    win: {
+      text: 'Appwrite has the broadest SDK coverage of the four: client SDKs for Web, Flutter, Apple, Android and React Native, and server SDKs across Node.js, Python, Dart, PHP, Ruby, .NET, Go, Swift, Kotlin and Rust. If your team ships native mobile apps in several languages, Appwrite meets you where you are.',
+      links: [{ label: 'Appwrite SDKs', href: 'https://appwrite.io/docs/sdks' }],
+    },
+  },
+  {
+    id: 'pocketbase',
+    name: 'PocketBase',
+    cells: {
+      selfHosting: { text: 'One executable with embedded SQLite', href: 'https://pocketbase.io/docs/' },
+      license: { text: 'MIT', href: 'https://github.com/pocketbase/pocketbase' },
+      multiTenancy: { text: 'Not built in; access is expressed per collection with API rules', href: 'https://pocketbase.io/docs/api-rules-and-filters/' },
+      agents: { text: '— (none in its docs)', href: 'https://pocketbase.io/docs/' },
+      auth: { text: 'Password, OTP, OAuth2 and MFA', href: 'https://pocketbase.io/docs/authentication/' },
+      realtime: { text: 'Realtime subscriptions over server-sent events', href: 'https://pocketbase.io/docs/api-realtime/' },
+      storage: { text: 'Local filesystem by default, or S3-compatible', href: 'https://pocketbase.io/docs/files-handling/' },
+      adminUi: { text: 'Built-in superusers dashboard', href: 'https://pocketbase.io/docs/' },
+      maturity: { text: 'Pre-1.0; backward compatibility is not guaranteed before v1.0.0', href: 'https://github.com/pocketbase/pocketbase' },
+    },
+    win: {
+      text: 'PocketBase is a single binary. Download it, run it, and you have a database, auth, file storage, realtime and a dashboard with nothing else to install. Kelta needs PostgreSQL, Redis, NATS and Cerbos next to its own services; for a small app or a prototype, PocketBase is far less to run.',
+      links: [{ label: 'PocketBase introduction', href: 'https://pocketbase.io/docs/' }],
+    },
+  },
+  {
+    id: 'directus',
+    name: 'Directus',
+    cells: {
+      selfHosting: { text: 'Docker, over Postgres, MySQL, SQLite and other SQL databases', href: 'https://directus.com/docs/self-hosting/overview' },
+      license: { text: 'Monospace Sustainable Core License 1.0 — read the license terms', href: 'https://github.com/directus/directus/blob/main/license' },
+      multiTenancy: { text: 'Not built in; roles and access policies', href: 'https://directus.com/docs/guides/auth/access-control' },
+      agents: { text: 'MCP server (Directus v11.12+)', href: 'https://directus.com/docs/guides/ai/mcp' },
+      auth: { text: 'OpenID, OAuth 2.0, LDAP and SAML single sign-on', href: 'https://directus.com/docs/guides/auth/sso' },
+      realtime: { text: 'WebSocket Realtime API, off by default when self-hosted', href: 'https://directus.com/docs/getting-started/connect-to-realtime' },
+      storage: { text: 'Local, S3, GCS, Azure, Cloudinary and Supabase storage adapters', href: 'https://directus.com/docs/configuration/files' },
+      adminUi: { text: 'Data Studio app for content, files, users and dashboards', href: 'https://directus.com/docs/getting-started/overview' },
+      maturity: { text: 'Established project with a large open-source community', href: 'https://github.com/directus/directus' },
+    },
+    win: {
+      text: 'Directus has the most polished admin UI here. Its Data Studio gives non-technical teams a finished app for content, files, users and dashboards, and it can sit on top of an existing SQL database. If your main need is a back office over data you already have, Directus is the better fit.',
+      links: [{ label: 'Directus Data Studio', href: 'https://directus.com/docs/getting-started/overview' }],
+    },
+  },
+];
+
+const columns = [kelta, ...competitors];
+const external = { target: '_blank', rel: 'noopener noreferrer' };
+---
+
+<BaseLayout title="Compare" description="How Kelta compares with Supabase, Appwrite, PocketBase and Directus — and where each of them wins.">
+  <section class="bg-gradient-to-b from-kelta-50 to-white py-20">
+    <div class="mx-auto max-w-7xl px-6 text-center">
+      <h1 class="text-4xl font-extrabold text-navy md:text-5xl">Kelta compared</h1>
+      <p class="mx-auto mt-4 max-w-3xl text-lg text-kelta-700">
+        The open-source application platform your AI agents can actually operate — schema, flows, and approvals over an API and an MCP server.
+      </p>
+      <p class="mx-auto mt-4 max-w-2xl text-sm text-kelta-700">
+        Supabase, Appwrite, PocketBase and Directus are good projects, and each is the better choice for some teams.
+        Every competitor entry below links to that project's own documentation; check it before you decide.
+      </p>
+    </div>
+  </section>
+
+  <section class="py-12">
+    <div class="mx-auto max-w-7xl overflow-x-auto px-6">
+      <table class="w-full min-w-[960px] border-collapse text-left text-sm">
+        <thead>
+          <tr class="border-b-2 border-navy">
+            <th scope="col" class="w-40 py-3 pr-4 font-semibold text-navy"></th>
+            {columns.map((column) => (
+              <th scope="col" class="py-3 pr-4 font-bold text-navy">{column.name}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr class="border-b border-gray-100 align-top">
+              <th scope="row" class="py-4 pr-4 font-semibold text-navy">{row.label}</th>
+              {columns.map((column) => {
+                const cell = column.cells[row.key as keyof typeof column.cells];
+                return (
+                  <td class="py-4 pr-4 leading-relaxed text-kelta-700">
+                    <a
+                      href={cell.href}
+                      class="underline decoration-gray-300 underline-offset-2 hover:text-cyan"
+                      {...(cell.href.startsWith('http') ? external : {})}
+                    >
+                      {cell.text}
+                    </a>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p class="mt-4 text-xs text-gray-500">Checked against each project's documentation in October 2026. Projects move quickly; their docs are the source of truth.</p>
+    </div>
+  </section>
+
+  <section class="py-12">
+    <div class="mx-auto max-w-7xl px-6">
+      <h2 class="mb-8 text-3xl font-bold text-navy">Where they win</h2>
+      <div class="grid gap-8 md:grid-cols-2">
+        {competitors.map((competitor) => (
+          <div id={competitor.id} class="rounded-xl border border-gray-100 bg-white p-8 shadow-sm">
+            <h3 class="mb-3 text-xl font-bold text-navy">{competitor.name}</h3>
+            <p class="text-sm leading-relaxed text-kelta-700">{competitor.win.text}</p>
+            <p class="mt-3 text-sm">
+              {competitor.win.links.map((link) => (
+                <a href={link.href} class="mr-4 font-semibold text-cyan hover:text-blue" {...external}>{link.label}</a>
+              ))}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="py-12">
+    <div class="mx-auto max-w-7xl px-6">
+      <div class="rounded-xl border border-kelta-100 bg-kelta-50 p-8">
+        <h2 class="mb-3 text-xl font-bold text-navy">Where Kelta fits</h2>
+        <p class="text-sm leading-relaxed text-navy">
+          Choose Kelta when you need tenants as a first-class concept and want AI agents to change the application itself —
+          collections, fields, <a href="/docs/automation/flows/" class="font-semibold underline">flows</a> and
+          <a href="/docs/automation/approvals/" class="font-semibold underline">approvals</a> — through the
+          <a href="/docs/mcp/overview/" class="font-semibold underline">MCP server</a>, under the same permissions as a person.
+          Kelta is young: expect a smaller community and rougher edges than any of the projects above. See the
+          <a href="/roadmap" class="font-semibold underline">roadmap</a> for what is shipped and what is not.
+        </p>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
