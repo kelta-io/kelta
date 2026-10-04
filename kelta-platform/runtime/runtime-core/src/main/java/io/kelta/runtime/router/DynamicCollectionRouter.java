@@ -1949,11 +1949,18 @@ public class DynamicCollectionRouter {
      *
      * <p>{@link #NEVER_CACHED_SYSTEM_COLLECTIONS} extends that exclusion to collections which are
      * writable here but still mutated out-of-band.
+     *
+     * <p>Self-scoped collections ({@code tenants}) are never cached either: the cache is keyed on
+     * the {@code X-Tenant-ID} header, but what a {@code tenants} read returns depends on the bound
+     * {@code TenantContext}, which the worker unbinds for a platform admin's tenant listing
+     * ({@code TenantManagementScopeFilter}). A cached full listing would otherwise be served to
+     * the next caller of the same tenant with the same query.
      */
     private boolean cacheable(CollectionDefinition definition) {
         return definition.systemCollection()
                 && !definition.readOnly()
                 && !NEVER_CACHED_SYSTEM_COLLECTIONS.contains(definition.name())
+                && !SystemCollectionTenancy.isSelfScoped(definition)
                 && systemCollectionCache != null;
     }
 

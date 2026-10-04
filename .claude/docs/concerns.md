@@ -1609,7 +1609,7 @@ admin `DELETE /api/admin/users/{id}/tokens/{tokenId}` so an operator can kill a 
 plaintext is gone. Until then, pulling `API_ACCESS` from the profile is the immediate kill
 switch.
 
-## Any token could list every tenant (found and fixed 2026-10-04)
+## Any token could list every tenant (found 2026-10-04; closed 2026-10-04, PLT-330)
 
 **Symptom:** `GET /api/tenants` from any tenant — even a least-privilege service PAT with
 `API_ACCESS` and no grant on `tenants` — returned all 16 platform tenants with `name`, `slug`,
@@ -1640,6 +1640,48 @@ tenant its URL names, `fields[tenants]=name,slug`, no `include`; any other tenan
 that resolves no tenant, is a 404. Verify with `curl` and **no** token as well as with a
 least-privilege PAT — the first verification of #1603 used only authenticated calls and missed this.
 
-**Still open:** this is the gateway layer only. Direct `queryEngine` callers in the worker
-(reports, dashboards, exports) that select the `tenants` collection are not narrowed by it; a
-storage-layer or RLS policy keyed on `id = current tenant` is the follow-up.
+**Closed (PLT-330) — the storage layer now enforces it too.** The gateway fix above never
+reached the worker's direct `queryEngine` callers (`DashboardDataService`,
+`ReportExecutionService`, `DataExportService`, `BulkOperationService`, `CampaignRunnerService`,
+`PageRenderService`): a report, metric widget or export over `tenants` still read every tenant.
+What each layer enforces now:
+
+- **Gateway** (`RouteAuthorizationFilter`, #1603/#1604): `GET /api/tenants[/…]` without
+  `MANAGE_TENANTS` is narrowed to `filter[id][eq]=<caller>` (list) or 404 (another id); an
+  anonymous request is narrowed to the URL's tenant, `name`/`slug` only. Covers only the
+  `/api/tenants` route.
+- **Storage** (`PhysicalTableStorageAdapter`): `SystemCollectionTenancy.isSelfScoped` names
+  `tenants` — a system collection whose primary key *is* the tenant id. With a tenant bound,
+  `tenantScope()` returns `id = <bound tenant>` for it (no `hasTenantColumn` introspection), so
+  `query`, its `totalCount`, `aggregate` and `semanticSearch` all AND it in after the caller's
+  own filters; `getById` ANDs it too (only for self-scoped collections — `tenant_id`-scoped
+  get-by-id stays router-side), so a foreign id reads as absent. Unbound reads stay unfiltered
+  and log through `warnUnscopedRead` like any tenant-scoped collection. `tenants` responses are
+  no longer stored in `SystemCollectionCache` (keyed by header, not by the bound context).
+- **Worker platform path** (`TenantManagementScopeFilter`): a caller whose profile holds
+  `MANAGE_TENANTS` (re-checked against `profile_system_permission`, not trusted from the
+  gateway) gets `GET /api/tenants` run **unbound** — the full Setup › Tenants list — and
+  `/api/tenants/{id}` run **bound to `{id}`**, so editing/suspending another tenant still finds
+  its row. `POST /api/tenants`, deeper paths, and everyone else keep their own tenant bound. The
+  predicate was not widened for this; the context was.
+
+Tenant resolution is unaffected: slug→id lookups (gateway bootstrap, `TenantSlugResolver`,
+kelta-auth) are raw `JdbcTemplate` SQL on `tenant`, not the storage adapter, and the
+pre-login `GET /<slug>/api/tenants?filter[slug][eq]=<slug>` reads its own row under the
+slug-resolved tenant.
+
+**RLS assessment (no migration in PLT-330).** `tenant` has no RLS today. A
+`tenant_isolation` policy `USING (id = COALESCE(kelta_pinned_tenant(), current_setting(
+'app.current_tenant_id', true)))` plus the usual `admin_bypass` ('' sentinel, V200/V201) would
+be a sound second layer for the paths above — the admin listing runs unbound and so hits
+`admin_bypass`, single-tenant management runs bound to the managed id, and every `JOIN tenant t
+ON t.id = pu.tenant_id` joins the caller's own row. It is **not** a drop-in, though: raw SQL that
+reads *another* tenant's row while a tenant is bound would silently see nothing, and must be
+moved to an unbound or per-tenant context first —
+`SandboxProvisioningService` (`SELECT COUNT(*) FROM tenant WHERE slug = ?` uniqueness check
+under the parent's context would always pass, deferring to the unique constraint; the sandbox
+slug lookup at ~L408), `EmailRepository`'s `SELECT id FROM tenant WHERE
+lower(email_from_address) = …` inbound routing, and kelta-auth's slug→id lookups
+(`TenantContextFilter`, `KeltaUserDetailsService`, `PortalLoginService`) if any run after a
+tenant is bound. Those callers must be audited before the policy ships, and Superset/pinned DB
+roles would see only their own `tenant` row (desirable). Proposed as a separate migration task.

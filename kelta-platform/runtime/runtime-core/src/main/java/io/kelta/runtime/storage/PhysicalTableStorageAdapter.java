@@ -677,9 +677,21 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
     public Optional<Map<String, Object>> getById(CollectionDefinition definition, String id) {
         TableRef tableRef = getTableRef(definition);
         String sql = "SELECT * FROM " + tableRef.toSql() + " WHERE id = ?";
+        List<Object> params = new ArrayList<>();
+        params.add(id);
+        // Only self-scoped collections are narrowed here: for tenant_id-scoped ones get-by-id
+        // stays router-side (DynamicCollectionRouter.visibleToTenant), but nothing downstream
+        // could narrow a tenants row and a foreign id must read as absent.
+        if (SystemCollectionTenancy.isSelfScoped(definition)) {
+            TenantScope scope = tenantScope(definition, tableRef);
+            if (scope != null) {
+                sql += " AND " + scope.sql();
+                params.addAll(scope.params());
+            }
+        }
 
         try {
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id);
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, params.toArray());
             if (results.isEmpty()) {
                 return Optional.empty();
             }
@@ -1088,7 +1100,7 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
     /**
      * A rendered {@code tenant_id} predicate and its bind values, ANDed into a read's WHERE clause.
      *
-     * @param sql the predicate SQL, e.g. {@code tenant_id = ?}
+     * @param sql the predicate SQL, e.g. {@code tenant_id = ?} (or {@code id = ?} when self-scoped)
      * @param params its bind values, in placeholder order
      */
     private record TenantScope(String sql, List<Object> params) {}
@@ -1106,18 +1118,26 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
      * {@code /api/pages/home/render} served another tenant's page). Same pattern as
      * {@link #isUnique}, which has scoped uniqueness checks this way all along.
      *
+     * <p>Self-scoped collections ({@code tenants}, {@link SystemCollectionTenancy#isSelfScoped})
+     * have no {@code tenant_id} column — each row is a tenant — so they are narrowed by primary
+     * key, {@code id = caller}, without the column introspection.
+     *
      * @param definition the collection being read
      * @param tableRef its resolved table
      * @return the predicate to AND in, or {@code null} when the read needs no tenant narrowing
      */
     private TenantScope tenantScope(CollectionDefinition definition, TableRef tableRef) {
-        if (!SystemCollectionTenancy.isTenantScoped(definition)) {
+        boolean selfScoped = SystemCollectionTenancy.isSelfScoped(definition);
+        if (!selfScoped && !SystemCollectionTenancy.isTenantScoped(definition)) {
             return null;
         }
         String tenantId = TenantContext.get();
         if (tenantId == null || tenantId.isBlank()) {
             warnUnscopedRead(definition);
             return null;
+        }
+        if (selfScoped) {
+            return new TenantScope("id = ?", List.of(tenantId));
         }
         if (!hasTenantColumn(tableRef)) {
             return null;
@@ -1157,7 +1177,8 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
     }
 
     /**
-     * A tenant-scoped system collection read with no bound tenant returns every tenant's rows.
+     * A tenant-scoped (or self-scoped) system collection read with no bound tenant returns every
+     * tenant's rows.
      * Genuine platform paths do that deliberately (Flyway, bootstrap, and the scheduler threads
      * that sweep tenant by tenant), so those are logged at DEBUG; anywhere else it is a leak
      * waiting to be reported and gets a WARN naming the collection and the thread.

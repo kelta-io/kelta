@@ -31,6 +31,17 @@ public final class SystemCollectionTenancy {
      */
     private static final Set<String> SHARES_SYSTEM_ROWS = Set.of("collections", "fields");
 
+    /**
+     * System collections whose primary key <em>is</em> the tenant id: each row is a tenant, so
+     * there is no {@code tenant_id} column to filter on and a tenant may read only the row whose
+     * {@code id} is its own.
+     *
+     * <p>{@code tenants} is {@code .tenantScoped(false)} precisely because it has no
+     * {@code tenant_id} column, which is why {@link #isTenantScoped} never caught it and every
+     * report, dashboard widget or export over it read every tenant on the platform.
+     */
+    private static final Set<String> SELF_SCOPED = Set.of("tenants");
+
     private SystemCollectionTenancy() {
     }
 
@@ -42,6 +53,15 @@ public final class SystemCollectionTenancy {
      */
     public static boolean isTenantScoped(CollectionDefinition definition) {
         return definition != null && definition.systemCollection() && definition.tenantScoped();
+    }
+
+    /**
+     * True when reads of {@code definition} must be narrowed to the single row whose
+     * {@code id} is the current tenant ({@code id = caller}) rather than by a {@code tenant_id}
+     * column.
+     */
+    public static boolean isSelfScoped(CollectionDefinition definition) {
+        return definition != null && definition.systemCollection() && SELF_SCOPED.contains(definition.name());
     }
 
     /**
