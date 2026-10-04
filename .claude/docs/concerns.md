@@ -1663,7 +1663,10 @@ What each layer enforces now:
   gateway) gets `GET /api/tenants` run **unbound** — the full Setup › Tenants list — and
   `/api/tenants/{id}` run **bound to `{id}`**, so editing/suspending another tenant still finds
   its row. `POST /api/tenants`, deeper paths, and everyone else keep their own tenant bound. The
-  predicate was not widened for this; the context was.
+  predicate was not widened for this; the context was. It depends on the gateway forwarding
+  `X-User-Profile-Id`, which a `/api/tenants` GET only gets since #1604 made the path
+  anonymous-only public — before that, an admin's token was ignored there, the worker saw no
+  profile, and Setup › Tenants would have listed one tenant (PLT-330's first CI run failed on it).
 
 Tenant resolution is unaffected: slug→id lookups (gateway bootstrap, `TenantSlugResolver`,
 kelta-auth) are raw `JdbcTemplate` SQL on `tenant`, not the storage adapter, and the
