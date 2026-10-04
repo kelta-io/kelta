@@ -16,6 +16,8 @@
 # Merges use a PAT (ARGOCD_REPO_TOKEN, `repo` scope) rather than GITHUB_TOKEN: a push made
 # with GITHUB_TOKEN never triggers this repo's other workflows, so `Build and Deploy`
 # would not fire on the squash-merge.
+# needs-human-merge: a PR carrying this label (the fleet sets it on security tasks, PLT-336)
+# is never merged by this workflow -- Craig merges it by hand.
 name: Auto-merge autopilot PRs
 
 on:
@@ -35,6 +37,7 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       contains(github.event.pull_request.labels.*.name, 'autopilot') &&
+      !contains(github.event.pull_request.labels.*.name, 'needs-human-merge') &&
       (github.event.pull_request.user.login == 'cklinker' ||
        github.event.pull_request.user.login == 'github-actions[bot]') &&
       github.event.pull_request.draft == false
@@ -56,6 +59,7 @@ jobs:
       github.event.review.user.login == 'rzware-reviewer[bot]' &&
       github.event.pull_request.user.login == 'rzware-developer[bot]' &&
       contains(github.event.pull_request.labels.*.name, 'autopilot') &&
+      !contains(github.event.pull_request.labels.*.name, 'needs-human-merge') &&
       github.event.pull_request.draft == false
     steps:
       - name: Enable auto-merge (squash)
