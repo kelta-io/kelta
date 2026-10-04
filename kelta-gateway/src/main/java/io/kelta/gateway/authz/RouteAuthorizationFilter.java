@@ -19,15 +19,20 @@ import org.springframework.core.Ordered;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Mono;
 
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Global filter that enforces route-level authorization via Cerbos.
@@ -52,6 +57,11 @@ import java.util.Optional;
 public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
 
     private static final Logger log = LoggerFactory.getLogger(RouteAuthorizationFilter.class);
+
+    private static final String TENANTS_PATH = "/api/tenants";
+
+    /** Any caller-supplied filter on the tenants {@code id}: {@code filter[id]}, {@code filter[id][eq]}, … */
+    private static final Pattern TENANT_ID_FILTER = Pattern.compile("(?i)^filter\\[\\s*id\\s*\\](\\[[^\\]]*\\])?$");
 
     private final RouteRegistry routeRegistry;
     private final boolean permissionsEnabled;
@@ -191,6 +201,16 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                                         return forwardWithHeaders(exchange, chain, principal);
                                     });
                         }
+                        // The tenants collection has no tenant_id column — each row *is* a tenant —
+                        // so nothing downstream narrows reads of it to the caller. Without
+                        // MANAGE_TENANTS (the platform-admin grant that already gates writes) a
+                        // caller may read only its own tenant's row.
+                        if ("static-tenants".equals(collectionId)) {
+                            return cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")
+                                    .flatMap(platformAdmin -> platformAdmin
+                                            ? forwardWithHeaders(exchange, chain, principal)
+                                            : forwardOwnTenantOnly(exchange, chain, path, principal));
+                        }
                         return forwardWithHeaders(exchange, chain, principal);
                     }
 
@@ -226,6 +246,57 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                         .header("X-Cerbos-Scope", principal.getTenantId() != null ? principal.getTenantId() : ""))
                 .build();
         return chain.filter(mutated);
+    }
+
+    /**
+     * Narrows a read of {@code /api/tenants} to the caller's own tenant.
+     *
+     * <p>A list gets {@code filter[id][eq]=<caller tenant>} after every caller-supplied
+     * {@code filter[id]…} parameter is dropped, so a duplicate key can never win over it; other
+     * filters still apply and can only narrow further. A request for any other tenant's row (or
+     * anything beneath it) is a 404, not a 403, so the response does not confirm the id exists.
+     */
+    private Mono<Void> forwardOwnTenantOnly(ServerWebExchange exchange,
+                                            GatewayFilterChain chain,
+                                            String path,
+                                            GatewayPrincipal principal) {
+        String ownTenantId = principal.getTenantId();
+        String rest = path.length() > TENANTS_PATH.length() ? path.substring(TENANTS_PATH.length()) : "";
+        if (rest.isEmpty() || "/".equals(rest)) {
+            MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+            exchange.getRequest().getQueryParams().forEach((key, values) -> {
+                if (!TENANT_ID_FILTER.matcher(key).matches()) {
+                    params.put(key, values);
+                }
+            });
+            params.set("filter[id][eq]", ownTenantId);
+            URI narrowed = UriComponentsBuilder.fromUri(exchange.getRequest().getURI())
+                    .replaceQueryParams(params)
+                    .encode()
+                    .build()
+                    .toUri();
+            ServerWebExchange scoped = exchange.mutate().request(r -> r.uri(narrowed)).build();
+            return forwardWithHeaders(scoped, chain, principal);
+        }
+        String requestedId = rest.substring(1).split("/", 2)[0];
+        if (!requestedId.equals(ownTenantId)) {
+            log.warn("User {} denied read of another tenant's record on path: {}",
+                    principal.getUsername(), path);
+            metrics.recordAuthzDenied(TenantResolutionFilter.getTenantSlug(exchange), "tenants",
+                    exchange.getRequest().getMethod() != null ? exchange.getRequest().getMethod().name() : "unknown");
+            return notFound(exchange);
+        }
+        return forwardWithHeaders(exchange, chain, principal);
+    }
+
+    private Mono<Void> notFound(ServerWebExchange exchange) {
+        if (!ResponseHelpers.prepareJsonResponse(exchange.getResponse(), HttpStatus.NOT_FOUND)) {
+            return Mono.empty();
+        }
+        byte[] body = "{\"errors\":[{\"status\":\"404\",\"code\":\"NOT_FOUND\",\"detail\":\"Not found\"}]}"
+                .getBytes(StandardCharsets.UTF_8);
+        return exchange.getResponse().writeWith(
+                Mono.just(exchange.getResponse().bufferFactory().wrap(body)));
     }
 
     private boolean isWriteMethod(ServerWebExchange exchange) {
