@@ -430,8 +430,10 @@ class RouteRegistryTest {
         // ConfigEventListener builds "/api/<collectionName>/**" for every collection, and this
         // registry replaces by path with no tenant in the key -- so a collection named "modules",
         // "files" or "images" would take the prefix over for EVERY tenant. Module HTTP routes,
-        // signed-JAR upload, file serving and image transforms all hang off these.
-        for (String path : List.of("/api/modules/**", "/api/files/**", "/api/images/**")) {
+        // signed-JAR upload, file serving, image transforms and the alert latency summary all
+        // hang off these.
+        for (String path : List.of("/api/modules/**", "/api/files/**", "/api/images/**",
+                "/api/alerts/**")) {
             registry.addRoute(createRoute("static-" + path, path));
             registry.addRoute(createRoute("collection-uuid-pretending-to-own-" + path, path));
 

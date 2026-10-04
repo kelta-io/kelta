@@ -62,7 +62,7 @@ class AvailabilityEventListenerTest {
         WatchTarget target = new WatchTarget("target-1", "tenant-1", "recgov", "site-1",
                 "Site A", null, "{}", true);
         return new AvailabilityMatchService.ClaimedAlert("alert-1", watch, target,
-                "2026-08-14", null, null);
+                "2026-08-14", null, null, null);
     }
 
     @Nested

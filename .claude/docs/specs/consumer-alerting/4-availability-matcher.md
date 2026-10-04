@@ -116,3 +116,41 @@ short-circuit bound the work; stream maxAge bounds replay. Duplicate pollers dou
 — the dedupe tuple makes it harmless. Tenant email templates must exist before go-live
 (tenant config task). Per-target watch fanout is unbounded — fine at launch scale; revisit
 batching past ~10k watches on one target.
+
+## 9. Addendum — delivery latency metric + summary endpoint (landed)
+
+Generic, per-tenant visibility into how fast alerts reach members. Two surfaces, one definition
+(`service/availability/AlertLatencySummary`):
+
+- **Latency = `alert_delivery.sent_at - alert.created_at`**, clamped at zero (the two stamps come
+  from the worker's and the database's clocks). `alert.created_at` is the detection time because
+  `AlertRepository.claim` writes it with `NOW()` in the same matcher pass that detects the
+  CLOSED→OPEN transition (`AvailabilityMatchService.claimAlerts`); `claim` now returns it via
+  `RETURNING created_at` and it rides on `ClaimedAlert.createdAt`. Nothing else can serve:
+  `availability_state.last_change_at` is overwritten in place on the next transition (no
+  history), and the poller's `polledAt` is never persisted. **Poller → platform lag is not
+  included.** No migration.
+- **Metric** — `AlertDispatchService.dispatch` records the Micrometer timer
+  `kelta_alert_delivery_latency_seconds` (tags `tenant` = tenant id, `channel` =
+  `push|email|sms`; percentile histogram published so quantiles can be computed downstream)
+  exactly once per delivery, right after `markSent`, using the same `sentAt` it persisted. FAILED
+  deliveries record nothing. Exported through the existing OTLP/Prometheus pipeline.
+- **Endpoint** — `GET /api/alerts/latency?since=<ISO-8601 instant>&channel=<push|email|sms>`
+  (`AlertLatencyController`) → `{"data":{"count","p50Seconds","p90Seconds","since","channel"}}`.
+  `since` defaults to now − 7d and filters on `alert.created_at >= since`; an unparseable `since`
+  or unknown `channel` is 400. Without `channel` each alert is one sample at its **earliest SENT**
+  delivery (a failed push followed by a sent email counts once, at the email); with `channel`
+  every SENT delivery on that channel is a sample. PENDING/FAILED never contribute; no samples
+  is `count: 0` with null percentiles. Percentiles are computed in Java with linear
+  interpolation between closest ranks (same result as Postgres `percentile_cont`).
+- **Scoping & permission** — read-only; the tenant is the request's bound `TenantContext`.
+  `AlertDeliveryRepository.findSentSince` joins `alert_delivery` to `alert` and filters
+  `alert.tenant_id = ?` explicitly — `alert_delivery` has no `tenant_id` of its own (its only RLS
+  is the parent-alert policy from V202), so the predicate does not lean on RLS alone.
+  `/api/alerts/**` is a `static-` gateway route (also in `RouteRegistry`'s authoritative static
+  paths), so only `API_ACCESS` is checked there; the controller requires an INTERNAL caller whose
+  profile grants `MANAGE_DATA` (same check as `WatchController.hasSupportPermission`) and denies
+  every PORTAL actor with 403. There is no cross-tenant or write surface on `alert` /
+  `alert_delivery`.
+- **Tests** — `AlertDispatchServiceTest` (Latency metric), `AlertLatencySummaryTest`,
+  `AlertLatencyControllerTest`, `AlertLatencyIntegrationTest` (Testcontainers, two tenants).

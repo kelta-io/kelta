@@ -479,6 +479,21 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   re-owning one; it **fails closed** on an unresolvable identity (unlike the fail-open quota
   hook: this protects other members' data, not revenue) and admits internal-tier writes with no
   HTTP identity.
+- **Alert delivery latency** (consumer-alerting slice-4 addendum): `GET /api/alerts/latency`
+  (`AlertLatencyController`) rides the `static-alerts` route (`/api/alerts/**`, also an
+  authoritative static path in `RouteRegistry`), so the gateway checks only `API_ACCESS`; the
+  controller requires an INTERNAL caller holding `MANAGE_DATA` (same check as
+  `WatchController.hasSupportPermission`, PORTAL short-circuits to 403). It is read-only and
+  scoped to the bound tenant: the query joins `alert_delivery` to `alert` with an explicit
+  `alert.tenant_id = ?`, because `alert_delivery` carries no `tenant_id` (only the parent-alert
+  RLS policy). Latency is `alert_delivery.sent_at - alert.created_at` — `alert.created_at` is
+  written with `NOW()` in the matcher pass that detects the CLOSED→OPEN transition, whereas
+  `availability_state.last_change_at` is overwritten in place and has no history; poller lag is
+  excluded. The same definition (`AlertLatencySummary`) feeds the
+  `kelta_alert_delivery_latency_seconds` timer (tags `tenant`, `channel`, percentile histogram)
+  recorded by `AlertDispatchService` once per SENT delivery. Returns
+  `{data:{count,p50Seconds,p90Seconds,since,channel}}`; `since` defaults to now − 7d; percentiles
+  are interpolated (`percentile_cont`-equivalent). Detail: `specs/consumer-alerting/4-availability-matcher.md` §9.
 - **Member win API + ticker** (consumer-alerting slices 9, K-8): `/api/wins/**` is a static route
   (`API_ACCESS` only; scoping in `WinController`). `POST /api/wins`, `GET /api/wins` and
   `GET /api/wins/{id}` are self-only (owner from `X-User-Id`) with the same

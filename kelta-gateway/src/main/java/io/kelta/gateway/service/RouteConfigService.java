@@ -233,6 +233,9 @@ public class RouteConfigService {
                 // route, so only API_ACCESS is checked here; WatchController owns
                 // member scoping and WatchGuardHook covers the generic route.
                 {"watches", "/api/watches/**", "watches"},
+                // Read-only alert delivery latency summary — a static- route, so only
+                // API_ACCESS is checked here; AlertLatencyController requires MANAGE_DATA.
+                {"alerts", "/api/alerts/**", "alerts"},
                 {"connected-apps", "/api/connected-apps/**", "connected-apps"},
                 {"email-templates", "/api/email-templates/**", "email-templates"},
                 {"email", "/api/email/**", "email"},

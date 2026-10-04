@@ -35,6 +35,7 @@ class AvailabilityMatchServiceTest {
 
     private static final String TENANT = "tenant-1";
     private static final String TARGET_ID = "target-1";
+    private static final Instant CLAIMED_AT = Instant.parse("2026-08-02T12:00:00Z");
 
     private WatchTargetRepository targetRepository;
     private WatchRepository watchRepository;
@@ -57,7 +58,11 @@ class AvailabilityMatchServiceTest {
         when(alertRepository.alertedRecently(anyString(), anyString(), anyString(), any(), any()))
                 .thenReturn(false);
         when(alertRepository.claim(anyString(), anyString(), anyString(), anyString(),
-                anyString(), any(), any())).thenReturn(Optional.of("alert-1"));
+                anyString(), any(), any())).thenReturn(Optional.of(claim("alert-1")));
+    }
+
+    private static AlertRepository.Claim claim(String alertId) {
+        return new AlertRepository.Claim(alertId, CLAIMED_AT);
     }
 
     private AvailabilityMatchService newService(boolean enabled, int suppressionMinutes) {
@@ -159,6 +164,9 @@ class AvailabilityMatchServiceTest {
 
             assertThat(claimed).hasSize(1);
             assertThat(claimed.get(0).alertId()).isEqualTo("alert-1");
+            assertThat(claimed.get(0).createdAt())
+                    .as("the claim's created_at is the detection time latency is measured from")
+                    .isEqualTo(CLAIMED_AT);
             verify(alertRepository).claim(eq(TENANT), eq("w1"), eq(TARGET_ID),
                     eq("2026-08-15"), eq("episode-1"), any(), any());
         }
@@ -194,9 +202,9 @@ class AvailabilityMatchServiceTest {
             when(watchRepository.findLiveForTarget(anyString(), anyString(), any()))
                     .thenReturn(List.of(watch("w1", "{}"), watch("w2", "{}")));
             when(alertRepository.claim(anyString(), eq("w1"), anyString(), anyString(),
-                    anyString(), any(), any())).thenReturn(Optional.of("alert-1"));
+                    anyString(), any(), any())).thenReturn(Optional.of(claim("alert-1")));
             when(alertRepository.claim(anyString(), eq("w2"), anyString(), anyString(),
-                    anyString(), any(), any())).thenReturn(Optional.of("alert-2"));
+                    anyString(), any(), any())).thenReturn(Optional.of(claim("alert-2")));
 
             assertThat(service.process(TENANT, event("OPEN", null, null))).hasSize(2);
         }

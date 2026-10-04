@@ -77,9 +77,13 @@ public class AvailabilityMatchService {
         this.suppressionWindow = Duration.ofMinutes(Math.max(0, suppressionMinutes));
     }
 
-    /** An alert that was claimed and is owed a notification. */
+    /**
+     * An alert that was claimed and is owed a notification. {@code createdAt} is the alert row's
+     * {@code created_at} — the detection time delivery latency is measured from.
+     */
     public record ClaimedAlert(String alertId, Watch watch, WatchTarget target,
-                               String slotKey, Instant windowStart, Instant windowEnd) {
+                               String slotKey, Instant windowStart, Instant windowEnd,
+                               Instant createdAt) {
     }
 
     /**
@@ -153,9 +157,9 @@ public class AvailabilityMatchService {
 
             alertRepository.claim(tenantId, watch.id(), target.id(), event.slotKey(), episodeId,
                             event.windowStart(), event.windowEnd())
-                    .ifPresent(alertId -> claimed.add(new ClaimedAlert(
-                            alertId, watch, target, event.slotKey(),
-                            event.windowStart(), event.windowEnd())));
+                    .ifPresent(claim -> claimed.add(new ClaimedAlert(
+                            claim.alertId(), watch, target, event.slotKey(),
+                            event.windowStart(), event.windowEnd(), claim.createdAt())));
         }
         return claimed;
     }
