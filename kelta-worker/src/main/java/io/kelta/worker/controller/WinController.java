@@ -47,8 +47,9 @@ import java.util.Map;
  * Anonymous access to the ticker belongs with the public read-surface slice; for now the feed
  * is authenticated like any other API.
  *
- * <p>Support staff (INTERNAL, holding {@link #SUPPORT_PERMISSION}) calling {@code list}/{@code get}
- * with no {@code memberId} are handed the tenant's full, unfiltered view — delegated verbatim to
+ * <p>Support staff (INTERNAL, holding {@code MANAGE_DATA} or the read-only {@code VIEW_ALL_DATA};
+ * see {@link SupportPermissions#READ}) calling {@code list}/{@code get} with no {@code memberId}
+ * are handed the tenant's full, unfiltered view — delegated verbatim to
  * {@link DynamicCollectionRouter} so paging, filtering, sorting and {@code meta.totalCount} all
  * behave exactly like every other collection, rather than being reimplemented here. Same idiom as
  * {@code WatchController}.
@@ -62,8 +63,8 @@ public class WinController implements SelfScopedController {
     static final String COLLECTION = "wins";
     private static final int MAX_SUMMARY = 280;
     private static final int DEFAULT_RECENT = 20;
-    /** Permission letting internal staff view every member's wins in the tenant (support). */
-    static final String SUPPORT_PERMISSION = "MANAGE_DATA";
+    /** Permission letting internal staff name another member's wins (support). */
+    static final String SUPPORT_PERMISSION = SupportPermissions.MANAGE_DATA;
 
     private final WinRepository winRepository;
     private final QueryEngine queryEngine;
@@ -148,10 +149,10 @@ public class WinController implements SelfScopedController {
                                     @RequestParam(required = false) MultiValueMap<String, String> params,
                                     HttpServletRequest request) {
         String tenantId = requireTenant();
-        if (!isPortalCaller(request) && (memberId == null || memberId.isBlank())) {
-            if (!hasSupportPermission(request, tenantId)) {
+        if (!SupportPermissions.isPortal(request) && (memberId == null || memberId.isBlank())) {
+            if (!hasSupportRead(request)) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                        SUPPORT_PERMISSION + " permission required");
+                        "MANAGE_DATA or VIEW_ALL_DATA permission required");
             }
             return dynamicCollectionRouter.list(COLLECTION, params, request);
         }
@@ -174,7 +175,7 @@ public class WinController implements SelfScopedController {
                                     @RequestParam(required = false) MultiValueMap<String, String> params,
                                     HttpServletRequest request) {
         String tenantId = requireTenant();
-        if (hasSupportPermission(request, tenantId)) {
+        if (hasSupportRead(request)) {
             return dynamicCollectionRouter.get(COLLECTION, id, params, request);
         }
         String subject = requireActor(request, tenantId);
@@ -265,7 +266,7 @@ public class WinController implements SelfScopedController {
         if (memberId == null || memberId.isBlank() || memberId.equals(caller)) {
             return caller;
         }
-        if (!hasSupportPermission(request, tenantId)) {
+        if (!hasSupportWrite(request)) {
             // Do not reveal whether the named member exists.
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not permitted");
         }
@@ -273,28 +274,16 @@ public class WinController implements SelfScopedController {
         return memberId;
     }
 
-    /**
-     * True when the caller is internal staff holding {@link #SUPPORT_PERMISSION}. Same check
-     * shape as {@code WatchController.hasSupportPermission}. A PORTAL actor short-circuits to
-     * false before any lookup — a member is never support staff, whatever their profile grants.
-     */
-    private boolean hasSupportPermission(HttpServletRequest request, String tenantId) {
-        if (isPortalCaller(request)) {
-            return false;
-        }
-        String profileId = permissionResolver.getProfileId(request);
-        if (profileId == null || profileId.isBlank()) {
-            return false;
-        }
-        return bootstrapRepository.findProfileSystemPermissions(profileId).stream()
-                .anyMatch(p -> SUPPORT_PERMISSION.equals(p.get("permission_name"))
-                        && Boolean.TRUE.equals(p.get("granted")));
+    /** Tenant-wide read-only views: {@code MANAGE_DATA} or {@code VIEW_ALL_DATA}, never PORTAL. */
+    private boolean hasSupportRead(HttpServletRequest request) {
+        return SupportPermissions.internalHoldsAny(request, permissionResolver, bootstrapRepository,
+                SupportPermissions.READ);
     }
 
-    /** True when the caller is a portal (member) actor, per the gateway-stamped identity. */
-    private boolean isPortalCaller(HttpServletRequest request) {
-        String userType = request.getHeader("X-User-Type");
-        return userType != null && "PORTAL".equalsIgnoreCase(userType);
+    /** Naming another member's wins: {@code MANAGE_DATA} only, never PORTAL. */
+    private boolean hasSupportWrite(HttpServletRequest request) {
+        return SupportPermissions.internalHoldsAny(request, permissionResolver, bootstrapRepository,
+                SupportPermissions.WRITE);
     }
 
     private static void putIfPresent(Map<String, Object> data, String key, String value) {

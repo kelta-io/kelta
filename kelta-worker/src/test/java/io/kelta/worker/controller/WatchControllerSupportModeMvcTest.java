@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -37,7 +38,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -101,6 +105,13 @@ class WatchControllerSupportModeMvcTest {
                         ? List.of(Map.of("permission_name", WatchController.SUPPORT_PERMISSION,
                                          "granted", Boolean.TRUE))
                         : List.of());
+    }
+
+    private void grantViewAllData() {
+        when(permissionResolver.getProfileId(any())).thenReturn("profile-metrics");
+        when(bootstrapRepository.findProfileSystemPermissions("profile-metrics")).thenReturn(
+                List.of(Map.of("permission_name", SupportPermissions.VIEW_ALL_DATA,
+                               "granted", Boolean.TRUE)));
     }
 
     @Test
@@ -172,7 +183,7 @@ class WatchControllerSupportModeMvcTest {
     @Test
     @DisplayName("a PORTAL actor whose profile grants MANAGE_DATA is still refused support-mode access")
     void portalWithManageDataStillOwnerScoped() throws Exception {
-        // hasSupportPermission short-circuits PORTAL to false before any profile lookup, so
+        // hasSupportRead short-circuits PORTAL to false before any profile lookup, so
         // even a profile that (mis)grants MANAGE_DATA never reaches the full-tenant branch.
         grantSupport(true);
         Watch mine = new Watch(WATCH_ID, TENANT, OWNER, "target-1", null, null, Watch.STATUS_ACTIVE, null);
@@ -219,6 +230,114 @@ class WatchControllerSupportModeMvcTest {
                 .andExpect(status().isNotFound());
 
         verify(queryEngine, never()).getById(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("an INTERNAL caller with VIEW_ALL_DATA (no MANAGE_DATA) gets the tenant's full view")
+    void viewAllDataListsFullTenant() throws Exception {
+        grantViewAllData();
+        Watch w1 = new Watch("w1", TENANT, "member-a", "target-1", null, null, Watch.STATUS_ACTIVE, null);
+        when(queryEngine.executeQuery(any(), any())).thenReturn(
+                QueryResult.of(List.of(recordOf(w1)), 1, new Pagination(1, 20)));
+
+        mvc.perform(get("/api/watches")
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.meta.totalCount").value(1));
+
+        verify(watchRepository, never()).findByMember(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("GET /api/watches/{id} resolves any row for a VIEW_ALL_DATA caller")
+    void viewAllDataGetsAnyRowById() throws Exception {
+        grantViewAllData();
+        Watch foreign = new Watch(WATCH_ID, TENANT, "someone-else", "target-1", null, null,
+                Watch.STATUS_ACTIVE, null);
+        when(queryEngine.getById(any(), eq(WATCH_ID))).thenReturn(Optional.of(recordOf(foreign)));
+
+        mvc.perform(get("/api/watches/{id}", WATCH_ID)
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(WATCH_ID));
+    }
+
+    @Test
+    @DisplayName("VIEW_ALL_DATA never authorizes acting on another member: POST/PATCH/DELETE with memberId are 403")
+    void viewAllDataCannotActForAnotherMember() throws Exception {
+        grantViewAllData();
+
+        mvc.perform(post("/api/watches")
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetId\":\"target-1\",\"memberId\":\"" + OWNER + "\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(patch("/api/watches/{id}", WATCH_ID)
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"PAUSED\",\"memberId\":\"" + OWNER + "\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(delete("/api/watches/{id}", WATCH_ID)
+                        .param("memberId", OWNER)
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL"))
+                .andExpect(status().isForbidden());
+
+        verify(queryEngine, never()).create(any(), any());
+        verify(queryEngine, never()).update(any(), anyString(), any());
+        verify(queryEngine, never()).delete(any(), anyString());
+        verify(watchRepository, never()).findByMember(TENANT, OWNER);
+    }
+
+    @Test
+    @DisplayName("VIEW_ALL_DATA does not widen PATCH/DELETE: another member's watch is still 404")
+    void viewAllDataForeignWatchMutationIsNotFound() throws Exception {
+        grantViewAllData();
+        when(watchRepository.findByMember(TENANT, STAFF)).thenReturn(List.of());
+
+        mvc.perform(patch("/api/watches/{id}", WATCH_ID)
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"PAUSED\"}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(delete("/api/watches/{id}", WATCH_ID)
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL"))
+                .andExpect(status().isNotFound());
+
+        verify(queryEngine, never()).update(any(), anyString(), any());
+        verify(queryEngine, never()).delete(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("a PORTAL actor whose profile grants VIEW_ALL_DATA still sees only their own rows")
+    void portalWithViewAllDataStillOwnerScoped() throws Exception {
+        grantViewAllData();
+        Watch mine = new Watch(WATCH_ID, TENANT, OWNER, "target-1", null, null, Watch.STATUS_ACTIVE, null);
+        when(watchRepository.findByMember(TENANT, OWNER)).thenReturn(List.of(mine));
+
+        mvc.perform(get("/api/watches")
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", OWNER)
+                        .header("X-User-Type", "PORTAL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.meta").doesNotExist());
+
+        verify(queryEngine, never()).executeQuery(any(), any());
     }
 
     private static Map<String, Object> recordOf(Watch watch) {

@@ -31,14 +31,14 @@ import java.util.Set;
  * {@code kelta_alert_delivery_latency_seconds} timer.
  *
  * <p>{@code /api/alerts/**} is a {@code static-} gateway route, so only {@code API_ACCESS} is
- * checked there; this controller requires an internal operator holding {@code MANAGE_DATA}.
+ * checked there; this controller requires an internal operator holding {@code MANAGE_DATA} or the
+ * read-only {@code VIEW_ALL_DATA} ({@link SupportPermissions#READ}).
  * The tenant is the request's bound {@link TenantContext} — there is no cross-tenant view.
  */
 @RestController
 @RequestMapping("/api/alerts")
 public class AlertLatencyController {
 
-    static final String REQUIRED_PERMISSION = "MANAGE_DATA";
     static final Set<String> CHANNELS = Set.of("push", "email", "sms");
     static final Duration DEFAULT_WINDOW = Duration.ofDays(7);
 
@@ -63,7 +63,7 @@ public class AlertLatencyController {
         if (tenantId == null || tenantId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No tenant context");
         }
-        if (!hasManageData(request)) {
+        if (!hasReadPermission(request)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not permitted");
         }
         Instant from = parseSince(since);
@@ -106,21 +106,9 @@ public class AlertLatencyController {
         return channel;
     }
 
-    /**
-     * Internal staff holding {@link #REQUIRED_PERMISSION}; a PORTAL actor is never permitted.
-     * Same check as {@code WatchController.hasSupportPermission}.
-     */
-    boolean hasManageData(HttpServletRequest request) {
-        String userType = request.getHeader("X-User-Type");
-        if (userType != null && "PORTAL".equalsIgnoreCase(userType)) {
-            return false;
-        }
-        String profileId = permissionResolver.getProfileId(request);
-        if (profileId == null || profileId.isBlank()) {
-            return false;
-        }
-        return bootstrapRepository.findProfileSystemPermissions(profileId).stream()
-                .anyMatch(p -> REQUIRED_PERMISSION.equals(p.get("permission_name"))
-                        && Boolean.TRUE.equals(p.get("granted")));
+    /** Internal staff holding {@code MANAGE_DATA} or {@code VIEW_ALL_DATA}; never a PORTAL actor. */
+    boolean hasReadPermission(HttpServletRequest request) {
+        return SupportPermissions.internalHoldsAny(request, permissionResolver, bootstrapRepository,
+                SupportPermissions.READ);
     }
 }

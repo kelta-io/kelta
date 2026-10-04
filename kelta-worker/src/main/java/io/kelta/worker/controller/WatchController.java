@@ -67,8 +67,9 @@ import java.util.Optional;
  * {@code WatchGuardHook} exists — this controller is the pleasant door, not the
  * only one.
  *
- * <p>Support staff (INTERNAL, holding {@link #SUPPORT_PERMISSION}) calling {@code list}/{@code get}
- * with no {@code memberId} are handed the tenant's full, unfiltered view — delegated verbatim to
+ * <p>Support staff (INTERNAL, holding {@code MANAGE_DATA} or the read-only {@code VIEW_ALL_DATA};
+ * see {@link SupportPermissions#READ}) calling {@code list}/{@code get} with no {@code memberId}
+ * are handed the tenant's full, unfiltered view — delegated verbatim to
  * {@link DynamicCollectionRouter} so paging, filtering, sorting and {@code meta.totalCount} all
  * behave exactly like every other collection, rather than being reimplemented here.
  */
@@ -84,7 +85,7 @@ public class WatchController implements SelfScopedController {
     /** Entitlement key listing the alert channels a member's plan permits. */
     static final String ENTITLEMENT_CHANNELS = "channels";
     /** Permission letting internal staff act on a named member's behalf (support). */
-    static final String SUPPORT_PERMISSION = "MANAGE_DATA";
+    static final String SUPPORT_PERMISSION = SupportPermissions.MANAGE_DATA;
 
     /** Collection holding watchable things, for the promotion path. */
     static final String TARGET_COLLECTION = "watch-targets";
@@ -152,10 +153,10 @@ public class WatchController implements SelfScopedController {
                                     @RequestParam(required = false) MultiValueMap<String, String> params,
                                     HttpServletRequest request) {
         String tenantId = requireTenant();
-        if (!isPortalCaller(request) && (memberId == null || memberId.isBlank())) {
-            if (!hasSupportPermission(request, tenantId)) {
+        if (!SupportPermissions.isPortal(request) && (memberId == null || memberId.isBlank())) {
+            if (!hasSupportRead(request)) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                        SUPPORT_PERMISSION + " permission required");
+                        "MANAGE_DATA or VIEW_ALL_DATA permission required");
             }
             return dynamicCollectionRouter.list(COLLECTION, params, request);
         }
@@ -178,7 +179,7 @@ public class WatchController implements SelfScopedController {
                                     @RequestParam(required = false) MultiValueMap<String, String> params,
                                     HttpServletRequest request) {
         String tenantId = requireTenant();
-        if (hasSupportPermission(request, tenantId)) {
+        if (hasSupportRead(request)) {
             return dynamicCollectionRouter.get(COLLECTION, id, params, request);
         }
         String subject = requireActor(request, tenantId);
@@ -341,7 +342,7 @@ public class WatchController implements SelfScopedController {
         if (memberId == null || memberId.isBlank() || memberId.equals(caller)) {
             return caller;
         }
-        if (!hasSupportPermission(request, tenantId)) {
+        if (!hasSupportWrite(request)) {
             // Do not reveal whether the named member exists.
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not permitted");
         }
@@ -349,30 +350,16 @@ public class WatchController implements SelfScopedController {
         return memberId;
     }
 
-    /**
-     * True when the caller is internal staff holding {@link #SUPPORT_PERMISSION}.
-     * Same check shape as {@code TelehealthArchiveController.requireManageData}.
-     * A PORTAL actor short-circuits to false before any lookup — a member is never
-     * support staff, whatever their profile happens to grant.
-     */
-    boolean hasSupportPermission(HttpServletRequest request, String tenantId) {
-        String userType = request.getHeader("X-User-Type");
-        if (userType != null && "PORTAL".equalsIgnoreCase(userType)) {
-            return false;
-        }
-        String profileId = permissionResolver.getProfileId(request);
-        if (profileId == null || profileId.isBlank()) {
-            return false;
-        }
-        return bootstrapRepository.findProfileSystemPermissions(profileId).stream()
-                .anyMatch(p -> SUPPORT_PERMISSION.equals(p.get("permission_name"))
-                        && Boolean.TRUE.equals(p.get("granted")));
+    /** Tenant-wide read-only views: {@code MANAGE_DATA} or {@code VIEW_ALL_DATA}, never PORTAL. */
+    boolean hasSupportRead(HttpServletRequest request) {
+        return SupportPermissions.internalHoldsAny(request, permissionResolver, bootstrapRepository,
+                SupportPermissions.READ);
     }
 
-    /** True when the caller is a portal (member) actor, per the gateway-stamped identity. */
-    private boolean isPortalCaller(HttpServletRequest request) {
-        String userType = request.getHeader("X-User-Type");
-        return userType != null && "PORTAL".equalsIgnoreCase(userType);
+    /** Acting on a named member's watches: {@code MANAGE_DATA} only, never PORTAL. */
+    boolean hasSupportWrite(HttpServletRequest request) {
+        return SupportPermissions.internalHoldsAny(request, permissionResolver, bootstrapRepository,
+                SupportPermissions.WRITE);
     }
 
     /** Rejects criteria the matcher could not act on, before it is stored. */

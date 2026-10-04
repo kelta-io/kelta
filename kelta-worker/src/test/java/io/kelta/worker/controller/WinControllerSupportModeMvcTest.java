@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -36,6 +37,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -93,6 +95,13 @@ class WinControllerSupportModeMvcTest {
                         ? List.of(Map.of("permission_name", WinController.SUPPORT_PERMISSION,
                                          "granted", Boolean.TRUE))
                         : List.of());
+    }
+
+    private void grantViewAllData() {
+        when(permissionResolver.getProfileId(any())).thenReturn("profile-metrics");
+        when(bootstrapRepository.findProfileSystemPermissions("profile-metrics")).thenReturn(
+                List.of(Map.of("permission_name", SupportPermissions.VIEW_ALL_DATA,
+                               "granted", Boolean.TRUE)));
     }
 
     @Test
@@ -199,6 +208,87 @@ class WinControllerSupportModeMvcTest {
                 .andExpect(status().isNotFound());
 
         verify(queryEngine, never()).getById(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("an INTERNAL caller with VIEW_ALL_DATA (no MANAGE_DATA) gets the tenant's full view")
+    void viewAllDataListsFullTenant() throws Exception {
+        grantViewAllData();
+        when(queryEngine.executeQuery(any(), any())).thenReturn(QueryResult.of(
+                List.of(recordOf("w1", "member-a"), recordOf("w2", "member-b")), 2, new Pagination(1, 20)));
+
+        mvc.perform(get("/api/wins")
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.meta.totalCount").value(2));
+
+        verify(winRepository, never()).findByMember(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("GET /api/wins/{id} resolves any row for a VIEW_ALL_DATA caller")
+    void viewAllDataGetsAnyRowById() throws Exception {
+        grantViewAllData();
+        when(queryEngine.getById(any(), eq(WIN_ID))).thenReturn(Optional.of(recordOf(WIN_ID, "someone-else")));
+
+        mvc.perform(get("/api/wins/{id}", WIN_ID)
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(WIN_ID));
+    }
+
+    @Test
+    @DisplayName("VIEW_ALL_DATA does not let a caller name another member's wins (403)")
+    void viewAllDataCannotNameAnotherMember() throws Exception {
+        grantViewAllData();
+
+        mvc.perform(get("/api/wins")
+                        .param("memberId", OWNER)
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL"))
+                .andExpect(status().isForbidden());
+
+        verify(winRepository, never()).findByMember(TENANT, OWNER);
+    }
+
+    @Test
+    @DisplayName("POST /api/wins never consults VIEW_ALL_DATA: no member identity is still 403")
+    void viewAllDataDoesNotAuthorizeCreate() throws Exception {
+        grantViewAllData();
+
+        mvc.perform(post("/api/wins")
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Type", "INTERNAL")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"summary\":\"a win\"}"))
+                .andExpect(status().isForbidden());
+
+        verify(queryEngine, never()).create(any(), any());
+        verify(bootstrapRepository, never()).findProfileSystemPermissions(anyString());
+    }
+
+    @Test
+    @DisplayName("a PORTAL actor whose profile grants VIEW_ALL_DATA still sees only their own rows")
+    void portalWithViewAllDataStillOwnerScoped() throws Exception {
+        grantViewAllData();
+        Win mine = new Win(WIN_ID, OWNER, "target-1", null, null, null, "my win", null, false, null, Instant.now());
+        when(winRepository.findByMember(TENANT, OWNER)).thenReturn(List.of(mine));
+
+        mvc.perform(get("/api/wins")
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", OWNER)
+                        .header("X-User-Type", "PORTAL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.meta").doesNotExist());
+
+        verify(queryEngine, never()).executeQuery(any(), any());
     }
 
     private static Map<String, Object> recordOf(String id, String memberId) {
