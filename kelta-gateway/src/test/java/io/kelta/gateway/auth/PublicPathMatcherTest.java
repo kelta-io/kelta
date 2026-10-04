@@ -209,4 +209,31 @@ class PublicPathMatcherTest {
 
         assertThat(matcher.isPublicRequest(exchange)).isTrue();
     }
+
+    @Test
+    void anonymousOnlyPathIsPublicWithoutAToken() {
+        PublicPathMatcher matcher = new PublicPathMatcher(BOOTSTRAP_PATHS, Collections.emptyList(),
+                List.of("/api/tenants"));
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/tenants").build());
+        assertThat(matcher.isPublicRequest(exchange)).isTrue();
+    }
+
+    @Test
+    void anonymousOnlyPathIsNotPublicWhenATokenIsPresent() {
+        PublicPathMatcher matcher = new PublicPathMatcher(BOOTSTRAP_PATHS, Collections.emptyList(),
+                List.of("/api/tenants"));
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/tenants").header("Authorization", "Bearer x").build());
+        assertThat(matcher.isPublicRequest(exchange)).isFalse();
+    }
+
+    @Test
+    void otherPublicPathsStayPublicWithAToken() {
+        PublicPathMatcher matcher = new PublicPathMatcher(BOOTSTRAP_PATHS, Collections.emptyList(),
+                List.of("/api/tenants"));
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/ui-pages").header("Authorization", "Bearer x").build());
+        assertThat(matcher.isPublicRequest(exchange)).isTrue();
+    }
 }
