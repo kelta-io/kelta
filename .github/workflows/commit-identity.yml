@@ -1,0 +1,39 @@
+name: Commit identity
+
+# Fails a pull request whose commits carry an author, committer or trailer
+# (Co-authored-by, Signed-off-by, ...) on a blocked email domain. The domain
+# list is the repository variable BLOCKED_COMMIT_DOMAINS -- a regex of
+# domains, e.g. `example\.com|example\.org` -- so the workflow itself names
+# none. With the variable unset the check passes and says so.
+
+on:
+  pull_request:
+
+jobs:
+  identity:
+    name: No blocked commit identities
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check PR commits
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          DOMAINS: ${{ vars.BLOCKED_COMMIT_DOMAINS }}
+        run: |
+          if [ -z "$DOMAINS" ]; then
+            echo "::notice::BLOCKED_COMMIT_DOMAINS is not set; nothing to check."
+            exit 0
+          fi
+          bad=$(git log --format='%h %ae %ce%n%B' "$BASE..$HEAD" | grep -iE "@($DOMAINS)" || true)
+          if [ -n "$bad" ]; then
+            echo "::error::A blocked email domain appears in this PR's commits:"
+            echo "$bad" | grep -iE "^[0-9a-f]{7,} |@($DOMAINS)"
+            echo "Fix the commit identity (git config user.email) and reword the commit(s) to drop the address."
+            exit 1
+          fi
+          echo "No blocked identities in $(git rev-list --count "$BASE..$HEAD") commit(s)."
