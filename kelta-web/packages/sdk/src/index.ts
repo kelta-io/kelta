@@ -47,6 +47,7 @@ export type {
   Page,
   Tenant,
   CreateTenantRequest,
+  TenantAdminInviteResponse,
   UpdateTenantRequest,
   GovernorLimits,
   GovernorLimitsStatus,

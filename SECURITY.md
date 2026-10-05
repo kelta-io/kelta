@@ -42,3 +42,21 @@ This repository uses an autopilot loop that can open and auto-merge pull
 requests for routine work. Tasks of `type: security` are gated to manual
 review and are **never** auto-merged — a human approves every security
 change before it lands on `main`.
+
+## Tenant Provisioning
+
+A newly provisioned tenant has **no default credential**. Its seeded System
+Administrator (`<slug>-admin`) is created with an unusable password and can only
+be claimed by invite:
+
+- pass `adminEmail` when creating the tenant (`POST /api/tenants`) — the admin
+  gets that email and the `user.invite` email is sent; `adminEmail` is not
+  stored on the tenant; or
+- send the invite later from Setup › Tenants › Invite admin
+  (`POST /api/tenants/{id}/admin-invite`, requires `MANAGE_TENANTS`, written
+  to the security audit log).
+
+Tenants provisioned before this change had a well-known default admin
+password; migration V204 invalidated it wherever it was never rotated. See the
+PLT-337 entry in [`.claude/docs/concerns.md`](.claude/docs/concerns.md),
+including the open question about the baseline platform admin.

@@ -1,17 +1,22 @@
 package io.kelta.worker.listener;
 
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.runtime.module.integration.spi.EmailService;
+import io.kelta.runtime.workflow.BeforeSaveResult;
 import io.kelta.worker.service.CerbosPolicySyncService;
+import io.kelta.worker.service.UserInviteService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -22,6 +27,7 @@ class TenantProvisioningHookTest {
 
     private JdbcTemplate jdbcTemplate;
     private CerbosPolicySyncService cerbosPolicySyncService;
+    private UserInviteService userInviteService;
     private TenantProvisioningHook hook;
 
     private static final String AUTH_ISSUER = "https://auth.example.com";
@@ -32,7 +38,8 @@ class TenantProvisioningHookTest {
     void setUp() {
         jdbcTemplate = mock(JdbcTemplate.class);
         cerbosPolicySyncService = mock(CerbosPolicySyncService.class);
-        hook = new TenantProvisioningHook(jdbcTemplate, AUTH_ISSUER, cerbosPolicySyncService);
+        userInviteService = mock(UserInviteService.class);
+        hook = new TenantProvisioningHook(jdbcTemplate, AUTH_ISSUER, cerbosPolicySyncService, userInviteService);
     }
 
     @Test
@@ -238,46 +245,80 @@ class TenantProvisioningHookTest {
     @DisplayName("seedAdminUser")
     class SeedAdminUser {
 
+        private static final String COUNT_ADMIN_SQL =
+                "SELECT COUNT(*) FROM platform_user WHERE tenant_id = ? AND (email = ? OR username = ?)";
+        private static final String PROFILE_SQL =
+                "SELECT id FROM profile WHERE tenant_id = ? AND name = 'System Administrator' LIMIT 1";
+
+        private void stubNoAdminAndProfile(String email) {
+            when(jdbcTemplate.queryForObject(COUNT_ADMIN_SQL, Integer.class, TENANT_ID, email, TENANT_SLUG + "-admin"))
+                    .thenReturn(0);
+            when(jdbcTemplate.queryForList(PROFILE_SQL, String.class, TENANT_ID))
+                    .thenReturn(List.of("profile-sys-admin"));
+        }
+
+        private String seededHash() {
+            var hash = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(jdbcTemplate).update(contains("INSERT INTO user_credential"),
+                    anyString(), anyString(), hash.capture());
+            return hash.getValue();
+        }
+
         @Test
         @DisplayName("Should create admin user with slug-based email and username")
         void shouldCreateAdminUserWithSlug() {
             String adminEmail = TENANT_SLUG + "-admin@kelta.local";
+            stubNoAdminAndProfile(adminEmail);
 
-            when(jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM platform_user WHERE tenant_id = ? AND email = ?",
-                    Integer.class, TENANT_ID, adminEmail))
-                    .thenReturn(0);
+            String userId = hook.seedAdminUser(TENANT_ID, TENANT_SLUG, null);
 
-            when(jdbcTemplate.queryForList(
-                    "SELECT id FROM profile WHERE tenant_id = ? AND name = 'System Administrator' LIMIT 1",
-                    String.class, TENANT_ID))
-                    .thenReturn(List.of("profile-sys-admin"));
-
-            hook.seedAdminUser(TENANT_ID, TENANT_SLUG);
-
-            // Verify user creation with slug-based email and username
+            assertNotNull(userId);
             verify(jdbcTemplate).update(
                     contains("INSERT INTO platform_user"),
-                    anyString(), eq(TENANT_ID), eq(adminEmail),
+                    eq(userId), eq(TENANT_ID), eq(adminEmail),
                     eq(TENANT_SLUG + "-admin"), eq("profile-sys-admin"));
+        }
 
-            // Verify credential creation
+        @Test
+        @DisplayName("Should seed an unusable credential — no known password, not even \"password\"")
+        void shouldSeedUnusableCredential() {
+            stubNoAdminAndProfile(TENANT_SLUG + "-admin@kelta.local");
+
+            hook.seedAdminUser(TENANT_ID, TENANT_SLUG, null);
+
+            String hash = seededHash();
+            BCryptPasswordEncoder bcrypt = new BCryptPasswordEncoder();
+            assertFalse(bcrypt.matches("password", hash));
+            // Empty — the same shape UserInviteService writes for invite-only users — so it is
+            // not a bcrypt hash of any secret at all, known or not.
+            assertEquals("", hash);
+            assertFalse(hash.startsWith("$2"), "must not be a bcrypt hash");
+            assertFalse(hash.startsWith("{"), "must not be a delegating-encoder hash");
+        }
+
+        @Test
+        @DisplayName("Should give the admin the supplied email when one is provided")
+        void shouldUseSuppliedAdminEmail() {
+            String email = "owner@example.com";
+            stubNoAdminAndProfile(email);
+
+            String userId = hook.seedAdminUser(TENANT_ID, TENANT_SLUG, email);
+
             verify(jdbcTemplate).update(
-                    contains("INSERT INTO user_credential"),
-                    anyString(), anyString(), anyString());
+                    contains("INSERT INTO platform_user"),
+                    eq(userId), eq(TENANT_ID), eq(email),
+                    eq(TENANT_SLUG + "-admin"), eq("profile-sys-admin"));
+            assertEquals("", seededHash());
         }
 
         @Test
         @DisplayName("Should skip when admin user already exists")
         void shouldSkipWhenAdminExists() {
             String adminEmail = TENANT_SLUG + "-admin@kelta.local";
-
-            when(jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM platform_user WHERE tenant_id = ? AND email = ?",
-                    Integer.class, TENANT_ID, adminEmail))
+            when(jdbcTemplate.queryForObject(COUNT_ADMIN_SQL, Integer.class, TENANT_ID, adminEmail, TENANT_SLUG + "-admin"))
                     .thenReturn(1);
 
-            hook.seedAdminUser(TENANT_ID, TENANT_SLUG);
+            assertNull(hook.seedAdminUser(TENANT_ID, TENANT_SLUG, null));
 
             verify(jdbcTemplate, never()).update(contains("INSERT INTO platform_user"),
                     any(), any(), any(), any(), any());
@@ -287,21 +328,151 @@ class TenantProvisioningHookTest {
         @DisplayName("Should skip when no System Administrator profile found")
         void shouldSkipWhenNoProfileFound() {
             String adminEmail = TENANT_SLUG + "-admin@kelta.local";
-
-            when(jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM platform_user WHERE tenant_id = ? AND email = ?",
-                    Integer.class, TENANT_ID, adminEmail))
+            when(jdbcTemplate.queryForObject(COUNT_ADMIN_SQL, Integer.class, TENANT_ID, adminEmail, TENANT_SLUG + "-admin"))
                     .thenReturn(0);
-
-            when(jdbcTemplate.queryForList(
-                    "SELECT id FROM profile WHERE tenant_id = ? AND name = 'System Administrator' LIMIT 1",
-                    String.class, TENANT_ID))
+            when(jdbcTemplate.queryForList(PROFILE_SQL, String.class, TENANT_ID))
                     .thenReturn(List.of());
 
-            hook.seedAdminUser(TENANT_ID, TENANT_SLUG);
+            assertNull(hook.seedAdminUser(TENANT_ID, TENANT_SLUG, null));
 
             verify(jdbcTemplate, never()).update(contains("INSERT INTO platform_user"),
                     any(), any(), any(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("adminEmail")
+    class AdminEmail {
+
+        private Map<String, Object> tenantRecord(Object adminEmail) {
+            Map<String, Object> record = new HashMap<>();
+            record.put("id", TENANT_ID);
+            record.put("slug", TENANT_SLUG);
+            record.put("name", "Acme");
+            record.put("adminEmail", adminEmail);
+            return record;
+        }
+
+        private void stubProvisioning(String email) {
+            when(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM platform_user WHERE tenant_id = ? AND (email = ? OR username = ?)",
+                    Integer.class, TENANT_ID, email, TENANT_SLUG + "-admin"))
+                    .thenReturn(0);
+            when(jdbcTemplate.queryForList(
+                    "SELECT id FROM profile WHERE tenant_id = ? AND name = 'System Administrator' LIMIT 1",
+                    String.class, TENANT_ID))
+                    .thenReturn(List.of("profile-sys-admin"));
+        }
+
+        @Test
+        @DisplayName("is stripped from the record before persist, so it never becomes a tenant attribute")
+        void isStrippedBeforePersist() {
+            Map<String, Object> record = tenantRecord("Owner@Example.com ");
+
+            BeforeSaveResult result = hook.beforeCreate(record, "creator-tenant");
+
+            assertTrue(result.isSuccess());
+            assertFalse(result.hasFieldUpdates());
+            assertFalse(record.containsKey("adminEmail"));
+        }
+
+        @Test
+        @DisplayName("rejects a malformed address")
+        void rejectsMalformedAddress() {
+            Map<String, Object> record = tenantRecord("not-an-email");
+
+            BeforeSaveResult result = hook.beforeCreate(record, "creator-tenant");
+
+            assertFalse(result.isSuccess());
+            assertEquals("adminEmail", result.getErrors().get(0).field());
+        }
+
+        @Test
+        @DisplayName("seeds the admin with that email and invites them, bound to the new tenant")
+        void seedsAndInvitesUnderNewTenant() {
+            String email = "owner@example.com";
+            stubProvisioning(email);
+            List<String> boundDuringInvite = new ArrayList<>();
+            when(userInviteService.inviteUser(eq(TENANT_ID), anyString())).thenAnswer(inv -> {
+                boundDuringInvite.add(TenantContext.get());
+                return "invite-token";
+            });
+            Map<String, Object> record = tenantRecord("Owner@Example.com");
+
+            TenantContext.runWithTenant("creator-tenant", "creator", () -> {
+                hook.beforeCreate(record, "creator-tenant");
+                hook.afterCreate(record, "creator-tenant");
+            });
+
+            var userId = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(jdbcTemplate).update(contains("INSERT INTO platform_user"),
+                    userId.capture(), eq(TENANT_ID), eq(email), eq(TENANT_SLUG + "-admin"), eq("profile-sys-admin"));
+            verify(userInviteService).inviteUser(TENANT_ID, userId.getValue());
+            assertEquals(List.of(TENANT_ID), boundDuringInvite);
+        }
+
+        @Test
+        @DisplayName("queues the user.invite email to the supplied address")
+        void queuesUserInviteEmail() {
+            EmailService emailService = mock(EmailService.class);
+            when(emailService.sendByKey(anyString(), anyString(), anyString(), any(), anyString(), any()))
+                    .thenReturn(Optional.of("log-1"));
+            TenantProvisioningHook realInviteHook = new TenantProvisioningHook(jdbcTemplate, AUTH_ISSUER,
+                    cerbosPolicySyncService,
+                    new UserInviteService(jdbcTemplate, emailService, "https://ui.example.com"));
+            String email = "owner@example.com";
+            stubProvisioning(email);
+            when(jdbcTemplate.queryForList(contains("FROM platform_user pu JOIN tenant t"), anyString(), eq(TENANT_ID)))
+                    .thenReturn(List.of(Map.of("email", email, "first_name", "System", "tenant_name", "Acme")));
+            Map<String, Object> record = tenantRecord(email);
+
+            realInviteHook.beforeCreate(record, "creator-tenant");
+            realInviteHook.afterCreate(record, "creator-tenant");
+
+            verify(emailService).sendByKey(eq(TENANT_ID), eq(email), eq("user.invite"),
+                    any(), eq("USER_INVITE"), anyString());
+        }
+
+        @Test
+        @DisplayName("without adminEmail nobody is invited")
+        void noInviteWithoutAdminEmail() {
+            stubProvisioning(TENANT_SLUG + "-admin@kelta.local");
+            Map<String, Object> record = new HashMap<>(Map.of("id", TENANT_ID, "slug", TENANT_SLUG));
+
+            hook.beforeCreate(record, "creator-tenant");
+            hook.afterCreate(record, "creator-tenant");
+
+            verify(jdbcTemplate).update(contains("INSERT INTO platform_user"),
+                    anyString(), eq(TENANT_ID), eq(TENANT_SLUG + "-admin@kelta.local"),
+                    eq(TENANT_SLUG + "-admin"), eq("profile-sys-admin"));
+            verifyNoInteractions(userInviteService);
+        }
+
+        @Test
+        @DisplayName("is not carried over to a later create on the same thread")
+        void notCarriedToAnotherRecord() {
+            hook.beforeCreate(tenantRecord("owner@example.com"), "creator-tenant");
+            stubProvisioning(TENANT_SLUG + "-admin@kelta.local");
+
+            // A different record id reaching afterCreate (the first create failed in between)
+            Map<String, Object> other = new HashMap<>(Map.of("id", "tenant-other", "slug", TENANT_SLUG));
+            hook.afterCreate(other, "creator-tenant");
+
+            verifyNoInteractions(userInviteService);
+        }
+
+        @Test
+        @DisplayName("a failed invite still activates the tenant")
+        void failedInviteStillActivates() {
+            stubProvisioning("owner@example.com");
+            when(userInviteService.inviteUser(eq(TENANT_ID), anyString()))
+                    .thenThrow(new RuntimeException("smtp down"));
+            Map<String, Object> record = tenantRecord("owner@example.com");
+
+            hook.beforeCreate(record, "creator-tenant");
+            assertDoesNotThrow(() -> hook.afterCreate(record, "creator-tenant"));
+
+            verify(jdbcTemplate).update(contains("UPDATE tenant SET status = 'ACTIVE'"), eq(TENANT_ID));
         }
     }
 
@@ -339,7 +510,7 @@ class TenantProvisioningHookTest {
         @DisplayName("Should no-op when sync service is null")
         void shouldNoOpWhenServiceNull() {
             TenantProvisioningHook hookNoSync =
-                    new TenantProvisioningHook(jdbcTemplate, AUTH_ISSUER, null);
+                    new TenantProvisioningHook(jdbcTemplate, AUTH_ISSUER, null, userInviteService);
 
             assertDoesNotThrow(() -> hookNoSync.syncCerbosPolicies(TENANT_ID));
             verifyNoInteractions(cerbosPolicySyncService);

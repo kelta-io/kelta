@@ -87,6 +87,7 @@ interface TenantFormData {
   name: string
   edition: string
   limits: GovernorLimitsData
+  adminEmail: string
 }
 
 /**
@@ -96,6 +97,7 @@ interface FormErrors {
   slug?: string
   name?: string
   edition?: string
+  adminEmail?: string
 }
 
 /**
@@ -106,6 +108,8 @@ export interface TenantsPageProps {
 }
 
 const VALID_EDITIONS = ['FREE', 'PROFESSIONAL', 'ENTERPRISE', 'UNLIMITED']
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/
 
 function validateForm(data: TenantFormData, isEditing: boolean): FormErrors {
   const errors: FormErrors = {}
@@ -129,6 +133,10 @@ function validateForm(data: TenantFormData, isEditing: boolean): FormErrors {
 
   if (!VALID_EDITIONS.includes(data.edition)) {
     errors.edition = 'Invalid edition'
+  }
+
+  if (!isEditing && data.adminEmail.trim() && !EMAIL_PATTERN.test(data.adminEmail.trim())) {
+    errors.adminEmail = 'Enter a valid email address'
   }
 
   return errors
@@ -174,6 +182,7 @@ function TenantForm({
     name: tenant?.name ?? '',
     edition: tenant?.edition ?? 'PROFESSIONAL',
     limits: parseLimits(tenant?.limits),
+    adminEmail: '',
   })
   const [errors, setErrors] = useState<FormErrors>({})
   const [touched, setTouched] = useState<Record<string, boolean>>({})
@@ -184,7 +193,7 @@ function TenantForm({
   }, [])
 
   const handleChange = useCallback(
-    (field: 'slug' | 'name' | 'edition', value: string) => {
+    (field: 'slug' | 'name' | 'edition' | 'adminEmail', value: string) => {
       setFormData((prev) => ({ ...prev, [field]: value }))
       if (errors[field]) {
         setErrors((prev) => ({ ...prev, [field]: undefined }))
@@ -204,7 +213,7 @@ function TenantForm({
   }, [])
 
   const handleBlur = useCallback(
-    (field: 'slug' | 'name' | 'edition') => {
+    (field: 'slug' | 'name' | 'edition' | 'adminEmail') => {
       setTouched((prev) => ({ ...prev, [field]: true }))
       const validationErrors = validateForm(formData, isEditing)
       if (validationErrors[field]) {
@@ -219,7 +228,7 @@ function TenantForm({
       e.preventDefault()
       const validationErrors = validateForm(formData, isEditing)
       setErrors(validationErrors)
-      setTouched({ slug: true, name: true, edition: true })
+      setTouched({ slug: true, name: true, edition: true, adminEmail: true })
       if (Object.keys(validationErrors).length === 0) {
         onSubmit(formData)
       }
@@ -352,6 +361,39 @@ function TenantForm({
               </select>
             </div>
 
+            {!isEditing && (
+              <div className="flex flex-col gap-1">
+                <label htmlFor="tenant-admin-email" className="text-sm font-medium text-foreground">
+                  Admin email
+                </label>
+                <input
+                  id="tenant-admin-email"
+                  type="email"
+                  className={cn(
+                    'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
+                    touched.adminEmail && errors.adminEmail ? 'border-destructive' : 'border-border'
+                  )}
+                  value={formData.adminEmail}
+                  onChange={(e) => handleChange('adminEmail', e.target.value)}
+                  onBlur={() => handleBlur('adminEmail')}
+                  placeholder="owner@example.com"
+                  aria-invalid={touched.adminEmail && !!errors.adminEmail}
+                  aria-describedby="tenant-admin-email-hint"
+                  disabled={isSubmitting}
+                  data-testid="tenant-admin-email-input"
+                />
+                <span id="tenant-admin-email-hint" className="text-xs text-muted-foreground">
+                  The tenant admin has no password until claimed. Enter an email to send the invite
+                  now, or invite later from this page.
+                </span>
+                {touched.adminEmail && errors.adminEmail && (
+                  <span className="mt-1 block text-xs text-destructive" role="alert">
+                    {errors.adminEmail}
+                  </span>
+                )}
+              </div>
+            )}
+
             <fieldset
               className="m-0 rounded-md border border-border p-4"
               data-testid="governor-limits-section"
@@ -449,6 +491,8 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false)
   const [activateDialogOpen, setActivateDialogOpen] = useState(false)
   const [targetTenant, setTargetTenant] = useState<Tenant | null>(null)
+  const [inviteTenant, setInviteTenant] = useState<Tenant | null>(null)
+  const [inviteEmail, setInviteEmail] = useState('')
 
   // Fetch tenants
   const {
@@ -471,6 +515,7 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
         name: data.name,
         edition: data.edition,
         limits: data.limits,
+        ...(data.adminEmail.trim() ? { adminEmail: data.adminEmail.trim() } : {}),
       } as CreateTenantRequest),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tenants'] })
@@ -527,6 +572,40 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
       showToast(error.message || 'Failed to activate tenant.', 'error')
     },
   })
+
+  // Invite the tenant's seeded admin — provisioned tenants have no usable admin password
+  const inviteMutation = useMutation({
+    mutationFn: ({ id, email }: { id: string; email: string }) =>
+      keltaClient.admin.tenants.inviteAdmin(id, email),
+    onSuccess: (result) => {
+      showToast(`Invite sent to ${result.email}.`, 'success')
+      setInviteTenant(null)
+      setInviteEmail('')
+    },
+    onError: (error: Error) => {
+      showToast(error.message || 'Failed to send the admin invite.', 'error')
+    },
+  })
+
+  const handleInviteClick = useCallback((tenant: Tenant) => {
+    setInviteTenant(tenant)
+    setInviteEmail('')
+  }, [])
+
+  const handleInviteClose = useCallback(() => {
+    setInviteTenant(null)
+    setInviteEmail('')
+  }, [])
+
+  const handleInviteSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault()
+      if (inviteTenant && inviteEmail.trim()) {
+        inviteMutation.mutate({ id: inviteTenant.id, email: inviteEmail.trim() })
+      }
+    },
+    [inviteTenant, inviteEmail, inviteMutation]
+  )
 
   const handleCreate = useCallback(() => {
     setEditingTenant(undefined)
@@ -713,6 +792,15 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
                       >
                         Edit
                       </button>
+                      <button
+                        type="button"
+                        className="rounded border border-border px-2 py-1 text-xs font-medium text-primary hover:border-primary hover:bg-muted"
+                        onClick={() => handleInviteClick(tenant)}
+                        aria-label={`Invite admin for ${tenant.name}`}
+                        data-testid={`invite-admin-button-${index}`}
+                      >
+                        Invite admin
+                      </button>
                       {tenant.status === 'ACTIVE' ? (
                         <button
                           type="button"
@@ -750,6 +838,63 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
           onCancel={handleCloseForm}
           isSubmitting={isSubmitting}
         />
+      )}
+
+      {inviteTenant && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={(e) => e.target === e.currentTarget && handleInviteClose()}
+          onKeyDown={(e) => e.key === 'Escape' && handleInviteClose()}
+          role="presentation"
+        >
+          <div
+            className="w-full max-w-[480px] rounded-lg bg-card p-6 shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="invite-admin-title"
+            data-testid="invite-admin-dialog"
+          >
+            <h2 id="invite-admin-title" className="mb-2 text-xl font-semibold">
+              Invite admin — {inviteTenant.name}
+            </h2>
+            <p className="mb-4 text-sm text-muted-foreground">
+              The tenant&apos;s System Administrator gets this email and an invite to set a
+              password.
+            </p>
+            <form onSubmit={handleInviteSubmit}>
+              <label className="mb-1 block text-sm font-medium" htmlFor="invite-admin-email">
+                Email
+              </label>
+              <input
+                id="invite-admin-email"
+                type="email"
+                required
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                data-testid="invite-admin-email-input"
+              />
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border border-border bg-muted px-4 py-2 text-sm text-foreground"
+                  onClick={handleInviteClose}
+                  data-testid="invite-admin-cancel"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="cursor-pointer rounded-md border-none bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={inviteMutation.isPending || !inviteEmail.trim()}
+                  data-testid="invite-admin-submit"
+                >
+                  {inviteMutation.isPending ? 'Sending...' : 'Send invite'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       <ConfirmDialog

@@ -309,6 +309,21 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   Every other static route still stops at `API_ACCESS`. Adding a row is a security decision —
   check which UI flows read the route under an ordinary profile first; most seeded profiles
   ("Standard User") hold neither `VIEW_ALL_DATA` nor per-collection grants on system collections.
+- **Tenant admin invite** (`POST /api/tenants/{id}/admin-invite` with `{"email"}`,
+  `TenantAdminInviteController` → `TenantAdminInviteService`): rides `static-tenants`, whose
+  writes the gateway already gates on `MANAGE_TENANTS`; the controller re-checks `MANAGE_TENANTS`
+  (the `PasswordResetAdminController` pattern) and writes every attempt to `SecurityAuditLogger`
+  as `TENANT_ADMIN_INVITED`. `TenantManagementScopeFilter` does **not** rebind this deeper path,
+  so the permission check runs under the caller's own tenant and the service then binds the
+  managed tenant explicitly (`callWithTenant(id, slug, …)`) to set the seeded admin's
+  (`<slug>-admin`) email and call `UserInviteService.inviteUser`. 400 on a malformed email, 404
+  when the tenant or its seeded admin is missing, 409 when another user of that tenant has the
+  email. Both literal segments are spelled out, so it beats `DynamicCollectionRouter`'s
+  `POST /{parent}/{parentId}/{child}` (`TenantAdminInviteControllerTest` registers the stand-in).
+  `POST /api/tenants` also accepts a transient **`adminEmail`** attribute — not a `tenants`
+  field: `TenantProvisioningHook` strips it in `beforeCreate` and, after provisioning, seeds the
+  admin with that email and sends the same invite. Provisioned admins have no usable password
+  otherwise (`concerns.md` → PLT-337).
 - **Collection schema** (`GET /api/collections/{name}/schema`, `CollectionSchemaController`):
   rides the existing `static-collections` route, so only `API_ACCESS` is checked. That is
   deliberate and not a new exposure — the same prefix already serves
@@ -703,6 +718,9 @@ The one request-path exception is `filter/TenantManagementScopeFilter`, which re
 tenant for a `MANAGE_TENANTS` caller on `/api/tenants` (unbound for the listing, the managed
 tenant for `/api/tenants/{id}`) so the self-scoped `tenants` read still serves platform tenant
 management — see Worker Layers → tenant scoping.
+Deeper paths keep the caller's binding: `POST /api/tenants/{id}/admin-invite` checks the
+caller's `MANAGE_TENANTS` there, then `TenantAdminInviteService` binds the managed tenant itself
+with `callWithTenant` — the cross-tenant form Critical Rule 3 prescribes.
 
 ### Tenant context → database connection (all three JDBC services)
 
