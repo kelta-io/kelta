@@ -3,7 +3,8 @@
 #
 # Flyway migrations (run by kelta-worker on startup) already seed:
 #   - Default tenant:  slug=default, id=00000000-0000-0000-0000-000000000001
-#   - Default admin:   admin@kelta.local / password  (force_change_on_login=true)
+#   - Platform admin:  admin@kelta.local — kelta-auth replaces the seeded password on first
+#                      boot (KELTA_BOOTSTRAP_ADMIN_PASSWORD, or a generated one it logs once)
 #
 # This script just confirms the stack is up and ready.
 set -euo pipefail
@@ -47,5 +48,7 @@ echo "  Worker:      http://localhost:8083"
 echo ""
 echo "  Default tenant slug: default"
 echo "  Login:  admin@kelta.local"
-echo "  Pass:   password  (change on first login)"
+echo "  Pass:   KELTA_BOOTSTRAP_ADMIN_PASSWORD from .env, or the first-boot password in"
+echo "          docker compose logs kelta-auth | grep -o 'Password: *[A-Za-z0-9]*'"
+echo "          (you are asked to change it on first sign-in)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

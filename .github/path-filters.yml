@@ -71,6 +71,7 @@ e2e:
   - *web
   - 'kelta-ui/**'
   - 'e2e-tests/**'
+  - 'ci/admin-first-sign-in.sh'
 
 # Runtime-installable modules (kelta-modules/**). Built and tested separately from the
 # platform reactor, but they COMPILE AGAINST the runtime API — so a change to KeltaModule,
@@ -95,6 +96,8 @@ quickstart:
   - 'Makefile'
   - 'docker/bootstrap/**'
   - '.env.example'
+  - 'ci/quickstart-*.sh'
+  - 'ci/admin-first-sign-in.sh'
 
 # Workflow plumbing changed — run everything.
 workflows:

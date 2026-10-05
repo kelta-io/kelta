@@ -83,7 +83,10 @@ known to work. `make up` builds GraalVM native images — what production runs �
 **~24 GB allocated to Docker**; on a default allocation it fails with
 `cannot allocate memory`. See [Native vs JVM images](#native-vs-jvm-images).
 
-1. Open **http://localhost:5173/default/** and sign in with `admin@kelta.local` / `password`. The
+1. Open **http://localhost:5173/default/** and sign in as `admin@kelta.local` with the
+   first-boot password kelta-auth prints once in its log
+   (`docker compose logs kelta-auth | grep -o 'Password: *[A-Za-z0-9]*'`), then choose your own.
+   Set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` in `.env` before the first start to pick it instead. The
    `/default/` path is the tenant — the bare `http://localhost:5173` shows a *Tenant Required* page.
 2. Go to **Setup → Data Model → Collections**, click **Create Collection**, fill in
    the wizard (Basics → Fields → Authorization → Review), then click **Create
@@ -106,13 +109,13 @@ make seed    # waits for healthy stack, then prints credentials
 > **Build fails with `cannot allocate memory`?** That's GraalVM native-image, not a
 > code error. Run `make up-jvm` instead — see [Native vs JVM images](#native-vs-jvm-images).
 
-Default credentials (seeded by Flyway migrations):
+Platform admin (seeded by Flyway; kelta-auth replaces the seeded password on first boot):
 
 | Field | Value |
 |-------|-------|
 | URL | http://localhost:5173/default/ |
 | Email | `admin@kelta.local` |
-| Password | `password` (force-change on first login) |
+| Password | `KELTA_BOOTSTRAP_ADMIN_PASSWORD` from `.env`, else the one printed once in `docker compose logs kelta-auth` (banner *Kelta platform admin initial password*); change it at first sign-in |
 | Tenant slug | `default` |
 
 ### Service ports

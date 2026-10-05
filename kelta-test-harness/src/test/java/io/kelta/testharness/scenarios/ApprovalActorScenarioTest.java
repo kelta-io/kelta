@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 @DisplayName("Approval Actor Identity Scenario")
 class ApprovalActorScenarioTest extends ScenarioBase {
 
-    /** BCrypt hash of "password" — same value the admin seed uses. */
+    /** BCrypt hash of "password", for this scenario's own seeded users. */
     private static final String PASSWORD_HASH =
             "$2a$10$zAQaSHX1XSR1bwUL3pz9EOzecplsxInVizZc9HwLf7xPluSiE1EP6";
 

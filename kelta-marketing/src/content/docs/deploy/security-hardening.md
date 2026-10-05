@@ -50,6 +50,11 @@ makes every client look like the ingress.
 ## Auth server
 
 - `DIRECT_LOGIN_ENABLED=false`.
+- Sign in as the platform admin (`admin@kelta.local`, tenant `default`) and change the first-boot password before
+  the deployment takes traffic. kelta-auth replaces the database's seeded password on first boot — with
+  `KELTA_BOOTSTRAP_ADMIN_PASSWORD`, or a generated one printed once in its log — and forces a change at first
+  sign-in; until then anyone holding the bootstrap value or that log line can become platform admin. Remove the
+  variable from your secret store afterwards, and treat the auth log of the first boot as sensitive.
 - Set `KELTA_SECURITY_TRUSTED_PROXIES` (above). Without it, `KELTA_AUTH_RATE_LIMIT_TRUSTED_PROXY_COUNT` must equal
   the number of proxies in front of the auth server (`0` if none); otherwise a client can forge
   `X-Forwarded-For` and get a fresh limit bucket per request.

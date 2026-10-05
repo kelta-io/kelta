@@ -3,26 +3,56 @@ package io.kelta.testharness.fixtures;
 import io.kelta.testharness.KeltaStack;
 import org.springframework.web.client.RestClient;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Mints JWTs against the in-harness kelta-auth instance via the direct-login endpoint.
  *
- * <p>The {@code default} tenant is seeded by the Flyway baseline with
- * {@code admin@kelta.local / password}. Every other tenant is provisioned at runtime
- * by the worker's {@code TenantProvisioningHook}, which seeds its admin as
- * {@code <slug>-admin@kelta.local} (username {@code <slug>-admin}) with <em>no usable
- * password</em> — a real tenant claims it by invite. A fixture that wants to log in as such an
- * admin first calls {@link #setProvisionedAdminCredential(String)}, which writes the
+ * <p>The {@code default} tenant's admin is the Flyway baseline's platform admin
+ * ({@code admin@kelta.local}). kelta-auth replaces its seeded credential on first boot
+ * ({@code BaselineAdminPasswordInitializer}): the harness starts kelta-auth with
+ * {@code KELTA_BOOTSTRAP_ADMIN_PASSWORD} = {@link #BOOTSTRAP_ADMIN_PASSWORD}, which carries a forced
+ * change, and the first {@link #loginAsAdmin()} completes that change once through the real
+ * sign-in form, to {@link #PLATFORM_ADMIN_PASSWORD} ({@link #ensurePlatformAdminPassword()}).
+ *
+ * <p>Every other tenant is provisioned at runtime by the worker's {@code TenantProvisioningHook},
+ * which seeds its admin as {@code <slug>-admin@kelta.local} (username {@code <slug>-admin}) with
+ * <em>no usable password</em> — a real tenant claims it by invite. A fixture that wants to log in
+ * as such an admin first calls {@link #setProvisionedAdminCredential(String)}, which writes the
  * harness-only {@link #PROVISIONED_ADMIN_PASSWORD} straight into the database.
  * {@link #loginAsAdmin(String)} picks the right identity and password per slug.
  */
 public final class AuthFixture {
+
+    /**
+     * Harness-only {@code KELTA_BOOTSTRAP_ADMIN_PASSWORD}: the initial platform-admin password
+     * kelta-auth applies on first boot, with a forced change. Never a platform default.
+     */
+    public static final String BOOTSTRAP_ADMIN_PASSWORD = "harness-bootstrap-admin-secret";
+
+    /** Harness-only platform-admin password the fixture chooses when completing the forced change. */
+    public static final String PLATFORM_ADMIN_PASSWORD = "harness-platform-admin-secret";
+
+    private static final Pattern CSRF_INPUT = Pattern.compile("<input[^>]*name=\"_csrf\"[^>]*>");
+    private static final Pattern VALUE_ATTR = Pattern.compile("value=\"([^\"]*)\"");
+
+    private static volatile boolean platformAdminReady;
 
     /** Harness-only secret for runtime-provisioned tenant admins. Never a platform default. */
     public static final String PROVISIONED_ADMIN_PASSWORD = "harness-tenant-admin-secret";
@@ -57,7 +87,7 @@ public final class AuthFixture {
      *       {@code TenantProvisioningHook} when the tenant was created via the admin API
      *       (e.g. the {@code threadline-clothing} fixture tenant)</li>
      * </ul>
-     * The baseline admin's password is {@code password}; a provisioned admin's is
+     * The platform admin's password is {@link #PLATFORM_ADMIN_PASSWORD}; a provisioned admin's is
      * {@link #PROVISIONED_ADMIN_PASSWORD}, once {@link #setProvisionedAdminCredential(String)}
      * has set it.
      *
@@ -68,6 +98,9 @@ public final class AuthFixture {
      */
     @SuppressWarnings("unchecked")
     public String loginAsAdmin(String tenantSlug) {
+        if (TenantFixture.DEFAULT_SLUG.equals(tenantSlug)) {
+            ensurePlatformAdminPassword();
+        }
         String username = adminUsernameForSlug(tenantSlug);
         Map<String, Object> response = client.post()
                 .uri("/auth/direct-login")
@@ -111,7 +144,122 @@ public final class AuthFixture {
     }
 
     private static String passwordForSlug(String tenantSlug) {
-        return TenantFixture.DEFAULT_SLUG.equals(tenantSlug) ? "password" : PROVISIONED_ADMIN_PASSWORD;
+        return TenantFixture.DEFAULT_SLUG.equals(tenantSlug) ? PLATFORM_ADMIN_PASSWORD : PROVISIONED_ADMIN_PASSWORD;
+    }
+
+    /**
+     * Completes the platform admin's forced first-sign-in change once per harness run, the way a
+     * person does after a fresh install: sign in with {@link #BOOTSTRAP_ADMIN_PASSWORD}, get sent
+     * to {@code /change-password}, choose {@link #PLATFORM_ADMIN_PASSWORD}. No-op once that works.
+     */
+    public static synchronized void ensurePlatformAdminPassword() {
+        if (platformAdminReady) {
+            return;
+        }
+        if (directLoginStatus(PLATFORM_ADMIN_PASSWORD) != 200) {
+            completeForcedPasswordChange(BOOTSTRAP_ADMIN_PASSWORD, PLATFORM_ADMIN_PASSWORD);
+        }
+        platformAdminReady = true;
+    }
+
+    private static int directLoginStatus(String password) {
+        String body = "{\"username\":\"" + adminUsernameForSlug(TenantFixture.DEFAULT_SLUG)
+                + "\",\"password\":\"" + password
+                + "\",\"tenantSlug\":\"" + TenantFixture.DEFAULT_SLUG + "\"}";
+        HttpRequest request = HttpRequest.newBuilder(URI.create(KeltaStack.authBaseUrl() + "/auth/direct-login"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        return new FormSession().send(request).statusCode();
+    }
+
+    /**
+     * Drives kelta-auth's form sign-in and {@code /change-password} pages for the platform admin.
+     * Cookies are carried by hand: the session cookie may be {@code Secure}, which
+     * {@link java.net.CookieManager} withholds over the harness's plain http.
+     */
+    private static void completeForcedPasswordChange(String currentPassword, String newPassword) {
+        String base = KeltaStack.authBaseUrl();
+        FormSession session = new FormSession();
+
+        HttpResponse<String> loginPage = session.send(HttpRequest.newBuilder(
+                URI.create(base + "/login?tenant=" + TenantFixture.DEFAULT_SLUG)).GET().build());
+        HttpResponse<String> signIn = session.send(session.form(base + "/login", Map.of(
+                "username", adminUsernameForSlug(TenantFixture.DEFAULT_SLUG),
+                "password", currentPassword,
+                "_csrf", csrfToken(loginPage))));
+        String location = signIn.headers().firstValue("Location").orElse("");
+        if (!location.contains("/change-password")) {
+            throw new IllegalStateException("Platform admin sign-in did not ask for a password change "
+                    + "(status " + signIn.statusCode() + ", Location '" + location + "'). Is kelta-auth "
+                    + "running with KELTA_BOOTSTRAP_ADMIN_PASSWORD = AuthFixture.BOOTSTRAP_ADMIN_PASSWORD?");
+        }
+
+        HttpResponse<String> changePage = session.send(HttpRequest.newBuilder(
+                URI.create(base + "/change-password")).GET().build());
+        HttpResponse<String> changed = session.send(session.form(base + "/change-password", Map.of(
+                "currentPassword", currentPassword,
+                "newPassword", newPassword,
+                "confirmPassword", newPassword,
+                "_csrf", csrfToken(changePage))));
+        String done = changed.headers().firstValue("Location").orElse("");
+        if (!done.contains("passwordChanged")) {
+            throw new IllegalStateException("Platform admin password change was not accepted (status "
+                    + changed.statusCode() + ", Location '" + done + "')");
+        }
+    }
+
+    private static String csrfToken(HttpResponse<String> page) {
+        Matcher input = CSRF_INPUT.matcher(page.body());
+        if (input.find()) {
+            Matcher value = VALUE_ATTR.matcher(input.group());
+            if (value.find()) {
+                return value.group(1);
+            }
+        }
+        throw new IllegalStateException("No _csrf field on " + page.uri() + " (status " + page.statusCode() + ")");
+    }
+
+    /** A cookie-carrying, non-redirecting client for one browser-like session. */
+    private static final class FormSession {
+        private final HttpClient http = HttpClient.newHttpClient();
+        private final Map<String, String> cookies = new LinkedHashMap<>();
+
+        HttpRequest form(String url, Map<String, String> fields) {
+            StringBuilder body = new StringBuilder();
+            fields.forEach((k, v) -> body.append(body.isEmpty() ? "" : "&")
+                    .append(URLEncoder.encode(k, StandardCharsets.UTF_8)).append('=')
+                    .append(URLEncoder.encode(v, StandardCharsets.UTF_8)));
+            return HttpRequest.newBuilder(URI.create(url))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+                    .build();
+        }
+
+        HttpResponse<String> send(HttpRequest request) {
+            HttpRequest.Builder withCookies = HttpRequest.newBuilder(request, (name, value) -> true);
+            if (!cookies.isEmpty()) {
+                StringBuilder header = new StringBuilder();
+                cookies.forEach((k, v) -> header.append(header.isEmpty() ? "" : "; ").append(k).append('=').append(v));
+                withCookies.header("Cookie", header.toString());
+            }
+            try {
+                HttpResponse<String> response = http.send(withCookies.build(), HttpResponse.BodyHandlers.ofString());
+                for (String setCookie : response.headers().allValues("Set-Cookie")) {
+                    String pair = setCookie.split(";", 2)[0];
+                    int eq = pair.indexOf('=');
+                    if (eq > 0) {
+                        cookies.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+                    }
+                }
+                return response;
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(e);
+            }
+        }
     }
 
     /**

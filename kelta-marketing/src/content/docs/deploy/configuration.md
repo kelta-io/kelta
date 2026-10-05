@@ -87,6 +87,7 @@ no default (the service fails to start, or the feature stays off). Defaults that
 | `COOKIE_DOMAIN` | — | Session cookie domain |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | |
 | `DIRECT_LOGIN_ENABLED` | `false` | Password grant for bootstrap/tests — keep `false` in production |
+| `KELTA_BOOTSTRAP_ADMIN_PASSWORD` | — | Initial password for the platform admin `admin@kelta.local`, applied once on the first boot that finds the database's seeded password, with a forced change at first sign-in. Never logged. Unset: a random password is generated and printed once in a WARN banner in the kelta-auth log. No effect once the password has been replaced |
 | `SUPERSET_CLIENT_ID` / `CLIENT_SECRET` / `REDIRECT_URI` | — | OAuth client for embedded BI |
 | `KELTA_AUTH_RATE_LIMIT_IP_PATHS` | `/portal/api/signup=5,/portal/api/login/request=10,/portal/api/challenge=30,/portal/login=10` | Per-IP budgets on public portal paths |
 | `KELTA_AUTH_RATE_LIMIT_TRUSTED_PROXY_COUNT` | `1` | `X-Forwarded-For` hops to trust from the right; `0` when directly exposed. Used only when `KELTA_SECURITY_TRUSTED_PROXIES` is empty |

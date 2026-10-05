@@ -48,6 +48,15 @@ io.kelta.auth/
    then discarded. Registered by `ConnectedAppRegistrar.registerCliClient()`.
    Spec: `specs/kelta-cli/2-browser-login.md`.
 
+### First-boot platform admin password
+`config/BaselineAdminPasswordInitializer` (`ApplicationRunner`) replaces the Flyway baseline's
+`admin@kelta.local` BCrypt("password") with `KELTA_BOOTSTRAP_ADMIN_PASSWORD` or a generated
+password (printed once in a WARN banner) and forces a change at first sign-in. Exact-hash compare,
+one conditional `UPDATE`, only the replica that changed the row logs. Tests:
+`BaselineAdminPasswordInitializerTest` (unit) and `BaselineAdminPasswordIntegrationTest`
+(Testcontainers; migrates from `../kelta-worker`'s migrations). `*IntegrationTest` classes run under
+plain surefire here and skip without Docker.
+
 ### Identity Brokering (SSO)
 - `DynamicClientRegistrationRepository` — loads OIDC provider configs from worker at runtime
 - `FederatedLoginSuccessHandler` — handles successful external IdP login

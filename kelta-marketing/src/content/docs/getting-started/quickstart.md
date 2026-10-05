@@ -51,14 +51,28 @@ the volumes.
 
 ## Sign in
 
-Open **http://localhost:5173/default/** and sign in with the seeded administrator. The `/default/` path is the
+Open **http://localhost:5173/default/** and sign in as the platform administrator. The `/default/` path is the
 tenant; the bare `http://localhost:5173` shows a *Tenant Required* page instead:
 
 | Field | Value |
 |---|---|
 | Email | `admin@kelta.local` |
-| Password | `password` — you are asked to change it on first login |
+| Password | the first-boot password (below) — you are asked to change it on first sign-in |
 | Tenant | `default` |
+
+Kelta does not ship a default administrator password. On its first boot, kelta-auth replaces the seeded one and
+prints the new password **once** in a warning banner headed `Kelta platform admin initial password`:
+
+```bash
+docker compose logs kelta-auth | grep -o 'Password: *[A-Za-z0-9]*'
+```
+
+(The services log JSON, so the banner arrives as one line; drop the `grep -o` to see all of it.) The banner is
+printed only once — on later restarts the account is already changed and nothing is logged.
+
+To choose the initial password yourself instead, set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` in `.env` (or your shell)
+**before the first `make up`**. It is applied once, never logged, and you are still asked to change it at first
+sign-in. Setting it after the first boot has no effect.
 
 You land in the admin console. Continue with [your first app](/docs/getting-started/first-app/).
 

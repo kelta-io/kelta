@@ -137,6 +137,9 @@ services:
       # Enable direct login for bootstrap/e2e (safe because DIRECT_LOGIN_ENABLED
       # defaults to false in production)
       DIRECT_LOGIN_ENABLED: "true"
+      # Initial platform-admin password, applied once on first boot with a forced change.
+      # Unset: kelta-auth generates one and prints it once in its log (quickstart.md).
+      KELTA_BOOTSTRAP_ADMIN_PASSWORD: ${KELTA_BOOTSTRAP_ADMIN_PASSWORD:-}
       # Listen on 8081 inside the container too, so http://auth.localhost:8081 is
       # the same URL for the browser (published port) and for containers (alias).
       SERVER_PORT: "8081"
