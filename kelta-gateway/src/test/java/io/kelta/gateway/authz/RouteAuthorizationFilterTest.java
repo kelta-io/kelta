@@ -3,6 +3,7 @@ package io.kelta.gateway.authz;
 import tools.jackson.databind.ObjectMapper;
 import io.kelta.gateway.auth.GatewayPrincipal;
 import io.kelta.gateway.auth.PublicPathMatcher;
+import io.kelta.gateway.filter.CustomDomainFilter;
 import io.kelta.gateway.authz.cerbos.CerbosAuthorizationService;
 import io.kelta.gateway.metrics.GatewayMetrics;
 import io.kelta.gateway.route.RouteDefinition;
@@ -173,6 +174,49 @@ class RouteAuthorizationFilterTest {
             StepVerifier.create(filter.filter(exchange, filterChain))
                     .expectComplete()
                     .verify();
+
+            verify(filterChain).filter(exchange);
+        }
+
+        @Test
+        @DisplayName("Public bootstrap read with no resolved tenant is a 404, never forwarded")
+        void publicBootstrapReadWithoutTenantIsNotFound() {
+            for (String path : List.of("/api/ui-pages", "/api/ui-menus", "/api/oidc-providers", "/api/ui-translations")) {
+                MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get(path).build());
+                when(publicPathMatcher.isPublicRequest(exchange)).thenReturn(true);
+                when(publicPathMatcher.isTenantScopedPublicPath(path)).thenReturn(true);
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            }
+            verify(filterChain, never()).filter(any());
+        }
+
+        @Test
+        @DisplayName("Public bootstrap read for a resolved tenant is forwarded")
+        void publicBootstrapReadWithTenantIsForwarded() {
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/ui-pages").build());
+            exchange.getAttributes().put("tenantId", "tenant-1");
+            when(publicPathMatcher.isPublicRequest(exchange)).thenReturn(true);
+            lenient().when(publicPathMatcher.isTenantScopedPublicPath("/api/ui-pages")).thenReturn(true);
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+            verify(filterChain).filter(exchange);
+            assertThat(exchange.getResponse().getStatusCode()).isNull();
+        }
+
+        @Test
+        @DisplayName("Public bootstrap read on a verified custom domain is forwarded")
+        void publicBootstrapReadOnCustomDomainIsForwarded() {
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/ui-menus").build());
+            exchange.getAttributes().put(CustomDomainFilter.CUSTOM_DOMAIN_RESOLVED, true);
+            exchange.getAttributes().put("tenantSlug", "acme");
+            when(publicPathMatcher.isPublicRequest(exchange)).thenReturn(true);
+            lenient().when(publicPathMatcher.isTenantScopedPublicPath("/api/ui-menus")).thenReturn(true);
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
 
             verify(filterChain).filter(exchange);
         }

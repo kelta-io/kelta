@@ -88,6 +88,26 @@ public class PublicPathMatcher {
         return false;
     }
 
+    /**
+     * Returns true if {@code path} matches a {@code public-paths} prefix. Those are tenant-scoped
+     * bootstrap metadata, so serving one only makes sense once a tenant is resolved; the
+     * {@code unauthenticated-paths} (webhooks, OTEL) are not covered here.
+     *
+     * @param path the slug-stripped request path
+     * @return true if the path is tenant-scoped public metadata
+     */
+    public boolean isTenantScopedPublicPath(String path) {
+        if (publicPaths == null) {
+            return false;
+        }
+        for (String prefix : publicPaths) {
+            if (path.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean isAnonymousOnly(String path) {
         for (String prefix : anonymousOnlyPublicPaths) {
             if (path.startsWith(prefix)) {
