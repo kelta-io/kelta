@@ -307,6 +307,57 @@ class LoginTrackingFilterTest {
     }
 
     @Test
+    void shouldPreferGatewayResolvedClientIpOverForwardedFor() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Kelta-Client-Ip", "203.0.113.7");
+        request.addHeader("X-Forwarded-For", "198.51.100.1, 203.0.113.7, 10.42.0.5");
+        request.setRemoteAddr("10.42.1.9");
+
+        assertEquals("203.0.113.7", LoginTrackingFilter.extractClientIp(request));
+    }
+
+    @Test
+    void shouldFallBackToForwardedForWhenGatewayHeaderBlank() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Kelta-Client-Ip", "  ");
+        request.addHeader("X-Forwarded-For", "203.0.113.50");
+        request.setRemoteAddr("127.0.0.1");
+
+        assertEquals("203.0.113.50", LoginTrackingFilter.extractClientIp(request));
+    }
+
+    @Test
+    void shouldRecordGatewayResolvedIpNotSpoofedLeftmostHop() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/accounts");
+        request.addHeader("X-User-Id", "alice@example.com");
+        request.addHeader("X-Tenant-ID", "tenant-123");
+        request.addHeader("X-Kelta-Client-Ip", "203.0.113.7");
+        request.addHeader("X-Forwarded-For", "198.51.100.1, 203.0.113.7");
+        request.setRemoteAddr("10.42.1.9");
+        request.addHeader("User-Agent", "Mozilla/5.0");
+
+        when(jdbcTemplate.queryForObject(
+                eq("SELECT id FROM platform_user WHERE tenant_id = ? AND email = ? LIMIT 1"),
+                eq(String.class), eq("tenant-123"), eq("alice@example.com")))
+                .thenReturn("user-uuid-1");
+
+        filter.doFilterInternal(request, new MockHttpServletResponse(), mock(FilterChain.class));
+
+        verify(jdbcTemplate).update(
+                contains("INSERT INTO login_history"),
+                any(String.class), eq("user-uuid-1"), eq("tenant-123"),
+                any(), eq("203.0.113.7"), eq("OAUTH"), eq("SUCCESS"),
+                eq("Mozilla/5.0"), isNull(), isNull(), isNull(), isNull(), isNull(),
+                any(), any());
+        verify(jdbcTemplate).update(
+                contains("INSERT INTO security_audit_log"),
+                any(String.class), eq("tenant-123"), eq("LOGIN_SUCCESS"), eq("AUTH"),
+                eq("user-uuid-1"), eq("alice@example.com"),
+                eq("USER"), eq("user-uuid-1"), eq("alice@example.com"),
+                any(String.class), eq("203.0.113.7"), eq("Mozilla/5.0"), any());
+    }
+
+    @Test
     void shouldTruncateUserAgentExceeding500Chars() {
         String longAgent = "A".repeat(600);
         String truncated = LoginTrackingFilter.truncateUserAgent(longAgent);

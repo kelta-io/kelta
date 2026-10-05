@@ -27,9 +27,10 @@ import java.util.List;
  *
  * <p><b>Security note.</b> A bare IP is accepted and treated as a single-host
  * range ({@code /32} or {@code /128}). Exemption is evaluated against the
- * <em>same</em> resolved client IP the limiter would key on, so when
- * {@code trust-forwarded-for} is enabled an exempt entry is only as trustworthy
- * as the proxy chain in front of the gateway — keep the list to ranges you
+ * <em>same</em> resolved client IP the limiter would key on, so an exempt entry
+ * is only as trustworthy as {@link ClientIpResolver}'s answer: with
+ * {@code kelta.security.trusted-proxies} unset and {@code trust-forwarded-for}
+ * enabled that answer is a client-supplied header — keep the list to ranges you
  * control, and prefer narrow prefixes over broad ones.
  *
  * @since 1.0.0
@@ -70,13 +71,7 @@ public class RateLimitExemptionService {
             if (entry == null || entry.isBlank()) {
                 continue;
             }
-            String trimmed = entry.trim();
-            // Accept a bare address as a single-host range so operators can write
-            // "203.0.113.7" instead of "203.0.113.7/32".
-            String normalized = trimmed.indexOf('/') >= 0
-                    ? trimmed
-                    : trimmed + (trimmed.indexOf(':') >= 0 ? "/128" : "/32");
-            CidrBlock block = CidrBlock.parse(normalized);
+            CidrBlock block = CidrBlock.parseRangeOrHost(entry);
             if (block == null) {
                 log.warn("Ignoring invalid rate-limit exemption entry: '{}'", entry);
                 continue;

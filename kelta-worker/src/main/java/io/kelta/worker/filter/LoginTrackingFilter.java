@@ -69,6 +69,9 @@ public class LoginTrackingFilter extends OncePerRequestFilter {
     /** Maximum length for user agent strings stored in the database. */
     private static final int MAX_USER_AGENT_LENGTH = 500;
 
+    /** Client IP resolved and stamped by the gateway ({@code ClientIpForwardingFilter}). */
+    static final String CLIENT_IP_HEADER = "X-Kelta-Client-Ip";
+
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final JdbcTemplate jdbcTemplate;
@@ -402,7 +405,18 @@ public class LoginTrackingFilter extends OncePerRequestFilter {
                 Timestamp.from(Instant.now()));
     }
 
+    /**
+     * The client address to record. Prefers {@value #CLIENT_IP_HEADER}, which the gateway
+     * resolves through its trusted-proxy rules and overwrites on every request (any
+     * client-supplied copy is stripped). The {@code X-Forwarded-For} fallback only applies
+     * to requests that did not come through the gateway; its left-most hop is
+     * client-controlled.
+     */
     static String extractClientIp(HttpServletRequest request) {
+        String gatewayResolved = request.getHeader(CLIENT_IP_HEADER);
+        if (gatewayResolved != null && !gatewayResolved.isBlank()) {
+            return gatewayResolved.trim();
+        }
         String forwarded = request.getHeader("X-Forwarded-For");
         if (forwarded != null && !forwarded.isBlank()) {
             return forwarded.split(",")[0].trim();

@@ -46,6 +46,38 @@ public record CidrBlock(byte[] network, int prefixLen) {
         return new CidrBlock(network, prefixLen);
     }
 
+    /**
+     * Like {@link #parse(String)}, but also accepts a bare address as a single-host
+     * range ({@code /32} or {@code /128}) so operators can write {@code 203.0.113.7}
+     * instead of {@code 203.0.113.7/32}.
+     */
+    public static CidrBlock parseRangeOrHost(String entry) {
+        if (entry == null || entry.isBlank()) {
+            return null;
+        }
+        String trimmed = entry.trim();
+        String normalized = trimmed.indexOf('/') >= 0
+                ? trimmed
+                : trimmed + (trimmed.indexOf(':') >= 0 ? "/128" : "/32");
+        return parse(normalized);
+    }
+
+    /**
+     * True when {@code ip} is an IPv4/IPv6 address literal. Never resolves DNS: a
+     * hostname or any other garbage is simply not a literal.
+     */
+    public static boolean isAddressLiteral(String ip) {
+        if (ip == null || ip.isEmpty()) {
+            return false;
+        }
+        try {
+            InetAddress.ofLiteral(ip);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     /** True when {@code ip} (an address literal) falls inside this block. */
     public boolean contains(String ip) {
         if (ip == null) {

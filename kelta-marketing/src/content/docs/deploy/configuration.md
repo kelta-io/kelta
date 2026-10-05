@@ -37,7 +37,8 @@ no default (the service fails to start, or the feature stays off). Defaults that
 | `TENANT_SLUG_ENABLED` | `true` | Resolve tenants from the first path segment |
 | `TENANT_SLUG_REQUIRE_PREFIX` | `false` | Reject `/api` requests with no slug or header |
 | `PERMISSIONS_ENABLED`, `PERMISSIONS_CACHE_TTL` | `true`, `5` (min) | Cerbos route checks and the identity/permission cache |
-| `IP_ALLOWLIST_ENABLED`, `IP_ALLOWLIST_TRUST_XFF` | `true`, `true` | Tenant IP allowlist feature and whether forwarded headers count |
+| `KELTA_SECURITY_TRUSTED_PROXIES` | — | Comma-separated CIDRs or bare IPs of the proxies in front of the gateway (e.g. `10.42.0.0/16`). When set, `X-Forwarded-For` / `X-Real-IP` are believed only from those peers and the client is the right-most untrusted hop; this drives audit logs, login history, geolocation, rate limits and tenant IP allowlists. Empty keeps the legacy behaviour below |
+| `IP_ALLOWLIST_ENABLED`, `IP_ALLOWLIST_TRUST_XFF` | `true`, `true` | Tenant IP allowlist feature and, when `KELTA_SECURITY_TRUSTED_PROXIES` is empty, whether forwarded headers count (then any hop matches — spoofable). Ignored once trusted proxies are set |
 | `RATE_LIMIT_IP_PATHS` | `/actuator/health=100,/api/modules/webhooks=300,/api/webhooks/mail=600` | Per-IP per-minute budgets for unauthenticated prefixes, longest-prefix match |
 | `RATE_LIMIT_EXEMPT_CIDRS` | — | Addresses exempt from **both** limiters; keep to narrow trusted ranges |
 | `RATE_LIMIT_USER_SHARE` | `0.9` | Fraction of the tenant window one member may use; `1.0` disables |
@@ -88,7 +89,8 @@ no default (the service fails to start, or the feature stays off). Defaults that
 | `DIRECT_LOGIN_ENABLED` | `false` | Password grant for bootstrap/tests — keep `false` in production |
 | `SUPERSET_CLIENT_ID` / `CLIENT_SECRET` / `REDIRECT_URI` | — | OAuth client for embedded BI |
 | `KELTA_AUTH_RATE_LIMIT_IP_PATHS` | `/portal/api/signup=5,/portal/api/login/request=10,/portal/api/challenge=30,/portal/login=10` | Per-IP budgets on public portal paths |
-| `KELTA_AUTH_RATE_LIMIT_TRUSTED_PROXY_COUNT` | `1` | `X-Forwarded-For` hops to trust from the right; `0` when directly exposed |
+| `KELTA_AUTH_RATE_LIMIT_TRUSTED_PROXY_COUNT` | `1` | `X-Forwarded-For` hops to trust from the right; `0` when directly exposed. Used only when `KELTA_SECURITY_TRUSTED_PROXIES` is empty |
+| `KELTA_SECURITY_TRUSTED_PROXIES` | — | Same meaning as on the gateway: CIDRs or bare IPs of the auth server's ingress; when set, the portal rate limit keys on the right-most untrusted `X-Forwarded-For` hop |
 | `KELTA_AUTH_BOT_CHALLENGE_ENABLED`, `_HMAC_KEY`, `_MAX_NUMBER`, `_TTL_SECONDS` | `false`, —, `100000`, `600` | Proof-of-work challenge on portal signup; enabling without a key fails startup on purpose |
 | `kelta.auth.saml.sp-signing-certificate` / `sp-signing-private-key` (properties) | — | Platform SP key pair for signed SAML requests |
 

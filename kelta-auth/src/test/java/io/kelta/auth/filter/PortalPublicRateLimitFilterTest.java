@@ -37,7 +37,12 @@ class PortalPublicRateLimitFilterTest {
 
     private PortalPublicRateLimitFilter filter(int trustedProxies) {
         return new PortalPublicRateLimitFilter(redisTemplate,
-                List.of(PortalPublicRateLimitFilter.DEFAULT_IP_PATHS.split(",")), trustedProxies);
+                List.of(PortalPublicRateLimitFilter.DEFAULT_IP_PATHS.split(",")), trustedProxies, List.of());
+    }
+
+    private PortalPublicRateLimitFilter trustingProxies(String... cidrs) {
+        return new PortalPublicRateLimitFilter(redisTemplate,
+                List.of(PortalPublicRateLimitFilter.DEFAULT_IP_PATHS.split(",")), 1, List.of(cidrs));
     }
 
     @SuppressWarnings("unchecked")
@@ -213,6 +218,67 @@ class PortalPublicRateLimitFilterTest {
         void fallsBackToRemoteAddr() {
             assertThat(filter(1).resolveClientIp(request("/portal/api/signup")))
                     .isEqualTo("10.0.0.9");
+        }
+    }
+
+    @Nested
+    @DisplayName("Client IP resolution with kelta.security.trusted-proxies")
+    class TrustedProxyResolution {
+
+        private MockHttpServletRequest from(String peer, String xff) {
+            MockHttpServletRequest request = request("/portal/api/signup");
+            request.setRemoteAddr(peer);
+            if (xff != null) {
+                request.addHeader("X-Forwarded-For", xff);
+            }
+            return request;
+        }
+
+        @Test
+        @DisplayName("trusted peer: the right-most untrusted hop, not the client's left-most claim")
+        void rightMostUntrustedHop() {
+            assertThat(trustingProxies("10.1.0.0/16")
+                    .resolveClientIp(from("10.1.0.9", "198.51.100.1, 203.0.113.7, 10.1.0.5")))
+                    .isEqualTo("203.0.113.7");
+        }
+
+        @Test
+        @DisplayName("untrusted peer: forwarded headers are ignored")
+        void untrustedPeerIgnoresHeaders() {
+            MockHttpServletRequest request = from("192.0.2.4", "198.51.100.1");
+            request.addHeader("X-Real-IP", "198.51.100.2");
+
+            assertThat(trustingProxies("10.1.0.0/16").resolveClientIp(request)).isEqualTo("192.0.2.4");
+        }
+
+        @Test
+        @DisplayName("every hop trusted: the left-most; a malformed hop stops the walk without DNS")
+        void allTrustedAndMalformed() {
+            PortalPublicRateLimitFilter filter = trustingProxies("10.1.0.0/16");
+
+            assertThat(filter.resolveClientIp(from("10.1.0.9", "10.1.0.3, 10.1.0.5"))).isEqualTo("10.1.0.3");
+            assertThat(filter.resolveClientIp(from("10.1.0.9", "203.0.113.7, localhost, 10.1.0.5")))
+                    .isEqualTo("10.1.0.5");
+        }
+
+        @Test
+        @DisplayName("trusted peer without X-Forwarded-For: X-Real-IP, then the peer")
+        void realIpThenPeer() {
+            PortalPublicRateLimitFilter filter = trustingProxies("10.1.0.9");
+            MockHttpServletRequest withRealIp = from("10.1.0.9", null);
+            withRealIp.addHeader("X-Real-IP", "203.0.113.8");
+
+            assertThat(filter.resolveClientIp(withRealIp)).isEqualTo("203.0.113.8");
+            assertThat(filter.resolveClientIp(from("10.1.0.9", null))).isEqualTo("10.1.0.9");
+        }
+
+        @Test
+        @DisplayName("an empty list keeps the trusted-proxy-count rule")
+        void emptyListKeepsHopCount() {
+            assertThat(filter(1).resolveClientIp(from("10.1.0.9", "198.51.100.1, 203.0.113.7")))
+                    .isEqualTo("203.0.113.7");
+            assertThat(filter(2).resolveClientIp(from("10.1.0.9", "198.51.100.1, 203.0.113.7")))
+                    .isEqualTo("198.51.100.1");
         }
     }
 

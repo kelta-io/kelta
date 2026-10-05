@@ -6,6 +6,7 @@ import io.kelta.gateway.auth.PublicPathMatcher;
 import io.kelta.gateway.authz.cerbos.CerbosAuthorizationService;
 import io.kelta.gateway.cache.GatewayCacheManager;
 import io.kelta.gateway.config.TenantIpConfig;
+import io.kelta.gateway.geo.ClientIpResolver;
 import io.kelta.gateway.metrics.GatewayMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -65,16 +66,27 @@ class TenantIpAllowlistFilterTest {
     }
 
     private TenantIpAllowlistFilter newFilter(boolean enabled, boolean trustXff) {
+        return newFilter(enabled, new ClientIpResolver(trustXff));
+    }
+
+    private TenantIpAllowlistFilter newFilter(boolean enabled, ClientIpResolver resolver) {
         PublicPathMatcher publicPathMatcher =
                 new PublicPathMatcher(Collections.emptyList(), Collections.emptyList());
         return new TenantIpAllowlistFilter(cacheManager, cerbos, publicPathMatcher, metrics,
-                new ObjectMapper(), enabled, trustXff);
+                new ObjectMapper(), resolver, enabled);
     }
 
     private ServerWebExchange exchange(String remoteIp, String xff) {
+        return exchange(remoteIp, xff, null);
+    }
+
+    private ServerWebExchange exchange(String remoteIp, String xff, String realIp) {
         MockServerHttpRequest.BaseBuilder<?> builder = MockServerHttpRequest.get("/api/customers");
         if (xff != null) {
             builder.header("X-Forwarded-For", xff);
+        }
+        if (realIp != null) {
+            builder.header("X-Real-IP", realIp);
         }
         MockServerHttpRequest request = builder
                 .remoteAddress(new InetSocketAddress(remoteIp, 40000))
@@ -165,6 +177,53 @@ class TenantIpAllowlistFilterTest {
         StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
 
         verify(chain).filter(exchange);
+    }
+
+    // ── Trusted-proxy mode (kelta.security.trusted-proxies) ───────────────
+
+    private static ClientIpResolver trustingIngress() {
+        return new ClientIpResolver(true, List.of("10.42.0.0/16"));
+    }
+
+    @Test
+    void trustedProxies_untrustedPeerForgingAllowedXffOrRealIp_forbidden() {
+        filter = newFilter(true, trustingIngress());
+        restrictTo("198.51.100.0/24");
+        when(cerbos.checkSystemPermission(any(GatewayPrincipal.class), eq("MANAGE_TENANTS")))
+                .thenReturn(Mono.just(false));
+        ServerWebExchange exchange = exchange("203.0.113.5", "198.51.100.1", "198.51.100.2");
+
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        verify(chain, never()).filter(any());
+        assertEquals(HttpStatus.FORBIDDEN, exchange.getResponse().getStatusCode());
+    }
+
+    @Test
+    void trustedProxies_trustedPeerWithAllowedClient_allowed() {
+        filter = newFilter(true, trustingIngress());
+        restrictTo("198.51.100.0/24");
+        ServerWebExchange exchange = exchange("10.42.0.7", "198.51.100.1");
+
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        verify(chain).filter(exchange);
+        verify(cerbos, never()).checkSystemPermission(any(), anyString());
+    }
+
+    @Test
+    void trustedProxies_trustedPeerWithDisallowedClient_forbiddenEvenIfLeftHopAllowed() {
+        filter = newFilter(true, trustingIngress());
+        restrictTo("198.51.100.0/24");
+        when(cerbos.checkSystemPermission(any(GatewayPrincipal.class), eq("MANAGE_TENANTS")))
+                .thenReturn(Mono.just(false));
+        // Client prepended an allowed address; the ingress appended the real one.
+        ServerWebExchange exchange = exchange("10.42.0.7", "198.51.100.1, 203.0.113.9");
+
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        verify(chain, never()).filter(any());
+        assertEquals(HttpStatus.FORBIDDEN, exchange.getResponse().getStatusCode());
     }
 
     // ── Fail-open paths ───────────────────────────────────────────────────

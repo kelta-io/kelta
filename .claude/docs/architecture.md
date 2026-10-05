@@ -48,7 +48,8 @@ Order values below are the live `getOrder()` returns from source (lower runs fir
 
 | Order | Filter | Purpose |
 |-------|--------|---------|
-| -400 | IdentityHeaderStripFilter | Strip client-forged internal headers (`X-User-*`, `X-Forwarded-*`, `X-Geo-*`) |
+| -400 | IdentityHeaderStripFilter | Strip client-forged internal headers (`X-User-*`, `X-Forwarded-*`, `X-Geo-*`, `X-Kelta-Client-Ip`) |
+| -390 | ClientIpForwardingFilter | Stamp `X-Kelta-Client-Ip` with the `ClientIpResolver` result for downstream services |
 | -310 | CustomDomainFilter | Map custom domain → tenant |
 | -300 | TenantSlugExtractionFilter | Extract tenant slug from URL |
 | -200 | TenantResolutionFilter | Resolve slug → tenant ID |
@@ -199,8 +200,35 @@ used, on top of the shared `apiCallsPerDay` governor budget above.
 `RateLimitExemptionService` and `TenantIpAllowlistFilter` share one `CidrBlock` matcher
 (`io.kelta.gateway.net`), which parses address **literals** only so a hostname in a forwarded
 header can never trigger a DNS lookup. Caveat: exemption is evaluated against the same resolved
-client IP the limiter keys on, so with `ip-allowlist.trust-forwarded-for=true` an exempt entry
-is only as trustworthy as the proxy chain — keep the list to narrow ranges you control.
+client IP the limiter keys on, so in legacy mode (no `kelta.security.trusted-proxies`) with
+`ip-allowlist.trust-forwarded-for=true` an exempt entry is only as trustworthy as a
+client-supplied header — keep the list to narrow ranges you control.
+
+### Client IP resolution data flow (trusted proxies)
+
+One rule decides "who is the client", in `io.kelta.gateway.geo.ClientIpResolver`; nothing else
+in the gateway parses `X-Forwarded-For` / `X-Real-IP` (`ClientIpResolverTest` asserts it).
+Consumers: `SecurityAuditFilter`, `GeoEnrichmentFilter`, `IpRateLimitFilter`,
+`RateLimitExemptionService`, `TenantIpAllowlistFilter` (via `allowlistCandidates`) and
+`ClientIpForwardingFilter`.
+
+- **Trusted-proxy mode** — `kelta.security.trusted-proxies` (`KELTA_SECURITY_TRUSTED_PROXIES`,
+  comma-separated CIDRs or bare IPs, parsed by `CidrBlock`, never DNS). Socket peer untrusted →
+  the peer, headers ignored. Peer trusted → walk XFF right to left past trusted hops and return
+  the first untrusted one (left-most if all trusted; a non-literal hop stops the walk at the
+  nearest verified hop); no XFF → `X-Real-IP` if a literal, else the peer. The allowlist judges
+  only this one address.
+- **Legacy mode** (list empty, the default) — unchanged: left-most XFF hop when
+  `trust-forwarded-for=true`, else the peer; the allowlist matches **any** of peer / XFF hops /
+  `X-Real-IP` (spoofable — `concerns.md`). The resolver logs the active mode at startup.
+- **Downstream:** `IdentityHeaderStripFilter` (-400) removes any inbound `X-Kelta-Client-Ip`;
+  `ClientIpForwardingFilter` (-390) sets it to the resolved IP. The worker's
+  `LoginTrackingFilter` records that header in `login_history.source_ip` and the
+  `LOGIN_SUCCESS` `security_audit_log.ip_address`, falling back to left-most XFF / remote addr
+  only for requests that did not traverse the gateway.
+- **kelta-auth** has its own ingress; `PortalPublicRateLimitFilter` carries a copy of the same
+  right-most-untrusted rule when `kelta.security.trusted-proxies` is set, else the legacy
+  `kelta.auth.rate-limit.trusted-proxy-count` arithmetic. Keep the two copies identical.
 
 ### IP geolocation (GeoLite2) data flow
 
@@ -208,8 +236,8 @@ The gateway owns a per-pod GeoLite2-City `.mmdb` (`io.kelta.gateway.geo` package
 `GeoIpDatabaseManager` downloads it from MaxMind on a `@Scheduled` interval (needs the
 `MAXMIND_LICENSE_KEY` secret; sha256-verified, atomically hot-swapped; per-pod local file —
 deliberately **no NATS**, this is infrastructure, not tenant config). `GeoEnrichmentFilter`
-(order -45) resolves the client IP via the shared `ClientIpResolver` (leftmost XFF hop under
-the existing `trust-forwarded-for` knob), skips private/CGNAT/ULA addresses, and on a hit:
+(order -45) resolves the client IP via the shared `ClientIpResolver` (see Client IP
+resolution above), skips private/CGNAT/ULA addresses, and on a hit:
 
 - sets the `gateway.geo` exchange attribute (`GeoResult`),
 - stamps trusted headers `X-Geo-Country` (ISO-3166 alpha-2), `X-Geo-Region`, `X-Geo-City`

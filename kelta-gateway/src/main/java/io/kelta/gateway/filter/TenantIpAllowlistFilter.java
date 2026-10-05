@@ -25,22 +25,24 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Enforces per-tenant IP allowlists for data-path requests.
  *
  * <p>When a tenant has {@code ipAllowlistEnabled=true} with a non-empty CIDR list, a
- * request to {@code /api/**} is allowed only when <em>any</em> IP in its chain — the
- * socket remote address plus every {@code X-Forwarded-For} hop and {@code X-Real-IP}
- * (when {@code trust-forwarded-for} is enabled) — falls inside an allowed CIDR. Matching
- * "anywhere in the chain" is deliberately permissive so the check survives changes in the
- * proxy/Twingate topology; the trade-off is that {@code X-Forwarded-For} is client-supplied
- * and therefore spoofable — set {@code kelta.gateway.ip-allowlist.trust-forwarded-for=false}
- * to match the socket address only.
+ * request to {@code /api/**} is allowed only when its source address falls inside an
+ * allowed CIDR. Which address(es) count is decided by {@link ClientIpResolver#allowlistCandidates}:
+ * <ul>
+ *   <li>With {@code kelta.security.trusted-proxies} set, only the single resolved client
+ *       IP — forwarding headers are honoured only from a trusted proxy peer, so a client
+ *       cannot name an allowed address in {@code X-Forwarded-For} / {@code X-Real-IP}.</li>
+ *   <li>With it unset (legacy), a match on <em>any</em> IP in the chain — the socket
+ *       address plus every {@code X-Forwarded-For} hop and {@code X-Real-IP} when
+ *       {@code trust-forwarded-for} is enabled. Topology-resilient but client-spoofable;
+ *       {@code trust-forwarded-for=false} matches the socket address only.</li>
+ * </ul>
  *
  * <p><b>Fail-open by design</b> so a misconfiguration can never lock a tenant out:
  * <ul>
@@ -70,8 +72,8 @@ public class TenantIpAllowlistFilter implements GlobalFilter, Ordered {
     private final PublicPathMatcher publicPathMatcher;
     private final GatewayMetrics metrics;
     private final ObjectMapper objectMapper;
+    private final ClientIpResolver clientIpResolver;
     private final boolean enabled;
-    private final boolean trustForwardedFor;
 
     public TenantIpAllowlistFilter(
             GatewayCacheManager cacheManager,
@@ -79,15 +81,15 @@ public class TenantIpAllowlistFilter implements GlobalFilter, Ordered {
             PublicPathMatcher publicPathMatcher,
             GatewayMetrics metrics,
             ObjectMapper objectMapper,
-            @Value("${kelta.gateway.ip-allowlist.enabled:true}") boolean enabled,
-            @Value("${kelta.gateway.ip-allowlist.trust-forwarded-for:true}") boolean trustForwardedFor) {
+            ClientIpResolver clientIpResolver,
+            @Value("${kelta.gateway.ip-allowlist.enabled:true}") boolean enabled) {
         this.cacheManager = cacheManager;
         this.cerbosService = cerbosService;
         this.publicPathMatcher = publicPathMatcher;
         this.metrics = metrics;
         this.objectMapper = objectMapper;
+        this.clientIpResolver = clientIpResolver;
         this.enabled = enabled;
-        this.trustForwardedFor = trustForwardedFor;
     }
 
     @Override
@@ -121,7 +123,7 @@ public class TenantIpAllowlistFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange);
         }
 
-        List<String> candidateIps = collectCandidateIps(exchange);
+        List<String> candidateIps = clientIpResolver.allowlistCandidates(exchange);
         if (matchesAnyCidr(candidateIps, config.getCidrs())) {
             return chain.filter(exchange);
         }
@@ -142,48 +144,6 @@ public class TenantIpAllowlistFilter implements GlobalFilter, Ordered {
                     metrics.recordAuthzDenied(tenantSlug, "ip-allowlist", method);
                     return forbidden(exchange, "Access from your network is not permitted for this tenant");
                 });
-    }
-
-    /**
-     * Collects every candidate source IP for the request: the socket remote address plus,
-     * when {@code trust-forwarded-for} is enabled, every {@code X-Forwarded-For} hop and
-     * {@code X-Real-IP}. A match on any of them allows the request.
-     */
-    private List<String> collectCandidateIps(ServerWebExchange exchange) {
-        List<String> ips = new ArrayList<>();
-
-        InetSocketAddress remote = exchange.getRequest().getRemoteAddress();
-        if (remote != null && remote.getAddress() != null) {
-            addNormalized(ips, remote.getAddress().getHostAddress());
-        }
-
-        if (trustForwardedFor) {
-            String xff = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
-            if (xff != null && !xff.isBlank()) {
-                for (String hop : xff.split(",")) {
-                    addNormalized(ips, hop);
-                }
-            }
-            String realIp = exchange.getRequest().getHeaders().getFirst("X-Real-IP");
-            addNormalized(ips, realIp);
-        }
-
-        return ips;
-    }
-
-    private void addNormalized(List<String> ips, String raw) {
-        String ip = normalizeIp(raw);
-        if (ip != null && !ips.contains(ip)) {
-            ips.add(ip);
-        }
-    }
-
-    /**
-     * Normalizes a raw IP token: trims, strips an IPv6 scope suffix ({@code %eth0}) and
-     * surrounding brackets ({@code [::1]}). Returns null for blanks.
-     */
-    static String normalizeIp(String raw) {
-        return ClientIpResolver.normalizeIp(raw);
     }
 
     private boolean matchesAnyCidr(List<String> candidateIps, List<String> cidrs) {
