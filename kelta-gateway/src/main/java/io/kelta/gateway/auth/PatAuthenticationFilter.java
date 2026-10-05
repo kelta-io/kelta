@@ -218,10 +218,13 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
             // Same rule as JwtAuthenticationFilter: a token issued in tenant A is never accepted
             // on tenant B's URL. Identity is resolved in the URL's tenant downstream, so without
             // this check the token's own tenant would not bound what it can reach.
+            // A tenant claimed only by the X-Tenant-ID / X-Tenant-Slug header must be the token's
+            // own, so a token that records no tenant cannot use one either (PLT-355).
             String requestTenantId = TenantResolutionFilter.getTenantId(exchange);
-            if (tenantId != null && !tenantId.isEmpty()
-                    && requestTenantId != null && !requestTenantId.isEmpty()
-                    && !tenantId.equals(requestTenantId)) {
+            boolean hasTokenTenant = tenantId != null && !tenantId.isEmpty();
+            if ((hasTokenTenant && requestTenantId != null && !requestTenantId.isEmpty()
+                    && !tenantId.equals(requestTenantId))
+                    || (!hasTokenTenant && TenantResolutionFilter.isHeaderSourced(exchange))) {
                 log.warn("Cross-tenant PAT use rejected: token tenant={} request tenant={} path={}",
                         tenantId, requestTenantId, path);
                 metrics.recordAuthFailure(tenantSlug, "tenant_mismatch");

@@ -1875,3 +1875,45 @@ them. Grant `MANAGE_TENANTS` as you would a superuser.
 - Expired tokens no longer count against the 10-live-tokens-per-user cap. Without that change,
   ten bootstraps would have locked the seeded admin out of new tokens for good.
 
+
+## Client `X-Tenant-ID` / `X-Tenant-Slug` are a claim, not a tenant (decided 2026-10-05; PLT-355)
+
+**What was wrong:** when the URL named no tenant, `TenantResolutionFilter` took the tenant from
+the client's `X-Tenant-ID` / `X-Tenant-Slug` headers, and `IdentityHeaderStripFilter` did not
+strip them. Concretely: an anonymous request with `X-Tenant-ID: <B>` was admitted as tenant B's
+Guest; on a **custom domain** (which set only the slug) `X-Tenant-ID` filled in the id, so an
+anonymous request on tenant A's domain could run as B's Guest and the worker got A's slug with
+B's id; a slug-shaped but unknown URL segment was filled in from the header too; and a PAT with
+only `X-Tenant-Slug: <B>` passed the #1615 check (no id to compare) while the worker received
+B's slug.
+
+**Decision: keep the headers, with documented safety (not strip-at-edge, not in-cluster-only).**
+- No in-repo client depends on the header to reach a tenant. kelta-ui, the CLI, kelta-mcp and
+  the e2e suite all use the `/{slug}/...` URL. The SDK's `ai.chatStream` copies `X-Tenant-ID`
+  from axios defaults only if a consumer set it, and that path is authenticated. Stripping
+  outright would still break any **external** API client that sends a token plus `X-Tenant-ID`
+  to a slug-less URL, which is a breaking change. Gateway access logs were not reachable from
+  the worker pod, so external traffic was not measured.
+- In-cluster-only would need a trusted network marker that the gateway cannot see today. Every
+  request reaches it through the same ingress.
+- The rules (`architecture.md` → Tenant resolution rules): the URL tenant wins and the header is
+  ignored. Without a URL tenant, the header is a claim (`tenantSource=header`) that the JWT
+  `tenant_id` / PAT `tenantId` must match **and** be present. An anonymous request never gets a
+  header-claimed tenant. The client headers are always stripped from the forwarded request, and
+  `HeaderTransformationFilter` re-adds the settled values.
+
+**Tests that pin it:** `TenantHeaderTrustTest` runs the real tenant → JWT → PAT filter chain. It
+has one mismatch test per auth path, anonymous with a URL slug cannot be overridden, anonymous
+without a slug cannot select a tenant, and a public path drops the claim.
+`TenantResolutionFilterTest` covers stripping, custom-domain id resolution, and unknown-slug
+no-fill.
+
+**Residual risks:**
+- On a **URL** tenant, a JWT with no `tenant_id` claim is still accepted. Every kelta-auth token
+  carries the claim, but the issuer check is not tenant-scoped (`DynamicReactiveJwtDecoder`
+  ignores its `tenantId` argument).
+- A PAT on a slug-less URL with no header runs with **no** forwarded tenant. It does not get its
+  own tenant either. This is unchanged.
+- kelta-auth's `SessionController` / `SmsAuthController` read `X-Tenant-ID` themselves. They
+  are served by kelta-auth directly, not through this gateway chain, so the rules above do not
+  cover them.
