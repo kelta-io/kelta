@@ -1311,6 +1311,26 @@ reintroduces the starvation bug.
   exists.** To check what AOT actually kept, read
   `<service>/target/spring-aot/main/sources/**/…__BeanFactoryRegistrations.java` after
   `mvn spring-boot:process-aot` — a missing `registerBeanDefinition("…")` line is the whole bug.
+- **A static initializer that runs at BUILD time in a native image captures the build host's state —
+  including `System.nanoTime()`.** Root cause of the 2026-10-05 total-API outage (08:31Z to 16:44Z):
+  Netty measures scheduler time from `START_TIME = System.nanoTime()` taken in a static initializer
+  (`AbstractScheduledEventExecutor` in the shaded Netty 4.1 inside grpc-netty-shaded), and
+  grpc-netty-shaded's `netty-codec-http` `native-image.properties` put the whole shaded Netty
+  package at build time. Images are built on in-cluster runners, so the origin was the runner node's
+  `CLOCK_MONOTONIC` (time since that node booted). A gateway pod on a node that booted later saw
+  negative Netty time; `deadlineNanos()` clamps to `Long.MAX_VALUE` and `pollScheduledTask()`'s
+  `deadline - now` overflows, so every timer fired immediately: Cerbos gRPC checks failed
+  `DEADLINE_EXCEEDED` (the tell is `Deadline CallOptions will be exceeded in 1.99s` — a deadline
+  reported as already exceeded with nearly all of it remaining), #1622's keepalive then killed every
+  transport (`Keepalive failed`), and the fail-closed gateway answered every authorized call `403
+  API access not permitted`. Invisible on the JVM and in CI; it depended on which node built the
+  image and which node ran it. Netty 4.2's own jars carry the same blanket flag (`SystemTicker`),
+  but native-maven-plugin `--exclude-config`s them in favour of the reachability metadata, which is
+  why Reactor Netty was unaffected. The gateway native profile now initializes both clock origins at
+  run time, and `NativeImageClockOriginTest` fails if any class in a Netty jar on the gateway
+  classpath reads `System.nanoTime()` in `<clinit>` without that flag. **Rule: a library that ships
+  `--initialize-at-build-time` for a whole package needs its clock/entropy/host-state statics
+  checked; reproduce with `unshare --time --monotonic=<negative>` on Linux.**
 - **Every new `kelta.*` NATS subject namespace needs its own JetStream stream in `JetStreamInitializer`.**
   `NatsEventPublisher` always JetStream-publishes and awaits an ack; a subject matched by no stream never
   acks → `CancellationException: response not registered in time` and the event is dropped (publish is
