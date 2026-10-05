@@ -50,6 +50,7 @@ Order values below are the live `getOrder()` returns from source (lower runs fir
 |-------|--------|---------|
 | -400 | IdentityHeaderStripFilter | Strip client-forged internal headers (`X-User-*`, `X-Forwarded-*`, `X-Geo-*`, `X-Kelta-Client-Ip`) |
 | -390 | ClientIpForwardingFilter | Stamp `X-Kelta-Client-Ip` with the `ClientIpResolver` result for downstream services |
+| -320 | RootEndpointsFilter (`config/`) | Answer exactly `GET`/`HEAD /robots.txt` and `/` and stop the chain — see Public root endpoints |
 | -310 | CustomDomainFilter | Map custom domain → tenant |
 | -300 | TenantSlugExtractionFilter | Extract tenant slug from URL |
 | -200 | TenantResolutionFilter | Settle the tenant (URL wins; header is only a claim) and strip client `X-Tenant-*` — see Tenant resolution rules |
@@ -69,6 +70,24 @@ Cross-cutting (off main path): `ObservabilityContextFilter (-90)`, `HttpBodyCapt
 (-80)`, `SystemCollectionResponseCacheFilter (-10)`, `RequestLoggingFilter (MAX)`. `?include=`
 resolution is done by `IncludeResolver` (`jsonapi` package), not a numbered filter; read-side
 FLS is enforced in the worker (`CerbosFieldSecurityAdvice`), not the gateway.
+
+### Public root endpoints (PLT-350)
+
+Two paths are answered by the gateway itself on every host, with no tenant and no auth — they
+short-circuit in `RootEndpointsFilter` (a `WebFilter`, order -320) before custom-domain/slug
+resolution and Spring Security:
+
+| Path | Response |
+|------|----------|
+| `GET /robots.txt` | `200 text/plain` — `User-agent: *` / `Disallow: /` (API hosts are not for crawling) |
+| `GET /` | `200 application/json` — `{"service": <kelta.gateway.root.service-name>, "docs": <kelta.gateway.root.docs-url>}` (defaults `kelta-api`, `https://kelta.io/docs`); never version, build, commit or host details |
+
+Both are matched **exactly** (`/robots.txt/x`, `/<slug>/robots.txt`, `/<slug>` still take the
+normal path). They are deliberately **not** in `kelta.gateway.security.public-paths`:
+`PublicPathMatcher` matches by prefix, so a bare `/` there would make every route public.
+`TenantSlugExtractionFilter` also exempts exactly `/robots.txt`, so it never becomes a slug or
+a `require-prefix` 404. Before this, each crawler hit logged a stack-bearing
+`404 NOT_FOUND "No static resource"` WARN.
 
 ### Tenant resolution rules (PLT-355)
 

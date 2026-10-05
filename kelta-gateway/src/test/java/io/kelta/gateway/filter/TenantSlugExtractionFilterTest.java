@@ -158,6 +158,36 @@ class TenantSlugExtractionFilterTest {
         assertThat(capturedExchange[0].getRequest().getPath().value()).isEqualTo("/");
     }
 
+    // --- Root endpoints (RootEndpointsFilter) ---
+
+    @Test
+    void shouldNotTreatRobotsTxtAsTenantSlugEvenWhenPrefixRequired() {
+        TenantSlugExtractionFilter filter = createFilter(true, true);
+
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/robots.txt"));
+
+        StepVerifier.create(filter.filter(exchange, chain))
+                .verifyComplete();
+
+        verify(chain).filter(exchange);
+        assertThat(exchange.getResponse().getStatusCode()).isNull();
+        assertThat(exchange.getAttributes()).doesNotContainKey(TenantResolutionFilter.TENANT_SLUG_ATTR);
+    }
+
+    @Test
+    void shouldStillRequireTenantForPathsUnderRobotsTxt() {
+        TenantSlugExtractionFilter filter = createFilter(true, true);
+
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/robots.txt/api/users"));
+
+        StepVerifier.create(filter.filter(exchange, chain))
+                .verifyComplete();
+
+        verify(chain, never()).filter(any());
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
     // --- Platform path bypass ---
 
     @Test

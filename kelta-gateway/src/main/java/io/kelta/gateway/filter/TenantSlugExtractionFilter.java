@@ -57,6 +57,12 @@ public class TenantSlugExtractionFilter implements WebFilter, Ordered {
             "api", "actuator", "platform", "internal", "otel", "scim", "auth", "ws"
     );
 
+    /**
+     * Answered by {@code RootEndpointsFilter} on any host: never a slug, and never a
+     * tenant-required 404 even with {@code require-prefix} on. Matched exactly, not as a prefix.
+     */
+    private static final String ROBOTS_PATH = "/robots.txt";
+
     private final GatewayCacheManager cacheManager;
     private final GatewayMetrics metrics;
     private final boolean enabled;
@@ -96,7 +102,7 @@ public class TenantSlugExtractionFilter implements WebFilter, Ordered {
         String path = exchange.getRequest().getPath().value();
 
         // Platform endpoints bypass slug requirement
-        if (isPlatformPath(path)) {
+        if (ROBOTS_PATH.equals(path) || isPlatformPath(path)) {
             return chain.filter(exchange);
         }
 

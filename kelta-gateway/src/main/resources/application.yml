@@ -80,6 +80,15 @@ kelta:
       platform-paths: /actuator,/platform,/internal,/otel,/api/webhooks,/scim
       cache-refresh-ms: 60000
 
+    # Public root endpoints answered by RootEndpointsFilter on every host, before tenant
+    # resolution and auth: GET /robots.txt (text/plain "User-agent: *" / "Disallow: /" — API
+    # hosts are not for crawling) and GET / (JSON {"service": <service-name>, "docs": <docs-url>}).
+    # Both paths are matched exactly; never add "/" to security.public-paths, which is
+    # prefix-matched and would make every route public.
+    root:
+      service-name: ${KELTA_GATEWAY_ROOT_SERVICE_NAME:kelta-api}
+      docs-url: ${KELTA_GATEWAY_ROOT_DOCS_URL:https://kelta.io/docs}
+
     # Worker service URL (used for routing AND internal API calls)
     worker-service-url: ${WORKER_SERVICE_URL:http://emf-worker:80}
 
