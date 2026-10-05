@@ -70,6 +70,7 @@ public class GatewayCacheManager {
     private final AtomicReference<Mono<Map<String, String>>> inFlightSlugMapFetch = new AtomicReference<>();
 
     private final Cache<String, String> tenantSlugCache;
+    private final Cache<String, Boolean> unknownTenantIdCache; // tenantId the slug map lacks
     private final Cache<String, Integer> governorLimitCache;
     private final Cache<String, TenantIpConfig> tenantIpConfigCache; // tenantId → IP allowlist config
     private final Cache<String, String> customDomainCache; // domain → tenantSlug
@@ -87,6 +88,11 @@ public class GatewayCacheManager {
                 .expireAfterWrite(10, TimeUnit.MINUTES)
                 .maximumSize(10_000)
                 .recordStats()
+                .build();
+
+        this.unknownTenantIdCache = Caffeine.newBuilder()
+                .expireAfterWrite(1, TimeUnit.MINUTES)
+                .maximumSize(10_000)
                 .build();
 
         this.governorLimitCache = Caffeine.newBuilder()
@@ -170,6 +176,7 @@ public class GatewayCacheManager {
                     }
                     // Merge only — never clear, or a concurrent request misses a slug we hold.
                     tenantSlugCache.putAll(mapping);
+                    unknownTenantIdCache.invalidateAll(mapping.values());
                     String resolved = mapping.get(slug);
                     if (resolved != null) {
                         return Optional.of(resolved);
@@ -185,6 +192,56 @@ public class GatewayCacheManager {
                     log.warn("Lazy tenant slug-map fetch failed: {}", e.getMessage());
                     return Mono.just(Optional.empty());
                 });
+    }
+
+    /**
+     * Resolves a tenant ID to its slug without blocking — the inverse of
+     * {@link #resolveTenantSlugReactive}. Used when a client names its tenant by
+     * {@code X-Tenant-ID} alone, so the worker still receives the slug that selects the tenant's
+     * schema.
+     *
+     * <p>On a cache miss the same shared slug-map fetch runs. An id the fetched map does not hold
+     * is remembered briefly in a separate set (never as a slug entry), so a stream of unknown ids
+     * cannot turn into a worker fetch per request; the next slug refresh forgets it.
+     *
+     * @param tenantId the tenant ID claimed by the client
+     * @return the tenant slug if the ID is known, empty otherwise
+     */
+    public Mono<Optional<String>> resolveTenantIdToSlugReactive(String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            return Mono.just(Optional.empty());
+        }
+        Optional<String> cached = slugForTenantId(tenantSlugCache.asMap(), tenantId);
+        if (cached.isPresent()) {
+            return Mono.just(cached);
+        }
+        if (unknownTenantIdCache.getIfPresent(tenantId) != null) {
+            return Mono.just(Optional.empty());
+        }
+        return sharedTenantSlugMapFetch()
+                .map(mapping -> {
+                    if (mapping.isEmpty()) {
+                        return Optional.<String>empty();
+                    }
+                    tenantSlugCache.putAll(mapping);
+                    unknownTenantIdCache.invalidateAll(mapping.values());
+                    Optional<String> resolved = slugForTenantId(mapping, tenantId);
+                    if (resolved.isEmpty()) {
+                        unknownTenantIdCache.put(tenantId, Boolean.TRUE);
+                    }
+                    return resolved;
+                })
+                .onErrorResume(e -> {
+                    log.warn("Lazy tenant slug-map fetch failed: {}", e.getMessage());
+                    return Mono.just(Optional.empty());
+                });
+    }
+
+    private static Optional<String> slugForTenantId(Map<String, String> slugMap, String tenantId) {
+        return slugMap.entrySet().stream()
+                .filter(e -> tenantId.equals(e.getValue()) && !SLUG_NOT_FOUND.equals(e.getValue()))
+                .map(Map.Entry::getKey)
+                .findFirst();
     }
 
     /**
@@ -264,6 +321,7 @@ public class GatewayCacheManager {
     private void replaceTenantSlugs(Map<String, String> slugMap) {
         tenantSlugCache.putAll(slugMap);
         tenantSlugCache.asMap().keySet().removeIf(slug -> !slugMap.containsKey(slug));
+        unknownTenantIdCache.invalidateAll();
     }
 
     /**

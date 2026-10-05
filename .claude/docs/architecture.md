@@ -79,8 +79,14 @@ The tenant a request runs under is decided in this order, and only the gateway d
    authoritative. A client `X-Tenant-ID` / `X-Tenant-Slug` is ignored, even when the slug is
    slug-shaped but unknown (the request then has no tenant).
 2. **Header claim** — only when the URL named no tenant: `X-Tenant-ID`, else `X-Tenant-Slug`
-   resolved to its id (an `X-Tenant-Slug` that names a different tenant than `X-Tenant-ID` is
-   dropped). The exchange is marked `tenantSource=header`
+   resolved to its id. A header-claimed tenant is forwarded with **both id and slug**: for an
+   `X-Tenant-ID` the slug is always the one that id maps to
+   (`GatewayCacheManager.resolveTenantIdToSlugReactive`, same cached slug map and shared lazy
+   `/internal/tenants/slug-map` fetch as the slug→id lookup), never the client's — an
+   `X-Tenant-Slug` naming another tenant is replaced. Without the slug the worker's
+   `PhysicalTableStorageAdapter` falls back to the public schema (`relation … does not exist`,
+   PLT-359). An id the slug map does not know is still claimed, with no slug, and left to the
+   credential check. The exchange is marked `tenantSource=header`
    (`TenantResolutionFilter.isHeaderSourced`). The claim must be proven by the credential:
    - **JWT** — the `tenant_id` claim must be present and equal (`tenant_mismatch` → 401). On a
      URL tenant a token without the claim is still accepted, as before.
