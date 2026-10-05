@@ -488,13 +488,23 @@ ever exposed to a lower-privilege role. It is deliberately **not** auto-invoked 
   bypass mitigated by K8s NetworkPolicy + service-mesh mTLS, not by app code.
   Verify on cluster: `kubectl get networkpolicy -n kelta`.
 
-**Tenant IP allowlist — `X-Forwarded-For` trust (accepted trade-off):**
-- `TenantIpAllowlistFilter` allows a request when **any** IP in the chain (socket +
-  every `X-Forwarded-For` hop + `X-Real-IP`) matches an allowed CIDR. This is
-  deliberately topology-resilient but means a non-admin could inject an allowed IP via
-  `X-Forwarded-For` to bypass the restriction. Chosen by the tenant/operator; tighten to
-  socket-only with `kelta.gateway.ip-allowlist.trust-forwarded-for=false` where the proxy
-  hop count is known. The filter is **fail-open** by design (missing config, disabled, or
+**Tenant IP allowlist / client IP — `X-Forwarded-For` trust (open until the deploy sets
+`KELTA_SECURITY_TRUSTED_PROXIES`, PLT-341):**
+- With `kelta.security.trusted-proxies` **unset** (the default, kept for upgrade
+  compatibility), `TenantIpAllowlistFilter` allows a request when **any** IP in the chain
+  (socket + every `X-Forwarded-For` hop + `X-Real-IP`) matches an allowed CIDR, so a non-admin
+  can bypass the allowlist by sending `X-Forwarded-For: <an allowed IP>`; and the audit log,
+  geo, rate limits, exemptions and `login_history.source_ip` use the client-controlled
+  left-most hop. `trust-forwarded-for=false` closes it but, behind an ingress, makes every
+  client look like the ingress pod.
+- **Fix:** set `kelta.security.trusted-proxies` to the ingress pod CIDR (and, for kelta-auth,
+  its ingress CIDR). Then only the single right-most-untrusted address counts
+  (`architecture.md` → Client IP resolution). Follow-up: flip the default to strict once
+  quickstart/docker-compose set the list.
+- The worker trusts the gateway-stamped `X-Kelta-Client-Ip` like it trusts `X-User-Id`: on the
+  assumption that only the gateway reaches it. No NetworkPolicy in this repo enforces that
+  (see Network-level defense-in-depth above); an in-cluster caller that can reach the worker
+  directly can forge it. The filter is **fail-open** by design (missing config, disabled, or
   `MANAGE_TENANTS` holder → allow), so it hardens access but is not a hard security
   boundary on its own — pair it with the network-level controls above.
 

@@ -186,6 +186,16 @@ only isolation there is.
 `ALTER DEFAULT PRIVILEGES … GRANT`, which hands over every table added later. Not granting
 `user_credential` and `oauth2_*` is stronger than trusting a policy to hide them.
 
+### Client IP: always through `ClientIpResolver`
+
+Gateway code that needs the caller's address calls `ClientIpResolver.resolve(exchange)` (or
+`allowlistCandidates` for the tenant allowlist) — never `getRemoteAddress()` or a hand-rolled
+`X-Forwarded-For` split; `ClientIpResolverTest` fails the build if a gateway class mentions
+`"X-Forwarded-For"` / `"X-Real-IP"`. Services behind the gateway read the gateway-stamped
+`X-Kelta-Client-Ip` header (stripped inbound, set by `ClientIpForwardingFilter`), not XFF.
+kelta-auth, which has its own ingress, keeps a behaviourally identical copy of the rule in
+`PortalPublicRateLimitFilter`. Range lists are CIDRs or bare IPs parsed literal-only (no DNS).
+
 ### BeforeSaveHook signatures
 
 `BeforeSaveHook` exposes two parallel signatures for each lifecycle method: the **legacy** form without a collection name (`beforeCreate(record, tenantId)`, `beforeUpdate(id, record, previous, tenantId)`, `afterCreate(record, tenantId)`, …) and the **collection-name-aware** form that takes `collectionName` as the first argument. Both `BeforeSaveHookRegistry.evaluateBeforeCreate/Update` and `invokeAfterCreate/Update/Delete` dispatch the collection-name-aware variant, whose default delegates to the legacy variant — so existing hooks remain source-compatible.

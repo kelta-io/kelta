@@ -1,5 +1,6 @@
 package io.kelta.gateway.filter;
 
+import io.kelta.gateway.geo.ClientIpResolver;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -18,8 +19,9 @@ import java.util.List;
  * {@code RouteAuthorizationFilter.forwardWithHeaders}, order 0) and
  * {@code X-Forwarded-User} / {@code X-User-Id} / {@code X-Forwarded-Groups} /
  * {@code X-Forwarded-Roles} (set by {@code HeaderTransformationFilter}, order 50) for identity
- * and permission checks, and {@code X-Geo-*} (set by {@code GeoEnrichmentFilter}, order -45)
- * for request-origin geolocation. Authenticated requests get every one of these overwritten downstream,
+ * and permission checks, {@code X-Geo-*} (set by {@code GeoEnrichmentFilter}, order -45)
+ * for request-origin geolocation, and {@code X-Kelta-Client-Ip} (set by
+ * {@code ClientIpForwardingFilter}, order -390) for the client address it records. Authenticated requests get every one of these overwritten downstream,
  * but requests that skip those set-points (public paths, unauthenticated bootstrap, any future
  * forwarding branch) would otherwise pass a client-forged value straight through to the worker.
  *
@@ -44,7 +46,8 @@ public class IdentityHeaderStripFilter implements GlobalFilter, Ordered {
             "X-Geo-City",
             "X-Geo-Lat",
             "X-Geo-Lon",
-            "X-Geo-Accuracy-Km");
+            "X-Geo-Accuracy-Km",
+            ClientIpResolver.CLIENT_IP_HEADER);
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {

@@ -49,6 +49,13 @@ kelta:
   # Generate with: openssl rand -base64 32
   encryption:
     key: ${KELTA_ENCRYPTION_KEY:}
+  security:
+    # Proxies whose X-Forwarded-For / X-Real-IP are believed when resolving the client IP
+    # for the portal per-IP rate limit (PortalPublicRateLimitFilter). Comma-separated
+    # CIDRs or bare IPs — set to the ingress pod CIDR. Same rule as the gateway: the
+    # client is the right-most untrusted X-Forwarded-For hop, and headers from an
+    # untrusted peer are ignored. Empty (default) keeps kelta.auth.rate-limit.trusted-proxy-count.
+    trusted-proxies: ${KELTA_SECURITY_TRUSTED_PROXIES:}
   auth:
     # Leave blank to derive the issuer from each request's host (recommended:
     # required for tenant custom domains so tokens carry iss=https://<host>).

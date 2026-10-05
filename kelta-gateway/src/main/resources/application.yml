@@ -61,6 +61,17 @@ kelta:
   nats:
     url: ${NATS_URL:nats://localhost:4222}
     connection-name: kelta-gateway
+  security:
+    # Proxies whose forwarding headers are believed when resolving the real client IP
+    # (ClientIpResolver: audit log, geo, rate limits, exemptions, tenant IP allowlist, and
+    # the X-Kelta-Client-Ip header the worker records in login_history.source_ip).
+    # Comma-separated CIDRs or bare IPs, e.g. "10.42.0.0/16,192.0.2.7"; set it to the
+    # ingress (traefik) pod CIDR. When set, X-Forwarded-For / X-Real-IP are honoured only
+    # from a trusted peer and the client is the right-most untrusted X-Forwarded-For hop.
+    # Empty (the default) keeps the legacy behaviour below: with
+    # ip-allowlist.trust-forwarded-for=true the left-most hop is used and the allowlist
+    # matches any hop — both client-spoofable.
+    trusted-proxies: ${KELTA_SECURITY_TRUSTED_PROXIES:}
   gateway:
     # Tenant slug URL prefix configuration
     tenant-slug:
@@ -90,9 +101,10 @@ kelta:
       # probes, in-cluster callers, a payment processor's webhook egress ranges.
       # A bare address is treated as a single host (/32 or /128). Invalid entries
       # are logged and skipped. Empty (the default) exempts nobody.
-      # NOTE: with ip-allowlist.trust-forwarded-for=true the resolved client IP
-      # can include client-supplied X-Forwarded-For hops — keep this list to
-      # narrow ranges you actually control.
+      # NOTE: unless kelta.security.trusted-proxies is set, with
+      # ip-allowlist.trust-forwarded-for=true the resolved client IP is a
+      # client-supplied X-Forwarded-For hop — keep this list to narrow ranges
+      # you actually control.
       exempt-cidrs: ${RATE_LIMIT_EXEMPT_CIDRS:}
 
     # Per-tenant IP allowlist (network access restriction).
@@ -100,8 +112,11 @@ kelta:
     # MANAGE_TENANTS holders bypass. Config is fetched at bootstrap and refreshed via NATS.
     ip-allowlist:
       enabled: ${IP_ALLOWLIST_ENABLED:true}   # Global kill-switch for the filter
-      # When true, X-Forwarded-For / X-Real-IP hops are considered (resilient to proxy topology
-      # but client-spoofable). Set false to match only the socket source address.
+      # Legacy mode only (kelta.security.trusted-proxies empty): when true, ANY
+      # X-Forwarded-For / X-Real-IP hop matching an allowed CIDR admits the request
+      # (resilient to proxy topology but client-spoofable). Set false to match only the
+      # socket source address. Ignored once trusted-proxies is set — then only the single
+      # resolved client IP is judged.
       trust-forwarded-for: ${IP_ALLOWLIST_TRUST_XFF:true}
 
     # IP geolocation enrichment (GeoLite2-City, self-hosted MMDB).

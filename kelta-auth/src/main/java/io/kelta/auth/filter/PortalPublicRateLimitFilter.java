@@ -16,8 +16,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,6 +53,12 @@ import java.util.Map;
  *
  * <p>Off unless {@code kelta.auth.rate-limit.ip-paths} is non-empty; it ships with
  * budgets for the three public portal paths.
+ *
+ * <p><b>Client IP.</b> With {@code kelta.security.trusted-proxies} set (CIDRs or bare
+ * addresses), the same rule as the gateway's {@code ClientIpResolver}: forwarding headers
+ * count only when the socket peer is a trusted proxy, and the client is the right-most
+ * untrusted {@code X-Forwarded-For} hop. Otherwise the legacy
+ * {@code kelta.auth.rate-limit.trusted-proxy-count} hop arithmetic applies.
  */
 @Component
 @Order(-150)
@@ -92,17 +100,45 @@ public class PortalPublicRateLimitFilter extends OncePerRequestFilter {
     private final StringRedisTemplate redisTemplate;
     private final Map<String, Integer> pathBudgets;
     private final int trustedProxyCount;
+    private final List<Cidr> trustedProxies;
 
     public PortalPublicRateLimitFilter(
             StringRedisTemplate redisTemplate,
             @Value("${kelta.auth.rate-limit.ip-paths:" + DEFAULT_IP_PATHS + "}") List<String> ipPaths,
-            @Value("${kelta.auth.rate-limit.trusted-proxy-count:1}") int trustedProxyCount) {
+            @Value("${kelta.auth.rate-limit.trusted-proxy-count:1}") int trustedProxyCount,
+            @Value("${kelta.security.trusted-proxies:}") List<String> trustedProxies) {
         this.redisTemplate = redisTemplate;
         this.pathBudgets = parsePathBudgets(ipPaths);
         this.trustedProxyCount = Math.max(0, trustedProxyCount);
-        log.info("PortalPublicRateLimitFilter initialized: {} path(s) {} over a {}s window, "
-                        + "{} trusted proxy hop(s)",
-                pathBudgets.size(), pathBudgets, WINDOW.toSeconds(), this.trustedProxyCount);
+        this.trustedProxies = parseTrustedProxies(trustedProxies);
+        if (this.trustedProxies.isEmpty()) {
+            log.info("PortalPublicRateLimitFilter initialized: {} path(s) {} over a {}s window, "
+                            + "{} trusted proxy hop(s) (kelta.security.trusted-proxies unset)",
+                    pathBudgets.size(), pathBudgets, WINDOW.toSeconds(), this.trustedProxyCount);
+        } else {
+            log.info("PortalPublicRateLimitFilter initialized: {} path(s) {} over a {}s window, "
+                            + "trusted-proxy mode with {} trusted range(s)",
+                    pathBudgets.size(), pathBudgets, WINDOW.toSeconds(), this.trustedProxies.size());
+        }
+    }
+
+    private static List<Cidr> parseTrustedProxies(List<String> entries) {
+        if (entries == null) {
+            return List.of();
+        }
+        List<Cidr> parsed = new ArrayList<>();
+        for (String entry : entries) {
+            if (entry == null || entry.isBlank()) {
+                continue;
+            }
+            Cidr cidr = Cidr.parse(entry);
+            if (cidr == null) {
+                log.warn("Ignoring invalid kelta.security.trusted-proxies entry: '{}'", entry);
+                continue;
+            }
+            parsed.add(cidr);
+        }
+        return List.copyOf(parsed);
     }
 
     /** {@code <prefix>=<limit>} entries, longest prefix first; bad entries skipped. */
@@ -221,6 +257,10 @@ public class PortalPublicRateLimitFilter extends OncePerRequestFilter {
      * With the default of one trusted proxy that means the last entry.
      */
     String resolveClientIp(HttpServletRequest request) {
+        if (!trustedProxies.isEmpty()) {
+            String resolved = resolveThroughTrustedProxies(request);
+            return resolved == null ? "unknown" : resolved;
+        }
         String header = request.getHeader("X-Forwarded-For");
         if (header != null && !header.isBlank() && trustedProxyCount > 0) {
             String[] hops = header.split(",");
@@ -238,6 +278,139 @@ public class PortalPublicRateLimitFilter extends OncePerRequestFilter {
         }
         String remote = request.getRemoteAddr();
         return remote == null ? "unknown" : remote;
+    }
+
+    /**
+     * Trusted-proxy rule, kept behaviourally identical to the gateway's
+     * {@code ClientIpResolver}: an untrusted peer is the client and its headers are
+     * ignored; from a trusted peer, walk {@code X-Forwarded-For} right to left past
+     * trusted hops and return the first untrusted one (the left-most if all are trusted).
+     * A hop that is not an address literal stops the walk at the nearest verified hop.
+     * No {@code X-Forwarded-For} → {@code X-Real-IP} if it is a literal, else the peer.
+     */
+    private String resolveThroughTrustedProxies(HttpServletRequest request) {
+        String peer = normalizeIp(request.getRemoteAddr());
+        if (peer == null || !isTrustedProxy(peer)) {
+            return peer;
+        }
+        List<String> hops = new ArrayList<>();
+        var headers = request.getHeaders("X-Forwarded-For");
+        while (headers != null && headers.hasMoreElements()) {
+            String value = headers.nextElement();
+            if (value == null) {
+                continue;
+            }
+            for (String raw : value.split(",")) {
+                String hop = normalizeIp(raw);
+                hops.add(hop == null ? "" : hop);
+            }
+        }
+        if (hops.size() == 1 && hops.get(0).isEmpty()) {
+            hops.clear();
+        }
+        if (hops.isEmpty()) {
+            String realIp = normalizeIp(request.getHeader("X-Real-IP"));
+            return Cidr.isLiteral(realIp) ? realIp : peer;
+        }
+        String nearestVerified = peer;
+        for (int i = hops.size() - 1; i >= 0; i--) {
+            String hop = hops.get(i);
+            if (!Cidr.isLiteral(hop)) {
+                return nearestVerified;
+            }
+            if (!isTrustedProxy(hop)) {
+                return hop;
+            }
+            nearestVerified = hop;
+        }
+        return nearestVerified;
+    }
+
+    private boolean isTrustedProxy(String ip) {
+        for (Cidr cidr : trustedProxies) {
+            if (cidr.contains(ip)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String normalizeIp(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String ip = raw.trim();
+        if (ip.startsWith("[")) {
+            int close = ip.indexOf(']');
+            if (close > 0) {
+                ip = ip.substring(1, close);
+            }
+        }
+        int pct = ip.indexOf('%');
+        if (pct >= 0) {
+            ip = ip.substring(0, pct);
+        }
+        return ip.isEmpty() ? null : ip;
+    }
+
+    /**
+     * Minimal CIDR block — a copy of the gateway's {@code CidrBlock} (kelta-auth does not
+     * depend on kelta-gateway). Parses literals only via {@link InetAddress#ofLiteral}, so
+     * a hostname in a forwarded header is never resolved via DNS.
+     */
+    record Cidr(byte[] network, int prefixLen) {
+
+        /** {@code a.b.c.d/len}, an IPv6 equivalent, or a bare address (a single host). */
+        static Cidr parse(String entry) {
+            String s = entry.trim();
+            int slash = s.indexOf('/');
+            try {
+                byte[] network = InetAddress.ofLiteral(slash < 0 ? s : s.substring(0, slash)).getAddress();
+                int prefixLen = slash < 0 ? network.length * 8 : Integer.parseInt(s.substring(slash + 1).trim());
+                if (prefixLen < 0 || prefixLen > network.length * 8) {
+                    return null;
+                }
+                return new Cidr(network, prefixLen);
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
+
+        static boolean isLiteral(String ip) {
+            if (ip == null || ip.isEmpty()) {
+                return false;
+            }
+            try {
+                InetAddress.ofLiteral(ip);
+                return true;
+            } catch (RuntimeException e) {
+                return false;
+            }
+        }
+
+        boolean contains(String ip) {
+            byte[] target;
+            try {
+                target = InetAddress.ofLiteral(ip).getAddress();
+            } catch (RuntimeException e) {
+                return false;
+            }
+            if (target.length != network.length) {
+                return false;
+            }
+            int fullBytes = prefixLen / 8;
+            for (int i = 0; i < fullBytes; i++) {
+                if (network[i] != target[i]) {
+                    return false;
+                }
+            }
+            int remBits = prefixLen % 8;
+            if (remBits > 0) {
+                int mask = (0xFF << (8 - remBits)) & 0xFF;
+                return (network[fullBytes] & mask) == (target[fullBytes] & mask);
+            }
+            return true;
+        }
     }
 
     private void tooManyRequests(HttpServletRequest request, HttpServletResponse response,
