@@ -396,6 +396,23 @@
                                 <buildArg>--initialize-at-build-time=dev.cerbos</buildArg>
                                 <buildArg>--initialize-at-build-time=build.buf.validate</buildArg>
                                 <buildArg>--initialize-at-build-time=grpc.gateway</buildArg>
+                                <!--
+                                  Netty's scheduler clock origin (START_TIME = System.nanoTime() in a
+                                  static initializer) must be captured when the gateway starts, not on
+                                  the build host.  grpc-netty-shaded's netty-codec-http
+                                  native-image.properties put the whole shaded Netty package at build
+                                  time, so AbstractScheduledEventExecutor carried the build node's
+                                  monotonic clock.  On a node whose clock is behind the build node's,
+                                  Netty time goes negative, every deadline clamps to Long.MAX_VALUE and
+                                  "deadline - now" overflows, so every timer fires at once: Cerbos checks
+                                  failed DEADLINE_EXCEEDED / "Keepalive failed" and the gateway denied
+                                  every API call.  GraalVM moves the event-loop subclasses to run time
+                                  with it.  Netty 4.2's SystemTicker has the same pattern; today its
+                                  jars' config is excluded in favour of the reachability metadata, and
+                                  it is listed so that cannot change silently.
+                                  NativeImageClockOriginTest enforces the list.
+                                -->
+                                <buildArg>--initialize-at-run-time=io.grpc.netty.shaded.io.netty.util.concurrent.AbstractScheduledEventExecutor,io.netty.util.concurrent.SystemTicker</buildArg>
                             </buildArgs>
                         </configuration>
                     </plugin>
