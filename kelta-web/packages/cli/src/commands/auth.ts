@@ -7,10 +7,12 @@ import { defineCommand, type CommandContext, type RegisteredCommand } from '../r
 
 const TOKEN_PREFIX_LENGTH = 8;
 
+function explicitProfileName(ctx: CommandContext): string | undefined {
+  return ctx.global.profile ?? process.env.KELTA_PROFILE;
+}
+
 function activeProfileName(ctx: CommandContext): string {
-  return (
-    ctx.global.profile ?? process.env.KELTA_PROFILE ?? loadConfig().defaultProfile ?? 'default'
-  );
+  return explicitProfileName(ctx) ?? loadConfig().defaultProfile ?? 'default';
 }
 
 interface SaveProfileArgs {
@@ -44,7 +46,11 @@ const login = defineCommand({
   requiresAuth: false,
   options: [
     { flag: '--url <url>', description: 'Kelta API URL (default: from the profile)' },
-    { flag: '--tenant <slug>', description: 'Tenant slug (default: from the profile)' },
+    {
+      flag: '--tenant <slug>',
+      description:
+        'Tenant slug (default: from the profile; a different tenant needs an explicit --profile)',
+    },
     {
       flag: '--auth-url <url>',
       description: 'Auth server URL (default: profile value, or api.→auth. host derivation)',
@@ -70,6 +76,21 @@ const login = defineCommand({
     const existing = loadConfig().profiles[name];
     let apiUrl = input.url ?? existing?.apiUrl;
     const tenantSlug = input.tenant ?? existing?.tenantSlug;
+    // Without an explicit --profile/KELTA_PROFILE the active profile is only
+    // implied; never let a login for another tenant replace its credential.
+    if (
+      !explicitProfileName(ctx) &&
+      input.tenant &&
+      existing?.tenantSlug &&
+      existing.tenantSlug !== input.tenant
+    ) {
+      throw new CliError(
+        `Profile "${name}" is bound to tenant "${existing.tenantSlug}", not "${input.tenant}" — ` +
+          `nothing was changed. Log in to "${input.tenant}" as its own profile: ` +
+          `kelta auth login --tenant ${input.tenant} --profile ${input.tenant}`,
+        { code: 'PROFILE_TENANT_MISMATCH', exitCode: EXIT.USAGE }
+      );
+    }
     if (!apiUrl || !tenantSlug) {
       throw new CliError(`Profile "${name}" has no saved connection — pass --url and --tenant`, {
         code: 'MISSING_CONNECTION',
@@ -143,7 +164,7 @@ const login = defineCommand({
       },
       message:
         `Logged in — created PAT ${minted.tokenPrefix}… ` +
-        `(expires ${minted.expiresAt || 'unknown'}) → profile "${name}"`,
+        `(expires ${minted.expiresAt || 'unknown'}) → profile "${name}" (tenant "${tenantSlug}")`,
     };
   },
 });

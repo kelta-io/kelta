@@ -46,6 +46,22 @@ kelta auth status --output json   # { "authenticated": true, "url": …, "tenant
 
 A sandbox is a separate tenant — log in to it as its own profile.
 
+### Which profile `auth login` writes
+
+`kelta auth login` writes the profile named by `--profile` (or `KELTA_PROFILE`); otherwise it writes the
+default profile. A login never silently replaces another tenant's credential: without an explicit profile, a
+`--tenant` that differs from the default profile's saved tenant is refused with exit `2`
+(`PROFILE_TENANT_MISMATCH`) before any browser flow starts, and nothing on disk changes.
+
+```bash
+kelta auth login --tenant other --token klt_...                    # refused: default is bound to acme
+kelta auth login --tenant other --token klt_... --profile other    # writes a new "other" profile
+kelta profile use other                                            # make it the default, if wanted
+```
+
+Re-logging in to the same tenant, a profile with no saved tenant yet, and any explicit `--profile` are written
+as asked. The output (and `--output json` → `profile`) names the profile that was written.
+
 ## Precedence and CI
 
 Flags override environment variables, which override the profile file:
