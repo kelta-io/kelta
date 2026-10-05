@@ -15,6 +15,7 @@ import { useApi } from '../../context/ApiContext'
 import type { CreateTenantRequest, UpdateTenantRequest } from '@kelta/sdk'
 import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { cn } from '@/lib/utils'
+import { BootstrapTokenDialog } from './BootstrapTokenDialog'
 
 /**
  * Tenant interface matching the API response
@@ -493,6 +494,7 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
   const [targetTenant, setTargetTenant] = useState<Tenant | null>(null)
   const [inviteTenant, setInviteTenant] = useState<Tenant | null>(null)
   const [inviteEmail, setInviteEmail] = useState('')
+  const [bootstrapTenant, setBootstrapTenant] = useState<Tenant | null>(null)
 
   // Fetch tenants
   const {
@@ -801,6 +803,15 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
                       >
                         Invite admin
                       </button>
+                      <button
+                        type="button"
+                        className="rounded border border-border px-2 py-1 text-xs font-medium text-primary hover:border-primary hover:bg-muted"
+                        onClick={() => setBootstrapTenant(tenant)}
+                        aria-label={`Bootstrap token for ${tenant.name}`}
+                        data-testid={`bootstrap-token-button-${index}`}
+                      >
+                        Bootstrap token
+                      </button>
                       {tenant.status === 'ACTIVE' ? (
                         <button
                           type="button"
@@ -895,6 +906,10 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
             </form>
           </div>
         </div>
+      )}
+
+      {bootstrapTenant && (
+        <BootstrapTokenDialog tenant={bootstrapTenant} onClose={() => setBootstrapTenant(null)} />
       )}
 
       <ConfirmDialog
