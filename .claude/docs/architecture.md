@@ -348,6 +348,18 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   when the tenant or its seeded admin is missing, 409 when another user of that tenant has the
   email. Both literal segments are spelled out, so it beats `DynamicCollectionRouter`'s
   `POST /{parent}/{parentId}/{child}` (`TenantAdminInviteControllerTest` registers the stand-in).
+- **Tenant bootstrap token** (`POST /api/tenants/{id}/bootstrap-token` with
+  `{"expiresIn"?, "userId"?, "email"?}`, `TenantBootstrapTokenController`): same route, gateway
+  gate and in-controller `MANAGE_TENANTS` re-check as the invite. It mints a PAT **in the target
+  tenant** for its seeded admin (`TenantAdminInviteService.findTenantUser`, tenant-filtered,
+  under `callWithTenant`). It can also target a `userId`/`email` of that tenant. The mint goes
+  through `PersonalAccessTokenController#issueToken` under the target tenant's binding.
+  `expiresIn` is `30m`/`2h` or ISO-8601, default 1 h, max 24 h (400 otherwise). The Redis cache
+  TTL equals the remaining lifetime. The platform tenant (`SYSTEM_TENANT_ID`) gets 403, non-UUID
+  ids 404, a user outside the tenant 404 and an inactive user 409. The plaintext token is
+  returned once. Every attempt is audited as `TENANT_BOOTSTRAP_TOKEN_ISSUED`. The token works
+  only on the target tenant's URLs, because `PatAuthenticationFilter` rejects a tenant mismatch
+  with 401. The grant this implies is recorded in `concerns.md`.
   `POST /api/tenants` also accepts a transient **`adminEmail`** attribute — not a `tenants`
   field: `TenantProvisioningHook` strips it in `beforeCreate` and, after provisioning, seeds the
   admin with that email and sends the same invite. Provisioned admins have no usable password
@@ -746,7 +758,8 @@ The one request-path exception is `filter/TenantManagementScopeFilter`, which re
 tenant for a `MANAGE_TENANTS` caller on `/api/tenants` (unbound for the listing, the managed
 tenant for `/api/tenants/{id}`) so the self-scoped `tenants` read still serves platform tenant
 management — see Worker Layers → tenant scoping.
-Deeper paths keep the caller's binding: `POST /api/tenants/{id}/admin-invite` checks the
+Deeper paths keep the caller's binding: `POST /api/tenants/{id}/admin-invite` (and
+`/bootstrap-token`) checks the
 caller's `MANAGE_TENANTS` there, then `TenantAdminInviteService` binds the managed tenant itself
 with `callWithTenant` — the cross-tenant form Critical Rule 3 prescribes.
 

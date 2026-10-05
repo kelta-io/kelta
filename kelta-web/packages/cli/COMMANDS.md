@@ -597,6 +597,15 @@ Show a user's login history
 
 - `--size <n>` — Page size (default: "20")
 
+## tenants
+
+### `kelta tenants bootstrap-token <slug>`
+
+Mint a short-lived PAT as a tenant's admin (requires MANAGE_TENANTS; prints the token once)
+
+- `--expires-in <duration>` — Lifetime: 30m, 2h or ISO-8601 (PT2H); max 24h (default: "1h")
+- `--user-id <id>` — A user of that tenant (default: the tenant's seeded System Administrator)
+
 ## limits
 
 ### `kelta limits get`

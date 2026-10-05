@@ -1785,8 +1785,9 @@ force-change flow and take the tenant over. Sandboxes were already safe
 platform tenant's `admin@kelta.local` with the same `password` hash and
 `force_change_on_login = false`, which V204's predicate deliberately leaves alone. kelta-auth now
 replaces it on first boot — see the next section.
-A bootstrap PAT for a new tenant's admin (MANAGE_TENANTS-gated, short-lived, usable only in
-that tenant) is a planned follow-up, not part of PLT-337.
+The bootstrap PAT for a new tenant's admin (MANAGE_TENANTS-gated, short-lived, usable only in
+that tenant) shipped in PLT-342. See "`MANAGE_TENANTS` can act as any non-platform tenant's
+admin for up to 24 h" below.
 
 ## The platform admin shipped with a well-known password (found 2026-10-04; PLT-343)
 
@@ -1822,3 +1823,39 @@ credential.
 CI set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` and complete the forced change through the real form
 (`AuthFixture.ensurePlatformAdminPassword`, `ci/admin-first-sign-in.sh`); the quickstart job reads
 the banner. See `testing.md`.
+
+## `MANAGE_TENANTS` can act as any non-platform tenant's admin for up to 24 h (accepted 2026-10-05; PLT-342)
+
+**What changed:** `POST /api/tenants/{id}/bootstrap-token` (`TenantBootstrapTokenController`)
+lets a `MANAGE_TENANTS` holder mint a PAT **in the target tenant** for its seeded System
+Administrator (or any user of that tenant named by `userId`/`email`). `MANAGE_TENANTS` therefore
+**implies the ability to act as any non-platform tenant's administrator** for the token's
+lifetime. Before this, it could create, suspend and invite into tenants but not act inside
+them. Grant `MANAGE_TENANTS` as you would a superuser.
+
+**Bounds that hold it in place. A change to any of them is a security change:**
+- **Lifetime:** default 1 h, max 24 h (`TenantBootstrapTokenController.MAX_LIFETIME`). The Redis
+  `pat:<hash>` entry is cached for exactly the token's remaining lifetime
+  (`PersonalAccessTokenController#cacheUntilExpiry`, also used by the `validate` re-cache). It
+  used to be cached for `days + 1`, which for an hour-long token would have kept a stale entry
+  for a day after the row expired. The gateway also checks `expiresAt` from the cached JSON.
+- **Tenant binding:** the row's `tenant_id` is the target tenant, and `PatAuthenticationFilter`
+  rejects a PAT on any other tenant's URL (`tenant_mismatch` → 401, kelta#1615). The harness
+  scenario `TenantBootstrapTokenScenarioTest` pins 401 on another tenant and on the platform tenant.
+- **Platform tenant refused:** the id is parsed as a UUID and compared with
+  `SystemCollectionDefinitions.SYSTEM_TENANT_ID` (case-insensitive). Non-UUID ids, including the
+  internal `system` tenant row, are 404. Bootstrapping the platform tenant would turn
+  `MANAGE_TENANTS` into a path to every platform permission the seeded admin holds.
+- **User lookup is tenant-filtered:** `TenantAdminInviteService.findTenantUser` filters every
+  query by `tenant_id` under `callWithTenant(target)`. A user of another tenant is 404.
+- **Audit:** every attempt is `TENANT_BOOTSTRAP_TOKEN_ISSUED` on the worker's `security.audit` log
+  stream (actor, target tenant, target user). It is not a `security_audit_log` row, because
+  `SecurityAuditLogger` is log-only. Token material is never logged.
+
+**Residual risks:**
+- The token is an ordinary PAT. The target user can see and revoke it (`bootstrap-<actor>-<ts>`
+  in their token list), but nothing revokes it automatically when the tenant is claimed. It
+  simply expires.
+- Expired tokens no longer count against the 10-live-tokens-per-user cap. Without that change,
+  ten bootstraps would have locked the seeded admin out of new tokens for good.
+

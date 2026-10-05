@@ -48,6 +48,8 @@ export type {
   Tenant,
   CreateTenantRequest,
   TenantAdminInviteResponse,
+  TenantBootstrapTokenRequest,
+  TenantBootstrapTokenResponse,
   UpdateTenantRequest,
   GovernorLimits,
   GovernorLimitsStatus,
