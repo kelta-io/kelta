@@ -24,8 +24,9 @@ import java.util.Optional;
  *       {@code /{slug}/...} prefix ({@link TenantSlugExtractionFilter}). Authoritative: client
  *       {@code X-Tenant-ID} / {@code X-Tenant-Slug} headers are ignored. A custom domain only
  *       names the slug, so the id is resolved from it here.</li>
- *   <li><b>Header</b> — only when the URL named no tenant: {@code X-Tenant-ID}, else
- *       {@code X-Tenant-Slug} resolved to its id. The result is marked
+ *   <li><b>Header</b> — only when the URL named no tenant: {@code X-Tenant-ID} (its slug
+ *       resolved from the id, never taken from the client), else {@code X-Tenant-Slug} resolved
+ *       to its id. Either way the tenant is forwarded with both id and slug. The result is marked
  *       {@link #TENANT_SOURCE_HEADER}: it is a <em>claim</em> the credential must prove.
  *       {@code JwtAuthenticationFilter} / {@code PatAuthenticationFilter} reject a token whose
  *       tenant is missing or differs, and an anonymous request never gets a header-selected
@@ -119,20 +120,19 @@ public class TenantResolutionFilter implements GlobalFilter, Ordered {
     private record HeaderTenant(String id, String slug) {}
 
     /**
-     * An {@code X-Tenant-ID} wins; an {@code X-Tenant-Slug} sent alongside it is kept only if it
-     * names the same tenant, so the worker never receives an id and a slug for two tenants.
+     * An {@code X-Tenant-ID} wins, and the slug forwarded with it is always the one that id maps
+     * to: the worker selects the tenant's schema by slug, so an id alone would run tenant queries
+     * against the public schema. A client {@code X-Tenant-Slug} is only ever used to find the id
+     * when no {@code X-Tenant-ID} was sent. An id the slug map does not know is still claimed,
+     * with no slug — the credential check decides whether it stands.
      */
     private Mono<Optional<HeaderTenant>> resolveHeaderTenant(String headerTenantId, String headerTenantSlug) {
-        if (headerTenantSlug == null) {
-            return Mono.just(Optional.of(new HeaderTenant(headerTenantId, null)));
+        if (headerTenantId != null) {
+            return cacheManager.resolveTenantIdToSlugReactive(headerTenantId)
+                    .map(slug -> Optional.of(new HeaderTenant(headerTenantId, slug.orElse(null))));
         }
-        return cacheManager.resolveTenantSlugReactive(headerTenantSlug).map(slugId -> {
-            if (headerTenantId == null) {
-                return slugId.map(id -> new HeaderTenant(id, headerTenantSlug));
-            }
-            boolean sameTenant = slugId.map(headerTenantId::equals).orElse(false);
-            return Optional.of(new HeaderTenant(headerTenantId, sameTenant ? headerTenantSlug : null));
-        });
+        return cacheManager.resolveTenantSlugReactive(headerTenantSlug)
+                .map(slugId -> slugId.map(id -> new HeaderTenant(id, headerTenantSlug)));
     }
 
     private void logIgnoredHeader(String urlTenantId, String headerTenantId, String headerTenantSlug,

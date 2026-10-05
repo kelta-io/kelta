@@ -399,6 +399,76 @@ class GatewayCacheManagerTest {
         }
     }
 
+    // ── Tenant ID → Slug Lookup Tests ─────────────────────────────────
+
+    @Nested
+    class TenantIdToSlugTests {
+
+        @Test
+        void resolvesIdFromTheCachedSlugMapWithoutCallingTheWorker() {
+            cacheManager.refreshTenantSlugs(Map.of("acme", "tenant-id-1", "globex", "tenant-id-2"));
+
+            assertThat(cacheManager.resolveTenantIdToSlugReactive("tenant-id-2").block())
+                    .contains("globex");
+            verifyNoInteractions(webClient);
+        }
+
+        @Test
+        void lazilyFetchesTheSlugMapOnACacheMiss() {
+            stubRefreshResponse(Mono.just(Map.of("couchpicks", "tenant-cp")));
+
+            Optional<String> resolved = Mono.defer(() -> cacheManager.resolveTenantIdToSlugReactive("tenant-cp"))
+                    .subscribeOn(Schedulers.parallel())
+                    .block(Duration.ofSeconds(5));
+            assertThat(resolved).contains("couchpicks");
+
+            // The fetch warmed the shared slug cache for both directions.
+            reset(webClient);
+            assertThat(cacheManager.resolveTenantSlug("couchpicks")).contains("tenant-cp");
+            assertThat(cacheManager.resolveTenantIdToSlugReactive("tenant-cp").block()).contains("couchpicks");
+            verifyNoInteractions(webClient);
+        }
+
+        @Test
+        void unknownIdResolvesEmptyAndAddsNoSlugEntry() {
+            stubRefreshResponse(Mono.just(Map.of("acme", "tenant-id-1")));
+
+            assertThat(cacheManager.resolveTenantIdToSlugReactive("tenant-ghost").block()).isEmpty();
+            assertThat(cacheManager.tenantSlugCacheSize()).isEqualTo(1);
+
+            // Remembered briefly, so a stream of unknown ids is not a worker fetch per request.
+            reset(webClient);
+            assertThat(cacheManager.resolveTenantIdToSlugReactive("tenant-ghost").block()).isEmpty();
+            verifyNoInteractions(webClient);
+        }
+
+        @Test
+        void unknownIdResolvesOnceASlugRefreshKnowsIt() {
+            stubRefreshResponse(Mono.just(Map.of("acme", "tenant-id-1")));
+            assertThat(cacheManager.resolveTenantIdToSlugReactive("tenant-new").block()).isEmpty();
+
+            cacheManager.refreshTenantSlugs(Map.of("acme", "tenant-id-1", "fresh", "tenant-new"));
+
+            assertThat(cacheManager.resolveTenantIdToSlugReactive("tenant-new").block()).contains("fresh");
+        }
+
+        @Test
+        void fetchErrorResolvesEmptyAndRetriesNextTime() {
+            stubRefreshResponse(Mono.error(new RuntimeException("worker down")));
+            assertThat(cacheManager.resolveTenantIdToSlugReactive("tenant-cp").block()).isEmpty();
+
+            stubRefreshResponse(Mono.just(Map.of("couchpicks", "tenant-cp")));
+            assertThat(cacheManager.resolveTenantIdToSlugReactive("tenant-cp").block()).contains("couchpicks");
+        }
+
+        @Test
+        void blankIdResolvesEmpty() {
+            assertThat(cacheManager.resolveTenantIdToSlugReactive(null).block()).isEmpty();
+            assertThat(cacheManager.resolveTenantIdToSlugReactive(" ").block()).isEmpty();
+            verifyNoInteractions(webClient);
+        }
+    }
+
     // ── Governor Limit Cache Tests ────────────────────────────────────
 
     @Nested

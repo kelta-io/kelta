@@ -1,6 +1,7 @@
 package io.kelta.gateway.auth;
 
 import io.kelta.gateway.cache.GatewayCacheManager;
+import io.kelta.gateway.filter.HeaderTransformationFilter;
 import io.kelta.gateway.filter.TenantResolutionFilter;
 import io.kelta.gateway.metrics.GatewayMetrics;
 import io.kelta.gateway.ratelimit.RedisRateLimiter;
@@ -65,6 +66,9 @@ class TenantHeaderTrustTest {
         when(cacheManager.resolveTenantSlugReactive(anyString())).thenReturn(Mono.just(Optional.empty()));
         when(cacheManager.resolveTenantSlugReactive("alpha")).thenReturn(Mono.just(Optional.of(TENANT_A)));
         when(cacheManager.resolveTenantSlugReactive("beta")).thenReturn(Mono.just(Optional.of(TENANT_B)));
+        when(cacheManager.resolveTenantIdToSlugReactive(anyString())).thenReturn(Mono.just(Optional.empty()));
+        when(cacheManager.resolveTenantIdToSlugReactive(TENANT_A)).thenReturn(Mono.just(Optional.of("alpha")));
+        when(cacheManager.resolveTenantIdToSlugReactive(TENANT_B)).thenReturn(Mono.just(Optional.of("beta")));
         when(cacheManager.resolveGuestProfileReactive(anyString()))
                 .thenReturn(Mono.just(Optional.of("guest-profile")));
 
@@ -130,6 +134,18 @@ class TenantHeaderTrustTest {
         GatewayFilterChain afterTenant = ex -> jwtFilter.filter(ex, afterJwt);
         tenantFilter.filter(exchange, afterTenant).block();
         return exchange;
+    }
+
+    /** As {@link #run}, then through {@link HeaderTransformationFilter} — the request the worker receives. */
+    private HttpHeaders forwardToWorker(MockServerHttpRequest request) {
+        run(request);
+        assertThat(forwarded).as("request must reach the backend").isNotNull();
+        ServerWebExchange[] toWorker = new ServerWebExchange[1];
+        new HeaderTransformationFilter().filter(forwarded, ex -> {
+            toWorker[0] = ex;
+            return Mono.empty();
+        }).block();
+        return toWorker[0].getRequest().getHeaders();
     }
 
     private void assertRejected(MockServerWebExchange exchange) {
@@ -247,6 +263,22 @@ class TenantHeaderTrustTest {
         }
 
         @Test
+        @DisplayName("X-Tenant-ID alone naming the token's tenant is forwarded with that tenant's id and slug")
+        void headerIdOnlyForwardsIdAndSlug() {
+            patForTenant(TENANT_A);
+
+            HttpHeaders sent = forwardToWorker(MockServerHttpRequest.get("/api/tasks")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + PAT)
+                    .header("X-Tenant-ID", TENANT_A)
+                    .build());
+
+            assertThat(sent.getFirst("X-Tenant-ID")).isEqualTo(TENANT_A);
+            assertThat(sent.getFirst("X-Tenant-Slug"))
+                    .as("without the slug the worker queries the public schema")
+                    .isEqualTo("alpha");
+        }
+
+        @Test
         @DisplayName("a header naming the token's own tenant is accepted")
         void headerMatchingTokenAccepted() {
             patForTenant(TENANT_A);
@@ -309,13 +341,14 @@ class TenantHeaderTrustTest {
         @Test
         @DisplayName("public path without slug: the header-claimed tenant is dropped")
         void publicPathDropsHeaderTenant() {
-            run(MockServerHttpRequest.get("/api/ui-pages")
+            HttpHeaders sent = forwardToWorker(MockServerHttpRequest.get("/api/ui-pages")
                     .header("X-Tenant-ID", TENANT_B)
                     .build());
 
-            assertThat(forwarded).isNotNull();
             assertThat(TenantResolutionFilter.getTenantId(forwarded)).isNull();
             assertThat(TenantResolutionFilter.getTenantSlug(forwarded)).isNull();
+            assertThat(sent.getFirst("X-Tenant-ID")).isNull();
+            assertThat(sent.getFirst("X-Tenant-Slug")).isNull();
         }
 
         @Test
