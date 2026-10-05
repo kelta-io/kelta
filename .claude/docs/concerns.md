@@ -1894,6 +1894,18 @@ B's slug.
   outright would still break any **external** API client that sends a token plus `X-Tenant-ID`
   to a slug-less URL, which is a breaking change. Gateway access logs were not reachable from
   the worker pod, so external traffic was not measured.
+
+  | Caller | Where | Path it relies on |
+  |---|---|---|
+  | kelta-web SDK | `kelta-web/packages/sdk/src/admin/AdminClient.ts:2612-2613` (`ai.chatStream`) | Copies `X-Tenant-ID` only if a consumer set it on axios defaults; the request carries a JWT, so the claim must match it |
+  | kelta-ui | `kelta-ui/app/src/App.tsx:676` (`apiClientBaseUrl` = base + tenant path) | URL tenant (`/{slug}/api/...` or custom domain); sends no tenant header |
+  | kelta-cli | `kelta-web/packages/cli/src/auth/loginFlow.ts:132`, `src/mcp/remote.ts:57` | URL tenant (`/{slug}/api`, `/{slug}/mcp`); sends no tenant header |
+  | kelta-mcp | `kelta-mcp/src/main/java/io/kelta/mcp/client/GatewayHttpClient.java:77-79` (prefixes `/{slug}`); inbound strip at `auth/McpAuthFilter.java:89` | URL tenant; strips client tenant headers on ingress |
+  | kelta-ai | `kelta-ai/src/main/java/io/kelta/ai/service/WorkerApiClient.java:44` (and every `.header("X-Tenant-ID", …)` through `:527`) | Calls the worker **directly** (`WORKER_SERVICE_URL`), not through the gateway; unaffected |
+  | kelta-gateway → worker | `kelta-gateway/src/main/java/io/kelta/gateway/filter/HeaderTransformationFilter.java:63-64,110-113` | Re-adds the settled tenant after the client headers are stripped |
+  | kelta-worker outbound | none (worker only *reads* the gateway-set headers, e.g. `filter/TenantContextFilter.java:52-53`) | n/a |
+  | e2e-tests | `e2e-tests/helpers/data-factory.ts:155` | URL tenant (`/{tenantSlug}/api/...`); sends no tenant header |
+  | kelta-test-harness | `scenarios/GeoCaptureScenarioTest.java:93-94,109-110` | Calls the worker directly, standing in for the gateway; unaffected |
 - In-cluster-only would need a trusted network marker that the gateway cannot see today. Every
   request reaches it through the same ingress.
 - The rules (`architecture.md` → Tenant resolution rules): the URL tenant wins and the header is
