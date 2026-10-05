@@ -11,6 +11,16 @@
 | AWS S3 / Garage | Object storage | `aws-sdk-s3` 2.30.1 | `${KELTA_S3_ENDPOINT}` | `kelta-worker/.../service/S3StorageService.java` |
 | Keycloak | OIDC federation | Spring Security OAuth2 | Port 8180 (docker-compose) | `kelta-auth/.../federation/FederatedUserMapper.java` |
 
+### Cerbos gateway channel
+
+The gateway builds its own gRPC channel to Cerbos (`CerbosChannel`, wrapped into the SDK
+client by `dev.cerbos.sdk.KeltaCerbosClients` because `CerbosClientBuilder` exposes no
+keepalive) with HTTP/2 keepalive (`kelta.gateway.cerbos.keepalive-*`). A check failing with
+`DEADLINE_EXCEEDED`/`UNAVAILABLE` resets the transport (`enterIdle`) and is retried once —
+only when the previous check succeeded, so an outage costs at most one doubled request before
+the circuit breaker opens; the second failure still denies. A failed startup warmup attempt
+rebuilds the whole channel before the next attempt.
+
 ### Cerbos policy seeding (worker startup)
 
 `CerbosPolicySeeder` pushes base + per-tenant generated policies via the Cerbos Admin HTTP API

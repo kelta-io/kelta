@@ -33,6 +33,7 @@ no default (the service fails to start, or the feature stays off). Defaults that
 | `NATS_URL` | `nats://localhost:4222` | Event bus |
 | `WORKER_SERVICE_URL`, `AI_SERVICE_URL` | in-cluster service URLs | Upstreams |
 | `CERBOS_HOST`, `CERBOS_GRPC_PORT` | —, `3593` | Policy decision point |
+| `CERBOS_KEEPALIVE_TIME_SECONDS`, `CERBOS_KEEPALIVE_TIMEOUT_SECONDS`, `CERBOS_KEEPALIVE_WITHOUT_CALLS` | `60`, `10`, `true` | HTTP/2 keepalive on the gateway's Cerbos channel |
 | `CORS_ALLOWED_ORIGIN_PATTERN` | — (required) | Allowed browser origins; `*` is accepted but logged as a warning |
 | `TENANT_SLUG_ENABLED` | `true` | Resolve tenants from the first path segment |
 | `TENANT_SLUG_REQUIRE_PREFIX` | `false` | Reject `/api` requests with no slug or header |
