@@ -45,7 +45,7 @@ Bridge (stdio):
 Direct (hosted HTTP, no CLI involved at runtime):
 
 ```bash
-claude mcp add kelta-admin --transport http --url https://api.example.com/acme/mcp/admin \
+claude mcp add --transport http kelta-admin https://api.example.com/acme/mcp/admin \
   --header "Authorization: Bearer <YOUR_PAT>"
 ```
 
