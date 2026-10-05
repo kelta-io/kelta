@@ -36,8 +36,8 @@ export KELTA_API_KEY=klt_...   # a personal access token — see Personal access
 **Claude Code**
 
 ```bash
-claude mcp add kelta-user --transport http \
-  --url https://api.kelta.io/examples/mcp/user \
+claude mcp add --transport http kelta-user \
+  https://api.kelta.io/examples/mcp/user \
   --header "Authorization: Bearer $KELTA_API_KEY"
 ```
 

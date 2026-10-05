@@ -21,8 +21,8 @@ For an agent that should only read, mint the token for a service user whose prof
 **Claude Code**
 
 ```bash
-claude mcp add kelta-admin --transport http \
-  --url https://api.example.com/acme/mcp/admin \
+claude mcp add --transport http kelta-admin \
+  https://api.example.com/acme/mcp/admin \
   --header "Authorization: Bearer klt_..."
 ```
 
