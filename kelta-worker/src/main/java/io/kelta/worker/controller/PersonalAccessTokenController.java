@@ -8,9 +8,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -159,34 +161,63 @@ public class PersonalAccessTokenController {
             return ResponseEntity.badRequest().body(Map.of("error", "expiresInDays must be between 1 and 365"));
         }
 
+        List<String> scopes = body.get("scopes") instanceof List<?> list
+                ? list.stream().map(Object::toString).toList()
+                : List.of("api");
+
+        MintedToken minted;
+        try {
+            minted = issueToken(userId, tenantId, name.trim(), scopes,
+                    Instant.now().plus(expiresInDays, ChronoUnit.DAYS), actorId, eventType, "name=" + name.trim());
+        } catch (ResponseStatusException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", String.valueOf(e.getReason())));
+        }
+        return ResponseEntity.ok(Map.of(
+                "token", minted.token(),
+                "name", minted.name(),
+                "tokenPrefix", minted.tokenPrefix(),
+                "scopes", minted.scopes(),
+                "expiresAt", minted.expiresAt().toString()));
+    }
+
+    /** A freshly minted token. {@code token} is the plaintext — return it to the caller once, never store it. */
+    public record MintedToken(String token, String name, String tokenPrefix, List<String> scopes, Instant expiresAt) {}
+
+    /**
+     * Mints a token for {@code userId} in {@code tenantId} that expires at {@code expiresAt}, and
+     * audits it once under {@code eventType}. The Redis cache entry lives no longer than the token.
+     * Must run with {@code tenantId} bound (RLS on {@code platform_user} / {@code user_api_token}).
+     *
+     * @throws ResponseStatusException 400 when the user does not exist in the tenant or already has
+     *                                 the maximum number of live tokens
+     * @throws UniqueConstraintViolationException when the user already has a token with {@code name}
+     */
+    public MintedToken issueToken(String userId, String tenantId, String name, List<String> scopes,
+                                  Instant expiresAt, String actorId, SecurityAuditLogger.EventType eventType,
+                                  String auditDetail) {
         // Get user email for Redis cache
         var userResult = jdbcTemplate.queryForList(
                 "SELECT email FROM platform_user WHERE id = ? AND tenant_id = ?", userId, tenantId);
         if (userResult.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "User not found");
         }
         String userEmail = (String) userResult.get(0).get("email");
 
-        // Check token count limit
+        // Check token count limit — expired tokens no longer count against it
         var countResult = jdbcTemplate.queryForList(
-                "SELECT COUNT(*) AS cnt FROM user_api_token WHERE user_id = ? AND tenant_id = ? AND revoked = false",
+                "SELECT COUNT(*) AS cnt FROM user_api_token WHERE user_id = ? AND tenant_id = ? AND revoked = false " +
+                        "AND (expires_at IS NULL OR expires_at > NOW())",
                 userId, tenantId);
         int currentCount = countResult.isEmpty() ? 0 : ((Number) countResult.get(0).get("cnt")).intValue();
         if (currentCount >= MAX_TOKENS_PER_USER) {
-            return ResponseEntity.badRequest().body(Map.of(
-                    "error", "Maximum " + MAX_TOKENS_PER_USER + " active tokens allowed per user"));
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Maximum " + MAX_TOKENS_PER_USER + " active tokens allowed per user");
         }
 
         // Generate token
         String rawToken = TOKEN_PREFIX + generateRandomString(TOKEN_LENGTH);
         String tokenHash = sha256(rawToken);
         String tokenPrefixDisplay = rawToken.substring(0, Math.min(rawToken.length(), 8));
-        Instant expiresAt = Instant.now().plus(expiresInDays, ChronoUnit.DAYS);
-
-        @SuppressWarnings("unchecked")
-        List<String> scopes = body.get("scopes") instanceof List<?> list
-                ? list.stream().map(Object::toString).toList()
-                : List.of("api");
         String scopesJson = "[" + String.join(",", scopes.stream().map(s -> "\"" + s + "\"").toList()) + "]";
 
         // Insert token — uq_user_api_token_name_per_user makes (user_id, name) unique
@@ -194,10 +225,10 @@ public class PersonalAccessTokenController {
             jdbcTemplate.update(
                     "INSERT INTO user_api_token (user_id, tenant_id, name, token_prefix, token_hash, scopes, expires_at) " +
                             "VALUES (?, ?, ?, ?, ?, ?::jsonb, ?)",
-                    userId, tenantId, name.trim(), tokenPrefixDisplay, tokenHash, scopesJson,
+                    userId, tenantId, name, tokenPrefixDisplay, tokenHash, scopesJson,
                     Timestamp.from(expiresAt));
         } catch (DuplicateKeyException e) {
-            throw new UniqueConstraintViolationException("user_api_token", "name", name.trim());
+            throw new UniqueConstraintViolationException("user_api_token", "name", name);
         }
 
         // Cache token metadata in Redis for gateway validation
@@ -208,22 +239,24 @@ public class PersonalAccessTokenController {
                     "email", userEmail,
                     "scopes", scopesJson,
                     "expiresAt", expiresAt.toString()));
-            redisTemplate.opsForValue().set(
-                    PAT_KEY_PREFIX + tokenHash, patJson,
-                    Duration.ofDays(expiresInDays + 1));
+            cacheUntilExpiry(tokenHash, patJson, expiresAt);
         } catch (Exception e) {
             log.warn("Failed to cache PAT in Redis: {}", e.getMessage());
         }
 
-        SecurityAuditLogger.log(eventType, actorId, userId, tenantId, "success", "name=" + name.trim());
-        log.info("PAT created for user {} in tenant {} (actor {}): {}", userId, tenantId, actorId, name.trim());
+        SecurityAuditLogger.log(eventType, actorId, userId, tenantId, "success", auditDetail);
+        log.info("PAT created for user {} in tenant {} (actor {}): {}", userId, tenantId, actorId, name);
 
-        return ResponseEntity.ok(Map.of(
-                "token", rawToken,
-                "name", name.trim(),
-                "tokenPrefix", tokenPrefixDisplay,
-                "scopes", scopes,
-                "expiresAt", expiresAt.toString()));
+        return new MintedToken(rawToken, name, tokenPrefixDisplay, scopes, expiresAt);
+    }
+
+    /** Caches a token's metadata for exactly as long as the token has left to live. */
+    private void cacheUntilExpiry(String tokenHash, String patJson, Instant expiresAt) {
+        Duration ttl = Duration.between(Instant.now(), expiresAt);
+        if (ttl.isNegative() || ttl.isZero()) {
+            return;
+        }
+        redisTemplate.opsForValue().set(PAT_KEY_PREFIX + tokenHash, patJson, ttl);
     }
 
     /**
@@ -309,12 +342,11 @@ public class PersonalAccessTokenController {
         // Re-cache in Redis for future requests
         try {
             String patJson = OBJECT_MAPPER.writeValueAsString(data);
-            long daysUntilExpiry = expiresAt != null
-                    ? Duration.between(Instant.now(), expiresAt.toInstant()).toDays() + 1
-                    : 90;
-            redisTemplate.opsForValue().set(
-                    PAT_KEY_PREFIX + tokenHash, patJson,
-                    Duration.ofDays(Math.max(1, daysUntilExpiry)));
+            if (expiresAt != null) {
+                cacheUntilExpiry(tokenHash, patJson, expiresAt.toInstant());
+            } else {
+                redisTemplate.opsForValue().set(PAT_KEY_PREFIX + tokenHash, patJson, Duration.ofDays(90));
+            }
         } catch (Exception e) {
             log.warn("Failed to re-cache PAT in Redis: {}", e.getMessage());
         }
