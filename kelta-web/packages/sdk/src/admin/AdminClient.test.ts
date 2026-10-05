@@ -151,6 +151,23 @@ describe('AdminClient bulkJobs', () => {
   });
 });
 
+describe('AdminClient tenants.inviteAdmin', () => {
+  it('POSTs the email as a plain body to the tenant admin-invite endpoint', async () => {
+    const axios = createMockAxios();
+    const client = new AdminClient(axios);
+    const mockPost = axios.post as ReturnType<typeof vi.fn>;
+    const invite = { status: 'INVITED', tenantId: 't1', userId: 'u1', email: 'owner@example.com' };
+    mockPost.mockResolvedValue({ data: invite });
+
+    const result = await client.tenants.inviteAdmin('t1', 'owner@example.com');
+
+    expect(mockPost).toHaveBeenCalledWith('/api/tenants/t1/admin-invite', {
+      email: 'owner@example.com',
+    });
+    expect(result).toEqual(invite);
+  });
+});
+
 describe('AdminClient users.invitePortal', () => {
   let axios: AxiosInstance;
   let client: AdminClient;

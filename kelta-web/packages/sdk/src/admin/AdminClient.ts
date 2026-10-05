@@ -36,6 +36,7 @@ import type {
   MigrationRun,
   Tenant,
   CreateTenantRequest,
+  TenantAdminInviteResponse,
   UpdateTenantRequest,
   GovernorLimits,
   Page,
@@ -468,6 +469,16 @@ export class AdminClient {
     activate: async (id: string): Promise<void> => {
       const body = toJsonApiBody('tenants', { status: 'ACTIVE' }, id);
       await this.axios.patch(`/api/tenants/${id}`, body);
+    },
+
+    /**
+     * Point the tenant's seeded admin at `email` and send them the invite. Provisioned
+     * tenants have no usable admin password until it is claimed this way.
+     * Requires MANAGE_TENANTS.
+     */
+    inviteAdmin: async (id: string, email: string): Promise<TenantAdminInviteResponse> => {
+      const response = await this.axios.post(`/api/tenants/${id}/admin-invite`, { email });
+      return response.data as TenantAdminInviteResponse;
     },
 
     getLimits: async (id: string): Promise<GovernorLimits> => {

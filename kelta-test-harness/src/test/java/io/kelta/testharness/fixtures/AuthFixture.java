@@ -3,6 +3,10 @@ package io.kelta.testharness.fixtures;
 import io.kelta.testharness.KeltaStack;
 import org.springframework.web.client.RestClient;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.Base64;
 import java.util.Map;
 
@@ -12,10 +16,20 @@ import java.util.Map;
  * <p>The {@code default} tenant is seeded by the Flyway baseline with
  * {@code admin@kelta.local / password}. Every other tenant is provisioned at runtime
  * by the worker's {@code TenantProvisioningHook}, which seeds its admin as
- * {@code <slug>-admin@kelta.local} (username {@code <slug>-admin}, password
- * {@code password}). {@link #loginAsAdmin(String)} picks the right identity per slug.
+ * {@code <slug>-admin@kelta.local} (username {@code <slug>-admin}) with <em>no usable
+ * password</em> — a real tenant claims it by invite. A fixture that wants to log in as such an
+ * admin first calls {@link #setProvisionedAdminCredential(String)}, which writes the
+ * harness-only {@link #PROVISIONED_ADMIN_PASSWORD} straight into the database.
+ * {@link #loginAsAdmin(String)} picks the right identity and password per slug.
  */
 public final class AuthFixture {
+
+    /** Harness-only secret for runtime-provisioned tenant admins. Never a platform default. */
+    public static final String PROVISIONED_ADMIN_PASSWORD = "harness-tenant-admin-secret";
+
+    /** {@code {bcrypt}} hash of {@link #PROVISIONED_ADMIN_PASSWORD}, in kelta-auth's stored form. */
+    public static final String PROVISIONED_ADMIN_PASSWORD_HASH =
+            "{bcrypt}$2a$10$zp1bsun6IbTXVK3L.CN1MOBD0.n0QzRXd13.ZakYsoQc30GLcZw6K";
 
     private final RestClient client;
 
@@ -43,7 +57,9 @@ public final class AuthFixture {
      *       {@code TenantProvisioningHook} when the tenant was created via the admin API
      *       (e.g. the {@code threadline-clothing} fixture tenant)</li>
      * </ul>
-     * Both share the password {@code password}.
+     * The baseline admin's password is {@code password}; a provisioned admin's is
+     * {@link #PROVISIONED_ADMIN_PASSWORD}, once {@link #setProvisionedAdminCredential(String)}
+     * has set it.
      *
      * @param tenantSlug the slug of the tenant to scope the login to (e.g.
      *                   {@code "default"} or {@code "threadline-clothing"})
@@ -58,7 +74,7 @@ public final class AuthFixture {
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                 .body(Map.of(
                         "username", username,
-                        "password", "password",
+                        "password", passwordForSlug(tenantSlug),
                         "tenantSlug", tenantSlug))
                 .retrieve()
                 .body(Map.class);
@@ -70,11 +86,34 @@ public final class AuthFixture {
     }
 
     /**
-     * The admin email for a tenant. The Flyway baseline seeds {@code admin@kelta.local}
-     * for the {@code default} tenant; every runtime-provisioned tenant gets
-     * {@code <slug>-admin@kelta.local} from {@code TenantProvisioningHook}. Direct-login
-     * accepts email or username, so the email form is used uniformly.
+     * Gives a runtime-provisioned tenant's seeded admin the harness-only credential
+     * ({@link #PROVISIONED_ADMIN_PASSWORD}) and clears {@code force_change_on_login}, so
+     * {@link #loginAsAdmin(String)} can authenticate as it. Provisioning leaves the admin with
+     * no usable password, and the harness has no mailbox to accept an invite from. Idempotent.
+     * Runs as the bootstrap superuser, which bypasses RLS.
+     *
+     * @return the number of credential rows updated (1 once the tenant is provisioned)
      */
+    public static int setProvisionedAdminCredential(String tenantSlug) {
+        String sql = "UPDATE user_credential SET password_hash = ?, force_change_on_login = false "
+                + "WHERE user_id IN (SELECT pu.id FROM platform_user pu JOIN tenant t ON t.id = pu.tenant_id "
+                + "WHERE t.slug = ? AND pu.username = ?)";
+        try (Connection conn = DriverManager.getConnection(
+                        KeltaStack.dbJdbcUrl(), KeltaStack.dbUsername(), KeltaStack.dbPassword());
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, PROVISIONED_ADMIN_PASSWORD_HASH);
+            ps.setString(2, tenantSlug);
+            ps.setString(3, tenantSlug + "-admin");
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to set the harness admin credential for " + tenantSlug, e);
+        }
+    }
+
+    private static String passwordForSlug(String tenantSlug) {
+        return TenantFixture.DEFAULT_SLUG.equals(tenantSlug) ? "password" : PROVISIONED_ADMIN_PASSWORD;
+    }
+
     /**
      * The admin's login name, which is also the value the gateway stamps into {@code X-User-Id}.
      * Exposed because grants take a principal in exactly this form.

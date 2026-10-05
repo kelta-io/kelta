@@ -1737,3 +1737,43 @@ was already empty for them.
 - `GET /api/profiles/{id}?include=profile-system-permissions,…` returns the grant rows through
   the profiles route, which reads at `API_ACCESS` — the `profile-*-permissions` routes' own object
   check does not apply to an include.
+
+## Provisioned tenant admins shared a well-known password (found 2026-10-04; PLT-337)
+
+**Symptom:** `TenantProvisioningHook.seedAdminUser()` created every runtime-provisioned tenant's
+System Administrator (`<slug>-admin@kelta.local`) with a bare BCrypt hash of the literal
+`password` and `force_change_on_login = true`. kelta-auth's `DelegatingPasswordEncoder` still
+matches prefix-less bcrypt (`setDefaultPasswordEncoderForMatches(new BCryptPasswordEncoder())`),
+so until someone rotated it, anyone who knew the naming pattern could sign in through the
+force-change flow and take the tenant over. Sandboxes were already safe
+(`SandboxProvisioningService.hardenSandboxAdmin` writes a one-time random secret).
+
+**Fix — no default credential, claim by invite:**
+- The seeded admin keeps its row but gets the **empty** `password_hash` `UserInviteService`
+  writes for invite-only users. kelta-auth rejects it for every input with a plain 401
+  `invalid_credentials` (BCrypt logs "Empty encoded password" and returns false — no 500);
+  `ProvisionedAdminLoginTest` pins that through the real encoder and `DaoAuthenticationProvider`.
+- `POST /api/tenants` accepts a transient `adminEmail`. It is not a `tenants` field: the hook
+  removes it in `beforeCreate` (so it is never persisted or echoed in the record event), keeps it
+  in a thread-local keyed by the record id, and in `afterCreate` seeds the admin with that email
+  and calls `UserInviteService.inviteUser` under the new tenant's binding. A failed invite leaves
+  the tenant ACTIVE.
+- Without `adminEmail` nobody can sign in interactively until a platform admin uses Setup ›
+  Tenants › **Invite admin** (`POST /api/tenants/{id}/admin-invite`, `MANAGE_TENANTS`,
+  audited as `TENANT_ADMIN_INVITED`), which sets the seeded admin's email and sends the invite.
+- `V204__invalidate_default_tenant_admin_passwords.sql` swaps the old hash for the empty one on
+  rows that still carry it **and** `force_change_on_login = true`, and `RAISE NOTICE`s the
+  affected tenant ids (read them from the migrate Job's log). Those tenants' admins are claimed
+  the same way, through Invite admin.
+- The test harness no longer relies on the default: `AuthFixture.setProvisionedAdminCredential`
+  writes a harness-only `{bcrypt}` secret over JDBC after provisioning (the ecommerce fixture
+  calls it on seed and on rerun).
+
+**Still open — for the ceo to decide:** the Flyway baseline (`V1__baseline.sql`) seeds the
+platform tenant's `admin@kelta.local` (tenant `00000000-0000-0000-0000-000000000001`) with the
+same `password` hash and `force_change_on_login = false`. V204's predicate deliberately leaves it
+alone (CI e2e and the harness sign in with it), so whether production's platform admin still
+carries the baseline hash needs checking by hand:
+`SELECT 1 FROM user_credential uc JOIN platform_user pu ON pu.id = uc.user_id WHERE pu.email = 'admin@kelta.local' AND uc.password_hash = '$2a$10$zAQaSHX1XSR1bwUL3pz9EOzecplsxInVizZc9HwLf7xPluSiE1EP6';`
+A bootstrap PAT for a new tenant's admin (MANAGE_TENANTS-gated, short-lived, usable only in
+that tenant) is a planned follow-up, not part of PLT-337.

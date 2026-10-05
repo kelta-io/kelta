@@ -16,7 +16,7 @@ class SecurityAuditLoggerTest {
 
         @Test
         void shouldHaveAllExpectedEventTypes() {
-            assertEquals(34, SecurityAuditLogger.EventType.values().length);
+            assertEquals(35, SecurityAuditLogger.EventType.values().length);
             assertNotNull(SecurityAuditLogger.EventType.valueOf("RECORDING_CONSENT_CAPTURED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("ARCHIVE_CREATED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("ARCHIVE_ACCESSED"));
@@ -27,6 +27,7 @@ class SecurityAuditLoggerTest {
             assertNotNull(SecurityAuditLogger.EventType.valueOf("VIDEO_SESSION_STARTED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("VIDEO_SESSION_ENDED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("PORTAL_USER_INVITED"));
+            assertNotNull(SecurityAuditLogger.EventType.valueOf("TENANT_ADMIN_INVITED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("CHAT_CONVERSATION_OPENED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("CHAT_CONVERSATION_ASSIGNED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("CHAT_CONVERSATION_CLOSED"));

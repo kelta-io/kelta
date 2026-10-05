@@ -2,7 +2,11 @@ package io.kelta.worker.listener;
 
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.workflow.BeforeSaveHook;
+import io.kelta.runtime.workflow.BeforeSaveResult;
 import io.kelta.worker.service.CerbosPolicySyncService;
+import io.kelta.worker.service.SecurityAuditLogger;
+import io.kelta.worker.service.TenantAdminInviteService;
+import io.kelta.worker.service.UserInviteService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,15 +26,29 @@ import java.util.*;
  * PROVISIONING to ACTIVE. If any step fails, the tenant remains in
  * PROVISIONING status for manual intervention.
  *
+ * <p>The seeded admin gets no usable password — only the empty hash
+ * {@link UserInviteService} writes for invite-only users — so nobody can sign in as
+ * it until it is claimed by invite. A create request may carry a transient
+ * {@value #ADMIN_EMAIL_ATTRIBUTE} attribute (not a field of {@code tenants}; it is
+ * stripped in {@link #beforeCreate} so it is never persisted): the admin is then
+ * created with that email and invited straight away. Without it, a platform admin
+ * sends the invite later via {@code POST /api/tenants/{id}/admin-invite}.
+ *
  * @since 1.0.0
  */
 public class TenantProvisioningHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(TenantProvisioningHook.class);
 
-    /** BCrypt hash of "password" — same as V102 migration. */
-    private static final String DEFAULT_PASSWORD_HASH =
-            "$2a$10$zAQaSHX1XSR1bwUL3pz9EOzecplsxInVizZc9HwLf7xPluSiE1EP6";
+    /** Transient create attribute naming the person who should claim the seeded admin. */
+    public static final String ADMIN_EMAIL_ATTRIBUTE = "adminEmail";
+
+    /**
+     * The seeded admin's credential: the empty hash invite-only users carry. kelta-auth's
+     * password encoder rejects it for every input, so the account is unusable until an
+     * invite sets a password.
+     */
+    static final String UNUSABLE_PASSWORD_HASH = "";
 
     /** Visible for testing: the provisioning row count is derived from this. */
     static final List<String> ALL_PERMISSIONS = List.of(
@@ -48,13 +66,24 @@ public class TenantProvisioningHook implements BeforeSaveHook {
     private final JdbcTemplate jdbcTemplate;
     private final String authIssuerUri;
     private final CerbosPolicySyncService cerbosPolicySyncService;
+    private final UserInviteService userInviteService;
+
+    /**
+     * The {@value #ADMIN_EMAIL_ATTRIBUTE} taken off the record in {@link #beforeCreate}, keyed
+     * by the record id, for {@link #afterCreate} on the same thread — both run synchronously
+     * inside one {@code QueryEngine.create}. Overwritten by the next create on the thread, so a
+     * create that fails between the two leaves nothing behind for long.
+     */
+    private final ThreadLocal<PendingAdminEmail> pendingAdminEmail = new ThreadLocal<>();
 
     public TenantProvisioningHook(JdbcTemplate jdbcTemplate,
                                    String authIssuerUri,
-                                   CerbosPolicySyncService cerbosPolicySyncService) {
+                                   CerbosPolicySyncService cerbosPolicySyncService,
+                                   UserInviteService userInviteService) {
         this.jdbcTemplate = jdbcTemplate;
         this.authIssuerUri = authIssuerUri;
         this.cerbosPolicySyncService = cerbosPolicySyncService;
+        this.userInviteService = userInviteService;
     }
 
     @Override
@@ -68,9 +97,31 @@ public class TenantProvisioningHook implements BeforeSaveHook {
     }
 
     @Override
+    public BeforeSaveResult beforeCreate(Map<String, Object> record, String tenantId) {
+        pendingAdminEmail.remove();
+        if (!record.containsKey(ADMIN_EMAIL_ATTRIBUTE)) {
+            return BeforeSaveResult.ok();
+        }
+        Object raw = record.remove(ADMIN_EMAIL_ATTRIBUTE);
+        if (raw == null || (raw instanceof String s && s.isBlank())) {
+            return BeforeSaveResult.ok();
+        }
+        String email = TenantAdminInviteService.normalizeEmail(raw);
+        if (email == null) {
+            return BeforeSaveResult.error(ADMIN_EMAIL_ATTRIBUTE, "adminEmail must be a valid email address");
+        }
+        pendingAdminEmail.set(new PendingAdminEmail(getString(record, "id"), email));
+        return BeforeSaveResult.ok();
+    }
+
+    @Override
     public void afterCreate(Map<String, Object> record, String tenantId) {
         String id = getString(record, "id");
         String slug = getString(record, "slug");
+        PendingAdminEmail pending = pendingAdminEmail.get();
+        pendingAdminEmail.remove();
+        String adminEmail = pending != null && pending.recordId() != null && pending.recordId().equals(id)
+                ? pending.email() : null;
         if (id == null) {
             log.warn("Tenant provisioning skipped: no id in record");
             return;
@@ -87,10 +138,13 @@ public class TenantProvisioningHook implements BeforeSaveHook {
             try {
                 seedDefaultProfiles(id);
                 seedOidcProvider(id);
-                seedAdminUser(id, slug);
+                String adminUserId = seedAdminUser(id, slug, adminEmail);
                 syncCerbosPolicies(id);
                 activateTenant(id);
                 log.info("Tenant provisioning complete for tenant '{}' (slug={})", id, slug);
+                if (adminEmail != null && adminUserId != null) {
+                    inviteAdmin(id, adminUserId);
+                }
             } catch (Exception e) {
                 log.error("Tenant provisioning failed for tenant '{}' (slug={}): {}",
                         id, slug, e.getMessage(), e);
@@ -217,18 +271,22 @@ public class TenantProvisioningHook implements BeforeSaveHook {
     }
 
     /**
-     * Creates the default admin user and credential for the tenant.
-     * Mirrors the logic from V102 migration.
+     * Creates the tenant's System Administrator with an unusable credential.
+     *
+     * @param adminEmail the email of the person who will claim the account, or {@code null}
+     *                   for the {@code <slug>-admin@kelta.local} placeholder
+     * @return the new admin's user id, or {@code null} when no admin was created
      */
-    void seedAdminUser(String tenantId, String slug) {
-        String adminEmail = (slug != null ? slug : "admin") + "-admin@kelta.local";
+    String seedAdminUser(String tenantId, String slug, String adminEmail) {
+        String adminUsername = TenantAdminInviteService.seededAdminUsername(slug);
+        String email = adminEmail != null ? adminEmail : adminUsername + "@kelta.local";
 
         Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM platform_user WHERE tenant_id = ? AND email = ?",
-                Integer.class, tenantId, adminEmail);
+                "SELECT COUNT(*) FROM platform_user WHERE tenant_id = ? AND (email = ? OR username = ?)",
+                Integer.class, tenantId, email, adminUsername);
         if (count != null && count > 0) {
-            log.debug("Admin user {} already exists for tenant {}, skipping", adminEmail, tenantId);
-            return;
+            log.debug("Admin user {} already exists for tenant {}, skipping", adminUsername, tenantId);
+            return null;
         }
 
         // Find the System Administrator profile for this tenant
@@ -237,25 +295,44 @@ public class TenantProvisioningHook implements BeforeSaveHook {
                 String.class, tenantId);
         if (profileIds.isEmpty()) {
             log.warn("No System Administrator profile found for tenant {}, skipping admin user creation", tenantId);
-            return;
+            return null;
         }
         String adminProfileId = profileIds.get(0);
 
-        String adminUsername = (slug != null ? slug : "admin") + "-admin";
         String userId = UUID.randomUUID().toString();
 
         jdbcTemplate.update("""
                 INSERT INTO platform_user (id, tenant_id, email, username, first_name, last_name,
                     status, profile_id, created_at, updated_at)
                 VALUES (?, ?, ?, ?, 'System', 'Administrator', 'ACTIVE', ?, NOW(), NOW())
-                """, userId, tenantId, adminEmail, adminUsername, adminProfileId);
+                """, userId, tenantId, email, adminUsername, adminProfileId);
 
         jdbcTemplate.update("""
                 INSERT INTO user_credential (id, user_id, password_hash, force_change_on_login, created_at)
                 VALUES (?, ?, ?, TRUE, NOW())
-                """, UUID.randomUUID().toString(), userId, DEFAULT_PASSWORD_HASH);
+                """, UUID.randomUUID().toString(), userId, UNUSABLE_PASSWORD_HASH);
 
-        log.info("Created admin user '{}' for tenant {} (slug={})", adminEmail, tenantId, slug);
+        log.info("Created admin user '{}' for tenant {} (slug={}) — no usable password until invited",
+                adminUsername, tenantId, slug);
+        return userId;
+    }
+
+    /**
+     * Sends the seeded admin the {@code user.invite} email. Runs inside the new tenant's
+     * binding (see {@link #afterCreate}) like every other provisioning write. A failed invite
+     * leaves the tenant ACTIVE; it can be re-sent from Setup › Tenants.
+     */
+    void inviteAdmin(String tenantId, String adminUserId) {
+        try {
+            String token = userInviteService.inviteUser(tenantId, adminUserId);
+            SecurityAuditLogger.log(SecurityAuditLogger.EventType.TENANT_ADMIN_INVITED,
+                    "system", adminUserId, tenantId, token != null ? "success" : "failure",
+                    "tenant provisioning");
+        } catch (Exception e) {
+            SecurityAuditLogger.log(SecurityAuditLogger.EventType.TENANT_ADMIN_INVITED,
+                    "system", adminUserId, tenantId, "failure", "tenant provisioning");
+            log.error("Admin invite failed for new tenant {}: {}", tenantId, e.getMessage(), e);
+        }
     }
 
     /**
@@ -278,4 +355,6 @@ public class TenantProvisioningHook implements BeforeSaveHook {
     }
 
     private record ProfileDef(String name, String description, Set<String> grantedPermissions) {}
+
+    private record PendingAdminEmail(String recordId, String email) {}
 }

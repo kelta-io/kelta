@@ -46,8 +46,9 @@ import java.util.Map;
  * </ul>
  *
  * <p>The provisioning hook seeds the tenant admin as {@code <slug>-admin@kelta.local}
- * (username {@code <slug>-admin}, password {@code password}) — {@link AuthFixture}
- * derives that identity for any non-{@code default} slug, so
+ * (username {@code <slug>-admin}) with no usable password, so this fixture gives it the
+ * harness-only credential ({@link AuthFixture#setProvisionedAdminCredential(String)}) —
+ * {@link AuthFixture} derives that identity for any non-{@code default} slug, so
  * {@code auth.loginAsAdmin(ECOMMERCE_SLUG)} authenticates against this tenant.
  *
  * <p><b>Idempotent + run-once:</b> {@link #seedOnce()} short-circuits if the tenant is
@@ -75,6 +76,8 @@ public final class EcommerceSeedFixture {
             // fresh gateway/worker only pick the tenant's dynamic routes up on the periodic
             // bootstrap refresh (observed ~2 minutes). Block here — once, for everyone —
             // so scenarios don't each burn (and overrun) their own wait budgets.
+            // The credential is re-set too: a schema seeded before PLT-337 carries the old one.
+            setAdminCredential();
             String token = auth.loginAsAdmin(TenantFixture.ECOMMERCE_SLUG);
             waitForStatus(gatewayClient(token),
                     "/" + TenantFixture.ECOMMERCE_SLUG + "/api/customers", HttpStatus.OK, 360);
@@ -85,7 +88,7 @@ public final class EcommerceSeedFixture {
         log.info("Seeding ecommerce fixture tenant '{}' via admin API", TenantFixture.ECOMMERCE_SLUG);
         createTenant();
         waitForTenantActive();
-        clearAdminForcePasswordChange();
+        setAdminCredential();
 
         String token = auth.loginAsAdmin(TenantFixture.ECOMMERCE_SLUG);
         RestClient client = gatewayClient(token);
@@ -155,25 +158,17 @@ public final class EcommerceSeedFixture {
     }
 
     /**
-     * Clears {@code force_change_on_login} on the provisioned tenant admin's credential.
-     * {@code TenantProvisioningHook} seeds every runtime-provisioned admin with
-     * {@code force_change_on_login = TRUE} (they must rotate the well-known password), which
-     * makes {@code KeltaUserDetails.isCredentialsNonExpired()} return false — so direct-login
-     * for the admin fails with "credentials have expired". The harness uses the admin directly,
-     * so clear the flag (the default tenant's baseline admin already has it false).
+     * Gives the provisioned tenant admin the harness-only credential. {@code TenantProvisioningHook}
+     * seeds every runtime-provisioned admin with no usable password (a real tenant claims it by
+     * invite), so the harness writes its own — and clears {@code force_change_on_login}, which
+     * would otherwise fail direct-login with "credentials have expired".
      */
-    private void clearAdminForcePasswordChange() {
-        String adminEmail = TenantFixture.ECOMMERCE_SLUG + "-admin@kelta.local";
-        String sql = "UPDATE user_credential SET force_change_on_login = false "
-                + "WHERE user_id IN (SELECT id FROM platform_user WHERE email = ?)";
-        try (Connection conn = DriverManager.getConnection(
-                        KeltaStack.dbJdbcUrl(), KeltaStack.dbUsername(), KeltaStack.dbPassword());
-                PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, adminEmail);
-            int updated = ps.executeUpdate();
-            log.info("Cleared force_change_on_login for '{}' ({} credential row(s))", adminEmail, updated);
-        } catch (SQLException e) {
-            throw new IllegalStateException("Failed to clear force_change_on_login for " + adminEmail, e);
+    private void setAdminCredential() {
+        int updated = AuthFixture.setProvisionedAdminCredential(TenantFixture.ECOMMERCE_SLUG);
+        log.info("Set harness admin credential for '{}' ({} credential row(s))",
+                TenantFixture.ECOMMERCE_SLUG, updated);
+        if (updated == 0) {
+            throw new IllegalStateException("No seeded admin credential for " + TenantFixture.ECOMMERCE_SLUG);
         }
     }
 

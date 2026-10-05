@@ -337,6 +337,21 @@ export interface CreateTenantRequest {
   edition?: string;
   settings?: Record<string, unknown>;
   limits?: Partial<GovernorLimits>;
+  /**
+   * Email of the person who should claim the tenant's seeded admin. Transient: the
+   * admin is created with this email and invited; it is not stored on the tenant.
+   */
+  adminEmail?: string;
+}
+
+/**
+ * Result of inviting a tenant's seeded admin
+ */
+export interface TenantAdminInviteResponse {
+  status: 'INVITED';
+  tenantId: string;
+  userId: string;
+  email: string;
 }
 
 /**
