@@ -236,4 +236,13 @@ class PublicPathMatcherTest {
                 MockServerHttpRequest.get("/api/ui-pages").header("Authorization", "Bearer x").build());
         assertThat(matcher.isPublicRequest(exchange)).isTrue();
     }
+
+    @Test
+    void bootstrapPathsAreTenantScopedButUnauthenticatedPathsAreNot() {
+        PublicPathMatcher matcher = new PublicPathMatcher(BOOTSTRAP_PATHS, UNAUTHENTICATED_PATHS);
+        assertThat(matcher.isTenantScopedPublicPath("/api/ui-pages")).isTrue();
+        assertThat(matcher.isTenantScopedPublicPath("/api/oidc-providers/abc")).isTrue();
+        assertThat(matcher.isTenantScopedPublicPath("/otel/v1/traces")).isFalse();
+        assertThat(matcher.isTenantScopedPublicPath("/api/users")).isFalse();
+    }
 }

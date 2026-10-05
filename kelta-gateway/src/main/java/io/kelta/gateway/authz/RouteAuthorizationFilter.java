@@ -5,6 +5,7 @@ import io.kelta.gateway.auth.JwtAuthenticationFilter;
 import io.kelta.gateway.auth.PublicPathMatcher;
 import io.kelta.gateway.authz.cerbos.CerbosAuthorizationService;
 import io.kelta.gateway.error.ResponseHelpers;
+import io.kelta.gateway.filter.CustomDomainFilter;
 import io.kelta.gateway.filter.RequestLoggingFilter;
 import io.kelta.gateway.filter.TenantResolutionFilter;
 import io.kelta.gateway.metrics.GatewayMetrics;
@@ -94,6 +95,12 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
         if (publicPathMatcher.isPublicRequest(exchange)) {
             if (isTenantsPath(path)) {
                 return forwardAnonymousTenantLookup(exchange, chain, path);
+            }
+            if (publicPathMatcher.isTenantScopedPublicPath(path) && !hasResolvedTenant(exchange)) {
+                // Bootstrap metadata belongs to one tenant. With none resolved (an unknown slug, or
+                // no slug at all) nothing downstream scopes the read and it would return every
+                // tenant's rows, so there is nothing to serve.
+                return notFound(exchange);
             }
             return chain.filter(exchange);
         }
@@ -394,6 +401,16 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                 .build()
                 .toUri();
         return exchange.mutate().request(r -> r.uri(uri)).build();
+    }
+
+    /**
+     * A tenant is resolved when the URL slug (or an {@code X-Tenant-ID} header) produced a tenant
+     * id, or a verified custom domain named the tenant (its id is resolved from the slug downstream).
+     */
+    private static boolean hasResolvedTenant(ServerWebExchange exchange) {
+        String tenantId = TenantResolutionFilter.getTenantId(exchange);
+        return (tenantId != null && !tenantId.isBlank())
+                || Boolean.TRUE.equals(exchange.getAttributes().get(CustomDomainFilter.CUSTOM_DOMAIN_RESOLVED));
     }
 
     private static boolean isTenantsPath(String path) {

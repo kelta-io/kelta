@@ -150,6 +150,8 @@ kelta:
       # login button, and the tenant record itself. Writes stay authenticated: this list is
       # GET/HEAD only. Adding a path here also bypasses TenantIpAllowlistFilter, so keep it
       # to metadata that is safe to serve to an anonymous visitor of that tenant.
+      # A read here with no resolved tenant (unknown slug, no slug) is a 404 in RouteAuthorizationFilter:
+      # nothing downstream would scope it to one tenant.
       public-paths: /api/ui-pages,/api/ui-menus,/api/ui-translations,/api/oidc-providers,/api/tenants
       # Public only to a request with NO Authorization header. /api/tenants is here because the
       # tenants table has no tenant_id column: nothing downstream scopes it, so the anonymous view
