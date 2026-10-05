@@ -172,6 +172,7 @@ function groupSummary(group: string, defs: RegisteredCommand[]): string {
     'list-views': 'Saved list views',
     flows: 'Flow definitions, executions, and versions',
     users: 'User administration',
+    tenants: 'Tenant administration (platform admins)',
     limits: 'Tenant governor limits',
     audit: 'Audit trails (setup, security, logins)',
     records: 'Record CRUD, bulk operations, and search',

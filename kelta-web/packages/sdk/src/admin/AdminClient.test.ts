@@ -168,6 +168,42 @@ describe('AdminClient tenants.inviteAdmin', () => {
   });
 });
 
+describe('AdminClient tenants.bootstrapToken', () => {
+  it('POSTs expiresIn and userId to the tenant bootstrap-token endpoint', async () => {
+    const axios = createMockAxios();
+    const client = new AdminClient(axios);
+    const mockPost = axios.post as ReturnType<typeof vi.fn>;
+    const minted = {
+      token: 'klt_abc',
+      tokenPrefix: 'klt_abc',
+      name: 'bootstrap-ops@example.com-2026-10-05T00:00:00Z',
+      tenantId: 't1',
+      userId: 'u1',
+      expiresAt: '2026-10-05T01:00:00Z',
+    };
+    mockPost.mockResolvedValue({ data: minted });
+
+    const result = await client.tenants.bootstrapToken('t1', { expiresIn: '2h', userId: 'u1' });
+
+    expect(mockPost).toHaveBeenCalledWith('/api/tenants/t1/bootstrap-token', {
+      expiresIn: '2h',
+      userId: 'u1',
+    });
+    expect(result).toEqual(minted);
+  });
+
+  it('sends an empty body when no options are given, so the server defaults apply', async () => {
+    const axios = createMockAxios();
+    const client = new AdminClient(axios);
+    const mockPost = axios.post as ReturnType<typeof vi.fn>;
+    mockPost.mockResolvedValue({ data: {} });
+
+    await client.tenants.bootstrapToken('t1');
+
+    expect(mockPost).toHaveBeenCalledWith('/api/tenants/t1/bootstrap-token', {});
+  });
+});
+
 describe('AdminClient users.invitePortal', () => {
   let axios: AxiosInstance;
   let client: AdminClient;

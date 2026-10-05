@@ -22,6 +22,7 @@ import { recordCommands } from '../commands/records.js';
 import { reportCommands } from '../commands/reports.js';
 import { sdkCommands } from '../commands/sdk.js';
 import { updateCommands } from '../commands/update.js';
+import { tenantCommands } from '../commands/tenants.js';
 import { userCommands } from '../commands/users.js';
 import { validationCommands } from '../commands/validation.js';
 import type { RegisteredCommand } from './types.js';
@@ -43,6 +44,7 @@ export const allCommands: RegisteredCommand[] = [
   ...reportCommands,
   ...flowCommands,
   ...userCommands,
+  ...tenantCommands,
   ...limitCommands,
   ...auditCommands,
   ...recordCommands,

@@ -205,6 +205,16 @@ class TenantBootstrapTokenControllerTest {
     }
 
     @Test
+    @DisplayName("a non-UUID id (e.g. the internal 'system' tenant) is 404 and writes no token")
+    void nonUuidTenantRefused() throws Exception {
+        grant("MANAGE_TENANTS", true);
+
+        perform(bootstrap("system", "{}")).andExpect(status().isNotFound());
+
+        verifyNoTokenWritten();
+    }
+
+    @Test
     @DisplayName("expiresIn defaults to 1 h; the cache TTL is no longer than the token's lifetime")
     void defaultsToOneHour() throws Exception {
         grant("MANAGE_TENANTS", true);

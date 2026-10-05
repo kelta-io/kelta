@@ -37,6 +37,8 @@ import type {
   Tenant,
   CreateTenantRequest,
   TenantAdminInviteResponse,
+  TenantBootstrapTokenRequest,
+  TenantBootstrapTokenResponse,
   UpdateTenantRequest,
   GovernorLimits,
   Page,
@@ -479,6 +481,19 @@ export class AdminClient {
     inviteAdmin: async (id: string, email: string): Promise<TenantAdminInviteResponse> => {
       const response = await this.axios.post(`/api/tenants/${id}/admin-invite`, { email });
       return response.data as TenantAdminInviteResponse;
+    },
+
+    /**
+     * Mint a short-lived PAT in the tenant for its seeded admin (or `userId`). The token
+     * works only on that tenant's URLs and is returned once. Refused for the platform
+     * tenant. Requires MANAGE_TENANTS.
+     */
+    bootstrapToken: async (
+      id: string,
+      request: TenantBootstrapTokenRequest = {}
+    ): Promise<TenantBootstrapTokenResponse> => {
+      const response = await this.axios.post(`/api/tenants/${id}/bootstrap-token`, request);
+      return response.data as TenantBootstrapTokenResponse;
     },
 
     getLimits: async (id: string): Promise<GovernorLimits> => {

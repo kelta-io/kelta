@@ -355,6 +355,28 @@ export interface TenantAdminInviteResponse {
 }
 
 /**
+ * Options for minting a tenant bootstrap token
+ */
+export interface TenantBootstrapTokenRequest {
+  /** Token lifetime: `30m`, `2h` or ISO-8601 (`PT2H`). Default 1 h, max 24 h. */
+  expiresIn?: string;
+  /** A user of the target tenant. Default: the tenant's seeded System Administrator. */
+  userId?: string;
+}
+
+/**
+ * A short-lived PAT minted in the target tenant. `token` is shown once — store it now.
+ */
+export interface TenantBootstrapTokenResponse {
+  token: string;
+  tokenPrefix: string;
+  name: string;
+  tenantId: string;
+  userId: string;
+  expiresAt: string;
+}
+
+/**
  * Request to update a tenant
  */
 export interface UpdateTenantRequest {

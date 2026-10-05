@@ -35,7 +35,8 @@ import java.util.regex.Pattern;
  * a PAT on any tenant URL but its own, so the token works only in the target tenant.
  *
  * <p>{@code expiresIn} is ISO-8601 ({@code PT1H}) or shorthand minutes/hours ({@code 30m},
- * {@code 2h}); default 1 h, max 24 h. The platform tenant itself is refused. The plaintext token
+ * {@code 2h}); default 1 h, max 24 h. The platform tenant itself is refused, and a non-UUID id
+ * (the internal {@code system} tenant) is never a target. The plaintext token
  * is returned once and is never logged.
  *
  * <p>Requires {@code MANAGE_TENANTS}, checked here the same way as
