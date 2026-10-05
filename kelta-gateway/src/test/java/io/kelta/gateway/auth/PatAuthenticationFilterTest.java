@@ -5,6 +5,7 @@ import io.kelta.gateway.ratelimit.RedisRateLimiter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import io.kelta.gateway.filter.TenantResolutionFilter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -135,6 +136,38 @@ class PatAuthenticationFilterTest {
             verify(metrics, never()).recordAuthFailure(any(), eq("unknown_pat"));
             assertThat(exchange.getResponse().getStatusCode()).isNull();
             assertThat(exchange.getAttributes()).containsKey("gateway.principal");
+        }
+
+        @Test
+        @DisplayName("a token is accepted on its own tenant's URL")
+        void sameTenantIsAccepted() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get("pat:revoked:" + HASH)).thenReturn(Mono.empty());
+            when(valueOps.get("pat:" + HASH)).thenReturn(Mono.just(PAT_JSON));
+            MockServerWebExchange exchange = exchangeFor("/api/titles");
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "t-1");
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            verify(filterChain).filter(any(ServerWebExchange.class));
+            assertThat(exchange.getResponse().getStatusCode()).isNull();
+        }
+
+        @Test
+        @DisplayName("a token is rejected on another tenant's URL")
+        void otherTenantIsRejected() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get("pat:revoked:" + HASH)).thenReturn(Mono.empty());
+            when(valueOps.get("pat:" + HASH)).thenReturn(Mono.just(PAT_JSON));
+            MockServerWebExchange exchange = exchangeFor("/api/titles");
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "t-other");
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            verify(filterChain, never()).filter(any(ServerWebExchange.class));
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(metrics).recordAuthFailure(any(), eq("tenant_mismatch"));
+            assertThat(exchange.getAttributes()).doesNotContainKey("gateway.principal");
         }
 
         @Test

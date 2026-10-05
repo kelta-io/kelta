@@ -215,6 +215,19 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
             String scopes = patData.get("scopes") != null
                     ? patData.get("scopes").toString() : "[\"api\"]";
 
+            // Same rule as JwtAuthenticationFilter: a token issued in tenant A is never accepted
+            // on tenant B's URL. Identity is resolved in the URL's tenant downstream, so without
+            // this check the token's own tenant would not bound what it can reach.
+            String requestTenantId = TenantResolutionFilter.getTenantId(exchange);
+            if (tenantId != null && !tenantId.isEmpty()
+                    && requestTenantId != null && !requestTenantId.isEmpty()
+                    && !tenantId.equals(requestTenantId)) {
+                log.warn("Cross-tenant PAT use rejected: token tenant={} request tenant={} path={}",
+                        tenantId, requestTenantId, path);
+                metrics.recordAuthFailure(tenantSlug, "tenant_mismatch");
+                return unauthorized(exchange, "Token is not valid for this tenant");
+            }
+
             GatewayPrincipal principal = new GatewayPrincipal(
                     email, Collections.emptyList(), Map.of(
                     "sub", userId,
