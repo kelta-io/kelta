@@ -24,26 +24,14 @@ test.describe("Plugins", () => {
     const pluginsPage = new PluginsPage(page);
     await pluginsPage.goto();
 
-    // After goto(), either the plugins page or "Insufficient Permissions" is visible.
-    // If the plugins page is visible, check for plugin cards or empty state.
-    if (await pluginsPage.pluginsPage.isVisible().catch(() => false)) {
-      const hasPluginCards =
-        (await page.locator('[data-testid^="plugin-card-"]').count()) > 0;
-      const hasEmptyState = await pluginsPage.emptyState
-        .isVisible()
-        .catch(() => false);
-      const hasEmptyText = await page
-        .getByText(/no plugins/i)
+    // The admin has access (the tests above assert the page unconditionally),
+    // so the page must render either plugin cards or its empty state.
+    await expect(pluginsPage.pluginsPage).toBeVisible();
+    await expect(
+      page
+        .locator('[data-testid^="plugin-card-"]')
         .first()
-        .isVisible()
-        .catch(() => false);
-
-      expect(hasPluginCards || hasEmptyState || hasEmptyText).toBe(true);
-    } else {
-      // Permission denied — page is showing "Insufficient Permissions"
-      await expect(
-        page.getByText(/insufficient permissions/i),
-      ).toBeVisible();
-    }
+        .or(pluginsPage.emptyState),
+    ).toBeVisible();
   });
 });

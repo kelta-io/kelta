@@ -18,26 +18,21 @@ test.describe("Webhooks", () => {
     await expect(webhooksPage.webhooksPage).toBeVisible();
   });
 
-  test("can switch to messages tab", async ({ page }) => {
+  test("settles into the endpoint dashboard or the Svix error state", async ({
+    page,
+  }) => {
     const webhooksPage = new WebhooksPage(page);
     await webhooksPage.goto();
     await expect(webhooksPage.webhooksPage).toBeVisible();
 
-    // Click the messages tab if it exists
-    if (await webhooksPage.messagesTab.isVisible().catch(() => false)) {
-      await webhooksPage.messagesTab.click();
-    }
-  });
-
-  test("can switch to event catalog tab", async ({ page }) => {
-    const webhooksPage = new WebhooksPage(page);
-    await webhooksPage.goto();
-    await expect(webhooksPage.webhooksPage).toBeVisible();
-
-    // Click the event catalog tab if it exists
-    if (await webhooksPage.eventCatalogTab.isVisible().catch(() => false)) {
-      await webhooksPage.eventCatalogTab.click();
-    }
+    // Svix may not be configured in CI, in which case the page renders its
+    // ErrorMessage instead of the dashboard. Either is a settled page; a
+    // stuck spinner or blank page is not.
+    await expect(
+      page
+        .getByRole("heading", { name: "Webhooks", level: 1 })
+        .or(webhooksPage.pageError),
+    ).toBeVisible();
   });
 
   test("add endpoint dialog shows collection filter", async ({ page }) => {
