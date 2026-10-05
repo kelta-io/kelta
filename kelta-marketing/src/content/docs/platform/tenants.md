@@ -30,6 +30,33 @@ Creating a tenant runs the provisioning chain: schema, seeded profiles, an admin
 any configured integrations. Suspending a tenant (`status: SUSPENDED`) rejects its logins and API calls without
 deleting anything.
 
+### Bootstrap token
+
+A new tenant's administrator has no usable password until someone claims the account through the invite, and a
+platform admin's own token cannot act inside another tenant. To let automation configure a fresh tenant
+straight away, a `MANAGE_TENANTS` holder can mint a short-lived personal access token **in the target tenant**:
+
+```http
+POST /api/tenants/{id}/bootstrap-token
+{ "expiresIn": "1h", "userId": "<optional>" }
+```
+
+- The token belongs to the tenant's seeded System Administrator, or to `userId` (or `email`) when that names a
+  user of the same tenant. A user of any other tenant is `404`.
+- `expiresIn` is `30m` / `2h` shorthand or ISO-8601 (`PT2H`). Default 1 hour, maximum 24 hours; zero, negative,
+  longer or unparseable values are `400`.
+- It works only on that tenant's URLs. Used on any other tenant, including the platform tenant, it is `401`.
+- The platform tenant itself cannot be bootstrapped (`403`).
+- The response carries the plaintext `token` once, with `tokenPrefix`, `name`, `tenantId`, `userId` and
+  `expiresAt`. The token is named `bootstrap-<actor>-<timestamp>`, so the target user sees it in their token list
+  and can revoke it.
+- Every attempt, refused or not, is audited as `TENANT_BOOTSTRAP_TOKEN_ISSUED` with the actor, the target tenant
+  and the target user ([Audit logs](/docs/security/audit-log/)).
+
+Console: Setup → Platform → Tenants → *Bootstrap token* shows the token once with a copy button. SDK:
+`admin.tenants.bootstrapToken(id, { expiresIn, userId })`. CLI: `kelta tenants bootstrap-token <slug> --expires-in 1h`
+prints only the token on stdout, so `TOKEN=$(kelta tenants bootstrap-token acme)` works.
+
 The tenant dashboard (`/tenant-dashboard`) summarises usage against limits; the system-health page shows
 component status.
 

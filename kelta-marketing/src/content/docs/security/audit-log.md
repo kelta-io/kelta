@@ -23,6 +23,20 @@ Event types include `LOGIN_SUCCESS`, `LOGIN_FAILED`, `ACCOUNT_LOCKED`, `ACCOUNT_
 GET /api/security-audit-logs?filter[eventType][eq]=LOGIN_FAILED&sort=-timestamp&page[size]=100
 ```
 
+### Platform-administration events
+
+Token and tenant-administration events (`PAT_CREATED`, `PAT_ADMIN_CREATED`, `PAT_REVOKED`, `TENANT_ADMIN_INVITED`,
+`TENANT_BOOTSTRAP_TOKEN_ISSUED`) are emitted by the worker on its structured `security.audit` log stream, with the
+MDC fields `security.event`, `security.actor`, `security.target`, `security.tenant` and `security.result`.
+Search for them in your log pipeline.
+
+`TENANT_BOOTSTRAP_TOKEN_ISSUED` records each
+[bootstrap token](/docs/platform/tenants/#bootstrap-token) attempt. The actor is the platform admin's email, the
+tenant is the target tenant and the target is the user the token was minted for. A successful mint is one
+`result=success` event whose detail holds the token name, its expiry and the admin's own tenant. Refusals are
+`result=failure` with the reason (missing `MANAGE_TENANTS`, the platform tenant, a bad `expiresIn`, a user outside
+the tenant). Neither ever contains token material.
+
 Console: Setup → Security → Security audit (`MANAGE_USERS`). CLI: `kelta audit security --since 24h`.
 
 ## Setup audit trail
