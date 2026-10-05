@@ -189,6 +189,8 @@ Create it in **Setup → UI customization → Pages** (or `kelta pages apply pag
 
 ## Where next
 
+- Go further: the [worked examples](/docs/examples/library-app/) build a lending library from the CLI, automate it
+  with a record flow and an inbound webhook, and hand it to an AI agent over MCP
 - Model it properly: [Field types](/docs/data-model/field-types/), [Relationships](/docs/data-model/relationships/)
 - Automate it: send an email when an invoice becomes `OVERDUE` — [Flows](/docs/automation/flows/)
 - Secure it: who can see `amount`? — [Field-level security](/docs/security/field-security-and-masking/)

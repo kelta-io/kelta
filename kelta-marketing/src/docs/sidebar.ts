@@ -7,6 +7,7 @@
 
 export const SECTIONS = [
   { id: 'getting-started', label: 'Getting started', order: 10 },
+  { id: 'examples', label: 'Worked examples', order: 15 },
   { id: 'concepts', label: 'Concepts', order: 20 },
   { id: 'data-model', label: 'Data model', order: 30 },
   { id: 'security', label: 'Security & identity', order: 40 },
