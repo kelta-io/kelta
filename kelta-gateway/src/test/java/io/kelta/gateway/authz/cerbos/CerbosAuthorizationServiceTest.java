@@ -4,8 +4,6 @@ import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.CheckResult;
 import dev.cerbos.sdk.builders.Principal;
 import dev.cerbos.sdk.builders.Resource;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
 import io.kelta.gateway.auth.GatewayPrincipal;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,14 +33,11 @@ class CerbosAuthorizationServiceTest {
     @Mock
     private CheckResult checkResult;
 
-    @Mock
-    private CerbosChannel cerbosChannel;
-
     private CerbosAuthorizationService service;
 
     @BeforeEach
     void setUp() {
-        service = new CerbosAuthorizationService(cerbosClient, cerbosChannel, new SimpleMeterRegistry());
+        service = new CerbosAuthorizationService(cerbosClient, new SimpleMeterRegistry());
     }
 
     private GatewayPrincipal principal() {
@@ -226,110 +221,6 @@ class CerbosAuthorizationServiceTest {
             StepVerifier.create(service.checkSystemPermission(p, "API_ACCESS"))
                     .expectNext(true)
                     .verifyComplete();
-        }
-    }
-
-    @Nested
-    @DisplayName("Transient-failure retry")
-    class TransientRetry {
-
-        private StatusRuntimeException status(Status status) {
-            return status.withDescription("test").asRuntimeException();
-        }
-
-        @Test
-        @DisplayName("One DEADLINE_EXCEEDED then success resets the connection and allows")
-        void retriesDeadlineExceededOnce() {
-            when(cerbosClient.check(any(Principal.class), any(Resource.class), eq("API_ACCESS")))
-                    .thenThrow(status(Status.DEADLINE_EXCEEDED))
-                    .thenReturn(checkResult);
-            when(checkResult.isAllowed("API_ACCESS")).thenReturn(true);
-
-            StepVerifier.create(service.checkSystemPermission(principal(), "API_ACCESS"))
-                    .expectNext(true)
-                    .verifyComplete();
-
-            verify(cerbosClient, times(2)).check(any(), any(), eq("API_ACCESS"));
-            verify(cerbosChannel).resetConnection();
-        }
-
-        @Test
-        @DisplayName("One UNAVAILABLE then success allows an object check")
-        void retriesUnavailableOnce() {
-            when(cerbosClient.check(any(Principal.class), any(Resource.class), eq("read")))
-                    .thenThrow(status(Status.UNAVAILABLE))
-                    .thenReturn(checkResult);
-            when(checkResult.isAllowed("read")).thenReturn(true);
-
-            StepVerifier.create(service.checkObjectPermission(principal(), "col-1", "read"))
-                    .expectNext(true)
-                    .verifyComplete();
-
-            verify(cerbosClient, times(2)).check(any(), any(), eq("read"));
-            verify(cerbosChannel).resetConnection();
-        }
-
-        @Test
-        @DisplayName("Two consecutive transient failures still deny (fail-closed) and are not cached")
-        void twoFailuresDeny() {
-            when(cerbosClient.check(any(Principal.class), any(Resource.class), eq("API_ACCESS")))
-                    .thenThrow(status(Status.DEADLINE_EXCEEDED))
-                    .thenThrow(status(Status.UNAVAILABLE))
-                    .thenReturn(checkResult);
-            when(checkResult.isAllowed("API_ACCESS")).thenReturn(true);
-
-            StepVerifier.create(service.checkSystemPermission(principal(), "API_ACCESS"))
-                    .expectNext(false)
-                    .verifyComplete();
-            verify(cerbosClient, times(2)).check(any(), any(), eq("API_ACCESS"));
-
-            StepVerifier.create(service.checkSystemPermission(principal(), "API_ACCESS"))
-                    .expectNext(true)
-                    .verifyComplete();
-        }
-
-        @Test
-        @DisplayName("Non-transient errors (INVALID_ARGUMENT) are not retried")
-        void doesNotRetryInvalidArgument() {
-            when(cerbosClient.check(any(Principal.class), any(Resource.class), eq("API_ACCESS")))
-                    .thenThrow(status(Status.INVALID_ARGUMENT));
-
-            StepVerifier.create(service.checkSystemPermission(principal(), "API_ACCESS"))
-                    .expectNext(false)
-                    .verifyComplete();
-
-            verify(cerbosClient, times(1)).check(any(), any(), eq("API_ACCESS"));
-            verify(cerbosChannel, never()).resetConnection();
-        }
-
-        @Test
-        @DisplayName("Does not retry while already in a failure streak (bounded during outages)")
-        void doesNotRetryDuringFailureStreak() {
-            when(cerbosClient.check(any(Principal.class), any(Resource.class), eq("API_ACCESS")))
-                    .thenThrow(status(Status.UNAVAILABLE));
-
-            StepVerifier.create(service.checkSystemPermission(principal(), "API_ACCESS"))
-                    .expectNext(false)
-                    .verifyComplete();
-            StepVerifier.create(service.checkSystemPermission(principal(), "API_ACCESS"))
-                    .expectNext(false)
-                    .verifyComplete();
-
-            // First request: attempt + retry. Second request: single attempt, no retry.
-            verify(cerbosClient, times(3)).check(any(), any(), eq("API_ACCESS"));
-            verify(cerbosChannel, times(1)).resetConnection();
-        }
-
-        @Test
-        @DisplayName("Classifies transient status codes")
-        void classifiesTransient() {
-            assertThat(CerbosAuthorizationService.isTransient(status(Status.DEADLINE_EXCEEDED))).isTrue();
-            assertThat(CerbosAuthorizationService.isTransient(status(Status.UNAVAILABLE))).isTrue();
-            assertThat(CerbosAuthorizationService.isTransient(
-                    new java.util.concurrent.ExecutionException(status(Status.UNAVAILABLE)))).isTrue();
-            assertThat(CerbosAuthorizationService.isTransient(new java.util.concurrent.TimeoutException())).isTrue();
-            assertThat(CerbosAuthorizationService.isTransient(status(Status.INVALID_ARGUMENT))).isFalse();
-            assertThat(CerbosAuthorizationService.isTransient(new RuntimeException("boom"))).isFalse();
         }
     }
 }

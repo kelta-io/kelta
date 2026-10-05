@@ -145,13 +145,6 @@ kelta:
     cerbos:
       host: ${CERBOS_HOST:cerbos.emf.svc.cluster.local}
       grpc-port: ${CERBOS_GRPC_PORT:3593}
-      # HTTP/2 keepalive on the Cerbos channel, so a transport whose peer silently vanished
-      # is detected and redialled instead of hanging checks until their 2 s deadline.
-      # A Cerbos server enforcing a stricter ping policy answers with GOAWAY too_many_pings;
-      # grpc-java then backs the interval off by itself.
-      keepalive-time-seconds: ${CERBOS_KEEPALIVE_TIME_SECONDS:60}
-      keepalive-timeout-seconds: ${CERBOS_KEEPALIVE_TIMEOUT_SECONDS:10}
-      keepalive-without-calls: ${CERBOS_KEEPALIVE_WITHOUT_CALLS:true}
 
     # Security settings
     security:

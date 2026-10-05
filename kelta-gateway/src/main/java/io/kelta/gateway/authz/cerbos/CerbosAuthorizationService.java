@@ -3,12 +3,10 @@ package io.kelta.gateway.authz.cerbos;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.cerbos.sdk.CerbosBlockingClient;
-import dev.cerbos.sdk.CerbosException;
 import dev.cerbos.sdk.CheckResult;
 import dev.cerbos.sdk.builders.AttributeValue;
 import dev.cerbos.sdk.builders.Principal;
 import dev.cerbos.sdk.builders.Resource;
-import io.grpc.Status;
 import io.kelta.gateway.auth.GatewayPrincipal;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -18,8 +16,6 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -39,12 +35,6 @@ import java.util.concurrent.atomic.AtomicLong;
  * <h3>Fail-closed design</h3>
  * <p>All failures (timeouts, errors, circuit breaker open) result in deny.
  * Only successful Cerbos responses that return ALLOW are cached as {@code true}.
- *
- * <h3>Transient-failure retry</h3>
- * <p>A check that fails with {@code DEADLINE_EXCEEDED} / {@code UNAVAILABLE} (or the local
- * timeout) resets the channel's transport and is retried once — but only when the previous
- * check succeeded, so during an outage at most the first request of a failure streak pays
- * the second attempt. A second failure still denies.
  */
 @Service
 public class CerbosAuthorizationService {
@@ -66,7 +56,6 @@ public class CerbosAuthorizationService {
     private static final int CACHE_MAX_SIZE = 10_000;
 
     private final CerbosBlockingClient cerbosClient;
-    private final CerbosChannel cerbosChannel;
     private final ExecutorService cerbosExecutor;
 
     // Cache: key = "tenantId:profileId:permission" or "tenantId:profileId:collectionId:action"
@@ -81,10 +70,8 @@ public class CerbosAuthorizationService {
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
     private final AtomicLong circuitOpenUntil = new AtomicLong(0);
 
-    public CerbosAuthorizationService(CerbosBlockingClient cerbosClient, CerbosChannel cerbosChannel,
-                                      MeterRegistry meterRegistry) {
+    public CerbosAuthorizationService(CerbosBlockingClient cerbosClient, MeterRegistry meterRegistry) {
         this.cerbosClient = cerbosClient;
-        this.cerbosChannel = cerbosChannel;
         this.cerbosExecutor = Executors.newCachedThreadPool(r -> {
             Thread t = new Thread(r, "cerbos-check");
             t.setDaemon(true);
@@ -128,7 +115,7 @@ public class CerbosAuthorizationService {
         cacheMisses.increment();
 
         return Mono.fromCallable(() -> {
-            Callable<Boolean> check = () -> {
+            Future<Boolean> future = cerbosExecutor.submit(() -> {
                 Principal cerbosPrincipal = CerbosPrincipalBuilder.build(principal);
                 Resource resource = Resource.newInstance("system_feature", permissionName)
                         .withAttribute("featureName", AttributeValue.stringValue(permissionName))
@@ -136,21 +123,23 @@ public class CerbosAuthorizationService {
 
                 CheckResult result = cerbosClient.check(cerbosPrincipal, resource, permissionName);
                 return result.isAllowed(permissionName);
-            };
+            });
 
             try {
-                boolean allowed = checkWithRetry(check);
+                boolean allowed = future.get(CERBOS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 recordSuccess();
                 permissionCache.put(cacheKey, allowed);
                 log.debug("Cerbos system check: user={} permission={} allowed={}",
                         principal.getUsername(), permissionName, allowed);
                 return allowed;
             } catch (TimeoutException e) {
+                future.cancel(true);
                 recordFailure();
                 log.error("Cerbos system check timed out (fail-closed): user={} permission={}",
                         principal.getUsername(), permissionName);
                 return false;
             } catch (Exception e) {
+                future.cancel(true);
                 recordFailure();
                 log.error("Cerbos system check failed (fail-closed): user={} permission={} error={}",
                         principal.getUsername(), permissionName, e.getMessage());
@@ -184,7 +173,7 @@ public class CerbosAuthorizationService {
         cacheMisses.increment();
 
         return Mono.fromCallable(() -> {
-            Callable<Boolean> check = () -> {
+            Future<Boolean> future = cerbosExecutor.submit(() -> {
                 Principal cerbosPrincipal = CerbosPrincipalBuilder.build(principal);
                 Resource resource = Resource.newInstance("collection", collectionId)
                         .withAttribute("collectionId", AttributeValue.stringValue(collectionId))
@@ -192,21 +181,23 @@ public class CerbosAuthorizationService {
 
                 CheckResult result = cerbosClient.check(cerbosPrincipal, resource, action);
                 return result.isAllowed(action);
-            };
+            });
 
             try {
-                boolean allowed = checkWithRetry(check);
+                boolean allowed = future.get(CERBOS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 recordSuccess();
                 permissionCache.put(cacheKey, allowed);
                 log.debug("Cerbos object check: user={} collection={} action={} allowed={}",
                         principal.getUsername(), collectionId, action, allowed);
                 return allowed;
             } catch (TimeoutException e) {
+                future.cancel(true);
                 recordFailure();
                 log.error("Cerbos object check timed out (fail-closed): user={} collection={} action={}",
                         principal.getUsername(), collectionId, action);
                 return false;
             } catch (Exception e) {
+                future.cancel(true);
                 recordFailure();
                 log.error("Cerbos object check failed (fail-closed): user={} collection={} action={} error={}",
                         principal.getUsername(), collectionId, action, e.getMessage());
@@ -234,48 +225,6 @@ public class CerbosAuthorizationService {
             cacheEvictions.increment(evicted);
             log.info("Evicted {} cached permission entries for tenant {}", evicted, tenantId);
         }
-    }
-
-    // ── Cerbos call + transient retry ───────────────────────────────────
-
-    private boolean checkWithRetry(Callable<Boolean> check) throws Exception {
-        boolean retryAllowed = consecutiveFailures.get() == 0;
-        try {
-            return callOnce(check);
-        } catch (Exception e) {
-            if (!retryAllowed || !isTransient(e)) {
-                throw e;
-            }
-            log.warn("Cerbos check failed transiently ({}) — resetting connection and retrying once",
-                    e.getMessage());
-            cerbosChannel.resetConnection();
-            return callOnce(check);
-        }
-    }
-
-    private boolean callOnce(Callable<Boolean> check) throws Exception {
-        Future<Boolean> future = cerbosExecutor.submit(check);
-        try {
-            return future.get(CERBOS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            future.cancel(true);
-            throw e;
-        }
-    }
-
-    static boolean isTransient(Throwable e) {
-        if (e instanceof TimeoutException) {
-            return true;
-        }
-        Status.Code code = statusCode(e instanceof ExecutionException ? e.getCause() : e);
-        return code == Status.Code.DEADLINE_EXCEEDED || code == Status.Code.UNAVAILABLE;
-    }
-
-    private static Status.Code statusCode(Throwable e) {
-        if (e instanceof CerbosException ce) {
-            return Status.fromCodeValue(ce.getStatusCode()).getCode();
-        }
-        return Status.fromThrowable(e).getCode();
     }
 
     // ── Cache key builders ──────────────────────────────────────────────
