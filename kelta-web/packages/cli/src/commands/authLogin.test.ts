@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -188,6 +188,100 @@ describe('auth login — browser flow', () => {
     );
     expect(browserLoginMock).not.toHaveBeenCalled();
     expect(getToken('ci')).toBe('klt_manual1234567890');
+  });
+});
+
+describe('auth login — tenant binding of the active profile', () => {
+  function bindDefaultTo(tenant: string) {
+    saveConfig({
+      version: 1,
+      defaultProfile: 'default',
+      profiles: { default: { apiUrl: 'https://api.kelta.io', tenantSlug: tenant } },
+    });
+    setToken('default', 'klt_tenantA_original');
+  }
+
+  function storedFiles() {
+    return ['config.json', 'credentials.json'].map((f) => readFileSync(join(dir, '.kelta', f)));
+  }
+
+  function tokenLogin(tenant: string, token: string, profile?: string) {
+    return run(authCommands, 'login', { tenant, token, expiresIn: '90', browser: true }, profile);
+  }
+
+  it('refuses a login for another tenant without --profile and leaves the profile untouched', async () => {
+    bindDefaultTo('tenant-a');
+    const before = storedFiles();
+
+    const failure = tokenLogin('tenant-b', 'klt_tenantB_new').then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    await expect(failure).resolves.toMatchObject({
+      code: 'PROFILE_TENANT_MISMATCH',
+      exitCode: 2,
+    });
+    expect(((await failure) as Error).message).toContain('--profile tenant-b');
+    expect(storedFiles()).toEqual(before);
+    expect(getToken('default')).toBe('klt_tenantA_original');
+  });
+
+  it('refuses before the browser flow starts, so nothing is minted', async () => {
+    bindDefaultTo('tenant-a');
+    await expect(
+      run(authCommands, 'login', { tenant: 'tenant-b', expiresIn: '90', browser: true })
+    ).rejects.toMatchObject({ code: 'PROFILE_TENANT_MISMATCH' });
+    expect(browserLoginMock).not.toHaveBeenCalled();
+  });
+
+  it('re-login to the same tenant updates the active profile credential', async () => {
+    bindDefaultTo('tenant-a');
+    const result = await tokenLogin('tenant-a', 'klt_tenantA_refreshed');
+    expect(getToken('default')).toBe('klt_tenantA_refreshed');
+    expect(result.data).toMatchObject({ profile: 'default', tenant: 'tenant-a' });
+  });
+
+  it('an explicit --profile always wins, even over a profile bound to another tenant', async () => {
+    bindDefaultTo('tenant-a');
+    const result = await tokenLogin('tenant-b', 'klt_tenantB_new', 'default');
+    expect(getToken('default')).toBe('klt_tenantB_new');
+    expect(loadConfig().profiles.default?.tenantSlug).toBe('tenant-b');
+    expect(result.data).toMatchObject({ profile: 'default', tenant: 'tenant-b' });
+  });
+
+  it('KELTA_PROFILE counts as an explicit profile', async () => {
+    bindDefaultTo('tenant-a');
+    process.env.KELTA_PROFILE = 'default';
+    await tokenLogin('tenant-b', 'klt_tenantB_new');
+    expect(getToken('default')).toBe('klt_tenantB_new');
+    expect(loadConfig().profiles.default?.tenantSlug).toBe('tenant-b');
+  });
+
+  it('writes a fresh profile with no saved tenant without --profile', async () => {
+    const result = await run(authCommands, 'login', {
+      url: 'https://api.kelta.io',
+      tenant: 'tenant-b',
+      token: 'klt_tenantB_new',
+      expiresIn: '90',
+      browser: true,
+    });
+    expect(getToken('default')).toBe('klt_tenantB_new');
+    expect(loadConfig().profiles.default?.tenantSlug).toBe('tenant-b');
+    expect(result.data).toMatchObject({ profile: 'default' });
+    expect(result.message).toContain('profile "default"');
+  });
+
+  it('browser login output names the written profile', async () => {
+    bindDefaultTo('tenant-a');
+    browserLoginMock.mockResolvedValue({
+      token: 'klt_minted1234567890',
+      tokenPrefix: 'klt_mint',
+      expiresAt: '2026-11-04T00:00:00Z',
+      name: 'n',
+    });
+    const result = await run(authCommands, 'login', { expiresIn: '90', browser: true });
+    expect(result.data).toMatchObject({ profile: 'default', tenant: 'tenant-a' });
+    expect(result.message).toContain('profile "default"');
   });
 });
 

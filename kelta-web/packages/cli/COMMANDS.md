@@ -9,12 +9,14 @@ Full machine-readable catalog: `kelta manifest`.
 
 ## auth
 
+`kelta auth login` writes the profile named by `--profile` (or `KELTA_PROFILE`), otherwise the default profile. Without an explicit profile, a `--tenant` that differs from the default profile's saved tenant is refused (exit `2`, `PROFILE_TENANT_MISMATCH`) and nothing is changed — log in to the other tenant as its own profile with `--profile <name>`. Re-login to the same tenant, a profile with no saved tenant, and any explicit `--profile` are written as asked. The output names the profile that was written.
+
 ### `kelta auth login`
 
 Log in via the browser and store a PAT for a profile (--token for headless)
 
 - `--url <url>` — Kelta API URL (default: from the profile)
-- `--tenant <slug>` — Tenant slug (default: from the profile)
+- `--tenant <slug>` — Tenant slug (default: from the profile; a different tenant needs an explicit --profile)
 - `--auth-url <url>` — Auth server URL (default: profile value, or api.→auth. host derivation)
 - `--token <token>` — Skip the browser: store this PAT (klt_...) or JWT
 - `--expires-in <days>` — PAT lifetime in days (browser login) (default: "90")

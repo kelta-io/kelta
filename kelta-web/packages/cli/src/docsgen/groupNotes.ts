@@ -5,6 +5,14 @@
  * the `kelta manifest` machine catalog pinned by manifest.test.ts.
  */
 export const GROUP_NOTES: Record<string, string> = {
+  auth:
+    '`kelta auth login` writes the profile named by `--profile` (or `KELTA_PROFILE`), ' +
+    'otherwise the default profile. Without an explicit profile, a `--tenant` that ' +
+    "differs from the default profile's saved tenant is refused (exit `2`, " +
+    '`PROFILE_TENANT_MISMATCH`) and nothing is changed — log in to the other tenant ' +
+    'as its own profile with `--profile <name>`. Re-login to the same tenant, a ' +
+    'profile with no saved tenant, and any explicit `--profile` are written as asked. ' +
+    'The output names the profile that was written.',
   sandbox:
     'A sandbox is its own tenant with its own users, not a view into the parent ' +
     "tenant — the parent's PAT or session has no membership there and is refused " +
