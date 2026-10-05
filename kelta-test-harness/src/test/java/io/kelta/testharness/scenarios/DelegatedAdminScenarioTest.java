@@ -21,8 +21,8 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 /**
  * Delegated administration (V157) through the real stack (gateway → worker → Postgres + RLS),
  * exercised as a genuinely <em>non-admin</em> caller: a delegated user is seeded directly into
- * {@code platform_user} / {@code user_credential} (same BCrypt hash of "password" as the V102
- * admin seed) and logs in via the auth service's {@code /auth/direct-login}, so every request
+ * {@code platform_user} / {@code user_credential} (a BCrypt hash of "password" of its own) and
+ * logs in via the auth service's {@code /auth/direct-login}, so every request
  * carries a real Standard-User {@code X-User-Profile-Id} / {@code X-User-Email} stamped by the
  * gateway.
  *
@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 @DisplayName("Delegated Administration Scenario")
 class DelegatedAdminScenarioTest extends ScenarioBase {
 
-    /** BCrypt hash of "password" — same value V102 seeds for admin@kelta.local. */
+    /** BCrypt hash of "password", for this scenario's own seeded users. */
     private static final String PASSWORD_HASH =
             "$2a$10$zAQaSHX1XSR1bwUL3pz9EOzecplsxInVizZc9HwLf7xPluSiE1EP6";
 
@@ -386,7 +386,7 @@ class DelegatedAdminScenarioTest extends ScenarioBase {
 
     /**
      * Seeds an ACTIVE platform_user + user_credential (BCrypt of "password", no forced change)
-     * so the user can direct-login — the same shape the V102 admin seed uses.
+     * so the user can direct-login.
      */
     private String seedActiveUser(Connection db, String tenantId, String email, String profileId)
             throws Exception {

@@ -1564,6 +1564,29 @@ the rest of the email pipeline. `kelta-auth`'s `WorkerClient.sendInviteEmail`
 calls this endpoint after a federated user is newly JIT-provisioned, so SSO
 sign-ups receive a notification email in addition to their existing session.
 
+### First-boot platform admin credential
+
+The Flyway baseline seeds the platform tenant (`00000000-0000-0000-0000-000000000001`, slug
+`default`) with `admin@kelta.local` on BCrypt(`password`). kelta-auth's
+`config/BaselineAdminPasswordInitializer` (`ApplicationRunner`, `@Order(20)`, no tenant bound → the
+platform session) replaces it on boot:
+
+1. Read the account's `user_credential.password_hash`. Anything but the exact baseline string →
+   return silently (an admin who changed it, a later boot, a fresh install already handled).
+2. New password = `kelta.auth.bootstrap-admin-password` (`KELTA_BOOTSTRAP_ADMIN_PASSWORD`) if set,
+   else 24 chars from `SecureRandom`; encoded with the service's `PasswordEncoder` (`{bcrypt}…`).
+3. `UPDATE user_credential SET password_hash = ?, force_change_on_login = true,
+   password_changed_at = now() … WHERE user_id = ? AND password_hash = <baseline>`. The row count
+   is the replica election: 0 rows → another pod won, log nothing.
+4. On 1 row: delete the account's `oauth2_authorization` rows, then log **one** WARN — the
+   password banner if generated (the only place it is ever shown), or "applied from
+   KELTA_BOOTSTRAP_ADMIN_PASSWORD" without the value.
+
+The admin then signs in, `KeltaUserDetails.isCredentialsNonExpired()` is false, and form login
+redirects to `/change-password` (`ForcePasswordChangeController`); `/auth/direct-login` answers
+403 `credentials_expired`. Covered by `BaselineAdminPasswordInitializerTest` (unit, incl. the
+0-row path) and `BaselineAdminPasswordIntegrationTest` (Testcontainers, real migrations).
+
 ### Scheduled flow cron handling
 
 SCHEDULED flows carry their schedule in `triggerConfig.cron`. The worker bridges

@@ -17,7 +17,7 @@ Boots a full mini-stack (Postgres, Redis, NATS, Cerbos, worker, auth, gateway) v
 
 **Standalone `*IT.java`** also run under that profile without the full stack. `CerbosGeneratedPolicyIT` starts only a Cerbos container (sqlite in-memory + admin API, pinned to the production image), pushes the worker's golden generated policies (`kelta-worker/src/test/resources/cerbos/golden/`, kept in sync with `CerbosPolicyGenerator` by `CerbosPolicyGeneratorTest.GoldenFixtureTests`) and asserts an allow/deny matrix — the pattern for "a real PDP must accept and evaluate what we generate", since the KeltaStack Cerbos is allow-all. Run one with `mvn verify -f kelta-test-harness/pom.xml -Pintegration-tests -Dit.test=CerbosGeneratedPolicyIT`.
 
-**Service-module Testcontainers tests** (`*IntegrationTest` in kelta-worker, kelta-ai and
+**Service-module Testcontainers tests** (`*IntegrationTest` in kelta-worker, kelta-ai, kelta-auth and
 runtime-core — e.g. `RowLevelSecurityIntegrationTest`) run under plain surefire, not the
 harness profile, and are `@Testcontainers(disabledWithoutDocker = true)`: without a usable Docker
 they are **skipped**, not failed. In CI that is caught by `scripts/ci/assert-integration-tests-ran.sh`,
@@ -26,10 +26,25 @@ which fails the job when an `*IntegrationTest` suite skipped every test; CI also
 Testcontainers otherwise reports Docker as unavailable. Locally on Docker Engine 29+, Testcontainers
 1.20.4 fails its API handshake (it speaks API 1.32; the engine's minimum is 1.40) and skips too —
 run with `-Dapi.version=1.44` (e.g. `JAVA_TOOL_OPTIONS=-Dapi.version=1.44`) until the dependency is
-bumped. (kelta-auth and kelta-gateway are different: their poms exclude `*IntegrationTest` from
-surefire and run them only via failsafe under `-Pintegration-tests`, which the CI `test-java` job
-does not activate — so those suites, including auth's `TenantBindingIntegrationTest`, do not run
-in CI at all; see `concerns.md` → Test Coverage Gaps.)
+bumped. (kelta-gateway is different: its pom excludes `*IntegrationTest` from surefire and runs
+them only via failsafe under `-Pintegration-tests`, which the CI `test-java` job does not activate —
+so those suites do not run in CI at all; see `concerns.md` → Test Coverage Gaps. kelta-auth's
+`BaselineAdminPasswordIntegrationTest` migrates its database from kelta-worker's real migration
+directory via a `filesystem:` Flyway location, so it needs the whole repo checked out.)
+
+**How the harness signs in as the platform admin.** kelta-auth replaces the Flyway baseline's
+`admin@kelta.local` password on first boot (`BaselineAdminPasswordInitializer`), so nothing signs in
+with `password` any more. `KeltaStack` starts kelta-auth with `KELTA_BOOTSTRAP_ADMIN_PASSWORD` =
+`AuthFixture.BOOTSTRAP_ADMIN_PASSWORD`, which carries a forced change; the first
+`AuthFixture.loginAsAdmin()` for the `default` tenant calls `ensurePlatformAdminPassword()`, which
+completes that change once per JVM through the real `/login` → `/change-password` form (CSRF token
+scraped from the page, cookies carried by hand) and from then on signs in with
+`AuthFixture.PLATFORM_ADMIN_PASSWORD`. There is **no** test-only switch that skips
+`force_change_on_login`, and none should be added. Scenarios that seed their *own* users with a
+BCrypt(`password`) hash (`DelegatedAdminScenarioTest`, `UserPreferenceScenarioTest`, …) are
+unaffected. CI's compose stacks do the same with `ci/admin-first-sign-in.sh`: the `e2e` job sets
+`KELTA_BOOTSTRAP_ADMIN_PASSWORD` and changes it to the password Playwright uses
+(`E2E_TEST_PASSWORD`).
 
 **When the stack won't start**: `KeltaStack.startService(...)` prints the tail of a service
 container's log before rethrowing. The wait strategy is an HTTP probe on `/actuator/health`,
@@ -175,9 +190,12 @@ matchers asserting the on-the-wire JSON:API body (see `conventions.md` → MCP t
 section actually works and stays fast, rather than trusting docs to stay in sync with the
 compose file by hand. It builds the JVM-mode images (`docker-compose.yml` + `docker-compose.ci.yml`
 — same port-safe overlay the `e2e` job uses, for the shared k8s-runner daemon), then wraps
-`ci/quickstart-run.sh` (`docker compose up -d --wait`, then a login + first-collection-creation
-check piped over stdin into a `curlimages/curl` sibling container on the compose network — via
-`kelta-auth`'s `/auth/direct-login` and a `POST` to `/api/collections`, `ci/quickstart-check.sh`)
+`ci/quickstart-run.sh` (`docker compose up -d --wait`; read the platform admin's first-boot
+password from `docker compose logs kelta-auth` the way `quickstart.md` tells a new user to — no
+`KELTA_BOOTSTRAP_ADMIN_PASSWORD` here, on purpose; complete the forced change with
+`ci/admin-first-sign-in.sh`; then a login + first-collection-creation check, each piped over stdin
+into a `curlimages/curl` sibling container on the compose network — via `kelta-auth`'s
+`/auth/direct-login` and a `POST` to `/api/collections`, `ci/quickstart-check.sh`)
 in `timeout 300`. The check script goes in over **stdin, not a bind mount** — Docker on
 `k8s-runner-integration` is remote and can't see the runner's filesystem (same reason
 `docker-compose.ci.yml` bakes cerbos config into an image instead of mounting it). Only the wall

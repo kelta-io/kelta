@@ -1384,13 +1384,15 @@ Regression guard: `TenantAwareDataSourceTest` (runtime-core, beside the class si
   `scripts/ci/assert-integration-tests-ran.sh` fails the job if any `*IntegrationTest` suite skips
   every test, so a runner change cannot quietly turn them off again. Known local caveat: Docker
   Engine 29+ needs `-Dapi.version=1.44` with Testcontainers 1.20.4 (`testing.md`).
-- **OPEN — kelta-auth and kelta-gateway integration tests never run in CI.** Both poms exclude
-  `**/*IntegrationTest.java` from surefire and run them only through failsafe with `skipITs`
+- **OPEN — kelta-gateway integration tests never run in CI.** Its pom excludes
+  `**/*IntegrationTest.java` from surefire and runs them only through failsafe with `skipITs`
   flipped by the `integration-tests` profile, which `test-java`'s `mvn verify -f kelta-<svc>/pom.xml`
-  does not activate. That covers auth's `TenantBindingIntegrationTest` (Testcontainers) and
-  gateway's ~14 `*IntegrationTest` classes — not skipped, never attempted, so
-  `assert-integration-tests-ran.sh` finds no report to judge. Fix: run those two with
-  `-Pintegration-tests` (expect some suites to need attention first).
+  does not activate — gateway's ~14 `*IntegrationTest` classes are not skipped, never attempted, so
+  `assert-integration-tests-ran.sh` finds no report to judge. Fix: run it with `-Pintegration-tests`
+  (expect some suites to need attention first). **kelta-auth was fixed by PLT-343:** its surefire no
+  longer excludes `*IntegrationTest` (as in worker/ai), and its `test-java` leg moved to
+  `k8s-runner-integration`, so `TenantBindingIntegrationTest` and `BaselineAdminPasswordIntegrationTest`
+  run and are checked for wholesale skips.
 
 - **FIXED (2026-09-15) — nothing validated the workflow files, and a broken one produces
   *silence*, not a red build.** Adding a `secrets` context to an `if:` condition made `ci.yml`
@@ -1779,11 +1781,44 @@ force-change flow and take the tenant over. Sandboxes were already safe
   writes a harness-only `{bcrypt}` secret over JDBC after provisioning (the ecommerce fixture
   calls it on seed and on rerun).
 
-**Still open — for the ceo to decide:** the Flyway baseline (`V1__baseline.sql`) seeds the
-platform tenant's `admin@kelta.local` (tenant `00000000-0000-0000-0000-000000000001`) with the
-same `password` hash and `force_change_on_login = false`. V204's predicate deliberately leaves it
-alone (CI e2e and the harness sign in with it), so whether production's platform admin still
-carries the baseline hash needs checking by hand:
-`SELECT 1 FROM user_credential uc JOIN platform_user pu ON pu.id = uc.user_id WHERE pu.email = 'admin@kelta.local' AND uc.password_hash = '$2a$10$zAQaSHX1XSR1bwUL3pz9EOzecplsxInVizZc9HwLf7xPluSiE1EP6';`
+**Resolved by PLT-343 (2026-10-05):** the Flyway baseline (`V1__baseline.sql`) seeds the
+platform tenant's `admin@kelta.local` with the same `password` hash and
+`force_change_on_login = false`, which V204's predicate deliberately leaves alone. kelta-auth now
+replaces it on first boot — see the next section.
 A bootstrap PAT for a new tenant's admin (MANAGE_TENANTS-gated, short-lived, usable only in
 that tenant) is a planned follow-up, not part of PLT-337.
+
+## The platform admin shipped with a well-known password (found 2026-10-04; PLT-343)
+
+**Symptom:** every fresh install — quickstart, self-hosted, a new CI stack — started with the
+platform tenant's `admin@kelta.local`, which can manage every tenant, on BCrypt(`password`)
+with no forced change (the `V1__baseline.sql` seed). Production's platform admin still had it on
+2026-10-04 and was fixed by hand.
+
+**Fix — `BaselineAdminPasswordInitializer` (kelta-auth `ApplicationRunner`, no migration):** on
+every boot it reads the platform admin's stored hash; only when it is *exactly* the baseline string
+(a string compare — never a BCrypt match) does it swap in `KELTA_BOOTSTRAP_ADMIN_PASSWORD` or a
+24-char `SecureRandom` password, with `force_change_on_login = true`, in one
+`UPDATE … WHERE user_id = ? AND password_hash = <baseline>`. Only the replica whose update changed
+the row logs: one WARN naming the account and the action — for a generated password that WARN is
+the banner carrying the password, printed once; a configured value is never logged. It also
+deletes the account's stored `oauth2_authorization` rows. Existing installs still on the baseline
+take the same path on their next deploy. See `architecture.md` → First-boot platform admin
+credential.
+
+**Residual risks:**
+- A generated password is in the first boot's kelta-auth log, which in a cluster is shipped to
+  log aggregation (Loki). It forces a change at first sign-in, so it is only useful until then;
+  production should set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` from the secret store instead.
+- HTTP sessions are not revoked: Spring Session's Redis store is the non-indexed repository, so
+  sessions cannot be found by principal. Any session signed in with the baseline password before
+  the swap lives out its 8h timeout. Direct-login JWTs (stateless) likewise run to expiry.
+- `oauth2_authorization.principal_name` carries no tenant, so the revocation also signs out a
+  same-named `admin@kelta.local`/`admin` user of another tenant, once.
+- `ForcePasswordChangeController` updates the credential of *every* ACTIVE user with the submitted
+  email or username; only the login session's tenant binding (RLS) keeps that to one tenant.
+
+**No test-only opt-out.** There is no setting that skips `force_change_on_login`. The harness and
+CI set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` and complete the forced change through the real form
+(`AuthFixture.ensurePlatformAdminPassword`, `ci/admin-first-sign-in.sh`); the quickstart job reads
+the banner. See `testing.md`.

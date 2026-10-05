@@ -33,6 +33,13 @@ public class AuthProperties {
 
     private Saml saml = new Saml();
 
+    /**
+     * Initial password for the Flyway baseline's platform admin ({@code admin@kelta.local}),
+     * applied once by {@link BaselineAdminPasswordInitializer} while the account still carries
+     * the baseline hash. Blank generates one and prints it once in the auth log.
+     */
+    private String bootstrapAdminPassword;
+
     public String getIssuerUri() { return issuerUri; }
     public void setIssuerUri(String issuerUri) { this.issuerUri = issuerUri; }
 
@@ -68,6 +75,11 @@ public class AuthProperties {
     public DirectLogin getDirectLogin() { return directLogin; }
     public void setDirectLogin(DirectLogin directLogin) {
         this.directLogin = (directLogin != null) ? directLogin : new DirectLogin();
+    }
+
+    public String getBootstrapAdminPassword() { return bootstrapAdminPassword; }
+    public void setBootstrapAdminPassword(String bootstrapAdminPassword) {
+        this.bootstrapAdminPassword = bootstrapAdminPassword;
     }
 
     public Saml getSaml() { return saml; }

@@ -69,8 +69,8 @@ jobs:
   test-java:
     name: Test ${{ matrix.service }}
     needs: changes
-    # Services with Testcontainers ITs (worker: RowLevelSecurityIntegrationTest; ai:
-    # TenantBindingIntegrationTest) run on k8s-runner-integration, like the harness job: its
+    # Services with Testcontainers ITs (worker: RowLevelSecurityIntegrationTest; ai and auth:
+    # TenantBindingIntegrationTest; auth: BaselineAdminPasswordIntegrationTest) run on k8s-runner-integration, like the harness job: its
     # Docker publishes container ports where the job can reach them. On k8s-runner the container
     # starts but getHost():getMappedPort() is "Connection refused" — those suites used to be
     # skipped instead. Services without Testcontainers stay on the lighter k8s-runner.
@@ -87,7 +87,7 @@ jobs:
             runner: k8s-runner-integration
           - service: auth
             changed: ${{ needs.changes.outputs.auth }}
-            runner: k8s-runner
+            runner: k8s-runner-integration
           - service: ai
             changed: ${{ needs.changes.outputs.ai }}
             runner: k8s-runner-integration
@@ -574,6 +574,11 @@ jobs:
       cancel-in-progress: true
     env:
       COMPOSE_PROJECT_NAME: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      # CI-only literals. kelta-auth applies the first on first boot with a forced change
+      # (docker-compose.yml passes it through); "Complete platform admin first sign-in"
+      # changes it to the second, which Playwright signs in with.
+      KELTA_BOOTSTRAP_ADMIN_PASSWORD: ci-bootstrap-admin-secret
+      E2E_ADMIN_PASSWORD: ci-e2e-admin-secret
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -613,6 +618,13 @@ jobs:
         run: |
           docker compose -f docker-compose.yml -f docker-compose.ci.yml \
             --profile seed run --rm kelta-bootstrap
+
+      - name: Complete platform admin first sign-in (forced password change)
+        run: |
+          docker run --rm -i --network "${COMPOSE_PROJECT_NAME}_kelta-network" \
+            -e INITIAL_PASSWORD="$KELTA_BOOTSTRAP_ADMIN_PASSWORD" \
+            -e NEW_PASSWORD="$E2E_ADMIN_PASSWORD" \
+            curlimages/curl:8.11.0 sh < ci/admin-first-sign-in.sh
 
       - name: Build Playwright runner image (tests + CLI baked in)
         # Bake e2e-tests + node_modules into a runner image. Bind-mounting the
@@ -656,7 +668,7 @@ jobs:
             -e E2E_REAL_SIGN_IN=true \
             -e E2E_TENANT_SLUG=default \
             -e E2E_TEST_USERNAME=admin \
-            -e E2E_TEST_PASSWORD=password \
+            -e E2E_TEST_PASSWORD="$E2E_ADMIN_PASSWORD" \
             kelta-e2e-runner:local \
             npx playwright test
 

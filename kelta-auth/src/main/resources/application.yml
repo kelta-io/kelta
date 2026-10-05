@@ -75,6 +75,11 @@ kelta:
     # Enable direct login endpoint for programmatic auth (e2e tests)
     direct-login:
       enabled: ${DIRECT_LOGIN_ENABLED:false}
+    # Initial password for the Flyway baseline's platform admin (admin@kelta.local). Applied
+    # once, on the first boot that finds the account on the baseline's well-known hash, and
+    # the admin must change it at first sign-in. Blank: a random one is generated and printed
+    # once in the kelta-auth log (BaselineAdminPasswordInitializer).
+    bootstrap-admin-password: ${KELTA_BOOTSTRAP_ADMIN_PASSWORD:}
   internal:
     token: ${KELTA_INTERNAL_TOKEN:}
     # Connected app: Superset OAuth2 client registration

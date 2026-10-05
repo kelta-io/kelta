@@ -217,6 +217,19 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- Flyway: BaselineAdminPasswordIntegrationTest migrates a fresh database from
+             kelta-worker's migrations, the schema a new install boots against -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <repositories>
@@ -249,8 +262,9 @@
                     <printSummary>true</printSummary>
                     <reportsDirectory>${project.build.directory}/surefire-reports</reportsDirectory>
                     <excludedGroups>integration</excludedGroups>
+                    <!-- *IntegrationTest (Testcontainers, skipped without Docker) runs here, as in
+                         kelta-worker and kelta-ai, so CI's assert-integration-tests-ran.sh sees it -->
                     <excludes>
-                        <exclude>**/*IntegrationTest.java</exclude>
                         <exclude>**/integration/**/*Test.java</exclude>
                     </excludes>
                     <parallel>classes</parallel>

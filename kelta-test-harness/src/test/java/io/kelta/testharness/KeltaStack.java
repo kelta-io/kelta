@@ -1,5 +1,6 @@
 package io.kelta.testharness;
 
+import io.kelta.testharness.fixtures.AuthFixture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
@@ -223,6 +224,9 @@ public final class KeltaStack {
             .withEnv("UI_BASE_URL",               "http://localhost:5173")
             .withEnv("CORS_ALLOWED_ORIGINS",      "http://localhost:5173")
             .withEnv("DIRECT_LOGIN_ENABLED",      "true")
+            // Replaces the baseline platform admin's well-known password on first boot, with a
+            // forced change that AuthFixture completes once (BaselineAdminPasswordInitializer).
+            .withEnv("KELTA_BOOTSTRAP_ADMIN_PASSWORD", AuthFixture.BOOTSTRAP_ADMIN_PASSWORD)
             .withExposedPorts(8080)
             .waitingFor(Wait.forHttp("/actuator/health").withStartupTimeout(Duration.ofMinutes(2)));
 
