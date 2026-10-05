@@ -2,6 +2,7 @@ package io.kelta.worker.filter;
 
 import io.kelta.runtime.context.GeoContext;
 import io.kelta.runtime.context.GeoHeaders;
+import io.kelta.runtime.context.RequestAuthentication;
 import io.kelta.runtime.context.TenantContext;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -28,6 +29,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * headers, the parsed {@link io.kelta.runtime.context.GeoStamp} is bound to
  * {@link GeoContext#CURRENT_GEO} in the same scope.
  *
+ * <p>Every request also binds {@link RequestAuthentication#CURRENT}: {@code AUTHENTICATED} when
+ * the gateway forwarded an {@code X-User-Id} (it strips client-supplied copies), else
+ * {@code ANONYMOUS}. That is the opt-in that makes {@code PhysicalTableStorageAdapter} fail
+ * closed on an anonymous, tenant-less read of a tenant-scoped system collection instead of
+ * returning every tenant's rows.
+ *
  * <p>Runs with highest precedence so TenantContext is available to all
  * downstream filters and controllers.
  */
@@ -37,6 +44,7 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
     private static final String X_TENANT_ID_HEADER = "X-Tenant-ID";
     private static final String X_TENANT_SLUG_HEADER = "X-Tenant-Slug";
+    private static final String X_USER_ID_HEADER = "X-User-Id";
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -44,21 +52,20 @@ public class TenantContextFilter extends OncePerRequestFilter {
         String tenantId = request.getHeader(X_TENANT_ID_HEADER);
         String tenantSlug = request.getHeader(X_TENANT_SLUG_HEADER);
 
+        String userId = request.getHeader(X_USER_ID_HEADER);
+
         boolean hasTenant = tenantId != null && !tenantId.isBlank();
         boolean hasSlug = tenantSlug != null && !tenantSlug.isBlank();
 
-        if (!hasTenant && !hasSlug) {
-            filterChain.doFilter(request, response);
-            return;
+        ScopedValue.Carrier carrier = ScopedValue.where(RequestAuthentication.CURRENT,
+                userId != null && !userId.isBlank()
+                        ? RequestAuthentication.AUTHENTICATED
+                        : RequestAuthentication.ANONYMOUS);
+        if (hasTenant) {
+            carrier = carrier.where(TenantContext.CURRENT_TENANT, tenantId);
         }
-
-        ScopedValue.Carrier carrier = hasTenant
-                ? ScopedValue.where(TenantContext.CURRENT_TENANT, tenantId)
-                : null;
         if (hasSlug) {
-            carrier = (carrier == null)
-                    ? ScopedValue.where(TenantContext.CURRENT_TENANT_SLUG, tenantSlug)
-                    : carrier.where(TenantContext.CURRENT_TENANT_SLUG, tenantSlug);
+            carrier = carrier.where(TenantContext.CURRENT_TENANT_SLUG, tenantSlug);
         }
         // Bind the gateway-attested request-origin geolocation alongside the tenant so
         // Cerbos principal building and record stamping can read it without the request.

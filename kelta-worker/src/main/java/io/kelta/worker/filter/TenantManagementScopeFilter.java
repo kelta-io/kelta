@@ -1,5 +1,6 @@
 package io.kelta.worker.filter;
 
+import io.kelta.runtime.context.RequestAuthentication;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -26,7 +27,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * requires for a full listing and for every write):
  * <ul>
  *   <li>{@code GET /api/tenants} runs with the tenant <b>unbound</b> — the platform path,
- *       which also selects RLS {@code admin_bypass} for the request;</li>
+ *       which also selects RLS {@code admin_bypass} for the request, and is marked
+ *       {@link RequestAuthentication#PLATFORM_SCOPED} so the cross-tenant read logs at DEBUG
+ *       rather than as a possible leak;</li>
  *   <li>{@code /api/tenants/{id}} (any method) runs bound to <b>{@code id}</b>, the tenant
  *       being managed, so the self-scope admits that one row and the change is attributed to
  *       that tenant.</li>
@@ -73,7 +76,11 @@ public class TenantManagementScopeFilter extends OncePerRequestFilter {
 
         AtomicReference<IOException> ioErr = new AtomicReference<>();
         AtomicReference<ServletException> servletErr = new AtomicReference<>();
-        ScopedValue.where(TenantContext.CURRENT_TENANT, managedTenantId).run(() -> {
+        ScopedValue.Carrier carrier = ScopedValue.where(TenantContext.CURRENT_TENANT, managedTenantId);
+        if (managedTenantId == null) {
+            carrier = carrier.where(RequestAuthentication.CURRENT, RequestAuthentication.PLATFORM_SCOPED);
+        }
+        carrier.run(() -> {
             try {
                 filterChain.doFilter(request, response);
             } catch (IOException e) {

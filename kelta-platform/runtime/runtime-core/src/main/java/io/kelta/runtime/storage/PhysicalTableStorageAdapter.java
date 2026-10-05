@@ -1,5 +1,6 @@
 package io.kelta.runtime.storage;
 
+import io.kelta.runtime.context.RequestAuthentication;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
@@ -675,6 +676,9 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
 
     @Override
     public Optional<Map<String, Object>> getById(CollectionDefinition definition, String id) {
+        if (refusesAnonymousRead(definition)) {
+            return Optional.empty();
+        }
         TableRef tableRef = getTableRef(definition);
         String sql = "SELECT * FROM " + tableRef.toSql() + " WHERE id = ?";
         List<Object> params = new ArrayList<>();
@@ -1105,6 +1109,9 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
      */
     private record TenantScope(String sql, List<Object> params) {}
 
+    /** Matches no row: an anonymous request with no tenant reads nothing, rather than everything. */
+    private static final TenantScope NO_ROWS = new TenantScope("FALSE", List.of());
+
     /**
      * The tenant predicate for a read of {@code definition}, or {@code null} when none applies.
      *
@@ -1122,6 +1129,9 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
      * have no {@code tenant_id} column — each row is a tenant — so they are narrowed by primary
      * key, {@code id = caller}, without the column introspection.
      *
+     * <p>With no tenant bound, an {@link RequestAuthentication#ANONYMOUS anonymous} request gets
+     * {@link #NO_ROWS} — see {@link #refusesAnonymousRead}.
+     *
      * @param definition the collection being read
      * @param tableRef its resolved table
      * @return the predicate to AND in, or {@code null} when the read needs no tenant narrowing
@@ -1133,6 +1143,9 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         }
         String tenantId = TenantContext.get();
         if (tenantId == null || tenantId.isBlank()) {
+            if (refusesAnonymousRead(definition)) {
+                return NO_ROWS;
+            }
             warnUnscopedRead(definition);
             return null;
         }
@@ -1185,6 +1198,11 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
      */
     private void warnUnscopedRead(CollectionDefinition definition) {
         String threadName = Thread.currentThread().getName();
+        if (RequestAuthentication.current() == RequestAuthentication.PLATFORM_SCOPED) {
+            log.debug("Tenant-scoped system collection '{}' read with no tenant context by a "
+                    + "platform-scoped request — not tenant-filtered", definition.name());
+            return;
+        }
         if (isSchedulerThread(threadName)) {
             log.debug("Tenant-scoped system collection '{}' read with no tenant context on scheduler "
                     + "thread '{}' — not tenant-filtered", definition.name(), threadName);
@@ -1193,6 +1211,31 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         log.warn("Tenant-scoped system collection '{}' read with no tenant context on thread '{}' — "
                         + "the query is NOT tenant-filtered and returns rows from every tenant",
                 definition.name(), threadName);
+    }
+
+    /**
+     * Whether a read of {@code definition} must fail closed: the collection is tenant- or
+     * self-scoped, no tenant is bound, and the request carries no authenticated principal.
+     * Defence in depth behind the gateway's 404 for public reads that resolve no tenant
+     * (kelta#1617): such a read used to return every tenant's rows. Only a bound
+     * {@link RequestAuthentication#ANONYMOUS} opts in — unbound contexts (scheduler, bootstrap,
+     * Flyway) keep reading across tenants.
+     */
+    private static boolean refusesAnonymousRead(CollectionDefinition definition) {
+        if (RequestAuthentication.current() != RequestAuthentication.ANONYMOUS) {
+            return false;
+        }
+        if (!SystemCollectionTenancy.isSelfScoped(definition)
+                && !SystemCollectionTenancy.isTenantScoped(definition)) {
+            return false;
+        }
+        String tenantId = TenantContext.get();
+        if (tenantId != null && !tenantId.isBlank()) {
+            return false;
+        }
+        log.info("Anonymous request with no tenant read tenant-scoped system collection '{}' — "
+                + "refused, returning no rows", definition.name());
+        return true;
     }
 
     private static boolean isSchedulerThread(String threadName) {

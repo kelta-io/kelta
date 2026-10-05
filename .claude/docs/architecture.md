@@ -823,7 +823,9 @@ for it, not just a `ScopedValue`.
   the caller's tenant. `tenants` is never served from `SystemCollectionCache`, whose key is the
   `X-Tenant-ID` header rather than the bound context. A collection whose table has no `tenant_id` column is left alone (eleven of
   them hang off a parent FK), and an unbound read is left unfiltered but logged at WARN off
-  scheduler threads. `injectTenantFilter` keeps adding the same predicate at the router as a
+  scheduler threads — except on an **anonymous** HTTP request (`RequestAuthentication.ANONYMOUS`,
+  bound by `TenantContextFilter` when no `X-User-Id` arrived), where it fails closed to
+  `WHERE FALSE` / an empty `getById` (PLT-354). `injectTenantFilter` keeps adding the same predicate at the router as a
   second layer; get-by-id applies the rule after the fetch (`visibleToTenant`: another
   tenant's row → 404, never a 403 existence oracle) and is still router-only. RLS enforces
   the real boundary underneath (strict per-tenant `tenant_isolation` policy — the
