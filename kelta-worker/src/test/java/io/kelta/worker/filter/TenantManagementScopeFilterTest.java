@@ -1,5 +1,6 @@
 package io.kelta.worker.filter;
 
+import io.kelta.runtime.context.RequestAuthentication;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -125,5 +126,26 @@ class TenantManagementScopeFilterTest {
             after.set(TenantContext.get());
         });
         assertTrue(ADMIN_TENANT.equals(after.get()));
+    }
+
+    @Test
+    @DisplayName("PLT-354: the unbound listing is marked platform-scoped; managed-tenant reads are not")
+    void unboundListingIsPlatformScoped() throws Exception {
+        assertEquals(RequestAuthentication.PLATFORM_SCOPED, authSeenBy("/api/tenants"));
+        assertEquals(RequestAuthentication.AUTHENTICATED, authSeenBy("/api/tenants/" + OTHER_TENANT));
+    }
+
+    private RequestAuthentication authSeenBy(String path) throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+        request.addHeader("X-User-Profile-Id", ADMIN_PROFILE);
+        AtomicReference<RequestAuthentication> seen = new AtomicReference<>();
+        ScopedValue.where(RequestAuthentication.CURRENT, RequestAuthentication.AUTHENTICATED)
+                .where(TenantContext.CURRENT_TENANT, ADMIN_TENANT)
+                .call(() -> {
+                    filter.doFilter(request, new MockHttpServletResponse(),
+                            (req, res) -> seen.set(RequestAuthentication.current()));
+                    return null;
+                });
+        return seen.get();
     }
 }

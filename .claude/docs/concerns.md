@@ -54,7 +54,23 @@ Reads with **no tenant bound** are left unfiltered — that is the platform path
 bootstrap) and the RLS `admin_bypass` sentinel depends on it. To keep that from hiding the next
 bug, the adapter logs a WARN naming the collection and the thread whenever a tenant-scoped
 system collection is read with no tenant context, demoted to DEBUG on scheduler threads
-(`scheduler-`, `scheduling-`), where cross-tenant sweeps run unbound by design.
+(`scheduler-`, `scheduling-`), where cross-tenant sweeps run unbound by design, and on a
+`MANAGE_TENANTS` listing of `tenants` (`TenantManagementScopeFilter` marks it
+`RequestAuthentication.PLATFORM_SCOPED`), so WARN keeps meaning "possible leak".
+
+**Anonymous no-tenant reads fail closed in the worker (2026-10-05, PLT-354).** Defence in depth
+behind the gateway's 404 for public bootstrap reads that resolve no tenant (kelta#1617): before
+it, 28 WARNs in 30 h showed anonymous `ui-pages`, `ui-menus`, `ui-menu-items`,
+`ui-translations` and `oidc-providers` reads with no tenant returning several tenants' rows. The
+worker's `TenantContextFilter` now binds `RequestAuthentication.CURRENT` on every HTTP request
+(`AUTHENTICATED` when the gateway forwarded `X-User-Id`, else `ANONYMOUS`), and
+`PhysicalTableStorageAdapter.refusesAnonymousRead` turns an `ANONYMOUS`, tenant-less read of any
+collection `SystemCollectionTenancy.isTenantScoped`/`isSelfScoped` names into `WHERE FALSE`
+(list, count, aggregate, semantic search) or an empty `getById` with no SQL — logged at INFO,
+never run unscoped. Binding the marker is the opt-in: scheduler, NATS-consumer, bootstrap and
+Flyway paths leave it unbound and keep reading across tenants, so no thread-name heuristic was
+widened. An authenticated no-tenant read still runs unscoped and WARNs as before. Covered by
+`PhysicalTableStorageAdapterAnonymousReadTest` and `TenantContextFilterTest`.
 
 Relationship to RLS: with `NOBYPASSRLS` in force (see the entry below) Postgres now refuses
 these reads at the database as well. This is the application-layer half — the platform should
