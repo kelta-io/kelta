@@ -52,7 +52,7 @@ Order values below are the live `getOrder()` returns from source (lower runs fir
 | -390 | ClientIpForwardingFilter | Stamp `X-Kelta-Client-Ip` with the `ClientIpResolver` result for downstream services |
 | -310 | CustomDomainFilter | Map custom domain → tenant |
 | -300 | TenantSlugExtractionFilter | Extract tenant slug from URL |
-| -200 | TenantResolutionFilter | Resolve slug → tenant ID |
+| -200 | TenantResolutionFilter | Settle the tenant (URL wins; header is only a claim) and strip client `X-Tenant-*` — see Tenant resolution rules |
 | -150 | IpRateLimitFilter | Per-IP rate limiting on configured public path prefixes (Redis-backed, shared across replicas) |
 | -100 | JwtAuthenticationFilter | Validate JWT |
 | -99 | PatAuthenticationFilter | Validate PAT (`klt_`) as JWT alternative |
@@ -69,6 +69,34 @@ Cross-cutting (off main path): `ObservabilityContextFilter (-90)`, `HttpBodyCapt
 (-80)`, `SystemCollectionResponseCacheFilter (-10)`, `RequestLoggingFilter (MAX)`. `?include=`
 resolution is done by `IncludeResolver` (`jsonapi` package), not a numbered filter; read-side
 FLS is enforced in the worker (`CerbosFieldSecurityAdvice`), not the gateway.
+
+### Tenant resolution rules (PLT-355)
+
+The tenant a request runs under is decided in this order, and only the gateway decides it:
+
+1. **URL** — a verified custom domain (`CustomDomainFilter`, the id is resolved from its slug in
+   `TenantResolutionFilter`) or the `/{slug}/...` prefix (`TenantSlugExtractionFilter`). This is
+   authoritative. A client `X-Tenant-ID` / `X-Tenant-Slug` is ignored, even when the slug is
+   slug-shaped but unknown (the request then has no tenant).
+2. **Header claim** — only when the URL named no tenant: `X-Tenant-ID`, else `X-Tenant-Slug`
+   resolved to its id (an `X-Tenant-Slug` that names a different tenant than `X-Tenant-ID` is
+   dropped). The exchange is marked `tenantSource=header`
+   (`TenantResolutionFilter.isHeaderSourced`). The claim must be proven by the credential:
+   - **JWT** — the `tenant_id` claim must be present and equal (`tenant_mismatch` → 401). On a
+     URL tenant a token without the claim is still accepted, as before.
+   - **PAT** — the token's `tenantId` must be present and equal (`tenant_mismatch` → 401).
+   - **Anonymous / Guest** — never. A non-public path is 401 without consulting the Guest
+     profile (`header_tenant_anonymous`); a public / unauthenticated path runs with **no**
+     tenant (`clearHeaderSourcedTenant`), so tenant-scoped bootstrap reads 404 (#1617).
+3. **None** — no tenant. JWT/Guest then 401; a PAT runs with no forwarded tenant.
+
+The client's `X-Tenant-ID` / `X-Tenant-Slug` are **always stripped** from the forwarded request in
+`TenantResolutionFilter`; `HeaderTransformationFilter` (50) re-adds both from the settled exchange
+attributes. The worker and kelta-ai therefore only see a gateway-derived tenant, and their
+`X-Tenant-ID` contract is unchanged. `IdentityHeaderStripFilter` (-400) deliberately does **not**
+strip these two, because `TenantResolutionFilter` must read the claim first. Callers that hit
+the worker/kelta-ai directly in-cluster (kelta-ai `WorkerApiClient`, the gateway's own worker
+calls) set `X-Tenant-ID` themselves and never cross this filter.
 
 ### Query encoding across the gateway hop
 
@@ -1189,7 +1217,7 @@ can even reach login). A fetch error never negative-caches a valid slug; the nex
 **HTTP Request (Client -> Gateway -> Worker):**
 1. Client sends request (e.g., GET /api/contacts)
 2. TenantSlugExtractionFilter extracts tenant from URL
-3. TenantResolutionFilter resolves tenant ID
+3. TenantResolutionFilter settles the tenant ID (URL wins; a header is a claim the credential must prove)
 4. JwtAuthenticationFilter validates JWT
 5. DynamicRouteLocator matches route from RouteRegistry
 6. Request forwarded to Worker with tenant headers

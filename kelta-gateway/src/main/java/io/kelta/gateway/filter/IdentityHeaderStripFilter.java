@@ -27,6 +27,10 @@ import java.util.List;
  *
  * <p>Runs at order -400 — before the custom-domain (-310) / tenant (-300/-200) / auth (-100)
  * filters — so nothing downstream ever sees a client-supplied value for these headers.
+ *
+ * <p>{@code X-Tenant-ID} / {@code X-Tenant-Slug} are deliberately not in this list:
+ * {@link TenantResolutionFilter} (-200) must read them as the tenant <em>claim</em> of a
+ * slug-less request, and strips them from the forwarded request itself once read (PLT-355).
  */
 @Component
 public class IdentityHeaderStripFilter implements GlobalFilter, Ordered {

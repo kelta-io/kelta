@@ -105,6 +105,9 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         // Allow unauthenticated access to public bootstrap paths (GET/HEAD only)
         if (publicPathMatcher.isPublicRequest(exchange)) {
             log.debug("Allowing unauthenticated access to public path: {}", path);
+            // No credential is checked here, so nothing proves a header-claimed tenant: a public
+            // path is served for the URL's tenant or for none (PLT-355).
+            TenantResolutionFilter.clearHeaderSourcedTenant(exchange);
             return chain.filter(exchange);
         }
 
@@ -150,8 +153,12 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 // Enforce that the JWT's tenant_id matches the slug-resolved tenant.
                 // This prevents cross-tenant access: a token issued for tenant A must not
                 // be accepted on tenant B's slug.
+                // A tenant claimed only by the X-Tenant-ID / X-Tenant-Slug header must be proven
+                // by the token itself, so a token without a tenant_id claim cannot use it either.
                 String jwtTenantId = principal.getTenantId();
-                if (jwtTenantId != null && !jwtTenantId.isEmpty() && !jwtTenantId.equals(tenantId)) {
+                boolean hasJwtTenant = jwtTenantId != null && !jwtTenantId.isEmpty();
+                if ((hasJwtTenant && !jwtTenantId.equals(tenantId))
+                        || (!hasJwtTenant && TenantResolutionFilter.isHeaderSourced(exchange))) {
                     log.warn("Cross-tenant access attempt: JWT tenant={} request tenant={} path={}",
                             jwtTenantId, tenantId, path);
                     metrics.recordAuthFailure(TenantResolutionFilter.getTenantSlug(exchange), "tenant_mismatch");
@@ -194,6 +201,14 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
      * for them and this falls through to the exact same {@code unauthorized(...)} call.
      */
     private Mono<Void> admitAsGuestOrReject(ServerWebExchange exchange, GatewayFilterChain chain, String path) {
+        // Guest access is granted to the URL's tenant only. A tenant named by the X-Tenant-ID /
+        // X-Tenant-Slug header is a claim with no credential behind it (PLT-355).
+        if (TenantResolutionFilter.isHeaderSourced(exchange)) {
+            log.warn("Anonymous request tried to select tenant {} by header on path: {}",
+                    TenantResolutionFilter.getTenantId(exchange), path);
+            metrics.recordAuthFailure(TenantResolutionFilter.getTenantSlug(exchange), "header_tenant_anonymous");
+            return unauthorized(exchange, "Missing Authorization header");
+        }
         String tenantId = TenantResolutionFilter.getTenantId(exchange);
         if (tenantId == null || tenantId.isBlank()) {
             log.warn("Missing Authorization header for path: {}", path);

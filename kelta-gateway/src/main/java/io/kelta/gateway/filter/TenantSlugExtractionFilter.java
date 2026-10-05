@@ -155,8 +155,8 @@ public class TenantSlugExtractionFilter implements WebFilter, Ordered {
                 return notFound(exchange, "Tenant not found: " + firstSegment);
             }
             // Slug pattern matched but not in cache — strip the segment anyway so
-            // route matching works, but don't set tenant attributes. The downstream
-            // TenantResolutionFilter or worker will resolve tenant from headers.
+            // route matching works, but don't set tenant attributes. The request runs with
+            // no tenant: TenantResolutionFilter will not let a header fill it in.
             log.warn("Slug '{}' matches pattern but is not in cache; stripping path but no tenant context set", firstSegment);
         } else {
             metrics.recordTenantResolution("slug", "success");

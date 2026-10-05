@@ -148,6 +148,14 @@ class IdentityHeaderStripFilterTest {
     }
 
     @Test
+    @DisplayName("Leaves tenant headers for TenantResolutionFilter, which reads then strips them")
+    void shouldLeaveTenantHeadersToTenantResolutionFilter() {
+        assertThat(IdentityHeaderStripFilter.INTERNAL_IDENTITY_HEADERS)
+                .doesNotContain(TenantResolutionFilter.TENANT_ID_HEADER, TenantResolutionFilter.TENANT_SLUG_HEADER);
+        assertThat(filter.getOrder()).isLessThan(new TenantResolutionFilter(null, null).getOrder());
+    }
+
+    @Test
     @DisplayName("Should run before the custom-domain filter (order < -310)")
     void shouldRunBeforeCustomDomainFilter() {
         assertThat(filter.getOrder()).isLessThan(-310);
