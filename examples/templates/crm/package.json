@@ -1,0 +1,2233 @@
+{
+  "formatVersion": 2,
+  "name": "crm",
+  "version": "1.0.0",
+  "description": "Lightweight CRM template: accounts, contacts, deals and activities with layouts and a flow that stamps deals.closedAt when a deal is won or lost.",
+  "items": [
+    {
+      "type": "COLLECTION",
+      "data": {
+        "id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "name": "deals",
+        "description": "Sales opportunities. closedAt is stamped by the 'Stamp deal closed date' flow when the stage becomes WON or LOST.",
+        "active": true,
+        "current_version": 1,
+        "display_name": "Deals",
+        "path": "/api/deals",
+        "system_collection": false,
+        "display_field_id": "fb487406-5242-4e6c-a5d1-d1baf8bdabad",
+        "adapter_config": null,
+        "track_history": false,
+        "capture_geo": false,
+        "display_field_name": "name"
+      }
+    },
+    {
+      "type": "COLLECTION",
+      "data": {
+        "id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "name": "contacts",
+        "description": "People at your accounts.",
+        "active": true,
+        "current_version": 1,
+        "display_name": "Contacts",
+        "path": "/api/contacts",
+        "system_collection": false,
+        "display_field_id": "00596a07-c8c5-4364-9cab-c168284c87ea",
+        "adapter_config": null,
+        "track_history": false,
+        "capture_geo": false,
+        "display_field_name": "lastName"
+      }
+    },
+    {
+      "type": "COLLECTION",
+      "data": {
+        "id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "name": "activities",
+        "description": "Calls, emails, meetings and tasks logged against a deal or a contact.",
+        "active": true,
+        "current_version": 1,
+        "display_name": "Activities",
+        "path": "/api/activities",
+        "system_collection": false,
+        "display_field_id": "5dd03201-3a4b-4cbe-a3d6-d613b5775a1a",
+        "adapter_config": null,
+        "track_history": false,
+        "capture_geo": false,
+        "display_field_name": "subject"
+      }
+    },
+    {
+      "type": "COLLECTION",
+      "data": {
+        "id": "e3346c05-1422-496a-825d-1617afb49221",
+        "name": "accounts",
+        "description": "Companies you sell to.",
+        "active": true,
+        "current_version": 1,
+        "display_name": "Accounts",
+        "path": "/api/accounts",
+        "system_collection": false,
+        "display_field_id": "d1dd9aad-3abb-486e-838c-8aaf8f9a944b",
+        "adapter_config": null,
+        "track_history": false,
+        "capture_geo": false,
+        "display_field_name": "name"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "fb487406-5242-4e6c-a5d1-d1baf8bdabad",
+        "collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "name": "name",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Deal name",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": true,
+        "collection_name": "deals",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "d5b8cd05-6047-49db-b904-27c79b36f08e",
+        "collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "name": "amount",
+        "type": "CURRENCY",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Amount",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "deals",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "81d9fed6-f720-415f-b963-b129eb73926f",
+        "collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "name": "account",
+        "type": "LOOKUP",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Account",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": "accounts",
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": "deals",
+        "cascade_delete": false,
+        "reference_collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "deals",
+        "reference_collection_name": "accounts"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "7dce27ed-803a-4115-85b1-f45cda1e34fc",
+        "collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "name": "primaryContact",
+        "type": "LOOKUP",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Primary contact",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": "contacts",
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": "deals",
+        "cascade_delete": false,
+        "reference_collection_id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "deals",
+        "reference_collection_name": "contacts"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "d1f961aa-ff73-46e4-8f12-fd08d9011daf",
+        "collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "name": "stage",
+        "type": "PICKLIST",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Stage",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": "PROSPECTING",
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": {
+          "globalPicklistId": "6847ec6b-c86a-474c-adf5-58b0afe9e06f",
+          "picklistSourceType": "GLOBAL"
+        },
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "deals",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "eccf4dda-aae4-4e99-80d8-3ee5d1f18c5f",
+        "collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "name": "expectedCloseDate",
+        "type": "DATE",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Expected close date",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "deals",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "83bfc5d4-16f8-4209-965f-37b2f3fe849a",
+        "collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "name": "closedAt",
+        "type": "DATETIME",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": "Set automatically when the stage becomes WON or LOST.",
+        "display_name": "Closed at",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "deals",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "b494e469-f99a-4af8-93a0-e2cb29c51042",
+        "collection_id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "name": "email",
+        "type": "EMAIL",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Email",
+        "unique_constraint": true,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": true,
+        "collection_name": "contacts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "16056782-cfd7-48b4-bd4b-a40f6b4afd20",
+        "collection_id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "name": "firstName",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "First name",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "contacts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "00596a07-c8c5-4364-9cab-c168284c87ea",
+        "collection_id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "name": "lastName",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Last name",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": true,
+        "collection_name": "contacts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "bb77c431-3f62-45f3-a782-25e26367a869",
+        "collection_id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "name": "phone",
+        "type": "PHONE",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Phone",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "contacts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "e0f2a33c-25f2-4182-8d99-fae7390812c6",
+        "collection_id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "name": "jobTitle",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Job title",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "contacts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "c2559bea-1d4c-491c-972a-f63a44537656",
+        "collection_id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "name": "account",
+        "type": "LOOKUP",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Account",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": "accounts",
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": "contacts",
+        "cascade_delete": false,
+        "reference_collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "contacts",
+        "reference_collection_name": "accounts"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "f68dc1b4-1ad2-4f6d-937f-fc6b1e9b9557",
+        "collection_id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "name": "dueDate",
+        "type": "DATE",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Due date",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "activities",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "d8db036d-9780-44d1-bd99-47baff836422",
+        "collection_id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "name": "activityType",
+        "type": "PICKLIST",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Type",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": "CALL",
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": {
+          "globalPicklistId": "951e1017-4fda-4d51-9842-5789ea3beeae",
+          "picklistSourceType": "GLOBAL"
+        },
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "activities",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "5dd03201-3a4b-4cbe-a3d6-d613b5775a1a",
+        "collection_id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "name": "subject",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Subject",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": true,
+        "collection_name": "activities",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "b761794e-f8ca-41b0-a908-883277519ef2",
+        "collection_id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "name": "completed",
+        "type": "BOOLEAN",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Completed",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": false,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "activities",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "78c753b8-8ad8-4e2a-9f94-6421a612e327",
+        "collection_id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "name": "deal",
+        "type": "LOOKUP",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Deal",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": "deals",
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": "activities",
+        "cascade_delete": false,
+        "reference_collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "activities",
+        "reference_collection_name": "deals"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "f9e2fc52-74c6-4181-8b20-7ba424122354",
+        "collection_id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "name": "contact",
+        "type": "LOOKUP",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Contact",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": "contacts",
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": "activities",
+        "cascade_delete": false,
+        "reference_collection_id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "activities",
+        "reference_collection_name": "contacts"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "2c05e74d-14a0-4d5d-ac86-1150fa1a7fd5",
+        "collection_id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "name": "notes",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Notes",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "activities",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "d1dd9aad-3abb-486e-838c-8aaf8f9a944b",
+        "collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "name": "name",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Account name",
+        "unique_constraint": true,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": true,
+        "collection_name": "accounts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "936170f3-96ab-4cec-a777-72ccb4bff394",
+        "collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "name": "website",
+        "type": "URL",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Website",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "accounts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "588426e0-43f6-4582-8ab0-b24122d2d3ee",
+        "collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "name": "industry",
+        "type": "PICKLIST",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Industry",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": {
+          "globalPicklistId": "714e42c5-d327-4281-86ce-8157e45e95e7",
+          "picklistSourceType": "GLOBAL"
+        },
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "accounts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "683166a2-d3ca-4a20-afbc-f9dded0f6502",
+        "collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "name": "city",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "City",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "accounts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "36bfb0be-48db-429c-b66a-ea6702081dc1",
+        "collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "name": "description",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Description",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "accounts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "9eff7def-ec7e-42e2-ab6d-031a9b881d63",
+        "collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "name": "phone",
+        "type": "PHONE",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Phone",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "accounts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "f6a7c677-c591-4187-9dac-ed2fdb6a92da",
+        "collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "name": "country",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Country",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "accounts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "57317540-22db-4382-9f66-c06387652aba",
+        "collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "name": "annualRevenue",
+        "type": "CURRENCY",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Annual revenue",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "accounts",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "GLOBAL_PICKLIST",
+      "data": {
+        "id": "714e42c5-d327-4281-86ce-8157e45e95e7",
+        "name": "crm-industry",
+        "description": "Account industry.",
+        "sorted": false,
+        "restricted": true
+      }
+    },
+    {
+      "type": "GLOBAL_PICKLIST",
+      "data": {
+        "id": "951e1017-4fda-4d51-9842-5789ea3beeae",
+        "name": "crm-activity-type",
+        "description": "Kinds of sales activity.",
+        "sorted": false,
+        "restricted": true
+      }
+    },
+    {
+      "type": "GLOBAL_PICKLIST",
+      "data": {
+        "id": "6847ec6b-c86a-474c-adf5-58b0afe9e06f",
+        "name": "crm-deal-stage",
+        "description": "Sales pipeline stages for deals. WON and LOST are the closed stages.",
+        "sorted": false,
+        "restricted": true
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "f1e7f7b5-aeb8-4936-a8a2-42c52379185b",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "714e42c5-d327-4281-86ce-8157e45e95e7",
+        "value": "SOFTWARE",
+        "label": "Software",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 0,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-industry"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "174ca019-e3df-471a-8b47-fe830f2a1193",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "951e1017-4fda-4d51-9842-5789ea3beeae",
+        "value": "CALL",
+        "label": "Call",
+        "is_default": true,
+        "is_active": true,
+        "sort_order": 0,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-activity-type"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "a880813b-7893-40d3-b10f-0f365754042c",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "6847ec6b-c86a-474c-adf5-58b0afe9e06f",
+        "value": "PROSPECTING",
+        "label": "Prospecting",
+        "is_default": true,
+        "is_active": true,
+        "sort_order": 0,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-deal-stage"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "3dc1b17d-b15e-4396-9810-f1c962c686b1",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "714e42c5-d327-4281-86ce-8157e45e95e7",
+        "value": "MANUFACTURING",
+        "label": "Manufacturing",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 1,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-industry"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "cca0a5bb-f88f-44d4-ac13-5603b03b6c53",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "951e1017-4fda-4d51-9842-5789ea3beeae",
+        "value": "EMAIL",
+        "label": "Email",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 1,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-activity-type"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "476d7d67-53c0-43d2-ada0-ff48ac08a0ad",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "6847ec6b-c86a-474c-adf5-58b0afe9e06f",
+        "value": "QUALIFICATION",
+        "label": "Qualification",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 1,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-deal-stage"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "69a55f40-c22f-438a-87cb-ae249f34c139",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "951e1017-4fda-4d51-9842-5789ea3beeae",
+        "value": "MEETING",
+        "label": "Meeting",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 2,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-activity-type"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "459df490-7b4c-4bb6-abd8-14c4d88d960f",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "714e42c5-d327-4281-86ce-8157e45e95e7",
+        "value": "RETAIL",
+        "label": "Retail",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 2,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-industry"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "7f94c9a2-e841-44ca-8fc1-e618ad9c4ab5",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "6847ec6b-c86a-474c-adf5-58b0afe9e06f",
+        "value": "PROPOSAL",
+        "label": "Proposal",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 2,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-deal-stage"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "9c8ceea9-aadf-4dbe-a52f-94738d85c39c",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "6847ec6b-c86a-474c-adf5-58b0afe9e06f",
+        "value": "NEGOTIATION",
+        "label": "Negotiation",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 3,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-deal-stage"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "f6012c15-0aa6-4bc8-8383-610d6112c59c",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "951e1017-4fda-4d51-9842-5789ea3beeae",
+        "value": "TASK",
+        "label": "Task",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 3,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-activity-type"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "64489778-e93a-4254-beae-6e4f31ddcc52",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "714e42c5-d327-4281-86ce-8157e45e95e7",
+        "value": "HEALTHCARE",
+        "label": "Healthcare",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 3,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-industry"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "0ae89ddc-f1db-4517-9625-f3c5677c0d41",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "6847ec6b-c86a-474c-adf5-58b0afe9e06f",
+        "value": "WON",
+        "label": "Won",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 4,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-deal-stage"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "c4be6318-6ffb-4d8c-9d36-d1d66f5c53bf",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "714e42c5-d327-4281-86ce-8157e45e95e7",
+        "value": "FINANCE",
+        "label": "Finance",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 4,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-industry"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "de3806ef-d1ab-4998-970c-833ab5fa645a",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "714e42c5-d327-4281-86ce-8157e45e95e7",
+        "value": "OTHER",
+        "label": "Other",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 5,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-industry"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "c2bee4e8-ac67-496f-800f-12076723d782",
+        "picklist_source_type": "GLOBAL",
+        "picklist_source_id": "6847ec6b-c86a-474c-adf5-58b0afe9e06f",
+        "value": "LOST",
+        "label": "Lost",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 5,
+        "color": null,
+        "description": null,
+        "picklist_name": "crm-deal-stage"
+      }
+    },
+    {
+      "type": "PAGE_LAYOUT",
+      "data": {
+        "id": "a1fa5d36-e8ec-4244-ac73-8593dd47add4",
+        "collection_id": "e3346c05-1422-496a-825d-1617afb49221",
+        "name": "Account",
+        "description": null,
+        "layout_type": "DETAIL",
+        "is_default": true,
+        "default_filter": null,
+        "default_sort_field": null,
+        "default_sort_direction": "ASC",
+        "default_row_limit": 50,
+        "header_config": {
+          "metaFields": [
+            {
+              "key": "industry"
+            },
+            {
+              "key": "city"
+            }
+          ],
+          "titleFields": [
+            "name"
+          ]
+        },
+        "rail_blocks": null,
+        "collection_name": "accounts"
+      }
+    },
+    {
+      "type": "PAGE_LAYOUT",
+      "data": {
+        "id": "5bf6100c-14bf-4da2-94f2-dde35b26b445",
+        "collection_id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "name": "Contact",
+        "description": null,
+        "layout_type": "DETAIL",
+        "is_default": true,
+        "default_filter": null,
+        "default_sort_field": null,
+        "default_sort_direction": "ASC",
+        "default_row_limit": 50,
+        "header_config": {
+          "metaFields": [
+            {
+              "key": "jobTitle"
+            },
+            {
+              "key": "email"
+            }
+          ],
+          "titleFields": [
+            "firstName",
+            "lastName"
+          ]
+        },
+        "rail_blocks": null,
+        "collection_name": "contacts"
+      }
+    },
+    {
+      "type": "PAGE_LAYOUT",
+      "data": {
+        "id": "1eb74bae-80a3-48f2-ba21-7beb62d76d1d",
+        "collection_id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "name": "Activity",
+        "description": null,
+        "layout_type": "DETAIL",
+        "is_default": true,
+        "default_filter": null,
+        "default_sort_field": null,
+        "default_sort_direction": "ASC",
+        "default_row_limit": 50,
+        "header_config": {
+          "metaFields": [
+            {
+              "key": "activityType"
+            },
+            {
+              "key": "dueDate"
+            }
+          ],
+          "titleFields": [
+            "subject"
+          ]
+        },
+        "rail_blocks": null,
+        "collection_name": "activities"
+      }
+    },
+    {
+      "type": "PAGE_LAYOUT",
+      "data": {
+        "id": "dabbb63a-7d64-4432-9be1-6b234364e615",
+        "collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "name": "Deal",
+        "description": null,
+        "layout_type": "DETAIL",
+        "is_default": true,
+        "default_filter": null,
+        "default_sort_field": null,
+        "default_sort_direction": "ASC",
+        "default_row_limit": 50,
+        "header_config": {
+          "metaFields": [
+            {
+              "key": "stage"
+            },
+            {
+              "key": "amount"
+            }
+          ],
+          "titleFields": [
+            "name"
+          ]
+        },
+        "rail_blocks": null,
+        "collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "8ca543bc-7e27-413a-bbb2-1793b3561cb2",
+        "layout_id": "a1fa5d36-e8ec-4244-ac73-8593dd47add4",
+        "heading": "Account",
+        "columns": 2,
+        "sort_order": 0,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Account",
+        "collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "d086c3d5-9ab7-4c6b-9752-ae38193991b6",
+        "layout_id": "5bf6100c-14bf-4da2-94f2-dde35b26b445",
+        "heading": "Contact",
+        "columns": 2,
+        "sort_order": 0,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Contact",
+        "collection_name": "contacts"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "dfb9a078-6cbc-4784-900f-8989c6b56c4c",
+        "layout_id": "1eb74bae-80a3-48f2-ba21-7beb62d76d1d",
+        "heading": "Activity",
+        "columns": 2,
+        "sort_order": 0,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Activity",
+        "collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "c671f2bc-c12f-44a2-9d73-e41dbbcfb17a",
+        "layout_id": "dabbb63a-7d64-4432-9be1-6b234364e615",
+        "heading": "Deal",
+        "columns": 2,
+        "sort_order": 0,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Deal",
+        "collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "0c5b7f18-976f-467f-bad2-f097694bb4af",
+        "layout_id": "dabbb63a-7d64-4432-9be1-6b234364e615",
+        "heading": "Outcome",
+        "columns": 2,
+        "sort_order": 1,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Deal",
+        "collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "b41b37ba-3f16-4d01-9beb-ea83f9f24d0c",
+        "layout_id": "1eb74bae-80a3-48f2-ba21-7beb62d76d1d",
+        "heading": "Related to",
+        "columns": 2,
+        "sort_order": 1,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Activity",
+        "collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "0cc87e5a-9e2b-4757-a71e-cebb9ef436f5",
+        "layout_id": "a1fa5d36-e8ec-4244-ac73-8593dd47add4",
+        "heading": "Location",
+        "columns": 2,
+        "sort_order": 1,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Account",
+        "collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "2c6bed48-3573-45dc-bb3f-86148e395b74",
+        "layout_id": "a1fa5d36-e8ec-4244-ac73-8593dd47add4",
+        "heading": "Notes",
+        "columns": 1,
+        "sort_order": 2,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Account",
+        "collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "3e4f0bf1-710c-4117-950d-93e510b7da43",
+        "layout_id": "1eb74bae-80a3-48f2-ba21-7beb62d76d1d",
+        "heading": "Notes",
+        "columns": 1,
+        "sort_order": 2,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Activity",
+        "collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "438fa90c-d71c-44c6-b995-58db20a59d63",
+        "section_id": "c671f2bc-c12f-44a2-9d73-e41dbbcfb17a",
+        "field_id": "fb487406-5242-4e6c-a5d1-d1baf8bdabad",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Deal",
+        "collection_name": "deals",
+        "field_name": "name",
+        "field_collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "09be47e7-a40c-4364-90a3-d74155214953",
+        "section_id": "0c5b7f18-976f-467f-bad2-f097694bb4af",
+        "field_id": "83bfc5d4-16f8-4209-965f-37b2f3fe849a",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": true,
+        "label_override": null,
+        "help_text_override": "Set automatically when the stage becomes Won or Lost.",
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 1,
+        "layout_name": "Deal",
+        "collection_name": "deals",
+        "field_name": "closedAt",
+        "field_collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "b9728541-9d4b-4cc6-a208-49a83fc06c61",
+        "section_id": "dfb9a078-6cbc-4784-900f-8989c6b56c4c",
+        "field_id": "5dd03201-3a4b-4cbe-a3d6-d613b5775a1a",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Activity",
+        "collection_name": "activities",
+        "field_name": "subject",
+        "field_collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "e45ae646-d546-4f07-9df7-38d25fa17772",
+        "section_id": "b41b37ba-3f16-4d01-9beb-ea83f9f24d0c",
+        "field_id": "78c753b8-8ad8-4e2a-9f94-6421a612e327",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 1,
+        "layout_name": "Activity",
+        "collection_name": "activities",
+        "field_name": "deal",
+        "field_collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "7686dbec-ecc5-4871-a205-a1ff2943c3da",
+        "section_id": "3e4f0bf1-710c-4117-950d-93e510b7da43",
+        "field_id": "2c05e74d-14a0-4d5d-ac86-1150fa1a7fd5",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 2,
+        "layout_name": "Activity",
+        "collection_name": "activities",
+        "field_name": "notes",
+        "field_collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "5772917d-55d1-40de-8396-3f92e23201a9",
+        "section_id": "8ca543bc-7e27-413a-bbb2-1793b3561cb2",
+        "field_id": "d1dd9aad-3abb-486e-838c-8aaf8f9a944b",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": true,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Account",
+        "collection_name": "accounts",
+        "field_name": "name",
+        "field_collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "904ba99f-15e9-4e0d-af05-a4ab7486f55c",
+        "section_id": "0cc87e5a-9e2b-4757-a71e-cebb9ef436f5",
+        "field_id": "683166a2-d3ca-4a20-afbc-f9dded0f6502",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 1,
+        "layout_name": "Account",
+        "collection_name": "accounts",
+        "field_name": "city",
+        "field_collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "aed27648-1c18-4134-b697-5ae7babc0f35",
+        "section_id": "2c6bed48-3573-45dc-bb3f-86148e395b74",
+        "field_id": "36bfb0be-48db-429c-b66a-ea6702081dc1",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 2,
+        "layout_name": "Account",
+        "collection_name": "accounts",
+        "field_name": "description",
+        "field_collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "5d5c68ce-76c4-4459-96f5-47c209a0586b",
+        "section_id": "d086c3d5-9ab7-4c6b-9752-ae38193991b6",
+        "field_id": "16056782-cfd7-48b4-bd4b-a40f6b4afd20",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Contact",
+        "collection_name": "contacts",
+        "field_name": "firstName",
+        "field_collection_name": "contacts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "da88b37c-1605-42bb-b5e8-b9d17e0688b5",
+        "section_id": "8ca543bc-7e27-413a-bbb2-1793b3561cb2",
+        "field_id": "588426e0-43f6-4582-8ab0-b24122d2d3ee",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Account",
+        "collection_name": "accounts",
+        "field_name": "industry",
+        "field_collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "7165b96c-c7a9-4a02-a294-4b219562511e",
+        "section_id": "0cc87e5a-9e2b-4757-a71e-cebb9ef436f5",
+        "field_id": "f6a7c677-c591-4187-9dac-ed2fdb6a92da",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 1,
+        "layout_name": "Account",
+        "collection_name": "accounts",
+        "field_name": "country",
+        "field_collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "7613cd93-3e48-4bdd-811f-1dca270aefbe",
+        "section_id": "c671f2bc-c12f-44a2-9d73-e41dbbcfb17a",
+        "field_id": "d1f961aa-ff73-46e4-8f12-fd08d9011daf",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Deal",
+        "collection_name": "deals",
+        "field_name": "stage",
+        "field_collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "daf272b7-023b-4828-bea6-0f1bef6decf4",
+        "section_id": "b41b37ba-3f16-4d01-9beb-ea83f9f24d0c",
+        "field_id": "f9e2fc52-74c6-4181-8b20-7ba424122354",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 1,
+        "layout_name": "Activity",
+        "collection_name": "activities",
+        "field_name": "contact",
+        "field_collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "4ce371f8-eb12-42da-9bfe-045e20558149",
+        "section_id": "d086c3d5-9ab7-4c6b-9752-ae38193991b6",
+        "field_id": "00596a07-c8c5-4364-9cab-c168284c87ea",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Contact",
+        "collection_name": "contacts",
+        "field_name": "lastName",
+        "field_collection_name": "contacts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "6bdd3fb1-ce46-49d4-9351-3f135b887b9f",
+        "section_id": "dfb9a078-6cbc-4784-900f-8989c6b56c4c",
+        "field_id": "d8db036d-9780-44d1-bd99-47baff836422",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Activity",
+        "collection_name": "activities",
+        "field_name": "activityType",
+        "field_collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "55b69613-c7ce-42fc-ac5b-d6fc204a48aa",
+        "section_id": "dfb9a078-6cbc-4784-900f-8989c6b56c4c",
+        "field_id": "f68dc1b4-1ad2-4f6d-937f-fc6b1e9b9557",
+        "column_number": 0,
+        "sort_order": 2,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Activity",
+        "collection_name": "activities",
+        "field_name": "dueDate",
+        "field_collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "6413db22-9178-40f3-97ee-e8df25931af8",
+        "section_id": "d086c3d5-9ab7-4c6b-9752-ae38193991b6",
+        "field_id": "e0f2a33c-25f2-4182-8d99-fae7390812c6",
+        "column_number": 0,
+        "sort_order": 2,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Contact",
+        "collection_name": "contacts",
+        "field_name": "jobTitle",
+        "field_collection_name": "contacts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "388ae222-bb9d-4dab-a313-471f95e892c0",
+        "section_id": "8ca543bc-7e27-413a-bbb2-1793b3561cb2",
+        "field_id": "936170f3-96ab-4cec-a777-72ccb4bff394",
+        "column_number": 0,
+        "sort_order": 2,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Account",
+        "collection_name": "accounts",
+        "field_name": "website",
+        "field_collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "a3894c55-a655-46a0-be29-20f48ef7ae10",
+        "section_id": "c671f2bc-c12f-44a2-9d73-e41dbbcfb17a",
+        "field_id": "81d9fed6-f720-415f-b963-b129eb73926f",
+        "column_number": 0,
+        "sort_order": 2,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Deal",
+        "collection_name": "deals",
+        "field_name": "account",
+        "field_collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "a8dbfb2a-027f-48f1-b028-9745bba6362d",
+        "section_id": "8ca543bc-7e27-413a-bbb2-1793b3561cb2",
+        "field_id": "9eff7def-ec7e-42e2-ab6d-031a9b881d63",
+        "column_number": 1,
+        "sort_order": 3,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Account",
+        "collection_name": "accounts",
+        "field_name": "phone",
+        "field_collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "7a5c969e-b4f3-49b0-afdb-59b0ffad3b9c",
+        "section_id": "d086c3d5-9ab7-4c6b-9752-ae38193991b6",
+        "field_id": "c2559bea-1d4c-491c-972a-f63a44537656",
+        "column_number": 1,
+        "sort_order": 3,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Contact",
+        "collection_name": "contacts",
+        "field_name": "account",
+        "field_collection_name": "contacts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "4fd58676-cfa8-4e13-9864-7ac6345fcce9",
+        "section_id": "dfb9a078-6cbc-4784-900f-8989c6b56c4c",
+        "field_id": "b761794e-f8ca-41b0-a908-883277519ef2",
+        "column_number": 1,
+        "sort_order": 3,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Activity",
+        "collection_name": "activities",
+        "field_name": "completed",
+        "field_collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "cd44b63a-6b78-4c7a-9341-d7d5623d4b9d",
+        "section_id": "c671f2bc-c12f-44a2-9d73-e41dbbcfb17a",
+        "field_id": "7dce27ed-803a-4115-85b1-f45cda1e34fc",
+        "column_number": 1,
+        "sort_order": 3,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Deal",
+        "collection_name": "deals",
+        "field_name": "primaryContact",
+        "field_collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "a3758167-75dc-44dc-ae0d-bb301190deb0",
+        "section_id": "8ca543bc-7e27-413a-bbb2-1793b3561cb2",
+        "field_id": "57317540-22db-4382-9f66-c06387652aba",
+        "column_number": 0,
+        "sort_order": 4,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Account",
+        "collection_name": "accounts",
+        "field_name": "annualRevenue",
+        "field_collection_name": "accounts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "d617eaaa-5be8-47b7-b5ec-21c945cc9356",
+        "section_id": "c671f2bc-c12f-44a2-9d73-e41dbbcfb17a",
+        "field_id": "d5b8cd05-6047-49db-b904-27c79b36f08e",
+        "column_number": 0,
+        "sort_order": 4,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Deal",
+        "collection_name": "deals",
+        "field_name": "amount",
+        "field_collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "557b4b3c-6888-45a8-ae88-7da08c55b098",
+        "section_id": "d086c3d5-9ab7-4c6b-9752-ae38193991b6",
+        "field_id": "b494e469-f99a-4af8-93a0-e2cb29c51042",
+        "column_number": 0,
+        "sort_order": 4,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Contact",
+        "collection_name": "contacts",
+        "field_name": "email",
+        "field_collection_name": "contacts"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "80e567bb-70f9-48b9-a2ac-e95d8ccea49a",
+        "section_id": "c671f2bc-c12f-44a2-9d73-e41dbbcfb17a",
+        "field_id": "eccf4dda-aae4-4e99-80d8-3ee5d1f18c5f",
+        "column_number": 1,
+        "sort_order": 5,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Deal",
+        "collection_name": "deals",
+        "field_name": "expectedCloseDate",
+        "field_collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "73b40c06-1aa4-4c74-a57e-18853c43b8a6",
+        "section_id": "d086c3d5-9ab7-4c6b-9752-ae38193991b6",
+        "field_id": "bb77c431-3f62-45f3-a782-25e26367a869",
+        "column_number": 1,
+        "sort_order": 5,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Contact",
+        "collection_name": "contacts",
+        "field_name": "phone",
+        "field_collection_name": "contacts"
+      }
+    },
+    {
+      "type": "LAYOUT_RELATED_LIST",
+      "data": {
+        "id": "c2e65809-1be3-493e-916b-96b7a3aee5c2",
+        "layout_id": "a1fa5d36-e8ec-4244-ac73-8593dd47add4",
+        "related_collection_id": "e56d9606-97b2-466c-9f7f-252a944a37e7",
+        "relationship_field_id": "c2559bea-1d4c-491c-972a-f63a44537656",
+        "display_columns": [
+          "firstName",
+          "lastName",
+          "email",
+          "jobTitle"
+        ],
+        "sort_field": "lastName",
+        "sort_direction": "ASC",
+        "row_limit": 10,
+        "sort_order": 0,
+        "layout_name": "Account",
+        "collection_name": "accounts",
+        "related_collection_name": "contacts",
+        "relationship_field_name": "account",
+        "relationship_field_collection_name": "contacts"
+      }
+    },
+    {
+      "type": "LAYOUT_RELATED_LIST",
+      "data": {
+        "id": "c6c4a299-9996-4c76-af95-8460c4cedb56",
+        "layout_id": "5bf6100c-14bf-4da2-94f2-dde35b26b445",
+        "related_collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "relationship_field_id": "7dce27ed-803a-4115-85b1-f45cda1e34fc",
+        "display_columns": [
+          "name",
+          "stage",
+          "amount"
+        ],
+        "sort_field": "createdAt",
+        "sort_direction": "DESC",
+        "row_limit": 10,
+        "sort_order": 0,
+        "layout_name": "Contact",
+        "collection_name": "contacts",
+        "related_collection_name": "deals",
+        "relationship_field_name": "primaryContact",
+        "relationship_field_collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_RELATED_LIST",
+      "data": {
+        "id": "12980ab6-80a5-4b8d-a978-af7ffd014d6f",
+        "layout_id": "dabbb63a-7d64-4432-9be1-6b234364e615",
+        "related_collection_id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "relationship_field_id": "78c753b8-8ad8-4e2a-9f94-6421a612e327",
+        "display_columns": [
+          "subject",
+          "activityType",
+          "dueDate",
+          "completed"
+        ],
+        "sort_field": "dueDate",
+        "sort_direction": "DESC",
+        "row_limit": 10,
+        "sort_order": 0,
+        "layout_name": "Deal",
+        "collection_name": "deals",
+        "related_collection_name": "activities",
+        "relationship_field_name": "deal",
+        "relationship_field_collection_name": "activities"
+      }
+    },
+    {
+      "type": "LAYOUT_RELATED_LIST",
+      "data": {
+        "id": "28d8950f-01d1-4851-a4a7-cc6bc3839477",
+        "layout_id": "a1fa5d36-e8ec-4244-ac73-8593dd47add4",
+        "related_collection_id": "5566c336-3d33-4b11-a52f-0aef54517f4a",
+        "relationship_field_id": "81d9fed6-f720-415f-b963-b129eb73926f",
+        "display_columns": [
+          "name",
+          "stage",
+          "amount",
+          "expectedCloseDate"
+        ],
+        "sort_field": "expectedCloseDate",
+        "sort_direction": "ASC",
+        "row_limit": 10,
+        "sort_order": 1,
+        "layout_name": "Account",
+        "collection_name": "accounts",
+        "related_collection_name": "deals",
+        "relationship_field_name": "account",
+        "relationship_field_collection_name": "deals"
+      }
+    },
+    {
+      "type": "LAYOUT_RELATED_LIST",
+      "data": {
+        "id": "a8019bd7-7ecf-4ef3-b40b-4b0cc85d03d9",
+        "layout_id": "5bf6100c-14bf-4da2-94f2-dde35b26b445",
+        "related_collection_id": "782f02b1-607e-433a-a415-4e895429ce9e",
+        "relationship_field_id": "f9e2fc52-74c6-4181-8b20-7ba424122354",
+        "display_columns": [
+          "subject",
+          "activityType",
+          "dueDate",
+          "completed"
+        ],
+        "sort_field": "dueDate",
+        "sort_direction": "DESC",
+        "row_limit": 10,
+        "sort_order": 1,
+        "layout_name": "Contact",
+        "collection_name": "contacts",
+        "related_collection_name": "activities",
+        "relationship_field_name": "contact",
+        "relationship_field_collection_name": "activities"
+      }
+    }
+  ]
+}

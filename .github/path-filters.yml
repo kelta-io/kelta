@@ -84,7 +84,8 @@ runtime_modules:
   - 'kelta-modules/**'
 
 # Quickstart smoke test — anything that could break "clone → docker compose up →
-# create first collection" for a first-time user.
+# create first collection" for a first-time user, plus the tenant templates the same
+# job installs afterwards.
 quickstart:
   - *runtime
   - 'kelta-gateway/**'
@@ -100,6 +101,10 @@ quickstart:
   - '.env.example'
   - 'ci/quickstart-*.sh'
   - 'ci/admin-first-sign-in.sh'
+  # Tenant templates are installed into the quickstart tenant after the smoke check.
+  - 'examples/templates/**'
+  - 'ci/template-apply.sh'
+  - 'ci/template-files.test.mjs'
 
 # Workflow plumbing changed — run everything.
 workflows:

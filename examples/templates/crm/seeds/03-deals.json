@@ -1,0 +1,232 @@
+{
+  "atomic:operations": [
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-1",
+        "attributes": {
+          "name": "Bramblecrest store rollout",
+          "stage": "NEGOTIATION",
+          "amount": 84000,
+          "expectedCloseDate": "2026-11-20",
+          "account": {
+            "lid": "account-1"
+          },
+          "primaryContact": {
+            "lid": "contact-1"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-2",
+        "attributes": {
+          "name": "Bramblecrest loyalty pilot",
+          "stage": "WON",
+          "amount": 18500,
+          "expectedCloseDate": "2026-08-14",
+          "account": {
+            "lid": "account-1"
+          },
+          "primaryContact": {
+            "lid": "contact-2"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-3",
+        "attributes": {
+          "name": "Quillmoor platform licence",
+          "stage": "PROPOSAL",
+          "amount": 120000,
+          "expectedCloseDate": "2026-12-05",
+          "account": {
+            "lid": "account-2"
+          },
+          "primaryContact": {
+            "lid": "contact-3"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-4",
+        "attributes": {
+          "name": "Quillmoor support renewal",
+          "stage": "WON",
+          "amount": 24000,
+          "expectedCloseDate": "2026-09-30",
+          "account": {
+            "lid": "account-2"
+          },
+          "primaryContact": {
+            "lid": "contact-4"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-5",
+        "attributes": {
+          "name": "Harborlight dispatch automation",
+          "stage": "QUALIFICATION",
+          "amount": 65000,
+          "expectedCloseDate": "2027-01-15",
+          "account": {
+            "lid": "account-3"
+          },
+          "primaryContact": {
+            "lid": "contact-6"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-6",
+        "attributes": {
+          "name": "Harborlight finance integration",
+          "stage": "LOST",
+          "amount": 40000,
+          "expectedCloseDate": "2026-07-31",
+          "account": {
+            "lid": "account-3"
+          },
+          "primaryContact": {
+            "lid": "contact-5"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-7",
+        "attributes": {
+          "name": "Fenwick & Tarn quality tracking",
+          "stage": "PROSPECTING",
+          "amount": 95000,
+          "expectedCloseDate": "2027-02-28",
+          "account": {
+            "lid": "account-4"
+          },
+          "primaryContact": {
+            "lid": "contact-8"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-8",
+        "attributes": {
+          "name": "Fenwick & Tarn plant expansion",
+          "stage": "NEGOTIATION",
+          "amount": 210000,
+          "expectedCloseDate": "2026-11-30",
+          "account": {
+            "lid": "account-4"
+          },
+          "primaryContact": {
+            "lid": "contact-7"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-9",
+        "attributes": {
+          "name": "Copperleaf clinic scheduling",
+          "stage": "WON",
+          "amount": 56000,
+          "expectedCloseDate": "2026-09-12",
+          "account": {
+            "lid": "account-5"
+          },
+          "primaryContact": {
+            "lid": "contact-9"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-10",
+        "attributes": {
+          "name": "Silverbirch online storefront",
+          "stage": "PROPOSAL",
+          "amount": 47000,
+          "expectedCloseDate": "2026-12-12",
+          "account": {
+            "lid": "account-6"
+          },
+          "primaryContact": {
+            "lid": "contact-11"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-11",
+        "attributes": {
+          "name": "Oakhaven portfolio reporting",
+          "stage": "LOST",
+          "amount": 150000,
+          "expectedCloseDate": "2026-06-30",
+          "account": {
+            "lid": "account-7"
+          },
+          "primaryContact": {
+            "lid": "contact-13"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "deals",
+        "lid": "deal-12",
+        "attributes": {
+          "name": "Lumen Ridge partner programme",
+          "stage": "QUALIFICATION",
+          "amount": 30000,
+          "expectedCloseDate": "2027-01-31",
+          "account": {
+            "lid": "account-8"
+          },
+          "primaryContact": {
+            "lid": "contact-15"
+          }
+        }
+      }
+    }
+  ]
+}

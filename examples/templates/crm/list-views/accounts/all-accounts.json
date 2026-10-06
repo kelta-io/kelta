@@ -1,0 +1,17 @@
+{
+  "name": "All accounts",
+  "visibility": "PUBLIC",
+  "isDefault": true,
+  "viewType": "TABLE",
+  "columns": [
+    "name",
+    "industry",
+    "city",
+    "country",
+    "annualRevenue"
+  ],
+  "filters": [],
+  "sortField": "name",
+  "sortDirection": "ASC",
+  "rowLimit": 25
+}
