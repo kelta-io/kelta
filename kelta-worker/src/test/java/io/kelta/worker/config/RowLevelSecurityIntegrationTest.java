@@ -70,6 +70,7 @@ class RowLevelSecurityIntegrationTest {
     static final String VERSION_B = "bbbbbbbb-0000-0000-0000-000000005001";
     static final String CREDENTIAL_A = "aaaaaaaa-0000-0000-0000-000000000c01";
     static final String CREDENTIAL_B = "bbbbbbbb-0000-0000-0000-000000000c01";
+    static final String TEMPLATE_B = "bbbbbbbb-0000-0000-0000-00000000b001";
 
     /** Container superuser: runs the migrations and plants the fixtures (bypasses RLS). */
     static JdbcTemplate admin;
@@ -149,6 +150,9 @@ class RowLevelSecurityIntegrationTest {
         admin.update("INSERT INTO user_credential (id, user_id, password_hash) VALUES (?, ?, ?)",
                 CREDENTIAL_B, USER_B, "hash-b");
 
+        // Tenant B's own override of a platform default template (seeded by V167 under 'system').
+        admin.update("INSERT INTO email_template (id, tenant_id, name, subject, body_html, template_key) "
+                + "VALUES (?, ?, 'Invite (B)', 'B subject', '<p>B</p>', 'portal.invite')", TEMPLATE_B, TENANT_B);
         // A direct per-tenant login of the kind SupersetDatabaseUserService creates: public SELECT,
         // no wrapper, and pinned to tenant A through tenant_db_role (V201) rather than the GUC.
         admin.execute("CREATE ROLE pinned_a LOGIN PASSWORD 'pinned_a' NOBYPASSRLS");
@@ -373,6 +377,39 @@ class RowLevelSecurityIntegrationTest {
         assertThat(fields).isZero();
         assertThat(admin.queryForObject("SELECT description FROM field WHERE id = ?", String.class, FIELD_SYSTEM))
                 .isNull();
+    }
+
+    @Test
+    @DisplayName("platform default email templates are readable by every tenant, writable by none; overrides stay private")
+    void systemEmailTemplatesReadableButNotWritable() {
+        // The repository's lookup: the tenant's override, else the 'system' default.
+        String lookup = "SELECT tenant_id FROM email_template WHERE template_key = ? AND is_active = true "
+                + "AND tenant_id IN (?, 'system') ORDER BY CASE WHEN tenant_id = ? THEN 0 ELSE 1 END LIMIT 1";
+        assertThat(asTenant(TENANT_A, () -> app.queryForObject(lookup, String.class,
+                "portal.invite", TENANT_A, TENANT_A)))
+                .as("a tenant without an override falls back to the system default")
+                .isEqualTo("system");
+        assertThat(asTenant(TENANT_B, () -> app.queryForObject(lookup, String.class,
+                "portal.invite", TENANT_B, TENANT_B)))
+                .as("a tenant's own override wins")
+                .isEqualTo(TENANT_B);
+        assertThat(asTenant(TENANT_A, () -> ids("SELECT id FROM email_template WHERE id = ?", TEMPLATE_B)))
+                .as("another tenant's override stays invisible")
+                .isEmpty();
+
+        int updated = asTenant(TENANT_A, () -> app.update(
+                "UPDATE email_template SET subject = 'tampered' WHERE tenant_id = 'system'"));
+        int deleted = asTenant(TENANT_A, () -> app.update(
+                "DELETE FROM email_template WHERE tenant_id = 'system'"));
+        assertThat(updated).isZero();
+        assertThat(deleted).isZero();
+        assertThat(admin.queryForObject(
+                "SELECT count(*) FROM email_template WHERE tenant_id = 'system' AND subject = 'tampered'",
+                Integer.class)).isZero();
+        assertThatThrownBy(() -> asTenant(TENANT_A, () -> app.update(
+                "INSERT INTO email_template (id, tenant_id, name, subject, body_html) "
+                        + "VALUES (?, 'system', 'x', 'x', 'x')", UUID.randomUUID().toString())))
+                .rootCause().hasMessageContaining("violates row-level security policy");
     }
 
     @Test
