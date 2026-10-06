@@ -1981,3 +1981,33 @@ login session. Not done: logout does **not** revoke the refresh token server-sid
 client has no client-auth path to `/oauth2/revoke`); no refresh-token family revocation on
 reuse; no DPoP-bound refresh tokens (SAS 7 supports DPoP; the SPA does not send proofs). Each
 would close the gap further.
+
+## kelta-auth redirected to an unregistered `redirect_uri` on rejection (found 2026-10-06; fixed #1636)
+
+**Symptom:** `GET /oauth2/authorize?client_id=<any registered client>&redirect_uri=<any URL>&response_type=code`
+answered **302** to the requested, unregistered URL with
+`error=invalid_request&error_description=invalid_redirect_uri` appended. That is an open redirect on
+the auth host: a link that starts on `auth.kelta.io` and lands anywhere, usable to dress up a phishing
+link. No code or token was ever sent, so it leaked nothing by itself. It had been there since the
+validator was introduced (#567, 2026-03-15).
+
+**Cause:** `PlatformRedirectUriValidator` (the authorization-code request validator wired in
+`AuthorizationServerConfig`) rejected the URI by throwing
+`OAuth2AuthorizationCodeRequestAuthenticationException` carrying the **original** request token.
+Spring Authorization Server's `OAuth2AuthorizationEndpointFilter` redirects an error to the token's
+redirect URI whenever it has one, and answers 400 only when it is null. That is why SAS's own
+validator throws with a copy whose redirect URI is cleared. RFC 6749 §4.1.2.1: when the redirection
+URI is invalid, the server must not redirect.
+
+**Fix (#1636):** the rejection carries a copy of the token with `redirectUri = null`, so the endpoint
+answers 400 with no `Location`. `PlatformRedirectUriValidatorTest.rejectionCarriesNoRedirectUri`
+asserts this for every client shape and fails on the old code. Verified in production after deploy
+(auth `main-902a2a4`): the same probe returns 400 with no `Location`.
+
+**Keep it that way:** any new authorization-request validator must throw with a token whose redirect
+URI is null for redirect-URI failures. Errors that come *after* the URI is validated (`invalid_scope`,
+`access_denied`) legitimately redirect to the registered URI.
+
+Note on the noise that led here: a run of `invalid_redirect_uri` callbacks on a tenant's external site
+was a crawler replaying stale error URLs it had collected. There was no matching authorize request in
+the logs, and the site's sign-in itself worked.
