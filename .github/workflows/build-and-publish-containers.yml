@@ -13,6 +13,7 @@ on:
       - 'kelta-web/**'
       - 'kelta-ui/**'
       - 'kelta-marketing/**'
+      - 'README.md'
       - 'e2e-tests/**'
       - '.github/workflows/build-and-publish-containers.yml'
       - '.github/path-filters.yml'

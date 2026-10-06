@@ -7,24 +7,29 @@ order: 20
 
 The repository ships a Docker Compose stack with every service and backing store. It is the fastest way to
 evaluate Kelta or develop against it. For production, see [Kubernetes deployment](/docs/deploy/kubernetes/).
+Check the [prerequisites](#prerequisites) below first, then run the steps in this section — they are
+[README.md's Quickstart](https://github.com/kelta-io/kelta#quickstart), included verbatim at build time.
+
+## Start the stack
+
+Clone the repository:
+
+```bash
+git clone https://github.com/kelta-io/kelta.git
+cd kelta
+```
+
+<!-- include: readme-quickstart -->
 
 ## Prerequisites
 
 - Docker and Docker Compose (Docker Desktop or the Docker Engine plugin).
 - `make` and `git`.
-- **Memory.** A default Docker Desktop allocation is enough — the commands below build JVM images. The
+- **Memory.** A default Docker Desktop allocation is enough — the commands above build JVM images. The
   GraalVM native images production runs need roughly **24 GB allocated to Docker**; see
   [Native images](#native-images) if you want them.
 
-## Start the stack
-
-```bash
-git clone https://github.com/kelta-io/kelta.git
-cd kelta
-make setup   # first time only: copies .env and generates dev signing/encryption keys
-make up-jvm  # postgres, redis, nats, cerbos, auth, worker, gateway, ui
-make seed    # waits for the stack to be healthy, then prints login details
-```
+## What the commands do
 
 `make setup` writes an `.env` from `.env.example` and generates the secrets that have no defaults: an RSA JWK set
 for JWT signing (`JWK_SET`) and an AES-256 key for envelope encryption (`KELTA_ENCRYPTION_KEY`). Services that need a
@@ -33,7 +38,7 @@ signing key fail to start without one rather than falling back to a shared value
 `make up-jvm` builds the same JVM images the `quickstart` CI job builds and times on every relevant change, so
 it is the path known to work on a laptop.
 
-### Native images
+## Native images
 
 `make up` builds GraalVM native images instead — what production runs. The three Java services build
 concurrently and each sizes its heap to most of the memory Docker reports, so it needs roughly 24 GB allocated to
