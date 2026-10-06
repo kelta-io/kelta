@@ -31,8 +31,6 @@ export type {
   FieldDefinition,
   FieldType,
   FieldTypeConfig,
-  Role,
-  Policy,
   OIDCProvider,
   UIConfig,
   UIPage,

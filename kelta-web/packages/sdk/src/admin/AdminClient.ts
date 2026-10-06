@@ -11,8 +11,6 @@ import type {
   ImportApiSpecRequest,
   ImportApiSpecResponse,
   FieldDefinition,
-  Role,
-  Policy,
   OIDCProvider,
   UIConfig,
   PackageData,
@@ -56,7 +54,6 @@ import type {
   RecordShare,
   UserGroup,
   CreateUserGroupRequest,
-  RoleHierarchyNode,
   SetupAuditTrailEntry,
   GovernorLimitsStatus,
   GlobalPicklist,
@@ -279,54 +276,6 @@ export class AdminClient {
 
     delete: async (_collectionId: string, fieldId: string): Promise<void> => {
       await this.axios.delete(`/api/fields/${fieldId}`);
-    },
-  };
-
-  // ---------------------------------------------------------------------------
-  // Authorization (roles & policies)
-  // ---------------------------------------------------------------------------
-
-  readonly authz = {
-    listRoles: async (): Promise<Role[]> => {
-      const response = await this.axios.get('/api/roles');
-      return unwrapJsonApiList<Role>(response.data);
-    },
-
-    createRole: async (role: Role): Promise<Role> => {
-      const body = toJsonApiBody('roles', role as unknown as Record<string, unknown>);
-      const response = await this.axios.post('/api/roles', body);
-      return unwrapJsonApiResource<Role>(response.data);
-    },
-
-    updateRole: async (id: string, role: Role): Promise<Role> => {
-      const body = toJsonApiBody('roles', role as unknown as Record<string, unknown>, id);
-      const response = await this.axios.patch(`/api/roles/${id}`, body);
-      return unwrapJsonApiResource<Role>(response.data);
-    },
-
-    deleteRole: async (id: string): Promise<void> => {
-      await this.axios.delete(`/api/roles/${id}`);
-    },
-
-    listPolicies: async (): Promise<Policy[]> => {
-      const response = await this.axios.get('/api/policies');
-      return unwrapJsonApiList<Policy>(response.data);
-    },
-
-    createPolicy: async (policy: Policy): Promise<Policy> => {
-      const body = toJsonApiBody('policies', policy as unknown as Record<string, unknown>);
-      const response = await this.axios.post('/api/policies', body);
-      return unwrapJsonApiResource<Policy>(response.data);
-    },
-
-    updatePolicy: async (id: string, policy: Policy): Promise<Policy> => {
-      const body = toJsonApiBody('policies', policy as unknown as Record<string, unknown>, id);
-      const response = await this.axios.patch(`/api/policies/${id}`, body);
-      return unwrapJsonApiResource<Policy>(response.data);
-    },
-
-    deletePolicy: async (id: string): Promise<void> => {
-      await this.axios.delete(`/api/policies/${id}`);
     },
   };
 
@@ -1327,23 +1276,6 @@ export class AdminClient {
     ): Promise<GovernorLimitsStatus> => {
       const response = await this.axios.put('/api/governor-limits/tier', { tier });
       return unwrapJsonApiResource<GovernorLimitsStatus>(response.data);
-    },
-  };
-
-  // ---------------------------------------------------------------------------
-  // Role hierarchy
-  // ---------------------------------------------------------------------------
-
-  readonly roleHierarchy = {
-    get: async (): Promise<RoleHierarchyNode[]> => {
-      const response = await this.axios.get('/api/roles?sort=hierarchyLevel');
-      return unwrapJsonApiList<RoleHierarchyNode>(response.data);
-    },
-
-    setParent: async (roleId: string, parentRoleId: string | null): Promise<RoleHierarchyNode> => {
-      const body = toJsonApiBody('roles', { parentRoleId }, roleId);
-      const response = await this.axios.patch(`/api/roles/${roleId}`, body);
-      return unwrapJsonApiResource<RoleHierarchyNode>(response.data);
     },
   };
 

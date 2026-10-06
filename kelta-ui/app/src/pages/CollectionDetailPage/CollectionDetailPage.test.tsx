@@ -82,16 +82,6 @@ const mockCollection: Collection = {
       order: 3,
     },
   ],
-  authz: {
-    routePolicies: [
-      { operation: 'read', policyId: 'policy-read-all' },
-      { operation: 'create', policyId: 'policy-admin-only' },
-    ],
-    fieldPolicies: [
-      { fieldName: 'email', operation: 'read', policyId: 'policy-read-all' },
-      { fieldName: 'email', operation: 'write', policyId: 'policy-admin-only' },
-    ],
-  },
   createdAt: '2024-01-15T10:30:00Z',
   updatedAt: '2024-01-20T14:45:00Z',
 }

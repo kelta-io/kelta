@@ -56,7 +56,6 @@ const mockMenus: UIMenu[] = [
         path: '/settings',
         icon: 'settings',
         order: 1,
-        policies: ['admin_policy'],
         children: [
           {
             id: 'item_2_1',
@@ -69,7 +68,6 @@ const mockMenus: UIMenu[] = [
             label: 'Security',
             path: '/settings/security',
             order: 1,
-            policies: ['security_policy'],
           },
         ],
       },
@@ -92,13 +90,6 @@ const mockMenus: UIMenu[] = [
     createdAt: '2024-01-10T08:00:00Z',
     updatedAt: '2024-01-12T14:00:00Z',
   },
-]
-
-// Mock policies data
-const mockPolicies = [
-  { id: 'admin_policy', name: 'Admin Access', description: 'Full admin access' },
-  { id: 'security_policy', name: 'Security Access', description: 'Security settings access' },
-  { id: 'viewer_policy', name: 'Viewer Access', description: 'Read-only access' },
 ]
 
 describe('MenuBuilderPage', () => {
@@ -434,23 +425,7 @@ describe('MenuBuilderPage', () => {
 
   describe('Menu Editor', () => {
     beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({
-            data: {
-              content: mockPolicies,
-              totalElements: mockPolicies.length,
-              totalPages: 1,
-              size: 1000,
-              number: 0,
-            },
-          })
-        }
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({ data: mockPolicies })
-        }
-        return Promise.resolve({ data: mockMenus })
-      })
+      mockAxios.get.mockResolvedValue({ data: mockMenus })
     })
 
     it('should open editor when clicking on menu name', async () => {
@@ -508,23 +483,7 @@ describe('MenuBuilderPage', () => {
 
   describe('Menu Tree View', () => {
     beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({
-            data: {
-              content: mockPolicies,
-              totalElements: mockPolicies.length,
-              totalPages: 1,
-              size: 1000,
-              number: 0,
-            },
-          })
-        }
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({ data: mockPolicies })
-        }
-        return Promise.resolve({ data: mockMenus })
-      })
+      mockAxios.get.mockResolvedValue({ data: mockMenus })
     })
 
     it('should display add item button in editor', async () => {
@@ -578,23 +537,7 @@ describe('MenuBuilderPage', () => {
 
   describe('Add Menu Item', () => {
     beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({
-            data: {
-              content: mockPolicies,
-              totalElements: mockPolicies.length,
-              totalPages: 1,
-              size: 1000,
-              number: 0,
-            },
-          })
-        }
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({ data: mockPolicies })
-        }
-        return Promise.resolve({ data: mockMenus })
-      })
+      mockAxios.get.mockResolvedValue({ data: mockMenus })
     })
 
     it('should open add item form when clicking add item button', async () => {
@@ -684,23 +627,7 @@ describe('MenuBuilderPage', () => {
 
   describe('Menu Preview', () => {
     beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({
-            data: {
-              content: mockPolicies,
-              totalElements: mockPolicies.length,
-              totalPages: 1,
-              size: 1000,
-              number: 0,
-            },
-          })
-        }
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({ data: mockPolicies })
-        }
-        return Promise.resolve({ data: mockMenus })
-      })
+      mockAxios.get.mockResolvedValue({ data: mockMenus })
     })
 
     it('should display menu preview panel', async () => {
@@ -737,23 +664,7 @@ describe('MenuBuilderPage', () => {
 
   describe('Save Menu', () => {
     beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({
-            data: {
-              content: mockPolicies,
-              totalElements: mockPolicies.length,
-              totalPages: 1,
-              size: 1000,
-              number: 0,
-            },
-          })
-        }
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({ data: mockPolicies })
-        }
-        return Promise.resolve({ data: mockMenus })
-      })
+      mockAxios.get.mockResolvedValue({ data: mockMenus })
     })
 
     it('should disable save button when no changes', async () => {
@@ -801,23 +712,7 @@ describe('MenuBuilderPage', () => {
     })
 
     it('should save menu when save button is clicked', async () => {
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({
-            data: {
-              content: mockPolicies,
-              totalElements: mockPolicies.length,
-              totalPages: 1,
-              size: 1000,
-              number: 0,
-            },
-          })
-        }
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({ data: mockPolicies })
-        }
-        return Promise.resolve({ data: mockMenus })
-      })
+      mockAxios.get.mockResolvedValue({ data: mockMenus })
       // The SDK's updateMenu uses PATCH with JSON:API envelope
       mockAxios.patch.mockResolvedValueOnce({
         data: {
@@ -869,271 +764,32 @@ describe('MenuBuilderPage', () => {
     })
   })
 
-  describe('Access Policies Configuration', () => {
+  describe('Menu item access', () => {
     beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        // Check for policies endpoint first (more specific)
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({ data: mockPolicies })
-        }
-        // Default to menus list
-        return Promise.resolve({ data: mockMenus })
-      })
+      mockAxios.get.mockResolvedValue({ data: mockMenus })
     })
 
-    it('should display policies container in menu item form', async () => {
+    // Menu items used to offer "Access Policies" from the legacy /api/policies endpoint, which
+    // no longer exists (it 404'd on every editor open) — and ui-menu-items never stored them.
+    it('offers no access-policy picker and never requests /api/policies', async () => {
       const user = userEvent.setup()
       render(<MenuBuilderPage />, { wrapper: createTestWrapper() })
 
       await waitFor(() => {
         expect(screen.getByText('main_navigation')).toBeInTheDocument()
       })
-
       await user.click(screen.getByTestId('menu-name-0'))
-
       await waitFor(() => {
         expect(screen.getByTestId('add-item-button')).toBeInTheDocument()
       })
-
-      await user.click(screen.getByTestId('add-item-button'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('menu-item-form-modal')).toBeInTheDocument()
-        expect(screen.getByTestId('policies-container')).toBeInTheDocument()
-      })
-    })
-
-    it('should display available policies as checkboxes', async () => {
-      const user = userEvent.setup()
-      render(<MenuBuilderPage />, { wrapper: createTestWrapper() })
-
-      await waitFor(() => {
-        expect(screen.getByText('main_navigation')).toBeInTheDocument()
-      })
-
-      await user.click(screen.getByTestId('menu-name-0'))
-
-      // Wait for editor to load
-      await waitFor(() => {
-        expect(screen.getByTestId('add-item-button')).toBeInTheDocument()
-      })
-
       await user.click(screen.getByTestId('add-item-button'))
 
       await waitFor(() => {
         expect(screen.getByTestId('menu-item-form-modal')).toBeInTheDocument()
       })
-
-      // Check that policies are displayed - they may take a moment to load
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('policy-checkbox-admin_policy')).toBeInTheDocument()
-          expect(screen.getByTestId('policy-checkbox-security_policy')).toBeInTheDocument()
-          expect(screen.getByTestId('policy-checkbox-viewer_policy')).toBeInTheDocument()
-        },
-        { timeout: 3000 }
-      )
-    })
-
-    it('should allow selecting multiple policies', async () => {
-      const user = userEvent.setup()
-      render(<MenuBuilderPage />, { wrapper: createTestWrapper() })
-
-      await waitFor(() => {
-        expect(screen.getByText('main_navigation')).toBeInTheDocument()
-      })
-
-      await user.click(screen.getByTestId('menu-name-0'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('add-item-button')).toBeInTheDocument()
-      })
-
-      // Give time for policies query to complete
-      await new Promise((resolve) => setTimeout(resolve, 100))
-
-      await user.click(screen.getByTestId('add-item-button'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('menu-item-form-modal')).toBeInTheDocument()
-      })
-
-      // Wait for policies to load
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('policy-input-admin_policy')).toBeInTheDocument()
-        },
-        { timeout: 3000 }
-      )
-
-      // Select multiple policies
-      await user.click(screen.getByTestId('policy-input-admin_policy'))
-      await user.click(screen.getByTestId('policy-input-viewer_policy'))
-
-      // Verify checkboxes are checked
-      expect(screen.getByTestId('policy-input-admin_policy')).toBeChecked()
-      expect(screen.getByTestId('policy-input-viewer_policy')).toBeChecked()
-      expect(screen.getByTestId('policy-input-security_policy')).not.toBeChecked()
-    })
-
-    it('should save menu item with selected policies', async () => {
-      const user = userEvent.setup()
-      render(<MenuBuilderPage />, { wrapper: createTestWrapper() })
-
-      await waitFor(() => {
-        expect(screen.getByText('main_navigation')).toBeInTheDocument()
-      })
-
-      await user.click(screen.getByTestId('menu-name-0'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('add-item-button')).toBeInTheDocument()
-      })
-
-      // Give time for policies query to complete
-      await new Promise((resolve) => setTimeout(resolve, 100))
-
-      await user.click(screen.getByTestId('add-item-button'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('menu-item-form-modal')).toBeInTheDocument()
-      })
-
-      // Fill in required fields
-      await user.type(screen.getByTestId('item-label-input'), 'Protected Item')
-      await user.type(screen.getByTestId('item-path-input'), '/protected')
-
-      // Wait for policies to load and select one
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('policy-input-admin_policy')).toBeInTheDocument()
-        },
-        { timeout: 3000 }
-      )
-
-      await user.click(screen.getByTestId('policy-input-admin_policy'))
-
-      // Submit the form
-      await user.click(screen.getByTestId('menu-item-form-submit'))
-
-      // Verify item was created
-      await waitFor(() => {
-        expect(screen.getByText(/created successfully/i)).toBeInTheDocument()
-      })
-
-      // Verify the item appears in the tree
-      await waitFor(() => {
-        const protectedItems = screen.getAllByText('Protected Item')
-        expect(protectedItems.length).toBeGreaterThanOrEqual(1)
-      })
-    })
-
-    it('should display no policies message when no policies available', async () => {
-      mockAxios.get.mockImplementation((url: string) => {
-        // Check for policies endpoint first - return empty array
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({ data: [] })
-        }
-        // Default to menus list
-        return Promise.resolve({ data: mockMenus })
-      })
-
-      const user = userEvent.setup()
-      render(<MenuBuilderPage />, { wrapper: createTestWrapper() })
-
-      await waitFor(() => {
-        expect(screen.getByText('main_navigation')).toBeInTheDocument()
-      })
-
-      await user.click(screen.getByTestId('menu-name-0'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('add-item-button')).toBeInTheDocument()
-      })
-
-      await user.click(screen.getByTestId('add-item-button'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('menu-item-form-modal')).toBeInTheDocument()
-      })
-
-      // Wait for the no policies message to appear
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('no-policies-message')).toBeInTheDocument()
-        },
-        { timeout: 3000 }
-      )
-    })
-  })
-
-  describe('Menu Preview with Policies', () => {
-    beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        // Check for policies endpoint first (more specific)
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({ data: mockPolicies })
-        }
-        // Default to menus list
-        return Promise.resolve({ data: mockMenus })
-      })
-    })
-
-    it('should display policies in preview for items with policies', async () => {
-      const user = userEvent.setup()
-      render(<MenuBuilderPage />, { wrapper: createTestWrapper() })
-
-      await waitFor(() => {
-        expect(screen.getByText('main_navigation')).toBeInTheDocument()
-      })
-
-      await user.click(screen.getByTestId('menu-name-0'))
-
-      // Wait for editor and preview to load
-      await waitFor(() => {
-        expect(screen.getByTestId('menu-preview')).toBeInTheDocument()
-        expect(screen.getByTestId('add-item-button')).toBeInTheDocument()
-      })
-
-      // Add a new item with policies to test the preview
-      await user.click(screen.getByTestId('add-item-button'))
-
-      await waitFor(() => {
-        expect(screen.getByTestId('menu-item-form-modal')).toBeInTheDocument()
-      })
-
-      // Fill in the form
-      await user.type(screen.getByTestId('item-label-input'), 'Admin Only')
-      await user.type(screen.getByTestId('item-path-input'), '/admin')
-
-      // Wait for policies to load and select one
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('policy-input-admin_policy')).toBeInTheDocument()
-        },
-        { timeout: 3000 }
-      )
-
-      await user.click(screen.getByTestId('policy-input-admin_policy'))
-
-      // Submit the form
-      await user.click(screen.getByTestId('menu-item-form-submit'))
-
-      // Verify item was created
-      await waitFor(() => {
-        expect(screen.getByText(/created successfully/i)).toBeInTheDocument()
-      })
-
-      // The preview should now show the item with its policy
-      // Look for the policy indicator in the preview
-      await waitFor(
-        () => {
-          // The preview should contain the Admin Access policy name
-          const previewContent = screen.getByTestId('menu-preview')
-          expect(previewContent).toHaveTextContent('Admin Access')
-        },
-        { timeout: 3000 }
-      )
+      expect(screen.queryByTestId('policies-container')).not.toBeInTheDocument()
+      const requested = mockAxios.get.mock.calls.map(([url]) => String(url))
+      expect(requested.some((url) => url.includes('/api/policies'))).toBe(false)
     })
   })
 

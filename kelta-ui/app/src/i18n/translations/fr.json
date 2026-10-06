@@ -461,11 +461,6 @@
       "labelPlaceholder": "ex. Tableau de bord",
       "pathPlaceholder": "ex. /tableau-de-bord",
       "pathHint": "Le chemin URL de cet élément de menu. Doit commencer par / si fourni.",
-      "accessPolicies": "Politiques d'accès",
-      "accessPoliciesHint": "Sélectionnez les politiques qui contrôlent qui peut voir cet élément de menu. Laissez vide pour autoriser tous les utilisateurs.",
-      "selectPolicies": "Sélectionner des politiques...",
-      "noPolicies": "Aucune politique disponible",
-      "policiesCount": "{{count}} politiques sélectionnées",
       "confirmDeleteMenu": "Êtes-vous sûr de vouloir supprimer ce menu ? Cette action est irréversible.",
       "confirmDeleteItem": "Êtes-vous sûr de vouloir supprimer cet élément de menu ? Cela supprimera également tous les sous-éléments.",
       "validation": {
