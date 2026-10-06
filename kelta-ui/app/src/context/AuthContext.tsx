@@ -35,7 +35,13 @@ import type {
 import type { OIDCProviderSummary } from '../types/config'
 import { fetchBootstrapConfig } from '../utils/bootstrapCache'
 import { SessionExpiredError, TokenUnavailableError } from './authErrors'
-import { getTenantSlug, setResolvedTenantId, getResolvedTenantId } from './TenantContext'
+import { tenantTokensKey } from '../lib/authStorage'
+import {
+  getTenantSlug,
+  setResolvedTenantId,
+  getResolvedTenantId,
+  isCustomDomainHost,
+} from './TenantContext'
 
 /**
  * Find the internal kelta-auth provider in a list of OIDC providers.
@@ -80,6 +86,11 @@ const REFRESH_RETRY_MAX_MS = 60 * 1000
 // Cooldown after a failed refresh attempt: callers that hit refresh inside this
 // window get the last outcome instead of firing another request.
 const REFRESH_FAILURE_COOLDOWN_MS = 5 * 1000
+
+// Web Locks name serializing token refreshes across every tab of this origin.
+// Refresh tokens rotate on each use, so two tabs refreshing with the same token
+// would have the slower one rejected (`invalid_grant`) and logged out.
+const REFRESH_LOCK_NAME = 'kelta-auth-token-refresh'
 
 /**
  * Outcome of a refresh attempt.
@@ -201,32 +212,77 @@ function isTokenExpired(expiresAt: number): boolean {
 }
 
 /**
- * Store tokens in sessionStorage (more secure than localStorage)
+ * localStorage key holding this tenant's tokens.
+ *
+ * Tokens live in localStorage so every tab shares one session and it survives a
+ * browser restart: a new tab, or coming back the next morning, does not mean
+ * signing in again. (They used to live in sessionStorage: per tab, gone with the
+ * window.) They are keyed per tenant because a token is bound to its tenant —
+ * the gateway rejects it on another tenant's URL — and on the platform host every
+ * tenant shares the origin; separate keys let each workspace you use stay signed
+ * in side by side. A custom domain is its own origin, so it needs no suffix.
+ *
+ * The refresh token rotates on every use and the server bounds its idle
+ * lifetime; refreshes are serialized across tabs by {@link withRefreshLock}. The
+ * in-flight login state (PKCE verifier, state, nonce) stays per tab in
+ * sessionStorage.
  */
-function storeTokens(tokens: StoredTokens): void {
-  sessionStorage.setItem(STORAGE_KEYS.TOKENS, JSON.stringify(tokens))
+function tokensKey(): string {
+  return tenantTokensKey(isCustomDomainHost() ? null : getTenantSlug())
 }
 
-/**
- * Retrieve stored tokens
- */
-function getStoredTokens(): StoredTokens | null {
-  const stored = sessionStorage.getItem(STORAGE_KEYS.TOKENS)
-  if (!stored) return null
+function storeTokens(tokens: StoredTokens): void {
+  localStorage.setItem(tokensKey(), JSON.stringify(tokens))
+}
+
+function parseStoredTokens(raw: string | null): StoredTokens | null {
+  if (!raw) return null
   try {
-    return JSON.parse(stored) as StoredTokens
+    return JSON.parse(raw) as StoredTokens
   } catch {
     return null
   }
 }
 
 /**
- * Clear all stored auth data
+ * Retrieve this tenant's stored tokens.
+ */
+function getStoredTokens(): StoredTokens | null {
+  const stored = parseStoredTokens(localStorage.getItem(tokensKey()))
+  if (stored) return stored
+
+  // Adopt a session stored before tokens moved to localStorage (also how the e2e
+  // fixtures inject theirs), so nobody is logged out by the move — unless the
+  // token visibly belongs to a different tenant than this URL's.
+  const legacy = parseStoredTokens(sessionStorage.getItem(STORAGE_KEYS.TOKENS))
+  if (!legacy) return null
+  const tokenTenant = parseJwt(legacy.accessToken)?.tenant_id
+  const urlTenant = getResolvedTenantId()
+  if (tokenTenant && urlTenant && tokenTenant !== urlTenant) return null
+  storeTokens(legacy)
+  sessionStorage.removeItem(STORAGE_KEYS.TOKENS)
+  return legacy
+}
+
+/**
+ * Clear this tenant's auth data. Other tenants' sessions are left alone.
  */
 function clearAuthStorage(): void {
   Object.values(STORAGE_KEYS).forEach((key) => {
     sessionStorage.removeItem(key)
   })
+  localStorage.removeItem(tokensKey())
+}
+
+/**
+ * Run a token refresh while holding a cross-tab lock, so tabs never spend the
+ * same (rotating) refresh token concurrently. Browsers without the Web Locks
+ * API run it unlocked; doRefresh's re-read of storage covers most of that race.
+ */
+async function withRefreshLock(refresh: () => Promise<RefreshResult>): Promise<RefreshResult> {
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined
+  if (!locks?.request) return refresh()
+  return await locks.request(`${REFRESH_LOCK_NAME}:${tokensKey()}`, refresh)
 }
 
 // Module-level guard to prevent concurrent login() calls within the same page load.
@@ -305,76 +361,126 @@ export function AuthProvider({
   }, [])
 
   /**
+   * If another tab replaced `previous`'s refresh token since this tab read it,
+   * take over the tokens it stored (`latest`). Returns null when there is
+   * nothing newer to adopt.
+   */
+  const adoptTokensRotatedElsewhere = useCallback(
+    (previous: StoredTokens | null, latest: StoredTokens | null): RefreshResult | null => {
+      if (
+        !previous?.refreshToken ||
+        !latest?.refreshToken ||
+        latest.refreshToken === previous.refreshToken ||
+        isTokenExpired(latest.expiresAt)
+      ) {
+        return null
+      }
+      const latestUser = extractUserFromToken(latest.idToken, latest.accessToken)
+      if (latestUser) setUser(latestUser)
+      return { status: 'ok', tokens: latest }
+    },
+    []
+  )
+
+  /**
+   * Exchange `storedTokens.refreshToken` at the token endpoint. Called only by
+   * doRefresh, with the cross-tab refresh lock held.
+   */
+  const refreshWithToken = useCallback(
+    async (storedTokens: StoredTokens): Promise<RefreshResult> => {
+      const refreshToken = storedTokens.refreshToken
+      if (!refreshToken) {
+        return { status: 'terminal' }
+      }
+
+      // Refresh always targets the internal kelta-auth provider — it is the
+      // issuer of the stored token regardless of which external IdP federated
+      // the original login. Providers come from bootstrap config; if that has
+      // not loaded (or failed to load) yet, that is a transient condition.
+      const internal = findInternalProvider(providersRef.current)
+      if (!internal) {
+        return { status: 'transient' }
+      }
+
+      try {
+        const discovery = await fetchDiscoveryDocument(internal.issuer)
+        const tokenUrl = discovery.token_endpoint
+
+        const params = new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: internal.clientId,
+          refresh_token: refreshToken,
+        })
+
+        const response = await fetch(tokenUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: params.toString(),
+        })
+
+        if (!response.ok) {
+          const outcome = await classifyRefreshFailure(response)
+          console.error(
+            `[Auth] Token refresh failed (${response.status} ${response.statusText}) — ${outcome.status}`
+          )
+          if (outcome.status === 'terminal') {
+            // Without a cross-tab lock another tab may have rotated the token
+            // under us; if storage now holds a newer one, the session is fine.
+            const adopted = adoptTokensRotatedElsewhere(storedTokens, getStoredTokens())
+            if (adopted) return adopted
+            // The refresh token is dead — drop it so nothing retries with it.
+            storeTokens({ ...storedTokens, refreshToken: undefined })
+          }
+          return outcome
+        }
+
+        const tokenResponse: TokenResponse = await response.json()
+        const newTokens: StoredTokens = {
+          accessToken: tokenResponse.access_token,
+          idToken: tokenResponse.id_token,
+          refreshToken: tokenResponse.refresh_token || refreshToken,
+          expiresAt: Date.now() + tokenResponse.expires_in * 1000,
+        }
+
+        storeTokens(newTokens)
+        const newUser = extractUserFromToken(newTokens.idToken, newTokens.accessToken)
+        if (newUser) {
+          setUser(newUser)
+        }
+
+        return { status: 'ok', tokens: newTokens }
+      } catch (err) {
+        // fetch() rejection = network down / DNS / CORS preflight during a
+        // rollout. Never fatal on its own.
+        console.error('[Auth] Token refresh error:', err)
+        return { status: 'transient' }
+      }
+    },
+    [fetchDiscoveryDocument, adoptTokensRotatedElsewhere]
+  )
+
+  /**
    * Perform the actual token refresh (called only by refreshAccessToken).
    * This function is NOT deduplication-aware — callers must go through refreshAccessToken.
    */
   const doRefresh = useCallback(async (): Promise<RefreshResult> => {
-    const storedTokens = getStoredTokens()
-    if (!storedTokens?.refreshToken) {
-      return { status: 'terminal' }
-    }
-
-    // Refresh always targets the internal kelta-auth provider — it is the
-    // issuer of the stored token regardless of which external IdP federated
-    // the original login. Providers come from bootstrap config; if that has
-    // not loaded (or failed to load) yet, that is a transient condition.
-    const internal = findInternalProvider(providersRef.current)
-    if (!internal) {
-      return { status: 'transient' }
-    }
-
-    try {
-      const discovery = await fetchDiscoveryDocument(internal.issuer)
-      const tokenUrl = discovery.token_endpoint
-
-      const params = new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: internal.clientId,
-        refresh_token: storedTokens.refreshToken,
-      })
-
-      const response = await fetch(tokenUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params.toString(),
-      })
-
-      if (!response.ok) {
-        const outcome = await classifyRefreshFailure(response)
-        console.error(
-          `[Auth] Token refresh failed (${response.status} ${response.statusText}) — ${outcome.status}`
-        )
-        if (outcome.status === 'terminal') {
-          // The refresh token is dead — drop it so nothing retries with it.
-          storeTokens({ ...storedTokens, refreshToken: undefined })
-        }
-        return outcome
+    const tokensBeforeLock = getStoredTokens()
+    return withRefreshLock(async (): Promise<RefreshResult> => {
+      const storedTokens = getStoredTokens()
+      if (!storedTokens?.refreshToken) {
+        return { status: 'terminal' }
       }
 
-      const tokenResponse: TokenResponse = await response.json()
-      const newTokens: StoredTokens = {
-        accessToken: tokenResponse.access_token,
-        idToken: tokenResponse.id_token,
-        refreshToken: tokenResponse.refresh_token || storedTokens.refreshToken,
-        expiresAt: Date.now() + tokenResponse.expires_in * 1000,
-      }
+      // Another tab refreshed while this one waited for the lock: its tokens
+      // are already in storage, and the refresh token we started with is spent.
+      const adopted = adoptTokensRotatedElsewhere(tokensBeforeLock, storedTokens)
+      if (adopted) return adopted
 
-      storeTokens(newTokens)
-      const newUser = extractUserFromToken(newTokens.idToken, newTokens.accessToken)
-      if (newUser) {
-        setUser(newUser)
-      }
-
-      return { status: 'ok', tokens: newTokens }
-    } catch (err) {
-      // fetch() rejection = network down / DNS / CORS preflight during a
-      // rollout. Never fatal on its own.
-      console.error('[Auth] Token refresh error:', err)
-      return { status: 'transient' }
-    }
-  }, [fetchDiscoveryDocument])
+      return refreshWithToken(storedTokens)
+    })
+  }, [refreshWithToken, adoptTokensRotatedElsewhere])
 
   /**
    * Refresh the access token using the refresh token.
@@ -986,6 +1092,30 @@ export function AuthProvider({
       window.removeEventListener('online', onOnline)
     }
   }, [isAuthenticated, refreshAccessToken, scheduleTokenRefresh])
+
+  /**
+   * Keep tabs in step. Tokens are shared through localStorage, so when another
+   * tab refreshes them this tab picks up the new user and re-arms its timer
+   * from the new expiry; when another tab ends the session, this one follows.
+   */
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea === sessionStorage) return
+      if (event.key !== tokensKey() && event.key !== null) return
+      const tokens = getStoredTokens()
+      if (!tokens) {
+        setUser(null)
+        return
+      }
+      const sharedUser = extractUserFromToken(tokens.idToken, tokens.accessToken)
+      if (sharedUser) {
+        setUser(sharedUser)
+        scheduleTokenRefresh()
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [scheduleTokenRefresh])
 
   // Memoize context value to prevent unnecessary re-renders
   const contextValue = useMemo<AuthContextValue>(

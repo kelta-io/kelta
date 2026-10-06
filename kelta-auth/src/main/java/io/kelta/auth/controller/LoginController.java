@@ -1,15 +1,19 @@
 package io.kelta.auth.controller;
 
+import io.kelta.auth.config.ExpiredLoginFormHandler;
 import io.kelta.auth.federation.DynamicClientRegistrationRepository;
 import io.kelta.auth.federation.DynamicRelyingPartyRegistrationRepository;
 import io.kelta.auth.service.AuthDomainResolver;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrationRepository;
+import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
+import org.springframework.security.web.savedrequest.RequestCache;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,6 +30,7 @@ public class LoginController {
     private final ClientRegistrationRepository clientRegistrationRepository;
     private final AuthDomainResolver domainResolver;
     private final RelyingPartyRegistrationRepository relyingPartyRegistrationRepository;
+    private final RequestCache requestCache = new HttpSessionRequestCache();
 
     public LoginController(ClientRegistrationRepository clientRegistrationRepository,
                            AuthDomainResolver domainResolver,
@@ -46,6 +51,22 @@ public class LoginController {
         }
         if (request.getParameter("federation") != null) {
             model.addAttribute("federationError", true);
+        }
+
+        // Carry the pending /oauth2/authorize request in the form so a submit after the
+        // session expired can resume it (ExpiredLoginFormHandler). getRequest only reads
+        // the session; the response argument is unused.
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            String authorizeUrl = ExpiredLoginFormHandler.pendingAuthorizeUrl(
+                    requestCache.getRequest(request, null));
+            if (authorizeUrl != null) {
+                model.addAttribute("authorizeUrl", authorizeUrl);
+            }
+            if (session.getAttribute(ExpiredLoginFormHandler.SESSION_EXPIRED_ATTR) != null) {
+                session.removeAttribute(ExpiredLoginFormHandler.SESSION_EXPIRED_ATTR);
+                model.addAttribute("loginExpired", true);
+            }
         }
 
         String idpHint = request.getParameter("idp_hint");

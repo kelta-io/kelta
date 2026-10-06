@@ -65,6 +65,7 @@ import {
 // Admin/Setup pages (imported per-module, not via the barrel, so the eager barrel
 // graph doesn't drag the heavy lazy pages into the main chunk).
 import { NoTenantPage } from './pages/NoTenantPage/NoTenantPage'
+import { useRememberTenant } from './hooks/useRememberTenant'
 // LoginPage stays eager — it is the unauthenticated entry point; putting it behind a
 // lazy Suspense boundary raced the login route render (e2e `login.spec` flakes).
 import { LoginPage } from './pages/LoginPage'
@@ -516,6 +517,7 @@ function AdminLayout({ children }: { children: React.ReactNode }): React.ReactEl
   const { helpOpen, setHelpOpen } = useGlobalShortcuts()
   const location = useLocation()
   const { tenantBasePath } = useTenant()
+  useRememberTenant()
 
   const isSetupPage = location.pathname.endsWith('/setup')
 

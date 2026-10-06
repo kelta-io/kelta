@@ -1949,3 +1949,23 @@ no-fill.
 - kelta-auth's `SessionController` / `SmsAuthController` read `X-Tenant-ID` themselves. They
   are served by kelta-auth directly, not through this gateway chain, so the rules above do not
   cover them.
+
+## The SPA's refresh token lives in `localStorage` for up to 30 idle days (accepted 2026-10-05)
+
+The UI used to log users out whenever its access token expired: Spring AS never issued the
+public `kelta-platform` client a refresh token (`OAuth2RefreshTokenGenerator` returns `null` for
+public clients), so the silent-refresh path built in #1280/#1532 had nothing to refresh with.
+`PublicClientRefreshTokenGenerator` now issues one, and the SPA keeps its tokens in
+`localStorage` per tenant so new tabs and browser restarts stay signed in
+(`architecture.md` → SPA session lifetime).
+
+**Accepted risk.** Script running in the app's origin (XSS, a malicious plugin bundle) can read
+the refresh token and use it from elsewhere until it is rotated or idles out — sessionStorage
+offered no real protection against the same script, but the token now outlives the tab.
+Mitigations: rotation on every use (`reuseRefreshTokens(false)`), so a stolen token stops working
+the next time the real tab refreshes (≤ 1 h) and the victim is signed out rather than silently
+sharing a session; a 30-day idle TTL; logout clears the tenant's key and ends the kelta-auth
+login session. Not done: logout does **not** revoke the refresh token server-side (the public
+client has no client-auth path to `/oauth2/revoke`); no refresh-token family revocation on
+reuse; no DPoP-bound refresh tokens (SAS 7 supports DPoP; the SPA does not send proofs). Each
+would close the gap further.

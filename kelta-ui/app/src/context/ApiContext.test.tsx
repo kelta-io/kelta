@@ -115,7 +115,6 @@ describe('ApiContext 401 interceptor', () => {
     await expect(onError(unauthorized())).rejects.toMatchObject({ response: { status: 401 } })
 
     expect(mockAxios.request).not.toHaveBeenCalled()
-    expect(sessionStorage.getItem('kelta_auth_tokens')).toBeNull()
     expect(assign).toHaveBeenCalledWith('/default/login')
   })
 

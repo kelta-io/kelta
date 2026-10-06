@@ -31,6 +31,13 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.core.OAuth2Token;
+import org.springframework.security.oauth2.server.authorization.token.DelegatingOAuth2TokenGenerator;
+import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
+import org.springframework.security.oauth2.server.authorization.token.JwtGenerator;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2AccessTokenGenerator;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
 import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
@@ -217,6 +224,10 @@ public class AuthorizationServerConfig {
                             }
                         })
                 )
+                // A login form left open past the session timeout fails CSRF on submit;
+                // resume the user's authorization request instead of a dead-end 403.
+                .exceptionHandling(exceptions -> exceptions
+                        .accessDeniedHandler(new ExpiredLoginFormHandler()))
                 .csrf(csrf -> csrf
                         .ignoringRequestMatchers("/auth/session", "/auth/direct-login",
                                 "/portal/api/login/request", "/portal/api/login/verify",
@@ -470,6 +481,21 @@ public class AuthorizationServerConfig {
     @ConditionalOnMissingBean
     public JwtEncoder jwtEncoder(JWKSource<SecurityContext> jwkSource) {
         return new NimbusJwtEncoder(jwkSource);
+    }
+
+    /**
+     * The authorization server's token generator — Spring's default chain (JWT access/ID
+     * tokens with the Kelta claims customizer, opaque access tokens) except for refresh
+     * tokens, which come from {@link PublicClientRefreshTokenGenerator} so the public
+     * platform UI client receives one. Spring picks this bean up in place of its default.
+     */
+    @Bean
+    public OAuth2TokenGenerator<OAuth2Token> tokenGenerator(
+            JwtEncoder jwtEncoder, OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer) {
+        JwtGenerator jwtGenerator = new JwtGenerator(jwtEncoder);
+        jwtGenerator.setJwtCustomizer(jwtCustomizer);
+        return new DelegatingOAuth2TokenGenerator(
+                jwtGenerator, new OAuth2AccessTokenGenerator(), new PublicClientRefreshTokenGenerator());
     }
 
     @Bean

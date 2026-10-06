@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { forgetTenant, recentTenants, type RecentTenant } from '@/lib/recentTenants'
+import { hasStoredSession } from '@/lib/authStorage'
 
 /**
  * The platform host's root, where the URL has no tenant slug.
@@ -54,8 +55,20 @@ export function NoTenantPage(): React.ReactElement {
                   href={`/${encodeURIComponent(t.slug)}/app`}
                   className="min-w-0 flex-1 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1a1a2e]"
                 >
-                  <div className="truncate text-base font-medium text-[#1a1a2e]">
-                    {t.name || t.slug}
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-base font-medium text-[#1a1a2e]">
+                      {t.name || t.slug}
+                    </span>
+                    {/* Each workspace keeps its own session in this browser; a live one opens
+                        without signing in. */}
+                    {hasStoredSession(t.slug) && (
+                      <span
+                        className="shrink-0 rounded-full bg-[#e6f4ea] px-2 py-0.5 text-[11px] font-medium text-[#1e6b34]"
+                        data-testid={`signed-in-${t.slug}`}
+                      >
+                        Signed in
+                      </span>
+                    )}
                   </div>
                   <div className="truncate text-xs text-[#777]">/{t.slug}/</div>
                 </a>

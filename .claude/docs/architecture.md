@@ -958,9 +958,27 @@ direct hit, not a bare-name fallback, and is served.
 
 ### SPA session lifetime — token refresh contract (`AuthContext`)
 
-The SPA holds an 8 h access token + 7 d rotating refresh token (`ConnectedAppRegistrar`,
-`reuseRefreshTokens(false)`) in **`sessionStorage`** (per tab). Refresh goes to kelta-auth's
-token endpoint with `client_id` only (`PublicClientRefreshTokenAuthenticationConverter`).
+The SPA holds a 1 h access token + a rotating refresh token whose 30 d TTL restarts on every
+use, i.e. a 30-day *idle* limit (`ConnectedAppRegistrar.platformTokenSettings()`,
+`reuseRefreshTokens(false)`; the registrar re-saves the `kelta-platform` row whenever these
+lifetimes drift). Spring AS's default generator never issues a refresh token to a public
+client, so `AuthorizationServerConfig.tokenGenerator` swaps in
+`PublicClientRefreshTokenGenerator` — before it, no refresh token ever reached the SPA and every
+session died with its access token. Refresh goes to kelta-auth's token endpoint with
+`client_id` only (`PublicClientRefreshTokenAuthenticationConverter`).
+
+**Storage is `localStorage`, keyed per tenant** — `kelta_auth_tokens:<slug>`, bare
+`kelta_auth_tokens` on a custom domain (`lib/authStorage.ts`). Shared by every tab and
+surviving a browser restart; per tenant because a token is tenant-bound (the gateway rejects it
+on another tenant's URL) and on the platform host all tenants share the origin, so several
+workspaces stay signed in side by side. A session left in `sessionStorage` under the legacy key
+(older build, e2e direct-login fixture) is adopted on first read unless its `tenant_id` claim
+names another tenant. PKCE/state/nonce stay per tab in `sessionStorage`. Because refresh tokens
+rotate, tabs coordinate: refreshes run under a Web Lock (`kelta-auth-token-refresh:<key>`), a
+tab that waited re-reads storage and adopts the token another tab just stored, an
+`invalid_grant` is re-checked against storage before it counts as terminal, and a `storage`
+listener moves every tab onto refreshed tokens (or signs it out when another tab did).
+
 The rules that keep an open tab signed in — a session must never be torn down by a blip:
 
 - **Only a *terminal* refresh failure ends the session**: HTTP 401, or 400 with OAuth
@@ -985,7 +1003,23 @@ The rules that keep an open tab signed in — a session must never be torn down 
   every reload, e.g. after Chrome Memory Saver discarded the tab). A transient failure here
   restores the user from the stale token and lets the timer keep retrying.
 
-Tests: `AuthContext.test.tsx` → "Proactive Refresh", `ApiContext.test.tsx` (401 interceptor).
+Tests: `AuthContext.test.tsx` → "Proactive Refresh" + "Shared session across tabs",
+`ApiContext.test.tsx` (401 interceptor); server side `PublicClientRefreshTokenFlowTest` runs
+SAS's real code + refresh providers with the configured generator.
+
+**Workspaces.** `useRememberTenant()` (admin `AdminLayout` and `EndUserShell`) records each
+tenant + user in `kelta_recent_tenants` (`lib/recentTenants.ts`, no tokens). The slug-less root
+(`NoTenantPage`) lists them with a "Signed in" badge where `hasStoredSession` finds a live
+session, and `UserMenu` → "Switch workspace" lists the others. Switching is a full page load
+(`window.location.assign`), never a router navigation: the auth/API/config providers are bound
+to the current tenant.
+
+**Stale kelta-auth login form.** `/oauth2/authorize` saves itself in the HTTP session (Redis,
+8 h) and redirects to `/login`; a form left open past that fails CSRF on submit. The login page
+carries the pending authorize URL in a hidden `authorize_url` field and
+`ExpiredLoginFormHandler` (the default chain's access-denied handler) restarts that request —
+same-origin `/oauth2/authorize?…` only — landing on a fresh form that says the page expired,
+instead of a dead-end 403.
 
 ### Component layering — admin app vs. plugin library
 

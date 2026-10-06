@@ -95,14 +95,24 @@ window.IntersectionObserver = IntersectionObserverMock as unknown as typeof Inte
 // Mock scrollTo
 window.scrollTo = vi.fn()
 
-// Mock localStorage
+// Mock localStorage — an in-memory store (auth tokens live here, so a no-op
+// stub would sign every rendered page out). Like the per-file sessionStorage
+// mocks it persists across the tests of one file; tests that need a clean
+// slate clear it. The methods stay vi.fn()s so a test can assert on them.
+const localStore = new Map<string, string>()
 const localStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  removeItem: vi.fn(),
-  clear: vi.fn(),
-  length: 0,
-  key: vi.fn(),
+  getItem: vi.fn((key: string) => localStore.get(key) ?? null),
+  setItem: vi.fn((key: string, value: string) => {
+    localStore.set(key, String(value))
+  }),
+  removeItem: vi.fn((key: string) => {
+    localStore.delete(key)
+  }),
+  clear: vi.fn(() => localStore.clear()),
+  get length() {
+    return localStore.size
+  },
+  key: vi.fn((index: number) => Array.from(localStore.keys())[index] ?? null),
 }
 Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,

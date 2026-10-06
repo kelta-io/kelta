@@ -192,6 +192,10 @@
                 Invalid email or password. Please try again.
             </div>
 
+            <div th:if="${loginExpired}" class="alert-warning">
+                Your sign-in page expired. Please sign in again.
+            </div>
+
             <div th:if="${pendingActivation}" class="alert-warning">
                 Your account is pending activation. Please contact your administrator to assign a profile.
             </div>
@@ -227,6 +231,7 @@
             </div>
 
             <form th:action="@{/login}" method="post">
+                <input th:if="${authorizeUrl}" type="hidden" name="authorize_url" th:value="${authorizeUrl}">
                 <div class="form-group">
                     <label for="username">Email or Username</label>
                     <input type="text" id="username" name="username"

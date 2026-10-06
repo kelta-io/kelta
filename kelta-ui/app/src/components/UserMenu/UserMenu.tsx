@@ -26,6 +26,8 @@ import {
   Check,
   CheckSquare,
   Key,
+  Building2,
+  LayoutGrid,
 } from 'lucide-react'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -48,6 +50,9 @@ import { useOptionalApi } from '@/context/ApiContext'
 import { enableWebPush, webPushStatus, type WebPushStatus } from '@/push/webPush'
 import { toast } from 'sonner'
 import { getGravatarUrl } from '@/utils/gravatar'
+import { recentTenants } from '@/lib/recentTenants'
+import { hasStoredSession } from '@/lib/authStorage'
+import { isCustomDomainHost } from '@/context/TenantContext'
 import type { User } from '@/types/auth'
 import { ChevronDown } from 'lucide-react'
 
@@ -196,6 +201,13 @@ export function UserMenu({
   // The support console is otherwise reachable only by URL. VIEW_SUPPORT_MAILBOX is the "may open
   // the console" permission; which mailboxes appear inside it is decided by membership, server-side.
   const canViewMailbox = hasPermission('VIEW_SUPPORT_MAILBOX')
+
+  // Other workspaces this browser has used. Each keeps its own session, so switching to one that
+  // is still signed in lands straight in it. Read when the menu renders rather than cached: the
+  // list changes as other tabs sign in. Not offered on a custom domain, whose origin is one tenant.
+  const otherWorkspaces = isCustomDomainHost()
+    ? []
+    : recentTenants().filter((w) => w.slug !== tenantSlug)
   const handleNavigateToMailbox = useCallback(() => {
     navigate(`/${tenantSlug}/app/mailbox`)
   }, [navigate, tenantSlug])
@@ -380,6 +392,43 @@ export function UserMenu({
             <ArrowLeft className="mr-2 h-4 w-4" />
             {t('userMenu.backToApp')}
           </DropdownMenuItem>
+        )}
+
+        {/* Workspace switcher. A full page load, not a router navigation: the auth, API and
+            config providers are bound to the current tenant and must start over for another. */}
+        {otherWorkspaces.length > 0 && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger data-testid="switch-workspace-trigger">
+              <Building2 className="mr-2 h-4 w-4" />
+              {t('userMenu.switchWorkspace', 'Switch workspace')}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent data-testid="switch-workspace-menu">
+              {otherWorkspaces.map((w) => (
+                <DropdownMenuItem
+                  key={w.slug}
+                  onClick={() => window.location.assign(`/${encodeURIComponent(w.slug)}/app`)}
+                  data-testid={`switch-workspace-${w.slug}`}
+                >
+                  <span className="min-w-0 flex-1 truncate">{w.name || w.slug}</span>
+                  {hasStoredSession(w.slug) && (
+                    <span
+                      className="ml-2 h-2 w-2 shrink-0 rounded-full bg-green-500"
+                      title={t('userMenu.signedIn', 'Signed in')}
+                      aria-label={t('userMenu.signedIn', 'Signed in')}
+                    />
+                  )}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => window.location.assign('/')}
+                data-testid="all-workspaces-menu-item"
+              >
+                <LayoutGrid className="mr-2 h-4 w-4" />
+                {t('userMenu.allWorkspaces', 'All workspaces')}
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         )}
 
         <DropdownMenuSeparator />
