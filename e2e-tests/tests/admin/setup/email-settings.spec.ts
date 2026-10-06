@@ -17,16 +17,33 @@ test.describe("Email Settings", () => {
     await expect(emailSettingsPage.saveButton).toBeVisible();
   });
 
-  test("can fill SMTP host and click save", async ({ page }) => {
+  test("save sends the SMTP form to the API", async ({ page }) => {
+    // This suite also runs post-deploy against a live tenant, so the save must
+    // never reach the server: a persisted fake host replaces that tenant's real
+    // mail settings until someone notices. Intercept the PUT, assert what the
+    // form sent, and answer it the way the worker does.
+    let sent: Record<string, unknown> | undefined;
+    await page.route("**/api/admin/tenant/email-settings", async (route) => {
+      if (route.request().method() !== "PUT") return route.continue();
+      sent = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "ok" }),
+      });
+    });
+
     await emailSettingsPage.hostInput.fill("smtp.acme.example");
     await emailSettingsPage.portInput.fill("2525");
     await emailSettingsPage.fromAddressInput.fill("noreply@acme.example");
-
-    // Save: just exercise the click path — backend response may toast either way
-    // but the dialog should close (no validation errors).
     await emailSettingsPage.saveButton.click();
-    // Allow the request to settle.
-    await page.waitForTimeout(500);
+
+    await expect(page.getByText("Email settings saved")).toBeVisible();
+    expect(sent).toMatchObject({
+      host: "smtp.acme.example",
+      port: 2525,
+      fromAddress: "noreply@acme.example",
+    });
   });
 
   test("test-send button disabled until a recipient is provided", async () => {
