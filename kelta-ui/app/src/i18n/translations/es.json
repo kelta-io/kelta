@@ -461,11 +461,6 @@
       "labelPlaceholder": "ej., Panel",
       "pathPlaceholder": "ej., /dashboard",
       "pathHint": "La ruta URL de este elemento de menu. Debe comenzar con / si se proporciona.",
-      "accessPolicies": "Politicas de acceso",
-      "accessPoliciesHint": "Seleccione politicas que controlen quien puede ver este elemento de menu. Dejar vacio para permitir a todos los usuarios.",
-      "selectPolicies": "Seleccionar politicas...",
-      "noPolicies": "No hay politicas disponibles",
-      "policiesCount": "{{count}} politicas seleccionadas",
       "confirmDeleteMenu": "Esta seguro de que desea eliminar este menu? Esta accion no se puede deshacer.",
       "confirmDeleteItem": "Esta seguro de que desea eliminar este elemento de menu? Tambien se eliminaran los elementos hijos.",
       "validation": {

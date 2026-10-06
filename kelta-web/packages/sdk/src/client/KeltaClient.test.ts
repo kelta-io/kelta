@@ -452,11 +452,17 @@ describe('KeltaClient', () => {
       expect(client.admin).toBeDefined();
       expect(client.admin.collections).toBeDefined();
       expect(client.admin.fields).toBeDefined();
-      expect(client.admin.authz).toBeDefined();
       expect(client.admin.oidc).toBeDefined();
       expect(client.admin.ui).toBeDefined();
       expect(client.admin.packages).toBeDefined();
       expect(client.admin.migrations).toBeDefined();
+    });
+
+    it('no longer exposes the legacy roles/policies APIs, whose endpoints do not exist', () => {
+      const admin = new KeltaClient({ baseUrl: 'https://api.example.com' })
+        .admin as unknown as Record<string, unknown>;
+      expect(admin.authz).toBeUndefined();
+      expect(admin.roleHierarchy).toBeUndefined();
     });
   });
 

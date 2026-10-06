@@ -19,7 +19,6 @@ export interface Collection {
   /** Stamp request-origin geolocation into created_geo/updated_geo on HTTP writes */
   captureGeo?: boolean
   fields?: FieldDefinition[]
-  authz?: CollectionAuthz
   createdAt: string
   updatedAt: string
 }
@@ -89,40 +88,6 @@ export interface ValidationRule {
   type: 'min' | 'max' | 'pattern' | 'email' | 'url' | 'custom'
   value?: unknown
   message?: string
-}
-
-/**
- * Collection authorization configuration
- */
-export interface CollectionAuthz {
-  routePolicies: RoutePolicyConfig[]
-  fieldPolicies: FieldPolicyConfig[]
-}
-
-/**
- * Route-level policy configuration
- */
-export interface RoutePolicyConfig {
-  operation: 'read' | 'create' | 'update' | 'delete' | 'list'
-  policyId: string
-}
-
-/**
- * Policy summary for dropdown selection
- */
-export interface PolicySummary {
-  id: string
-  name: string
-  description?: string
-}
-
-/**
- * Field-level policy configuration
- */
-export interface FieldPolicyConfig {
-  fieldName: string
-  operation: 'read' | 'write'
-  policyId: string
 }
 
 /**

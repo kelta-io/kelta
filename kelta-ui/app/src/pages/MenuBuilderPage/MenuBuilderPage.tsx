@@ -11,7 +11,7 @@
  * - 8.3: Menu editor with tree view for items
  * - 8.4: Support drag-and-drop reordering of menu items
  * - 8.5: Support nested menu items (submenus)
- * - 8.6: Configure label, path, icon, access policies
+ * - 8.6: Configure label, path, icon
  * - 8.7: Save menu configuration via API
  * - 8.8: Display menu preview
  */
@@ -70,7 +70,6 @@ export interface UIMenuItem {
   icon?: string
   order: number
   children?: UIMenuItem[]
-  policies?: string[]
 }
 
 /**
@@ -93,7 +92,6 @@ interface MenuItemFormData {
   label: string
   path: string
   icon: string
-  policies: string[]
 }
 
 /**
@@ -122,15 +120,6 @@ async function createMenu(apiClient: ApiClient, data: Partial<UIMenu>): Promise<
 
 async function deleteMenu(apiClient: ApiClient, id: string): Promise<void> {
   return apiClient.deleteResource(`/api/ui-menus/${id}`)
-}
-
-/**
- * Policy interface for access control
- */
-interface Policy {
-  id: string
-  name: string
-  description?: string
 }
 
 /**
@@ -409,7 +398,6 @@ interface MenuItemFormProps {
   onSubmit: (data: MenuItemFormData) => void
   onCancel: () => void
   isSubmitting: boolean
-  availablePolicies: Policy[]
 }
 
 function MenuItemForm({
@@ -417,7 +405,6 @@ function MenuItemForm({
   onSubmit,
   onCancel,
   isSubmitting,
-  availablePolicies,
 }: MenuItemFormProps): React.ReactElement {
   const { t } = useI18n()
   const isEditing = !!item
@@ -425,7 +412,6 @@ function MenuItemForm({
     label: item?.label ?? '',
     path: item?.path ?? '',
     icon: item?.icon ?? '',
-    policies: item?.policies ?? [],
   })
   const [errors, setErrors] = useState<FormErrors>({})
   const [touched, setTouched] = useState<Record<string, boolean>>({})
@@ -455,16 +441,6 @@ function MenuItemForm({
     },
     [formData, t]
   )
-
-  const handlePolicyToggle = useCallback((policyId: string) => {
-    setFormData((prev) => {
-      const currentPolicies = prev.policies || []
-      const newPolicies = currentPolicies.includes(policyId)
-        ? currentPolicies.filter((id) => id !== policyId)
-        : [...currentPolicies, policyId]
-      return { ...prev, policies: newPolicies }
-    })
-  }, [])
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -602,57 +578,6 @@ function MenuItemForm({
                   </option>
                 ))}
               </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-foreground">
-                {t('builder.menus.accessPolicies')}
-              </label>
-              <div
-                className="rounded-md border border-border bg-muted max-h-[200px] overflow-y-auto"
-                data-testid="policies-container"
-              >
-                {availablePolicies.length === 0 ? (
-                  <p
-                    className="m-0 p-4 text-center text-sm text-muted-foreground"
-                    data-testid="no-policies-message"
-                  >
-                    {t('builder.menus.noPolicies')}
-                  </p>
-                ) : (
-                  <div
-                    className="flex flex-col gap-1 p-2"
-                    role="group"
-                    aria-label={t('builder.menus.accessPolicies')}
-                  >
-                    {availablePolicies.map((policy) => (
-                      <label
-                        key={policy.id}
-                        className="flex items-start gap-2 rounded p-2 cursor-pointer transition-colors hover:bg-muted-foreground/10"
-                        data-testid={`policy-checkbox-${policy.id}`}
-                      >
-                        <input
-                          type="checkbox"
-                          className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
-                          checked={formData.policies.includes(policy.id)}
-                          onChange={() => handlePolicyToggle(policy.id)}
-                          disabled={isSubmitting}
-                          data-testid={`policy-input-${policy.id}`}
-                        />
-                        <span className="text-sm font-medium text-foreground">{policy.name}</span>
-                        {policy.description && (
-                          <span className="block text-xs text-muted-foreground mt-0.5">
-                            {policy.description}
-                          </span>
-                        )}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <span className="mt-1 text-xs text-muted-foreground">
-                {t('builder.menus.accessPoliciesHint')}
-              </span>
             </div>
 
             <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border max-md:flex-col">
@@ -946,10 +871,9 @@ function MenuTreeView({
 interface MenuPreviewProps {
   menu: UIMenu | null
   items: UIMenuItem[]
-  availablePolicies: Policy[]
 }
 
-function MenuPreview({ menu, items, availablePolicies }: MenuPreviewProps): React.ReactElement {
+function MenuPreview({ menu, items }: MenuPreviewProps): React.ReactElement {
   const { t } = useI18n()
 
   const previewIconComponents: Record<string, React.ComponentType<{ size?: number }>> = {
@@ -972,16 +896,7 @@ function MenuPreview({ menu, items, availablePolicies }: MenuPreviewProps): Reac
     return <MapPin size={14} />
   }
 
-  const getPolicyNames = (policyIds?: string[]): string[] => {
-    if (!policyIds || policyIds.length === 0) return []
-    return policyIds
-      .map((id) => availablePolicies.find((p) => p.id === id)?.name)
-      .filter((name): name is string => !!name)
-  }
-
   const renderPreviewItem = (item: UIMenuItem, depth: number = 0): React.ReactNode => {
-    const policyNames = getPolicyNames(item.policies)
-
     return (
       <div
         key={item.id}
@@ -1000,17 +915,6 @@ function MenuPreview({ menu, items, availablePolicies }: MenuPreviewProps): Reac
             </span>
           )}
         </div>
-        {policyNames.length > 0 && (
-          <div
-            className="flex items-center gap-1 mt-1 pl-[calc(1rem+0.5rem)]"
-            data-testid={`preview-policies-${item.id}`}
-          >
-            <span className="text-xs opacity-70">
-              <Lock size={12} />
-            </span>
-            <span className="text-xs text-muted-foreground italic">{policyNames.join(', ')}</span>
-          </div>
-        )}
         {item.children && item.children.length > 0 && (
           <div className="w-full mt-1 pl-4 border-l-2 border-border">
             {item.children.map((child) => renderPreviewItem(child, depth + 1))}
@@ -1207,20 +1111,6 @@ export function MenuBuilderPage({
     queryFn: () => keltaClient.admin.ui.listMenus() as Promise<UIMenu[]>,
   })
 
-  // Fetch available policies for access control (Requirement 8.6)
-  const { data: availablePolicies = [] } = useQuery({
-    queryKey: ['policies'],
-    queryFn: async () => {
-      try {
-        return (await keltaClient.admin.authz.listPolicies()) as Policy[]
-      } catch {
-        // Return empty array if policies endpoint fails - policies are optional
-        return [] as Policy[]
-      }
-    },
-    enabled: viewMode === 'editor',
-  })
-
   // Fetch single menu query for editing - get from the menus list
   const currentMenu = useMemo(() => {
     if (!editingMenuId || !menus) return undefined
@@ -1402,25 +1292,23 @@ export function MenuBuilderPage({
   const handleItemFormSubmit = useCallback(
     (data: MenuItemFormData) => {
       if (editingItem) {
-        // Update existing item (Requirement 8.6: Configure label, path, icon, access policies)
+        // Update existing item (Requirement 8.6: Configure label, path, icon)
         setMenuItems((prev) =>
           updateItemInTree(prev, editingItem.id, (item) => ({
             ...item,
             label: data.label,
             path: data.path || undefined,
             icon: data.icon || undefined,
-            policies: data.policies.length > 0 ? data.policies : undefined,
           }))
         )
       } else {
-        // Create new item (Requirement 8.6: Configure label, path, icon, access policies)
+        // Create new item (Requirement 8.6: Configure label, path, icon)
         const newItem: UIMenuItem = {
           id: generateId(),
           label: data.label,
           path: data.path || undefined,
           icon: data.icon || undefined,
           order: menuItems.length,
-          policies: data.policies.length > 0 ? data.policies : undefined,
         }
 
         if (parentItemId) {
@@ -1549,11 +1437,7 @@ export function MenuBuilderPage({
               onReorder={handleReorder}
             />
           </div>
-          <MenuPreview
-            menu={currentMenu || null}
-            items={menuItems}
-            availablePolicies={availablePolicies}
-          />
+          <MenuPreview menu={currentMenu || null} items={menuItems} />
         </div>
 
         {isMenuFormOpen && (
@@ -1571,7 +1455,6 @@ export function MenuBuilderPage({
             onSubmit={handleItemFormSubmit}
             onCancel={handleCloseItemForm}
             isSubmitting={false}
-            availablePolicies={availablePolicies}
           />
         )}
 

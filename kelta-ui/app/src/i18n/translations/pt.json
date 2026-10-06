@@ -461,11 +461,6 @@
       "labelPlaceholder": "ex., Dashboard",
       "pathPlaceholder": "ex., /dashboard",
       "pathHint": "O caminho da URL para este item de menu. Deve comecar com / se fornecido.",
-      "accessPolicies": "Politicas de Acesso",
-      "accessPoliciesHint": "Selecione politicas que controlam quem pode ver este item de menu. Deixe vazio para permitir todos os usuarios.",
-      "selectPolicies": "Selecionar politicas...",
-      "noPolicies": "Nenhuma politica disponivel",
-      "policiesCount": "{{count}} politicas selecionadas",
       "confirmDeleteMenu": "Tem certeza de que deseja excluir este menu? Esta acao nao pode ser desfeita.",
       "confirmDeleteItem": "Tem certeza de que deseja excluir este item de menu? Isso tambem excluira quaisquer subitens.",
       "validation": {

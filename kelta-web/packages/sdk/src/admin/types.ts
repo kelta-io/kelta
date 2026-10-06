@@ -140,28 +140,6 @@ export interface CollectionRelationships {
 }
 
 /**
- * Role definition
- */
-export interface Role {
-  id?: string;
-  name: string;
-  description?: string;
-  createdAt?: string;
-}
-
-/**
- * Policy definition
- */
-export interface Policy {
-  id?: string;
-  name: string;
-  description?: string;
-  expression?: string;
-  rules?: string;
-  createdAt?: string;
-}
-
-/**
  * OIDC Provider configuration
  */
 export interface OIDCProvider {
@@ -223,8 +201,6 @@ export interface BrandingConfig {
 export interface PackageData {
   version: string;
   collections: CollectionDefinition[];
-  roles: Role[];
-  policies: Policy[];
   uiConfig?: UIConfig;
 }
 
@@ -745,18 +721,6 @@ export interface CreateUserGroupRequest {
   description?: string;
   groupType?: 'PUBLIC' | 'QUEUE';
   memberIds?: string[];
-}
-
-/**
- * Role hierarchy node
- */
-export interface RoleHierarchyNode {
-  id: string;
-  name: string;
-  description?: string;
-  parentRoleId?: string;
-  hierarchyLevel: number;
-  children?: RoleHierarchyNode[];
 }
 
 /**

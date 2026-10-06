@@ -159,5 +159,7 @@ questions.
   until proven needed.
 - Undo history holds deep-cloned trees; 50 × a large page is still small (config JSON
   ≤ ~100KB), but the child spec must state the clone strategy (`structuredClone`).
-- Per-item authz on nav (menu-item `policies[]`) exists in the editor model but is not
-  enforced in the shell — out of scope here; noted for a future security slice.
+- Per-item authz on nav: the menu builder's old "Access Policies" picker (menu-item
+  `policies[]`) was removed — it read the deleted legacy `/api/policies` endpoint and
+  `ui-menu-items` never stored the field. Per-item visibility, if wanted, is a future
+  slice built on current RBAC (profiles / permission sets), not the legacy policy model.

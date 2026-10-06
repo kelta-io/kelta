@@ -2,14 +2,13 @@
  * TypeScript Type Definitions
  *
  * This module exports all shared TypeScript types and interfaces used throughout the application.
- * Types are organized by domain: configuration, collections, authorization, UI builder, etc.
+ * Types are organized by domain: configuration, collections, UI builder, etc.
  */
 
 // Re-export types from domain-specific files
 export * from './common'
 export * from './config'
 export * from './collections'
-export * from './authorization'
 export type {
   User as AuthUser,
   TokenResponse,

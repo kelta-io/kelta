@@ -461,11 +461,6 @@
       "labelPlaceholder": "z.B. Dashboard",
       "pathPlaceholder": "z.B. /dashboard",
       "pathHint": "Der URL-Pfad für diesen Menüeintrag. Muss mit / beginnen, falls angegeben.",
-      "accessPolicies": "Zugriffsrichtlinien",
-      "accessPoliciesHint": "Wählen Sie Richtlinien, die steuern, wer diesen Menüeintrag sehen kann. Leer lassen, um allen Benutzern Zugriff zu gewähren.",
-      "selectPolicies": "Richtlinien auswählen...",
-      "noPolicies": "Keine Richtlinien verfügbar",
-      "policiesCount": "{{count}} Richtlinien ausgewählt",
       "confirmDeleteMenu": "Sind Sie sicher, dass Sie dieses Menü löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.",
       "confirmDeleteItem": "Sind Sie sicher, dass Sie diesen Menüeintrag löschen möchten? Dadurch werden auch alle Untereinträge gelöscht.",
       "validation": {

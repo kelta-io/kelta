@@ -483,11 +483,6 @@
       "labelPlaceholder": "e.g., Dashboard",
       "pathPlaceholder": "e.g., /dashboard",
       "pathHint": "The URL path for this menu item. Must start with / if provided.",
-      "accessPolicies": "Access Policies",
-      "accessPoliciesHint": "Select policies that control who can see this menu item. Leave empty to allow all users.",
-      "selectPolicies": "Select policies...",
-      "noPolicies": "No policies available",
-      "policiesCount": "{{count}} policies selected",
       "confirmDeleteMenu": "Are you sure you want to delete this menu? This action cannot be undone.",
       "confirmDeleteItem": "Are you sure you want to delete this menu item? This will also delete any child items.",
       "validation": {
