@@ -88,6 +88,15 @@
           "expr" : "R.attr.collectionId == \"accounts\" && R.attr.status == \"locked\""
         }
       }
+    }, {
+      "actions" : [ "edit" ],
+      "effect" : "EFFECT_ALLOW",
+      "derivedRoles" : [ "profile_editor-profile" ],
+      "condition" : {
+        "match" : {
+          "expr" : "R.attr.collectionId == \"bookings\" && R.attr.createdBy == P.attr.userId"
+        }
+      }
     } ]
   }
 }

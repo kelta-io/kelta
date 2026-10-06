@@ -46,7 +46,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <ul>
  *   <li>{@code admin-profile} — VIEW_ALL_DATA + MODIFY_ALL_DATA, full CRUD on col-a</li>
  *   <li>{@code editor-profile} — read+edit col-a, read col-b, nothing on col-c; a custom
- *       ABAC rule denies {@code edit} on accounts when {@code R.attr.status == "locked"}</li>
+ *       ABAC rule denies {@code edit} on accounts when {@code R.attr.status == "locked"}, and an
+ *       own-record rule allows {@code edit} on bookings when
+ *       {@code R.attr.createdBy == P.attr.userId}</li>
  *   <li>{@code viewer-profile} — VIEW_ALL_DATA only</li>
  *   <li>{@code nobody-profile} — no grants</li>
  * </ul>
@@ -65,6 +67,8 @@ class CerbosGeneratedPolicyIT {
     private static final String ADMIN_PASSWORD_HASH =
             "$2y$05$9spStCKjVOpxOdn0NZO1d.oMAWklpC3pp8LcW6nzzN.81E6kfkqgy";
     private static final List<String> CRUD = List.of("create", "read", "edit", "delete");
+    private static final String ALICE_ID = "11111111-1111-1111-1111-111111111111";
+    private static final String BOB_ID = "22222222-2222-2222-2222-222222222222";
 
     private static GenericContainer<?> cerbos;
     private static RestClient client;
@@ -177,10 +181,29 @@ class CerbosGeneratedPolicyIT {
                 .isEqualTo("AAAA");
     }
 
+    @Test
+    @DisplayName("own-record rule R.attr.createdBy == P.attr.userId allows the owner and denies another user")
+    void ownRecordRuleMatchesCallerUuid() {
+        Map<String, Object> ownedByAlice = Map.of("createdBy", ALICE_ID);
+
+        assertThat(check("record", "editor-profile", TENANT, "bookings", ownedByAlice, ALICE_ID))
+                .as("the owner may edit their own booking").isEqualTo(".AA.");
+        assertThat(check("record", "editor-profile", TENANT, "bookings", ownedByAlice, BOB_ID))
+                .as("another user keeps read but may not edit").isEqualTo(".A..");
+        // P.id is the email: the pre-fix rule (createdBy == P.id) could never match a UUID column.
+        assertThat(check("record", "editor-profile", TENANT, "bookings",
+                Map.of("createdBy", "user@example.test"), "")).isEqualTo(".A..");
+    }
+
     // ----- helpers -----
 
     private static String check(String kind, String profileId, String tenantId, String collectionId) {
         return check(kind, profileId, tenantId, collectionId, Map.of());
+    }
+
+    private static String check(String kind, String profileId, String tenantId, String collectionId,
+                                Map<String, Object> extraResourceAttrs) {
+        return check(kind, profileId, tenantId, collectionId, extraResourceAttrs, ALICE_ID);
     }
 
     /**
@@ -188,7 +211,7 @@ class CerbosGeneratedPolicyIT {
      * {@code .} for deny.
      */
     private static String check(String kind, String profileId, String tenantId, String collectionId,
-                                Map<String, Object> extraResourceAttrs) {
+                                Map<String, Object> extraResourceAttrs, String userId) {
         Map<String, Object> resourceAttrs = new LinkedHashMap<>();
         resourceAttrs.put("collectionId", collectionId);
         resourceAttrs.putAll(extraResourceAttrs);
@@ -198,7 +221,7 @@ class CerbosGeneratedPolicyIT {
                         "id", "user@example.test",
                         "roles", List.of("user"),
                         "scope", TENANT,
-                        "attr", Map.of("profileId", profileId, "tenantId", tenantId)),
+                        "attr", Map.of("profileId", profileId, "tenantId", tenantId, "userId", userId)),
                 "resources", List.of(Map.of(
                         "actions", CRUD,
                         "resource", Map.of(

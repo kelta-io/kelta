@@ -578,7 +578,10 @@ class CerbosPolicyGeneratorTest {
                     new CustomRule("rule-locked", "editor-profile", "col-a", "edit", "EFFECT_DENY",
                             "R.attr.status == \"locked\"", true),
                     new CustomRule("rule-disabled", "editor-profile", "col-a", "delete", "EFFECT_ALLOW",
-                            "true", false));
+                            "true", false),
+                    // "Restrict to own records": P.attr.userId is the caller's platform_user UUID
+                    new CustomRule("rule-own", "editor-profile", "col-b", "edit", "EFFECT_ALLOW",
+                            "R.attr.createdBy == P.attr.userId", true));
 
             assertGolden("derived_roles.json", generator.generateDerivedRoles(GOLDEN_TENANT, profiles));
             assertGolden("collection.json",

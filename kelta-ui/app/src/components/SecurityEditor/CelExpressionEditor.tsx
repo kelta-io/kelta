@@ -26,14 +26,15 @@ export interface CelExpressionEditorProps {
 
 const CEL_HELP = [
   { variable: 'R.attr.<fieldName>', description: 'Record attribute value' },
+  { variable: 'P.attr.userId', description: 'Current user ID — compare with createdBy or a user lookup' },
   { variable: 'P.attr.profileId', description: 'Current user profile ID' },
   { variable: 'P.attr.tenantId', description: 'Current tenant ID' },
-  { variable: 'P.id', description: 'Current user email' },
+  { variable: 'P.id', description: 'Current user email — compare only with email fields' },
 ]
 
 const CEL_EXAMPLES = [
   { label: 'Deny when status is closed', expr: 'R.attr.status == "closed"' },
-  { label: 'Restrict to own records', expr: 'R.attr.createdBy == P.id' },
+  { label: 'Restrict to own records', expr: 'R.attr.createdBy == P.attr.userId' },
   { label: 'Region restriction', expr: 'R.attr.region in ["US", "EU"]' },
   { label: 'Amount threshold', expr: 'double(R.attr.amount) > 10000.0' },
 ]
@@ -106,9 +107,16 @@ export function CelExpressionEditor({
             <div className="space-y-1">
               {CEL_EXAMPLES.map((example) => (
                 <div key={example.expr} className="flex items-baseline gap-2 text-xs">
-                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">
+                  <button
+                    type="button"
+                    onClick={() => onChange(example.expr)}
+                    disabled={readOnly}
+                    title={readOnly ? undefined : 'Use this expression'}
+                    className="rounded bg-muted px-1 py-0.5 font-mono text-foreground enabled:hover:bg-accent disabled:cursor-default"
+                    data-testid={`${testId}-example`}
+                  >
                     {example.expr}
-                  </code>
+                  </button>
                   <span className="text-muted-foreground">{example.label}</span>
                 </div>
               ))}

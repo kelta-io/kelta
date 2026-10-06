@@ -17,6 +17,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Resolves the user's identity (profileId, profileName) from the worker
@@ -30,6 +31,8 @@ public class UserIdentityResolutionFilter implements GlobalFilter, Ordered {
     private static final Logger log = LoggerFactory.getLogger(UserIdentityResolutionFilter.class);
     private static final String CACHE_KEY_PREFIX = "user-identity:";
     private static final String PRINCIPAL_ATTRIBUTE = "gateway.principal";
+    private static final Pattern UUID_PATTERN = Pattern.compile(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 
     private final WebClient webClient;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
@@ -73,11 +76,20 @@ public class UserIdentityResolutionFilter implements GlobalFilter, Ordered {
             exchange.getAttributes().put(PRINCIPAL_ATTRIBUTE, principal);
         }
 
-        // Skip worker lookup when profile is already in the JWT claims (kelta-auth tokens).
-        // This eliminates the synchronous worker call per request for kelta-auth-issued tokens.
+        // Skip worker lookup when the profile is already in the JWT claims (kelta-auth tokens)
+        // and the caller's platform_user UUID is known too. This eliminates the synchronous
+        // worker call per request for kelta-auth-issued tokens. A kelta-auth `sub` is the UUID on
+        // the direct-login and portal paths but the email on the authorization-code path, so
+        // those tokens still take the (Redis-cached) lookup for the UUID alone.
         if (principal.getProfileId() != null && !principal.getProfileId().isEmpty()) {
-            log.debug("Profile already resolved from JWT claims for user: {}", principal.getUsername());
-            return chain.filter(exchange);
+            if (principal.getUserId() == null && isUuid(principal.getClaims().get("sub"))) {
+                principal = principal.withUserId((String) principal.getClaims().get("sub"));
+                exchange.getAttributes().put(PRINCIPAL_ATTRIBUTE, principal);
+            }
+            if (principal.getUserId() != null) {
+                log.debug("Profile already resolved from JWT claims for user: {}", principal.getUsername());
+                return chain.filter(exchange);
+            }
         }
 
         String email = principal.getUsername();
@@ -96,17 +108,45 @@ public class UserIdentityResolutionFilter implements GlobalFilter, Ordered {
                 .then(chain.filter(exchange));
     }
 
+    /**
+     * Applies the worker's identity lookup ({@code userId}, {@code profileId},
+     * {@code profileName}, {@code userType}) to the principal.
+     *
+     * <p>A profile the token already carries is kept. A PAT's principal is built by the
+     * gateway, not from a token, so its {@code user_type} claim comes from here — the PAT
+     * owner's {@code platform_user.user_type} — and {@code HeaderTransformationFilter} stamps it
+     * as {@code X-User-Type}. Without it every PAT, a portal member's included, read as INTERNAL.
+     */
+    static GatewayPrincipal enrichFromIdentity(Map<String, String> identity, GatewayPrincipal principal) {
+        GatewayPrincipal enriched = principal;
+        if (enriched.getProfileId() == null || enriched.getProfileId().isEmpty()) {
+            enriched = enriched
+                    .withProfileId(identity.get("profileId"))
+                    .withProfileName(identity.get("profileName"));
+        }
+        if (enriched.getUserId() == null && isUuid(identity.get("userId"))) {
+            enriched = enriched.withUserId(identity.get("userId"));
+        }
+        String userType = identity.get("userType");
+        if ("true".equals(enriched.getClaims().get("pat")) && userType != null && !userType.isBlank()) {
+            enriched = enriched.withClaim("user_type", userType);
+        }
+        return enriched.equals(principal) ? principal : enriched;
+    }
+
     private GatewayPrincipal enrichFromIdentityJson(String json, GatewayPrincipal principal) {
         try {
             Map<String, String> identity = objectMapper.readValue(json,
                     new TypeReference<Map<String, String>>() {});
-            return principal
-                    .withProfileId(identity.get("profileId"))
-                    .withProfileName(identity.get("profileName"));
+            return enrichFromIdentity(identity, principal);
         } catch (Exception e) {
             log.warn("Failed to parse cached user identity: {}", e.getMessage());
             return principal;
         }
+    }
+
+    private static boolean isUuid(Object value) {
+        return value instanceof String s && UUID_PATTERN.matcher(s).matches();
     }
 
     private Mono<String> fetchFromWorker(String tenantId, String email,

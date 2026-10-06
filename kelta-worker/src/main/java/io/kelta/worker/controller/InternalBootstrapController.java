@@ -199,8 +199,9 @@ public class InternalBootstrapController {
     /**
      * Returns lightweight user identity for gateway Cerbos authorization.
      *
-     * <p>Returns userId, profileId, and profileName. The gateway caches this
-     * in Redis and uses profileId to build the Cerbos principal.
+     * <p>Returns userId, profileId, profileName and userType. The gateway caches this
+     * in Redis, uses profileId and userId to build the Cerbos principal, and takes a PAT
+     * owner's userType for {@code X-User-Type}.
      *
      * @param email    the user's email address
      * @param tenantId the tenant UUID
@@ -224,6 +225,9 @@ public class InternalBootstrapController {
         response.put("userId", row.get("id"));
         response.put("profileId", row.get("profile_id"));
         response.put("profileName", row.get("profile_name"));
+        // The gateway stamps this as X-User-Type for PAT requests, whose principal carries no
+        // user_type claim of its own — a portal member's PAT must act as PORTAL.
+        response.put("userType", row.get("user_type") != null ? row.get("user_type") : "INTERNAL");
 
         return ResponseEntity.ok(response);
     }

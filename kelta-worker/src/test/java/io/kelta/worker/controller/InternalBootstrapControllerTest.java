@@ -385,6 +385,25 @@ class InternalBootstrapControllerTest {
             assertThat(response.getBody().get("profileId")).isNull();
             assertThat(response.getBody().get("profileName")).isNull();
         }
+
+        @Test
+        @DisplayName("Should return the user's type, defaulting to INTERNAL")
+        void returnsUserType() {
+            Map<String, Object> portalRow = new HashMap<>();
+            portalRow.put("id", "user-1");
+            portalRow.put("user_type", "PORTAL");
+            when(repository.findUserIdentity("member@test.com", "tenant-1"))
+                    .thenReturn(Optional.of(portalRow));
+            Map<String, Object> legacyRow = new HashMap<>();
+            legacyRow.put("id", "user-2");
+            when(repository.findUserIdentity("staff@test.com", "tenant-1"))
+                    .thenReturn(Optional.of(legacyRow));
+
+            assertThat(controller.getUserIdentity("member@test.com", "tenant-1").getBody().get("userType"))
+                    .isEqualTo("PORTAL");
+            assertThat(controller.getUserIdentity("staff@test.com", "tenant-1").getBody().get("userType"))
+                    .isEqualTo("INTERNAL");
+        }
     }
 
     @Nested

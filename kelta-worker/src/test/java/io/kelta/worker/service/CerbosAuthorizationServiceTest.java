@@ -6,6 +6,7 @@ import dev.cerbos.sdk.CheckResourcesResult;
 import dev.cerbos.sdk.CheckResult;
 import dev.cerbos.sdk.builders.Principal;
 import dev.cerbos.sdk.builders.Resource;
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.worker.config.WorkerProperties;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -416,6 +418,50 @@ class CerbosAuthorizationServiceTest {
             List<String> retry = service.batchCheckFieldAccess(
                     "user@test.com", "profile-1", "tenant-1", "col-1", fields, "read");
             assertThat(retry).hasSize(60);
+        }
+    }
+
+    @Nested
+    @DisplayName("Principal attributes")
+    class PrincipalAttributes {
+
+        private static final String ALICE = "11111111-1111-1111-1111-111111111111";
+
+        private dev.cerbos.api.v1.engine.Engine.Principal capturedPrincipal() {
+            ArgumentCaptor<Principal> captor = ArgumentCaptor.forClass(Principal.class);
+            verify(cerbosClient).check(captor.capture(), any(Resource.class), eq("read"));
+            return captor.getValue().toPrincipal();
+        }
+
+        @Test
+        @DisplayName("carries the bound caller's UUID as attr.userId and keeps P.id as the email")
+        void carriesCallerUuid() {
+            when(cerbosClient.check(any(Principal.class), any(Resource.class), eq("read")))
+                    .thenReturn(fieldCheckResult);
+            when(fieldCheckResult.isAllowed("read")).thenReturn(true);
+            CallerContext alice = new CallerContext(ALICE, CallerContext.UserType.INTERNAL, false, false);
+
+            CallerContext.runAs(alice, () -> service.checkRecordAccess("alice@test.com", "profile-1",
+                    "tenant-1", "contacts", "rec-1", java.util.Map.of(), "read"));
+
+            var principal = capturedPrincipal();
+            assertThat(principal.getId()).isEqualTo("alice@test.com");
+            assertThat(principal.getAttrMap().get("userId").getStringValue()).isEqualTo(ALICE);
+        }
+
+        @Test
+        @DisplayName("renders an empty attr.userId on the internal tier (no caller bound)")
+        void emptyUserIdWithoutCaller() {
+            when(cerbosClient.check(any(Principal.class), any(Resource.class), eq("read")))
+                    .thenReturn(fieldCheckResult);
+            when(fieldCheckResult.isAllowed("read")).thenReturn(true);
+
+            service.checkRecordAccess("alice@test.com", "profile-1",
+                    "tenant-1", "contacts", "rec-1", java.util.Map.of(), "read");
+
+            var principal = capturedPrincipal();
+            assertThat(principal.getAttrMap()).containsKey("userId");
+            assertThat(principal.getAttrMap().get("userId").getStringValue()).isEmpty();
         }
     }
 

@@ -22,6 +22,9 @@ import java.util.stream.Collectors;
  * - Preserves the Authorization header so downstream services can validate JWT tokens
  * - Adds X-Forwarded-User header with the authenticated principal's username
  * - Adds X-User-Id header with the user's email (resolved from JWT claims)
+ * - Adds X-User-Type header (INTERNAL|PORTAL) from the principal's user_type claim. For JWTs the
+ *   claim is the token's own; a PAT's principal is gateway-built, and UserIdentityResolutionFilter
+ *   adds the PAT owner's platform_user.user_type to it, so a portal member's PAT is PORTAL
  * - Adds X-Forwarded-Groups header with comma-separated list of principal's groups
  * - Adds X-Forwarded-Roles header (backward compatibility, same value as groups)
  * - Preserves all other request headers
@@ -89,9 +92,10 @@ public class HeaderTransformationFilter implements GlobalFilter, Ordered {
                     String userId = resolveUserId(principal);
                     headers.set(X_USER_ID_HEADER, userId);
 
-                    // Add X-User-Type header (INTERNAL|PORTAL) from the JWT
-                    // user_type claim; tokens minted before the claim existed
-                    // read as INTERNAL.
+                    // Add X-User-Type header (INTERNAL|PORTAL) from the user_type
+                    // claim — the JWT's own, or the PAT owner's (added by
+                    // UserIdentityResolutionFilter). Tokens minted before the
+                    // claim existed read as INTERNAL.
                     Object userType = principal.getClaims().get("user_type");
                     headers.set(X_USER_TYPE_HEADER,
                             userType instanceof String s && !s.isEmpty() ? s : "INTERNAL");

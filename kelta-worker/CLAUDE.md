@@ -9,7 +9,7 @@ io.kelta.worker/
   config/          ← Spring @Configuration (NATS subscriptions, Cerbos, S3, scheduler, tenant datasource)
   controller/      ← REST controllers (thin — delegate to services)
   event/           ← Record event publisher
-  filter/          ← Servlet filters (tenant context, MDC, metrics, login tracking)
+  filter/          ← Servlet filters (tenant context, caller context, MDC, metrics, login tracking)
   flow/            ← JdbcFlowStore (workflow persistence)
   handler/         ← Action handlers (e.g., SubmitForApprovalActionHandler)
   interceptor/     ← Cerbos authorization advice
@@ -94,7 +94,7 @@ stops the rollout. Two rules follow:
 2. Create or update a service class in `service/`
 3. If it needs persistence, add methods to existing repository or create new `@Repository` with `JdbcTemplate`
 4. Add a test: `src/test/java/io/kelta/worker/controller/MyControllerTest.java`
-5. **Tenant context** is pre-bound per request by `filter/TenantContextFilter` from the gateway's `X-Tenant-ID` / `X-Tenant-Slug` headers — **read** `TenantContext` (or `@RequestHeader("X-Tenant-ID")`); do **not** call `runWithTenant` on a request path. RLS scopes queries automatically. The same filter binds `GeoContext.CURRENT_GEO` (runtime-core) from the gateway's `X-Geo-*` headers — read `GeoContext.current()`/`currentCountry()` for request-origin geolocation; it is unbound on flow/scheduled paths.
+5. **Tenant context** is pre-bound per request by `filter/TenantContextFilter` from the gateway's `X-Tenant-ID` / `X-Tenant-Slug` headers — **read** `TenantContext` (or `@RequestHeader("X-Tenant-ID")`); do **not** call `runWithTenant` on a request path. RLS scopes queries automatically. The caller is pre-resolved too: `filter/CallerContextFilter` binds `CallerContext` (runtime-core — caller UUID, INTERNAL/PORTAL, `viewAll`/`modifyAll`); read `CallerContext.current()` instead of re-resolving `X-User-Id` (empty = internal tier). The same tenant filter binds `GeoContext.CURRENT_GEO` (runtime-core) from the gateway's `X-Geo-*` headers — read `GeoContext.current()`/`currentCountry()` for request-origin geolocation; it is unbound on flow/scheduled paths.
 6. **Authorization**: `/api/admin/**` (and other `static-*` routes) are **not** covered by per-resource Cerbos — they get only the blanket `API_ACCESS` check, and the worker advices exclude `/api/admin/` (and the record advice excludes `/api/telehealth/` — participant scoping lives in those controllers). Enforce a specific permission **in the controller/service**. A new top-level `/api/<x>/**` segment needs a gateway static route (`RouteConfigService.registerStaticRoutes()`) or it 404s. See `.claude/docs/architecture.md` → Authorizing a new endpoint.
 
 **Reference**: `ModuleController.java` + `ScimUserControllerTest.java`. Full recipe: `.claude/docs/playbooks.md` → "Add a worker REST endpoint".

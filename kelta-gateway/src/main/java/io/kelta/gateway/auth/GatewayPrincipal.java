@@ -23,6 +23,7 @@ public final class GatewayPrincipal {
     private final String connectedAppId;
     private final String appScopes;
     private final String geoCountry;
+    private final String userId;
 
     /**
      * Creates a new GatewayPrincipal with all fields.
@@ -40,6 +41,20 @@ public final class GatewayPrincipal {
     public GatewayPrincipal(String username, List<String> groups, Map<String, Object> claims,
                             String profileId, String profileName, String tenantId,
                             String connectedAppId, String appScopes, String geoCountry) {
+        this(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes,
+                geoCountry, null);
+    }
+
+    /**
+     * Creates a new GatewayPrincipal with all fields, including the resolved platform user id.
+     *
+     * @param userId the caller's {@code platform_user.id} UUID, resolved by the gateway — never
+     *               taken from a token claim (may be null)
+     */
+    public GatewayPrincipal(String username, List<String> groups, Map<String, Object> claims,
+                            String profileId, String profileName, String tenantId,
+                            String connectedAppId, String appScopes, String geoCountry,
+                            String userId) {
         this.username = Objects.requireNonNull(username, "username cannot be null");
         this.groups = groups != null ? List.copyOf(groups) : Collections.emptyList();
         this.claims = claims != null ? Map.copyOf(claims) : Collections.emptyMap();
@@ -49,6 +64,7 @@ public final class GatewayPrincipal {
         this.connectedAppId = connectedAppId;
         this.appScopes = appScopes;
         this.geoCountry = geoCountry;
+        this.userId = userId;
     }
 
     /**
@@ -138,45 +154,70 @@ public final class GatewayPrincipal {
     }
 
     /**
+     * Gets the caller's {@code platform_user.id} UUID, as resolved by the gateway (the PAT's
+     * owner, or the worker identity lookup). Null when it has not been resolved.
+     */
+    public String getUserId() {
+        return userId;
+    }
+
+    /**
+     * Returns a copy of this principal with the given resolved platform user id.
+     */
+    public GatewayPrincipal withUserId(String userId) {
+        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry, userId);
+    }
+
+    /**
+     * Returns a copy of this principal with one claim added or replaced. Only for claims the
+     * gateway itself attests (e.g. a PAT owner's {@code user_type}).
+     */
+    public GatewayPrincipal withClaim(String name, Object value) {
+        Map<String, Object> updated = new java.util.HashMap<>(claims);
+        updated.put(name, value);
+        return new GatewayPrincipal(username, groups, updated, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry, userId);
+    }
+
+    /**
      * Returns a copy of this principal with the given profile ID.
      */
     public GatewayPrincipal withProfileId(String profileId) {
-        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry);
+        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry, userId);
     }
 
     /**
      * Returns a copy of this principal with the given profile name.
      */
     public GatewayPrincipal withProfileName(String profileName) {
-        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry);
+        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry, userId);
     }
 
     /**
      * Returns a copy of this principal with the given tenant ID.
      */
     public GatewayPrincipal withTenantId(String tenantId) {
-        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry);
+        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry, userId);
     }
 
     /**
      * Returns a copy of this principal with the given connected app ID.
      */
     public GatewayPrincipal withConnectedAppId(String connectedAppId) {
-        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry);
+        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry, userId);
     }
 
     /**
      * Returns a copy of this principal with the given app scopes.
      */
     public GatewayPrincipal withAppScopes(String appScopes) {
-        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry);
+        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry, userId);
     }
 
     /**
      * Returns a copy of this principal with the given request-origin country.
      */
     public GatewayPrincipal withGeoCountry(String geoCountry) {
-        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry);
+        return new GatewayPrincipal(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry, userId);
     }
 
     /**
@@ -199,12 +240,13 @@ public final class GatewayPrincipal {
                Objects.equals(tenantId, that.tenantId) &&
                Objects.equals(connectedAppId, that.connectedAppId) &&
                Objects.equals(appScopes, that.appScopes) &&
-               Objects.equals(geoCountry, that.geoCountry);
+               Objects.equals(geoCountry, that.geoCountry) &&
+               Objects.equals(userId, that.userId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry);
+        return Objects.hash(username, groups, claims, profileId, profileName, tenantId, connectedAppId, appScopes, geoCountry, userId);
     }
 
     @Override

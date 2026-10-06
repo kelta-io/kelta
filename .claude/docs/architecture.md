@@ -444,6 +444,26 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   path). Authorization stays in `ApprovalService` (`assigned_to`/`submitted_by` UUID
   comparison). `GET /api/me/identity` exposes the same resolution to the frontend (the JWT
   `sub` is the UUID only on direct-login; the auth-code flow mints the email).
+- **Caller identity — `CallerContext`** (member-data-ownership slice 1). The gateway stamps the
+  identity headers from the validated principal (`HeaderTransformationFilter`): `X-User-Id` (the
+  email; a PAT's owner email), `X-User-Type` (`INTERNAL|PORTAL` — a JWT's own `user_type` claim; a
+  **PAT carries its owner's `platform_user.user_type`**, added to the gateway-built PAT principal
+  by `UserIdentityResolutionFilter` from `/internal/user-identity`; absent reads as INTERNAL) and
+  `X-User-Profile-Id`. The worker's `CallerContextFilter` (`HIGHEST_PRECEDENCE + 12`, after
+  `TenantContextFilter`) resolves them **once per request** into the runtime-core
+  `CallerContext` ScopedValue — `userId` (the `platform_user.id` UUID via `UserIdResolver`),
+  `userType`, and `viewAll`/`modifyAll` from the profile's `VIEW_ALL_DATA`/`MODIFY_ALL_DATA`
+  grants (15 s per-pod cache; never set for PORTAL). Read it with `CallerContext.current()` —
+  **empty = internal tier** (flows, NATS, schedulers, provisioning). No `X-User-Id` or no tenant →
+  nothing bound; an **email that resolves to no user → 401 `CALLER_UNRESOLVED`** (fail closed);
+  an identifier that is neither a UUID nor an email (a connected app's client id, stamped from
+  `sub`) → nothing bound, unchanged. The anonymous Guest principal stamps the nil UUID and binds
+  as INTERNAL. `/internal/**` and `/actuator/**` are skipped. The owner-guard hooks read it via
+  `listener/OwnerGuardCaller` (header re-resolution only when nothing was bound).
+  `CallerContext.ownerScoped(scope, READ|WRITE)` is the owner-scoping decision slice 2 uses.
+  Both Cerbos principals (`CerbosPrincipalBuilder`, worker `CerbosAuthorizationService`) carry
+  the UUID as **`P.attr.userId`**; `P.id` stays the email (integrations.md → Cerbos principal
+  attributes).
 - **User preference writes** (`/api/user-ui-preferences`, generic route): owner-guarded by
   `UserPreferenceGuardHook` (BeforeSaveHook, order −100) — the row's `userId` must equal the
   caller's canonical UUID (`X-User-Id` → `UserIdResolver`; fail-closed on unresolvable,
@@ -470,7 +490,8 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   single-use SHA-256-hashed tokens in `portal_login_token`, 15-min PORTAL_LOGIN / 7-day
   PORTAL_INVITE, enumeration-safe uniform responses, per-user rate limit). Verified logins get a
   normal auth session; the JWT carries a `user_type` claim which the gateway re-stamps as
-  `X-User-Type` (`HeaderTransformationFilter`; pre-claim tokens read as INTERNAL).
+  `X-User-Type` (`HeaderTransformationFilter`; pre-claim tokens read as INTERNAL). A portal
+  user's PAT is PORTAL too — its type comes from the owner row (see Caller identity above).
   `POST /api/admin/users/portal-invite` (existing `/api/admin/**` static route,
   `MANAGE_USERS` in-controller) creates the user with the seeded **Portal User** profile
   (API_ACCESS only) and enforces the `maxPortalUsers` governor; re-posting an existing portal
