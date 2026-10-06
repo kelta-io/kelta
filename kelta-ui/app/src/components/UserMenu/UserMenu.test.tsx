@@ -151,6 +151,9 @@ vi.mock('@/components/ui/button', () => ({
 import { getGravatarUrl } from '../../utils/gravatar'
 const mockGetGravatarUrl = vi.mocked(getGravatarUrl)
 
+import { useMemoryLocalStorage } from '@/test/memoryStorage'
+import { rememberTenant } from '@/lib/recentTenants'
+
 // Import component AFTER mocks
 import { UserMenu, type UserMenuProps } from './UserMenu'
 
@@ -382,6 +385,49 @@ describe('UserMenu', () => {
       render(<UserMenu {...defaultProps} variant="admin" />)
       fireEvent.click(screen.getByTestId('back-to-app-menu'))
       expect(mockNavigate).toHaveBeenCalledWith('/default/app')
+    })
+  })
+
+  describe('Workspace switcher', () => {
+    const assign = vi.fn()
+
+    beforeEach(() => {
+      useMemoryLocalStorage()
+      Object.defineProperty(window, 'location', {
+        value: { ...window.location, assign, hostname: 'localhost', pathname: '/default/app' },
+        writable: true,
+        configurable: true,
+      })
+    })
+
+    it('is hidden when this browser has used no other workspace', () => {
+      rememberTenant('default', { email: 'john.doe@example.com' })
+      render(<UserMenu {...defaultProps} />)
+      expect(screen.queryByTestId('switch-workspace-trigger')).toBeNull()
+    })
+
+    it('lists other remembered workspaces, marks live sessions, and reloads into the chosen one', () => {
+      rememberTenant('acme', { email: 'john.doe@example.com' }, 'Acme Corp')
+      rememberTenant('globex', { email: 'john.doe@example.com' })
+      localStorage.setItem(
+        'kelta_auth_tokens:acme',
+        JSON.stringify({ accessToken: 'a', refreshToken: 'r', expiresAt: 0 })
+      )
+
+      render(<UserMenu {...defaultProps} />)
+
+      const acme = screen.getByTestId('switch-workspace-acme')
+      expect(acme).toHaveTextContent('Acme Corp')
+      expect(acme.querySelector('[aria-label="Signed in"]')).not.toBeNull()
+      expect(
+        screen.getByTestId('switch-workspace-globex').querySelector('[aria-label="Signed in"]')
+      ).toBeNull()
+
+      fireEvent.click(acme)
+      expect(assign).toHaveBeenCalledWith('/acme/app')
+
+      fireEvent.click(screen.getByTestId('all-workspaces-menu-item'))
+      expect(assign).toHaveBeenCalledWith('/')
     })
   })
 

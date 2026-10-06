@@ -24,9 +24,9 @@ export const test = base.extend<EMFFixtures>({
     { option: true },
   ],
 
-  // Override the page fixture to inject sessionStorage tokens before each test.
-  // Playwright's storageState only captures cookies + localStorage, but
-  // the EMF app stores auth tokens in sessionStorage.
+  // Override the page fixture to inject the direct-login tokens before each test.
+  // The app keeps tokens in localStorage (captured by storageState) and adopts a
+  // session left in sessionStorage under the legacy key, which is what this injects.
   page: async ({ page }, use) => {
     if (fs.existsSync(SESSION_TOKENS_PATH)) {
       const tokens = JSON.parse(fs.readFileSync(SESSION_TOKENS_PATH, "utf-8"));

@@ -26,6 +26,9 @@ public class ConnectedAppRegistrar implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ConnectedAppRegistrar.class);
 
+    static final Duration PLATFORM_ACCESS_TOKEN_TTL = Duration.ofHours(1);
+    static final Duration PLATFORM_REFRESH_TOKEN_TTL = Duration.ofDays(30);
+
     private final RegisteredClientRepository clientRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthProperties properties;
@@ -67,8 +70,13 @@ public class ConnectedAppRegistrar implements ApplicationRunner {
         String registrationId = existing != null ? existing.getId() : UUID.randomUUID().toString();
         String expectedRedirectUri = uiBaseUrl + "/auth/callback";
 
-        // If the client already exists with the correct redirect URI, nothing to do.
-        if (existing != null && existing.getRedirectUris().contains(expectedRedirectUri)) {
+        // If the client already exists with the correct redirect URI and token settings,
+        // nothing to do. Token settings are compared too: before they were, a TTL change in
+        // code never reached an existing database row.
+        TokenSettings tokenSettings = platformTokenSettings();
+        if (existing != null && existing.getRedirectUris().contains(expectedRedirectUri)
+                && existing.getAuthorizationGrantTypes().contains(AuthorizationGrantType.REFRESH_TOKEN)
+                && sameTokenLifetimes(existing.getTokenSettings(), tokenSettings)) {
             log.info("Platform OAuth2 client '{}' already registered with correct redirect URI", clientId);
             return;
         }
@@ -89,20 +97,37 @@ public class ConnectedAppRegistrar implements ApplicationRunner {
                         .requireAuthorizationConsent(false)
                         .requireProofKey(true)
                         .build())
-                .tokenSettings(TokenSettings.builder()
-                        .accessTokenTimeToLive(Duration.ofHours(8))
-                        .refreshTokenTimeToLive(Duration.ofDays(7))
-                        .reuseRefreshTokens(false)
-                        .build())
+                .tokenSettings(tokenSettings)
                 .build();
 
         clientRepository.save(platformClient);
         if (existing == null) {
             log.info("Registered Platform OAuth2 client '{}' with redirect URI '{}'", clientId, expectedRedirectUri);
         } else {
-            log.info("Updated Platform OAuth2 client '{}' redirect URI to '{}' (was '{}')",
-                    clientId, expectedRedirectUri, existing.getRedirectUris());
+            log.info("Updated Platform OAuth2 client '{}': redirect URI '{}' (was '{}'), access TTL {}, refresh TTL {}",
+                    clientId, expectedRedirectUri, existing.getRedirectUris(),
+                    tokenSettings.getAccessTokenTimeToLive(), tokenSettings.getRefreshTokenTimeToLive());
         }
+    }
+
+    /**
+     * Token lifetimes for the platform UI. The SPA renews its access token in the background
+     * before it expires, so the access token can stay short; the refresh token is rotated on
+     * every use and each new one gets a fresh TTL, so {@link #PLATFORM_REFRESH_TOKEN_TTL} is an
+     * idle limit — a session only ends after that long with no open tab refreshing it.
+     */
+    static TokenSettings platformTokenSettings() {
+        return TokenSettings.builder()
+                .accessTokenTimeToLive(PLATFORM_ACCESS_TOKEN_TTL)
+                .refreshTokenTimeToLive(PLATFORM_REFRESH_TOKEN_TTL)
+                .reuseRefreshTokens(false)
+                .build();
+    }
+
+    private static boolean sameTokenLifetimes(TokenSettings actual, TokenSettings expected) {
+        return expected.getAccessTokenTimeToLive().equals(actual.getAccessTokenTimeToLive())
+                && expected.getRefreshTokenTimeToLive().equals(actual.getRefreshTokenTimeToLive())
+                && expected.isReuseRefreshTokens() == actual.isReuseRefreshTokens();
     }
 
     /**

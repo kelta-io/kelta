@@ -90,9 +90,9 @@ setup("authenticate via Authentik", async ({ page }) => {
 
   await expect(page).not.toHaveURL(/\/login/);
 
-  // Extract sessionStorage tokens — the app stores auth tokens in sessionStorage
-  // (not localStorage), and Playwright's storageState only captures cookies + localStorage.
-  // We save them separately and inject them via addInitScript in each test.
+  // The app keeps auth tokens in localStorage (per tenant), which the storageState
+  // saved below captures. Any kelta_auth* sessionStorage leftovers are saved too and
+  // re-injected via addInitScript in each test, as the direct-login path does.
   const sessionTokens = await page.evaluate(() => {
     const result: Record<string, string> = {};
     for (let i = 0; i < sessionStorage.length; i++) {

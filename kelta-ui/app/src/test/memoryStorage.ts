@@ -1,7 +1,6 @@
 /**
- * A real, behaving `Storage` for tests. The global vitest setup replaces `window.localStorage`
- * with `vi.fn()` stubs that store nothing, which is right for tests that only assert a call was
- * made and useless for anything that reads back what it wrote.
+ * A real, behaving `Storage` for tests. The global vitest setup's `window.localStorage` stores
+ * values too, but it is shared by every test in a file; this gives one test a fresh, isolated store.
  */
 export function memoryStorage(): Storage {
   const map = new Map<string, string>()

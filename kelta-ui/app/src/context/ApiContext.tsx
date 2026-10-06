@@ -94,8 +94,8 @@ export function ApiProvider({ children, baseUrl = '' }: ApiProviderProps): React
               // a provider ID triggers a redirect to /login when multiple providers
               // are configured, which causes an infinite redirect loop if the 401
               // originated from a component that fires on the login page.
+              // AuthContext has already cleared the stored tokens.
               console.warn('[API] Session expired on 401, redirecting to login')
-              sessionStorage.removeItem('kelta_auth_tokens')
               const loginPath = isCustomDomainHost() ? '/login' : `/${getTenantSlug()}/login`
               window.location.assign(loginPath)
             } else {

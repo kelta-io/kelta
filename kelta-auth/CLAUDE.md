@@ -34,7 +34,15 @@ io.kelta.auth/
    `PublicClientRefreshTokenAuthenticationConverter`/`-Provider` (in `config/`)
    authenticate it as method NONE; the refresh token is the credential and is
    rotated on every use (`reuseRefreshTokens(false)`). Confidential clients that
-   omit their secret are rejected, never silently authenticated.
+   omit their secret are rejected, never silently authenticated. Spring AS's
+   default `OAuth2RefreshTokenGenerator` returns `null` for a public client on
+   `authorization_code`, so `AuthorizationServerConfig.tokenGenerator` uses
+   `PublicClientRefreshTokenGenerator`: any client registered with the
+   `refresh_token` grant gets one (kelta-cli is not, so it still gets none).
+   Platform client lifetimes live in `ConnectedAppRegistrar.platformTokenSettings()`
+   and are reconciled onto the existing DB row at startup.
+   A login form that outlived its session (CSRF failure on POST `/login`) is
+   resumed by `ExpiredLoginFormHandler` from the form's hidden `authorize_url`.
 7. CLI login: `kelta-cli` (public client, PKCE, **no refresh grant**) uses an
    RFC 8252 loopback redirect — `http://127.0.0.1:<any port>/<tenant-slug>/auth/callback`
    (or `[::1]`) — accepted port-agnostically by `PlatformRedirectUriValidator`

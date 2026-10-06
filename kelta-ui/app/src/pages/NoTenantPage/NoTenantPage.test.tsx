@@ -30,6 +30,20 @@ describe('NoTenantPage', () => {
     ).toBe('/spotopened/login?login_hint=craig%40example.com')
   })
 
+  it('marks the workspaces this browser is still signed in to', () => {
+    rememberTenant('spotopened', { email: 'craig@example.com' })
+    rememberTenant('couchpicks', { email: 'craig@example.com' })
+    localStorage.setItem(
+      'kelta_auth_tokens:spotopened',
+      JSON.stringify({ accessToken: 'a', refreshToken: 'r', expiresAt: 0 })
+    )
+
+    render(<NoTenantPage />)
+
+    expect(screen.getByTestId('signed-in-spotopened')).toBeDefined()
+    expect(screen.queryByTestId('signed-in-couchpicks')).toBeNull()
+  })
+
   it('can forget a workspace, and falls back to the plain message when none remain', () => {
     rememberTenant('spotopened', { email: 'craig@example.com' })
     render(<NoTenantPage />)

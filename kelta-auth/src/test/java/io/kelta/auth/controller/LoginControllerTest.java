@@ -1,5 +1,6 @@
 package io.kelta.auth.controller;
 
+import io.kelta.auth.config.ExpiredLoginFormHandler;
 import io.kelta.auth.federation.DynamicClientRegistrationRepository;
 import io.kelta.auth.federation.DynamicRelyingPartyRegistrationRepository;
 import io.kelta.auth.service.AuthDomainResolver;
@@ -17,6 +18,9 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrationRepository;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 import org.springframework.ui.ConcurrentModel;
 import org.springframework.ui.Model;
 
@@ -215,6 +219,35 @@ class LoginControllerTest {
 
             assertThat(view).isEqualTo("login");
             assertThat(model.containsAttribute("ssoProviders")).isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("Resuming an expired login form")
+    class ExpiredForm {
+        @Mock private ClientRegistrationRepository plainRepo;
+
+        @Test
+        @DisplayName("exposes the pending authorize request and the expired notice once")
+        void exposesPendingAuthorizeAndExpiredNotice() {
+            LoginController controller = new LoginController(plainRepo, domainResolver, samlProvider(null));
+            MockHttpServletRequest authorize = new MockHttpServletRequest("GET", "/oauth2/authorize");
+            authorize.setQueryString("response_type=code&state=abc");
+            new HttpSessionRequestCache().saveRequest(authorize, new MockHttpServletResponse());
+
+            MockHttpServletRequest login = new MockHttpServletRequest("GET", "/login");
+            login.setSession(authorize.getSession());
+            login.getSession().setAttribute(ExpiredLoginFormHandler.SESSION_EXPIRED_ATTR, Boolean.TRUE);
+
+            Model model = new ConcurrentModel();
+            controller.login(model, login);
+            assertThat(model.getAttribute("authorizeUrl"))
+                    .isEqualTo("/oauth2/authorize?response_type=code&state=abc");
+            assertThat(model.getAttribute("loginExpired")).isEqualTo(true);
+
+            Model again = new ConcurrentModel();
+            controller.login(again, login);
+            assertThat(again.containsAttribute("loginExpired")).isFalse();
         }
     }
 

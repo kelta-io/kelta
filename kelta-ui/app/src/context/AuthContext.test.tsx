@@ -33,6 +33,18 @@ const sessionStorageMock = {
   key: vi.fn(),
 }
 
+// Auth tokens live in localStorage (the in-memory store from vitest.setup),
+// keyed per tenant; read and seed them through this view of it.
+const TOKENS_KEY = 'kelta_auth_tokens:default'
+
+const mockLocalStorage = new Proxy({} as Record<string, string>, {
+  get: (_target, key: string) => localStorage.getItem(key) ?? undefined,
+  set: (_target, key: string, value: string) => {
+    localStorage.setItem(key, value)
+    return true
+  },
+})
+
 // Mock window.location
 const originalLocation = window.location
 let mockLocationHref = 'http://localhost:3000/dashboard'
@@ -224,6 +236,7 @@ describe('AuthContext', () => {
 
     // Clear mock storage
     Object.keys(mockSessionStorage).forEach((key) => delete mockSessionStorage[key])
+    localStorage.clear()
 
     // Reset location mock
     mockLocationHref = 'http://localhost:3000/dashboard'
@@ -239,6 +252,7 @@ describe('AuthContext', () => {
     Object.defineProperty(window, 'location', {
       value: {
         origin: 'http://localhost:3000',
+        hostname: 'localhost',
         pathname: '/dashboard',
         search: '',
         get href() {
@@ -378,7 +392,7 @@ describe('AuthContext', () => {
         idToken: mockToken,
         expiresAt: Date.now() + 3600000,
       }
-      mockSessionStorage['kelta_auth_tokens'] = JSON.stringify(storedTokens)
+      mockLocalStorage[TOKENS_KEY] = JSON.stringify(storedTokens)
 
       renderWithAuth()
 
@@ -406,7 +420,7 @@ describe('AuthContext', () => {
         idToken: mockToken,
         expiresAt: Date.now() + 3600000,
       }
-      mockSessionStorage['kelta_auth_tokens'] = JSON.stringify(storedTokens)
+      mockLocalStorage[TOKENS_KEY] = JSON.stringify(storedTokens)
       mockSessionStorage['kelta_auth_provider_id'] = 'internal-1'
 
       const user = userEvent.setup()
@@ -430,7 +444,7 @@ describe('AuthContext', () => {
         exp: Math.floor(Date.now() / 1000) + 3600,
       }
       const mockToken = createMockJwt(payload)
-      mockSessionStorage['kelta_auth_tokens'] = JSON.stringify({
+      mockLocalStorage[TOKENS_KEY] = JSON.stringify({
         accessToken: mockToken,
         idToken: mockToken,
         expiresAt: Date.now() + 3600000,
@@ -474,7 +488,7 @@ describe('AuthContext', () => {
         idToken: mockToken,
         expiresAt: Date.now() + 3600000,
       }
-      mockSessionStorage['kelta_auth_tokens'] = JSON.stringify(storedTokens)
+      mockLocalStorage[TOKENS_KEY] = JSON.stringify(storedTokens)
 
       let authValue: ReturnType<typeof useAuth> | undefined
 
@@ -532,7 +546,7 @@ describe('AuthContext', () => {
 
     it('should handle invalid stored tokens gracefully', async () => {
       // Store invalid JSON
-      mockSessionStorage['kelta_auth_tokens'] = 'invalid-json'
+      mockLocalStorage[TOKENS_KEY] = 'invalid-json'
 
       renderWithAuth()
 
@@ -590,7 +604,7 @@ describe('AuthContext', () => {
         exp: Math.floor((Date.now() + expiresInMs) / 1000),
       }
       const mockToken = createMockJwt(payload)
-      mockSessionStorage['kelta_auth_tokens'] = JSON.stringify({
+      mockLocalStorage[TOKENS_KEY] = JSON.stringify({
         accessToken: mockToken,
         idToken: mockToken,
         refreshToken: 'stored-refresh-token',
@@ -652,7 +666,7 @@ describe('AuthContext', () => {
       expect(tokenEndpointCalls()).toBe(3)
 
       // Transient failures never discard the refresh token or the session
-      const stored = JSON.parse(mockSessionStorage['kelta_auth_tokens'])
+      const stored = JSON.parse(mockLocalStorage[TOKENS_KEY])
       expect(stored.refreshToken).toBe('stored-refresh-token')
       expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
     })
@@ -681,7 +695,7 @@ describe('AuthContext', () => {
         await vi.advanceTimersByTimeAsync(100)
       })
       expect(tokenEndpointCalls()).toBe(1)
-      const stored = JSON.parse(mockSessionStorage['kelta_auth_tokens'])
+      const stored = JSON.parse(mockLocalStorage[TOKENS_KEY])
       expect(stored.refreshToken).toBe('stored-refresh-token')
       expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
 
@@ -721,7 +735,7 @@ describe('AuthContext', () => {
         await vi.advanceTimersByTimeAsync(100)
       })
       expect(tokenEndpointCalls()).toBe(1)
-      expect(JSON.parse(mockSessionStorage['kelta_auth_tokens']).refreshToken).toBeUndefined()
+      expect(JSON.parse(mockLocalStorage[TOKENS_KEY]).refreshToken).toBeUndefined()
 
       // No retry is armed for a terminal failure
       await act(async () => {
@@ -738,14 +752,14 @@ describe('AuthContext', () => {
         })
       })
       expect(thrown).toBeInstanceOf(SessionExpiredError)
-      expect(mockSessionStorage['kelta_auth_tokens']).toBeUndefined()
+      expect(mockLocalStorage[TOKENS_KEY]).toBeUndefined()
       expect(screen.getByTestId('authenticated')).toHaveTextContent('not-authenticated')
     })
 
     it('getAccessToken keeps the session and returns the current token on a transient failure', async () => {
       vi.useFakeTimers()
       storeValidTokens(2 * 60 * 1000) // inside proactive window, still valid for 2 min
-      const currentToken = JSON.parse(mockSessionStorage['kelta_auth_tokens']).accessToken
+      const currentToken = JSON.parse(mockLocalStorage[TOKENS_KEY]).accessToken
       mockTokenEndpoint(() => {
         throw new Error('network down')
       })
@@ -780,9 +794,7 @@ describe('AuthContext', () => {
         })
       })
       expect(thrown).toBeInstanceOf(TokenUnavailableError)
-      expect(JSON.parse(mockSessionStorage['kelta_auth_tokens']).refreshToken).toBe(
-        'stored-refresh-token'
-      )
+      expect(JSON.parse(mockLocalStorage[TOKENS_KEY]).refreshToken).toBe('stored-refresh-token')
       expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
     })
 
@@ -811,7 +823,7 @@ describe('AuthContext', () => {
       // every reload with an expired token.
       const payload = { sub: 'user-123', email: 'test@example.com', exp: 0 }
       const mockToken = createMockJwt(payload)
-      mockSessionStorage['kelta_auth_tokens'] = JSON.stringify({
+      mockLocalStorage[TOKENS_KEY] = JSON.stringify({
         accessToken: mockToken,
         idToken: mockToken,
         refreshToken: 'stored-refresh-token',
@@ -823,7 +835,7 @@ describe('AuthContext', () => {
         expect(screen.getByTestId('loading')).toHaveTextContent('not-loading')
       })
       expect(tokenEndpointCalls()).toBe(1)
-      const stored = JSON.parse(mockSessionStorage['kelta_auth_tokens'])
+      const stored = JSON.parse(mockLocalStorage[TOKENS_KEY])
       expect(stored.accessToken).toBe('new-access-token')
       expect(stored.refreshToken).toBe('new-refresh-token')
       expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
@@ -832,7 +844,7 @@ describe('AuthContext', () => {
     it('keeps the session on page load when the refresh fails transiently', async () => {
       const payload = { sub: 'user-123', email: 'test@example.com', exp: 0 }
       const mockToken = createMockJwt(payload)
-      mockSessionStorage['kelta_auth_tokens'] = JSON.stringify({
+      mockLocalStorage[TOKENS_KEY] = JSON.stringify({
         accessToken: mockToken,
         idToken: mockToken,
         refreshToken: 'stored-refresh-token',
@@ -847,9 +859,7 @@ describe('AuthContext', () => {
         expect(screen.getByTestId('loading')).toHaveTextContent('not-loading')
       })
       expect(tokenEndpointCalls()).toBe(1)
-      expect(JSON.parse(mockSessionStorage['kelta_auth_tokens']).refreshToken).toBe(
-        'stored-refresh-token'
-      )
+      expect(JSON.parse(mockLocalStorage[TOKENS_KEY]).refreshToken).toBe('stored-refresh-token')
       expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
     })
 
@@ -870,9 +880,7 @@ describe('AuthContext', () => {
         await vi.advanceTimersByTimeAsync(0)
       })
       expect(tokenEndpointCalls()).toBe(1)
-      expect(JSON.parse(mockSessionStorage['kelta_auth_tokens']).accessToken).toBe(
-        'new-access-token'
-      )
+      expect(JSON.parse(mockLocalStorage[TOKENS_KEY]).accessToken).toBe('new-access-token')
     })
 
     it('refreshes immediately when the tab wakes inside the expiry window', async () => {
@@ -895,8 +903,115 @@ describe('AuthContext', () => {
       })
 
       expect(tokenEndpointCalls()).toBe(1)
-      const stored = JSON.parse(mockSessionStorage['kelta_auth_tokens'])
+      const stored = JSON.parse(mockLocalStorage[TOKENS_KEY])
       expect(stored.accessToken).toBe('new-access-token')
+    })
+  })
+
+  describe('Shared session across tabs', () => {
+    function tokensFor(email: string, refreshToken: string, expiresInMs: number) {
+      const token = createMockJwt({
+        sub: 'user-123',
+        email,
+        exp: Math.floor((Date.now() + expiresInMs) / 1000),
+      })
+      return JSON.stringify({
+        accessToken: token,
+        idToken: token,
+        refreshToken,
+        expiresAt: Date.now() + expiresInMs,
+      })
+    }
+
+    function dispatchTokenStorageEvent() {
+      window.dispatchEvent(new StorageEvent('storage', { key: TOKENS_KEY }))
+    }
+
+    it('adopts a session left in sessionStorage by an older build, moving it to localStorage', async () => {
+      mockSessionStorage['kelta_auth_tokens'] = tokensFor(
+        'legacy@example.com',
+        'rt',
+        60 * 60 * 1000
+      )
+
+      renderWithAuth()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('user')).toHaveTextContent('legacy@example.com')
+      })
+      expect(JSON.parse(mockLocalStorage[TOKENS_KEY]).refreshToken).toBe('rt')
+      expect(mockSessionStorage['kelta_auth_tokens']).toBeUndefined()
+    })
+
+    it('keeps the session when another tab already rotated the refresh token', async () => {
+      // This tab holds an expired access token with refresh token "rt-old"; by the
+      // time its refresh reaches the server, another tab has spent "rt-old" and
+      // stored "rt-new", so the server answers invalid_grant.
+      mockLocalStorage[TOKENS_KEY] = tokensFor('test@example.com', 'rt-old', -60 * 1000)
+      const baseFetch = createMockFetch()
+      global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === mockDiscoveryDoc.token_endpoint) {
+          mockLocalStorage[TOKENS_KEY] = tokensFor('test@example.com', 'rt-new', 60 * 60 * 1000)
+          return {
+            ok: false,
+            status: 400,
+            statusText: 'Bad Request',
+            json: async () => ({ error: 'invalid_grant' }),
+          } as unknown as Response
+        }
+        return baseFetch(input)
+      }) as typeof fetch
+
+      renderWithAuth()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('loading')).toHaveTextContent('not-loading')
+      })
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+      expect(JSON.parse(mockLocalStorage[TOKENS_KEY]).refreshToken).toBe('rt-new')
+    })
+
+    it('serializes refreshes through a Web Lock when the browser has one', async () => {
+      const request = vi.fn((_name: string, callback: () => Promise<unknown>) => callback())
+      Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true })
+      try {
+        mockLocalStorage[TOKENS_KEY] = tokensFor('test@example.com', 'rt', -60 * 1000)
+        global.fetch = createMockFetch() as typeof fetch
+
+        renderWithAuth()
+
+        await waitFor(() => {
+          expect(screen.getByTestId('authenticated')).toHaveTextContent('authenticated')
+        })
+        expect(request).toHaveBeenCalledWith(
+          'kelta-auth-token-refresh:kelta_auth_tokens:default',
+          expect.any(Function)
+        )
+        expect(JSON.parse(mockLocalStorage[TOKENS_KEY]).refreshToken).toBe('new-refresh-token')
+      } finally {
+        delete (navigator as { locks?: unknown }).locks
+      }
+    })
+
+    it('picks up tokens another tab refreshed, and signs out when another tab does', async () => {
+      mockLocalStorage[TOKENS_KEY] = tokensFor('first@example.com', 'rt', 60 * 60 * 1000)
+      global.fetch = createMockFetch() as typeof fetch
+      renderWithAuth()
+      await waitFor(() => {
+        expect(screen.getByTestId('user')).toHaveTextContent('first@example.com')
+      })
+
+      act(() => {
+        mockLocalStorage[TOKENS_KEY] = tokensFor('second@example.com', 'rt-2', 60 * 60 * 1000)
+        dispatchTokenStorageEvent()
+      })
+      expect(screen.getByTestId('user')).toHaveTextContent('second@example.com')
+
+      act(() => {
+        localStorage.removeItem(TOKENS_KEY)
+        dispatchTokenStorageEvent()
+      })
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('not-authenticated')
     })
   })
 
@@ -915,7 +1030,7 @@ describe('AuthContext', () => {
         idToken: mockToken,
         expiresAt: Date.now() - 3600000, // Expired
       }
-      mockSessionStorage['kelta_auth_tokens'] = JSON.stringify(storedTokens)
+      mockLocalStorage[TOKENS_KEY] = JSON.stringify(storedTokens)
 
       renderWithAuth()
 
