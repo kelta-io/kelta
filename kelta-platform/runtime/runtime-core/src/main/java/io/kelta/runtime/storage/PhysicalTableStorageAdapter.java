@@ -282,16 +282,19 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         try {
             try {
                 jdbcTemplate.execute(sql.toString());
-            } catch (DuplicateKeyException e) {
+            } catch (DataAccessException e) {
                 // PostgreSQL's CREATE TABLE IF NOT EXISTS is not atomic against
                 // concurrent CREATEs: two transactions can both pass the existence
-                // check and then both try to INSERT into pg_type, leaving one
-                // with a unique-violation on pg_type_typname_nsp_index (SQLSTATE
-                // 23505). When multiple worker pods consume the same NATS
-                // CollectionChanged event in parallel they hit exactly this race.
-                // The losing transaction's CREATE rolls back, but the winner's
-                // table is committed and visible, so we can safely continue to
-                // reconcileSchema which will fill in any missing columns.
+                // check, and the loser then fails on the catalog — a unique-violation
+                // on pg_type_typname_nsp_index (23505) or "type ... already exists"
+                // (42710), depending on where it collides. When multiple worker pods
+                // consume the same NATS CollectionChanged event in parallel they hit
+                // exactly this race. The losing transaction's CREATE rolls back, but
+                // the winner's table is committed and visible, so we can safely
+                // continue to reconcileSchema which will fill in any missing columns.
+                if (!isConcurrentDdlDuplicate(e)) {
+                    throw e;
+                }
                 log.warn("Concurrent CREATE TABLE race for '{}' (likely another worker pod created it "
                         + "first); treating as success and reconciling schema. Cause: {}",
                         qualifiedName, e.getMostSpecificCause().getMessage());
@@ -314,7 +317,8 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             }
 
             for (String stmt : postCreateStatements) {
-                jdbcTemplate.execute(stmt);
+                // CREATE INDEX IF NOT EXISTS races the same way CREATE TABLE does.
+                executeToleratingConcurrentDuplicate(stmt, qualifiedName);
             }
 
             for (PendingForeignKey fk : pendingForeignKeys) {
@@ -391,7 +395,10 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         // tenant's constraint and skipped creating this one, so only the first tenant to
         // initialize ever got its foreign key; every tenant after it silently ran with no
         // referential integrity on that column.
-        jdbcTemplate.execute(
+        // The existence check and the ADD are not atomic: a worker pod initializing the same
+        // collection concurrently can add the constraint in between, and this one then fails
+        // with "constraint ... already exists" (42710). The constraint exists either way.
+        executeToleratingConcurrentDuplicate(
                 "DO $$ BEGIN "
                 + "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '" + fk.fkName() + "'"
                 + " AND conrelid = to_regclass('" + fk.sourceTable() + "')) THEN "
@@ -400,7 +407,8 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
                 + " FOREIGN KEY (" + fk.sourceColumn() + ")"
                 + " REFERENCES " + targetRef.toSql() + "(" + fk.targetColumn() + ") "
                 + fk.onDelete() + " NOT VALID; "
-                + "END IF; END $$");
+                + "END IF; END $$",
+                fk.sourceTable());
 
         try {
             jdbcTemplate.execute("ALTER TABLE " + fk.sourceTable()
@@ -420,6 +428,49 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
                 log.warn("Could not validate foreign key '{}' on '{}': {}",
                         fk.fkName(), fk.sourceTable(), cause);
             }
+        }
+    }
+
+    /**
+     * True when a DDL failure only means another worker pod got there first — the object this
+     * idempotent statement ({@code CREATE ... IF NOT EXISTS}, or a guarded {@code ADD
+     * CONSTRAINT}) would have created was committed by a concurrent transaction between its
+     * existence check and its write. Postgres reports that as {@code duplicate_table} (42P07),
+     * {@code duplicate_object} — "type/constraint ... already exists" (42710) — or a unique
+     * violation (23505) on a system catalog's name index ({@code pg_type_typname_nsp_index},
+     * {@code pg_class_relname_nsp_index}). Any other 23505 is real: {@code CREATE UNIQUE INDEX}
+     * over rows that already hold duplicates fails with it too, and must not be swallowed.
+     */
+    static boolean isConcurrentDdlDuplicate(DataAccessException e) {
+        String sqlState = extractSqlState(e);
+        if ("42P07".equals(sqlState) || "42710".equals(sqlState)) {
+            return true;
+        }
+        // A DuplicateKeyException can arrive without its driver cause; its message still names
+        // the index.
+        if ("23505".equals(sqlState) || (sqlState == null && e instanceof DuplicateKeyException)) {
+            String message = e.getMostSpecificCause().getMessage();
+            return message != null
+                    && (message.contains("pg_type_typname_nsp_index")
+                            || message.contains("pg_class_relname_nsp_index"));
+        }
+        return false;
+    }
+
+    /**
+     * Runs an idempotent DDL statement, treating a lost race against a concurrent creator of the
+     * same object as success.
+     */
+    private void executeToleratingConcurrentDuplicate(String ddl, String table) {
+        try {
+            jdbcTemplate.execute(ddl);
+        } catch (DataAccessException e) {
+            if (!isConcurrentDdlDuplicate(e)) {
+                throw e;
+            }
+            log.warn("Concurrent DDL race on '{}' (likely another worker pod created the object "
+                    + "first); treating as success. Cause: {}",
+                    table, e.getMostSpecificCause().getMessage());
         }
     }
 
