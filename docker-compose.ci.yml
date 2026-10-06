@@ -56,6 +56,15 @@ services:
       dockerfile: kelta-worker/Dockerfile.jvm
     container_name: !reset null
     ports: !reset []
+    # No observability stack in CI. The in-cluster defaults
+    # (*.observability.svc.cluster.local) make every log/trace/metric query wait
+    # on DNS + a 5 s connect timeout before falling back to an empty result,
+    # which outlasts Playwright's waits (log-viewer.spec.ts). A refused loopback
+    # port takes the same fallback immediately.
+    environment:
+      LOKI_URL: http://127.0.0.1:9
+      TEMPO_URL: http://127.0.0.1:9
+      MIMIR_URL: http://127.0.0.1:9
 
   kelta-gateway:
     build:

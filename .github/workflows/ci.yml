@@ -646,7 +646,9 @@ jobs:
       - name: Build Playwright runner image (tests + CLI baked in)
         # Bake e2e-tests + node_modules into a runner image. Bind-mounting the
         # workspace doesn't work with the k8s-runner-integration remote Docker
-        # daemon (the daemon host can't see the runner's filesystem).
+        # daemon (the daemon host can't see the runner's filesystem). The tag is
+        # per run: that daemon is shared, and a fixed tag let a concurrent run's
+        # build replace this run's tests between build and `docker run`.
         #
         # Build context is the repo root (not e2e-tests) so the image can also carry
         # the built kelta-web tree (dist/ + hoisted node_modules — the CLI's own
@@ -658,7 +660,7 @@ jobs:
         run: |
           # Image tag must match the @playwright/test version in package-lock.json
           # (resolved from ^1.50.0 → currently 1.58.2). Update both together.
-          docker build -t kelta-e2e-runner:local -f - . <<'DOCKERFILE'
+          docker build -t "kelta-e2e-runner:${COMPOSE_PROJECT_NAME}" -f - . <<'DOCKERFILE'
           FROM mcr.microsoft.com/playwright:v1.58.2-noble
           WORKDIR /work
           COPY e2e-tests/package.json e2e-tests/package-lock.json ./
@@ -686,7 +688,7 @@ jobs:
             -e E2E_TENANT_SLUG=default \
             -e E2E_TEST_USERNAME=admin \
             -e E2E_TEST_PASSWORD="$E2E_ADMIN_PASSWORD" \
-            kelta-e2e-runner:local \
+            "kelta-e2e-runner:${COMPOSE_PROJECT_NAME}" \
             npx playwright test
 
       - name: Copy Playwright reports out of container
@@ -744,6 +746,7 @@ jobs:
         run: |
           docker compose -f docker-compose.yml -f docker-compose.ci.yml \
             --profile ai --profile tools --profile seed down -v || true
+          docker image rm "kelta-e2e-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
 
   # ===========================================================================
   # Quickstart smoke test (K-3) — proves the documented "clone → docker compose
