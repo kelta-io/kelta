@@ -574,6 +574,12 @@ jobs:
       cancel-in-progress: true
     env:
       COMPOSE_PROJECT_NAME: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      # docker compose builds a service whose image it cannot find (the bake step's
+      # --load images are not tagged with compose's <project>-<service> names), and it
+      # builds with the CURRENT builder. setup-buildx-action used to make its builder
+      # current; the persistent kelta-ci builder must be selected explicitly, or `up`
+      # rebuilds cold on the default builder — which blew the Quickstart 300s budget.
+      BUILDX_BUILDER: kelta-ci
       # CI-only literals. kelta-auth applies the first on first boot with a forced change
       # (docker-compose.yml passes it through); "Complete platform admin first sign-in"
       # changes it to the second, which Playwright signs in with.
@@ -764,6 +770,12 @@ jobs:
       cancel-in-progress: true
     env:
       COMPOSE_PROJECT_NAME: qs-${{ github.run_id }}-${{ github.run_attempt }}
+      # docker compose builds a service whose image it cannot find (the bake step's
+      # --load images are not tagged with compose's <project>-<service> names), and it
+      # builds with the CURRENT builder. setup-buildx-action used to make its builder
+      # current; the persistent kelta-ci builder must be selected explicitly, or `up`
+      # rebuilds cold on the default builder — which blew the Quickstart 300s budget.
+      BUILDX_BUILDER: kelta-ci
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

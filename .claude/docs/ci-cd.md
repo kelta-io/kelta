@@ -47,6 +47,10 @@ re-registers it and attaches to the existing `buildx_buildkit_kelta-ci0` contain
 (`id=kelta-m2-<service>`) therefore persist across runs. The Dockerfiles bind-mount the
 freshly installed runtime jars into the builder stage rather than `COPY`ing them, so a runtime
 source change no longer invalidates dependency resolution.
+Both jobs also set `BUILDX_BUILDER: kelta-ci`: the bake `--load` images aren't tagged with
+compose's `<project>-<service>` names, so `docker compose up` builds them again, with the
+**current** builder. Without the variable, that is the cold default builder, and Quickstart's
+300 s window ran out mid-build.
 
 **Before 2026-10-06 every build here ran cold.** `setup-buildx-action` made a throwaway
 builder per job, and the `--set *.cache-from/to=type=gha` flags were a silent no-op: buildx drops
