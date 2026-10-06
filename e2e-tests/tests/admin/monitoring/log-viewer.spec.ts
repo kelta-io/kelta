@@ -24,7 +24,9 @@ test.describe("Log Viewer", () => {
     const table = logViewerPage.table;
     const noEntries = page.getByText(/no log entries/i);
     const tableOrEmpty = table.or(noEntries);
-    await expect(tableOrEmpty).toBeVisible();
+    // The E2E stack has no Loki: the worker only falls back to an empty result after
+    // DNS resolution + its 5s connect timeout, which can outlast the default 10s expect.
+    await expect(tableOrEmpty).toBeVisible({ timeout: 30_000 });
   });
 
   test("can filter by log level", async ({ page }) => {
