@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("PlatformRedirectUriValidator Tests")
@@ -45,6 +46,27 @@ class PlatformRedirectUriValidatorTest {
                 "https://acme.com/auth/callback",
                 "http://localhost:5173/auth/callback");
         assertThatCode(() -> validator.accept(context)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("a rejected redirect_uri is not carried on the rejection (RFC 6749 §4.1.2.1)")
+    void rejectionCarriesNoRedirectUri() {
+        // The authorization endpoint redirects the error to the exception's redirect URI when
+        // it has one; an invalid redirection URI must not be redirected to.
+        for (String clientId : new String[] {"kelta-platform", "couchpicks-web", "kelta-cli"}) {
+            var context = buildContext(clientId,
+                    "https://example.com/cb",
+                    "https://www.couchpicks.tv/couchpicks/auth/callback");
+            assertThatThrownBy(() -> validator.accept(context))
+                    .isInstanceOfSatisfying(OAuth2AuthorizationCodeRequestAuthenticationException.class, e -> {
+                        assertThat(e.getError().getDescription()).isEqualTo("invalid_redirect_uri");
+                        assertThat(e.getAuthorizationCodeRequestAuthentication()).isNotNull();
+                        assertThat(e.getAuthorizationCodeRequestAuthentication().getRedirectUri())
+                                .as(clientId).isNull();
+                        assertThat(e.getAuthorizationCodeRequestAuthentication().getClientId())
+                                .isEqualTo(clientId);
+                    });
+        }
     }
 
     @Test
