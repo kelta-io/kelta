@@ -51,8 +51,6 @@ export interface ExportOptions {
   version: string
   description?: string
   collectionIds: string[]
-  roleIds: string[]
-  policyIds: string[]
   uiPageIds: string[]
   uiMenuIds: string[]
 }
@@ -114,26 +112,6 @@ export interface PackagesPageProps {
 // API functions using apiClient
 async function fetchPackageHistory(apiClient: ApiClient): Promise<Package[]> {
   return apiClient.getList('/api/packages/history')
-}
-
-async function fetchRoles(apiClient: ApiClient): Promise<SelectableItem[]> {
-  const roles = await apiClient.getList<{ id: string; name: string }>('/api/roles?page[size]=1000')
-  return roles.map((r: { id: string; name: string }) => ({
-    id: r.id,
-    name: r.name,
-    type: 'role',
-  }))
-}
-
-async function fetchPolicies(apiClient: ApiClient): Promise<SelectableItem[]> {
-  const policies = await apiClient.getList<{ id: string; name: string }>(
-    '/api/policies?page[size]=1000'
-  )
-  return policies.map((p: { id: string; name: string }) => ({
-    id: p.id,
-    name: p.name,
-    type: 'policy',
-  }))
 }
 
 async function fetchPages(apiClient: ApiClient): Promise<SelectableItem[]> {
@@ -355,8 +333,6 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
   const [packageVersion, setPackageVersion] = useState<string>('1.0.0')
   const [packageDescription, setPackageDescription] = useState<string>('')
   const [selectedCollections, setSelectedCollections] = useState<string[]>([])
-  const [selectedRoles, setSelectedRoles] = useState<string[]>([])
-  const [selectedPolicies, setSelectedPolicies] = useState<string[]>([])
   const [selectedPages, setSelectedPages] = useState<string[]>([])
   const [selectedMenus, setSelectedMenus] = useState<string[]>([])
 
@@ -365,16 +341,6 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
     () => summaries.map((c) => ({ id: c.id, name: c.name, type: 'collection' })),
     [summaries]
   )
-
-  const { data: roles = [], isLoading: rolesLoading } = useQuery({
-    queryKey: ['export-roles'],
-    queryFn: () => fetchRoles(apiClient),
-  })
-
-  const { data: policies = [], isLoading: policiesLoading } = useQuery({
-    queryKey: ['export-policies'],
-    queryFn: () => fetchPolicies(apiClient),
-  })
 
   const { data: pages = [], isLoading: pagesLoading } = useQuery({
     queryKey: ['export-pages'],
@@ -407,11 +373,7 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
   })
 
   const hasSelection =
-    selectedCollections.length > 0 ||
-    selectedRoles.length > 0 ||
-    selectedPolicies.length > 0 ||
-    selectedPages.length > 0 ||
-    selectedMenus.length > 0
+    selectedCollections.length > 0 || selectedPages.length > 0 || selectedMenus.length > 0
 
   const canExport = packageName.trim() !== '' && packageVersion.trim() !== '' && hasSelection
 
@@ -421,8 +383,6 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
       version: packageVersion,
       description: packageDescription || undefined,
       collectionIds: selectedCollections,
-      roleIds: selectedRoles,
-      policyIds: selectedPolicies,
       uiPageIds: selectedPages,
       uiMenuIds: selectedMenus,
     })
@@ -431,8 +391,6 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
     packageVersion,
     packageDescription,
     selectedCollections,
-    selectedRoles,
-    selectedPolicies,
     selectedPages,
     selectedMenus,
     exportMutation,
@@ -502,20 +460,6 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
           selectedIds={selectedCollections}
           onSelectionChange={setSelectedCollections}
           isLoading={collectionsLoading}
-        />
-        <ItemSelection
-          title={t('navigation.roles')}
-          items={roles}
-          selectedIds={selectedRoles}
-          onSelectionChange={setSelectedRoles}
-          isLoading={rolesLoading}
-        />
-        <ItemSelection
-          title={t('navigation.policies')}
-          items={policies}
-          selectedIds={selectedPolicies}
-          onSelectionChange={setSelectedPolicies}
-          isLoading={policiesLoading}
         />
         <ItemSelection
           title={t('navigation.pages')}

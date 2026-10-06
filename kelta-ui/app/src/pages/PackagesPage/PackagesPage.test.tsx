@@ -69,13 +69,6 @@ const mockCollections = [
   { id: 'col-2', name: 'products' },
 ]
 
-const mockRoles = [
-  { id: 'role-1', name: 'admin' },
-  { id: 'role-2', name: 'editor' },
-]
-
-const mockPolicies = [{ id: 'pol-1', name: 'admin_access' }]
-
 const mockPages = [{ id: 'page-1', name: 'dashboard' }]
 
 const mockMenus = [{ id: 'menu-1', name: 'main_nav' }]
@@ -102,12 +95,6 @@ function setupAxiosMocks(overrides: Record<string, unknown> = {}) {
     }
     if (url.includes('/api/collections')) {
       return Promise.resolve({ data: overrides.collections ?? mockCollections })
-    }
-    if (url.includes('/api/roles')) {
-      return Promise.resolve({ data: overrides.roles ?? mockRoles })
-    }
-    if (url.includes('/api/policies')) {
-      return Promise.resolve({ data: overrides.policies ?? mockPolicies })
     }
     if (url.includes('/api/ui-pages')) {
       return Promise.resolve({ data: overrides.pages ?? mockPages })
@@ -217,8 +204,9 @@ describe('PackagesPage', () => {
         expect(screen.getByTestId('item-section-collections')).toBeInTheDocument()
       })
 
-      expect(screen.getByTestId('item-section-roles')).toBeInTheDocument()
-      expect(screen.getByTestId('item-section-policies')).toBeInTheDocument()
+      // Roles and policies were legacy authz; the export endpoint never accepted them.
+      expect(screen.queryByTestId('item-section-roles')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('item-section-policies')).not.toBeInTheDocument()
       expect(screen.getByTestId('item-section-pages')).toBeInTheDocument()
       expect(screen.getByTestId('item-section-menus')).toBeInTheDocument()
     })
@@ -231,8 +219,10 @@ describe('PackagesPage', () => {
       })
 
       expect(screen.getByTestId('item-col-2')).toBeInTheDocument()
-      expect(screen.getByTestId('item-role-1')).toBeInTheDocument()
-      expect(screen.getByTestId('item-role-2')).toBeInTheDocument()
+      // The legacy /api/roles and /api/policies endpoints no longer exist (gateway 404).
+      const requested = mockAxios.get.mock.calls.map(([url]) => String(url))
+      expect(requested.some((url) => url.includes('/api/roles'))).toBe(false)
+      expect(requested.some((url) => url.includes('/api/policies'))).toBe(false)
     })
 
     it('allows selecting items for export', async () => {
@@ -622,12 +612,6 @@ describe('PackagesPage', () => {
         }
         if (url.includes('/api/collections')) {
           return Promise.resolve({ data: mockCollections })
-        }
-        if (url.includes('/api/roles')) {
-          return Promise.resolve({ data: mockRoles })
-        }
-        if (url.includes('/api/policies')) {
-          return Promise.resolve({ data: mockPolicies })
         }
         if (url.includes('/api/ui-pages')) {
           return Promise.resolve({ data: mockPages })
