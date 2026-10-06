@@ -1,0 +1,268 @@
+{
+  "atomic:operations": [
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-1",
+        "attributes": {
+          "firstName": "Maya",
+          "lastName": "Okafor",
+          "email": "maya.okafor@bramblecrest.example.com",
+          "phone": "+1 555 0111",
+          "jobTitle": "Head of Operations",
+          "account": {
+            "lid": "account-1"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-2",
+        "attributes": {
+          "firstName": "Theo",
+          "lastName": "Lindqvist",
+          "email": "theo.lindqvist@bramblecrest.example.com",
+          "jobTitle": "IT Manager",
+          "account": {
+            "lid": "account-1"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-3",
+        "attributes": {
+          "firstName": "Priya",
+          "lastName": "Raman",
+          "email": "priya.raman@quillmoor.example.com",
+          "phone": "+44 20 7946 0112",
+          "jobTitle": "CTO",
+          "account": {
+            "lid": "account-2"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-4",
+        "attributes": {
+          "firstName": "Owen",
+          "lastName": "Hartley",
+          "email": "owen.hartley@quillmoor.example.com",
+          "jobTitle": "Procurement Lead",
+          "account": {
+            "lid": "account-2"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-5",
+        "attributes": {
+          "firstName": "Rosa",
+          "lastName": "Delgado",
+          "email": "rosa.delgado@harborlight.example.com",
+          "phone": "+1 555 0113",
+          "jobTitle": "VP Finance",
+          "account": {
+            "lid": "account-3"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-6",
+        "attributes": {
+          "firstName": "Kenji",
+          "lastName": "Mori",
+          "email": "kenji.mori@harborlight.example.com",
+          "jobTitle": "Dispatch Supervisor",
+          "account": {
+            "lid": "account-3"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-7",
+        "attributes": {
+          "firstName": "Lena",
+          "lastName": "Brandt",
+          "email": "lena.brandt@fenwicktarn.example.com",
+          "phone": "+49 30 555 0114",
+          "jobTitle": "Plant Director",
+          "account": {
+            "lid": "account-4"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-8",
+        "attributes": {
+          "firstName": "Jonas",
+          "lastName": "Weber",
+          "email": "jonas.weber@fenwicktarn.example.com",
+          "jobTitle": "Quality Engineer",
+          "account": {
+            "lid": "account-4"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-9",
+        "attributes": {
+          "firstName": "Amara",
+          "lastName": "Nwosu",
+          "email": "amara.nwosu@copperleaf.example.com",
+          "phone": "+1 555 0115",
+          "jobTitle": "Clinical Operations Manager",
+          "account": {
+            "lid": "account-5"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-10",
+        "attributes": {
+          "firstName": "Daniel",
+          "lastName": "Reyes",
+          "email": "daniel.reyes@copperleaf.example.com",
+          "jobTitle": "CFO",
+          "account": {
+            "lid": "account-5"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-11",
+        "attributes": {
+          "firstName": "Chloe",
+          "lastName": "Tremblay",
+          "email": "chloe.tremblay@silverbirch.example.com",
+          "phone": "+1 555 0116",
+          "jobTitle": "E-commerce Director",
+          "account": {
+            "lid": "account-6"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-12",
+        "attributes": {
+          "firstName": "Marcus",
+          "lastName": "Bell",
+          "email": "marcus.bell@silverbirch.example.com",
+          "jobTitle": "Store Systems Lead",
+          "account": {
+            "lid": "account-6"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-13",
+        "attributes": {
+          "firstName": "Hannah",
+          "lastName": "Whitcombe",
+          "email": "hannah.whitcombe@oakhaven.example.com",
+          "phone": "+1 555 0117",
+          "jobTitle": "Partner",
+          "account": {
+            "lid": "account-7"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-14",
+        "attributes": {
+          "firstName": "Samir",
+          "lastName": "Haddad",
+          "email": "samir.haddad@oakhaven.example.com",
+          "jobTitle": "Operations Analyst",
+          "account": {
+            "lid": "account-7"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-15",
+        "attributes": {
+          "firstName": "Isla",
+          "lastName": "McKenzie",
+          "email": "isla.mckenzie@lumenridge.example.com",
+          "phone": "+61 2 5550 0118",
+          "jobTitle": "CEO",
+          "account": {
+            "lid": "account-8"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "contacts",
+        "lid": "contact-16",
+        "attributes": {
+          "firstName": "Ravi",
+          "lastName": "Chandran",
+          "email": "ravi.chandran@lumenridge.example.com",
+          "jobTitle": "Head of Product",
+          "account": {
+            "lid": "account-8"
+          }
+        }
+      }
+    }
+  ]
+}

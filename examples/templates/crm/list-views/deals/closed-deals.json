@@ -1,0 +1,26 @@
+{
+  "name": "Closed deals",
+  "visibility": "PUBLIC",
+  "isDefault": false,
+  "viewType": "TABLE",
+  "columns": [
+    "name",
+    "account",
+    "stage",
+    "amount",
+    "closedAt"
+  ],
+  "filters": [
+    {
+      "field": "stage",
+      "value": [
+        "WON",
+        "LOST"
+      ],
+      "operator": "in"
+    }
+  ],
+  "sortField": "closedAt",
+  "sortDirection": "DESC",
+  "rowLimit": 25
+}

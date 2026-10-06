@@ -747,7 +747,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.quickstart == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: k8s-runner-integration
-    timeout-minutes: 20
+    timeout-minutes: 30
     concurrency:
       group: quickstart-${{ github.head_ref || github.ref }}
       cancel-in-progress: true
@@ -775,7 +775,20 @@ jobs:
       - name: Pre-pull curl image (kept out of the timed window)
         run: docker pull curlimages/curl:8.11.0
 
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build kelta CLI (template install runs it after the timed window)
+        working-directory: kelta-web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
       - name: 'Time: stack start → first collection created (budget 300s)'
+        env:
+          ADMIN_PASSWORD_FILE: ${{ runner.temp }}/quickstart-admin-password
         run: |
           set +e
           START=$(date +%s)
@@ -788,6 +801,21 @@ jobs:
             echo "::error::Quickstart did not complete within the 300s budget (timeout or failure) — ${ELAPSED}s elapsed."
             exit 1
           fi
+
+      # Outside the timed window: install every tenant template into the fresh quickstart
+      # tenant with the kelta CLI — static file checks first (ci/template-files.test.mjs),
+      # then metadata diff must preview only creates, install.sh must exit 0 and the
+      # seeded record counts must match (ci/template-apply.sh).
+      - name: Install tenant templates (examples/templates/*) into the quickstart tenant
+        env:
+          ADMIN_PASSWORD_FILE: ${{ runner.temp }}/quickstart-admin-password
+        run: |
+          node --test ci/template-files.test.mjs
+          for template in examples/templates/*/; do
+            echo "::group::${template%/}"
+            bash ci/template-apply.sh "${template%/}"
+            echo "::endgroup::"
+          done
 
       - name: Dump compose logs on failure
         if: failure()

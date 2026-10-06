@@ -38,5 +38,10 @@ docker run --rm -i --network "$NETWORK" \
   -e INITIAL_PASSWORD="$INITIAL_PASSWORD" -e NEW_PASSWORD="$ADMIN_PASSWORD" \
   curlimages/curl:8.11.0 sh < ci/admin-first-sign-in.sh
 
+# Steps after the timed window (ci/template-apply.sh) sign in as the admin again.
+if [ -n "${ADMIN_PASSWORD_FILE:-}" ]; then
+  (umask 077 && printf '%s' "$ADMIN_PASSWORD" > "$ADMIN_PASSWORD_FILE")
+fi
+
 docker run --rm -i --network "$NETWORK" -e ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   curlimages/curl:8.11.0 sh < ci/quickstart-check.sh

@@ -1,0 +1,28 @@
+{
+  "name": "Open pipeline",
+  "visibility": "PUBLIC",
+  "isDefault": true,
+  "viewType": "TABLE",
+  "columns": [
+    "name",
+    "account",
+    "stage",
+    "amount",
+    "expectedCloseDate"
+  ],
+  "filters": [
+    {
+      "field": "stage",
+      "value": [
+        "PROSPECTING",
+        "QUALIFICATION",
+        "PROPOSAL",
+        "NEGOTIATION"
+      ],
+      "operator": "in"
+    }
+  ],
+  "sortField": "expectedCloseDate",
+  "sortDirection": "ASC",
+  "rowLimit": 25
+}

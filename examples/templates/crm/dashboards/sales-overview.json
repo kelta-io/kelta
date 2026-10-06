@@ -1,0 +1,153 @@
+{
+  "name": "Sales overview",
+  "description": "Pipeline, wins and upcoming work for the CRM template.",
+  "accessLevel": "PUBLIC",
+  "columnCount": 4,
+  "components": [
+    {
+      "title": "Open pipeline",
+      "componentType": "metric",
+      "columnPosition": 1,
+      "rowPosition": 1,
+      "columnSpan": 1,
+      "rowSpan": 1,
+      "config": {
+        "filters": [
+          {
+            "field": "stage",
+            "value": [
+              "PROSPECTING",
+              "QUALIFICATION",
+              "PROPOSAL",
+              "NEGOTIATION"
+            ],
+            "operator": "in"
+          }
+        ],
+        "aggregateType": "SUM",
+        "aggregateField": "amount",
+        "collectionName": "deals"
+      }
+    },
+    {
+      "title": "Won revenue",
+      "componentType": "metric",
+      "columnPosition": 2,
+      "rowPosition": 1,
+      "columnSpan": 1,
+      "rowSpan": 1,
+      "config": {
+        "filters": [
+          {
+            "field": "stage",
+            "value": "WON",
+            "operator": "eq"
+          }
+        ],
+        "aggregateType": "SUM",
+        "aggregateField": "amount",
+        "collectionName": "deals"
+      }
+    },
+    {
+      "title": "Deals",
+      "componentType": "metric",
+      "columnPosition": 3,
+      "rowPosition": 1,
+      "columnSpan": 1,
+      "rowSpan": 1,
+      "config": {
+        "aggregateType": "COUNT",
+        "collectionName": "deals"
+      }
+    },
+    {
+      "title": "Accounts",
+      "componentType": "metric",
+      "columnPosition": 4,
+      "rowPosition": 1,
+      "columnSpan": 1,
+      "rowSpan": 1,
+      "config": {
+        "aggregateType": "COUNT",
+        "collectionName": "accounts"
+      }
+    },
+    {
+      "title": "Deals by stage",
+      "componentType": "chart",
+      "columnPosition": 1,
+      "rowPosition": 2,
+      "columnSpan": 2,
+      "rowSpan": 1,
+      "config": {
+        "chartStyle": "bar",
+        "groupByField": "stage",
+        "collectionName": "deals"
+      }
+    },
+    {
+      "title": "Accounts by industry",
+      "componentType": "chart",
+      "columnPosition": 3,
+      "rowPosition": 2,
+      "columnSpan": 2,
+      "rowSpan": 1,
+      "config": {
+        "chartStyle": "pie",
+        "groupByField": "industry",
+        "collectionName": "accounts"
+      }
+    },
+    {
+      "title": "Recently closed",
+      "componentType": "table",
+      "columnPosition": 1,
+      "rowPosition": 3,
+      "columnSpan": 2,
+      "rowSpan": 1,
+      "config": {
+        "fields": [
+          "name",
+          "stage",
+          "amount",
+          "closedAt"
+        ],
+        "filters": [
+          {
+            "field": "stage",
+            "value": [
+              "WON",
+              "LOST"
+            ],
+            "operator": "in"
+          }
+        ],
+        "collectionName": "deals"
+      }
+    },
+    {
+      "title": "Open activities",
+      "componentType": "recent",
+      "columnPosition": 3,
+      "rowPosition": 3,
+      "columnSpan": 2,
+      "rowSpan": 1,
+      "config": {
+        "fields": [
+          "subject",
+          "activityType",
+          "dueDate"
+        ],
+        "filters": [
+          {
+            "field": "completed",
+            "value": false,
+            "operator": "eq"
+          }
+        ],
+        "collectionName": "activities"
+      }
+    }
+  ]
+}

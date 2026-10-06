@@ -211,3 +211,23 @@ clock from `docker compose up` to that API call succeeding counts against the bu
 happens first and isn't timed. Gated on the `quickstart` path filter (`.github/path-filters.yml`):
 backend/frontend source, `docker-compose*.yml`, `Makefile`, `docker/bootstrap/**`. Uses `make up`'s
 default-profile services only — no `--profile ai`, matching what a first-time user actually runs.
+
+### Tenant templates (`examples/templates/*`)
+
+The same job then installs every tenant template into the fresh quickstart tenant, **after** the
+timed window (the 300 s budget is unchanged). First `node --test ci/template-files.test.mjs`
+checks the files statically — every layout, list-view, dashboard, flow-trigger and seed attribute
+names a field of a collection in the template's `package.json`, seed `{"lid": …}` references
+point at an earlier batch, no export `jsonb` wrapper is left, and seed emails are `example.*`.
+Then `ci/template-apply.sh <template-dir>` bakes the `kelta` CLI (built from `kelta-web` earlier in the job), `examples/templates/` and itself into a
+throwaway `node:20-alpine` image — again because the remote daemon can't bind-mount — and runs it
+on the compose network. Inside, it signs in as the platform admin (`ci/quickstart-run.sh` leaves
+the changed password in `$ADMIN_PASSWORD_FILE`), passes the JWT to the CLI as `KELTA_TOKEN`, and:
+
+1. asserts `kelta metadata diff package.json` previews only creates (no updates, no conflicts);
+2. runs the template's `install.sh`, which must exit 0 (it stops at the first error);
+3. asserts each collection holds exactly as many records as the template's `seeds/*.json` add.
+
+A new template only needs the same layout (`package.json`, `install.sh`, `seeds/*.json` batches
+of `add` operations); the loop picks up every directory under `examples/templates/`. Gated on the
+`quickstart` filter, which includes `examples/templates/**` and the two `ci/template-*` files.
