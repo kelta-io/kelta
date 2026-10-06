@@ -1,0 +1,23 @@
+{
+  "name": "Open activities",
+  "visibility": "PUBLIC",
+  "isDefault": true,
+  "viewType": "TABLE",
+  "columns": [
+    "subject",
+    "activityType",
+    "dueDate",
+    "deal",
+    "contact"
+  ],
+  "filters": [
+    {
+      "field": "completed",
+      "value": false,
+      "operator": "eq"
+    }
+  ],
+  "sortField": "dueDate",
+  "sortDirection": "ASC",
+  "rowLimit": 25
+}

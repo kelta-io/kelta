@@ -809,7 +809,21 @@ jobs:
       - name: Pre-pull curl image (kept out of the timed window)
         run: docker pull curlimages/curl:8.11.0
 
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build kelta CLI (template install runs it after the timed window)
+        timeout-minutes: 5
+        working-directory: kelta-web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
       - name: 'Time: stack start → first collection created (budget 300s)'
+        env:
+          ADMIN_PASSWORD_FILE: ${{ runner.temp }}/quickstart-admin-password
         run: |
           set +e
           START=$(date +%s)
@@ -823,8 +837,29 @@ jobs:
             exit 1
           fi
 
+      # Outside the timed window: install every tenant template into the fresh quickstart
+      # tenant with the kelta CLI — static file checks first (ci/template-files.test.mjs),
+      # then metadata diff must preview only creates, install.sh must exit 0 and the
+      # seeded record counts must match (ci/template-apply.sh). Every docker/kelta/curl
+      # call in there is time-bounded and a failure prints the step it failed at. This
+      # step's timeout-minutes is the backstop: a timed-out step is a failure, so the log
+      # dump below still runs (a job-timeout cancel skipped it, leaving no logs).
+      - name: Install tenant templates (examples/templates/*) into the quickstart tenant
+        timeout-minutes: 10
+        env:
+          ADMIN_PASSWORD_FILE: ${{ runner.temp }}/quickstart-admin-password
+        run: |
+          node --test ci/template-files.test.mjs
+          START=$(date +%s)
+          for template in examples/templates/*/; do
+            echo "::group::${template%/}"
+            bash ci/template-apply.sh "${template%/}"
+            echo "::endgroup::"
+          done
+          echo "Template install wall-clock: $(( $(date +%s) - START ))s"
+
       - name: Dump compose logs on failure
-        if: failure()
+        if: failure() || cancelled()
         run: |
           mkdir -p _logs
           for s in kelta-auth kelta-worker kelta-gateway kelta-ui postgres redis nats cerbos mailpit; do
@@ -834,7 +869,7 @@ jobs:
 
       - name: Upload logs
         continue-on-error: true
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: quickstart-logs

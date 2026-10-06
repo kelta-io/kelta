@@ -1,0 +1,68 @@
+{
+  "name": "Stamp deal closed date",
+  "description": "When a deal stage becomes WON or LOST, set closedAt to the time of that change; clear it when the deal is reopened.",
+  "flowType": "RECORD_TRIGGERED",
+  "active": true,
+  "triggerConfig": {
+    "events": [
+      "CREATED",
+      "UPDATED"
+    ],
+    "collection": "deals",
+    "triggerFields": [
+      "stage"
+    ]
+  },
+  "definition": {
+    "States": {
+      "IsClosed": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Next": "StampClosedAt",
+            "Variable": "$.record.data.stage",
+            "StringEquals": "WON"
+          },
+          {
+            "Next": "StampClosedAt",
+            "Variable": "$.record.data.stage",
+            "StringEquals": "LOST"
+          }
+        ],
+        "Default": "ClearClosedAt"
+      },
+      "StampClosedAt": {
+        "End": true,
+        "Type": "Task",
+        "Resource": "UPDATE_RECORD",
+        "Parameters": {
+          "updates": [
+            {
+              "field": "closedAt",
+              "value": "${$.record.data.updatedAt}"
+            }
+          ],
+          "recordId": "${$.record.data.id}",
+          "targetCollectionName": "deals"
+        }
+      },
+      "ClearClosedAt": {
+        "Type": "Task",
+        "Resource": "UPDATE_RECORD",
+        "Parameters": {
+          "targetCollectionName": "deals",
+          "recordId": "${$.record.data.id}",
+          "updates": [
+            {
+              "field": "closedAt",
+              "value": null
+            }
+          ]
+        },
+        "End": true
+      }
+    },
+    "Comment": "Stamp deals.closedAt when the deal moves to a closed stage (WON or LOST); clear it when it moves back to an open stage.",
+    "StartAt": "IsClosed"
+  }
+}

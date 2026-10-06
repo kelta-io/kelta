@@ -1,0 +1,26 @@
+{
+  "name": "Pipeline board",
+  "visibility": "PUBLIC",
+  "isDefault": false,
+  "viewType": "KANBAN",
+  "columns": [
+    "name",
+    "account",
+    "stage",
+    "amount"
+  ],
+  "filters": [],
+  "sortField": "amount",
+  "sortDirection": "DESC",
+  "rowLimit": 100,
+  "typeConfig": {
+    "kanban": {
+      "laneField": "stage",
+      "cardFields": [
+        "account",
+        "amount",
+        "expectedCloseDate"
+      ]
+    }
+  }
+}

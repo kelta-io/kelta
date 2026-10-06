@@ -1,0 +1,140 @@
+{
+  "atomic:operations": [
+    {
+      "op": "add",
+      "data": {
+        "type": "accounts",
+        "lid": "account-1",
+        "attributes": {
+          "name": "Bramblecrest Foods",
+          "industry": "RETAIL",
+          "website": "https://bramblecrest.example.com",
+          "phone": "+1 555 0101",
+          "city": "Portland",
+          "country": "United States",
+          "annualRevenue": 4200000,
+          "description": "Regional grocery chain with 14 stores."
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "accounts",
+        "lid": "account-2",
+        "attributes": {
+          "name": "Quillmoor Analytics",
+          "industry": "SOFTWARE",
+          "website": "https://quillmoor.example.com",
+          "phone": "+44 20 7946 0102",
+          "city": "Leeds",
+          "country": "United Kingdom",
+          "annualRevenue": 9800000,
+          "description": "Reporting tools for logistics teams."
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "accounts",
+        "lid": "account-3",
+        "attributes": {
+          "name": "Harborlight Logistics",
+          "industry": "OTHER",
+          "website": "https://harborlight.example.com",
+          "phone": "+1 555 0103",
+          "city": "Savannah",
+          "country": "United States",
+          "annualRevenue": 27500000,
+          "description": "Port-side freight forwarding."
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "accounts",
+        "lid": "account-4",
+        "attributes": {
+          "name": "Fenwick & Tarn Manufacturing",
+          "industry": "MANUFACTURING",
+          "website": "https://fenwicktarn.example.com",
+          "phone": "+49 30 555 0104",
+          "city": "Dresden",
+          "country": "Germany",
+          "annualRevenue": 61000000,
+          "description": "Precision parts for agricultural machinery."
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "accounts",
+        "lid": "account-5",
+        "attributes": {
+          "name": "Copperleaf Health",
+          "industry": "HEALTHCARE",
+          "website": "https://copperleaf.example.com",
+          "phone": "+1 555 0105",
+          "city": "Denver",
+          "country": "United States",
+          "annualRevenue": 15300000,
+          "description": "Network of outpatient physiotherapy clinics."
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "accounts",
+        "lid": "account-6",
+        "attributes": {
+          "name": "Silverbirch Outfitters",
+          "industry": "RETAIL",
+          "website": "https://silverbirch.example.com",
+          "phone": "+1 555 0106",
+          "city": "Calgary",
+          "country": "Canada",
+          "annualRevenue": 7100000,
+          "description": "Outdoor gear retailer, online and two flagship stores."
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "accounts",
+        "lid": "account-7",
+        "attributes": {
+          "name": "Oakhaven Capital",
+          "industry": "FINANCE",
+          "website": "https://oakhaven.example.com",
+          "phone": "+1 555 0107",
+          "city": "Boston",
+          "country": "United States",
+          "annualRevenue": 33000000,
+          "description": "Mid-market private credit fund."
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "accounts",
+        "lid": "account-8",
+        "attributes": {
+          "name": "Lumen Ridge Software",
+          "industry": "SOFTWARE",
+          "website": "https://lumenridge.example.com",
+          "phone": "+61 2 5550 0108",
+          "city": "Brisbane",
+          "country": "Australia",
+          "annualRevenue": 5600000,
+          "description": "Scheduling software for field service teams."
+        }
+      }
+    }
+  ]
+}

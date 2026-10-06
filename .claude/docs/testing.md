@@ -211,3 +211,38 @@ clock from `docker compose up` to that API call succeeding counts against the bu
 happens first and isn't timed. Gated on the `quickstart` path filter (`.github/path-filters.yml`):
 backend/frontend source, `docker-compose*.yml`, `Makefile`, `docker/bootstrap/**`. Uses `make up`'s
 default-profile services only — no `--profile ai`, matching what a first-time user actually runs.
+
+### Tenant templates (`examples/templates/*`)
+
+The same job then installs every tenant template into the fresh quickstart tenant, in its own
+step **after** the timed window (the 300 s budget is unchanged). First `node --test
+ci/template-files.test.mjs` checks the files statically — every layout, list-view, dashboard,
+flow-trigger and seed attribute names a field of a collection in the template's `package.json`,
+seed `{"lid": …}` references point at an earlier batch, no export `jsonb` wrapper is left, seed
+emails are `example.*` — and checks the install path cannot hang silently (below). Then
+`ci/template-apply.sh <template-dir>` bundles the `kelta` CLI (built from `kelta-web` earlier in
+the job) into one file with esbuild, bakes it, `examples/templates/` and itself into a small
+throwaway `node:20-alpine` image — the remote daemon can't bind-mount, and copying `kelta-web`
+with its ~400 MB `node_modules` made the build context huge — and runs it on the compose network.
+Inside, it signs in as the platform admin (`ci/quickstart-run.sh` leaves the changed password in
+`$ADMIN_PASSWORD_FILE`), passes the JWT to the CLI as `KELTA_TOKEN`, and:
+
+1. asserts `kelta metadata diff package.json` previews only creates (no updates, no conflicts);
+2. runs the template's `install.sh`, which must exit 0 (it stops at the first error);
+3. asserts each collection holds exactly as many records as the template's `seeds/*.json` add.
+
+**Every install must be bounded and diagnosable.** KLT-375's install hung until the job timeout
+cancelled it, which also skipped the `if: failure()` log dump — no logs, no failing command. So:
+the CI step has `timeout-minutes: 10` (a timed-out step is a *failure*, so the dump runs; the dump
+and upload also run on `cancelled()`); every `docker`, `kelta` and `curl` call in
+`ci/template-apply.sh` and a template's `install.sh` runs under `timeout <N>` or `curl -m`; the
+CLI's HTTP client has no request timeout of its own, so nothing else bounds it. An `install.sh`
+runs with `set -euo pipefail` and `exec </dev/null`, authenticates only from
+`KELTA_URL`/`KELTA_TENANT`/`KELTA_TOKEN` (never `kelta auth login`), passes `--yes` on every
+mutating call, waits for the tenant with a fixed-attempt poll, and an EXIT trap prints
+`install failed at step: <name>`; `template-apply.sh` prints `template check failed at step: <name>`
+the same way. `ci/template-files.test.mjs` asserts all of that statically for every template.
+
+A new template only needs the same layout (`package.json`, `install.sh`, `seeds/*.json` batches
+of `add` operations); the loop picks up every directory under `examples/templates/`. Gated on the
+`quickstart` filter, which includes `examples/templates/**` and the `ci/template-*` files.

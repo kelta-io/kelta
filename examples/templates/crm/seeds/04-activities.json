@@ -1,0 +1,302 @@
+{
+  "atomic:operations": [
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-1",
+        "attributes": {
+          "subject": "Pricing call with operations",
+          "activityType": "CALL",
+          "completed": false,
+          "dueDate": "2026-10-08",
+          "deal": {
+            "lid": "deal-1"
+          },
+          "contact": {
+            "lid": "contact-1"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-2",
+        "attributes": {
+          "subject": "Send revised order form",
+          "activityType": "EMAIL",
+          "completed": false,
+          "dueDate": "2026-10-10",
+          "deal": {
+            "lid": "deal-1"
+          },
+          "contact": {
+            "lid": "contact-1"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-3",
+        "attributes": {
+          "subject": "Pilot kickoff meeting",
+          "activityType": "MEETING",
+          "completed": true,
+          "dueDate": "2026-08-20",
+          "deal": {
+            "lid": "deal-2"
+          },
+          "contact": {
+            "lid": "contact-2"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-4",
+        "attributes": {
+          "subject": "Technical deep dive",
+          "activityType": "MEETING",
+          "completed": false,
+          "dueDate": "2026-10-14",
+          "deal": {
+            "lid": "deal-3"
+          },
+          "contact": {
+            "lid": "contact-3"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-5",
+        "attributes": {
+          "subject": "Prepare security questionnaire",
+          "activityType": "TASK",
+          "completed": false,
+          "dueDate": "2026-10-16",
+          "deal": {
+            "lid": "deal-3"
+          },
+          "contact": {
+            "lid": "contact-4"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-6",
+        "attributes": {
+          "subject": "Renewal signed \u2014 send welcome pack",
+          "activityType": "EMAIL",
+          "completed": true,
+          "dueDate": "2026-10-01",
+          "deal": {
+            "lid": "deal-4"
+          },
+          "contact": {
+            "lid": "contact-4"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-7",
+        "attributes": {
+          "subject": "Discovery call",
+          "activityType": "CALL",
+          "completed": true,
+          "dueDate": "2026-10-09",
+          "deal": {
+            "lid": "deal-5"
+          },
+          "contact": {
+            "lid": "contact-6"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-8",
+        "attributes": {
+          "subject": "Map current dispatch workflow",
+          "activityType": "TASK",
+          "completed": false,
+          "dueDate": "2026-10-21",
+          "deal": {
+            "lid": "deal-5"
+          },
+          "contact": {
+            "lid": "contact-6"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-9",
+        "attributes": {
+          "subject": "Loss review notes",
+          "activityType": "TASK",
+          "completed": true,
+          "dueDate": "2026-08-05",
+          "deal": {
+            "lid": "deal-6"
+          },
+          "contact": {
+            "lid": "contact-5"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-10",
+        "attributes": {
+          "subject": "Intro email",
+          "activityType": "EMAIL",
+          "completed": false,
+          "dueDate": "2026-10-12",
+          "deal": {
+            "lid": "deal-7"
+          },
+          "contact": {
+            "lid": "contact-8"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-11",
+        "attributes": {
+          "subject": "Site visit in Dresden",
+          "activityType": "MEETING",
+          "completed": false,
+          "dueDate": "2026-10-28",
+          "deal": {
+            "lid": "deal-8"
+          },
+          "contact": {
+            "lid": "contact-7"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-12",
+        "attributes": {
+          "subject": "Go-live check-in",
+          "activityType": "CALL",
+          "completed": true,
+          "dueDate": "2026-09-25",
+          "deal": {
+            "lid": "deal-9"
+          },
+          "contact": {
+            "lid": "contact-9"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-13",
+        "attributes": {
+          "subject": "Invoice follow-up",
+          "activityType": "EMAIL",
+          "completed": false,
+          "dueDate": "2026-10-07",
+          "contact": {
+            "lid": "contact-10"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-14",
+        "attributes": {
+          "subject": "Storefront demo",
+          "activityType": "MEETING",
+          "completed": false,
+          "dueDate": "2026-10-15",
+          "deal": {
+            "lid": "deal-10"
+          },
+          "contact": {
+            "lid": "contact-11"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-15",
+        "attributes": {
+          "subject": "Check in after lost deal",
+          "activityType": "CALL",
+          "completed": false,
+          "dueDate": "2026-11-02",
+          "contact": {
+            "lid": "contact-14"
+          }
+        }
+      }
+    },
+    {
+      "op": "add",
+      "data": {
+        "type": "activities",
+        "lid": "activity-16",
+        "attributes": {
+          "subject": "Partner programme terms",
+          "activityType": "EMAIL",
+          "completed": false,
+          "dueDate": "2026-10-18",
+          "deal": {
+            "lid": "deal-12"
+          },
+          "contact": {
+            "lid": "contact-15"
+          }
+        }
+      }
+    }
+  ]
+}
