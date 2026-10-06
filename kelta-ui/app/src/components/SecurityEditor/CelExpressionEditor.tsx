@@ -26,7 +26,10 @@ export interface CelExpressionEditorProps {
 
 const CEL_HELP = [
   { variable: 'R.attr.<fieldName>', description: 'Record attribute value' },
-  { variable: 'P.attr.userId', description: 'Current user ID — compare with createdBy or a user lookup' },
+  {
+    variable: 'P.attr.userId',
+    description: 'Current user ID — compare with createdBy or a user lookup',
+  },
   { variable: 'P.attr.profileId', description: 'Current user profile ID' },
   { variable: 'P.attr.tenantId', description: 'Current tenant ID' },
   { variable: 'P.id', description: 'Current user email — compare only with email fields' },

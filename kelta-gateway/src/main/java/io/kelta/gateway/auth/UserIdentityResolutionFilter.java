@@ -76,17 +76,20 @@ public class UserIdentityResolutionFilter implements GlobalFilter, Ordered {
             exchange.getAttributes().put(PRINCIPAL_ATTRIBUTE, principal);
         }
 
-        // Skip worker lookup when the profile is already in the JWT claims (kelta-auth tokens)
-        // and the caller's platform_user UUID is known too. This eliminates the synchronous
-        // worker call per request for kelta-auth-issued tokens. A kelta-auth `sub` is the UUID on
-        // the direct-login and portal paths but the email on the authorization-code path, so
-        // those tokens still take the (Redis-cached) lookup for the UUID alone.
+        // Skip worker lookup when the profile is already in the JWT claims (kelta-auth tokens).
+        // This eliminates the synchronous worker call per request for kelta-auth-issued tokens.
+        // A kelta-auth `sub` is the platform_user UUID on the direct-login and portal paths, so
+        // it is the user id; on the authorization-code path it is the email, and only those
+        // tokens take the (Redis-cached) lookup, for the UUID alone. The Guest principal has no
+        // `sub` and never does.
         if (principal.getProfileId() != null && !principal.getProfileId().isEmpty()) {
-            if (principal.getUserId() == null && isUuid(principal.getClaims().get("sub"))) {
-                principal = principal.withUserId((String) principal.getClaims().get("sub"));
+            Object sub = principal.getClaims().get("sub");
+            if (principal.getUserId() == null && isUuid(sub)) {
+                principal = principal.withUserId((String) sub);
                 exchange.getAttributes().put(PRINCIPAL_ATTRIBUTE, principal);
             }
-            if (principal.getUserId() != null) {
+            boolean emailSubject = sub instanceof String s && s.contains("@");
+            if (principal.getUserId() != null || !emailSubject) {
                 log.debug("Profile already resolved from JWT claims for user: {}", principal.getUsername());
                 return chain.filter(exchange);
             }

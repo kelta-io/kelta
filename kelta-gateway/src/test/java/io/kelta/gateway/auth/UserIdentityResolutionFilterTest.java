@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -118,6 +119,17 @@ class UserIdentityResolutionFilterTest {
     }
 
     @Test
+    @DisplayName("an anonymous Guest principal (profile, no sub) never triggers a lookup")
+    void guestSkipsLookup() {
+        GatewayPrincipal guest = new GatewayPrincipal("00000000-0000-0000-0000-000000000000", List.of(),
+                Map.of(), "guest-profile", "Guest", TENANT, null, null);
+
+        forward(guest);
+
+        verifyNoInteractions(valueOps);
+    }
+
+    @Test
     @DisplayName("a token that already carries its profile keeps it; a UUID sub is the user id with no lookup")
     void profileClaimsSkipLookupWhenSubIsUuid() {
         GatewayPrincipal kelta = new GatewayPrincipal("staff@example.com", List.of(),
@@ -126,6 +138,20 @@ class UserIdentityResolutionFilterTest {
         ServerWebExchange forwarded = forward(kelta);
 
         GatewayPrincipal resolved = JwtAuthenticationFilter.getPrincipal(forwarded);
+        assertThat(resolved.getUserId()).isEqualTo(OWNER_ID);
+        assertThat(resolved.getProfileId()).isEqualTo("profile-jwt");
+        verifyNoInteractions(valueOps);
+    }
+
+    @Test
+    @DisplayName("a token with its profile but an email sub looks up only the user id, keeping its profile")
+    void emailSubLooksUpUserId() {
+        identityIs("INTERNAL");
+        GatewayPrincipal authCode = new GatewayPrincipal("staff@example.com", List.of(),
+                Map.of("sub", "staff@example.com"), "profile-jwt", "Staff", TENANT, null, null);
+
+        GatewayPrincipal resolved = JwtAuthenticationFilter.getPrincipal(forward(authCode));
+
         assertThat(resolved.getUserId()).isEqualTo(OWNER_ID);
         assertThat(resolved.getProfileId()).isEqualTo("profile-jwt");
     }
