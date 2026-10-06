@@ -333,6 +333,9 @@
     }
   },
   "packages": {
+    "flows": "التدفقات",
+    "pageLayouts": "تخطيطات الصفحات",
+    "validationRules": "قواعد التحقق",
     "title": "الحزم",
     "export": "تصدير",
     "import": "استيراد",

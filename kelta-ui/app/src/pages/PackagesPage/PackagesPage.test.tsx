@@ -73,9 +73,17 @@ const mockPages = [{ id: 'page-1', name: 'dashboard' }]
 
 const mockMenus = [{ id: 'menu-1', name: 'main_nav' }]
 
+const mockFlows = [{ id: 'flow-1', name: 'Welcome email' }]
+
+const mockLayouts = [{ id: 'layout-1', name: 'Default', collectionId: 'col-1' }]
+
+const mockValidationRules = [{ id: 'vr-1', name: 'Price positive', collectionId: 'col-2' }]
+
+const mockPicklists = [{ id: 'pick-1', name: 'Countries' }]
+
 const mockImportPreview = {
   creates: [{ type: 'collection', id: 'col-new', name: 'new_collection' }],
-  updates: [{ type: 'role', id: 'role-1', name: 'admin' }],
+  updates: [{ type: 'flow', id: 'flow-1', name: 'Welcome email' }],
   conflicts: [],
 }
 
@@ -101,6 +109,18 @@ function setupAxiosMocks(overrides: Record<string, unknown> = {}) {
     }
     if (url.includes('/api/ui-menus')) {
       return Promise.resolve({ data: overrides.menus ?? mockMenus })
+    }
+    if (url.includes('/api/flows')) {
+      return Promise.resolve({ data: overrides.flows ?? mockFlows })
+    }
+    if (url.includes('/api/page-layouts')) {
+      return Promise.resolve({ data: overrides.layouts ?? mockLayouts })
+    }
+    if (url.includes('/api/validation-rules')) {
+      return Promise.resolve({ data: overrides.validationRules ?? mockValidationRules })
+    }
+    if (url.includes('/api/global-picklists')) {
+      return Promise.resolve({ data: overrides.picklists ?? mockPicklists })
     }
     return Promise.resolve({ data: {} })
   })
@@ -209,6 +229,127 @@ describe('PackagesPage', () => {
       expect(screen.queryByTestId('item-section-policies')).not.toBeInTheDocument()
       expect(screen.getByTestId('item-section-pages')).toBeInTheDocument()
       expect(screen.getByTestId('item-section-menus')).toBeInTheDocument()
+      // Everything else the export endpoint accepts.
+      await waitFor(() => {
+        expect(screen.getByTestId('item-section-flows')).toBeInTheDocument()
+        expect(screen.getByTestId('item-section-layouts')).toBeInTheDocument()
+        expect(screen.getByTestId('item-section-validation-rules')).toBeInTheDocument()
+        expect(screen.getByTestId('item-section-picklists')).toBeInTheDocument()
+      })
+    })
+
+    it('labels layouts and validation rules with their collection', async () => {
+      render(<PackagesPage />, { wrapper: createTestWrapper() })
+
+      await waitFor(() => {
+        expect(screen.getByTestId('item-layout-1')).toHaveTextContent('users · Default')
+        expect(screen.getByTestId('item-vr-1')).toHaveTextContent('products · Price positive')
+      })
+      expect(screen.getByTestId('item-flow-1')).toHaveTextContent('Welcome email')
+      expect(screen.getByTestId('item-pick-1')).toHaveTextContent('Countries')
+    })
+
+    it('sends selected flows, layouts, validation rules and picklists in the export', async () => {
+      const user = userEvent.setup()
+      render(<PackagesPage />, { wrapper: createTestWrapper() })
+
+      await waitFor(() => {
+        expect(screen.getByTestId('checkbox-flow-1')).toBeInTheDocument()
+        expect(screen.getByTestId('checkbox-layout-1')).toBeInTheDocument()
+        expect(screen.getByTestId('checkbox-vr-1')).toBeInTheDocument()
+        expect(screen.getByTestId('checkbox-pick-1')).toBeInTheDocument()
+      })
+
+      await user.type(screen.getByLabelText(/Package Name/i), 'automation')
+      for (const id of ['flow-1', 'layout-1', 'vr-1', 'pick-1']) {
+        await user.click(screen.getByTestId(`checkbox-${id}`))
+      }
+      await waitFor(() => {
+        expect(screen.getByTestId('export-button')).not.toBeDisabled()
+      })
+      await user.click(screen.getByTestId('export-button'))
+
+      await waitFor(() => {
+        const exportCall = mockAxios.post.mock.calls.find(([url]) =>
+          String(url).includes('/api/packages/export')
+        )
+        expect(exportCall).toBeDefined()
+        const body = JSON.stringify(exportCall![1])
+        expect(body).toContain('"flowIds":["flow-1"]')
+        expect(body).toContain('"pageLayoutIds":["layout-1"]')
+        expect(body).toContain('"validationRuleIds":["vr-1"]')
+        expect(body).toContain('"globalPicklistIds":["pick-1"]')
+      })
+    })
+
+    it('downloads the exported package as a JSON file', async () => {
+      const pkg = { formatVersion: 2, name: 'automation', items: [{ type: 'FLOW' }] }
+      mockAxios.post.mockImplementation((url: string) =>
+        Promise.resolve({ data: url.includes('/api/packages/export') ? pkg : {} })
+      )
+      const createObjectURL = vi.mocked(global.URL.createObjectURL)
+      createObjectURL.mockClear()
+      const user = userEvent.setup()
+      render(<PackagesPage />, { wrapper: createTestWrapper() })
+
+      await waitFor(() => {
+        expect(screen.getByTestId('checkbox-flow-1')).toBeInTheDocument()
+      })
+      await user.type(screen.getByLabelText(/Package Name/i), 'automation')
+      await user.click(screen.getByTestId('checkbox-flow-1'))
+      await waitFor(() => {
+        expect(screen.getByTestId('export-button')).not.toBeDisabled()
+      })
+      await user.click(screen.getByTestId('export-button'))
+
+      // A browser's createObjectURL accepts only a Blob/File; the parsed package used to be
+      // passed straight through.
+      await waitFor(() => {
+        expect(createObjectURL).toHaveBeenCalled()
+      })
+      const file = createObjectURL.mock.calls[0][0] as Blob
+      expect(file).toBeInstanceOf(Blob)
+      expect(file.type).toBe('application/json')
+      const text = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.readAsText(file)
+      })
+      expect(JSON.parse(text)).toEqual(pkg)
+    })
+
+    it('lists every item, not just the first page of 200', async () => {
+      const firstPage = Array.from({ length: 200 }, (_, i) => ({ id: `flow-a${i}`, name: `A${i}` }))
+      mockAxios.get.mockImplementation((url: string) => {
+        if (url.includes('/api/flows')) {
+          const second = url.includes('page[number]=2')
+          return Promise.resolve({
+            data: {
+              data: (second ? [{ id: 'flow-last', name: 'Last flow' }] : firstPage).map(
+                ({ id, name }) => ({ type: 'flows', id, attributes: { name } })
+              ),
+              metadata: {
+                totalCount: 201,
+                currentPage: second ? 2 : 1,
+                pageSize: 200,
+                totalPages: 2,
+              },
+            },
+          })
+        }
+        return Promise.resolve({ data: [] })
+      })
+
+      render(<PackagesPage />, { wrapper: createTestWrapper() })
+
+      await waitFor(() => {
+        expect(screen.getByTestId('item-flow-last')).toBeInTheDocument()
+      })
+      expect(screen.getByTestId('item-flow-a0')).toBeInTheDocument()
+      const flowRequests = mockAxios.get.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.includes('/api/flows'))
+      expect(flowRequests.some((url) => url.includes('page[size]=200'))).toBe(true)
     })
 
     it('loads and displays available items', async () => {

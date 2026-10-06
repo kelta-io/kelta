@@ -479,6 +479,9 @@
     }
   },
   "packages": {
+    "flows": "Flows",
+    "pageLayouts": "Seitenlayouts",
+    "validationRules": "Validierungsregeln",
     "title": "Pakete",
     "export": "Exportieren",
     "import": "Importieren",

@@ -37,7 +37,7 @@ export interface Package {
  * Package item interface
  */
 export interface PackageItem {
-  type: 'collection' | 'role' | 'policy' | 'page' | 'menu'
+  type: 'collection' | 'page' | 'menu' | 'flow' | 'layout' | 'validation-rule' | 'picklist'
   id: string
   name: string
   content?: unknown
@@ -53,6 +53,10 @@ export interface ExportOptions {
   collectionIds: string[]
   uiPageIds: string[]
   uiMenuIds: string[]
+  flowIds: string[]
+  pageLayoutIds: string[]
+  validationRuleIds: string[]
+  globalPicklistIds: string[]
 }
 
 /**
@@ -99,6 +103,8 @@ interface SelectableItem {
   id: string
   name: string
   type: string
+  /** Owning collection, for per-collection metadata (layouts, validation rules). */
+  collectionId?: string
 }
 
 /**
@@ -114,30 +120,50 @@ async function fetchPackageHistory(apiClient: ApiClient): Promise<Package[]> {
   return apiClient.getList('/api/packages/history')
 }
 
-async function fetchPages(apiClient: ApiClient): Promise<SelectableItem[]> {
-  const pages = await apiClient.getList<{ id: string; name: string }>(
-    '/api/ui-pages?page[size]=1000'
-  )
-  return pages.map((p: { id: string; name: string }) => ({
-    id: p.id,
-    name: p.name,
-    type: 'page',
-  }))
+// Page size for the export pickers; the API clamps HTTP pages at 200.
+const EXPORT_LIST_PAGE_SIZE = 200
+
+interface NamedResource {
+  id: string
+  name: string
+  collectionId?: string
 }
 
-async function fetchMenus(apiClient: ApiClient): Promise<SelectableItem[]> {
-  const menus = await apiClient.getList<{ id: string; name: string }>(
-    '/api/ui-menus?page[size]=1000'
-  )
-  return menus.map((m: { id: string; name: string }) => ({
-    id: m.id,
-    name: m.name,
-    type: 'menu',
-  }))
+/**
+ * Every row of a JSON:API list, following `page[number]` until the last page. A single
+ * request is capped at 200 rows, so a tenant with more than that would otherwise lose the
+ * rest from the export picker without any sign of it.
+ */
+async function fetchAllPages(apiClient: ApiClient, path: string): Promise<NamedResource[]> {
+  const all: NamedResource[] = []
+  for (let page = 1; ; page++) {
+    const result = await apiClient.getPage<NamedResource>(
+      `${path}?page[size]=${EXPORT_LIST_PAGE_SIZE}&page[number]=${page}`
+    )
+    all.push(...result.content)
+    if (page >= result.totalPages || result.content.length < EXPORT_LIST_PAGE_SIZE) {
+      return all
+    }
+  }
 }
 
+async function fetchSelectable(
+  apiClient: ApiClient,
+  path: string,
+  type: string
+): Promise<SelectableItem[]> {
+  const rows = await fetchAllPages(apiClient, path)
+  return rows.map((r) => ({ id: r.id, name: r.name, type, collectionId: r.collectionId }))
+}
+
+/**
+ * The export endpoint answers with the package document itself (a JSON attachment), which the
+ * API client parses into an object. Wrap it back into a file for the download — handing the
+ * parsed object to `URL.createObjectURL` throws, so no file was ever saved.
+ */
 async function exportPackage(apiClient: ApiClient, options: ExportOptions): Promise<Blob> {
-  return apiClient.postResource('/api/packages/export', options)
+  const pkg = await apiClient.postResource<unknown>('/api/packages/export', options)
+  return new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' })
 }
 
 async function previewImport(apiClient: ApiClient, file: File): Promise<ImportPreview> {
@@ -219,6 +245,8 @@ function TypeBadge({ type }: TypeBadgeProps): React.ReactElement {
  * Item Selection Component for Export
  */
 interface ItemSelectionProps {
+  /** Stable id for the section's test hooks; the title is translated. */
+  sectionKey: string
   title: string
   items: SelectableItem[]
   selectedIds: string[]
@@ -227,6 +255,7 @@ interface ItemSelectionProps {
 }
 
 function ItemSelection({
+  sectionKey,
   title,
   items,
   selectedIds,
@@ -268,7 +297,7 @@ function ItemSelection({
   return (
     <div
       className="rounded-md border border-border bg-muted p-4"
-      data-testid={`item-section-${title.toLowerCase()}`}
+      data-testid={`item-section-${sectionKey}`}
     >
       <div className="flex items-center justify-between mb-2">
         <h4 className="m-0 text-sm font-semibold text-foreground">{title}</h4>
@@ -277,7 +306,7 @@ function ItemSelection({
             type="button"
             className="px-2 py-1 text-xs text-primary bg-transparent border-none cursor-pointer transition-colors duration-150 hover:text-primary/80 hover:underline focus:outline-2 focus:outline-ring focus:outline-offset-2"
             onClick={handleSelectAll}
-            data-testid={`select-all-${title.toLowerCase()}`}
+            data-testid={`select-all-${sectionKey}`}
           >
             {selectedIds.length === items.length ? t('common.deselectAll') : t('common.selectAll')}
           </button>
@@ -335,6 +364,10 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
   const [selectedCollections, setSelectedCollections] = useState<string[]>([])
   const [selectedPages, setSelectedPages] = useState<string[]>([])
   const [selectedMenus, setSelectedMenus] = useState<string[]>([])
+  const [selectedFlows, setSelectedFlows] = useState<string[]>([])
+  const [selectedLayouts, setSelectedLayouts] = useState<string[]>([])
+  const [selectedValidationRules, setSelectedValidationRules] = useState<string[]>([])
+  const [selectedPicklists, setSelectedPicklists] = useState<string[]>([])
 
   const { summaries, isLoading: collectionsLoading } = useCollectionSummaries()
   const collections: SelectableItem[] = useMemo(
@@ -344,13 +377,50 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
 
   const { data: pages = [], isLoading: pagesLoading } = useQuery({
     queryKey: ['export-pages'],
-    queryFn: () => fetchPages(apiClient),
+    queryFn: () => fetchSelectable(apiClient, '/api/ui-pages', 'page'),
   })
 
   const { data: menus = [], isLoading: menusLoading } = useQuery({
     queryKey: ['export-menus'],
-    queryFn: () => fetchMenus(apiClient),
+    queryFn: () => fetchSelectable(apiClient, '/api/ui-menus', 'menu'),
   })
+
+  const { data: flows = [], isLoading: flowsLoading } = useQuery({
+    queryKey: ['export-flows'],
+    queryFn: () => fetchSelectable(apiClient, '/api/flows', 'flow'),
+  })
+
+  const { data: rawLayouts = [], isLoading: layoutsLoading } = useQuery({
+    queryKey: ['export-layouts'],
+    queryFn: () => fetchSelectable(apiClient, '/api/page-layouts', 'layout'),
+  })
+
+  const { data: rawValidationRules = [], isLoading: validationRulesLoading } = useQuery({
+    queryKey: ['export-validation-rules'],
+    queryFn: () => fetchSelectable(apiClient, '/api/validation-rules', 'validation-rule'),
+  })
+
+  const { data: picklists = [], isLoading: picklistsLoading } = useQuery({
+    queryKey: ['export-picklists'],
+    queryFn: () => fetchSelectable(apiClient, '/api/global-picklists', 'picklist'),
+  })
+
+  // Layouts and validation rules belong to a collection, and their names repeat across
+  // collections ("Default", "Required email"), so label them with their collection.
+  const collectionNames = useMemo(() => new Map(summaries.map((c) => [c.id, c.name])), [summaries])
+  const withCollection = useCallback(
+    (items: SelectableItem[]): SelectableItem[] =>
+      items.map((item) => {
+        const collection = item.collectionId ? collectionNames.get(item.collectionId) : undefined
+        return collection ? { ...item, name: `${collection} · ${item.name}` } : item
+      }),
+    [collectionNames]
+  )
+  const layouts = useMemo(() => withCollection(rawLayouts), [withCollection, rawLayouts])
+  const validationRules = useMemo(
+    () => withCollection(rawValidationRules),
+    [withCollection, rawValidationRules]
+  )
 
   const exportMutation = useMutation({
     mutationFn: (options: ExportOptions) => exportPackage(apiClient, options),
@@ -372,8 +442,15 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
     },
   })
 
-  const hasSelection =
-    selectedCollections.length > 0 || selectedPages.length > 0 || selectedMenus.length > 0
+  const hasSelection = [
+    selectedCollections,
+    selectedPages,
+    selectedMenus,
+    selectedFlows,
+    selectedLayouts,
+    selectedValidationRules,
+    selectedPicklists,
+  ].some((selected) => selected.length > 0)
 
   const canExport = packageName.trim() !== '' && packageVersion.trim() !== '' && hasSelection
 
@@ -385,6 +462,10 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
       collectionIds: selectedCollections,
       uiPageIds: selectedPages,
       uiMenuIds: selectedMenus,
+      flowIds: selectedFlows,
+      pageLayoutIds: selectedLayouts,
+      validationRuleIds: selectedValidationRules,
+      globalPicklistIds: selectedPicklists,
     })
   }, [
     packageName,
@@ -393,6 +474,10 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
     selectedCollections,
     selectedPages,
     selectedMenus,
+    selectedFlows,
+    selectedLayouts,
+    selectedValidationRules,
+    selectedPicklists,
     exportMutation,
   ])
 
@@ -455,6 +540,7 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 max-lg:grid-cols-2 max-md:grid-cols-1">
         <ItemSelection
+          sectionKey="collections"
           title={t('navigation.collections')}
           items={collections}
           selectedIds={selectedCollections}
@@ -462,6 +548,7 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
           isLoading={collectionsLoading}
         />
         <ItemSelection
+          sectionKey="pages"
           title={t('navigation.pages')}
           items={pages}
           selectedIds={selectedPages}
@@ -469,11 +556,44 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
           isLoading={pagesLoading}
         />
         <ItemSelection
+          sectionKey="menus"
           title={t('navigation.menus')}
           items={menus}
           selectedIds={selectedMenus}
           onSelectionChange={setSelectedMenus}
           isLoading={menusLoading}
+        />
+        <ItemSelection
+          sectionKey="flows"
+          title={t('packages.flows')}
+          items={flows}
+          selectedIds={selectedFlows}
+          onSelectionChange={setSelectedFlows}
+          isLoading={flowsLoading}
+        />
+        <ItemSelection
+          sectionKey="layouts"
+          title={t('packages.pageLayouts')}
+          items={layouts}
+          selectedIds={selectedLayouts}
+          onSelectionChange={setSelectedLayouts}
+          isLoading={layoutsLoading || collectionsLoading}
+        />
+        <ItemSelection
+          sectionKey="validation-rules"
+          title={t('packages.validationRules')}
+          items={validationRules}
+          selectedIds={selectedValidationRules}
+          onSelectionChange={setSelectedValidationRules}
+          isLoading={validationRulesLoading || collectionsLoading}
+        />
+        <ItemSelection
+          sectionKey="picklists"
+          title={t('navigation.picklists')}
+          items={picklists}
+          selectedIds={selectedPicklists}
+          onSelectionChange={setSelectedPicklists}
+          isLoading={picklistsLoading}
         />
       </div>
 
