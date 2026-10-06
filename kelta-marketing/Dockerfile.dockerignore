@@ -5,6 +5,7 @@
 !docs/authoring/
 !kelta-web/packages/cli/COMMANDS.md
 !kelta-web/packages/cli/AGENTS.md
+!README.md
 kelta-marketing/node_modules
 kelta-marketing/dist
 kelta-marketing/.astro

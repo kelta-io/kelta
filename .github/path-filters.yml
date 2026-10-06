@@ -44,12 +44,14 @@ cli_downloads:
   - 'kelta-cli-downloads/**'
 
 # Astro marketing site (kelta.io). The docs engine renders docs/authoring/*.md and
-# the generated CLI docs in place, so edits to those must rebuild and redeploy it.
+# the generated CLI docs in place, and splices README.md's Quickstart into the docs
+# quickstart page, so edits to those must rebuild and redeploy it.
 marketing:
   - 'kelta-marketing/**'
   - 'docs/authoring/**'
   - 'kelta-web/packages/cli/COMMANDS.md'
   - 'kelta-web/packages/cli/AGENTS.md'
+  - 'README.md'
 
 # Any Java service change triggers integration tests.
 any_java:

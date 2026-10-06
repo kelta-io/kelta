@@ -212,6 +212,20 @@ describe('docs build wiring', () => {
     expect(block).toContain("- 'kelta-web/packages/cli/AGENTS.md'");
   });
 
+  // The docs quickstart page splices in README.md's Quickstart at build time.
+  it('ships README.md into the image and rebuilds the site when it changes', () => {
+    expect(read('kelta-marketing', 'Dockerfile')).toContain('COPY README.md /app/README.md');
+    expect(read('kelta-marketing', 'Dockerfile.dockerignore').split('\n')).toContain('!README.md');
+
+    const filters = read('.github', 'path-filters.yml');
+    const marketing = filters.slice(filters.indexOf('\nmarketing:'));
+    expect(marketing.slice(0, marketing.indexOf('\n\n'))).toContain("- 'README.md'");
+
+    const workflow = read('.github', 'workflows', 'build-and-publish-containers.yml');
+    const pushPaths = workflow.slice(workflow.indexOf('paths:'), workflow.indexOf('workflow_dispatch:'));
+    expect(pushPaths).toContain("- 'README.md'");
+  });
+
   it('indexes the docs with Pagefind after the build and guards the dev-mode loader', () => {
     const pkg = JSON.parse(read('kelta-marketing', 'package.json'));
     expect(pkg.scripts.postbuild).toBe('pagefind --site dist');
