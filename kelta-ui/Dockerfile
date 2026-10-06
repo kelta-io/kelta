@@ -7,7 +7,14 @@
 # Node 20 (not 18, which is EOL): vite-plugin-pwa's Workbox needs the Web Crypto
 # API as a process global — Node 18 doesn't expose it, so the service-worker
 # generation step fails with "crypto is not defined".
-FROM harbor.rzware.com/dockerhub-cache/library/node:20-alpine AS builder
+#
+# Base-image registry is a build arg, as in the services' Dockerfile.jvm: the default is
+# the homelab pull-through cache CI and production use; the release workflow
+# (.github/workflows/release.yml) passes docker.io/library because GitHub-hosted runners
+# must not depend on the homelab.
+ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
+
+FROM ${BASE_REGISTRY}/node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -58,7 +65,7 @@ RUN npx vite build
 # =============================================================================
 # Stage 2: Runtime with Nginx
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/nginx:1.25-alpine
+FROM ${BASE_REGISTRY}/nginx:1.25-alpine
 
 LABEL org.opencontainers.image.title="Kelta Admin UI"
 LABEL org.opencontainers.image.description="Admin/Builder UI for Kelta Platform"

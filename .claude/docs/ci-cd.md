@@ -174,6 +174,42 @@ Loki and Mimir retain 30 days, DORA wants 90+.
 usage and the counting caveats (cancelled builds bundling PRs, false-positive
 auto-rollbacks, re-apply bumps) are in `scripts/dora/README.md`.
 
+## `release.yml` — Tagged releases (ghcr.io + GitHub Release)
+
+Trigger: `push` of a tag matching `v*.*.*`; `workflow_dispatch` with a `dry_run` boolean
+(default `true`); and `pull_request` touching `.github/workflows/release.yml` or
+`.github/release/**`, which always runs as a dry run. A dry run builds every image for both
+arches and generates the notes (into the run summary), but pushes nothing and creates no
+Release. Publishing needs a tag ref — `workflow_dispatch` with `dry_run=false` on a branch fails
+in `plan`. Runs on **GitHub-hosted** runners only (`ubuntu-latest`, `ubuntu-24.04`,
+`ubuntu-24.04-arm`), never `k8s-runner`, and pulls only public sources. Only `GITHUB_TOKEN` is
+used; the workflow default is `permissions: {}`.
+
+| Job | Permissions | What it does |
+|-----|-------------|--------------|
+| `plan` | `contents: read` | Runs `node --test .github/release/lib.test.ts` (Node 24, which runs the `.ts` helpers with no build step). Resolves `version` (tag minus the `v`), `prerelease` (a `-suffix`) and `latest` (= not prerelease); a tag that matches the glob but is not SemVer (`v1.2.3.4`, `v1.2.3+build`) fails. Asserts the workflow's `IMAGES` list against `docker compose -f docker-compose.yml -f docker-compose.jvm.yml config`: every service with a `build:` and no profile must be released, from the same Dockerfile, with every compose build arg at the same value (extra args allowed) — so a service added to the quickstart stack, or a Dockerfile switch, fails the release instead of silently shipping without it. Writes the release notes. |
+| `build` | `contents: read`, `packages: write` | Matrix image × `[amd64, arm64]`, one native runner per arch (no QEMU). `docker/build-push-action` with the image's build args, OCI labels (`source`, `version`, `revision`, `licenses`) and a per-image/arch GHA cache. Publishing: pushes by digest to `ghcr.io/kelta-io/<service>`; dry run: `outputs: type=cacheonly`. |
+| `merge` | `packages: write` | Publishing only. `docker buildx imagetools create` joins the two digests into `ghcr.io/kelta-io/<service>:<version>`, plus `:latest` only when `latest` is true, with `org.opencontainers.image.source` set as an index annotation so the package links to the repo. |
+| `release` | `contents: write` | Publishing only, after every image is published. `gh release create <tag> --verify-tag` (`--prerelease` for a suffixed tag) with the notes; a re-run of the same tag edits the notes instead. |
+
+**Images released** = the default quickstart stack's custom builds: `kelta-auth`,
+`kelta-worker`, `kelta-gateway` from their `Dockerfile.jvm` with `docker-compose.jvm.yml`'s public
+build args (`BASE_REGISTRY=docker.io/library`, `MAVEN_MIRROR=central` — the Dockerfile defaults
+are the homelab Harbor/Nexus, unreachable from GitHub), and `kelta-ui` with compose's
+`VITE_API_BASE_URL=http://localhost:8080` plus `BASE_REGISTRY=docker.io/library` (the arg exists in
+`kelta-ui/Dockerfile` for this; its default is still Harbor). JVM, not native: a native image
+bakes Netty's clock origin in at build time (kelta#1627). `kelta-ai` (profile `ai`) and
+`kelta-bootstrap` (profile `seed`) are not released.
+
+**Release notes** (`.github/release/`): commits (`--no-merges`) since the previous `v*` tag
+(`git describe` from `<tag>^`), or the whole history when there is none, grouped into Features
+(`feat`), Bug fixes (`fix`) and Other changes (any other type, or no conventional prefix);
+`type!:` is marked **BREAKING**. Each section is capped at 250 entries so a full-history first
+release stays under GitHub's 125,000-character body limit, with a compare / history link.
+
+A new ghcr.io package created by the first push may be **private**; its visibility is set
+once, by hand, in the org's package settings.
+
 ## Other workflows
 
 - `build-runner-image.yml` — builds the self-hosted CI runner image.
@@ -187,7 +223,8 @@ auto-rollbacks, re-apply bumps) are in `scripts/dora/README.md`.
 
 ## Container registry & deploy
 
-- Registry: `harbor.rzware.com/emf/emf-<service>`.
+- Registry: `harbor.rzware.com/emf/emf-<service>` (homelab deploy). Public tagged releases go
+  to `ghcr.io/kelta-io/<service>` instead — see `release.yml` above.
 - Manifests: `homelab-argo` (kustomize), synced by **ArgoCD** to the local K8s cluster,
   namespace **`emf`** — in-cluster service DNS is `emf-<service>.emf.svc.cluster.local`
   (`emf-gateway`, `emf-ui`, `emf-auth`, `emf-ai`, `emf-mcp`, `emf-cli-downloads`,

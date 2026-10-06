@@ -1,0 +1,295 @@
+# Release: a SemVer tag (v1.2.3, v1.3.0-rc.1) builds multi-arch JVM images of every
+# service the README quickstart stack builds, pushes them to ghcr.io/kelta-io/<service>,
+# and publishes a GitHub Release with notes grouped by conventional-commit type.
+#
+# JVM, not native: a native image bakes Netty's clock origin in at build time (kelta#1627),
+# and an image built on one machine is meant to run on any other. Separate from
+# build-and-publish-containers.yml, which builds the homelab deploy on k8s-runner — release
+# builds run on GitHub-hosted runners and pull only public sources (Docker Hub, Maven
+# Central), never the homelab Harbor/Nexus caches.
+#
+# Dry run (build every image, push nothing, create no Release):
+#   - workflow_dispatch with dry_run (the default),
+#   - every pull_request that changes this workflow or .github/release/.
+# Helpers + their tests: .github/release/ (node --test .github/release/lib.test.ts).
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build the images without pushing them or creating a Release
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/release/**'
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io/kelta-io
+  # Every image the default quickstart stack builds from source — exactly the services
+  # `docker compose -f docker-compose.yml -f docker-compose.jvm.yml config` reports with a
+  # `build:` and no profile, from the same Dockerfile with the same build args (the plan job
+  # fails on any drift). kelta-ai (profile ai) and kelta-bootstrap (profile seed) are not in
+  # it. The Java args are docker-compose.jvm.yml's public sources, not the Dockerfile.jvm
+  # Harbor/Nexus defaults a GitHub-hosted runner cannot use; kelta-ui adds BASE_REGISTRY for
+  # the same reason, which compose does not pass.
+  IMAGES: >-
+    [
+      {"service": "kelta-auth", "dockerfile": "kelta-auth/Dockerfile.jvm",
+       "args": {"BASE_REGISTRY": "docker.io/library", "MAVEN_MIRROR": "central"}},
+      {"service": "kelta-gateway", "dockerfile": "kelta-gateway/Dockerfile.jvm",
+       "args": {"BASE_REGISTRY": "docker.io/library", "MAVEN_MIRROR": "central"}},
+      {"service": "kelta-ui", "dockerfile": "kelta-ui/Dockerfile",
+       "args": {"BASE_REGISTRY": "docker.io/library", "VITE_API_BASE_URL": "http://localhost:8080"}},
+      {"service": "kelta-worker", "dockerfile": "kelta-worker/Dockerfile.jvm",
+       "args": {"BASE_REGISTRY": "docker.io/library", "MAVEN_MIRROR": "central"}}
+    ]
+
+jobs:
+  plan:
+    name: Plan release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      latest: ${{ steps.plan.outputs.latest }}
+      images: ${{ steps.images.outputs.images }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          # Release notes walk back to the previous v* tag.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # 24 runs the .ts helpers directly (native type stripping) — no install step.
+          node-version: 24
+
+      - name: Test release helpers
+        run: node --test .github/release/lib.test.ts
+
+      # publish=true only for a tag push, or workflow_dispatch on a tag with dry_run=false.
+      # version = tag without the leading v; latest = no prerelease suffix (v1.2.3, not
+      # v1.2.3-rc.1). A tag that matches v*.*.* but is not SemVer fails here.
+      - name: Resolve version and mode
+        id: plan
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: node .github/release/release.ts plan
+
+      - name: Assert the image list matches the quickstart stack
+        id: images
+        run: |
+          set -euo pipefail
+          # docker-compose.yml's env_file: .env must exist for compose to resolve the file.
+          cp .env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.jvm.yml config --format json > "$RUNNER_TEMP/compose.json"
+          node .github/release/release.ts check-images "$RUNNER_TEMP/compose.json"
+
+      - name: Generate release notes
+        env:
+          REF: ${{ steps.plan.outputs.tag || 'HEAD' }}
+        run: |
+          set -euo pipefail
+          node .github/release/release.ts notes "$REF" "$RUNNER_TEMP/release-notes.md"
+          {
+            echo "# Release ${{ steps.plan.outputs.version }} (publish=${{ steps.plan.outputs.publish }})"
+            echo
+            cat "$RUNNER_TEMP/release-notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/release-notes.md
+          retention-days: 7
+
+  # One native runner per arch (no QEMU: an emulated Maven build is several times slower),
+  # each pushing its image by digest; `merge` stitches the digests into one tagged index.
+  build:
+    name: Build ${{ matrix.image.service }} (${{ matrix.arch }})
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.plan.outputs.images) }}
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: needs.plan.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build args
+        id: args
+        env:
+          ARGS: ${{ toJSON(matrix.image.args) }}
+        run: |
+          {
+            echo 'list<<EOF'
+            jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"$ARGS"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # Dry run: outputs=type=cacheonly builds the image fully and discards it.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.image.dockerfile }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: ${{ steps.args.outputs.list }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
+          outputs: ${{ needs.plan.outputs.publish == 'true' && format('type=image,name={0}/{1},push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, matrix.image.service) || 'type=cacheonly' }}
+          cache-from: type=gha,scope=release-${{ matrix.image.service }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.image.service }}-${{ matrix.arch }}
+
+      - name: Export digest
+        if: needs.plan.outputs.publish == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        if: needs.plan.outputs.publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image.service }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish ${{ matrix.image.service }}
+    needs: [plan, build]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.plan.outputs.images) }}
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digests-${{ matrix.image.service }}-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the multi-arch manifest
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ matrix.image.service }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          LATEST: ${{ needs.plan.outputs.latest }}
+          SOURCE: https://github.com/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tags=(-t "$IMAGE:$VERSION")
+          # `latest` only moves for a release without a prerelease suffix.
+          if [ "$LATEST" = "true" ]; then
+            tags+=(-t "$IMAGE:latest")
+          fi
+          sources=()
+          for digest in *; do
+            sources+=("$IMAGE@sha256:$digest")
+          done
+          if [ "${#sources[@]}" -ne 2 ]; then
+            echo "::error::expected 2 per-arch digests for $IMAGE, found ${#sources[@]}"
+            exit 1
+          fi
+          docker buildx imagetools create "${tags[@]}" \
+            --annotation "index:org.opencontainers.image.source=$SOURCE" \
+            --annotation "index:org.opencontainers.image.version=$VERSION" \
+            --annotation "index:org.opencontainers.image.revision=$GITHUB_SHA" \
+            "${sources[@]}"
+          docker buildx imagetools inspect "$IMAGE:$VERSION"
+
+  release:
+    name: GitHub Release
+    needs: [plan, merge]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}
+
+      - name: Create or update the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+          NOTES: ${{ runner.temp }}/release-notes.md
+        run: |
+          set -euo pipefail
+          # A re-run of the same tag refreshes the notes instead of failing on "already exists".
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$NOTES"
+          elif [ "$PRERELEASE" = "true" ]; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file "$NOTES" --prerelease
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file "$NOTES"
+          fi

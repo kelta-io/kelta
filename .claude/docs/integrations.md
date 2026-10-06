@@ -10,6 +10,7 @@
 | Superset | Embedded analytics | REST API | `${SUPERSET_URL}` | `kelta-worker/.../service/SupersetApiClient.java`, `kelta-ui/app/` (`@superset-ui/embedded-sdk`) |
 | AWS S3 / Garage | Object storage | `aws-sdk-s3` 2.30.1 | `${KELTA_S3_ENDPOINT}` | `kelta-worker/.../service/S3StorageService.java` |
 | Keycloak | OIDC federation | Spring Security OAuth2 | Port 8180 (docker-compose) | `kelta-auth/.../federation/FederatedUserMapper.java` |
+| GitHub Container Registry (ghcr.io) | Public multi-arch (amd64/arm64) JVM images of the quickstart services, one per `v*.*.*` tag: `ghcr.io/kelta-io/<service>:<version>`, `:latest` for non-prerelease tags | `docker/build-push-action`, `buildx imagetools` | `GITHUB_TOKEN` with `packages: write` (no other secret) | `.github/workflows/release.yml`, `.github/release/` — see `ci-cd.md` → `release.yml`. The homelab deploy keeps using Harbor |
 
 ### Cerbos policy seeding (worker startup)
 
