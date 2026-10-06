@@ -64,7 +64,9 @@ IMAGE="kelta-template-runner:${COMPOSE_PROJECT_NAME}"
 [ -f "$TEMPLATE/install.sh" ] || { echo "$TEMPLATE has no install.sh" >&2; exit 1; }
 [ -f kelta-web/packages/cli/dist/index.js ] || { echo "kelta CLI not built (kelta-web/packages/cli/dist)" >&2; exit 1; }
 
-docker build -q -t "$IMAGE" -f - . <<'DOCKERFILE'
+# --load: the job selects the persistent docker-container builder (BUILDX_BUILDER=kelta-ci),
+# which keeps build results in its own cache unless told to load them into the daemon.
+docker buildx build --load -q -t "$IMAGE" -f - . <<'DOCKERFILE'
 FROM node:20-alpine
 RUN apk add --no-cache bash curl jq
 COPY kelta-web /kelta-web
