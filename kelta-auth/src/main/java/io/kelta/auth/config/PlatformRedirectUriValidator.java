@@ -3,6 +3,7 @@ package io.kelta.auth.config;
 import io.kelta.auth.service.AuthDomainResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationContext;
@@ -97,7 +98,23 @@ public class PlatformRedirectUriValidator
 
         OAuth2Error error = new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST,
                 "invalid_redirect_uri", "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1");
-        throw new OAuth2AuthorizationCodeRequestAuthenticationException(error, authenticationToken);
+        throw new OAuth2AuthorizationCodeRequestAuthenticationException(error,
+                withoutRedirectUri(authenticationToken));
+    }
+
+    /**
+     * The request token with its redirect URI removed, for the rejection.
+     *
+     * <p>The authorization endpoint sends an error to the token's redirect URI when it has one,
+     * and renders a 400 otherwise. RFC 6749 §4.1.2.1: the server MUST NOT redirect to an
+     * invalid redirection URI. Spring's own validator clears it the same way.
+     */
+    private static OAuth2AuthorizationCodeRequestAuthenticationToken withoutRedirectUri(
+            OAuth2AuthorizationCodeRequestAuthenticationToken token) {
+        return new OAuth2AuthorizationCodeRequestAuthenticationToken(
+                token.getAuthorizationUri(), token.getClientId(),
+                (Authentication) token.getPrincipal(), null,
+                token.getState(), token.getScopes(), token.getAdditionalParameters());
     }
 
     private boolean isOriginMatchWithSuffix(String requestedRedirectUri,
