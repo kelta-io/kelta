@@ -777,6 +777,9 @@
     }
   },
   "packages": {
+    "flows": "Flows",
+    "pageLayouts": "Page Layouts",
+    "validationRules": "Validation Rules",
     "title": "Packages",
     "export": "Export",
     "import": "Import",

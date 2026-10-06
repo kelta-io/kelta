@@ -474,6 +474,9 @@
     }
   },
   "packages": {
+    "flows": "Flux",
+    "pageLayouts": "Mises en page",
+    "validationRules": "Règles de validation",
     "title": "Paquets",
     "export": "Exporter",
     "import": "Importer",
