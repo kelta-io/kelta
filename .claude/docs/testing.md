@@ -184,6 +184,14 @@ or the `execute_flow` MCP tool, remember the **double-wrap** rule (`{ "input": {
 see `integrations.md` → Flows. MCP tools are tested at the unit level with WireMock JSON-path
 matchers asserting the on-the-wire JSON:API body (see `conventions.md` → MCP tools).
 
+**The same suite runs post-deploy against production** (`build-and-publish-containers.yml` →
+E2E, `app.kelta.io`, the `default` tenant). A spec must never persist a change to a tenant-wide
+singleton setting (SMTP/email settings, password policy, portal auth, IP allowlist, …) — there is
+no row to clean up, the fake value simply replaces the tenant's real configuration. Intercept the
+write with `page.route(...)`, assert the request body, and `route.fulfill(...)` the server's
+response (`tests/admin/setup/email-settings.spec.ts`). Records a test creates are fine as long as
+it tears them down.
+
 ## Quickstart smoke test (CI)
 
 `.github/workflows/ci.yml`'s `quickstart` job proves the README [Quickstart](../../README.md#quickstart)
