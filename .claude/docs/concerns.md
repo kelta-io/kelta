@@ -198,6 +198,18 @@ The four gaps that survived those two passes were closed on 2026-09-17 (PLT-264)
   really is neither a superuser nor `BYPASSRLS`. See the open item below for the part of this
   that is *not* done.
 
+**Shared rows under a non-tenant `tenant_id` are hidden by enforcement too.** V200 handled
+system collections; `email_template` keeps its platform defaults under the literal
+`tenant_id = 'system'` and every reader asks for `tenant_id IN (<tenant>, 'system')` under a
+bound tenant. From enforcement on, `tenant_isolation` hid those rows: any tenant without its own
+copy logged `No template found for key …` and the mail (portal invite/sign-in link,
+`user.welcome`, …) was silently not sent; the admin template list and copy-to-override lost the
+defaults. `V205` adds the same read-only `system_rows_read` policy (`tenant_id = 'system'`);
+`systemEmailTemplatesReadableButNotWritable` proves the fallback, the override precedence, the
+privacy of other tenants' overrides, and that a tenant cannot update, delete or insert a
+`'system'` row. A new table that shares rows this way needs its own `system_rows_read` — the
+catalog sweep checks the policy pair, not that shared rows stay readable.
+
 Enforcement also exposed a latent bug in tenant provisioning. `TenantProvisioningHook` runs
 inside the request that created the tenant, and rebound the tenant with the **legacy**
 `TenantContext.set(id)` — but `TenantContext.get()` prefers a bound `ScopedValue` over the
