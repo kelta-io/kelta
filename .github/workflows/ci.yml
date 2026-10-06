@@ -583,8 +583,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      # A named builder on the node's Docker daemon (the runner mounts the host socket)
+      # outlives the job, so its layer cache and the Dockerfiles' per-service ~/.m2 cache
+      # mounts carry over between runs. setup-buildx-action created a fresh builder per job
+      # and removed it afterwards, so every E2E/Quickstart build re-fetched the whole Maven
+      # tree (~11.7k artifacts) from Nexus. A runner pod that has not seen the builder yet
+      # re-registers it and attaches to the existing container and its state volume.
+      - name: Set up Docker Buildx (persistent kelta-ci builder)
+        run: |
+          docker buildx inspect kelta-ci >/dev/null 2>&1 \
+            || docker buildx create --name kelta-ci --driver docker-container
+          docker buildx inspect --bootstrap kelta-ci
 
       - name: Generate .env (JWK_SET + encryption key)
         run: make setup
@@ -600,12 +609,14 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build
 
-      - name: Build service images (JVM, GHA cache)
+      - name: Build service images (JVM, persistent builder cache)
         run: |
-          docker buildx bake \
+          # The cache is the persistent kelta-ci builder itself (layers + ~/.m2 cache
+          # mounts). The type=gha cache this used to set was a silent no-op: buildx drops
+          # gha cache entries when ACTIONS_RUNTIME_TOKEN is not in its environment, and a
+          # plain run step never has it — every build here ran cold.
+          docker buildx bake --builder kelta-ci \
             -f docker-compose.yml -f docker-compose.ci.yml \
-            --set "*.cache-from=type=gha,scope=e2e-ci-jvm" \
-            --set "*.cache-to=type=gha,mode=max,scope=e2e-ci-jvm" \
             --load \
             kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
 
@@ -757,18 +768,29 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      # A named builder on the node's Docker daemon (the runner mounts the host socket)
+      # outlives the job, so its layer cache and the Dockerfiles' per-service ~/.m2 cache
+      # mounts carry over between runs. setup-buildx-action created a fresh builder per job
+      # and removed it afterwards, so every E2E/Quickstart build re-fetched the whole Maven
+      # tree (~11.7k artifacts) from Nexus. A runner pod that has not seen the builder yet
+      # re-registers it and attaches to the existing container and its state volume.
+      - name: Set up Docker Buildx (persistent kelta-ci builder)
+        run: |
+          docker buildx inspect kelta-ci >/dev/null 2>&1 \
+            || docker buildx create --name kelta-ci --driver docker-container
+          docker buildx inspect --bootstrap kelta-ci
 
       - name: Generate .env (JWK_SET + encryption key)
         run: make setup
 
-      - name: Build service images (JVM, GHA cache)
+      - name: Build service images (JVM, persistent builder cache)
         run: |
-          docker buildx bake \
+          # The cache is the persistent kelta-ci builder itself (layers + ~/.m2 cache
+          # mounts). The type=gha cache this used to set was a silent no-op: buildx drops
+          # gha cache entries when ACTIONS_RUNTIME_TOKEN is not in its environment, and a
+          # plain run step never has it — every build here ran cold.
+          docker buildx bake --builder kelta-ci \
             -f docker-compose.yml -f docker-compose.ci.yml \
-            --set "*.cache-from=type=gha,scope=e2e-ci-jvm" \
-            --set "*.cache-to=type=gha,mode=max,scope=e2e-ci-jvm" \
             --load \
             kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
 

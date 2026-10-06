@@ -32,7 +32,8 @@ COPY kelta-platform/runtime/runtime-module-integration/pom.xml ./runtime/runtime
 COPY kelta-platform/runtime/runtime-messaging-nats/pom.xml ./runtime/runtime-messaging-nats/
 COPY kelta-platform/runtime/runtime-module-schema/pom.xml ./runtime/runtime-module-schema/
 
-RUN mvn dependency:go-offline -B \
+RUN --mount=type=cache,id=kelta-m2-auth,target=/root/.m2/repository,sharing=locked \
+    mvn dependency:go-offline -B \
     -pl runtime/runtime-core,runtime/runtime-events,runtime/runtime-messaging-nats,runtime/runtime-jsonapi,runtime/runtime-module-core,runtime/runtime-module-integration,runtime/runtime-module-schema \
     -am || true
 
@@ -44,9 +45,18 @@ COPY kelta-platform/runtime/runtime-module-core/src ./runtime/runtime-module-cor
 COPY kelta-platform/runtime/runtime-module-integration/src ./runtime/runtime-module-integration/src
 COPY kelta-platform/runtime/runtime-module-schema/src ./runtime/runtime-module-schema/src
 
-RUN mvn clean install -DskipTests -B \
+# Maven runs with the local repository on a BuildKit cache mount (id per service, so
+# parallel builds never share one repo): on a persistent builder the ~3k third-party
+# artifacts survive between builds instead of being re-fetched from Nexus whenever a
+# layer above them changes. The mount is not part of the layer, so the freshly
+# installed runtime jars are copied out to /kelta-artifacts for the builder stage,
+# which bind-mounts them rather than COPYing them into a layer (a COPY of rebuilt
+# jars invalidated every layer after it, including dependency resolution).
+RUN --mount=type=cache,id=kelta-m2-auth,target=/root/.m2/repository,sharing=locked \
+    mvn clean install -DskipTests -B \
     -pl runtime/runtime-core,runtime/runtime-events,runtime/runtime-messaging-nats,runtime/runtime-jsonapi,runtime/runtime-module-core,runtime/runtime-module-integration,runtime/runtime-module-schema \
-    -am
+    -am && \
+    mkdir -p /kelta-artifacts && cp -r /root/.m2/repository/io/kelta /kelta-artifacts/kelta
 
 # =============================================================================
 # Stage 2: Build the service jar
@@ -61,13 +71,20 @@ COPY ci/maven-settings.xml /tmp/maven-settings.xml
 RUN mkdir -p /root/.m2 && \
     if [ "$MAVEN_MIRROR" = "nexus" ]; then cp /tmp/maven-settings.xml /root/.m2/settings.xml; fi
 
-COPY --from=runtime-builder /root/.m2/repository/io/kelta /root/.m2/repository/io/kelta
 
 COPY kelta-auth/pom.xml .
-RUN mvn dependency:go-offline -B || true
+RUN --mount=type=cache,id=kelta-m2-auth,target=/root/.m2/repository,sharing=locked \
+    --mount=type=bind,from=runtime-builder,source=/kelta-artifacts/kelta,target=/tmp/kelta-runtime \
+    mkdir -p /root/.m2/repository/io && rm -rf /root/.m2/repository/io/kelta && \
+    cp -r /tmp/kelta-runtime /root/.m2/repository/io/kelta && \
+    (mvn dependency:go-offline -B || true)
 
 COPY kelta-auth/src ./src
-RUN mvn clean package -DskipTests -B && \
+RUN --mount=type=cache,id=kelta-m2-auth,target=/root/.m2/repository,sharing=locked \
+    --mount=type=bind,from=runtime-builder,source=/kelta-artifacts/kelta,target=/tmp/kelta-runtime \
+    mkdir -p /root/.m2/repository/io && rm -rf /root/.m2/repository/io/kelta && \
+    cp -r /tmp/kelta-runtime /root/.m2/repository/io/kelta && \
+    mvn clean package -DskipTests -B && \
     mv target/kelta-auth-*.jar target/app.jar
 
 # =============================================================================
