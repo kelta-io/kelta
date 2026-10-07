@@ -31,10 +31,12 @@ command -v jq >/dev/null || { echo "install.sh needs jq on PATH" >&2; exit 2; }
 step() { echo "==> $*" >&2; }
 
 # kelta <args...>: run the CLI with JSON output; on failure echo its stdout to
-# stderr too (some wrappers report the error there) and stop.
+# stderr too (some wrappers report the error there) and stop. `command` skips
+# shell functions: with the default KELTA=kelta, a bare "$KELTA" resolves to
+# this function and recurses until the host runs out of memory.
 kelta() {
   local out
-  if ! out=$("$KELTA" "$@" --output json); then
+  if ! out=$(command "$KELTA" "$@" --output json); then
     echo "$out" >&2
     echo "install.sh: 'kelta $1 $2' failed" >&2
     exit 1

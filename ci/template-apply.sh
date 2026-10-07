@@ -76,5 +76,8 @@ COPY examples/templates /templates
 COPY ci/template-apply.sh /usr/local/bin/template-apply.sh
 DOCKERFILE
 
+# The runner's Docker daemon is the node's own, outside any Kubernetes limit: cap memory
+# and process count so a runaway template script fails this job instead of the node.
 docker run --rm --network "$NETWORK" -e ADMIN_PASSWORD="$(cat "$ADMIN_PASSWORD_FILE")" \
+  --memory 1g --memory-swap 1g --pids-limit 512 \
   "$IMAGE" bash /usr/local/bin/template-apply.sh --in-container "/templates/${TEMPLATE#examples/templates/}"
