@@ -264,6 +264,22 @@ Until this lands, `RowLevelSecurityIntegrationTest` — which migrates as a `NOB
 and drives queries through `TenantAwareDataSource` the way the worker does — is the coverage
 that actually gates the policies, not the harness.
 
+**FIXED (2026-10-07, PLT-423) — a fresh sandbox's one-time admin password never logged in, and
+the harness scenario asserting it was a false green.** `SandboxProvisioningService.createSandbox`
+runs on the request thread with the *parent* tenant bound, and `hardenSandboxAdmin` issued its
+`UPDATE user_credential … WHERE user_id = (SELECT id FROM platform_user WHERE tenant_id = <sandbox> …)`
+under that binding. In production (a `NOBYPASSRLS` role) the `platform_user` `tenant_isolation`
+policy hides the sandbox's admin from the parent, the UPDATE matched 0 rows, the code only
+`log.warn`ed, and the caller was handed an `adminInitialPassword` that `/auth/direct-login`
+rejects with 401 (KLT-417). `kelta-test-harness`'s `SandboxAdminLoginScenarioTest` asserts
+exactly that login and **passed throughout**, because the harness's worker and auth containers
+connect as the bootstrap superuser, which never evaluates a policy (the open item above). The
+UPDATE now runs under `TenantContext.callWithTenant(<sandbox id>, <sandbox slug>, …)` — the same
+shape as the `TenantProvisioningHook` fix — and 0 rows throws: `createSandbox` decommissions the
+just-created tenant and fails before any environment row or password exists. Regression guard:
+`SandboxAdminHardeningRlsIntegrationTest` (kelta-worker; NOBYPASSRLS role, parent bound, stored
+hash checked with kelta-auth's `DelegatingPasswordEncoder`).
+
 **FIXED (2026-09-14) — the platform had no dependency vulnerability scanning at all, and the
 one scanner that was configured had never run.** OWASP dependency-check sat in
 `kelta-platform/pom.xml` with `failBuildOnCVSS=7` and a suppressions file, but only inside

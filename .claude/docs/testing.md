@@ -32,6 +32,17 @@ so those suites do not run in CI at all; see `concerns.md` → Test Coverage Gap
 `BaselineAdminPasswordIntegrationTest` migrates its database from kelta-worker's real migration
 directory via a `filesystem:` Flyway location, so it needs the whole repo checked out.)
 
+**RLS-sensitive provisioning paths need a NOBYPASSRLS-backed test.** Any service that writes rows
+belonging to a tenant *other than the one bound on the request* (sandbox provisioning, tenant
+seeding, promotion, anything looping `callWithTenant`) can be silently wrong under RLS — a
+mis-bound UPDATE matches 0 rows and raises nothing. Neither a mocked `JdbcTemplate` nor a harness
+scenario catches it (the harness's service containers connect as the superuser — see
+`concerns.md`). Cover it with a kelta-worker `*IntegrationTest` modelled on
+`RowLevelSecurityIntegrationTest`: migrate as a `NOBYPASSRLS` role, wrap the pool in
+`TenantAwareDataSource`, bind the *caller's* tenant, call the real service (stub only the
+collaborators that don't touch the rows under test) and assert the stored row through the
+superuser. `SandboxAdminHardeningRlsIntegrationTest` is the reference.
+
 **How the harness signs in as the platform admin.** kelta-auth replaces the Flyway baseline's
 `admin@kelta.local` password on first boot (`BaselineAdminPasswordInitializer`), so nothing signs in
 with `password` any more. `KeltaStack` starts kelta-auth with `KELTA_BOOTSTRAP_ADMIN_PASSWORD` =
