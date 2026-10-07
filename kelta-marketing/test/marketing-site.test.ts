@@ -76,7 +76,9 @@ describe('compare page', () => {
       'License',
       'Multi-tenancy',
       'MCP / agent support',
+      'Data model',
       'Auth',
+      'Authorization',
       'Realtime',
       'File storage',
       'Admin UI',
@@ -86,8 +88,58 @@ describe('compare page', () => {
     }
   });
 
+  const cellHref = (source: string, key: string) => source.match(new RegExp(`${key}: \\{ text: '[^']+', href: '([^']+)'`))?.[1];
+
+  it.each([
+    ['supabase', /^https:\/\/(supabase\.com|github\.com\/supabase)\//],
+    ['appwrite', /^https:\/\/(appwrite\.io|github\.com\/appwrite)\//],
+    ['pocketbase', /^https:\/\/(pocketbase\.io|github\.com\/pocketbase)\//],
+    ['directus', /^https:\/\/(directus\.com|github\.com\/directus)\//],
+  ])('has a cited data-model and authorization cell for %s', (id, ownDomain) => {
+    const source = competitorSource(id);
+    for (const key of ['dataModel', 'authz']) {
+      expect(cellHref(source, key)).toMatch(ownDomain);
+    }
+  });
+
+  it('links the Kelta data-model and authorization cells to existing docs pages', () => {
+    const source = competitorSource('kelta');
+    expect(source).toMatch(/dataModel: \{ text: '[^']*collections and fields are defined at runtime/);
+    expect(source).toMatch(/authz: \{ text: '[^']*Cerbos policies/);
+    for (const key of ['dataModel', 'authz']) {
+      const href = cellHref(source, key);
+      expect(href).toMatch(/^\/docs\/[a-z-]+\/[a-z-]+\/$/);
+      expect(existsSync(join(marketingRoot, 'src', 'content', 'docs', `${href!.slice('/docs/'.length, -1)}.md`))).toBe(true);
+    }
+  });
+
+  it('keeps a "where they win" entry for every competitor', () => {
+    for (const id of ['supabase', 'appwrite', 'pocketbase', 'directus']) {
+      expect(competitorSource(id)).toMatch(/win: \{\s+text: '/);
+    }
+  });
+
   it('states no prices', () => {
     expect(page).not.toMatch(/\$\s?\d/);
+  });
+
+  // CHARTER.md §2: no Kelta pricing, paid tiers or launch dates on the page.
+  it('says nothing about pricing, paid tiers or launches', () => {
+    expect(page).not.toMatch(/\b(pricing|prices?|paid|tiers?|launch(es|ed|ing)?)\b/i);
+  });
+});
+
+describe('docs links to the compare page', () => {
+  it('lists /compare in the docs landing quick links', () => {
+    expect(read('kelta-marketing', 'src', 'pages', 'docs', 'index.astro')).toMatch(
+      /\{ label: '[^']+', href: '\/compare' \}/,
+    );
+  });
+
+  it('links /compare from the docs intro', () => {
+    expect(
+      read('kelta-marketing', 'src', 'content', 'docs', 'getting-started', 'what-is-kelta.md'),
+    ).toContain('](/compare)');
   });
 });
 

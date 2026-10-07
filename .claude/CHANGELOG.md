@@ -182,3 +182,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-10-06 docs(marketing): render the docs quickstart page's command block from README.md's Quickstart section at build time, with a drift test and README-triggered rebuilds (KLT-369)
 - 2026-10-06 fix(deps): bump transitive proxy-addr to 2.0.8 (kelta-web) and prosemirror-view to 1.42.6 (kelta-ui) for new high/critical advisories GHSA-jqcg-44mw-7w3h and GHSA-c8x8-7fp4-3x9w (KLT-369)
 - 2026-10-06 feat(ci): tag-triggered release workflow — multi-arch (amd64/arm64) JVM images of the quickstart services to ghcr.io/kelta-io/<service>:<version> (+latest for non-prerelease), a GitHub Release with notes grouped by conventional-commit type, a compose drift check on the image list, and a dry run on workflow_dispatch and on PRs touching it (KLT-374)
+- 2026-10-07 docs(marketing): extend /compare with data-model and authorization rows, link it from the docs landing and intro (KLT-422)
