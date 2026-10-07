@@ -68,3 +68,4 @@ Kelta is licensed under the GNU Affero General Public License v3.0 and is design
 - Build something: [Tutorial: your first app](/docs/getting-started/first-app/)
 - Learn the vocabulary: [How Kelta works](/docs/concepts/overview/) and the [glossary](/docs/concepts/glossary/)
 - Automate it: [Install the CLI](/docs/getting-started/install-cli/) or [connect an MCP client](/docs/mcp/connecting/)
+- Weigh the alternatives: [how Kelta compares](/compare) with Supabase, Appwrite, PocketBase and Directus, and where each of them wins
