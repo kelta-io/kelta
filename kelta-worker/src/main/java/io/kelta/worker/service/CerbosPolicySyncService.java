@@ -20,6 +20,8 @@ import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.util.*;
 import java.util.Base64;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Synchronizes Cerbos policies from profile data.
@@ -39,6 +41,15 @@ public class CerbosPolicySyncService {
     static final String BASE_COLLECTION_POLICY_ID = "resource.collection.vdefault";
 
     private static final String SUBJECT_PREFIX = "kelta.cerbos.policies.changed.";
+
+    /** The caller's {@code platform_user.id} UUID on every Cerbos principal (gateway and worker). */
+    static final String PRINCIPAL_USER_ID = "P.attr.userId";
+    private static final Set<String> SYSTEM_UUID_FIELDS = Set.of("createdBy", "updatedBy");
+    private static final Pattern LEGACY_PRINCIPAL_ID = Pattern.compile("(?<![\\w.])P\\.id(?![\\w.])");
+    private static final Pattern ATTR_THEN_PRINCIPAL_ID = Pattern.compile(
+            "(?<![\\w.])R\\.attr\\.([A-Za-z_][A-Za-z0-9_]*)(\\s*[!=]=\\s*)P\\.id(?![\\w.])");
+    private static final Pattern PRINCIPAL_ID_THEN_ATTR = Pattern.compile(
+            "(?<![\\w.])P\\.id(\\s*[!=]=\\s*)R\\.attr\\.([A-Za-z_][A-Za-z0-9_]*)(?![\\w.])");
 
     private final JdbcTemplate jdbcTemplate;
     private final BootstrapRepository bootstrapRepository;
@@ -289,15 +300,22 @@ public class CerbosPolicySyncService {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, tenantId);
 
             List<CerbosPolicyGenerator.CustomRule> rules = new ArrayList<>();
+            Map<String, Set<String>> uuidFieldsByCollection = new HashMap<>();
             for (Map<String, Object> row : rows) {
                 String conditionJson = row.get("condition_json") != null
                         ? row.get("condition_json").toString() : null;
                 String celExpression = extractCelExpression(conditionJson);
+                String collectionId = (String) row.get("collection_id");
+                if (celExpression != null && collectionId != null
+                        && LEGACY_PRINCIPAL_ID.matcher(celExpression).find()) {
+                    celExpression = rewriteLegacyPrincipalId(celExpression,
+                            uuidFieldsByCollection.computeIfAbsent(collectionId, this::loadUuidFieldNames));
+                }
 
                 rules.add(new CerbosPolicyGenerator.CustomRule(
                         (String) row.get("id"),
                         (String) row.get("profile_id"),
-                        (String) row.get("collection_id"),
+                        collectionId,
                         (String) row.get("action"),
                         (String) row.get("effect"),
                         celExpression,
@@ -334,11 +352,59 @@ public class CerbosPolicySyncService {
         return null;
     }
 
-    private String convertVisualToCel(String field, String operator, Object value) {
+    /**
+     * Fields of a collection that hold a {@code platform_user.id} UUID: the system audit
+     * fields plus every relationship field. A relationship value is always a record UUID, so
+     * comparing one with the email {@code P.id} could never have matched — rewriting it is safe.
+     */
+    private Set<String> loadUuidFieldNames(String collectionId) {
+        Set<String> names = new HashSet<>(SYSTEM_UUID_FIELDS);
+        try {
+            names.addAll(jdbcTemplate.queryForList(
+                    "SELECT name FROM field WHERE collection_id = ? AND active = true "
+                            + "AND UPPER(type) IN ('LOOKUP', 'MASTER_DETAIL', 'REFERENCE')",
+                    String.class, collectionId));
+        } catch (Exception e) {
+            log.warn("Could not load relationship fields for collection {}: {}", collectionId, e.getMessage());
+        }
+        return names;
+    }
+
+    /**
+     * Rewrites legacy own-record comparisons {@code R.attr.<f> == P.id} (either operand order,
+     * {@code ==} or {@code !=}) to {@code P.attr.userId} — but only where {@code <f>} is one of
+     * {@code uuidFields}. {@code P.id} is the caller's <em>email</em>, so the "Restrict to own
+     * records" helper and {@code $CURRENT_USER} used to compare a UUID column with an email and
+     * never matched. A comparison against any other field is left alone: a tenant rule such as
+     * {@code R.attr.ownerEmail == P.id} compares two emails and works today.
+     */
+    static String rewriteLegacyPrincipalId(String cel, Set<String> uuidFields) {
+        String rewritten = replaceAll(ATTR_THEN_PRINCIPAL_ID, cel, m ->
+                uuidFields.contains(m.group(1))
+                        ? "R.attr." + m.group(1) + m.group(2) + PRINCIPAL_USER_ID
+                        : m.group());
+        return replaceAll(PRINCIPAL_ID_THEN_ATTR, rewritten, m ->
+                uuidFields.contains(m.group(2))
+                        ? PRINCIPAL_USER_ID + m.group(1) + "R.attr." + m.group(2)
+                        : m.group());
+    }
+
+    private static String replaceAll(Pattern pattern, String input,
+                                     java.util.function.Function<Matcher, String> replacement) {
+        Matcher m = pattern.matcher(input);
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            m.appendReplacement(out, Matcher.quoteReplacement(replacement.apply(m)));
+        }
+        m.appendTail(out);
+        return out.toString();
+    }
+
+    static String convertVisualToCel(String field, String operator, Object value) {
         String attrRef = "R.attr." + field;
         return switch (operator) {
             case "equals" -> {
-                if ("$CURRENT_USER".equals(value)) yield attrRef + " == P.id";
+                if ("$CURRENT_USER".equals(value)) yield attrRef + " == " + PRINCIPAL_USER_ID;
                 yield attrRef + " == \"" + value + "\"";
             }
             case "not_equals" -> attrRef + " != \"" + value + "\"";

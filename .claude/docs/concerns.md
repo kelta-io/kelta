@@ -2027,3 +2027,34 @@ URI is null for redirect-URI failures. Errors that come *after* the URI is valid
 Note on the noise that led here: a run of `invalid_redirect_uri` callbacks on a tenant's external site
 was a crawler replaying stale error URLs it had collected. There was no matching authorize request in
 the logs, and the site's sign-in itself worked.
+
+## Own-record CEL rules compared a UUID with the caller's email (found 2026-10-06; fixed KLT-377)
+
+**Symptom:** a custom record rule built with the editor's "Restrict to own records" helper
+(`R.attr.createdBy == P.id`) or a visual condition with value `$CURRENT_USER` (compiled by
+`CerbosPolicySyncService` to `<attr> == P.id`) **never matched anyone**. An ALLOW rule of that shape
+granted nothing; a DENY rule of that shape denied nothing.
+
+**Cause:** both Cerbos principals use the caller's **email** as `P.id`
+(`Principal.newInstance(email, "user")` in the worker, the username in the gateway), while
+`createdBy` and user lookups hold the `platform_user.id` **UUID**. Separately, every PAT was
+forwarded as `X-User-Type: INTERNAL` — the gateway-built PAT principal had no `user_type` claim — so
+a portal member using a PAT was treated as staff.
+
+**Fix (KLT-377, member-data-ownership slice 1):** principals carry `P.attr.userId` (the UUID, from
+the worker's request-scoped `CallerContext`); the helper and `$CURRENT_USER` emit
+`P.attr.userId`; legacy `== P.id` comparisons against UUID-typed fields (`createdBy`/`updatedBy`,
+LOOKUP/MASTER_DETAIL/REFERENCE) are rewritten at policy-sync time. **`P.id` keeps meaning the
+email** so existing rules comparing email fields (`R.attr.ownerEmail == P.id`) keep working. PATs
+take the owner's `platform_user.user_type` from the gateway identity lookup. Real-PDP regression:
+`CerbosGeneratedPolicyIT.ownRecordRuleMatchesCallerUuid`; PAT type: `PortalPatCallerTypeScenarioTest`.
+
+**Side effect worth knowing:** the worker used to build its Cerbos principal inside the
+`cerbosExecutor` task, where request ScopedValues are unbound — so `P.attr.geoCountry` was always
+`""` at the worker. It is now built on the request thread, so worker-evaluated rules see the real
+request-origin country (the gateway always did).
+
+**Residual:** the worker now fails a request closed (401 `CALLER_UNRESOLVED`) when an email
+`X-User-Id` resolves to no user in the tenant. A non-email, non-UUID identity (a connected app's
+client id) binds no `CallerContext` and behaves as before; the anonymous Guest principal binds the
+nil UUID as INTERNAL. Slice 2 (owner scoping) must decide whether Guest is owner-scoped.

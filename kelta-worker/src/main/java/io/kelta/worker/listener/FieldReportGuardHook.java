@@ -6,11 +6,8 @@ import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
-import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.Map;
 import java.util.Optional;
@@ -60,7 +57,6 @@ public class FieldReportGuardHook implements BeforeSaveHook {
 
     static final String COLLECTION = "field-reports";
     private static final String OWNER_FIELD = "createdBy";
-    private static final String USER_ID_HEADER = "X-User-Id";
 
     private final UserIdResolver userIdResolver;
     private final CollectionRegistry collectionRegistry;
@@ -147,7 +143,7 @@ public class FieldReportGuardHook implements BeforeSaveHook {
     }
 
     /** Sentinel for "identity present but unresolvable" (distinct from "no identity"). */
-    private static final String CALLER_REJECTED = " rejected";
+    private static final String CALLER_REJECTED = OwnerGuardCaller.REJECTED;
 
     /**
      * Returns the caller's platform_user UUID, {@code null} when there is no HTTP request
@@ -155,21 +151,7 @@ public class FieldReportGuardHook implements BeforeSaveHook {
      * present but cannot be resolved to a UUID.
      */
     private String callerUuid(String tenantId) {
-        if (!(RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs)) {
-            return null;
-        }
-        HttpServletRequest request = attrs.getRequest();
-        String identifier = request.getHeader(USER_ID_HEADER);
-        if (identifier == null || identifier.isBlank()) {
-            return null;
-        }
-        String resolved = userIdResolver.resolve(identifier, tenantId);
-        try {
-            UUID.fromString(resolved);
-            return resolved;
-        } catch (IllegalArgumentException e) {
-            return CALLER_REJECTED;
-        }
+        return OwnerGuardCaller.resolve(userIdResolver, tenantId);
     }
 
     private BeforeSaveResult reject(String action, String reason) {

@@ -3,12 +3,9 @@ package io.kelta.worker.listener;
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
-import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.List;
 import java.util.Map;
@@ -40,10 +37,9 @@ public class WatchGuardHook implements BeforeSaveHook {
     private static final Logger log = LoggerFactory.getLogger(WatchGuardHook.class);
 
     static final String COLLECTION = "watches";
-    private static final String USER_ID_HEADER = "X-User-Id";
 
     /** Sentinel for "identity present but unresolvable" — deliberately not a valid UUID. */
-    private static final String CALLER_REJECTED = " rejected";
+    private static final String CALLER_REJECTED = OwnerGuardCaller.REJECTED;
 
     private final UserIdResolver userIdResolver;
     private final JdbcTemplate jdbcTemplate;
@@ -132,21 +128,7 @@ public class WatchGuardHook implements BeforeSaveHook {
      * unresolvable email would be compared against the owner column as-is.
      */
     private String callerUuid(String tenantId) {
-        if (!(RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs)) {
-            return null;
-        }
-        HttpServletRequest request = attrs.getRequest();
-        String identifier = request.getHeader(USER_ID_HEADER);
-        if (identifier == null || identifier.isBlank()) {
-            return null;
-        }
-        String resolved = userIdResolver.resolve(identifier, tenantId);
-        try {
-            UUID.fromString(resolved);
-            return resolved;
-        } catch (IllegalArgumentException | NullPointerException e) {
-            return CALLER_REJECTED;
-        }
+        return OwnerGuardCaller.resolve(userIdResolver, tenantId);
     }
 
     private BeforeSaveResult reject(String action, String reason) {

@@ -8,6 +8,7 @@ import dev.cerbos.sdk.CheckResult;
 import dev.cerbos.sdk.builders.AttributeValue;
 import dev.cerbos.sdk.builders.Principal;
 import dev.cerbos.sdk.builders.Resource;
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.GeoContext;
 import io.kelta.worker.config.WorkerProperties;
 import io.micrometer.core.instrument.Counter;
@@ -168,8 +169,9 @@ public class CerbosAuthorizationService {
             return false;
         }
 
+        Principal principal = buildPrincipal(email, profileId, tenantId);
+
         Future<Boolean> future = cerbosExecutor.submit(() -> {
-            Principal principal = buildPrincipal(email, profileId, tenantId);
             Resource resource = Resource.newInstance("collection", collectionId)
                     .withAttribute("collectionId", AttributeValue.stringValue(collectionId))
                     .withScope(tenantId);
@@ -205,9 +207,9 @@ public class CerbosAuthorizationService {
             return false;
         }
 
-        Future<Boolean> future = cerbosExecutor.submit(() -> {
-            Principal principal = buildPrincipal(email, profileId, tenantId);
+        Principal principal = buildPrincipal(email, profileId, tenantId);
 
+        Future<Boolean> future = cerbosExecutor.submit(() -> {
             Resource resource = Resource.newInstance("record", recordId)
                     .withAttribute("collectionId", AttributeValue.stringValue(collectionId))
                     .withAttribute("tenantId", stringAttr(tenantId));
@@ -252,9 +254,9 @@ public class CerbosAuthorizationService {
             return false;
         }
 
-        Future<Boolean> future = cerbosExecutor.submit(() -> {
-            Principal principal = buildPrincipal(email, profileId, tenantId);
+        Principal principal = buildPrincipal(email, profileId, tenantId);
 
+        Future<Boolean> future = cerbosExecutor.submit(() -> {
             Resource resource = Resource.newInstance("field", fieldId)
                     .withAttribute("collectionId", AttributeValue.stringValue(collectionId))
                     .withAttribute("fieldId", AttributeValue.stringValue(fieldId))
@@ -336,9 +338,8 @@ public class CerbosAuthorizationService {
                         email, collectionId);
                 return List.of();
             }
+            Principal principal = buildPrincipal(email, profileId, tenantId);
             Future<Set<String>> future = cerbosExecutor.submit(() -> {
-                Principal principal = buildPrincipal(email, profileId, tenantId);
-
                 var batchRequest = cerbosClient.batch(principal);
                 for (String fieldId : chunk) {
                     Resource resource = Resource.newInstance("field", fieldId)
@@ -444,9 +445,8 @@ public class CerbosAuthorizationService {
                         email, collectionId);
                 break;
             }
+            Principal principal = buildPrincipal(email, profileId, tenantId);
             Future<Set<String>> future = cerbosExecutor.submit(() -> {
-                Principal principal = buildPrincipal(email, profileId, tenantId);
-
                 var batchRequest = cerbosClient.batch(principal);
                 for (Map<String, Object> record : chunk) {
                     String recordId = (String) record.get("id");
@@ -600,10 +600,22 @@ public class CerbosAuthorizationService {
         return false;
     }
 
+    /**
+     * Builds the principal from the request's scoped values, so it must run on the request
+     * thread — never inside a {@code cerbosExecutor} task, where neither {@link GeoContext} nor
+     * {@link CallerContext} is bound.
+     *
+     * <p>{@code P.id} stays the email (existing tenant rules compare it with email fields);
+     * {@code P.attr.userId} is the caller's {@code platform_user.id} UUID, which is what
+     * own-record rules ({@code R.attr.createdBy == P.attr.userId}) compare against.
+     */
     private Principal buildPrincipal(String email, String profileId, String tenantId) {
         return Principal.newInstance(email, "user")
                 .withAttribute("profileId", stringAttr(profileId))
                 .withAttribute("tenantId", stringAttr(tenantId))
+                // "" on the internal tier (flows, schedulers) — no caller is bound there.
+                .withAttribute("userId", stringAttr(CallerContext.current()
+                        .map(CallerContext::userId).orElse(null)))
                 // Request-origin country from GeoContext (bound by TenantContextFilter);
                 // "" on flow/system paths and un-geolocated origins — policies must handle it.
                 .withAttribute("geoCountry", stringAttr(GeoContext.currentCountry()));

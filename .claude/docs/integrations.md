@@ -22,6 +22,27 @@ and later replicas of the same image skip, provided `GET /admin/policies` still 
 (`kelta.worker.cerbos.seed.force`) forces a full seed. Runtime permission changes never rely on this
 path — they sync through the profile/permission hooks and `CerbosPolicySyncCoalescer`.
 
+### Cerbos principal attributes
+
+Gateway (`CerbosPrincipalBuilder`) and worker (`CerbosAuthorizationService.buildPrincipal`) build
+the same principal shape — any policy or custom rule may rely on it:
+
+| Field | Value |
+|-------|-------|
+| `P.id` | the caller's **email** (username). Compare it only with email-valued fields |
+| `P.attr.userId` | the caller's `platform_user.id` **UUID** — compare UUID columns (`createdBy`, user lookups) with this. Worker: from `CallerContext`; gateway: the PAT owner / worker identity lookup / a kelta-auth UUID `sub`. `""` on the internal tier and for connected apps |
+| `P.attr.profileId`, `P.attr.profileName`, `P.attr.tenantId` | the caller's profile and tenant (`profileName` gateway only) |
+| `P.attr.geoCountry` | request-origin ISO country, `""` when unknown |
+| `P.attr.groups` | OIDC groups (gateway only, when present) |
+
+The worker builds the principal on the request thread (its Cerbos calls run on an executor thread
+where request ScopedValues are not bound). "Restrict to own records" in the custom-rule editor and
+the visual `$CURRENT_USER` condition both compile to `<attr> == P.attr.userId`. At sync time
+`CerbosPolicySyncService` rewrites legacy `R.attr.<f> == P.id` (either operand order, `==`/`!=`)
+to `P.attr.userId` **only** when `<f>` is `createdBy`/`updatedBy` or a LOOKUP/MASTER_DETAIL/
+REFERENCE field of the rule's collection; a comparison with any other field (e.g.
+`R.attr.ownerEmail == P.id`) is left alone. The stored `profile_custom_rules` rows are not changed.
+
 ### Attachment lifecycle (S3)
 
 Files attach to any record via the `attachments` system collection (backed by `file_attachment`, `S3StorageService`). The full lifecycle:
