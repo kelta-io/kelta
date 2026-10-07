@@ -236,7 +236,7 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
                     "sub", userId,
                     "pat", "true",
                     "pat_scopes", scopes
-            )).withTenantId(tenantId);
+            )).withTenantId(tenantId).withUserId(userId);
 
             ServerWebExchange mutatedExchange = exchange.mutate()
                     .request(r -> r.header("X-User-Id", userId))
