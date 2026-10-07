@@ -97,7 +97,7 @@ public class BootstrapRepository {
             """;
 
     private static final String SELECT_USER_IDENTITY = """
-            SELECT u.id, u.profile_id, p.name AS profile_name
+            SELECT u.id, u.profile_id, p.name AS profile_name, u.user_type
             FROM platform_user u
             LEFT JOIN profile p ON u.profile_id = p.id
             WHERE u.email = ? AND u.tenant_id = ? AND u.status = 'ACTIVE'

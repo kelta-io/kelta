@@ -141,10 +141,20 @@ public class SandboxProvisioningService {
         Map<String, Object> createdTenant = queryEngine.create(tenantsDef, tenantData);
         String sandboxTenantId = String.valueOf(createdTenant.get("id"));
 
-        // The provisioning hook seeds the admin with a well-known default
-        // password hash — replace it with a random one-time secret.
+        // The provisioning hook seeds the admin with an unusable credential —
+        // replace it with a random one-time secret. Runs before the env row
+        // exists, so a failure here leaves no environment reporting success.
         String initialPassword = randomPassword();
-        hardenSandboxAdmin(sandboxTenantId, sandboxSlug, initialPassword);
+        try {
+            hardenSandboxAdmin(sandboxTenantId, sandboxSlug, initialPassword);
+        } catch (RuntimeException e) {
+            try {
+                decommissionTenant(sandboxTenantId);
+            } catch (RuntimeException cleanup) {
+                e.addSuppressed(cleanup);
+            }
+            throw e;
+        }
 
         String prodEnvId = (String) environmentService
                 .ensureProductionEnvironment(parentTenantId, createdBy).get("id");
@@ -263,9 +273,7 @@ public class SandboxProvisioningService {
     public void deleteSandbox(String envId, String parentTenantId) {
         Map<String, Object> env = requireLocalSandbox(envId, parentTenantId);
         String sandboxTenantId = (String) env.get("sandbox_tenant_id");
-        environmentRepository.getJdbcTemplate().update(
-                "UPDATE tenant SET status = 'DECOMMISSIONED', updated_at = NOW() WHERE id = ?",
-                sandboxTenantId);
+        decommissionTenant(sandboxTenantId);
         environmentRepository.updateStatus(envId, parentTenantId, "ARCHIVED");
         publishEnvironmentEvent(parentTenantId, envId, "ARCHIVED");
         log.info("Archived sandbox env {} and decommissioned tenant {}", envId, sandboxTenantId);
@@ -363,21 +371,37 @@ public class SandboxProvisioningService {
         return env;
     }
 
-    private void hardenSandboxAdmin(String sandboxTenantId, String sandboxSlug, String password) {
+    /**
+     * Replaces the seeded admin's credential with {@code password}. The admin row
+     * belongs to the sandbox tenant while the request thread still carries the
+     * parent's binding, so the UPDATE must run under the sandbox's: under the
+     * parent's, RLS hides the platform_user row, 0 rows change, and the caller
+     * would be handed a password that never logs in.
+     *
+     * @throws IllegalStateException when no seeded admin credential was updated
+     */
+    void hardenSandboxAdmin(String sandboxTenantId, String sandboxSlug, String password) {
         // kelta-auth authenticates through a DelegatingPasswordEncoder that requires
         // the "{bcrypt}" id prefix (AuthorizationServerConfig.passwordEncoder()); a
         // bare BCryptPasswordEncoder hash never matches. force_change_on_login is
         // cleared too — the printed password is already a random one-time secret,
         // and there is no API path a CLI/automated caller could use to clear it.
         String hash = "{bcrypt}" + passwordEncoder.encode(password);
-        int updated = environmentRepository.getJdbcTemplate().update(
-                "UPDATE user_credential SET password_hash = ?, force_change_on_login = false " +
-                        "WHERE user_id = (SELECT id FROM platform_user WHERE tenant_id = ? AND username = ?)",
-                hash, sandboxTenantId, sandboxSlug + "-admin");
+        int updated = TenantContext.callWithTenant(sandboxTenantId, sandboxSlug, () ->
+                environmentRepository.getJdbcTemplate().update(
+                        "UPDATE user_credential SET password_hash = ?, force_change_on_login = false " +
+                                "WHERE user_id = (SELECT id FROM platform_user WHERE tenant_id = ? AND username = ?)",
+                        hash, sandboxTenantId, sandboxSlug + "-admin"));
         if (updated == 0) {
-            log.warn("Could not harden sandbox admin credential for tenant {} — seeded user not found",
-                    sandboxTenantId);
+            throw new IllegalStateException("Could not set the sandbox admin credential for tenant "
+                    + sandboxTenantId + " — seeded admin '" + sandboxSlug + "-admin' not found");
         }
+    }
+
+    private void decommissionTenant(String tenantId) {
+        environmentRepository.getJdbcTemplate().update(
+                "UPDATE tenant SET status = 'DECOMMISSIONED', updated_at = NOW() WHERE id = ?",
+                tenantId);
     }
 
     private String randomPassword() {

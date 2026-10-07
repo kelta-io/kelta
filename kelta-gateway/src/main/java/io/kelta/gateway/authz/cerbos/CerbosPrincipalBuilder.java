@@ -11,10 +11,16 @@ public class CerbosPrincipalBuilder {
 
     private CerbosPrincipalBuilder() {}
 
+    /**
+     * {@code P.id} stays the username (the email); {@code P.attr.userId} is the caller's
+     * {@code platform_user.id} UUID — the value own-record rules compare UUID columns with — or
+     * {@code ""} when the gateway has not resolved it (e.g. a connected app).
+     */
     public static Principal build(GatewayPrincipal principal) {
         Principal builder = Principal.newInstance(principal.getUsername(), "user")
                 .withAttribute("profileId", stringAttr(principal.getProfileId()))
                 .withAttribute("tenantId", stringAttr(principal.getTenantId()))
+                .withAttribute("userId", stringAttr(principal.getUserId()))
                 .withAttribute("profileName", stringAttr(principal.getProfileName()))
                 // Empty when the request origin has no geolocation (private IP, no geo DB) —
                 // geo-aware policy rules must handle "".

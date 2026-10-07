@@ -1,5 +1,6 @@
 package io.kelta.worker.service;
 
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.QueryEngine;
@@ -192,6 +193,43 @@ class SandboxProvisioningServiceTest {
             service.createSandbox(PARENT, "dev", null, "SANDBOX", "admin");
 
             verify(environmentRepository).updateStatus("env-1", PARENT, "ACTIVE");
+        }
+
+        @Test
+        @DisplayName("hardens the admin under the sandbox tenant's binding, not the caller's parent binding")
+        void hardensUnderSandboxBinding() {
+            happyPathSetup();
+            List<String> boundTenants = new ArrayList<>();
+            List<String> boundSlugs = new ArrayList<>();
+            when(jdbcTemplate.update(contains("UPDATE user_credential"), any(), any(), any()))
+                    .thenAnswer(inv -> {
+                        boundTenants.add(TenantContext.get());
+                        boundSlugs.add(TenantContext.getSlug());
+                        return 1;
+                    });
+
+            TenantContext.runWithTenant(PARENT, "acme", () ->
+                    service.createSandbox(PARENT, "dev", null, "SANDBOX", "admin"));
+
+            assertThat(boundTenants).containsExactly("sbx-tenant");
+            assertThat(boundSlugs).containsExactly("acme--dev");
+        }
+
+        @Test
+        @DisplayName("fails when no seeded admin credential was updated — no environment, no password returned")
+        void failsWhenAdminCredentialNotUpdated() {
+            happyPathSetup();
+            when(jdbcTemplate.update(contains("UPDATE user_credential"), any(), any(), any()))
+                    .thenReturn(0);
+
+            assertThatThrownBy(() -> service.createSandbox(PARENT, "dev", null, "SANDBOX", "admin"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("acme--dev-admin");
+
+            verify(environmentRepository, never()).createWithSandboxTenant(
+                    any(), any(), any(), any(), any(), any(), any());
+            verify(jdbcTemplate).update(contains("SET status = 'DECOMMISSIONED'"), eq("sbx-tenant"));
+            verifyNoInteractions(packageImportService, eventPublisher);
         }
 
         @Test
