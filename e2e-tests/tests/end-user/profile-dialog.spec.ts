@@ -51,6 +51,12 @@ test.describe("Profile dialog", () => {
     await saveProfile(page);
 
     try {
+      // The page is still interactive once the dialog closes (no focus trap or
+      // pointer-events lock left behind by the menu → dialog hand-off).
+      await page.getByTestId("user-menu-button").click();
+      await expect(page.getByTestId("profile-menu-item")).toBeVisible();
+      await page.keyboard.press("Escape");
+
       await page.reload();
       await homePage.waitForPageLoad();
       await openProfileDialog(page);
