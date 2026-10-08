@@ -409,12 +409,12 @@ class GlobalErrorHandlerTest {
             .baseUrl("http://localhost")
             .build();
 
-        byte[] body = client.get().uri("/api/fleet-state?filter[name]=default")
+        byte[] body = client.get().uri("/api/orders?filter[name]=default")
             .exchange()
             .expectStatus().isNotFound()
             .expectBody().returnResult().getResponseBody();
 
-        assertFullNotFoundError(new String(body, StandardCharsets.UTF_8), "/api/fleet-state");
+        assertFullNotFoundError(new String(body, StandardCharsets.UTF_8), "/api/orders");
     }
 
     /**
