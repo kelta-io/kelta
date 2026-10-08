@@ -2058,3 +2058,27 @@ request-origin country (the gateway always did).
 `X-User-Id` resolves to no user in the tenant. A non-email, non-UUID identity (a connected app's
 client id) binds no `CallerContext` and behaves as before; the anonymous Guest principal binds the
 nil UUID as INTERNAL. Slice 2 (owner scoping) must decide whether Guest is owner-scoped.
+
+## Gateway served only static routes after starting before the worker (found 2026-10-07; fixed by bootstrap retry)
+
+**Symptom:** after a node reboot on 2026-10-07 every tenant collection API (`/api/titles`,
+`/api/fleet-state`, `/api/countries`, …) answered **404** `No static resource api/<x>` for ~6.7 h
+(18:41 → 01:26 UTC), while admin/static paths still worked. The gateway logged
+`Route initialization completed with 62 routes; gateway is now READY`; a healthy start loads ~250.
+
+**Cause:** collection routes reach the gateway only through the one bootstrap fetch in
+`RouteInitializer` (`GET <worker>/internal/bootstrap`); NATS `kelta.config.collection.changed.*`
+events carry changes, never the full table. The gateway pod came up before `emf-worker`, the fetch
+got `Connection refused`, and nothing ever fetched again. Readiness still flipped, by design (see
+`RouteReadinessHealthIndicator`), so Kubernetes sent it all traffic. Fixed in production by
+restarting the gateway once the worker was up.
+
+**Fix:** when the startup fetch fails, `RouteInitializer` retries it on a background thread,
+starting at `kelta.gateway.bootstrap-retry.initial-delay-ms` (2 s) and doubling up to
+`max-delay-ms` (30 s), until it succeeds, then refreshes the route cache. Readiness behaviour is
+unchanged: the pod still serves static routes meanwhile, and collection routes appear within one
+backoff step of the worker answering. `RouteInitializerTest.testRun_RetriesBootstrapUntilWorkerIsUp`
+covers worker-down-then-up.
+
+**Keep it that way:** any new state the gateway loads only at startup needs the same retry (the
+tenant-slug cache already self-heals via its `@Scheduled` refresh).

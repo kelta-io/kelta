@@ -6,12 +6,17 @@ import io.kelta.gateway.route.RouteDefinition;
 import io.kelta.gateway.route.RouteRefresher;
 import io.kelta.gateway.route.RouteRegistry;
 import io.kelta.gateway.service.RouteConfigService;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
+
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Initializes routes on application startup.
@@ -21,7 +26,15 @@ import org.springframework.stereotype.Component;
  *   <li>Primes the tenant slug cache from the worker service</li>
  *   <li>Fetches dynamic routes from the worker's internal bootstrap endpoint</li>
  *   <li>Refreshes the Spring Cloud Gateway route cache via {@link RouteRefresher}</li>
+ *   <li>If the bootstrap fetch failed, keeps retrying it in the background with
+ *       exponential backoff until it succeeds</li>
  * </ol>
+ *
+ * <p><b>Why the retry.</b> Collection routes arrive only from the bootstrap fetch;
+ * NATS events carry changes, not the full table. When the gateway started before
+ * the worker (2026-10-07, after a node reboot) the one fetch got "connection
+ * refused", the gateway went READY with only its static routes, and every tenant
+ * collection API answered 404 for ~7 hours until the pod was restarted by hand.
  *
  * <p>All collections are routed to the worker service.
  */
@@ -41,6 +54,19 @@ public class RouteInitializer implements ApplicationRunner {
 
     @Value("${OTEL_COLLECTOR_URL:http://alloy-collector.observability.svc.cluster.local:4318}")
     private String otelCollectorUrl;
+
+    @Value("${kelta.gateway.bootstrap-retry.initial-delay-ms:2000}")
+    private long retryInitialDelayMs = 2000;
+
+    @Value("${kelta.gateway.bootstrap-retry.max-delay-ms:30000}")
+    private long retryMaxDelayMs = 30000;
+
+    private final ScheduledExecutorService retryScheduler =
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "route-bootstrap-retry");
+                thread.setDaemon(true);
+                return thread;
+            });
 
     /**
      * Creates a new RouteInitializer.
@@ -79,9 +105,11 @@ public class RouteInitializer implements ApplicationRunner {
         registerStaticRoutes();
 
         // Fetch and add dynamic routes from the worker service
+        boolean bootstrapLoaded = true;
         try {
             routeConfigService.refreshRoutes();
         } catch (Exception e) {
+            bootstrapLoaded = false;
             logger.error("Failed to load routes from worker on startup: {}", e.getMessage(), e);
         }
 
@@ -93,11 +121,44 @@ public class RouteInitializer implements ApplicationRunner {
         // accepting requests since before this runner started. Flip readiness last,
         // and flip it even if the bootstrap fetch failed above: static routes are
         // registered unconditionally, so the gateway is still useful, and staying
-        // unready over a transient worker blip would turn it into an outage.
+        // unready over a transient worker blip would turn it into an outage. The
+        // collection routes are filled in by scheduleBootstrapRetry below.
         routeReadiness.markRoutesInitialized();
 
         logger.info("Route initialization completed with {} routes; gateway is now READY",
                 routeRegistry.size());
+
+        if (!bootstrapLoaded) {
+            scheduleBootstrapRetry(1, retryInitialDelayMs);
+        }
+    }
+
+    /**
+     * Retries the bootstrap fetch until it succeeds, doubling the delay each time up
+     * to {@code kelta.gateway.bootstrap-retry.max-delay-ms}. Readiness is untouched:
+     * the pod is already serving its static routes, and the collection routes join
+     * the table the moment the worker answers.
+     */
+    private void scheduleBootstrapRetry(int attempt, long delayMs) {
+        logger.warn("Collection routes not loaded; retrying bootstrap fetch in {} ms (attempt {})",
+                delayMs, attempt);
+        retryScheduler.schedule(() -> {
+            try {
+                routeConfigService.refreshRoutes();
+            } catch (Exception e) {
+                logger.error("Bootstrap retry {} failed: {}", attempt, e.getMessage());
+                scheduleBootstrapRetry(attempt + 1, Math.min(delayMs * 2, retryMaxDelayMs));
+                return;
+            }
+            routeRefresher.refresh();
+            logger.info("Bootstrap retry {} succeeded; gateway now has {} routes",
+                    attempt, routeRegistry.size());
+        }, delayMs, TimeUnit.MILLISECONDS);
+    }
+
+    @PreDestroy
+    void shutdown() {
+        retryScheduler.shutdownNow();
     }
 
     /**

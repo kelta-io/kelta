@@ -92,6 +92,14 @@ kelta:
     # Worker service URL (used for routing AND internal API calls)
     worker-service-url: ${WORKER_SERVICE_URL:http://emf-worker:80}
 
+    # When the startup bootstrap fetch fails (worker not up yet), RouteInitializer keeps
+    # retrying it in the background: first after initial-delay-ms, doubling up to
+    # max-delay-ms, until it succeeds. Without it the gateway serves only static routes
+    # (every collection API 404s) until restarted.
+    bootstrap-retry:
+      initial-delay-ms: 2000
+      max-delay-ms: 30000
+
     # AI service URL (used for routing /api/ai/** requests)
     ai-service-url: ${AI_SERVICE_URL:http://emf-ai:80}
     

@@ -5,6 +5,7 @@ import io.kelta.gateway.health.RouteReadinessHealthIndicator;
 import io.kelta.gateway.route.RouteRefresher;
 import io.kelta.gateway.route.RouteRegistry;
 import io.kelta.gateway.service.RouteConfigService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.health.contributor.Status;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,6 +28,7 @@ import static org.mockito.Mockito.*;
  *   <li>Tenant slug cache is primed via GatewayCacheManager</li>
  *   <li>Dynamic routes are fetched from the worker service</li>
  *   <li>The route cache is refreshed</li>
+ *   <li>A failed bootstrap fetch is retried in the background until it succeeds</li>
  * </ul>
  */
 @ExtendWith(MockitoExtension.class)
@@ -61,6 +64,17 @@ class RouteInitializerTest {
             cacheManager,
             routeReadiness
         );
+    }
+
+    @AfterEach
+    void tearDown() {
+        // Tests that make the bootstrap fail would otherwise leave a retry loop running.
+        routeInitializer.shutdown();
+    }
+
+    private void useFastRetries() {
+        ReflectionTestUtils.setField(routeInitializer, "retryInitialDelayMs", 10L);
+        ReflectionTestUtils.setField(routeInitializer, "retryMaxDelayMs", 20L);
     }
 
     @Test
@@ -131,5 +145,36 @@ class RouteInitializerTest {
 
         // Should still publish refresh event
         verify(routeRefresher).refresh();
+    }
+
+    @Test
+    void testRun_RetriesBootstrapUntilWorkerIsUp() {
+        // The 2026-10-07 outage: the gateway started before the worker, the one
+        // bootstrap fetch failed, and collection routes never loaded.
+        useFastRetries();
+        doThrow(new IllegalStateException("Connection refused"))
+            .doThrow(new IllegalStateException("Connection refused"))
+            .doNothing()
+            .when(routeConfigService).refreshRoutes();
+
+        routeInitializer.run(applicationArguments);
+
+        // Startup fetch fails, retry 1 fails, retry 2 succeeds.
+        verify(routeConfigService, timeout(2000).times(3)).refreshRoutes();
+        // Once at startup, once when the retry finally loads the collection routes.
+        verify(routeRefresher, timeout(2000).times(2)).refresh();
+        // And it stops retrying after the success.
+        verify(routeConfigService, after(200).times(3)).refreshRoutes();
+        assertTrue(routeReadiness.isReady());
+    }
+
+    @Test
+    void testRun_DoesNotRetryWhenBootstrapSucceeds() {
+        useFastRetries();
+
+        routeInitializer.run(applicationArguments);
+
+        verify(routeConfigService, after(200).times(1)).refreshRoutes();
+        verify(routeRefresher, times(1)).refresh();
     }
 }
