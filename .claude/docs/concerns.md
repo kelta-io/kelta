@@ -2082,3 +2082,11 @@ covers worker-down-then-up.
 
 **Keep it that way:** any new state the gateway loads only at startup needs the same retry (the
 tenant-slug cache already self-heals via its `@Scheduled` refresh).
+
+**Error body:** clients saw these 404s as `{"errors":[{}]}`. `GlobalErrorHandler` serialized the
+`JsonApiError` bean, which has no reflection metadata in the native gateway image, so every member
+was dropped. It now serializes `error.toMap()` (the same fix the worker's `GlobalExceptionHandler`
+got), and an unrouted request (reason-less 404 or `NoResourceFoundException`) answers
+`detail: "No route found for path: /api/<x>"`. `GlobalErrorHandlerTest.testUnroutedCollectionApiReturnsFullErrorObject`
+and `testNoResourceFoundExceptionReturnsFullErrorObject` reproduce the empty body with a mapper that
+sees no bean properties (PLT-456).

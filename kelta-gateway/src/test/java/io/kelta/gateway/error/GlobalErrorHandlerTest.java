@@ -2,18 +2,30 @@ package io.kelta.gateway.error;
 
 import io.kelta.gateway.metrics.GatewayMetrics;
 import io.kelta.jsonapi.JsonApiParser;
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.PropertyAccessor;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
+import org.springframework.http.server.reactive.HttpHandler;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.test.web.reactive.server.HttpHandlerConnector;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.reactive.DispatcherHandler;
+import org.springframework.web.reactive.resource.NoResourceFoundException;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.server.adapter.WebHttpHandlerBuilder;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
@@ -370,6 +382,69 @@ class GlobalErrorHandlerTest {
         assertTrue(responseBody.contains("\"timestamp\":"));
         assertTrue(responseBody.contains("\"path\":"));
         assertTrue(responseBody.contains("\"correlationId\":"));
+    }
+
+    /**
+     * A mapper that sees no bean properties, as on the native image (no reflection
+     * metadata for JsonApiError). Bean serialization there wrote {"errors":[{}]}.
+     */
+    private static ObjectMapper nativeLikeMapper() {
+        return JsonMapper.builder()
+            .changeDefaultVisibility(vc -> vc.withVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.NONE))
+            .disable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
+            .build();
+    }
+
+    /**
+     * Routes not loaded (bootstrap fetch failed): the gateway dispatcher matches no
+     * route for a collection API and raises a reason-less 404.
+     */
+    @Test
+    void testUnroutedCollectionApiReturnsFullErrorObject() {
+        GlobalErrorHandler handler = new GlobalErrorHandler(nativeLikeMapper(), metrics);
+        HttpHandler httpHandler = WebHttpHandlerBuilder.webHandler(new DispatcherHandler())
+            .exceptionHandler(handler)
+            .build();
+        WebTestClient client = WebTestClient.bindToServer(new HttpHandlerConnector(httpHandler))
+            .baseUrl("http://localhost")
+            .build();
+
+        byte[] body = client.get().uri("/api/fleet-state?filter[name]=default")
+            .exchange()
+            .expectStatus().isNotFound()
+            .expectBody().returnResult().getResponseBody();
+
+        assertFullNotFoundError(new String(body, StandardCharsets.UTF_8), "/api/fleet-state");
+    }
+
+    /**
+     * The resource handler's "No static resource api/x" 404 — what the gateway raised
+     * during the 2026-10-07 route-bootstrap outage.
+     */
+    @Test
+    void testNoResourceFoundExceptionReturnsFullErrorObject() {
+        GlobalErrorHandler handler = new GlobalErrorHandler(nativeLikeMapper(), metrics);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+            MockServerHttpRequest.get("/api/titles").build()
+        );
+
+        StepVerifier.create(handler.handle(exchange,
+                new NoResourceFoundException(URI.create("/api/titles"), "api/titles")))
+            .verifyComplete();
+
+        assertEquals(HttpStatus.NOT_FOUND, exchange.getResponse().getStatusCode());
+        assertFullNotFoundError(getResponseBody(exchange), "/api/titles");
+    }
+
+    private void assertFullNotFoundError(String responseBody, String path) {
+        JsonNode errors = objectMapper.readTree(responseBody).get("errors");
+        assertNotNull(errors, responseBody);
+        assertEquals(1, errors.size(), responseBody);
+        JsonNode error = errors.get(0);
+        assertEquals("404", error.path("status").asString(), responseBody);
+        assertEquals("NOT_FOUND", error.path("code").asString(), responseBody);
+        assertEquals("No route found for path: " + path, error.path("detail").asString(), responseBody);
+        assertEquals(path, error.path("meta").path("path").asString(), responseBody);
     }
 
     /**
