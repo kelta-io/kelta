@@ -18,6 +18,12 @@ import { z } from 'zod'
 import { cn } from '@/lib/utils'
 import { useI18n } from '../../context/I18nContext'
 import { LoadingSpinner } from '../LoadingSpinner'
+import type { OwnerScope } from '../../types/collections'
+
+/** The system audit field every record carries — always a valid owner field */
+const CREATED_BY_OWNER_FIELD = 'createdBy'
+
+const OWNER_SCOPES: OwnerScope[] = ['NONE', 'PORTAL', 'ALL']
 
 /**
  * Collection data for the form
@@ -37,6 +43,12 @@ export interface CollectionFormData {
   captureGeo: boolean
   /** ID of the field used as display field in lookup dropdowns */
   displayFieldId?: string
+  /** Field holding each record's owning user id; undefined = not owned */
+  ownerField?: string
+  /** Which callers see and change only the records they own */
+  ownerScope: OwnerScope
+  /** Whether owner scoping also hides other people's records from reads */
+  ownerScopeReads: boolean
 }
 
 /**
@@ -46,6 +58,19 @@ export interface AvailableField {
   id: string
   name: string
   displayName: string
+  /** Field type (used to offer lookups to users as owner fields) */
+  type?: string
+  /** Target collection name of a relationship field */
+  referenceTarget?: string
+  /** LOOKUP or MASTER_DETAIL for relationship fields */
+  relationshipType?: string
+}
+
+/** A field can own records when it is a lookup to users. */
+function isUsersLookup(field: AvailableField): boolean {
+  const isLookup =
+    field.type?.toLowerCase() === 'lookup' || field.relationshipType?.toUpperCase() === 'LOOKUP'
+  return isLookup && field.referenceTarget === 'users'
 }
 
 /**
@@ -60,6 +85,9 @@ export interface Collection {
   trackHistory?: boolean
   captureGeo?: boolean
   displayFieldId?: string
+  ownerField?: string | null
+  ownerScope?: OwnerScope
+  ownerScopeReads?: boolean
   currentVersion: number
   createdAt: string
   updatedAt: string
@@ -93,22 +121,30 @@ export interface CollectionFormProps {
  * - Must start with a letter
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export const collectionFormSchema = z.object({
-  name: z
-    .string()
-    .min(1, 'validation.nameRequired')
-    .max(50, 'validation.nameTooLong')
-    .regex(/^[a-z][a-z0-9_]*$/, 'validation.nameFormat'),
-  displayName: z
-    .string()
-    .min(1, 'validation.displayNameRequired')
-    .max(100, 'validation.displayNameTooLong'),
-  description: z.string().max(500, 'validation.descriptionTooLong').optional().or(z.literal('')),
-  active: z.boolean(),
-  trackHistory: z.boolean(),
-  captureGeo: z.boolean(),
-  displayFieldId: z.string().optional().or(z.literal('')),
-})
+export const collectionFormSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1, 'validation.nameRequired')
+      .max(50, 'validation.nameTooLong')
+      .regex(/^[a-z][a-z0-9_]*$/, 'validation.nameFormat'),
+    displayName: z
+      .string()
+      .min(1, 'validation.displayNameRequired')
+      .max(100, 'validation.displayNameTooLong'),
+    description: z.string().max(500, 'validation.descriptionTooLong').optional().or(z.literal('')),
+    active: z.boolean(),
+    trackHistory: z.boolean(),
+    captureGeo: z.boolean(),
+    displayFieldId: z.string().optional().or(z.literal('')),
+    ownerField: z.string().optional().or(z.literal('')),
+    ownerScope: z.enum(['NONE', 'PORTAL', 'ALL']),
+    ownerScopeReads: z.boolean(),
+  })
+  .refine((data) => data.ownerScope === 'NONE' || !!data.ownerField, {
+    message: 'validation.ownerFieldRequired',
+    path: ['ownerField'],
+  })
 
 /**
  * Type inferred from the Zod schema
@@ -153,6 +189,9 @@ export function CollectionForm({
       trackHistory: collection?.trackHistory ?? false,
       captureGeo: collection?.captureGeo ?? false,
       displayFieldId: collection?.displayFieldId ?? '',
+      ownerField: collection?.ownerField ?? '',
+      ownerScope: collection?.ownerScope ?? 'NONE',
+      ownerScopeReads: collection?.ownerScopeReads ?? true,
     },
     mode: 'onBlur',
   })
@@ -168,9 +207,14 @@ export function CollectionForm({
         trackHistory: collection.trackHistory ?? false,
         captureGeo: collection.captureGeo ?? false,
         displayFieldId: collection.displayFieldId ?? '',
+        ownerField: collection.ownerField ?? '',
+        ownerScope: collection.ownerScope ?? 'NONE',
+        ownerScopeReads: collection.ownerScopeReads ?? true,
       })
     }
   }, [collection, reset])
+
+  const ownerFieldOptions = availableFields.filter(isUsersLookup)
 
   // Handle form submission
   const handleFormSubmit = useCallback(
@@ -183,6 +227,9 @@ export function CollectionForm({
         trackHistory: data.trackHistory,
         captureGeo: data.captureGeo,
         displayFieldId: data.displayFieldId || undefined,
+        ownerField: data.ownerField || undefined,
+        ownerScope: data.ownerScope,
+        ownerScopeReads: data.ownerScopeReads,
       }
       await onSubmit(formData)
     },
@@ -473,6 +520,109 @@ export function CollectionForm({
           {t('collectionForm.captureGeoHint')}
         </span>
       </div>
+
+      {/* Ownership — member data ownership: who sees and changes only their own records */}
+      <fieldset
+        className="flex flex-col gap-3 rounded-md border border-border p-4"
+        data-testid="collection-ownership-group"
+      >
+        <legend className="px-1 text-sm font-medium text-foreground">
+          {t('collectionForm.ownership')}
+        </legend>
+
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="collection-owner-field"
+            className="flex items-center gap-1 text-sm font-medium text-foreground"
+          >
+            {t('collectionForm.ownerField')}
+          </label>
+          <select
+            id="collection-owner-field"
+            className={cn(
+              'px-3 py-2 text-base leading-6 text-foreground bg-background border border-input rounded-md',
+              'focus:outline-none focus:border-primary focus:ring-2 focus:ring-ring',
+              'disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed',
+              errors.ownerField &&
+                'border-destructive focus:border-destructive focus:ring-destructive/25'
+            )}
+            disabled={isSubmitting}
+            aria-invalid={!!errors.ownerField}
+            aria-describedby={errors.ownerField ? 'owner-field-error' : 'owner-field-hint'}
+            data-testid="collection-owner-field-select"
+            {...register('ownerField')}
+          >
+            <option value="">{t('collectionForm.ownerFieldNone')}</option>
+            <option value={CREATED_BY_OWNER_FIELD}>
+              {t('collectionForm.ownerFieldCreatedBy')}
+            </option>
+            {ownerFieldOptions.map((field) => (
+              <option key={field.id} value={field.name}>
+                {field.displayName || field.name}
+              </option>
+            ))}
+          </select>
+          {errors.ownerField ? (
+            <span
+              id="owner-field-error"
+              className="flex items-center gap-1 text-sm text-destructive mt-1 before:content-['\u26A0'] before:text-xs"
+              role="alert"
+              data-testid="owner-field-error"
+            >
+              {getErrorMessage(errors.ownerField.message)}
+            </span>
+          ) : (
+            <span id="owner-field-hint" className="text-xs text-muted-foreground mt-1">
+              {t('collectionForm.ownerFieldHint')}
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1" role="radiogroup" aria-labelledby="owner-scope-label">
+          <span id="owner-scope-label" className="text-sm font-medium text-foreground">
+            {t('collectionForm.ownerScope')}
+          </span>
+          {OWNER_SCOPES.map((scope) => (
+            <label
+              key={scope}
+              className="flex items-center gap-2 text-base text-foreground cursor-pointer"
+            >
+              <input
+                type="radio"
+                value={scope}
+                className="w-[1.125rem] h-[1.125rem] accent-primary cursor-pointer disabled:cursor-not-allowed"
+                disabled={isSubmitting}
+                data-testid={`collection-owner-scope-${scope.toLowerCase()}`}
+                {...register('ownerScope')}
+              />
+              {t(`collectionForm.ownerScope${scope.charAt(0)}${scope.slice(1).toLowerCase()}`)}
+            </label>
+          ))}
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <input
+              id="collection-owner-scope-reads"
+              type="checkbox"
+              className="w-[1.125rem] h-[1.125rem] accent-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSubmitting}
+              aria-describedby="owner-scope-reads-hint"
+              data-testid="collection-owner-scope-reads-checkbox"
+              {...register('ownerScopeReads')}
+            />
+            <label
+              htmlFor="collection-owner-scope-reads"
+              className="text-base text-foreground cursor-pointer"
+            >
+              {t('collectionForm.ownerScopeReads')}
+            </label>
+          </div>
+          <span id="owner-scope-reads-hint" className="text-xs text-muted-foreground mt-1">
+            {t('collectionForm.ownerScopeReadsHint')}
+          </span>
+        </div>
+      </fieldset>
 
       {/* Form Actions */}
       <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-border max-md:flex-col-reverse max-md:gap-2">

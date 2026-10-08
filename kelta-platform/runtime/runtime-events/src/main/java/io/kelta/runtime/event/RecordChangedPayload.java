@@ -32,6 +32,14 @@ public class RecordChangedPayload {
     private boolean containsMaskedFields;
 
     /**
+     * True when the record's collection is owner-scoped (member data ownership): each record is
+     * readable only by its owner, so broadcast consumers without per-subscriber row filtering
+     * (the gateway realtime bridge) must publish invalidation-only events — no {@code data} —
+     * and let clients refetch through the owner-scoped JSON:API path. Defaults to false.
+     */
+    private boolean ownerScoped;
+
+    /**
      * Default constructor for deserialization.
      */
     public RecordChangedPayload() {
@@ -106,6 +114,15 @@ public class RecordChangedPayload {
     /** Fluent variant of {@link #setContainsMaskedFields} for inline publish sites. */
     public RecordChangedPayload withContainsMaskedFields(boolean containsMaskedFields) {
         this.containsMaskedFields = containsMaskedFields;
+        return this;
+    }
+
+    public boolean isOwnerScoped() { return ownerScoped; }
+    public void setOwnerScoped(boolean ownerScoped) { this.ownerScoped = ownerScoped; }
+
+    /** Fluent variant of {@link #setOwnerScoped} for inline publish sites. */
+    public RecordChangedPayload withOwnerScoped(boolean ownerScoped) {
+        this.ownerScoped = ownerScoped;
         return this;
     }
 

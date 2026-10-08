@@ -1114,12 +1114,24 @@
       "nameFormat": "O nome deve ser em minusculas, comecar com uma letra e conter apenas letras, numeros e sublinhados",
       "displayNameRequired": "O nome de exibicao e obrigatorio",
       "displayNameTooLong": "O nome de exibicao deve ter no maximo 100 caracteres",
-      "descriptionTooLong": "A descricao deve ter no maximo 500 caracteres"
+      "descriptionTooLong": "A descricao deve ter no maximo 500 caracteres",
+      "ownerFieldRequired": "Escolha um campo de proprietário para restringir os registos ao seu proprietário"
     },
     "trackHistory": "Rastrear histórico de registros",
     "trackHistoryHint": "Captura um instantâneo completo de cada criação, atualização e exclusão de registro. Adiciona uma aba Histórico às páginas de registro.",
     "captureGeo": "Capturar localização do registo",
-    "captureGeoHint": "Registar o país e a cidade de origem do pedido ao criar ou atualizar registos."
+    "captureGeoHint": "Registar o país e a cidade de origem do pedido ao criar ou atualizar registos.",
+    "ownership": "Propriedade",
+    "ownerField": "Campo de proprietário",
+    "ownerFieldNone": "Sem proprietário",
+    "ownerFieldCreatedBy": "Criado por",
+    "ownerFieldHint": "O campo que contém o proprietário de cada registo: Criado por, ou uma pesquisa para Utilizadores.",
+    "ownerScope": "Restringir a",
+    "ownerScopeNone": "Ninguém (predefinição)",
+    "ownerScopePortal": "Membros do portal — os membros só veem e alteram os seus próprios registos",
+    "ownerScopeAll": "Todos exceto administradores com Ver/Modificar todos os dados",
+    "ownerScopeReads": "Ocultar também os registos de outras pessoas nas leituras",
+    "ownerScopeReadsHint": "Desmarque para coleções de leitura pública e edição pelo autor: quem tem acesso de leitura vê todos os registos, mas só o proprietário os pode alterar."
   },
   "authorizationPanel": {
     "title": "Autorizacao",

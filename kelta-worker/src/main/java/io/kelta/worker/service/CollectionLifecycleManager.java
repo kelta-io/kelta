@@ -50,14 +50,16 @@ public class CollectionLifecycleManager {
     private static final String SELECT_COLLECTION_BY_ID = """
             SELECT id, name, display_name, description, active,
                    current_version, system_collection, path, tenant_id, display_field_id,
-                   adapter_config, track_history, capture_geo
+                   adapter_config, track_history, capture_geo,
+                   owner_field, owner_scope, owner_scope_reads
             FROM collection WHERE id = ? AND active = true
             """;
 
     private static final String SELECT_COLLECTION_BY_NAME = """
             SELECT id, name, display_name, description, active,
                    current_version, system_collection, path, tenant_id, display_field_id,
-                   adapter_config, track_history, capture_geo
+                   adapter_config, track_history, capture_geo,
+                   owner_field, owner_scope, owner_scope_reads
             FROM collection WHERE name = ? AND active = true
             LIMIT 1
             """;
@@ -504,8 +506,9 @@ public class CollectionLifecycleManager {
 
     /**
      * Builds a CollectionDefinition from database records for user-defined collections.
+     * Package-private for unit testing.
      */
-    private CollectionDefinition buildDefinitionFromDb(String collectionId, String collectionName,
+    CollectionDefinition buildDefinitionFromDb(String collectionId, String collectionName,
                                                         Map<String, Object> data) {
         CollectionDefinitionBuilder builder = new CollectionDefinitionBuilder()
                 .name(collectionName)
@@ -565,6 +568,11 @@ public class CollectionLifecycleManager {
 
         // Collection-level request-origin geo stamping toggle
         builder.captureGeo(Boolean.TRUE.equals(data.get("capture_geo")));
+
+        // Member data ownership: owner field + which callers are limited to their own rows
+        builder.ownerField(getStringOrNull(data, "owner_field", null));
+        builder.ownerScope(OwnerScope.parse(data.get("owner_scope")));
+        builder.ownerScopeReads(!Boolean.FALSE.equals(data.get("owner_scope_reads")));
 
         return builder.build();
     }

@@ -100,6 +100,35 @@ class RealtimeBridgeTest {
         return toJson(event);
     }
 
+    private String ownerScopedEvent() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("collectionName", COLLECTION);
+        payload.put("recordId", RECORD_ID);
+        payload.put("changeType", "CREATED");
+        payload.put("data", Map.of("name", "Acme", "member", "22222222-2222-2222-2222-222222222222"));
+        payload.put("ownerScoped", true);
+
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("tenantId", TENANT_ID);
+        event.put("timestamp", "2026-10-08T12:00:00Z");
+        event.put("payload", payload);
+        return toJson(event);
+    }
+
+    @Test
+    @DisplayName("Owner-scoped collections publish invalidation-only events (no record attributes)")
+    void ownerScopedCollectionsAreInvalidationOnly() {
+        when(subscriptionManager.getSubscribers(TENANT_ID, COLLECTION)).thenReturn(Set.of(session));
+        when(session.isOpen()).thenReturn(true);
+
+        bridge.onRecordChanged(ownerScopedEvent());
+
+        Map<String, Object> wsEvent = captureSentWsEvent();
+        assertFalse(wsEvent.containsKey("data"), "owner-scoped record data must not fan out");
+        assertEquals(Set.of("event", "collection", "changeType", "recordId", "timestamp"), wsEvent.keySet());
+        assertEquals(RECORD_ID, wsEvent.get("recordId"));
+    }
+
     private Map<String, Object> captureSentWsEvent() {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> wsEventCaptor = ArgumentCaptor.forClass(Map.class);

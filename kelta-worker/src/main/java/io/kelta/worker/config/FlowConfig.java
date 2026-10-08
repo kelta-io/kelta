@@ -583,6 +583,36 @@ public class FlowConfig {
     }
 
     /**
+     * Generic write guard for owner-scoped collections (ownerField + ownerScope metadata): stamps
+     * the owner on create, admits update/delete only by the owner (foreign or missing row → 404)
+     * and keeps the owner field immutable. Reads are scoped in PhysicalTableStorageAdapter.
+     */
+    @Bean
+    public io.kelta.worker.listener.OwnerScopeGuardHook ownerScopeGuardHook(
+            BeforeSaveHookRegistry hookRegistry,
+            io.kelta.runtime.registry.CollectionRegistry collectionRegistry,
+            io.kelta.runtime.query.QueryEngine queryEngine) {
+        io.kelta.worker.listener.OwnerScopeGuardHook hook =
+                new io.kelta.worker.listener.OwnerScopeGuardHook(collectionRegistry, queryEngine);
+        hookRegistry.register(hook);
+        return hook;
+    }
+
+    /**
+     * Rejects collection saves whose ownership settings cannot be enforced: an unknown
+     * ownerScope, or a scope without a createdBy / LOOKUP→users owner field.
+     */
+    @Bean
+    public io.kelta.worker.listener.CollectionOwnershipValidationHook collectionOwnershipValidationHook(
+            BeforeSaveHookRegistry hookRegistry,
+            org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
+        io.kelta.worker.listener.CollectionOwnershipValidationHook hook =
+                new io.kelta.worker.listener.CollectionOwnershipValidationHook(jdbcTemplate);
+        hookRegistry.register(hook);
+        return hook;
+    }
+
+    /**
      * Owner guard for user-ui-preferences: a write may only touch rows whose userId equals
      * the caller's canonical UUID. No NATS refresh hook — preference rows are read
      * per-request through the generic route; nothing caches them in a registry.

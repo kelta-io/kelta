@@ -994,6 +994,38 @@ class DefaultQueryEngineTest {
         }
 
         @Test
+        @DisplayName("Should flag ownerScoped on CREATED event for an owner-scoped collection")
+        void shouldFlagOwnerScopedOnCreate() {
+            CollectionDefinition owned = new CollectionDefinitionBuilder()
+                    .name("watchlists")
+                    .addField(FieldDefinition.string("name"))
+                    .ownerField("createdBy")
+                    .ownerScope(OwnerScope.PORTAL)
+                    .build();
+            when(validationEngine.validate(eq(owned), any(), any()))
+                    .thenReturn(io.kelta.runtime.validation.ValidationResult.success());
+            when(storageAdapter.create(eq(owned), any()))
+                    .thenAnswer(invocation -> invocation.getArgument(1));
+
+            engineWithPublisher.create(owned, new HashMap<>(Map.of("name", "Mine")));
+
+            assertTrue(capturePublishedPayload().isOwnerScoped());
+        }
+
+        @Test
+        @DisplayName("Should not flag ownerScoped on CREATED event for an unowned collection")
+        void shouldNotFlagOwnerScopedOnUnownedCreate() {
+            when(validationEngine.validate(eq(testCollection), any(), any()))
+                    .thenReturn(io.kelta.runtime.validation.ValidationResult.success());
+            when(storageAdapter.create(eq(testCollection), any()))
+                    .thenAnswer(invocation -> invocation.getArgument(1));
+
+            engineWithPublisher.create(testCollection, new HashMap<>(Map.of("name", "Test", "price", 10.0)));
+
+            assertFalse(capturePublishedPayload().isOwnerScoped());
+        }
+
+        @Test
         @DisplayName("Should not flag containsMaskedFields on CREATED event without masking config")
         void shouldNotFlagContainsMaskedFieldsOnCreateWithoutMaskingConfig() {
             Map<String, Object> inputData = new HashMap<>();
