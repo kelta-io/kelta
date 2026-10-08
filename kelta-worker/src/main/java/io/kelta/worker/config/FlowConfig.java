@@ -569,7 +569,8 @@ public class FlowConfig {
     /**
      * Last-line write guard for identity collections (users, user-permission-sets,
      * group-memberships, delegated-admin-scopes): identified HTTP writes require MANAGE_USERS /
-     * MANAGE_DELEGATED_ADMINS (or MODIFY_ALL_DATA), or a scope-validated DelegatedWriteContext.
+     * MANAGE_DELEGATED_ADMINS (or MODIFY_ALL_DATA), a scope-validated DelegatedWriteContext, or
+     * (users updates only) an own-row, allow-listed SelfProfileWriteContext.
      * Closes the unauthorized /api/operations write path for identity collections.
      */
     @Bean

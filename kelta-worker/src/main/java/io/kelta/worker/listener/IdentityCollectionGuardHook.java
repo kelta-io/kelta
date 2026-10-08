@@ -4,6 +4,7 @@ import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import io.kelta.worker.repository.BootstrapRepository;
+import io.kelta.worker.service.SelfProfileWriteContext;
 import io.kelta.worker.service.delegated.DelegatedWriteContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -15,8 +16,8 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Last-line write guard for identity collections ({@code users}, {@code group-memberships},
- * {@code delegated-admin-scopes}).
+ * Last-line write guard for identity collections ({@code users}, {@code user-permission-sets},
+ * {@code group-memberships}, {@code delegated-admin-scopes}).
  *
  * <p>Every QueryEngine write path fires before-save hooks — the dynamic collection router, the
  * JSON:API atomic-operations batch endpoint, CSV import, and the delegated admin controller. The
@@ -28,7 +29,11 @@ import java.util.Set;
  *   <li>the profile grants {@code MANAGE_USERS} or {@code MODIFY_ALL_DATA} (for
  *       {@code delegated-admin-scopes}: {@code MANAGE_DELEGATED_ADMINS}), or</li>
  *   <li>the write runs inside a scope-validated {@link DelegatedWriteContext} bound by
- *       {@code DelegatedUserAdminController}.</li>
+ *       {@code DelegatedUserAdminController}, or</li>
+ *   <li>it is a {@code users} <b>update</b> inside a {@link SelfProfileWriteContext} bound by
+ *       {@code MyProfileController}, whose target id is the grant's own user id and whose
+ *       changed fields are all in the grant's allow-list. Any other write under that context —
+ *       another id, another field, a create or delete — is judged as if it were unbound.</li>
  * </ul>
  *
  * <p>Writes with no HTTP request context (NATS listeners, flows, schedulers, provisioning) and
@@ -40,7 +45,10 @@ public class IdentityCollectionGuardHook implements BeforeSaveHook {
     private static final Logger log = LoggerFactory.getLogger(IdentityCollectionGuardHook.class);
 
     static final Set<String> GUARDED = Set.of(
-            "users", "group-memberships", "delegated-admin-scopes");
+            "users", "user-permission-sets", "group-memberships", "delegated-admin-scopes");
+
+    /** Stamped by {@code QueryEngine.update} on every write, not chosen by the caller. */
+    private static final Set<String> AUDIT_FIELDS = Set.of("updatedAt");
 
     private static final String PROFILE_ID_HEADER = "X-User-Profile-Id";
 
@@ -71,6 +79,9 @@ public class IdentityCollectionGuardHook implements BeforeSaveHook {
     public BeforeSaveResult beforeUpdate(String collectionName, String id,
                                          Map<String, Object> record,
                                          Map<String, Object> previous, String tenantId) {
+        if (isOwnSelfProfileUpdate(collectionName, id, record)) {
+            return BeforeSaveResult.ok();
+        }
         return guard(collectionName, "update");
     }
 
@@ -104,6 +115,18 @@ public class IdentityCollectionGuardHook implements BeforeSaveHook {
                     "Insufficient permissions to modify " + collectionName);
         }
         return BeforeSaveResult.ok();
+    }
+
+    private static boolean isOwnSelfProfileUpdate(String collectionName, String id,
+                                                  Map<String, Object> record) {
+        if (!"users".equals(collectionName)) {
+            return false;
+        }
+        return SelfProfileWriteContext.current()
+                .filter(grant -> grant.userId().equals(id))
+                .filter(grant -> record.keySet().stream()
+                        .allMatch(f -> AUDIT_FIELDS.contains(f) || grant.allowedFields().contains(f)))
+                .isPresent();
     }
 
     private String requestProfileId() {
