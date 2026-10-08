@@ -18,10 +18,22 @@ export interface Collection {
   trackHistory?: boolean
   /** Stamp request-origin geolocation into created_geo/updated_geo on HTTP writes */
   captureGeo?: boolean
+  /** Field holding each record's owning user id (a lookup to users, or `createdBy`); null = not owned */
+  ownerField?: string | null
+  /** Which callers see and change only the records they own */
+  ownerScope?: OwnerScope
+  /** When false, owner scoping limits writes only — everyone with read access reads every record */
+  ownerScopeReads?: boolean
   fields?: FieldDefinition[]
   createdAt: string
   updatedAt: string
 }
+
+/**
+ * Who a collection's owner scoping applies to: nobody, portal members, or everyone without
+ * View/Modify All Data.
+ */
+export type OwnerScope = 'NONE' | 'PORTAL' | 'ALL'
 
 /**
  * Field definition within a collection

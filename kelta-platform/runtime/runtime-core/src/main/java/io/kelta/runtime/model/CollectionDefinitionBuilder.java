@@ -61,6 +61,9 @@ public class CollectionDefinitionBuilder {
     private String tenantId;
     private boolean trackHistory = false;
     private boolean captureGeo = false;
+    private String ownerField;
+    private OwnerScope ownerScope = OwnerScope.NONE;
+    private boolean ownerScopeReads = true;
 
     /**
      * Creates a new collection definition builder.
@@ -313,6 +316,39 @@ public class CollectionDefinitionBuilder {
     }
 
     /**
+     * Sets the field holding the owning {@code users.id} (a LOOKUP to users, or {@code createdBy}).
+     *
+     * @param ownerField the owner field name, or null when the collection is not owned
+     * @return this builder for method chaining
+     */
+    public CollectionDefinitionBuilder ownerField(String ownerField) {
+        this.ownerField = ownerField;
+        return this;
+    }
+
+    /**
+     * Sets which callers are limited to the rows they own.
+     *
+     * @param ownerScope the owner scope (null is treated as NONE)
+     * @return this builder for method chaining
+     */
+    public CollectionDefinitionBuilder ownerScope(OwnerScope ownerScope) {
+        this.ownerScope = ownerScope;
+        return this;
+    }
+
+    /**
+     * Sets whether owner scoping also narrows reads (default true).
+     *
+     * @param ownerScopeReads false for owner-only writes with unscoped reads
+     * @return this builder for method chaining
+     */
+    public CollectionDefinitionBuilder ownerScopeReads(boolean ownerScopeReads) {
+        this.ownerScopeReads = ownerScopeReads;
+        return this;
+    }
+
+    /**
      * Builds the collection definition.
      *
      * <p>Applies sensible defaults for optional configuration:
@@ -373,7 +409,10 @@ public class CollectionDefinitionBuilder {
             displayFieldName,
             tenantId,
             trackHistory,
-            captureGeo
+            captureGeo,
+            ownerField,
+            ownerScope,
+            ownerScopeReads
         );
     }
 }

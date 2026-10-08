@@ -1305,6 +1305,17 @@ public final class SystemCollectionDefinitions {
             .addField(FieldDefinition.bool("captureGeo").withColumnName("capture_geo")
                 .withDefault(false)
                 .withDescription("Whether request-origin geo is stamped onto records."))
+            .addField(FieldDefinition.string("ownerField", 100).withColumnName("owner_field")
+                .withDescription("Field holding the owning user's id (a lookup to users, or createdBy); "
+                        + "empty when records are not owned."))
+            .addField(FieldDefinition.string("ownerScope", 10).withColumnName("owner_scope")
+                .withDefault("NONE")
+                .withDescription("Who sees and changes only their own records: NONE, PORTAL (portal "
+                        + "members) or ALL (everyone without View/Modify All Data)."))
+            .addField(FieldDefinition.bool("ownerScopeReads").withColumnName("owner_scope_reads")
+                .withDefault(true)
+                .withDescription("Whether owner scoping also hides other people's records from reads; "
+                        + "false keeps reads open and limits only writes."))
             .build();
     }
 

@@ -273,6 +273,8 @@ describe('CollectionForm Component', () => {
           active: true,
           trackHistory: false,
           captureGeo: false,
+          ownerScope: 'NONE',
+          ownerScopeReads: true,
         })
       })
     })
@@ -352,6 +354,8 @@ describe('CollectionForm Component', () => {
           active: true,
           trackHistory: false,
           captureGeo: false,
+          ownerScope: 'NONE',
+          ownerScopeReads: true,
         })
       })
     })
@@ -465,6 +469,108 @@ describe('CollectionForm Component', () => {
           })
         )
       })
+    })
+  })
+
+  describe('Ownership', () => {
+    const fields = [
+      {
+        id: 'f1',
+        name: 'member',
+        displayName: 'Member',
+        type: 'LOOKUP',
+        referenceTarget: 'users',
+      },
+      {
+        id: 'f2',
+        name: 'account',
+        displayName: 'Account',
+        type: 'LOOKUP',
+        referenceTarget: 'accounts',
+      },
+      { id: 'f3', name: 'label', displayName: 'Label', type: 'string' },
+    ]
+
+    it('should render the ownership group defaulting to not owned / Nobody / hide reads', () => {
+      renderWithProviders(<CollectionForm {...defaultProps} />)
+
+      expect(screen.getByTestId('collection-ownership-group')).toBeInTheDocument()
+      expect(screen.getByTestId('collection-owner-field-select')).toHaveValue('')
+      expect(screen.getByTestId('collection-owner-scope-none')).toBeChecked()
+      expect(screen.getByTestId('collection-owner-scope-reads-checkbox')).toBeChecked()
+    })
+
+    it('should offer Created by and only lookups to users as owner fields', () => {
+      renderWithProviders(
+        <CollectionForm {...defaultProps} collection={mockCollection} availableFields={fields} />
+      )
+
+      const select = screen.getByTestId('collection-owner-field-select')
+      const values = Array.from(select.querySelectorAll('option')).map((o) =>
+        o.getAttribute('value')
+      )
+      expect(values).toEqual(['', 'createdBy', 'member'])
+    })
+
+    it('should pre-populate the saved ownership in edit mode', () => {
+      renderWithProviders(
+        <CollectionForm
+          {...defaultProps}
+          availableFields={fields}
+          collection={{
+            ...mockCollection,
+            ownerField: 'member',
+            ownerScope: 'PORTAL',
+            ownerScopeReads: false,
+          }}
+        />
+      )
+
+      expect(screen.getByTestId('collection-owner-field-select')).toHaveValue('member')
+      expect(screen.getByTestId('collection-owner-scope-portal')).toBeChecked()
+      expect(screen.getByTestId('collection-owner-scope-reads-checkbox')).not.toBeChecked()
+    })
+
+    it('should submit the ownership settings', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined)
+      const user = userEvent.setup()
+      renderWithProviders(
+        <CollectionForm
+          {...defaultProps}
+          collection={mockCollection}
+          availableFields={fields}
+          onSubmit={onSubmit}
+        />
+      )
+
+      await user.selectOptions(screen.getByTestId('collection-owner-field-select'), 'member')
+      await user.click(screen.getByTestId('collection-owner-scope-all'))
+      await user.click(screen.getByTestId('collection-owner-scope-reads-checkbox'))
+      await user.click(screen.getByTestId('collection-form-submit'))
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ownerField: 'member',
+            ownerScope: 'ALL',
+            ownerScopeReads: false,
+          })
+        )
+      })
+    })
+
+    it('should require an owner field when a scope is chosen', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined)
+      const user = userEvent.setup()
+      renderWithProviders(
+        <CollectionForm {...defaultProps} collection={mockCollection} onSubmit={onSubmit} />
+      )
+
+      await user.click(screen.getByTestId('collection-owner-scope-portal'))
+      await user.click(screen.getByTestId('collection-form-submit'))
+
+      expect(await screen.findByTestId('owner-field-error')).toBeInTheDocument()
+      expect(onSubmit).not.toHaveBeenCalled()
     })
   })
 

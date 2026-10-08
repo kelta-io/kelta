@@ -311,6 +311,35 @@ class PackageImportServiceTest {
         }
 
         @Test
+        @DisplayName("creates the collection without ownership, then applies it once fields exist")
+        void ownershipAppliedAfterFields() {
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-orders"));
+
+            Map<String, Object> collection = collectionData("orders");
+            collection.put("owner_field", "member");
+            collection.put("owner_scope", "PORTAL");
+            collection.put("owner_scope_reads", false);
+
+            var report = service.importPackage(TENANT, pkg(item("COLLECTION", collection)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isZero();
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> createCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(any(), createCaptor.capture());
+            assertThat(createCaptor.getValue())
+                    .doesNotContainKeys("ownerField", "ownerScope", "ownerScopeReads");
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> updateCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).update(any(), eq("tgt-orders"), updateCaptor.capture());
+            assertThat(updateCaptor.getValue())
+                    .containsEntry("ownerField", "member")
+                    .containsEntry("ownerScope", "PORTAL")
+                    .containsEntry("ownerScopeReads", false);
+        }
+
+        @Test
         @DisplayName("leaves displayFieldId unset when the named field is missing in the target")
         void leavesUnsetWhenFieldMissing() {
             when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-orders"));

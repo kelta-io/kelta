@@ -1114,12 +1114,24 @@
       "nameFormat": "Name muss kleingeschrieben sein, mit einem Buchstaben beginnen und darf nur Buchstaben, Zahlen und Unterstriche enthalten",
       "displayNameRequired": "Anzeigename ist erforderlich",
       "displayNameTooLong": "Anzeigename darf maximal 100 Zeichen lang sein",
-      "descriptionTooLong": "Beschreibung darf maximal 500 Zeichen lang sein"
+      "descriptionTooLong": "Beschreibung darf maximal 500 Zeichen lang sein",
+      "ownerFieldRequired": "Wählen Sie ein Eigentümerfeld, um Datensätze auf ihren Eigentümer zu beschränken"
     },
     "trackHistory": "Datensatzverlauf verfolgen",
     "trackHistoryHint": "Erfasst bei jedem Erstellen, Aktualisieren und Löschen eines Datensatzes einen vollständigen Versions-Snapshot. Fügt den Datensatzseiten einen Verlaufs-Tab hinzu.",
     "captureGeo": "Datensatz-Standort erfassen",
-    "captureGeoHint": "Land und Stadt des Anfrageursprungs beim Erstellen oder Aktualisieren von Datensätzen speichern."
+    "captureGeoHint": "Land und Stadt des Anfrageursprungs beim Erstellen oder Aktualisieren von Datensätzen speichern.",
+    "ownership": "Eigentum",
+    "ownerField": "Eigentümerfeld",
+    "ownerFieldNone": "Kein Eigentümer",
+    "ownerFieldCreatedBy": "Erstellt von",
+    "ownerFieldHint": "Das Feld mit dem Eigentümer jedes Datensatzes: Erstellt von oder eine Verknüpfung zu Benutzern.",
+    "ownerScope": "Beschränken auf",
+    "ownerScopeNone": "Niemand (Standard)",
+    "ownerScopePortal": "Portalmitglieder – Mitglieder sehen und ändern nur ihre eigenen Datensätze",
+    "ownerScopeAll": "Alle außer Administratoren mit „Alle Daten anzeigen/ändern“",
+    "ownerScopeReads": "Datensätze anderer auch beim Lesen ausblenden",
+    "ownerScopeReadsHint": "Deaktivieren für öffentlich lesbare Sammlungen, die nur der Autor bearbeitet: Alle mit Leserecht sehen jeden Datensatz, ändern kann ihn nur der Eigentümer."
   },
   "authorizationPanel": {
     "title": "Autorisierung",
