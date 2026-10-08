@@ -67,14 +67,19 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
         createField(admin, slug, Map.of("collectionId", itemsId, "name", "folder", "type", "LOOKUP",
                 "relationshipName", "folder", "referenceTarget", folders), foldersId);
         waitForField(admin, slug, itemsId, "folder");
+        // The fields API answers from the DB; the worker's definition and ALTER land later
+        // through the field.changed refresh. Writing before then drops or rejects attributes.
+        awaitQueryable(tenantId, slug, folders, "title");
+        awaitQueryable(tenantId, slug, items, "title", "folder");
 
         patchCollection(admin, slug, itemsId, Map.of("ownerField", "createdBy", "ownerScope", "PORTAL"));
 
         // ── Callers ─────────────────────────────────────────────────────────────────────
         Caller alice = new Caller(invitePortalMember(admin, slug, "alice", suffix), "PORTAL", null);
         Caller bob = new Caller(invitePortalMember(admin, slug, "bob", suffix), "PORTAL", null);
-        Caller staff = new Caller(AuthFixture.adminUsername(TenantFixture.DEFAULT_SLUG), "INTERNAL",
-                profileGranting(tenantId, "VIEW_ALL_DATA"));
+        String adminUser = AuthFixture.adminUsername(TenantFixture.DEFAULT_SLUG);
+        Caller staff = new Caller(adminUser, "INTERNAL", profileGranting(tenantId, "VIEW_ALL_DATA"));
+        Caller staffWithoutGrant = new Caller(adminUser, "INTERNAL", null);
 
         // ── Data: one shared folder; Bob's row first so the newest row overall is Alice's ──
         String folderId = id(call(null, tenantId, slug, HttpMethod.POST, "/api/" + folders,
@@ -141,8 +146,13 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
                 .isEqualTo(HttpStatus.OK);
 
         // ── ALL: VIEW_ALL_DATA staff see every row; members stay scoped ─────────────────
+        assertThat(totalCount(call(staffWithoutGrant, tenantId, slug, HttpMethod.GET, "/api/" + items)
+                .getBody())).as("PORTAL scope leaves staff unscoped").isEqualTo(3);
         patchCollection(admin, slug, itemsId, Map.of("ownerScope", "ALL"));
-        awaitList(staff, tenantId, slug, items, body -> totalCount(body) == 3);
+        // Staff without VIEW_ALL_DATA own none of the rows: an empty list proves ALL is live.
+        awaitList(staffWithoutGrant, tenantId, slug, items, body -> totalCount(body) == 0);
+        assertThat(totalCount(call(staff, tenantId, slug, HttpMethod.GET, "/api/" + items).getBody()))
+                .isEqualTo(3);
         assertThat(totalCount(call(alice, tenantId, slug, HttpMethod.GET, "/api/" + items).getBody()))
                 .isEqualTo(2);
     }
@@ -299,6 +309,28 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
             spec = spec.contentType(MediaType.APPLICATION_JSON).body(body);
         }
         return spec.retrieve().onStatus(HttpStatusCode::isError, (req, resp) -> {}).toEntity(Map.class);
+    }
+
+    /**
+     * Polls until the worker can filter on every named field — validation rejects a field the
+     * definition lacks (400) and SQL fails on a column the ALTER has not added yet (500).
+     */
+    private void awaitQueryable(String tenantId, String slug, String collection, String... fieldNames)
+            throws InterruptedException {
+        StringBuilder uri = new StringBuilder("/api/").append(collection).append("?page[size]=1");
+        for (String field : fieldNames) {
+            uri.append("&filter[").append(field).append("][isnull]=false");
+        }
+        HttpStatusCode last = null;
+        for (int i = 0; i < 30; i++) {
+            last = call(null, tenantId, slug, HttpMethod.GET, uri.toString()).getStatusCode();
+            if (last.is2xxSuccessful()) {
+                return;
+            }
+            Thread.sleep(1000);
+        }
+        throw new AssertionError(collection + " never became queryable on " + List.of(fieldNames)
+                + "; last status " + last);
     }
 
     /** Polls the caller's list until {@code done} holds — collection.changed refresh timing. */
