@@ -186,3 +186,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-10-07 docs(marketing): extend /compare with data-model and authorization rows, link it from the docs landing and intro (KLT-422)
 - 2026-10-07 fix(worker): harden the sandbox admin credential under the sandbox tenant's RLS binding and fail sandbox creation when no credential is updated, instead of returning a password that never logs in (PLT-423)
 - 2026-10-08 fix(gateway): 404s for unrouted APIs carry status, code and a detail naming the path instead of {"errors":[{}]} on the native image (PLT-456)
+- 2026-10-08 fix(security): owner-scoped collections — ownerField/ownerScope/ownerScopeReads collection settings (V206) with an SQL owner predicate on every storage-adapter read and a generic OwnerScopeGuardHook for writes, invalidation-only realtime, and an Ownership group in the collection form (KLT-378)
