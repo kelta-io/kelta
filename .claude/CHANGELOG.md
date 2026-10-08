@@ -186,3 +186,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-10-07 docs(marketing): extend /compare with data-model and authorization rows, link it from the docs landing and intro (KLT-422)
 - 2026-10-07 fix(worker): harden the sandbox admin credential under the sandbox tenant's RLS binding and fail sandbox creation when no credential is updated, instead of returning a password that never logs in (PLT-423)
 - 2026-10-08 fix(gateway): 404s for unrouted APIs carry status, code and a detail naming the path instead of {"errors":[{}]} on the native image (PLT-456)
+- 2026-10-08 feat(security): GET/PATCH /api/me/profile lets any caller edit their own firstName/lastName/locale/timezone without MANAGE_USERS (own-id, allow-listed SelfProfileWriteContext honoured by IdentityCollectionGuardHook, which now also guards user-permission-sets); user menu Profile item opens ProfileDialog (KLT-379)
