@@ -508,6 +508,11 @@ user can list every approval (including `comments`). This predates the approvals
 exposure). Deferred fix: a row-level read policy (submitter/assignee/admin) needs a design
 pass — likely a read-side hook or Cerbos record policy on these collections. Revisit before
 approvals carry sensitive comments in anger.
+*Update (KLT-378, member-data-ownership slice 2):* the generic row-level read policy now exists
+for **owner-shaped** data — a collection with `ownerField` + `ownerScope` is filtered in SQL
+(architecture.md → Owner-scoped collections). `user-ui-preferences` can adopt it when slice 4
+converts the system collections; approvals (submitter **or** assignee) are not single-owner and
+still need their own design.
 **Realtime socket has no per-subscriber FLS (accepted, 2026-07-08).**
 `RealtimeBridge` fans each `kelta.record.changed` event to every tenant subscriber —
 collection name, record id, and (for non-masking collections) the record `data` — with no
@@ -2058,6 +2063,32 @@ request-origin country (the gateway always did).
 `X-User-Id` resolves to no user in the tenant. A non-email, non-UUID identity (a connected app's
 client id) binds no `CallerContext` and behaves as before; the anonymous Guest principal binds the
 nil UUID as INTERNAL. Slice 2 (owner scoping) must decide whether Guest is owner-scoped.
+*Decided in slice 2 (KLT-378):* Guest is INTERNAL without `VIEW_ALL_DATA`, so it is **not** scoped
+under `PORTAL` and **is** scoped under `ALL` — to the nil UUID, i.e. it sees only rows owned by
+the nil UUID, and every Guest shares those rows. Don't grant Guest create on an `ALL`-scoped
+collection.
+
+## Owner-scoped collections — paths outside the storage adapter (KLT-378, accepted until slice 4)
+
+Owner scoping (`ownerField`/`ownerScope`, architecture.md → Owner-scoped collections) is enforced
+in `PhysicalTableStorageAdapter` (reads) and `OwnerScopeGuardHook` (writes via `QueryEngine`).
+Anything that reads or writes the table some other way is **not** narrowed:
+
+- **Raw-JDBC member-data paths** — `WatchRepository`/`WatchTargetRepository` (`WatchController`,
+  `/api/watches`), `AlertRepository`/`AlertDeliveryRepository` (internal-tier alert fanout),
+  `PushRepository` (`PushDeviceController`, `/api/devices`), `WinController`, `ChatService`,
+  `AppointmentService` (`/api/telehealth`), `BillingSubscriptionRepository`. These are
+  self-scoped in code today (`SelfScopedController`, in-controller caller checks) and stay so
+  until slice 4 retires the bespoke owner-guard hooks.
+- **Full-text search** — `SearchIndexService` queries `search_index` directly (tenant-only
+  predicate), so `/api/_search` can return a foreign record's id + `display_value` from an
+  owner-scoped collection. Semantic search goes through the adapter and *is* scoped. Until the
+  index is owner-filtered, don't put sensitive data in an owner-scoped collection's display field.
+- **Realtime** — events for owner-scoped collections are invalidation-only, but every tenant
+  subscriber still learns the collection name + record id of each change (the residual of
+  "Realtime socket has no per-subscriber FLS").
+- **Performance** — the owner predicate is on every read; index the owner field on large
+  collections (no generic index migration is added).
 
 ## Gateway served only static routes after starting before the worker (found 2026-10-07; fixed by bootstrap retry)
 
