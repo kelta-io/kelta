@@ -472,6 +472,23 @@ writes. `MANAGE_DELEGATED_ADMINS` rides the platform's "object perms == config p
 the scope collection's own generic route, same as every other setup collection. Security feature →
 **not auto-merged**.
 
+**Member self-profile is a second, narrower exception to the identity guard (KLT-379).**
+`PATCH /api/me/profile` (`MyProfileController`) lets any caller change `firstName`/`lastName`/
+`locale`/`timezone` on **their own** `users` row without `MANAGE_USERS`. The delegated-admin
+guardrails above are unchanged — this is a separate path, not a widening of delegation. Guardrails
+that MUST stay intact: the caller id comes **only** from `CallerContext` (never the path or body —
+no `CallerContext` → 404); the allow-list is a code constant (`MyProfileController.EDITABLE_FIELDS`),
+deliberately not configurable — widening it (above all to `email`, `status`, `profileId`,
+`userType`, `managerId`, `mfaEnabled`, `settings`) is a reviewed security change; and
+`IdentityCollectionGuardHook` honours `SelfProfileWriteContext` only for a `users` **update** whose
+target id equals the grant's user id and whose changed fields (bar the engine-stamped `updatedAt`)
+are all allow-listed — it is not a blanket pass like `DelegatedWriteContext`, so a bug in the
+controller still cannot reach another row or field. `user-permission-sets` is now in the guard's
+`GUARDED` set as the docs always claimed (the permission-set collections themselves were removed in
+#1186, so this is forward cover). Real-DB proof: `MemberSelfProfileScenarioTest` (a PORTAL member
+changes their timezone but not `profileId` via `/api/me/profile`, `/api/users/{id}` or
+`/api/operations`). Security feature → **not auto-merged**.
+
 **Mass-email campaigns are a spam-capable, partly-public surface (V152).** Guardrails that
 MUST stay intact:
 - `CAMPAIGN_TRACKING_SECRET` **must be set to a strong per-deployment value.** It signs the HMAC
