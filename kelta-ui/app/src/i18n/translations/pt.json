@@ -1495,6 +1495,16 @@
     "darkMode": "Escuro",
     "systemMode": "Sistema"
   },
+  "profileDialog": {
+    "title": "Seu perfil",
+    "firstName": "Nome",
+    "lastName": "Sobrenome",
+    "language": "Idioma",
+    "timezone": "Fuso horário",
+    "saved": "Perfil salvo",
+    "saveFailed": "Não foi possível salvar seu perfil",
+    "loadFailed": "Não foi possível carregar seu perfil"
+  },
   "availability": {
     "title": "A minha disponibilidade",
     "subtitle": "Os utentes podem marcar consultas nestes horários ({{timezone}}).",
