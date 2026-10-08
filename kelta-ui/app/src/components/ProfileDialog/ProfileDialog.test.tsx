@@ -1,7 +1,7 @@
 /**
  * ProfileDialog tests — the caller's own profile against a mocked /api/me/profile:
  * the form loads the saved values, a stored region locale maps onto the UI language,
- * save PATCHes exactly the four editable attributes, and server errors surface.
+ * save PATCHes only the attributes the user changed, and server errors surface.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -82,7 +82,7 @@ describe('ProfileDialog', () => {
     expect(screen.getByText('sam@example.com')).toBeInTheDocument()
   })
 
-  it('saves only the four editable attributes and closes', async () => {
+  it('saves only the changed attributes and closes', async () => {
     const user = userEvent.setup()
     mockGet.mockResolvedValue(profileDoc({}))
     mockPatch.mockResolvedValue(profileDoc({ firstName: 'Alex', locale: 'pt', timezone: 'UTC' }))
@@ -99,7 +99,7 @@ describe('ProfileDialog', () => {
     expect(mockPatch).toHaveBeenCalledWith('/api/me/profile', {
       data: {
         type: 'users',
-        attributes: { firstName: 'Alex', lastName: 'Member', locale: 'pt', timezone: 'UTC' },
+        attributes: { firstName: 'Alex', locale: 'pt', timezone: 'UTC' },
       },
     })
     expect(mockSetLocale).toHaveBeenCalledWith('pt')

@@ -107,7 +107,12 @@ export function ProfileDialog({ open, onOpenChange }: ProfileDialogProps) {
       apiClient.patch<MyProfileDocument>(PROFILE_URL, {
         data: {
           type: 'users',
-          attributes: { firstName, lastName, locale, timezone },
+          // Only what the user changed: an untouched "en_US" must not be rewritten as "en".
+          attributes: Object.fromEntries(
+            Object.entries(draft ?? {}).filter(
+              ([field, value]) => value !== loaded[field as keyof ProfileDraft]
+            )
+          ),
         },
       }),
     onSuccess: (updated) => {
