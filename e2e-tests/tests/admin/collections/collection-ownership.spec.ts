@@ -77,14 +77,14 @@ test.describe("Collection ownership", () => {
       firstName: "Owner",
       lastName: "Scoped",
     });
-    test.skip(invite.status !== 201, `portal invite unavailable (${invite.status})`);
+    expect(invite.status, `portal invite failed: ${JSON.stringify(invite.body)}`).toBe(201);
     const memberId = invite.body.userId as string;
 
     const minted = await api(adminToken, "POST", `/api/admin/users/${memberId}/tokens`, {
       name: "e2e owner scoping",
       expiresInDays: 1,
     });
-    test.skip(minted.status !== 200, `admin PAT mint unavailable (${minted.status})`);
+    expect(minted.status, `admin PAT mint failed: ${JSON.stringify(minted.body)}`).toBe(200);
     const memberToken = minted.body.token as string;
 
     const profiles = await api(
@@ -93,7 +93,7 @@ test.describe("Collection ownership", () => {
       `/api/profiles?filter[name][eq]=${encodeURIComponent("Portal User")}`,
     );
     const portalProfileId = profiles.body?.data?.[0]?.id as string | undefined;
-    test.skip(!portalProfileId, "no Portal User profile in this tenant");
+    expect(portalProfileId, "the Portal User profile is seeded for every tenant").toBeTruthy();
     await api(adminToken, "POST", "/api/profile-object-permissions", {
       data: {
         type: "profile-object-permissions",
@@ -117,10 +117,10 @@ test.describe("Collection ownership", () => {
       if (created.status === 201 || created.status === 200) break;
       await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
-    test.skip(
-      created.status !== 201 && created.status !== 200,
-      `portal member could not write after the grant (${created.status})`,
-    );
+    expect(
+      [200, 201],
+      `portal member could not write after the grant (${created.status}): ${JSON.stringify(created.body)}`,
+    ).toContain(created.status);
 
     // ── The member sees only their own row; staff see both ──
     const memberList = await api(memberToken, "GET", `/api/${name}`);
