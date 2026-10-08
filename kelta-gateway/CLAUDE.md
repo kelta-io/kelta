@@ -43,7 +43,7 @@ exchange.getAttributes().put("tenantId", tenantId);
 ```
 
 ### Dynamic Routing
-Routes are loaded from worker at startup and updated via NATS events:
+Routes are loaded from worker at startup and updated via NATS events. If the startup bootstrap fetch fails (worker not up yet), `RouteInitializer` retries it in the background with exponential backoff (`kelta.gateway.bootstrap-retry.*`, 2 s → 30 s) until it succeeds; NATS events never carry the full table, so without that retry collection routes stay missing:
 - `RouteRegistry` — in-memory route store
 - `DynamicRouteLocator` — bridges RouteRegistry with Spring Cloud Gateway
 - `RouteRefresher` — the only place that publishes `RefreshRoutesEvent`; `synchronized` so concurrent refreshes cannot lose the newer registry snapshot (`concerns.md` → Resolved). Mutate `RouteRegistry` first, then `refresh()`
