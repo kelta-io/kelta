@@ -2204,6 +2204,16 @@
     "darkMode": "Dark",
     "systemMode": "System"
   },
+  "profileDialog": {
+    "title": "Your profile",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "language": "Language",
+    "timezone": "Time zone",
+    "saved": "Profile saved",
+    "saveFailed": "Could not save your profile",
+    "loadFailed": "Could not load your profile"
+  },
   "analytics": {
     "title": "Analytics",
     "dashboardsSection": "Dashboards",

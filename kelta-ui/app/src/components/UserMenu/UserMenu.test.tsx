@@ -148,6 +148,17 @@ vi.mock('@/components/ui/button', () => ({
   ),
 }))
 
+// Stub the dialog: its own behaviour is covered by ProfileDialog.test.tsx; here we only check
+// that the Profile item opens it and that closing it unmounts it.
+vi.mock('@/components/ProfileDialog', () => ({
+  ProfileDialog: ({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) =>
+    open ? (
+      <div data-testid="profile-dialog">
+        <button onClick={() => onOpenChange(false)}>close-profile</button>
+      </div>
+    ) : null,
+}))
+
 import { getGravatarUrl } from '../../utils/gravatar'
 const mockGetGravatarUrl = vi.mocked(getGravatarUrl)
 
@@ -373,6 +384,17 @@ describe('UserMenu', () => {
       render(<UserMenu {...defaultProps} />)
       expect(screen.getByTestId('profile-menu-item')).toBeInTheDocument()
       expect(screen.getByTestId('profile-menu-item')).toHaveTextContent('Profile')
+    })
+
+    it('opens the profile dialog from the Profile item and closes it again', () => {
+      render(<UserMenu {...defaultProps} />)
+      expect(screen.queryByTestId('profile-dialog')).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('profile-menu-item'))
+      expect(screen.getByTestId('profile-dialog')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByText('close-profile'))
+      expect(screen.queryByTestId('profile-dialog')).not.toBeInTheDocument()
     })
 
     it('should navigate to setup when "Switch to Setup" is clicked', () => {

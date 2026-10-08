@@ -931,6 +931,16 @@
     "darkMode": "داكن",
     "systemMode": "النظام"
   },
+  "profileDialog": {
+    "title": "ملفك الشخصي",
+    "firstName": "الاسم الأول",
+    "lastName": "اسم العائلة",
+    "language": "اللغة",
+    "timezone": "المنطقة الزمنية",
+    "saved": "تم حفظ الملف الشخصي",
+    "saveFailed": "تعذر حفظ ملفك الشخصي",
+    "loadFailed": "تعذر تحميل ملفك الشخصي"
+  },
   "recordNav": {
     "sections": "الأقسام"
   },
