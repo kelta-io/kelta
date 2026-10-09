@@ -1,6 +1,12 @@
 # Kelta CLI — Cross-Platform Admin CLI + Local MCP (Parent Spec)
 
-> **Status:** parent planning spec. Authoritative contract for rebuilding `@kelta/cli` into a
+> **Status:** partially shipped (verified against main 2026-10-09) — slices 1
+> (`1-foundation.md`), 2 (`2-browser-login.md`) and 3 (`3-admin-surface.md`) **shipped**;
+> slices 4 (`4-ai-ergonomics.md`), 5 (`5-local-mcp.md`) and 6 (`6-distribution.md`)
+> **partially shipped** — each lists its remaining gaps under `## Open`. Do not file tasks
+> for anything not listed there.
+>
+> Authoritative contract for rebuilding `@kelta/cli` into a
 > first-class, AI-oriented, cross-platform CLI (`kelta`) that covers core admin features,
 > multi-project login with locally stored PAT profiles, collection/record CRUD, multiple
 > output formats, a local MCP surface, and self-update from the cluster. Each slice in the

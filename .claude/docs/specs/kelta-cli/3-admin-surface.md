@@ -1,5 +1,7 @@
 # Slice 3 — Admin Command Surface
 
+> **Status:** shipped — `kelta-web/packages/cli/src/commands/{collections,fields,picklists,validation,constraints,layouts,flows,users,limits,audit,records}.ts` (+ `src/admin/fieldBody.ts`); KLT-217 added `{pages,menus,dashboards,reports}.ts` (#1518). Picklist value commands shipped as `value-add`/`value-update`/`value-deactivate` and atomic batch as `records bulk`. Verified against main 2026-10-09. No open items.
+
 > Child of `specs/kelta-cli/README.md`. Brings the CLI to parity with (and slightly beyond)
 > the kelta-mcp admin toolset, all as registry commands so slice 5 inherits them.
 
