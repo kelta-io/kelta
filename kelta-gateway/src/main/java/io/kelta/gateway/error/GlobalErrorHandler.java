@@ -14,6 +14,7 @@ import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.resource.NoResourceFoundException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
@@ -135,7 +136,7 @@ public class GlobalErrorHandler implements ErrorWebExceptionHandler {
                 String.valueOf(status.value()),
                 code,
                 code,
-                statusEx.getReason() != null ? statusEx.getReason() : status.getReasonPhrase()
+                responseStatusDetail(statusEx, status, path)
             );
             log.warn("Response status exception for path: {}, correlationId: {}, status: {}, message: {}",
                 path, correlationId, status, statusEx.getReason());
@@ -184,7 +185,9 @@ public class GlobalErrorHandler implements ErrorWebExceptionHandler {
 
         // Serialize error response to JSON:API format
         try {
-            Map<String, Object> responseBody = Map.of("errors", List.of(error));
+            // Serialize the plain map, not the bean: the native image has no reflection
+            // metadata for JsonApiError, so the bean serialized as {"errors":[{}]}.
+            Map<String, Object> responseBody = Map.of("errors", List.of(error.toMap()));
             String json = objectMapper.writeValueAsString(responseBody);
             byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
             DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(bytes);
@@ -208,6 +211,19 @@ public class GlobalErrorHandler implements ErrorWebExceptionHandler {
 
             return exchange.getResponse().writeWith(Mono.just(buffer));
         }
+    }
+
+    /**
+     * A request that matched no gateway route surfaces as a reason-less 404 from the
+     * dispatcher, or as {@link NoResourceFoundException} ("No static resource ...") from
+     * the resource handler. Both mean the same thing, so name the path that missed.
+     */
+    private static String responseStatusDetail(ResponseStatusException ex, HttpStatus status, String path) {
+        if (ex instanceof NoResourceFoundException
+                || (status == HttpStatus.NOT_FOUND && ex.getReason() == null)) {
+            return "No route found for path: " + path;
+        }
+        return ex.getReason() != null ? ex.getReason() : status.getReasonPhrase();
     }
 
     /**
