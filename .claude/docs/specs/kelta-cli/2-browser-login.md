@@ -1,5 +1,7 @@
 # Slice 2 — Browser Login + PAT Lifecycle
 
+> **Status:** shipped — `kelta-web/packages/cli/src/auth/{pkce,loopbackServer,loginFlow,browser}.ts`, `src/commands/{auth,token}.ts`, expiry warning in `src/context.ts`; kelta-auth `ConnectedAppRegistrar` registers `kelta-cli` and `PlatformRedirectUriValidator` accepts its loopback callback. The commands shipped as `kelta auth login` / `kelta auth logout [--revoke]` (not top-level `kelta login`/`logout`). Verified against main 2026-10-09. No open items in the CLI; the live login round-trip against a deployed kelta-auth is still owed (see `status.md`).
+
 > Child of `specs/kelta-cli/README.md`, decision D4. **Security-typed slice: two PRs
 > (auth-server change, then CLI), neither gets auto-merge** (SECURITY.md rule; PR #1116
 > precedent).

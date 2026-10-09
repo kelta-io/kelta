@@ -1,5 +1,7 @@
 # Slice 6 — Distribution: Binaries, Downloads Service, Self-Update, Pipeline
 
+> **Status:** partially shipped — `kelta update [--check]` / `kelta version` (`kelta-web/packages/cli/src/commands/update.ts`), `src/update/{manifest,selfUpdate,passiveCheck}.ts`, binaries via `kelta-web/scripts/build-binaries.mjs`, `kelta-cli-downloads/` (Dockerfile, nginx.conf, install.sh, install.ps1), `cli-downloads` matrix entry + in-cluster smoke in `build-and-publish-containers.yml`; `https://downloads.kelta.io/cli/manifest.json` is live. See [Open](#open). Verified against main 2026-10-09.
+
 > Child of `specs/kelta-cli/README.md`, decisions D1 + D5. Ships `kelta` as self-updating
 > single-file binaries served from the cluster, published on every merge to main.
 
@@ -102,3 +104,12 @@ N/A.
   `emf-cli-downloads` tags (keep last N) noted for homelab-argo housekeeping.
 - Runner arch is linux/amd64 — bun cross-compile needs no QEMU, but the docker image build
   is amd64-only like every other service (fine: nginx serves static bytes).
+
+## Open
+
+Promised above but absent from `kelta-web/packages/cli/` on main (2026-10-09):
+
+- **Config-file update settings** — the update URL override and the passive-check opt-out
+  are env-only (`KELTA_UPDATE_URL` in `src/update/manifest.ts`, `KELTA_UPDATE_CHECK=0` in
+  `src/update/passiveCheck.ts`); `ConfigFile` in `src/config/store.ts` has no update
+  settings, so the "profile setting" / "or config" paths in §1 do not exist.

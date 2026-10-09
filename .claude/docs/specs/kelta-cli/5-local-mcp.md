@@ -1,5 +1,7 @@
 # Slice 5 — Local MCP: `kelta mcp serve` + `kelta mcp install`
 
+> **Status:** partially shipped — `kelta mcp serve` (`--toolset`, `--source`, `--mcp-url`, `--enable-api-tool`) and `kelta mcp install <claude-code|claude-desktop|cursor|generic> [--direct]` in `kelta-web/packages/cli/src/commands/mcp.ts`; bridge + local tools in `src/mcp/{server,remote,localTools}.ts`; stdout ownership pinned by `src/registry/stdoutOwnership.test.ts`. See [Open](#open). Verified against main 2026-10-09.
+
 > Child of `specs/kelta-cli/README.md`. Exposes all CLI features over stdio MCP and bridges
 > the hosted kelta-mcp toolsets behind profile-managed auth.
 
@@ -90,3 +92,15 @@ N/A.
 - If the CLI binary (slice 6) is the installed artifact, `mcp install` must reference the
   absolute binary path on Windows (`kelta.exe`) — handled by the installer writing config
   with resolved paths.
+
+## Open
+
+Promised above but absent from `kelta-web/packages/cli/` on main (2026-10-09):
+
+- **`kelta mcp install` writing the client config file** — `src/commands/mcp.ts` only
+  prints the config to merge (for `~/.claude.json`, `claude_desktop_config.json`,
+  `.cursor/mcp.json`); nothing writes it, unlike the "Added MCP server … to
+  ~/.claude.json" sample in §2.
+- **`--mcp-url` help text** — `src/commands/mcp.ts` still describes the default as
+  "api.→mcp. derivation" (and `mcp install --direct` falls back to `https://mcp.kelta.io`),
+  while `deriveMcpUrl` in `src/mcp/remote.ts` returns the API origin as specified above.

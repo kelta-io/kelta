@@ -1,5 +1,7 @@
 # Slice 4 — AI Ergonomics: Manifest, `kelta api`, Agent Contract
 
+> **Status:** partially shipped — `kelta manifest [--group]` (`kelta-web/packages/cli/src/commands/manifest.ts`, `src/registry/manifest.ts`), `kelta api` (`src/commands/api.ts`), `kelta docs agent` + generated `AGENTS.md`/`COMMANDS.md` (`src/docsgen/`, `kelta-web/scripts/gen-docs.mjs`, freshness pinned by `docsgen.test.ts`), `requestId` on errors (`src/errors.ts`), `--all` 10k cap (`src/commands/records.ts`). See [Open](#open). Verified against main 2026-10-09.
+
 > Child of `specs/kelta-cli/README.md`. The "focus the tool for AI use" slice: make every
 > capability discoverable and predictable for an agent without a human in the loop.
 
@@ -70,3 +72,15 @@ N/A.
   scoping; document that Cerbos/gateway remain the enforcement layer (they do today).
 - Manifest size (~all commands) is fine for context windows now; if it grows, add
   `kelta manifest --group <g>` filtering (already trivial via registry).
+
+## Open
+
+Promised above but absent from `kelta-web/packages/cli/` on main (2026-10-09):
+
+- **`--no-color` global flag and `KELTA_NO_COLOR`** — not registered (global flags are
+  `--profile`, `--output`, `--raw`, `--quiet`, `--yes`). The CLI emits no ANSI color at all
+  (`src/docsgen/agentGuide.ts`: "NO_COLOR needs no special handling"), so the flag would be
+  a no-op; close by adding it as one or by dropping the requirement.
+- **Per-command `examples` and output-shape hints in `kelta manifest`** — `ManifestCommand`
+  in `src/registry/manifest.ts` carries summary, dangerous, requiresAuth, positionals,
+  options and `inputSchema` only.

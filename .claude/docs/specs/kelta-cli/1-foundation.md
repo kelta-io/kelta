@@ -1,5 +1,7 @@
 # Slice 1 — CLI Foundation: Registry, Profiles, Output, SDK Re-base, CI
 
+> **Status:** shipped — `kelta-web/packages/cli/src/registry/` (command registry), `src/config/store.ts` (profiles + `~/.keltarc` migration), `src/render/`, `src/errors.ts`, `src/context.ts`; built in the kelta-web root `build`; e2e smoke `e2e-tests/tests/admin/cli-smoke.spec.ts`. Verified against main 2026-10-09. No open items.
+
 > Child of `specs/kelta-cli/README.md`. Implements decisions D2 (SDK re-base) and D3
 > (command registry), plus the profile store and output/error contracts every later slice
 > builds on.
