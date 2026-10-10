@@ -1257,6 +1257,19 @@ phases their own independent deadlines (5m / 3m) instead of one shared budget. I
 step's timeouts again, keep them independent — recombining them into a single shared deadline
 reintroduces the starvation bug.
 
+**`rollout status` succeeding does not mean every Service endpoint accepts connections.** In
+run 38085868800 the same step's Phase 3 docs probes ran right after
+`kubectl rollout status` reported success (it had just printed `1 old replicas are pending
+termination...`): `/docs/` returned 200 and, milliseconds later, `/docs/reference/jsonapi/`
+returned **`000`** — no HTTP response at all — because a terminating old pod was still in the
+`emf-marketing` Service endpoints after nginx had stopped accepting connections. The same race
+dropped real kelta.io requests on every rollout. Fixed (PLT-477) in two places: the manifest
+gives the container a `preStop` `sleep 5` (with `terminationGracePeriodSeconds: 30`) so
+kube-proxy removes the pod before nginx quits, and the docs probes retry **only** `000`, for up
+to 30s per path, failing with a distinct "unreachable" error when that runs out. Any real non-200
+code (the 404 of run 35576779660) still fails on the first response — do not widen the retry to
+other codes.
+
 ## Dependency Risks
 
 - **Local builds used to depend on the homelab; CI and production still do, by design.**

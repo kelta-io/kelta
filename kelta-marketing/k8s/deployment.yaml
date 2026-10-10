@@ -48,6 +48,8 @@ spec:
       labels:
         app: emf-marketing
     spec:
+      # Must exceed the preStop sleep below plus nginx's own graceful quit.
+      terminationGracePeriodSeconds: 30
       # The emf Harbor project is private; every other emf-* Deployment pulls
       # with this secret. Without it the kubelet gets "pull access denied" and
       # the site sits in ImagePullBackOff (0/2) even though CI verified the tag.
@@ -59,6 +61,15 @@ spec:
           ports:
             - containerPort: 80
               protocol: TCP
+          # PLT-477: keep serving for a few seconds after the pod is marked
+          # Terminating, so kube-proxy can drop it from the Service endpoints
+          # before nginx stops accepting connections. Without this, requests
+          # routed to a terminating pod get connection refused (curl `000`) on
+          # every rollout — run 38085868800's smoke hit exactly that.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
           resources:
             requests:
               cpu: 50m

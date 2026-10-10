@@ -212,4 +212,42 @@ describe('deploy wiring', () => {
     expect(workflow).toContain('DEPLOY=emf-marketing');
     expect(workflow).not.toContain('not deployed in ${NS} yet (argo sync pending)');
   });
+
+  // PLT-477 / run 38085868800: a terminating old pod was still in the Service
+  // endpoints when `rollout status` returned, nginx had already stopped, and a docs
+  // probe got curl `000`. The preStop delay lets kube-proxy drop the pod first.
+  it('delays container shutdown with a preStop hook shorter than the grace period', () => {
+    const manifests = read('kelta-marketing', 'k8s', 'deployment.yaml');
+    const preStop = manifests.match(
+      /^\s*lifecycle:\n\s*preStop:\n\s*exec:\n\s*command: \["sleep", "(\d+)"\]$/m,
+    );
+    expect(preStop).not.toBeNull();
+    const grace = manifests.match(/^\s*terminationGracePeriodSeconds: (\d+)$/m);
+    expect(grace).not.toBeNull();
+    expect(Number(grace![1])).toBeGreaterThan(Number(preStop![1]));
+  });
+
+  it('retries docs probes only on curl 000 and fails any other non-200 at once', () => {
+    const workflow = read('.github', 'workflows', 'build-and-publish-containers.yml');
+    const marketing = workflow.slice(workflow.indexOf('DEPLOY=emf-marketing'));
+    const smoke = marketing.slice(0, marketing.indexOf('Marketing smoke OK'));
+    const loop = smoke.slice(smoke.indexOf('for path in /docs/ /docs/reference/jsonapi/'));
+    expect(loop.length).toBeLessThan(smoke.length);
+
+    // The retry loop breaks out on anything that is not 000, bounded by ~30s.
+    expect(loop).toContain('UNREACHABLE_DEADLINE=$(( $(date +%s) + 30 ))');
+    expect(loop).toContain('if [ "${CODE}" != "000" ] && [ -n "${CODE}" ]; then\n                break');
+    const unreachable = loop.indexOf('was unreachable for 30s (curl 000');
+    const notBuilt = loop.indexOf('did not build into the image');
+    expect(unreachable).toBeGreaterThan(0);
+    expect(notBuilt).toBeGreaterThan(unreachable);
+    // The non-200 check sits after the retry loop, so 404/500 fail on first response.
+    const retryEnd = loop.indexOf('done');
+    expect(loop.indexOf('if [ "${CODE}" != "200" ]; then')).toBeGreaterThan(retryEnd);
+    expect(notBuilt).toBeGreaterThan(retryEnd);
+
+    // PLT-282: Phase 1 and Phase 2 keep their own deadlines.
+    expect(smoke).toContain('EXISTENCE_DEADLINE=$(( $(date +%s) + 300 ))');
+    expect(smoke).toContain('SERVE_DEADLINE=$(( $(date +%s) + 180 ))');
+  });
 });

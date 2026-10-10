@@ -907,8 +907,25 @@ jobs:
           done
           kubectl -n "${NS}" rollout status deploy/"${DEPLOY}" --timeout=180s
 
+          # `rollout status` returns once the old ReplicaSet scales to zero, but a
+          # terminating old pod can still sit in the Service endpoints for a moment, so
+          # a probe may get no HTTP response at all (curl `000`, run 38085868800). Retry
+          # ONLY `000`, for at most ~30s per path; any real HTTP code other than 200
+          # (e.g. the 404 of run 35576779660) still fails on the first response.
           for path in /docs/ /docs/reference/jsonapi/ /pagefind/pagefind-entry.json; do
-            CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}${path}" || true)
+            UNREACHABLE_DEADLINE=$(( $(date +%s) + 30 ))
+            while :; do
+              CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}${path}" || true)
+              if [ "${CODE}" != "000" ] && [ -n "${CODE}" ]; then
+                break
+              fi
+              if [ "$(date +%s)" -ge "${UNREACHABLE_DEADLINE}" ]; then
+                echo "::error::${BASE}${path} was unreachable for 30s (curl 000: connection refused/reset, no HTTP response) — the emf-marketing Service had no pod accepting connections."
+                exit 1
+              fi
+              echo "no HTTP response from ${BASE}${path} (000), retrying…"
+              sleep 3
+            done
             if [ "${CODE}" != "200" ]; then
               echo "::error::${BASE}${path} returned ${CODE}, expected 200 — the docs site or its search index did not build into the image."
               exit 1
