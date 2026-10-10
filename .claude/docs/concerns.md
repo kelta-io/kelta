@@ -2094,6 +2094,14 @@ Anything that reads or writes the table some other way is **not** narrowed:
   until it consumes `kelta.config.collection.changed`. Turning scoping **on** for a collection
   that already holds member data therefore leaves a short window where another pod still returns
   every member's rows. Enable ownership before members write, or accept the NATS lag.
+- **Same-pod refresh ordering** — the serving pod's synchronous refresh and its own NATS
+  consumer (still working through the collection's earlier CREATED/field events) both read the
+  `collection` row and then register a definition. Unordered, a consumer read taken before the
+  PATCH committed could register *after* the synchronous refresh and put the unscoped definition
+  back until the next event. `CollectionLifecycleManager` holds a per-collection monitor across
+  read → register in `initializeCollection`/`refreshCollection`/`refreshOrInitializeLocally`, so
+  the later refresh always reads later (`CollectionLifecycleManagerConcurrencyTest`). Don't add
+  a registry write outside that monitor.
 
 ## Gateway served only static routes after starting before the worker (found 2026-10-07; fixed by bootstrap retry)
 

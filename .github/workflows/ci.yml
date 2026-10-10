@@ -540,6 +540,11 @@ jobs:
           MAVEN_OPTS: "-Xmx1g -XX:MaxMetaspaceSize=384m -Dmaven.wagon.http.retryHandler.count=10 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true -Daether.connector.http.retryHandler.count=10"
         run: mvn verify -f kelta-test-harness/pom.xml -Pintegration-tests -B
 
+      - name: Annotate harness failures
+        continue-on-error: true
+        if: failure()
+        run: scripts/ci/annotate-test-failures.sh kelta-test-harness/target/failsafe-reports
+
       - name: Upload harness reports
         continue-on-error: true
         if: failure()

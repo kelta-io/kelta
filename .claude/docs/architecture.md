@@ -489,7 +489,9 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     `kelta.config.collection.changed.<id>` (every pod refreshes) **and** refreshes the serving pod
     synchronously (`CollectionConfigEventPublisher` → `refreshOrInitializeLocally`, the #910
     read-after-write exception), so the response means that pod already enforces the new scope.
-    Other pods follow when they consume the event.
+    Other pods follow when they consume the event. Refreshes of one collection are serialized
+    per collection in `CollectionLifecycleManager`, so an in-flight NATS refresh that read the
+    row before the PATCH cannot register its stale definition afterwards.
   - **Realtime:** `RecordChangedPayload.ownerScoped=true` → `RealtimeBridge` publishes
     invalidation-only (no `data`); clients refetch through the scoped JSON:API path.
   - **Not covered:** anything reading the table without `QueryEngine` → the storage adapter —
