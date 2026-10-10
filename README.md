@@ -62,26 +62,24 @@ provided by the internal `kelta-auth` service — no external identity server re
 - Java 25 (GraalVM Community 25.0.2; see `.tool-versions`)
 - Maven 3.9+
 - Node.js 20.19+ (pinned by `kelta-ui/app`'s `engines`; on 18 its test suite cannot start)
-- Docker & Docker Compose
+- Docker & Docker Compose (v2.24+) — all the [Quickstart](#quickstart) needs; the rest is for
+  building from source
   - `make up` builds GraalVM native images and needs **~24 GB allocated to Docker**.
     With less, use `make up-jvm` — see [Native vs JVM images](#native-vs-jvm-images).
 
 ## Quickstart
 
-Clone the repo, start the stack, open the UI, and create your first collection.
+Start a released Kelta stack, open the UI, and create your first collection. Nothing is
+built: Compose pulls the version pinned by `KELTA_VERSION` in `.env` from `ghcr.io/kelta-io`,
+so Docker and `make` are all you need — no JDK, Maven or Node.
 
 ```bash
-make setup   # first time only: copies .env, generates dev signing keys
-make up-jvm  # starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
-make seed    # waits for the stack to be healthy, prints login info
+make setup                  # first time only: copies .env.example → .env, generates dev signing keys
+docker compose up -d --wait # pulls + starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
 ```
 
-`make up-jvm` builds the Java services as ordinary JVM images, which fit a default Docker
-Desktop memory allocation and build in a few minutes. It is the same image type the
-`quickstart` CI job builds and times on every relevant PR, so this is the path that is
-known to work. `make up` builds GraalVM native images — what production runs — but needs
-**~24 GB allocated to Docker**; on a default allocation it fails with
-`cannot allocate memory`. See [Native vs JVM images](#native-vs-jvm-images).
+To build this checkout from source instead, run `make up-jvm` — see
+[From source](#from-source-contributors).
 
 1. Open **http://localhost:5173/default/** and sign in as `admin@kelta.local` with the
    first-boot password kelta-auth prints once in its log
@@ -98,16 +96,29 @@ service list.
 
 ## Local Development
 
-### One-command start
+### From source (contributors)
+
+The Quickstart runs a released version. To run *this checkout*, every `make up*` target layers
+`docker-compose.build.yml` on `docker-compose.yml` and builds the Kelta services from source:
 
 ```bash
 make setup   # first time only: copies .env, generates RSA JWK + AES key
-make up      # starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
+make up-jvm  # builds + starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
 make seed    # waits for healthy stack, then prints credentials
 ```
 
-> **Build fails with `cannot allocate memory`?** That's GraalVM native-image, not a
-> code error. Run `make up-jvm` instead — see [Native vs JVM images](#native-vs-jvm-images).
+`make up-jvm` builds the Java services as ordinary JVM images, which fit a default Docker
+Desktop memory allocation and build in a few minutes. `make up` builds GraalVM native
+images — what production runs — but needs **~24 GB allocated to Docker**; on a default
+allocation it fails with `cannot allocate memory`, which is native-image, not a code error.
+See [Native vs JVM images](#native-vs-jvm-images). Built images are named
+`<project>-<service>`, never the `ghcr.io/kelta-io` release tags, so a build and a pulled
+release never stand in for each other.
+
+**Running a different release.** Set `KELTA_VERSION` in `.env` (the tags are listed on
+`ghcr.io/kelta-io/kelta-gateway`) and run `docker compose up -d` again. The `ai` and `seed`
+profiles are not released images; they need the from-source targets (`make up-jvm-ai`,
+`make seed`).
 
 Platform admin (seeded by Flyway; kelta-auth replaces the seeded password on first boot):
 

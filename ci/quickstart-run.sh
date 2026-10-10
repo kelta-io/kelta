@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Orchestrates the timed portion of the "quickstart" CI job (see
-# .github/workflows/ci.yml): start the stack, read the platform admin's first-boot
-# password from the kelta-auth log the way quickstart.md tells a new user to, complete
-# the forced password change, then run ci/quickstart-check.sh against the stack from a
-# sibling container on the compose network.
+# .github/workflows/ci.yml): start the stack (the released images pinned by
+# KELTA_VERSION, pulled beforehand — docker-compose.ci.yml builds no Kelta service),
+# read the platform admin's first-boot password from the kelta-auth log the way
+# quickstart.md tells a new user to, complete the forced password change, then run
+# ci/quickstart-check.sh against the stack from a sibling container on the compose
+# network.
 #
 # Docker on the k8s-runner-integration runner is remote — containers can't see
 # the runner's filesystem, so the scripts are piped in over stdin rather

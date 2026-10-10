@@ -1,10 +1,12 @@
 // CLI for .github/workflows/release.yml. Usage (Node >= 24):
 //   node .github/release/release.ts plan                    → GITHUB_OUTPUT: publish, tag, version, prerelease, latest
-//   node .github/release/release.ts check-images <compose.json>  → GITHUB_OUTPUT: images; exit 1 on drift
+//   node .github/release/release.ts check-images <build.json> <base.json>  → GITHUB_OUTPUT: images; exit 1 on drift
+//     build.json = docker-compose.yml + docker-compose.build.yml + docker-compose.jvm.yml (what the release builds)
+//     base.json  = docker-compose.yml alone (what the quickstart pulls)
 //   node .github/release/release.ts notes <ref> <out.md>    → release notes since the previous v* tag
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { composeBuiltImages, imageDrift, renderNotes, resolvePlan } from './lib.ts';
+import { composeBuiltImages, imageDrift, pinDrift, renderNotes, resolvePlan } from './lib.ts';
 import type { Commit, Image } from './lib.ts';
 
 function output(values: Record<string, string | boolean>): void {
@@ -46,7 +48,8 @@ switch (command) {
   case 'check-images': {
     const release: Image[] = JSON.parse(process.env.IMAGES ?? '[]');
     const compose = composeBuiltImages(JSON.parse(readFileSync(args[0], 'utf8')));
-    const errors = imageDrift(release, compose);
+    const base = JSON.parse(readFileSync(args[1], 'utf8'));
+    const errors = [...imageDrift(release, compose), ...pinDrift(release, base, process.env.REGISTRY ?? 'ghcr.io/kelta-io')];
     if (errors.length > 0) {
       for (const e of errors) console.log(`::error::${e}`);
       console.log('Update IMAGES in .github/workflows/release.yml to match the quickstart compose stack.');

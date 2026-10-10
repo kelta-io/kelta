@@ -1266,7 +1266,7 @@ reintroduces the starvation bug.
   measured at 4.6–46 kB/s, most of a 14-minute first build — and could not build at all if the
   homelab was unreachable. The four `Dockerfile.jvm` files now take `BASE_REGISTRY` and
   `MAVEN_MIRROR` build args whose **defaults are the homelab values**, so every build that
-  passes no args (the deploy workflow, `docker-compose.ci.yml` for e2e/quickstart) is unchanged;
+  passes no args (the deploy workflow, `docker-compose.ci-build.yml` for e2e) is unchanged;
   only `docker-compose.jvm.yml` overrides them to Docker Hub + Maven Central. **Still
   homelab-bound:** the native `Dockerfile`s (`make up`, production images) and
   `docker/bootstrap/Dockerfile` (`make seed`) — the native path is the production-parity one and
