@@ -4,9 +4,24 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      # Manual fallback for the e2e-tests/.update-snapshots marker (see the e2e job's
+      # "Regenerate visual baselines" step). Both empty = an ordinary dispatch.
+      update_snapshots_ref:
+        description: Branch to regenerate Playwright visual baselines on and push to (never main)
+        type: string
+        required: false
+        default: ''
+      update_snapshots_specs:
+        description: Space-separated spec paths relative to e2e-tests/ (under tests/), e.g. tests/end-user/object-detail-visual.spec.ts
+        type: string
+        required: false
+        default: ''
 
+# A baseline-regeneration dispatch gets its own group per target branch, so two of them
+# (both dispatched from main) do not cancel each other.
 concurrency:
-  group: ci-${{ github.head_ref || github.ref }}
+  group: ci-${{ github.head_ref || github.ref }}${{ inputs.update_snapshots_ref && format('-update-snapshots-{0}', inputs.update_snapshots_ref) || '' }}
   cancel-in-progress: true
 
 env:
@@ -49,6 +64,7 @@ jobs:
       templates: ${{ steps.filter.outputs.templates }}
       workflows: ${{ steps.filter.outputs.workflows }}
       dora: ${{ steps.filter.outputs.dora }}
+      update_snapshots: ${{ steps.snapshots.outputs.update_snapshots }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -56,11 +72,32 @@ jobs:
           # paths-filter needs full history to diff against PR base
           fetch-depth: 0
 
+      # A baseline-regeneration dispatch runs the e2e job only: with no filter outputs
+      # every other job skips.
       - name: Filter paths
         id: filter
+        if: github.event_name != 'workflow_dispatch' || inputs.update_snapshots_ref == ''
         uses: dorny/paths-filter@v4
         with:
           filters: .github/path-filters.yml
+
+      # The marker counts only if the PR head still has it AND this PR's diff touches it,
+      # so a marker merged to main by mistake cannot trigger regeneration on other PRs.
+      - name: Detect visual baseline marker (e2e-tests/.update-snapshots)
+        id: snapshots
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          marker=e2e-tests/.update-snapshots
+          if git cat-file -e "$HEAD_SHA:$marker" 2>/dev/null \
+            && [ -n "$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- "$marker")" ]; then
+            echo "update_snapshots=true" >> "$GITHUB_OUTPUT"
+            echo "$marker present on the PR head: the e2e job regenerates baselines instead of testing."
+          else
+            echo "update_snapshots=false" >> "$GITHUB_OUTPUT"
+          fi
 
   # ===========================================================================
   # Build runtime + test changed Java services in parallel
@@ -563,7 +600,9 @@ jobs:
   e2e:
     name: E2E Tests
     needs: changes
-    if: needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
+    if: >-
+      needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
+      || (github.event_name == 'workflow_dispatch' && inputs.update_snapshots_ref != '')
     runs-on: k8s-runner-integration
     timeout-minutes: 45
     # Per-branch concurrency: cancel an in-flight run when the PR is updated.
@@ -571,7 +610,7 @@ jobs:
     # bindings and COMPOSE_PROJECT_NAME namespacing container names; Playwright
     # runs inside a container on the compose network so no host ports are needed.
     concurrency:
-      group: e2e-${{ github.head_ref || github.ref }}
+      group: e2e-${{ github.head_ref || github.ref }}${{ inputs.update_snapshots_ref && format('-update-snapshots-{0}', inputs.update_snapshots_ref) || '' }}
       cancel-in-progress: true
     env:
       COMPOSE_PROJECT_NAME: ci-${{ github.run_id }}-${{ github.run_attempt }}
@@ -592,8 +631,12 @@ jobs:
       KELTA_BOOTSTRAP_ADMIN_PASSWORD: ci-bootstrap-admin-secret
       E2E_ADMIN_PASSWORD: ci-e2e-admin-secret
     steps:
+      # A baseline-regeneration dispatch builds and tests the target branch; on every other
+      # event update_snapshots_ref is empty and checkout keeps its default (the PR merge ref).
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.update_snapshots_ref }}
 
       # A named builder on the node's Docker daemon (the runner mounts the host socket)
       # outlives the job, so its layer cache and the Dockerfiles' per-service ~/.m2 cache
@@ -672,6 +715,53 @@ jobs:
           COPY kelta-web /kelta-web
           DOCKERFILE
 
+      # One environment for every Playwright container in this job (tests and baseline
+      # regeneration). docker reads --env-file on the client, so the remote daemon is fine.
+      - name: Write Playwright runner environment
+        run: |
+          cat > "$RUNNER_TEMP/e2e-runner.env" <<EOF
+          CI=true
+          E2E_BASE_URL=http://kelta-ui:8080
+          E2E_API_BASE_URL=http://kelta-gateway:8080
+          E2E_AUTH_BASE_URL=http://kelta-auth:8081
+          E2E_AUTH_DIRECT_LOGIN_URL=http://kelta-auth:8081
+          E2E_BROWSER_HOST_RULES=MAP auth.localhost kelta-auth
+          E2E_BROWSER_SECURE_ORIGINS=http://kelta-ui:8080
+          E2E_REAL_SIGN_IN=true
+          E2E_TENANT_SLUG=default
+          E2E_TEST_USERNAME=admin
+          E2E_TEST_PASSWORD=$E2E_ADMIN_PASSWORD
+          EOF
+
+      # Visual baselines (*-snapshots/*-chromium-linux.png) can only be produced here, so a PR
+      # regenerates its own: add e2e-tests/.update-snapshots (one spec per line, relative to
+      # e2e-tests/) or dispatch this workflow with update_snapshots_ref/_specs. ci/update-snapshots.sh
+      # runs --update-snapshots, commits the PNGs + the marker deletion to the head branch and
+      # exits 1, so `Run Playwright tests` below does not run; the push starts a normal run.
+      # ARGOCD_REPO_TOKEN (a PAT), never GITHUB_TOKEN: a GITHUB_TOKEN push triggers no workflow.
+      - name: Regenerate visual baselines (commit + push to the head branch, then fail)
+        id: update_snapshots
+        if: >-
+          (github.event_name == 'pull_request'
+            && needs.changes.outputs.update_snapshots == 'true'
+            && github.event.pull_request.head.repo.full_name == github.repository
+            && github.event.pull_request.head.ref != 'main')
+          || (github.event_name == 'workflow_dispatch'
+            && inputs.update_snapshots_ref != ''
+            && inputs.update_snapshots_ref != 'main')
+        timeout-minutes: 30
+        env:
+          SNAPSHOTS_REF: ${{ github.event.pull_request.head.ref || inputs.update_snapshots_ref }}
+          SNAPSHOTS_SPECS: ${{ inputs.update_snapshots_specs }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_TOKEN: ${{ secrets.ARGOCD_REPO_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          E2E_ENV_FILE: ${{ runner.temp }}/e2e-runner.env
+        run: |
+          # The stack and runner image were built from this checkout; refuse to commit
+          # baselines onto a head that has moved since.
+          EXPECTED_SHA="${PR_HEAD_SHA:-$(git rev-parse HEAD)}" bash ci/update-snapshots.sh
+
       - name: Run Playwright tests (sibling container on compose network)
         id: playwright
         run: |
@@ -680,17 +770,7 @@ jobs:
           docker rm -f "$CONTAINER" 2>/dev/null || true
           docker run --name "$CONTAINER" \
             --network "$NETWORK" \
-            -e CI=true \
-            -e E2E_BASE_URL=http://kelta-ui:8080 \
-            -e E2E_API_BASE_URL=http://kelta-gateway:8080 \
-            -e E2E_AUTH_BASE_URL=http://kelta-auth:8081 \
-            -e E2E_AUTH_DIRECT_LOGIN_URL=http://kelta-auth:8081 \
-            -e "E2E_BROWSER_HOST_RULES=MAP auth.localhost kelta-auth" \
-            -e E2E_BROWSER_SECURE_ORIGINS=http://kelta-ui:8080 \
-            -e E2E_REAL_SIGN_IN=true \
-            -e E2E_TENANT_SLUG=default \
-            -e E2E_TEST_USERNAME=admin \
-            -e E2E_TEST_PASSWORD="$E2E_ADMIN_PASSWORD" \
+            --env-file "$RUNNER_TEMP/e2e-runner.env" \
             kelta-e2e-runner:local \
             npx playwright test
 
@@ -1085,6 +1165,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      # ci/update-snapshots.sh pushes to PR branches; its own tests run with the workflow lint.
+      - name: Set up Node.js 24 (ci/update-snapshots.test.ts strips types natively)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Test ci/update-snapshots.sh
+        run: node --test ci/update-snapshots.test.ts
 
       - name: Install actionlint
         run: |
