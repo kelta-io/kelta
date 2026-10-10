@@ -236,6 +236,44 @@ release stays under GitHub's 125,000-character body limit, with a compare / hist
 A new ghcr.io package created by the first push may be **private**; its visibility is set
 once, by hand, in the org's package settings.
 
+## `upgrade-test.yml` — Release → HEAD upgrade on the same volumes
+
+Its own workflow (not a `ci.yml` job, so not in `quality-gate`) because its trigger is a narrow
+path list: `pull_request` to `main` touching `kelta-worker/src/main/resources/db/migration/**`,
+`docker-compose*.yml`, `**/Dockerfile*`, `docker/cerbos/**`, `.env.example`, the workflow itself,
+`ci/upgrade-*` or `ci/admin-first-sign-in.sh`; plus `workflow_dispatch`. One job, `upgrade`, on
+`k8s-runner-integration`, `timeout-minutes: 35`, `shell: bash` (pipefail — the verify step pipes
+into `tee`). It is the path `UPGRADING.md` documents, run once per PR:
+
+1. **Release lookup.** Checkout with `fetch-depth: 0` + `fetch-tags`; `git describe --tags
+   --abbrev=0 --match 'v*.*.*' HEAD` is the newest release tag that is an ancestor of HEAD; no
+   such tag fails the job. `version` = tag minus `v`.
+2. **Runner image + self-test.** `docker buildx build --load` of `upgrade-runner:<project>`
+   (`alpine:3.20` + bash/curl/jq, context `ci/` only), then `bash /ci/upgrade-verify.test.sh` in
+   it — the verify script's stub-mode tests, before anything expensive.
+3. **HEAD build first** (bake `--load` on `kelta-ci`, the `e2e` file set), so the release stack
+   is never left idle waiting on a build.
+4. **Release stack.** `COMPOSE_FILE=docker-compose.yml:docker-compose.ci.yml` with
+   `KELTA_VERSION=<version>` in the step env (shell env beats `.env` for interpolation; the
+   pull step greps `config --images` to prove the tag took). `timeout 300 pull`, `timeout 420
+   up -d --wait --wait-timeout 300`, `ci/admin-first-sign-in.sh` (`KELTA_BOOTSTRAP_ADMIN_PASSWORD`
+   → `ADMIN_PASSWORD`), then `ci/upgrade-seed.sh` in the runner image → `_upgrade/seed.json`.
+5. **`docker compose stop`** (never `down`), the release containers' logs saved to
+   `_logs/release/`, and `docker volume inspect <project>_postgres_data` to show the volume is
+   still there.
+6. **HEAD stack** on the same `COMPOSE_PROJECT_NAME` (`upg-<run_id>-<attempt>`, fixed for the
+   job — that is what makes the volumes shared), `COMPOSE_FILE` = the `e2e` from-source set,
+   `timeout 840 up -d --wait --wait-timeout 420`. kelta-worker runs Flyway on boot
+   (`SPRING_FLYWAY_ENABLED=true` in compose), so every migration since the release is applied to
+   real release data here.
+7. **`ci/upgrade-verify.sh`** re-reads every seeded resource; its output goes to the step summary.
+
+Every step has `timeout-minutes` and every compose/curl/wait call inside it a `timeout` or `-m`.
+**Artifact** on failure: `upgrade-test-logs` — `docker compose logs --no-color` per service (every
+service from `config --services`) for both the release (`_logs/release/`) and HEAD
+(`_logs/head/`) containers, plus `_upgrade/seed.json`; the HEAD worker's log tail is also
+printed inline (it carries the Flyway run). `down -v` and the runner image removal run always.
+
 ## Other workflows
 
 - `build-runner-image.yml` — builds the self-hosted CI runner image.

@@ -203,6 +203,37 @@ write with `page.route(...)`, assert the request body, and `route.fulfill(...)` 
 response (`tests/admin/setup/email-settings.spec.ts`). Records a test creates are fine as long as
 it tears them down.
 
+## Upgrade test (CI)
+
+`.github/workflows/upgrade-test.yml` checks that data written on the last release survives an
+upgrade to HEAD (job detail: `ci-cd.md` → `upgrade-test.yml`). The pattern, for anything that
+must be checked *across* a version change rather than on one build:
+
+- **Two stacks, one `COMPOSE_PROJECT_NAME`.** The release is the base compose with
+  `KELTA_VERSION` set; HEAD is the same project with the build overrides layered on. Same project
+  ⇒ same named volumes. Between them `docker compose stop`, never `down -v`.
+- **Seed through the API, record what came back.** `ci/upgrade-seed.sh` writes one tenant
+  (`tenants` record on `default` + `POST /api/tenants/{id}/bootstrap-token` for its admin), a
+  collection `upgrade_items` with STRING/INTEGER/DOUBLE/BOOLEAN/DATE fields, three records and a
+  user, then GETs each back and prints the values *the release returned* as the baseline
+  (`checks[]`: label, scope `platform|tenant`, path, attributes). Diffing against what was sent
+  would flag release-side normalisation as an upgrade bug.
+- **Verify reports every problem and names it.** `ci/upgrade-verify.sh` signs in again with the
+  changed admin password (the credential must survive too), mints a fresh tenant PAT, and prints
+  `MISSING <label>`, `UNREADABLE <label>` or `MISMATCH <label> field <f>: expected …, got …`
+  (`<absent>` for a dropped attribute) for each, exiting 1. An empty or malformed seed exits 2 —
+  a seed step that died must not read as "nothing differed".
+- **Self-test without a stack.** `UPGRADE_VERIFY_STUB_DIR` makes the verify script read
+  `<dir>/<path with / → _>.json` instead of calling the gateway (missing file = 404).
+  `ci/upgrade-verify.test.sh` uses it to prove the clean case passes and a missing record, a
+  changed value, a type change (`true` → `"true"`), a dropped field, a changed user field, a
+  non-JSON body and an empty/malformed seed all fail with the resource and field named. Runs as the
+  job's first step and locally with `bash ci/upgrade-verify.test.sh` (bash + jq).
+- **Prove the job can go red.** Its acceptance included a temporary commit adding a migration
+  that alters seeded data (e.g. `UPDATE platform_user SET last_name = 'Changed' WHERE email LIKE
+  'upgrade-user@%'`, or a `DROP COLUMN` on the seeded table), a red run, and a revert before
+  merge. Do the same when changing what the job seeds or compares.
+
 ## Quickstart smoke test (CI)
 
 `.github/workflows/ci.yml`'s `quickstart` job proves the README [Quickstart](../../README.md#quickstart)
