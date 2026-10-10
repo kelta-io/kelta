@@ -517,7 +517,7 @@ on `VIEW_ANALYTICS` (or `MANAGE_REPORTS`)** (2026-07-08, app-surfacing slice 1 �
 reports/dashboards half of this item). Remaining follow-up:
 `CUSTOMIZE_APPLICATION`/`VIEW_SETUP` for packages.
 
-**Approval instances/steps are tenant-visible to every user (accepted for now, 2026-07-08).** *(Also applies to `user-ui-preferences` (2026-07-08): rows are tenant-readable via the generic route — writes are owner-guarded by `UserPreferenceGuardHook`, reads are not; saved-view filters may embed data values. Same row-level-read v2 fix.)*
+**Approval instances/steps are tenant-visible to every user (accepted for now, 2026-07-08).** *(`user-ui-preferences` was listed here too — rows were tenant-readable via the generic route. **Closed 2026-10-10 (KLT-380, member-data-ownership slice 4):** the collection declares `ownerField=userId`, `ownerScope=ALL`, `ownerScopeReads=true`, so reads return only the caller's rows unless they hold `VIEW_ALL_DATA`; `UserPreferenceScenarioTest` asserts another user's list omits the row.)*
 `approval-instances` and `approval-step-instances` are ordinary system collections on the
 generic JSON:API routes with no row-level read restriction beyond tenant RLS — any tenant
 user can list every approval (including `comments`). This predates the approvals inbox
@@ -2098,7 +2098,7 @@ under `PORTAL` and **is** scoped under `ALL` — to the nil UUID, i.e. it sees o
 the nil UUID, and every Guest shares those rows. Don't grant Guest create on an `ALL`-scoped
 collection.
 
-## Owner-scoped collections — paths outside the storage adapter (KLT-378, accepted until slice 4)
+## Owner-scoped collections — paths outside the storage adapter (KLT-378, accepted)
 
 Owner scoping (`ownerField`/`ownerScope`, architecture.md → Owner-scoped collections) is enforced
 in `PhysicalTableStorageAdapter` (reads) and `OwnerScopeGuardHook` (writes via `QueryEngine`).
@@ -2108,8 +2108,20 @@ Anything that reads or writes the table some other way is **not** narrowed:
   `/api/watches`), `AlertRepository`/`AlertDeliveryRepository` (internal-tier alert fanout),
   `PushRepository` (`PushDeviceController`, `/api/devices`), `WinController`, `ChatService`,
   `AppointmentService` (`/api/telehealth`), `BillingSubscriptionRepository`. These are
-  self-scoped in code today (`SelfScopedController`, in-controller caller checks) and stay so
-  until slice 4 retires the bespoke owner-guard hooks.
+  self-scoped in code (`SelfScopedController`, in-controller caller checks). Slice 4 (KLT-380)
+  retired the bespoke owner-guard hooks — `watches`/`wins`/`user-ui-preferences`/`notes` now
+  declare ownership metadata, so their **generic-route** reads and writes go through the
+  adapter and `OwnerScopeGuardHook` — but these repositories still read the tables directly and
+  keep their in-code scoping.
+- **Connected-app machine identities** — `CallerContextFilter` binds nothing for an `X-User-Id`
+  that is neither a UUID nor an email (a connected app's client id), so the owner guard treats
+  that write as the internal tier and admits it. The retired hooks re-resolved the header and
+  rejected it as unresolvable. A connected app's reach is bounded by its Cerbos grants, not by
+  owner scoping; don't grant one write on an owner-scoped collection it should not edit freely.
+- **Support mode on `WatchController`** writes as the named member
+  (`SupportPermissions.writeAs`) after the controller checks `MANAGE_DATA`. That re-binding is
+  correct only because the check precedes it; a new support write path must keep the same
+  order.
 - **Full-text search** — `SearchIndexService` queries `search_index` directly (tenant-only
   predicate), so `/api/_search` can return a foreign record's id + `display_value` from an
   owner-scoped collection. Semantic search goes through the adapter and *is* scoped. Until the

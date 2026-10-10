@@ -19,11 +19,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 /**
- * Owner guard on {@code user-ui-preferences} (app-data-entry slice 1) through the real
- * stack. The collection rides the generic dynamic route, so what is proven here is exactly
- * the {@code UserPreferenceGuardHook} enforcement on the V163 table under real RLS:
- * self-writes succeed; creating, updating, or deleting another user's row is rejected and
- * persists nothing.
+ * Owner scoping on {@code user-ui-preferences} (app-data-entry slice 1) through the real
+ * stack. The collection rides the generic dynamic route and declares ownership metadata
+ * ({@code ownerField=userId}, {@code ownerScope=ALL}, {@code ownerScopeReads=true}), so what is
+ * proven here is the generic owner guard and read predicate on the V163 table under real RLS:
+ * self-writes succeed; another user's list does not contain the row; creating a row for another
+ * user is a 400, and updating or deleting another user's row is a 404 that persists nothing.
  */
 @DisplayName("User Preference Owner Guard Scenario")
 class UserPreferenceScenarioTest extends ScenarioBase {
@@ -99,7 +100,23 @@ class UserPreferenceScenarioTest extends ScenarioBase {
                                 .retrieve().toEntity(Map.class),
                         HttpClientErrorException.class);
                 assertThat(createDenied).as("cross-user create rejected").isNotNull();
-                assertThat(createDenied.getStatusCode().is4xxClientError()).isTrue();
+                assertThat(createDenied.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+                // ---- Reads are owner-filtered: Bob's list never contains Alice's row
+                Map<String, Object> bobList = gatewayClientWithToken(bobToken)
+                        .get().uri("/" + slug + URI + "?page[size]=200")
+                        .retrieve().body(Map.class);
+                assertThat((List<Map<String, Object>>) bobList.get("data"))
+                        .as("Bob's list: %s", bobList)
+                        .extracting(r -> r.get("id"))
+                        .doesNotContain(aliceRowId);
+                Map<String, Object> aliceList = gatewayClientWithToken(aliceToken)
+                        .get().uri("/" + slug + URI + "?page[size]=200")
+                        .retrieve().body(Map.class);
+                assertThat((List<Map<String, Object>>) aliceList.get("data"))
+                        .as("Alice's list: %s", aliceList)
+                        .extracting(r -> r.get("id"))
+                        .contains(aliceRowId);
 
                 // ---- Bob cannot update or delete Alice's row; the row is untouched
                 HttpClientErrorException updateDenied = catchThrowableOfType(
@@ -112,7 +129,7 @@ class UserPreferenceScenarioTest extends ScenarioBase {
                                 .retrieve().toEntity(Map.class),
                         HttpClientErrorException.class);
                 assertThat(updateDenied).as("cross-user update rejected").isNotNull();
-                assertThat(updateDenied.getStatusCode().is4xxClientError()).isTrue();
+                assertThat(updateDenied.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
 
                 HttpClientErrorException deleteDenied = catchThrowableOfType(
                         () -> gatewayClientWithToken(bobToken)
@@ -120,7 +137,7 @@ class UserPreferenceScenarioTest extends ScenarioBase {
                                 .retrieve().toBodilessEntity(),
                         HttpClientErrorException.class);
                 assertThat(deleteDenied).as("cross-user delete rejected").isNotNull();
-                assertThat(deleteDenied.getStatusCode().is4xxClientError()).isTrue();
+                assertThat(deleteDenied.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
 
                 assertThat(scalar(db,
                         "SELECT user_id FROM user_ui_preference WHERE id = ?", finalRow))
