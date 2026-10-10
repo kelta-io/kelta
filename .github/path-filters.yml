@@ -106,6 +106,12 @@ quickstart:
   - 'ci/quickstart-*.sh'
   - 'ci/admin-first-sign-in.sh'
 
+# Tenant templates — the "templates" job installs every examples/templates/*/ into one
+# fresh tenant of a HEAD-built stack and checks the seeded record counts.
+templates:
+  - 'examples/templates/**'
+  - 'ci/templates-install-check.*'
+
 # Workflow plumbing changed — run everything.
 workflows:
   - '.github/workflows/**'
