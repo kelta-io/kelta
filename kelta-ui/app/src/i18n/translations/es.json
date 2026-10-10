@@ -1456,5 +1456,15 @@
     "lightMode": "Claro",
     "darkMode": "Oscuro",
     "systemMode": "Sistema"
+  },
+  "profileDialog": {
+    "title": "Tu perfil",
+    "firstName": "Nombre",
+    "lastName": "Apellido",
+    "language": "Idioma",
+    "timezone": "Zona horaria",
+    "saved": "Perfil guardado",
+    "saveFailed": "No se pudo guardar tu perfil",
+    "loadFailed": "No se pudo cargar tu perfil"
   }
 }

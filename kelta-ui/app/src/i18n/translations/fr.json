@@ -1456,5 +1456,15 @@
     "lightMode": "Clair",
     "darkMode": "Sombre",
     "systemMode": "Système"
+  },
+  "profileDialog": {
+    "title": "Votre profil",
+    "firstName": "Prénom",
+    "lastName": "Nom",
+    "language": "Langue",
+    "timezone": "Fuseau horaire",
+    "saved": "Profil enregistré",
+    "saveFailed": "Impossible d'enregistrer votre profil",
+    "loadFailed": "Impossible de charger votre profil"
   }
 }
