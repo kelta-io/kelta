@@ -46,6 +46,7 @@ jobs:
       e2e: ${{ steps.filter.outputs.e2e }}
       runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
       quickstart: ${{ steps.filter.outputs.quickstart }}
+      templates: ${{ steps.filter.outputs.templates }}
       workflows: ${{ steps.filter.outputs.workflows }}
       dora: ${{ steps.filter.outputs.dora }}
     steps:
@@ -879,6 +880,115 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v || true
 
   # ===========================================================================
+  # Tenant templates — installs every examples/templates/*/ (metadata package, list
+  # views, dashboards, seed records, via its install.sh and the kelta CLI) into one
+  # fresh tenant and checks each collection's record count against the length of its
+  # seeds/<collection>.json (ci/templates-install-check.sh).
+  #
+  # Same compose stack and fresh `default` tenant as the quickstart job, but built from
+  # HEAD like the e2e job: a template is written against the current CLI and API, and
+  # the released images the quickstart pulls (KELTA_VERSION) lag behind main. A separate
+  # job so the quickstart's 300s budget only ever times the quickstart.
+  #
+  # Bounded at every level: each install.sh runs under `timeout 300` inside the runner
+  # container (capped at 1 GiB / 512 pids, so a runaway script fails the job instead of
+  # the node), the install step has its own timeout-minutes, and so does the job. A
+  # timed-out step is a failure, so the compose-log dump below still runs.
+  # ===========================================================================
+  templates:
+    name: Template Install Check
+    needs: changes
+    if: needs.changes.outputs.templates == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: k8s-runner-integration
+    timeout-minutes: 40
+    concurrency:
+      group: templates-${{ github.head_ref || github.ref }}
+      cancel-in-progress: true
+    env:
+      COMPOSE_PROJECT_NAME: tpl-${{ github.run_id }}-${{ github.run_attempt }}
+      # The e2e job's from-source stack (see the comments there).
+      COMPOSE_FILE: docker-compose.yml:docker-compose.build.yml:docker-compose.ci.yml:docker-compose.ci-build.yml
+      BUILDX_BUILDER: kelta-ci
+      KELTA_BOOTSTRAP_ADMIN_PASSWORD: ci-bootstrap-admin-secret
+      ADMIN_PASSWORD: ci-templates-admin-secret
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx (persistent kelta-ci builder)
+        run: |
+          docker buildx inspect kelta-ci >/dev/null 2>&1 \
+            || docker buildx create --name kelta-ci --driver docker-container
+          docker buildx inspect --bootstrap kelta-ci
+
+      - name: Generate .env (JWK_SET + encryption key)
+        run: make setup
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build kelta CLI (the templates' install.sh drive it)
+        timeout-minutes: 10
+        working-directory: kelta-web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build service images (JVM, persistent builder cache)
+        run: |
+          docker buildx bake --builder kelta-ci \
+            -f docker-compose.yml -f docker-compose.build.yml \
+            -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
+            --load \
+            kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
+
+      - name: Start stack
+        timeout-minutes: 8
+        run: |
+          docker compose up -d --wait --wait-timeout 300
+
+      - name: Complete platform admin first sign-in (forced password change)
+        timeout-minutes: 2
+        run: |
+          docker run --rm -i --network "${COMPOSE_PROJECT_NAME}_kelta-network" \
+            -e INITIAL_PASSWORD="$KELTA_BOOTSTRAP_ADMIN_PASSWORD" \
+            -e NEW_PASSWORD="$ADMIN_PASSWORD" \
+            curlimages/curl:8.11.0 sh < ci/admin-first-sign-in.sh
+
+      # Each install.sh is capped at 300s inside the container; this cap covers the image
+      # build, the script's own tests and up to three templates at their full 300s.
+      - name: Install every template and check its seeded record counts
+        timeout-minutes: 20
+        run: bash ci/templates-install-check.sh
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: |
+          mkdir -p _logs
+          for s in kelta-auth kelta-worker kelta-gateway kelta-ui postgres redis nats cerbos mailpit; do
+            docker compose logs --no-color "$s" > "_logs/${s}.log" 2>&1 || true
+          done
+
+      - name: Upload logs
+        continue-on-error: true
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: templates-logs
+          path: _logs/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop stack + remove volumes
+        if: always()
+        run: |
+          docker rm -f "${COMPOSE_PROJECT_NAME}_templates" 2>/dev/null || true
+          docker compose down -v || true
+          docker image rm "kelta-templates-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
+
+  # ===========================================================================
   # The worker image must stay JVM.
   #
   # Runtime module loading needs a bytecode interpreter: SandboxedModuleClassLoader defines classes
@@ -1046,13 +1156,13 @@ jobs:
 
   quality-gate:
     name: Quality Gate
-    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, worker-image-is-jvm, dependency-audit, lint-workflows, test-dora]
+    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, worker-image-is-jvm, dependency-audit, lint-workflows, test-dora]
     if: always()
     runs-on: k8s-runner
     steps:
       - name: Check job results
         run: |
-          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart worker-image-is-jvm dependency-audit lint-workflows test-dora; do
+          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart templates worker-image-is-jvm dependency-audit lint-workflows test-dora; do
             case "${job}" in
               test-java)         result="${{ needs.test-java.result }}" ;;
               test-runtime)      result="${{ needs.test-runtime.result }}" ;;
@@ -1062,6 +1172,7 @@ jobs:
               integration-tests) result="${{ needs.integration-tests.result }}" ;;
               e2e)               result="${{ needs.e2e.result }}" ;;
               quickstart)        result="${{ needs.quickstart.result }}" ;;
+              templates)         result="${{ needs.templates.result }}" ;;
               worker-image-is-jvm) result="${{ needs.worker-image-is-jvm.result }}" ;;
               dependency-audit)  result="${{ needs.dependency-audit.result }}" ;;
               lint-workflows)    result="${{ needs.lint-workflows.result }}" ;;
