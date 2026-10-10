@@ -574,6 +574,11 @@ jobs:
       cancel-in-progress: true
     env:
       COMPOSE_PROJECT_NAME: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      # HEAD, not the pinned release the base file pulls: docker-compose.build.yml restores
+      # the from-source build stanzas, docker-compose.ci.yml makes the stack safe on the
+      # shared daemon, docker-compose.ci-build.yml swaps in the JVM Dockerfiles + CI UI build.
+      # Read by every `docker compose` call in this job; the bake step spells the same list out.
+      COMPOSE_FILE: docker-compose.yml:docker-compose.build.yml:docker-compose.ci.yml:docker-compose.ci-build.yml
       # docker compose builds a service whose image it cannot find (the bake step's
       # --load images are not tagged with compose's <project>-<service> names), and it
       # builds with the CURRENT builder. setup-buildx-action used to make its builder
@@ -622,19 +627,18 @@ jobs:
           # gha cache entries when ACTIONS_RUNTIME_TOKEN is not in its environment, and a
           # plain run step never has it — every build here ran cold.
           docker buildx bake --builder kelta-ci \
-            -f docker-compose.yml -f docker-compose.ci.yml \
+            -f docker-compose.yml -f docker-compose.build.yml \
+            -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
             --load \
             kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
 
       - name: Start stack
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml \
-            up -d --wait --wait-timeout 300
+          docker compose up -d --wait --wait-timeout 300
 
       - name: Seed admin + verify health
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml \
-            --profile seed run --rm kelta-bootstrap
+          docker compose --profile seed run --rm kelta-bootstrap
 
       - name: Complete platform admin first sign-in (forced password change)
         run: |
@@ -722,8 +726,7 @@ jobs:
         run: |
           mkdir -p _logs
           for s in kelta-auth kelta-worker kelta-gateway kelta-ui postgres redis nats cerbos; do
-            docker compose -f docker-compose.yml -f docker-compose.ci.yml \
-              logs --no-color "$s" > "_logs/${s}.log" 2>&1 || true
+            docker compose logs --no-color "$s" > "_logs/${s}.log" 2>&1 || true
           done
 
       - name: Upload e2e artifacts
@@ -742,22 +745,25 @@ jobs:
       - name: Stop stack + remove volumes
         if: always()
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml \
-            --profile ai --profile tools --profile seed down -v || true
+          docker compose --profile ai --profile tools --profile seed down -v || true
 
   # ===========================================================================
   # Quickstart smoke test (K-3) — proves the documented "clone → docker compose
   # up → create your first collection" path actually works and stays fast.
   #
-  # Images are built ahead of the timer (JVM Dockerfiles via docker-compose.ci.yml,
-  # same port-safe/name-safe overlay the e2e job uses — the k8s-runner shares a
-  # Docker daemon so fixed host ports collide across concurrent jobs). Only the
-  # wall clock from `docker compose up` to a successful first-collection API call
-  # counts against the 300s budget; a `timeout 300` around that exact sequence
-  # enforces it regardless of where the time goes. This deliberately does NOT use
-  # `make up`/`make up-ai` — GraalVM native-image compiles take ~10 min per
-  # service and cannot fit any CI budget; native still ships in production via
-  # build-and-publish-containers.yml.
+  # Runs what a self-hoster runs: the Kelta release pinned by KELTA_VERSION in
+  # .env.example, PULLED from ghcr.io/kelta-io — nothing Kelta is built here
+  # (HEAD is exercised by e2e). docker-compose.ci.yml is layered on only for the
+  # shared-daemon safety the e2e job also needs (no fixed host ports or
+  # container names, CI-baked cerbos config). Images are pulled ahead of the
+  # timer, as they used to be built ahead of it, so the number stays comparable
+  # to K-3: only the wall clock from `docker compose up` to a successful
+  # first-collection API call counts against the 300s budget, and a `timeout 300`
+  # around that exact sequence enforces it regardless of where the time goes.
+  #
+  # The released kelta-ui is built for http://localhost:8080; that is fine here
+  # because the check drives the API with curl by service name, never the SPA —
+  # the UI only has to come up healthy, as it does for a self-hoster.
   # ===========================================================================
   quickstart:
     name: Quickstart Smoke Test
@@ -770,11 +776,9 @@ jobs:
       cancel-in-progress: true
     env:
       COMPOSE_PROJECT_NAME: qs-${{ github.run_id }}-${{ github.run_attempt }}
-      # docker compose builds a service whose image it cannot find (the bake step's
-      # --load images are not tagged with compose's <project>-<service> names), and it
-      # builds with the CURRENT builder. setup-buildx-action used to make its builder
-      # current; the persistent kelta-ci builder must be selected explicitly, or `up`
-      # rebuilds cold on the default builder — which blew the Quickstart 300s budget.
+      # Only cerbos is built here (CI-baked config, tagged kelta-cerbos-ci:local so `up`
+      # finds it); select the persistent builder anyway so any build `up` does start is
+      # warm rather than cold on the default builder.
       BUILDX_BUILDER: kelta-ci
     steps:
       - name: Checkout code
@@ -795,16 +799,42 @@ jobs:
       - name: Generate .env (JWK_SET + encryption key)
         run: make setup
 
-      - name: Build service images (JVM, persistent builder cache)
+      - name: Build CI cerbos image (config baked in — no Kelta service is built)
         run: |
-          # The cache is the persistent kelta-ci builder itself (layers + ~/.m2 cache
-          # mounts). The type=gha cache this used to set was a silent no-op: buildx drops
-          # gha cache entries when ACTIONS_RUNTIME_TOKEN is not in its environment, and a
-          # plain run step never has it — every build here ran cold.
           docker buildx bake --builder kelta-ci \
             -f docker-compose.yml -f docker-compose.ci.yml \
             --load \
-            kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
+            cerbos
+
+      - name: Pull released Kelta images (ghcr.io/kelta-io/*:KELTA_VERSION from .env)
+        run: |
+          grep '^KELTA_VERSION=' .env
+          # Only the four Kelta images move out of the timed window (they used to be built
+          # out of it); infra images are fetched by `up` exactly as before, keeping the
+          # number comparable with K-3's.
+          COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.ci.yml)
+          SERVICES=(kelta-auth kelta-worker kelta-gateway kelta-ui)
+          # `config --images` lists every service's image; keep the released ones.
+          mapfile -t IMAGES < <("${COMPOSE[@]}" config --images | grep '^ghcr.io/kelta-io/' | sort)
+          # Drop any copy a previous run left on the shared daemon so this times a cold pull,
+          # which is what a self-hoster's first `docker compose up` does. An image a concurrent
+          # run is using cannot be removed; it is reported as cached instead.
+          CACHED=()
+          for i in "${IMAGES[@]}"; do
+            docker image rm "$i" >/dev/null 2>&1 || true
+            if docker image inspect "$i" >/dev/null 2>&1; then CACHED+=("$i"); fi
+          done
+          START=$(date +%s)
+          "${COMPOSE[@]}" pull "${SERVICES[@]}"
+          ELAPSED=$(( $(date +%s) - START ))
+          {
+            echo "### Quickstart image pull (no JDK/Maven, nothing built)"
+            echo ""
+            echo "Pulled in **${ELAPSED}s**:"
+            for i in "${IMAGES[@]}"; do echo "- \`$i\`"; done
+            echo ""
+            echo "Still cached on the runner's daemon (in use elsewhere): ${CACHED[*]:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pre-pull curl image (kept out of the timed window)
         run: docker pull curlimages/curl:8.11.0
@@ -818,6 +848,7 @@ jobs:
           END=$(date +%s)
           ELAPSED=$((END - START))
           echo "Quickstart wall-clock (stack start → first collection created): ${ELAPSED}s"
+          echo "Quickstart wall-clock (stack start → first collection created): **${ELAPSED}s** / 300s" >> "$GITHUB_STEP_SUMMARY"
           if [ "$RESULT" -ne 0 ]; then
             echo "::error::Quickstart did not complete within the 300s budget (timeout or failure) — ${ELAPSED}s elapsed."
             exit 1

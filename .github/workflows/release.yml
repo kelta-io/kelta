@@ -37,10 +37,11 @@ concurrency:
 env:
   REGISTRY: ghcr.io/kelta-io
   # Every image the default quickstart stack builds from source — exactly the services
-  # `docker compose -f docker-compose.yml -f docker-compose.jvm.yml config` reports with a
-  # `build:` and no profile, from the same Dockerfile with the same build args (the plan job
-  # fails on any drift). kelta-ai (profile ai) and kelta-bootstrap (profile seed) are not in
-  # it. The Java args are docker-compose.jvm.yml's public sources, not the Dockerfile.jvm
+  # `docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.jvm.yml
+  # config` reports with a `build:` and no profile, from the same Dockerfile with the same
+  # build args — and every image the base docker-compose.yml pulls from REGISTRY for a
+  # self-hoster (the plan job fails on any drift either way). kelta-ai (profile ai) and
+  # kelta-bootstrap (profile seed) are not in it. The Java args are docker-compose.jvm.yml's public sources, not the Dockerfile.jvm
   # Harbor/Nexus defaults a GitHub-hosted runner cannot use; kelta-ui adds BASE_REGISTRY for
   # the same reason, which compose does not pass.
   IMAGES: >-
@@ -100,8 +101,12 @@ jobs:
           set -euo pipefail
           # docker-compose.yml's env_file: .env must exist for compose to resolve the file.
           cp .env.example .env
-          docker compose -f docker-compose.yml -f docker-compose.jvm.yml config --format json > "$RUNNER_TEMP/compose.json"
-          node .github/release/release.ts check-images "$RUNNER_TEMP/compose.json"
+          # From-source set: what each released image must be built like.
+          docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.jvm.yml \
+            config --format json > "$RUNNER_TEMP/compose-build.json"
+          # Base file alone: the self-hoster quickstart, which must pull exactly these images.
+          docker compose -f docker-compose.yml config --format json > "$RUNNER_TEMP/compose-base.json"
+          node .github/release/release.ts check-images "$RUNNER_TEMP/compose-build.json" "$RUNNER_TEMP/compose-base.json"
 
       - name: Generate release notes
         env:

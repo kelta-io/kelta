@@ -55,14 +55,21 @@ export function resolvePlan(ctx: RunContext): Plan {
 }
 
 type ComposeService = {
+  image?: string;
   build?: { dockerfile?: string; args?: Record<string, string | null> };
   profiles?: string[];
 };
 
+type ComposeConfig = { services: Record<string, ComposeService> };
+
+const inDefaultStack = (s: ComposeService): boolean => !(s.profiles && s.profiles.length > 0);
+
 // Services the default (profile-less) stack builds from source, as compose resolves them.
-export function composeBuiltImages(config: { services: Record<string, ComposeService> }): Image[] {
+// Read from the from-source file set (docker-compose.yml + docker-compose.build.yml +
+// docker-compose.jvm.yml): the base file alone builds nothing.
+export function composeBuiltImages(config: ComposeConfig): Image[] {
   return Object.entries(config.services)
-    .filter(([, s]) => s.build && !(s.profiles && s.profiles.length > 0))
+    .filter(([, s]) => s.build && inDefaultStack(s))
     .map(([service, s]) => ({
       service,
       dockerfile: s.build?.dockerfile ?? 'Dockerfile',
@@ -71,6 +78,30 @@ export function composeBuiltImages(config: { services: Record<string, ComposeSer
       ),
     }))
     .sort((a, b) => a.service.localeCompare(b.service));
+}
+
+// The base docker-compose.yml is the self-hoster's quickstart: every released service must
+// be pulled from `<registry>/<service>:<tag>` there, nothing in the default stack may be
+// built, and nothing pulled from the registry may be missing from the release.
+export function pinDrift(release: Image[], base: ComposeConfig, registry: string): string[] {
+  const errors: string[] = [];
+  const released = new Set(release.map((i) => i.service));
+  for (const { service } of release) {
+    const s = base.services[service];
+    if (!s?.image?.startsWith(`${registry}/${service}:`)) {
+      errors.push(`${service}: base compose runs ${s?.image ?? '(no image)'}, not the released ${registry}/${service}:<version>`);
+    }
+  }
+  for (const [service, s] of Object.entries(base.services)) {
+    if (!inDefaultStack(s)) continue;
+    if (s.build) {
+      errors.push(`${service}: base compose builds from source; move its build: to docker-compose.build.yml`);
+    }
+    if (s.image?.startsWith(`${registry}/`) && !released.has(service)) {
+      errors.push(`${service}: base compose pulls ${s.image}, which the release does not publish`);
+    }
+  }
+  return errors;
 }
 
 // Every compose service must be released from the same Dockerfile with the same build

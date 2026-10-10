@@ -1,7 +1,7 @@
 // node --test .github/release/lib.test.ts   (Node >= 24)
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { MAX_PER_SECTION, composeBuiltImages, imageDrift, parseTag, renderNotes, resolvePlan } from './lib.ts';
+import { MAX_PER_SECTION, composeBuiltImages, imageDrift, parseTag, pinDrift, renderNotes, resolvePlan } from './lib.ts';
 
 const ctx = { event: 'push', refType: 'tag', refName: 'v1.2.3', dryRunInput: '', sha: 'abcdef0123456789' };
 
@@ -111,6 +111,45 @@ describe('imageDrift', () => {
     assert.deepEqual(imageDrift(native, built), [
       'kelta-worker: released from kelta-worker/Dockerfile, compose builds kelta-worker/Dockerfile.jvm',
       'kelta-worker: build arg MAVEN_MIRROR=(unset), compose passes MAVEN_MIRROR=central',
+    ]);
+  });
+});
+
+describe('pinDrift', () => {
+  const registry = 'ghcr.io/kelta-io';
+  const base = {
+    services: {
+      postgres: { image: 'pgvector/pgvector:pg15' },
+      'kelta-worker': { image: 'ghcr.io/kelta-io/kelta-worker:0.1.0' },
+      'kelta-ui': { image: 'ghcr.io/kelta-io/kelta-ui:0.1.0' },
+      'kelta-ai': { image: 'kelta-ai:local', profiles: ['ai'] },
+      'kelta-bootstrap': { image: 'kelta-bootstrap:local', profiles: ['seed'] },
+    },
+  };
+
+  it('accepts a base file that pulls every released image and builds nothing by default', () => {
+    assert.deepEqual(pinDrift(release, base, registry), []);
+  });
+
+  it('reports a released service the base file builds instead of pulling', () => {
+    const built = { services: { ...base.services, 'kelta-ui': { build: { dockerfile: 'kelta-ui/Dockerfile' } } } };
+    assert.deepEqual(pinDrift(release, built, registry), [
+      'kelta-ui: base compose runs (no image), not the released ghcr.io/kelta-io/kelta-ui:<version>',
+      'kelta-ui: base compose builds from source; move its build: to docker-compose.build.yml',
+    ]);
+  });
+
+  it('reports a base image from another registry', () => {
+    const local = { services: { ...base.services, 'kelta-worker': { image: 'kelta-worker:local' } } };
+    assert.deepEqual(pinDrift(release, local, registry), [
+      'kelta-worker: base compose runs kelta-worker:local, not the released ghcr.io/kelta-io/kelta-worker:<version>',
+    ]);
+  });
+
+  it('reports a pulled registry image the release does not publish', () => {
+    const extra = { services: { ...base.services, 'kelta-mcp': { image: 'ghcr.io/kelta-io/kelta-mcp:0.1.0' } } };
+    assert.deepEqual(pinDrift(release, extra, registry), [
+      'kelta-mcp: base compose pulls ghcr.io/kelta-io/kelta-mcp:0.1.0, which the release does not publish',
     ]);
   });
 });

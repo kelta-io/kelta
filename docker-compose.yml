@@ -1,17 +1,20 @@
 # Kelta Local Development Environment
 # ─────────────────────────────────────────────────────────────────────────────
-# Quick start:
-#   make setup    ← first time: copies .env and generates dev RSA key
-#   make up       ← start the stack
-#   make seed     ← confirm health + print credentials
+# Quick start (released images, nothing built):
+#   make setup            ← first time: copies .env and generates dev RSA key
+#   docker compose up -d  ← pulls ghcr.io/kelta-io/<service>:$KELTA_VERSION (.env)
+#
+# From source (contributors): `make up-jvm` / `make up` layer docker-compose.build.yml
+# (+ docker-compose.jvm.yml) on this file to build the checkout instead. This file
+# itself carries no `build:` — the release it names is what a self-hoster runs.
 #
 # Profiles:
 #   (none)        postgres, redis, nats, cerbos, mailpit, kelta-auth,
 #                 kelta-worker, kelta-gateway, kelta-ui
-#   ai            adds kelta-ai (requires ANTHROPIC_API_KEY in .env)
+#   ai            adds kelta-ai (requires ANTHROPIC_API_KEY in .env; source-only: make up-jvm-ai)
 #   tools         adds pgadmin, redis-commander
 #   observability adds opensearch, jaeger
-#   seed          runs the one-shot kelta-bootstrap healthcheck/info container
+#   seed          runs the one-shot kelta-bootstrap healthcheck/info container (make seed)
 #
 # Issuer URI note:
 #   KELTA_AUTH_ISSUER_URI=http://auth.localhost:8081 is the ONE URL for kelta-auth,
@@ -108,9 +111,7 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════
 
   kelta-auth:
-    build:
-      context: .
-      dockerfile: kelta-auth/Dockerfile
+    image: ghcr.io/kelta-io/kelta-auth:${KELTA_VERSION:-0.1.0}
     container_name: kelta-auth
     restart: unless-stopped
     env_file: .env
@@ -166,9 +167,7 @@ services:
           - auth.localhost
 
   kelta-worker:
-    build:
-      context: .
-      dockerfile: kelta-worker/Dockerfile
+    image: ghcr.io/kelta-io/kelta-worker:${KELTA_VERSION:-0.1.0}
     container_name: kelta-worker
     restart: unless-stopped
     env_file: .env
@@ -228,9 +227,7 @@ services:
       - kelta-network
 
   kelta-gateway:
-    build:
-      context: .
-      dockerfile: kelta-gateway/Dockerfile
+    image: ghcr.io/kelta-io/kelta-gateway:${KELTA_VERSION:-0.1.0}
     container_name: kelta-gateway
     restart: unless-stopped
     environment:
@@ -296,11 +293,7 @@ services:
       - kelta-network
 
   kelta-ui:
-    build:
-      context: .
-      dockerfile: kelta-ui/Dockerfile
-      args:
-        VITE_API_BASE_URL: http://localhost:8080
+    image: ghcr.io/kelta-io/kelta-ui:${KELTA_VERSION:-0.1.0}
     container_name: kelta-ui
     restart: unless-stopped
     ports:
@@ -322,9 +315,11 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════
 
   kelta-ai:
-    build:
-      context: .
-      dockerfile: kelta-ai/Dockerfile
+    # Not released: built from source by docker-compose.build.yml (make up-ai / up-jvm-ai).
+    # The local name only keeps this file loadable on its own (buildx bake and other
+    # compose loaders reject a service with neither image nor build, profile or not);
+    # nothing publishes it, so `--profile ai` needs the build override.
+    image: kelta-ai:local
     container_name: kelta-ai
     restart: unless-stopped
     env_file: .env
@@ -361,8 +356,9 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════
 
   kelta-bootstrap:
-    build:
-      context: docker/bootstrap
+    # Not released: built from source by docker-compose.build.yml (make seed). Local
+    # name for the same reason as kelta-ai's.
+    image: kelta-bootstrap:local
     container_name: kelta-bootstrap
     environment:
       GATEWAY_URL: http://kelta-gateway:8080
