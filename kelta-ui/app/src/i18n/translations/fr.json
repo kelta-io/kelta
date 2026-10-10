@@ -1114,12 +1114,24 @@
       "nameFormat": "Le nom doit être en minuscules, commencer par une lettre et ne contenir que des lettres, des chiffres et des underscores",
       "displayNameRequired": "Le nom d'affichage est obligatoire",
       "displayNameTooLong": "Le nom d'affichage ne doit pas dépasser 100 caractères",
-      "descriptionTooLong": "La description ne doit pas dépasser 500 caractères"
+      "descriptionTooLong": "La description ne doit pas dépasser 500 caractères",
+      "ownerFieldRequired": "Choisissez un champ propriétaire pour restreindre les enregistrements à leur propriétaire"
     },
     "trackHistory": "Suivre l'historique des enregistrements",
     "trackHistoryHint": "Capture un instantané complet à chaque création, mise à jour et suppression d'enregistrement. Ajoute un onglet Historique aux pages d'enregistrement.",
     "captureGeo": "Capturer la localisation",
-    "captureGeoHint": "Enregistrer le pays et la ville d'origine de la requête lors de la création ou de la mise à jour des enregistrements."
+    "captureGeoHint": "Enregistrer le pays et la ville d'origine de la requête lors de la création ou de la mise à jour des enregistrements.",
+    "ownership": "Propriété",
+    "ownerField": "Champ propriétaire",
+    "ownerFieldNone": "Sans propriétaire",
+    "ownerFieldCreatedBy": "Créé par",
+    "ownerFieldHint": "Le champ qui contient le propriétaire de chaque enregistrement : Créé par, ou une recherche vers Utilisateurs.",
+    "ownerScope": "Restreindre à",
+    "ownerScopeNone": "Personne (par défaut)",
+    "ownerScopePortal": "Membres du portail — les membres ne voient et ne modifient que leurs propres enregistrements",
+    "ownerScopeAll": "Tout le monde sauf les administrateurs avec Voir/Modifier toutes les données",
+    "ownerScopeReads": "Masquer aussi les enregistrements des autres en lecture",
+    "ownerScopeReadsHint": "Décochez pour les collections en lecture publique modifiables par l'auteur : toute personne ayant l'accès en lecture voit chaque enregistrement, mais seul le propriétaire peut le modifier."
   },
   "authorizationPanel": {
     "title": "Autorisation",

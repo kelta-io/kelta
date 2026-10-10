@@ -44,7 +44,15 @@ export function CollectionFormPage({
 
   /** API response includes fields for the collection */
   interface CollectionWithFields extends Collection {
-    fields?: Array<{ id: string; name: string; displayName: string; active: boolean }>
+    fields?: Array<{
+      id: string
+      name: string
+      displayName: string
+      active: boolean
+      type?: string
+      referenceTarget?: string
+      relationshipType?: string
+    }>
   }
 
   // Fetch existing collection if in edit mode.
@@ -101,7 +109,14 @@ export function CollectionFormPage({
     if (!collectionData?.fields) return []
     return collectionData.fields
       .filter((f) => f.active)
-      .map((f) => ({ id: f.id, name: f.name, displayName: f.displayName }))
+      .map((f) => ({
+        id: f.id,
+        name: f.name,
+        displayName: f.displayName,
+        type: f.type,
+        referenceTarget: f.referenceTarget,
+        relationshipType: f.relationshipType,
+      }))
   }, [collectionData])
 
   // Handle form submission
@@ -116,6 +131,9 @@ export function CollectionFormPage({
           active: data.active,
           trackHistory: data.trackHistory,
           captureGeo: data.captureGeo,
+          ownerField: data.ownerField ?? null,
+          ownerScope: data.ownerScope,
+          ownerScopeReads: data.ownerScopeReads,
         }
         // Include displayFieldId — empty string clears it, undefined means no change
         if (data.displayFieldId !== undefined) {
@@ -131,6 +149,11 @@ export function CollectionFormPage({
         const requestData = {
           name: data.name,
           description: data.description || '',
+          ...(data.ownerScope !== 'NONE' && {
+            ownerField: data.ownerField,
+            ownerScope: data.ownerScope,
+            ownerScopeReads: data.ownerScopeReads,
+          }),
         }
 
         const created = await keltaClient.admin.collections.create(

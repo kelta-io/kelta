@@ -7,10 +7,13 @@ import io.kelta.runtime.event.PlatformEvent;
 import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
+import io.kelta.worker.service.CollectionLifecycleManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * Before-save hook for the "collections" system collection that publishes
@@ -35,10 +38,20 @@ public class CollectionConfigEventPublisher implements BeforeSaveHook {
 
     static final String SUBJECT_PREFIX = "kelta.config.collection.changed.";
 
-    private final PlatformEventPublisher eventPublisher;
+    /**
+     * Ownership settings decide which rows a caller can read and write, so a pod that keeps
+     * serving the old definition until its own NATS self-consume lands is a window where a
+     * just-scoped collection still returns every member's rows.
+     */
+    private static final Set<String> OWNERSHIP_KEYS = Set.of("ownerField", "ownerScope", "ownerScopeReads");
 
-    public CollectionConfigEventPublisher(PlatformEventPublisher eventPublisher) {
+    private final PlatformEventPublisher eventPublisher;
+    private final CollectionLifecycleManager lifecycleManager;
+
+    public CollectionConfigEventPublisher(PlatformEventPublisher eventPublisher,
+                                          CollectionLifecycleManager lifecycleManager) {
         this.eventPublisher = eventPublisher;
+        this.lifecycleManager = lifecycleManager;
     }
 
     @Override
@@ -61,6 +74,22 @@ public class CollectionConfigEventPublisher implements BeforeSaveHook {
     public void afterUpdate(String id, Map<String, Object> record,
                              Map<String, Object> previous, String tenantId) {
         publishEvent(record, ChangeType.UPDATED, tenantId);
+        if (ownershipChanged(record, previous)) {
+            // Read-after-write (#910): the broadcast above refreshes every pod, this one included,
+            // but asynchronously. Refresh this pod now as well so the PATCH response means the
+            // new owner scope is enforced here.
+            lifecycleManager.refreshOrInitializeLocally(id);
+        }
+    }
+
+    private static boolean ownershipChanged(Map<String, Object> record, Map<String, Object> previous) {
+        Map<String, Object> before = previous != null ? previous : Map.of();
+        return OWNERSHIP_KEYS.stream().anyMatch(key -> !Objects.equals(
+                normalize(record.get(key)), normalize(before.get(key))));
+    }
+
+    private static String normalize(Object value) {
+        return value == null ? null : value.toString().trim();
     }
 
     @Override

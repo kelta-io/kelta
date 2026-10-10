@@ -41,6 +41,12 @@ import java.util.Set;
  *                   (gateway {@code X-Geo-*} headers) into the {@code created_geo} /
  *                   {@code updated_geo} JSONB system columns. Flow/system writes leave
  *                   them null (no HTTP origin).
+ * @param ownerField Name of the field holding the owning {@code users.id} UUID — a LOOKUP to
+ *                   {@code users}, or the system {@code createdBy}. {@code null} = not owned.
+ * @param ownerScope Which callers are limited to the rows they own ({@link OwnerScope});
+ *                   never null ({@code NONE} when unset).
+ * @param ownerScopeReads Whether owner scoping also narrows reads. {@code false} = owner-only
+ *                   writes, but everyone with read permission still reads every row.
  *
  * @since 1.0.0
  */
@@ -63,7 +69,10 @@ public record CollectionDefinition(
     String displayFieldName,
     String tenantId,
     boolean trackHistory,
-    boolean captureGeo
+    boolean captureGeo,
+    String ownerField,
+    OwnerScope ownerScope,
+    boolean ownerScopeReads
 ) {
     /**
      * Compact constructor with validation and defensive copying.
@@ -83,6 +92,30 @@ public record CollectionDefinition(
         // Defensive copy for immutableFields and columnMapping
         immutableFields = immutableFields != null ? Set.copyOf(immutableFields) : Set.of();
         columnMapping = columnMapping != null ? Map.copyOf(columnMapping) : Map.of();
+        if (ownerField != null && ownerField.isBlank()) {
+            ownerField = null;
+        }
+        if (ownerScope == null) {
+            ownerScope = OwnerScope.NONE;
+        }
+    }
+
+    /**
+     * Backward-compatible constructor without the ownership parameters
+     * (ownerField=null, ownerScope=NONE, ownerScopeReads=true).
+     */
+    public CollectionDefinition(
+            String name, String displayName, String description,
+            List<FieldDefinition> fields, StorageConfig storageConfig,
+            ApiConfig apiConfig, AuthzConfig authzConfig,
+            long version, Instant createdAt, Instant updatedAt,
+            boolean systemCollection, boolean tenantScoped, boolean readOnly,
+            Set<String> immutableFields, Map<String, String> columnMapping,
+            String displayFieldName, String tenantId, boolean trackHistory, boolean captureGeo) {
+        this(name, displayName, description, fields, storageConfig, apiConfig,
+             authzConfig, version, createdAt, updatedAt,
+             systemCollection, tenantScoped, readOnly, immutableFields, columnMapping,
+             displayFieldName, tenantId, trackHistory, captureGeo, null, OwnerScope.NONE, true);
     }
 
     /**
@@ -176,6 +209,15 @@ public record CollectionDefinition(
         return tenantId != null ? tenantId + ":" + name : name;
     }
     
+    /**
+     * Whether this collection limits some callers to the rows they own: an owner field is set
+     * and the scope is not {@link OwnerScope#NONE}. Who exactly is limited is decided per caller
+     * ({@code CallerContext#ownerScoped}).
+     */
+    public boolean isOwnerScoped() {
+        return ownerField != null && ownerScope != OwnerScope.NONE;
+    }
+
     /**
      * Returns {@code true} if this collection is virtual (has no physical storage).
      * A virtual collection has a {@code null} storage configuration.
@@ -278,7 +320,8 @@ public record CollectionDefinition(
             storageConfig, apiConfig, authzConfig,
             version + 1, createdAt, Instant.now(),
             systemCollection, tenantScoped, readOnly,
-            immutableFields, columnMapping, displayFieldName, tenantId, trackHistory, captureGeo
+            immutableFields, columnMapping, displayFieldName, tenantId, trackHistory, captureGeo,
+            ownerField, ownerScope, ownerScopeReads
         );
     }
 
@@ -294,7 +337,8 @@ public record CollectionDefinition(
             storageConfig, apiConfig, authzConfig,
             version + 1, createdAt, Instant.now(),
             systemCollection, tenantScoped, readOnly,
-            immutableFields, columnMapping, displayFieldName, tenantId, trackHistory, captureGeo
+            immutableFields, columnMapping, displayFieldName, tenantId, trackHistory, captureGeo,
+            ownerField, ownerScope, ownerScopeReads
         );
     }
 

@@ -179,6 +179,38 @@ class PackageImportServiceTest {
         }
 
         @Test
+        @DisplayName("resolves a LOOKUP to a platform system collection (users) outside the package")
+        void resolvesReferenceToSystemCollection() {
+            seedCollections(Map.of("orders", "tgt-orders"));
+            when(jdbcTemplate.queryForList(contains("WHERE system_collection = true")))
+                    .thenReturn(List.of(Map.of("id", "sys-users", "name", "users")));
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "new-field"));
+
+            var report = service.importPackage(TENANT, pkg(item("FIELD", lookupFieldData("users"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).as("report: %s", report.items()).isZero();
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> dataCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(any(), dataCaptor.capture());
+            assertThat(dataCaptor.getValue().get("referenceCollectionId")).isEqualTo("sys-users");
+        }
+
+        @Test
+        @DisplayName("a package collection named like a system collection never resolves to the system row")
+        void packageCollectionNeverResolvesToSystemRow() {
+            when(jdbcTemplate.queryForList(contains("WHERE system_collection = true")))
+                    .thenReturn(List.of(Map.of("id", "sys-users", "name", "users")));
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tenant-users"));
+
+            service.importPackage(TENANT, pkg(item("COLLECTION", collectionData("users"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            verify(queryEngine).create(any(), anyMap());
+            verify(queryEngine, never()).update(any(), eq("sys-users"), anyMap());
+        }
+
+        @Test
         @DisplayName("fails the item without writing when the referenced collection is unresolvable")
         void unresolvableReferenceFails() {
             seedCollections(Map.of("orders", "tgt-orders"));
@@ -308,6 +340,35 @@ class PackageImportServiceTest {
             verify(queryEngine).update(updateDefCaptor.capture(), eq("tgt-orders"), updateDataCaptor.capture());
             assertThat(updateDefCaptor.getValue().name()).isEqualTo("collections");
             assertThat(updateDataCaptor.getValue()).containsEntry("displayFieldId", "tgt-field");
+        }
+
+        @Test
+        @DisplayName("creates the collection without ownership, then applies it once fields exist")
+        void ownershipAppliedAfterFields() {
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-orders"));
+
+            Map<String, Object> collection = collectionData("orders");
+            collection.put("owner_field", "member");
+            collection.put("owner_scope", "PORTAL");
+            collection.put("owner_scope_reads", false);
+
+            var report = service.importPackage(TENANT, pkg(item("COLLECTION", collection)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isZero();
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> createCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(any(), createCaptor.capture());
+            assertThat(createCaptor.getValue())
+                    .doesNotContainKeys("ownerField", "ownerScope", "ownerScopeReads");
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> updateCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).update(any(), eq("tgt-orders"), updateCaptor.capture());
+            assertThat(updateCaptor.getValue())
+                    .containsEntry("ownerField", "member")
+                    .containsEntry("ownerScope", "PORTAL")
+                    .containsEntry("ownerScopeReads", false);
         }
 
         @Test

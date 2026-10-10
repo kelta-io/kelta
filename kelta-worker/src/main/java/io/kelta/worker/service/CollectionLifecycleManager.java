@@ -50,14 +50,16 @@ public class CollectionLifecycleManager {
     private static final String SELECT_COLLECTION_BY_ID = """
             SELECT id, name, display_name, description, active,
                    current_version, system_collection, path, tenant_id, display_field_id,
-                   adapter_config, track_history, capture_geo
+                   adapter_config, track_history, capture_geo,
+                   owner_field, owner_scope, owner_scope_reads
             FROM collection WHERE id = ? AND active = true
             """;
 
     private static final String SELECT_COLLECTION_BY_NAME = """
             SELECT id, name, display_name, description, active,
                    current_version, system_collection, path, tenant_id, display_field_id,
-                   adapter_config, track_history, capture_geo
+                   adapter_config, track_history, capture_geo,
+                   owner_field, owner_scope, owner_scope_reads
             FROM collection WHERE name = ? AND active = true
             LIMIT 1
             """;
@@ -128,6 +130,16 @@ public class CollectionLifecycleManager {
      */
     private final ConcurrentHashMap<String, String> activeCollections = new ConcurrentHashMap<>();
 
+    /**
+     * One monitor per collection ID. Initialize and refresh each read the collection from the
+     * database and then register the definition; a NATS consumer and a read-after-write refresh
+     * (#910) for the same collection run concurrently, and without ordering a definition read
+     * before a committed change could register after the one read after it, leaving the pod
+     * serving the stale definition (e.g. without a just-set owner scope) until the next event.
+     * Holding the monitor across read → register means the later refresh always reads later.
+     */
+    private final ConcurrentHashMap<String, Object> collectionLocks = new ConcurrentHashMap<>();
+
     public CollectionLifecycleManager(CollectionRegistry collectionRegistry,
                                        StorageAdapter storageAdapter,
                                        JdbcTemplate jdbcTemplate,
@@ -197,6 +209,12 @@ public class CollectionLifecycleManager {
      * @throws RuntimeException if the definition cannot be loaded or the schema cannot be applied
      */
     public void initializeCollectionOrThrow(String collectionId, boolean applySchema) {
+        synchronized (lockFor(collectionId)) {
+            initializeCollectionLocked(collectionId, applySchema);
+        }
+    }
+
+    private void initializeCollectionLocked(String collectionId, boolean applySchema) {
         log.info("Initializing collection: {} (applySchema={})", collectionId, applySchema);
 
         if (metricsConfig != null) {
@@ -273,6 +291,12 @@ public class CollectionLifecycleManager {
      * @param collectionId the collection ID to refresh
      */
     public void refreshCollection(String collectionId) {
+        synchronized (lockFor(collectionId)) {
+            refreshCollectionLocked(collectionId);
+        }
+    }
+
+    private void refreshCollectionLocked(String collectionId) {
         String collectionName = activeCollections.get(collectionId);
         if (collectionName == null) {
             log.warn("Cannot refresh unknown collection: {}", collectionId);
@@ -346,15 +370,21 @@ public class CollectionLifecycleManager {
      */
     public void refreshOrInitializeLocally(String collectionId) {
         try {
-            if (getActiveCollections().contains(collectionId)) {
-                refreshCollection(collectionId);
-            } else {
-                initializeCollection(collectionId);
+            synchronized (lockFor(collectionId)) {
+                if (getActiveCollections().contains(collectionId)) {
+                    refreshCollection(collectionId);
+                } else {
+                    initializeCollection(collectionId);
+                }
             }
         } catch (Exception e) {
             log.warn("Local read-after-write refresh failed for collection {} "
                     + "(NATS event remains the backstop): {}", collectionId, e.getMessage(), e);
         }
+    }
+
+    private Object lockFor(String collectionId) {
+        return collectionLocks.computeIfAbsent(collectionId, id -> new Object());
     }
 
     /**
@@ -504,8 +534,9 @@ public class CollectionLifecycleManager {
 
     /**
      * Builds a CollectionDefinition from database records for user-defined collections.
+     * Package-private for unit testing.
      */
-    private CollectionDefinition buildDefinitionFromDb(String collectionId, String collectionName,
+    CollectionDefinition buildDefinitionFromDb(String collectionId, String collectionName,
                                                         Map<String, Object> data) {
         CollectionDefinitionBuilder builder = new CollectionDefinitionBuilder()
                 .name(collectionName)
@@ -565,6 +596,11 @@ public class CollectionLifecycleManager {
 
         // Collection-level request-origin geo stamping toggle
         builder.captureGeo(Boolean.TRUE.equals(data.get("capture_geo")));
+
+        // Member data ownership: owner field + which callers are limited to their own rows
+        builder.ownerField(getStringOrNull(data, "owner_field", null));
+        builder.ownerScope(OwnerScope.parse(data.get("owner_scope")));
+        builder.ownerScopeReads(!Boolean.FALSE.equals(data.get("owner_scope_reads")));
 
         return builder.build();
     }

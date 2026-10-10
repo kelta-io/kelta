@@ -661,6 +661,10 @@ environments as **metadata packages** (`PackageService` export → `PackageImpor
   `reference_collection_name`, `layout_name`, `field_name`, `picklist_name`,
   `related_collection_name`, `relationship_field_name`, `menu_name`, `parent_label`) so
   cross-tenant/cross-cluster import remaps every reference **by name, never by UUID**.
+  A FIELD's `reference_collection_name` resolves against the target tenant's collections
+  first, then the platform **system** collections (`users`, …) — those are never in a package
+  but are a valid LOOKUP target (every owner field is one). A package `COLLECTION` item
+  never resolves to a system row.
   Importers accept v1 packages (minus the new types).
 - **Types** (`PackageImportService.supportedTypes()`, applied in this order): `COLLECTION`,
   `FIELD`, `GLOBAL_PICKLIST`, `PICKLIST_VALUE`, `VALIDATION_RULE`, `PAGE_LAYOUT`,

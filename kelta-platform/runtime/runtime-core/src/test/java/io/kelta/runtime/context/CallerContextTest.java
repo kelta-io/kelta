@@ -1,8 +1,8 @@
 package io.kelta.runtime.context;
 
 import io.kelta.runtime.context.CallerContext.Access;
-import io.kelta.runtime.context.CallerContext.OwnerScope;
 import io.kelta.runtime.context.CallerContext.UserType;
+import io.kelta.runtime.model.OwnerScope;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

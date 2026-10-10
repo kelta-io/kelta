@@ -1,5 +1,7 @@
 package io.kelta.runtime.context;
 
+import io.kelta.runtime.model.OwnerScope;
+
 import java.util.Optional;
 
 /**
@@ -33,9 +35,6 @@ public record CallerContext(String userId, UserType userType, boolean viewAll, b
             return value != null && PORTAL.name().equalsIgnoreCase(value.trim()) ? PORTAL : INTERNAL;
         }
     }
-
-    /** Which callers a collection's owner scoping applies to. */
-    public enum OwnerScope { NONE, PORTAL, ALL }
 
     /** Whether the owner check is for reading rows or for changing them. */
     public enum Access { READ, WRITE }

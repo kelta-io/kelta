@@ -67,6 +67,13 @@ public class RealtimeBridge {
                 data = null;
             }
 
+            // Owner-scoped collections (member data ownership): each row is readable only
+            // by its owner, and the fanout has no per-subscriber row filter — so the event
+            // is invalidation-only; clients refetch through the owner-scoped JSON:API path.
+            if (Boolean.TRUE.equals(payload.get("ownerScoped"))) {
+                data = null;
+            }
+
             if (tenantId == null || collectionName == null) {
                 return;
             }

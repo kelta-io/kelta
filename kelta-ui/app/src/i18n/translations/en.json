@@ -1760,13 +1760,25 @@
     "trackHistoryHint": "Capture a full version snapshot of every record create, update, and delete. Adds a History tab to record pages.",
     "captureGeo": "Capture record location",
     "captureGeoHint": "Stamp the country and city of the request origin onto records when they are created or updated.",
+    "ownership": "Ownership",
+    "ownerField": "Owner field",
+    "ownerFieldNone": "Not owned",
+    "ownerFieldCreatedBy": "Created by",
+    "ownerFieldHint": "The field that holds each record's owner: Created by, or a lookup to Users.",
+    "ownerScope": "Restrict to",
+    "ownerScopeNone": "Nobody (default)",
+    "ownerScopePortal": "Portal members — members see and change only their own records",
+    "ownerScopeAll": "Everyone except admins with View/Modify All Data",
+    "ownerScopeReads": "Also hide other people's records from reads",
+    "ownerScopeReadsHint": "Untick for public-read, author-edit collections: everyone with read access still reads every record, but only the owner can change it.",
     "validation": {
       "nameRequired": "Collection name is required",
       "nameTooLong": "Collection name must be 50 characters or less",
       "nameFormat": "Name must be lowercase, start with a letter, and contain only letters, numbers, and underscores",
       "displayNameRequired": "Display name is required",
       "displayNameTooLong": "Display name must be 100 characters or less",
-      "descriptionTooLong": "Description must be 500 characters or less"
+      "descriptionTooLong": "Description must be 500 characters or less",
+      "ownerFieldRequired": "Choose an owner field to restrict records to their owner"
     }
   },
   "authorizationPanel": {

@@ -1114,12 +1114,24 @@
       "nameFormat": "El nombre debe estar en minusculas, comenzar con una letra y contener solo letras, numeros y guiones bajos",
       "displayNameRequired": "El nombre para mostrar es obligatorio",
       "displayNameTooLong": "El nombre para mostrar debe tener 100 caracteres o menos",
-      "descriptionTooLong": "La descripcion debe tener 500 caracteres o menos"
+      "descriptionTooLong": "La descripcion debe tener 500 caracteres o menos",
+      "ownerFieldRequired": "Elija un campo de propietario para restringir los registros a su propietario"
     },
     "trackHistory": "Registrar historial de cambios",
     "trackHistoryHint": "Captura una instantánea completa de cada creación, actualización y eliminación de registros. Añade una pestaña Historial a las páginas de registros.",
     "captureGeo": "Capturar ubicación del registro",
-    "captureGeoHint": "Registrar el país y la ciudad del origen de la solicitud al crear o actualizar registros."
+    "captureGeoHint": "Registrar el país y la ciudad del origen de la solicitud al crear o actualizar registros.",
+    "ownership": "Propiedad",
+    "ownerField": "Campo de propietario",
+    "ownerFieldNone": "Sin propietario",
+    "ownerFieldCreatedBy": "Creado por",
+    "ownerFieldHint": "El campo que contiene el propietario de cada registro: Creado por o una búsqueda a Usuarios.",
+    "ownerScope": "Restringir a",
+    "ownerScopeNone": "Nadie (predeterminado)",
+    "ownerScopePortal": "Miembros del portal: los miembros solo ven y modifican sus propios registros",
+    "ownerScopeAll": "Todos excepto los administradores con Ver/Modificar todos los datos",
+    "ownerScopeReads": "Ocultar también los registros de otras personas en las lecturas",
+    "ownerScopeReadsHint": "Desmarque para colecciones de lectura pública y edición por el autor: quien tenga acceso de lectura ve todos los registros, pero solo el propietario puede cambiarlos."
   },
   "authorizationPanel": {
     "title": "Autorizacion",

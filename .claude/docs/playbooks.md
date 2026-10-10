@@ -14,7 +14,8 @@ Index: [Flow action handler](#1-add-a-flow-action-handler) ·
 [MCP tool](#4-add-an-mcp-tool) ·
 [System collection](#5-add-a-system-collection) ·
 [Field type](#6-add-a-field-type) ·
-[External portal: member's own profile](#9-let-an-external-portal-edit-the-signed-in-members-own-profile)
+[External portal: member's own profile](#9-let-an-external-portal-edit-the-signed-in-members-own-profile) ·
+[Member-owned collection](#10-make-a-collection-member-owned)
 
 ---
 
@@ -420,3 +421,45 @@ member-safe endpoint.
 **Platform side** (when touching it): `MyProfileController` → `SelfProfileWriteContext` →
 `IdentityCollectionGuardHook`. Widening the allow-list is a security change (`concerns.md` →
 Member self-profile); the in-app equivalent is `ProfileDialog` behind the user menu's Profile item.
+
+## 10. Make a collection member-owned
+
+Use this when each record belongs to one user and other users (portal members, or everyone
+without `VIEW_ALL_DATA`) must not see or change it. It is pure metadata: **do not** write a
+bespoke owner-guard hook (the old `WatchGuardHook`/`NoteGuardHook`/… pattern) for a new
+collection.
+
+1. **Give the collection an owner field.** Either rely on the built-in `createdBy`, or add a
+   `LOOKUP` field whose target is `users` (e.g. `member`). Mark it `indexed` — the owner
+   predicate is on every read, so a large collection needs the index.
+2. **Set the three settings** on the collection (admin UI: Collection form → **Ownership**
+   group; API: `PATCH /api/collections/{id}`; package import re-applies them after FIELD rows):
+   - `ownerField` — the field from step 1 (`createdBy` or the LOOKUP's name).
+   - `ownerScope` — `PORTAL` (portal members see/change only their rows; staff unaffected) or
+     `ALL` (every caller, except INTERNAL callers whose profile grants `VIEW_ALL_DATA` for
+     reads / `MODIFY_ALL_DATA` for writes). `NONE` is the default and turns it off.
+   - `ownerScopeReads` — default `true`. Set `false` for public-read, author-edit collections
+     (reads unscoped, writes still owner-only).
+   `CollectionOwnershipValidationHook` rejects (400 `INVALID_OWNER_FIELD`) a scope other than
+   `NONE` without `createdBy` or an active LOOKUP→`users` field. A brand-new collection has no
+   fields yet, so set a LOOKUP owner **after** adding the field. The change propagates through
+   the existing `collection.changed` NATS broadcast — no extra wiring.
+3. **What you get** (enforcement lives in shared code — nothing per-collection to register):
+   - Reads: `PhysicalTableStorageAdapter.ownerScope(...)` ANDs `<owner column> = :callerId`
+     beside the tenant predicate for `query` (lists, counts, `/latest`, includes, exports,
+     reports, dashboards), `aggregate`, semantic search and `getById` — a foreign id is a 404 and
+     `totalCount` is correct. Under `ALL`, rows shared with the caller via `record_share`
+     (directly or through a group) stay visible.
+   - Writes: `OwnerScopeGuardHook` (wildcard, order −100, registered in `FlowConfig`) stamps the
+     owner on create (a different client-supplied owner → 400 `OWNER_MISMATCH`), 404s a foreign
+     update/delete, and makes the owner field immutable (400 `OWNER_IMMUTABLE`).
+   - Realtime: `kelta.record.changed` carries `ownerScoped=true`; `RealtimeBridge` strips `data`
+     (invalidation-only).
+   - The internal tier (no `CallerContext`: flows, NATS listeners, schedulers) is never scoped.
+4. **Code that reads the table without `QueryEngine` is not covered.** A raw-`JdbcTemplate`
+   repository, `search_index` full-text search, or a custom controller must scope itself (see
+   `concerns.md` → Owner-scoped collections — paths outside the storage adapter).
+5. **Test** with the real-DB pattern in
+   `kelta-test-harness/.../scenarios/OwnerScopedCollectionScenarioTest.java` (two portal users +
+   a `VIEW_ALL_DATA` staff user); unit-level adapter coverage is
+   `PhysicalTableStorageAdapterOwnerScopeTest`.

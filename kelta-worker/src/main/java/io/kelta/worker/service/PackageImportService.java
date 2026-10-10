@@ -2,6 +2,7 @@ package io.kelta.worker.service;
 
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.model.OwnerScope;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.repository.PackageRepository;
@@ -155,12 +156,18 @@ public class PackageImportService {
     }
 
     /**
-     * Second pass over already-imported collections: resolves each
-     * {@code display_field_name} (natural key, same pattern as a FIELD's
-     * {@code reference_collection_name}) against the just-imported FIELD rows
-     * and patches {@code displayFieldId} now that the target field exists.
-     * Skipped for a collection whose own import failed or was excluded by a
-     * filter, and entirely for dry runs (nothing was actually written).
+     * Second pass over already-imported collections, for settings that name a field and so can
+     * only be written once FIELD imports have created it:
+     * <ul>
+     *   <li>resolves each {@code display_field_name} (natural key, same pattern as a FIELD's
+     *       {@code reference_collection_name}) against the just-imported FIELD rows and patches
+     *       {@code displayFieldId};</li>
+     *   <li>re-applies the ownership settings ({@code ownerField}/{@code ownerScope}/
+     *       {@code ownerScopeReads}) — {@code CollectionOwnershipValidationHook} rejects a
+     *       LOOKUP owner field that does not exist yet.</li>
+     * </ul>
+     * Skipped for a collection whose own import failed or was excluded by a filter, and entirely
+     * for dry runs (nothing was actually written).
      */
     @SuppressWarnings("unchecked")
     private void patchDisplayFields(ImportContext ctx, List<Map<String, Object>> collectionItems,
@@ -172,22 +179,44 @@ public class PackageImportService {
         for (var item : collectionItems) {
             Map<String, Object> data = (Map<String, Object>) item.get("data");
             String collectionName = (String) data.get("name");
-            Object displayFieldName = data.get("display_field_name");
-            if (displayFieldName == null || !included("COLLECTION", collectionName, options)) {
+            if (!included("COLLECTION", collectionName, options)) {
                 continue;
             }
             String collectionId = ctx.collectionIdByName().get(collectionName);
             if (collectionId == null) {
                 continue; // the collection's own import failed — nothing to patch
             }
-            String fieldKey = collectionName + "." + displayFieldName;
-            String fieldId = ctx.fieldIdByKey().get(fieldKey);
-            if (fieldId == null) {
-                log.warn("Display field not found in target, leaving unset: {} (collection={})",
-                        fieldKey, collectionName);
-                continue;
+            Object displayFieldName = data.get("display_field_name");
+            if (displayFieldName != null) {
+                String fieldKey = collectionName + "." + displayFieldName;
+                String fieldId = ctx.fieldIdByKey().get(fieldKey);
+                if (fieldId == null) {
+                    log.warn("Display field not found in target, leaving unset: {} (collection={})",
+                            fieldKey, collectionName);
+                } else {
+                    queryEngine.update(def, collectionId, Map.of("displayFieldId", fieldId));
+                }
             }
-            queryEngine.update(def, collectionId, Map.of("displayFieldId", fieldId));
+            patchOwnership(def, collectionId, collectionName, data);
+        }
+    }
+
+    private void patchOwnership(CollectionDefinition def, String collectionId, String collectionName,
+                                Map<String, Object> data) {
+        OwnerScope scope = OwnerScope.parse(data.get("owner_scope"));
+        Object ownerField = data.get("owner_field");
+        if (scope == OwnerScope.NONE && ownerField == null) {
+            return;
+        }
+        Map<String, Object> ownership = new HashMap<>();
+        ownership.put("ownerField", ownerField);
+        ownership.put("ownerScope", scope.name());
+        ownership.put("ownerScopeReads", !Boolean.FALSE.equals(data.get("owner_scope_reads")));
+        try {
+            queryEngine.update(def, collectionId, ownership);
+        } catch (RuntimeException e) {
+            log.error("Could not apply ownership ({} by {}) to imported collection {} — it is NOT "
+                    + "owner-scoped: {}", scope, ownerField, collectionName, e.getMessage());
         }
     }
 
@@ -279,6 +308,11 @@ public class PackageImportService {
         // FIELD imports strictly after COLLECTION per TYPE_ORDER anyway — leave
         // it unset here and patch it once fields exist (patchDisplayFields).
         mapped.remove("displayFieldId");
+        // Ownership may name a LOOKUP field that FIELD imports have not created yet — applied
+        // in the same second pass.
+        mapped.remove("ownerField");
+        mapped.remove("ownerScope");
+        mapped.remove("ownerScopeReads");
 
         return upsertViaEngine(ctx, "COLLECTION", key, def, existingId, mapped,
                 id -> ctx.collectionIdByName().put(name, id));
@@ -298,7 +332,7 @@ public class PackageImportService {
                         "Field references a collection but the package carries no reference name "
                                 + "(v1 package?) — cannot remap safely");
             }
-            mapped.put("referenceCollectionId", ctx.requireCollection((String) refName));
+            mapped.put("referenceCollectionId", ctx.requireReferenceCollection((String) refName));
         }
 
         String existingId = ctx.fieldIdByKey().get(key);
@@ -621,6 +655,13 @@ public class PackageImportService {
         final ImportOptions options;
 
         private Map<String, String> collectionIdByName;
+        /**
+         * Platform system collections (users, profiles, …) — global rows outside every tenant and
+         * never in a package, but a valid LOOKUP target (an owner field is a LOOKUP to users).
+         * Kept apart from {@link #collectionIdByName} so a package collection can never resolve to,
+         * and so overwrite, a system row.
+         */
+        private Map<String, String> systemCollectionIdByName;
         private Map<String, String> fieldIdByKey;
         final Map<String, String> globalPicklistIdByName = new HashMap<>();
         final Map<String, String> picklistValueIdByKey = new HashMap<>();
@@ -649,6 +690,9 @@ public class PackageImportService {
             collectionIdByName = new HashMap<>();
             jdbc.queryForList("SELECT id, name FROM collection WHERE tenant_id = ?", tenantId)
                     .forEach(r -> collectionIdByName.put((String) r.get("name"), (String) r.get("id")));
+            systemCollectionIdByName = new HashMap<>();
+            jdbc.queryForList("SELECT id, name FROM collection WHERE system_collection = true")
+                    .forEach(r -> systemCollectionIdByName.put((String) r.get("name"), (String) r.get("id")));
             fieldIdByKey = new HashMap<>();
             jdbc.queryForList(
                     "SELECT f.id, f.name, c.name AS coll FROM field f " +
@@ -731,6 +775,17 @@ public class PackageImportService {
 
         String requireCollection(String name) {
             String id = collectionIdByName.get(name);
+            if (id == null) {
+                throw new IllegalStateException("Collection not found in target: " + name);
+            }
+            return id;
+        }
+
+        String requireReferenceCollection(String name) {
+            String id = collectionIdByName.get(name);
+            if (id == null) {
+                id = systemCollectionIdByName.get(name);
+            }
             if (id == null) {
                 throw new IllegalStateException("Collection not found in target: " + name);
             }

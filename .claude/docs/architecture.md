@@ -464,6 +464,40 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   Both Cerbos principals (`CerbosPrincipalBuilder`, worker `CerbosAuthorizationService`) carry
   the UUID as **`P.attr.userId`**; `P.id` stays the email (integrations.md → Cerbos principal
   attributes).
+- **Owner-scoped collections** (member-data-ownership slice 2, V206). A collection may declare
+  `ownerField` (`createdBy` or a LOOKUP→`users`), `ownerScope` (`NONE|PORTAL|ALL`) and
+  `ownerScopeReads` (default true) — `collection.owner_field/owner_scope/owner_scope_reads`, on
+  `CollectionDefinition` and round-tripped by `CollectionLifecycleManager`. The caller is scoped
+  when `CallerContext.current()` is bound **and** `ownerScoped(scope, READ|WRITE)`: PORTAL callers
+  under `PORTAL`/`ALL`; under `ALL` also INTERNAL callers lacking `VIEW_ALL_DATA` (reads) /
+  `MODIFY_ALL_DATA` (writes). No bound caller = internal tier = never scoped.
+  - **Reads are filtered in SQL** by `PhysicalTableStorageAdapter.ownerScope(...)`, ANDed with the
+    tenant predicate (`readScope`) in `query`, `aggregate`, semantic search and `getById` — so
+    lists, `totalCount`, `/latest`, `?include=`, exports, reports and dashboards all narrow, and a
+    foreign id reads as absent (404) **before** `CerbosRecordAuthorizationAdvice` runs (the advice
+    can only remove more rows; no double-404). Under `ALL` the predicate is
+    `owner = :caller OR id IN (record_share for caller or caller's groups)`, because
+    `RecordShareAccessService.widen` only re-admits rows the query already returned. Skipped
+    when `ownerScopeReads=false` (public-read, author-edit).
+  - **Writes** are guarded by `OwnerScopeGuardHook` (wildcard `BeforeSaveHook`, order −100,
+    `FlowConfig`): create stamps the owner (different supplied owner → 400 `OWNER_MISMATCH`);
+    update/delete of a row whose stored owner is not the caller → **404**; owner field immutable
+    (400 `OWNER_IMMUTABLE`). `CollectionOwnershipValidationHook` (on `collections`) rejects an
+    invalid `ownerField`/`ownerScope` with 400, and rejects setting ownership on a system
+    collection's row (system collections declare it in `SystemCollectionDefinitions`).
+  - **Propagation:** a PATCH that changes `ownerField`/`ownerScope`/`ownerScopeReads` publishes
+    `kelta.config.collection.changed.<id>` (every pod refreshes) **and** refreshes the serving pod
+    synchronously (`CollectionConfigEventPublisher` → `refreshOrInitializeLocally`, the #910
+    read-after-write exception), so the response means that pod already enforces the new scope.
+    Other pods follow when they consume the event. Refreshes of one collection are serialized
+    per collection in `CollectionLifecycleManager`, so an in-flight NATS refresh that read the
+    row before the PATCH cannot register its stale definition afterwards.
+  - **Realtime:** `RecordChangedPayload.ownerScoped=true` → `RealtimeBridge` publishes
+    invalidation-only (no `data`); clients refetch through the scoped JSON:API path.
+  - **Not covered:** anything reading the table without `QueryEngine` → the storage adapter —
+    raw-`JdbcTemplate` repositories/controllers and the `search_index` full-text search. Those
+    stay code-scoped (concerns.md → Owner-scoped collections). A new endpoint over an
+    owner-scoped collection must go through `QueryEngine` or scope itself.
 - **Member self-profile** (`GET`/`PATCH /api/me/profile`, `MyProfileController`;
   member-data-ownership slice 3, security). Rides the existing `/api/me/**` static route —
   `API_ACCESS` only, **no new gateway route** — and the worker advices skip `/api/me/`, so the

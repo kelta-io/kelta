@@ -1,10 +1,12 @@
 package io.kelta.runtime.storage;
 
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.RequestAuthentication;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.FieldType;
+import io.kelta.runtime.model.OwnerScope;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.model.system.SystemCollectionTenancy;
 import io.kelta.runtime.query.AggregationSpec;
@@ -582,7 +584,7 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         if (request.hasFilters()) {
             allFilters.addAll(request.filters());
         }
-        TenantScope tenantScope = tenantScope(definition, tableRef);
+        TenantScope tenantScope = readScope(definition, tableRef);
 
         String whereClause = buildWhereClause(allFilters, tenantScope, definition, params);
         if (!whereClause.isEmpty()) {
@@ -645,7 +647,7 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         sql.append(" FROM ").append(tableRef.toSql());
         sql.append(" WHERE ").append(vectorIdent).append(" IS NOT NULL");
         String semanticWhere = buildWhereClause(
-                filters == null ? List.of() : filters, tenantScope(definition, tableRef), definition, params);
+                filters == null ? List.of() : filters, readScope(definition, tableRef), definition, params);
         if (!semanticWhere.isEmpty()) {
             sql.append(" AND ").append(semanticWhere);
         }
@@ -692,7 +694,7 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         sql.append(" FROM ").append(tableRef.toSql());
 
         String whereClause = buildWhereClause(
-                filters == null ? List.of() : filters, tenantScope(definition, tableRef), definition, params);
+                filters == null ? List.of() : filters, readScope(definition, tableRef), definition, params);
         if (!whereClause.isEmpty()) {
             sql.append(" WHERE ").append(whereClause);
         }
@@ -743,6 +745,12 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
                 sql += " AND " + scope.sql();
                 params.addAll(scope.params());
             }
+        }
+        // Owner-scoped callers never see a row they do not own: a foreign id reads as absent (404).
+        TenantScope owner = ownerScope(definition);
+        if (owner != null) {
+            sql += " AND " + owner.sql();
+            params.addAll(owner.params());
         }
 
         try {
@@ -1211,6 +1219,69 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
                     List.of(tenantId, SystemCollectionDefinitions.SYSTEM_TENANT_ID));
         }
         return new TenantScope("tenant_id = ?", List.of(tenantId));
+    }
+
+    /**
+     * The owner predicate for an owner-scoped collection read, or {@code null} when the caller
+     * is not limited to their own rows.
+     *
+     * <p>Applies only when the collection declares an owner field and scope, reads are scoped
+     * ({@link CollectionDefinition#ownerScopeReads()}), and the bound {@link CallerContext} is
+     * {@linkplain CallerContext#ownerScoped owner-scoped} for reads under that scope. No bound
+     * caller is the internal tier (flows, NATS, schedulers): never narrowed. Sits beside
+     * {@link #tenantScope} for the same reason — every QueryEngine read (lists, counts,
+     * aggregates, {@code /latest}, includes, exports, reports, dashboards) passes through here,
+     * so the filter is in SQL and paging totals stay correct.
+     */
+    private TenantScope ownerScope(CollectionDefinition definition) {
+        if (!definition.isOwnerScoped() || !definition.ownerScopeReads()) {
+            return null;
+        }
+        Optional<CallerContext> caller = CallerContext.current();
+        if (caller.isEmpty() || !caller.get().ownerScoped(definition.ownerScope(), CallerContext.Access.READ)) {
+            return null;
+        }
+        String userId = caller.get().userId();
+        if (userId == null || userId.isBlank()) {
+            return NO_ROWS;
+        }
+        String column = quoteIdentifier(resolveColumnName(definition, definition.ownerField()));
+        if (definition.ownerScope() != OwnerScope.ALL) {
+            return new TenantScope(column + " = ?", List.of(userId));
+        }
+        // Under ALL a record share still widens reads: a row shared with the caller (directly or
+        // through a group) stays visible. RecordShareAccessService.widen only re-admits rows the
+        // query already returned, so the share has to be part of this predicate.
+        return new TenantScope("(" + column + " = ? OR id IN (" + SHARED_WITH_CALLER + "))",
+                List.of(userId, definition.name(), userId, userId));
+    }
+
+    /**
+     * Record ids of the collection named by the 1st bind that are shared with the user in the
+     * 2nd bind directly, or with a group whose member is the user in the 3rd bind. RLS on
+     * {@code record_share} keeps it to the calling tenant.
+     */
+    private static final String SHARED_WITH_CALLER = """
+            SELECT rs.record_id FROM record_share rs \
+            JOIN collection c ON c.id = rs.collection_id \
+            WHERE c.name = ? AND ((rs.shared_with_type = 'USER' AND rs.shared_with_id = ?) \
+            OR (rs.shared_with_type = 'GROUP' AND rs.shared_with_id IN (\
+            SELECT gm.group_id FROM group_membership gm \
+            WHERE gm.member_type = 'USER' AND gm.member_id = ?)))""";
+
+    /** {@link #tenantScope} and {@link #ownerScope} ANDed — the full row predicate for a read. */
+    private TenantScope readScope(CollectionDefinition definition, TableRef tableRef) {
+        TenantScope tenant = tenantScope(definition, tableRef);
+        TenantScope owner = ownerScope(definition);
+        if (owner == null) {
+            return tenant;
+        }
+        if (tenant == null) {
+            return owner;
+        }
+        List<Object> params = new ArrayList<>(tenant.params());
+        params.addAll(owner.params());
+        return new TenantScope(tenant.sql() + " AND " + owner.sql(), params);
     }
 
     /**
