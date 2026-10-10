@@ -318,6 +318,17 @@ The Astro site at **kelta.io / www.kelta.io**. Built and shipped like any other 
   which also means **never regenerate `kelta-marketing/package-lock.json` on macOS**: pagefind
   ships platform optional deps and a mac-generated lock drops the linux one, breaking `npm ci`
   in CI (regenerate in a `node:22` container with the repo mounted).
+- **`/waitlist` capture is a build arg, and CI does not pass it.** The Dockerfile declares
+  `ARG PUBLIC_WAITLIST_ENDPOINT=` (exported as `ENV` for `npm run build`); Astro inlines it at
+  build time. Empty — the default, and what `build-and-push` produces today since its
+  `build-args` carry only `CLI_VERSION`/`GIT_SHA` — renders a "hosted early access is not open
+  yet" page with no form that points at GitHub releases. Set to a Kelta collection URL
+  (`https://<tenant-host>/api/<collection>`, Guest profile allowed to create) it renders a form
+  that POSTs JSON:API `{"data":{"type":"<collection>","attributes":{"email","source"}}}` there,
+  with `type` taken from the URL's last path segment and a honeypot field (KLT-482 — the old
+  `mailto:` form bounced, kelta.io has no MX). Turning it on needs the arg added to the
+  workflow's `build-args`, and the gateway's `CORS_ALLOWED_ORIGIN_PATTERN` (`SecurityConfig`) must admit
+  `https://kelta.io` unless the endpoint is same-origin.
 
 Smoke (`smoke-test`, only when `marketing == 'true'`) hits the in-cluster Service, so it
 depends on neither public DNS nor the cert: within one ≤5 min budget it waits for the
