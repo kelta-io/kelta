@@ -203,6 +203,70 @@ write with `page.route(...)`, assert the request body, and `route.fulfill(...)` 
 response (`tests/admin/setup/email-settings.spec.ts`). Records a test creates are fine as long as
 it tears them down.
 
+### Updating visual baselines
+
+Visual baselines (`e2e-tests/tests/**/<spec>-snapshots/*-chromium-linux.png`) can only be
+produced inside CI's Linux runner container against a running stack: a Mac renders fonts
+differently, and fleet workers have no Docker or browser. So a PR that legitimately changes a
+screenshot regenerates its own baselines in CI's `e2e` job.
+
+**Marker.** Add `e2e-tests/.update-snapshots` to the PR, one spec path per line, relative to
+`e2e-tests/`. Blank lines are ignored, and so is everything after a `#`:
+
+```text
+# object detail header moved (PLT-476)
+tests/end-user/object-detail-visual.spec.ts
+```
+
+**Flow: regenerate → fail → re-run.**
+1. The `changes` job sets `update_snapshots=true` only when the PR head has the marker **and**
+   the PR's own diff (`base...head`) touches it. A marker that reached `main` by mistake does
+   not trigger anything on other PRs.
+2. After the stack is up and `kelta-e2e-runner:local` is built, the step `Regenerate visual
+   baselines` runs `ci/update-snapshots.sh`. The script clones the PR **head branch** (not the
+   merge ref), using `ARGOCD_REPO_TOKEN`. It aborts if the branch has moved past the commit
+   this run was started for. It then runs `npx playwright test --update-snapshots <specs>` in
+   the runner image, with the same network and `--env-file` as `Run Playwright tests`. Next it
+   `docker cp`s each spec's `-snapshots/` directory out of the container (the image bakes the
+   tests in; nothing is bind-mounted). It commits only those `*.png` files plus the marker's
+   deletion, in one commit authored by `github-actions[bot]`, and pushes that commit to the head
+   branch.
+3. The step writes `baselines regenerated for <specs> in <sha>; CI re-runs on that commit` to
+   the step summary and exits 1, so `Run Playwright tests` does not run and this run is red.
+   If no PNG changed, it still removes the marker and says
+   `no baseline changed for <specs>; removed the marker in <sha>`. If Playwright fails, it
+   commits nothing.
+4. The push is made with a PAT, so it triggers a new CI run (a `GITHUB_TOKEN` push would
+   not). That run has no marker and is a normal run against the new baselines. Its start
+   cancels the red run through `ci.yml`'s concurrency group, usually seconds after the push.
+   The summary is written right after the push, so on a cancelled run, read the line from the
+   step log (`::error::`) or the new commit's message.
+
+Review the regenerated PNGs in the PR diff like any other change.
+
+**Guards.**
+- The step runs only for same-repo PRs
+  (`github.event.pull_request.head.repo.full_name == github.repository`) and never for a head
+  ref of `main`.
+- The script also refuses `main` and rejects, naming the offending path, any spec that is:
+  - absolute;
+  - contains `..`;
+  - uses characters outside `[A-Za-z0-9._/-]`;
+  - is not a `*.spec.ts` file that exists on the branch and resolves (symlinks followed) under
+    `e2e-tests/tests/`.
+- A spec rejected by the script fails the step before Playwright runs, and nothing is pushed.
+
+**Dispatch fallback.** Run `ci.yml` manually with `update_snapshots_ref=<branch>` and
+`update_snapshots_specs="tests/a.spec.ts tests/b.spec.ts"` (space-separated, same rules), for
+example `gh workflow run ci.yml -f update_snapshots_ref=<branch> -f update_snapshots_specs=<specs>`.
+Only `changes` and `e2e` run. The `e2e` job checks out and builds that branch, then calls the same
+script. The guards are the same: the step's `if:` refuses `main`, and the script validates the
+specs. The branch must already contain `ci/update-snapshots.sh`, so rebase it if it predates
+the script.
+
+The script's own tests are `ci/update-snapshots.test.ts` (`node --test`, Node ≥ 24). They run
+in the `lint-workflows` job, against a local bare repo and a fake `docker`.
+
 ## Quickstart smoke test (CI)
 
 `.github/workflows/ci.yml`'s `quickstart` job proves the README [Quickstart](../../README.md#quickstart)
