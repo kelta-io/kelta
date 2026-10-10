@@ -1,0 +1,12 @@
+[
+  { "name": "Riverside Distribution Center - Fire safety - Aug 2026", "site": "Riverside Distribution Center", "template": "Fire safety", "inspector": "Sam Ortega", "scheduledDate": "2026-08-12", "completedDate": "2026-08-12", "status": "PASSED", "notes": "No issues." },
+  { "name": "Riverside Distribution Center - Fire safety - Sep 2026", "site": "Riverside Distribution Center", "template": "Fire safety", "inspector": "Sam Ortega", "scheduledDate": "2026-09-14", "status": "IN_PROGRESS", "notes": "Pallets in front of the east exit; waiting for the warehouse team." },
+  { "name": "Riverside Distribution Center - Workplace safety walk - Q3 2026", "site": "Riverside Distribution Center", "template": "Workplace safety walk", "inspector": "Priya Raman", "scheduledDate": "2026-09-02", "completedDate": "2026-09-02", "status": "FAILED" },
+  { "name": "Harbor Street Bakery - Food hygiene - week 38", "site": "Harbor Street Bakery", "template": "Food hygiene", "inspector": "Elena Rossi", "scheduledDate": "2026-09-16", "completedDate": "2026-09-16", "status": "PASSED", "notes": "Hand-wash station restocked during the visit." },
+  { "name": "Harbor Street Bakery - Food hygiene - week 39", "site": "Harbor Street Bakery", "template": "Food hygiene", "inspector": "Elena Rossi", "scheduledDate": "2026-09-23", "status": "IN_PROGRESS" },
+  { "name": "Northgate Office Tower - Fire safety - Sep 2026", "site": "Northgate Office Tower", "template": "Fire safety", "inspector": "Tom Becker", "scheduledDate": "2026-09-09", "completedDate": "2026-09-09", "status": "PASSED" },
+  { "name": "Lakeshore Assembly Plant - Workplace safety walk - Q3 2026", "site": "Lakeshore Assembly Plant", "template": "Workplace safety walk", "inspector": "Priya Raman", "scheduledDate": "2026-09-18", "completedDate": "2026-09-18", "status": "FAILED", "notes": "Re-inspect once the press guard is refitted." },
+  { "name": "Hillcrest Community Kitchen - Food hygiene - week 39", "site": "Hillcrest Community Kitchen", "template": "Food hygiene", "inspector": "Elena Rossi", "scheduledDate": "2026-09-24", "completedDate": "2026-09-24", "status": "PASSED" },
+  { "name": "Southpoint Retail Store - Fire safety - Oct 2026", "site": "Southpoint Retail Store", "template": "Fire safety", "inspector": "Tom Becker", "scheduledDate": "2026-10-20", "status": "SCHEDULED" },
+  { "name": "Lakeshore Assembly Plant - Fire safety - Oct 2026", "site": "Lakeshore Assembly Plant", "template": "Fire safety", "inspector": "Sam Ortega", "scheduledDate": "2026-10-27", "status": "SCHEDULED" }
+]

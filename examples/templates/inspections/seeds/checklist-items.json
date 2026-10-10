@@ -1,0 +1,17 @@
+[
+  { "code": "FS-01", "template": "Fire safety", "question": "Are all fire exits clear and unlocked?", "guidance": "Walk every exit route. Nothing stored in corridors or in front of exit doors.", "sortOrder": 1 },
+  { "code": "FS-02", "template": "Fire safety", "question": "Are exit signs and emergency lights working?", "guidance": "Press the test button on each emergency light.", "sortOrder": 2 },
+  { "code": "FS-03", "template": "Fire safety", "question": "Are extinguishers in place, charged and inspected within the last 12 months?", "guidance": "Check the gauge and the inspection tag.", "sortOrder": 3 },
+  { "code": "FS-04", "template": "Fire safety", "question": "Was the fire alarm tested this month?", "guidance": "Look for the entry in the alarm test log.", "sortOrder": 4 },
+  { "code": "FS-05", "template": "Fire safety", "question": "Is there 45 cm of clearance below sprinkler heads?", "sortOrder": 5 },
+  { "code": "FH-01", "template": "Food hygiene", "question": "Are fridges at or below 5 °C and freezers at or below -18 °C?", "guidance": "Read the thermometer in each unit, not the display.", "sortOrder": 1 },
+  { "code": "FH-02", "template": "Food hygiene", "question": "Is all stored food covered, labelled and in date?", "sortOrder": 2 },
+  { "code": "FH-03", "template": "Food hygiene", "question": "Are hand-wash stations stocked with soap and paper towels?", "sortOrder": 3 },
+  { "code": "FH-04", "template": "Food hygiene", "question": "Is there no sign of pests?", "guidance": "Check corners, under shelving and the pest control log.", "sortOrder": 4 },
+  { "code": "FH-05", "template": "Food hygiene", "question": "Is the cleaning schedule signed off for the last seven days?", "sortOrder": 5 },
+  { "code": "WS-01", "template": "Workplace safety walk", "question": "Are walkways free of trip hazards and spills?", "sortOrder": 1 },
+  { "code": "WS-02", "template": "Workplace safety walk", "question": "Are ladders and step stools in good condition?", "sortOrder": 2 },
+  { "code": "WS-03", "template": "Workplace safety walk", "question": "Are electrical cords and sockets undamaged and not overloaded?", "sortOrder": 3 },
+  { "code": "WS-04", "template": "Workplace safety walk", "question": "Is the first aid kit complete?", "sortOrder": 4 },
+  { "code": "WS-05", "template": "Workplace safety walk", "question": "Are machine guards fitted and in use?", "sortOrder": 5 }
+]

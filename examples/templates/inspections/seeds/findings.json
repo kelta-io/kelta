@@ -1,0 +1,14 @@
+[
+  { "title": "East fire exit blocked by pallets", "inspection": "Riverside Distribution Center - Fire safety - Sep 2026", "checklistItem": "FS-01", "severity": "HIGH", "resolved": false, "dueDate": "2026-09-15", "description": "Two pallets of stock stored against the east exit door." },
+  { "title": "Emergency light over loading bay 3 not working", "inspection": "Riverside Distribution Center - Fire safety - Sep 2026", "checklistItem": "FS-02", "severity": "MEDIUM", "resolved": false, "dueDate": "2026-09-30" },
+  { "title": "Damaged extension cord at packing station", "inspection": "Riverside Distribution Center - Workplace safety walk - Q3 2026", "checklistItem": "WS-03", "severity": "HIGH", "resolved": false, "dueDate": "2026-09-05", "description": "Insulation split near the plug; cord taken out of use but not replaced." },
+  { "title": "First aid kit missing burn dressings", "inspection": "Riverside Distribution Center - Workplace safety walk - Q3 2026", "checklistItem": "WS-04", "severity": "LOW", "resolved": true, "dueDate": "2026-09-09" },
+  { "title": "Hand-wash station out of paper towels", "inspection": "Harbor Street Bakery - Food hygiene - week 38", "checklistItem": "FH-03", "severity": "LOW", "resolved": true, "dueDate": "2026-09-16" },
+  { "title": "Walk-in fridge reading 8 °C", "inspection": "Harbor Street Bakery - Food hygiene - week 39", "checklistItem": "FH-01", "severity": "HIGH", "resolved": false, "dueDate": "2026-09-24", "description": "Door seal worn. Stock moved to the reach-in fridge." },
+  { "title": "Unlabelled containers on dry store shelf", "inspection": "Harbor Street Bakery - Food hygiene - week 39", "checklistItem": "FH-02", "severity": "MEDIUM", "resolved": false, "dueDate": "2026-09-26" },
+  { "title": "Extinguisher tag on floor 6 out of date", "inspection": "Northgate Office Tower - Fire safety - Sep 2026", "checklistItem": "FS-03", "severity": "MEDIUM", "resolved": true, "dueDate": "2026-09-20" },
+  { "title": "Guard removed from press 4", "inspection": "Lakeshore Assembly Plant - Workplace safety walk - Q3 2026", "checklistItem": "WS-05", "severity": "HIGH", "resolved": false, "dueDate": "2026-09-19", "description": "Press locked out until the guard is refitted." },
+  { "title": "Oil spill near line 2", "inspection": "Lakeshore Assembly Plant - Workplace safety walk - Q3 2026", "checklistItem": "WS-01", "severity": "MEDIUM", "resolved": true, "dueDate": "2026-09-18" },
+  { "title": "Step stool with cracked tread", "inspection": "Lakeshore Assembly Plant - Workplace safety walk - Q3 2026", "checklistItem": "WS-02", "severity": "LOW", "resolved": false, "dueDate": "2026-10-02" },
+  { "title": "Cleaning schedule missing two sign-offs", "inspection": "Hillcrest Community Kitchen - Food hygiene - week 39", "checklistItem": "FH-05", "severity": "LOW", "resolved": true, "dueDate": "2026-09-27" }
+]
