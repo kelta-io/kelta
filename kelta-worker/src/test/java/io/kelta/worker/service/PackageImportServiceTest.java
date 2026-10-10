@@ -49,7 +49,7 @@ class PackageImportServiceTest {
         when(jdbcTemplate.queryForList(anyString(), any(Object.class))).thenReturn(List.of());
 
         service = new PackageImportService(queryEngine, collectionRegistry, repository,
-                new ObjectMapper());
+                new ObjectMapper(), new JdbcUserIdResolver(jdbcTemplate));
     }
 
     // ------------------------------------------------------------------
@@ -441,20 +441,70 @@ class PackageImportServiceTest {
     @DisplayName("flow createdBy remapping")
     class FlowCreatedBy {
 
-        @Test
-        @DisplayName("binds imported flows to the executing user when supplied")
-        void usesExecutingUserId() {
+        private static final String EXEC_UUID = "11111111-2222-3333-4444-555555555555";
+
+        private void seedPlatformUser(String id) {
+            when(jdbcTemplate.queryForList(contains("AND id = ?"), eq(TENANT), eq(id)))
+                    .thenReturn(List.of(Map.of("id", id)));
+        }
+
+        private void seedFirstUser(String id) {
+            when(jdbcTemplate.queryForList(contains("ORDER BY created_at"), eq(TENANT)))
+                    .thenReturn(List.of(Map.of("id", id)));
+        }
+
+        private Object importFlowAs(String executingUserId) {
             when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-flow"));
 
             var report = service.importPackage(TENANT, pkg(item("FLOW", flowData())),
                     new PackageImportService.ImportOptions(
-                            PackageImportService.ConflictMode.SKIP, false, null, null, "exec-user"));
+                            PackageImportService.ConflictMode.SKIP, false, null, null, executingUserId));
 
-            assertThat(report.created()).isEqualTo(1);
+            assertThat(report.created()).as("%s", report.items()).isEqualTo(1);
             @SuppressWarnings("unchecked")
             ArgumentCaptor<Map<String, Object>> dataCaptor = ArgumentCaptor.forClass(Map.class);
             verify(queryEngine).create(any(), dataCaptor.capture());
-            assertThat(dataCaptor.getValue().get("createdBy")).isEqualTo("exec-user");
+            return dataCaptor.getValue().get("createdBy");
+        }
+
+        @Test
+        @DisplayName("passes a UUID executing user (PAT path) through unchanged")
+        void usesExecutingUserUuid() {
+            seedPlatformUser(EXEC_UUID);
+            seedFirstUser("first-user");
+
+            assertThat(importFlowAs(EXEC_UUID)).isEqualTo(EXEC_UUID);
+            verify(jdbcTemplate, never()).queryForObject(anyString(), eq(String.class), any(Object[].class));
+        }
+
+        @Test
+        @DisplayName("resolves an email executing user (JWT path) to its platform_user id")
+        void resolvesExecutingUserEmail() {
+            when(jdbcTemplate.queryForObject(contains("AND email = ?"), eq(String.class),
+                    eq(TENANT), eq("admin@kelta.local"))).thenReturn(EXEC_UUID);
+            seedPlatformUser(EXEC_UUID);
+            seedFirstUser("first-user");
+
+            assertThat(importFlowAs("admin@kelta.local")).isEqualTo(EXEC_UUID);
+        }
+
+        @Test
+        @DisplayName("falls back to the first user when the email has no platform_user in the target")
+        void unknownEmailFallsBackToFirstUser() {
+            when(jdbcTemplate.queryForObject(contains("AND email = ?"), eq(String.class),
+                    eq(TENANT), eq("stranger@kelta.local")))
+                    .thenThrow(new org.springframework.dao.EmptyResultDataAccessException(1));
+            seedFirstUser("first-user");
+
+            assertThat(importFlowAs("stranger@kelta.local")).isEqualTo("first-user");
+        }
+
+        @Test
+        @DisplayName("falls back to the first user when the UUID has no row in the target tenant")
+        void unknownUuidFallsBackToFirstUser() {
+            seedFirstUser("first-user");
+
+            assertThat(importFlowAs(EXEC_UUID)).isEqualTo("first-user");
         }
 
         @Test

@@ -82,7 +82,7 @@ class PackageRoundTripTest {
         });
 
         importService = new PackageImportService(queryEngine, registry, importRepository,
-                new ObjectMapper());
+                new ObjectMapper(), (identifier, tenantId) -> identifier);
     }
 
     // ------------------------------------------------------------------
