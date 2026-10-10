@@ -332,7 +332,7 @@ public class PackageImportService {
                         "Field references a collection but the package carries no reference name "
                                 + "(v1 package?) — cannot remap safely");
             }
-            mapped.put("referenceCollectionId", ctx.requireCollection((String) refName));
+            mapped.put("referenceCollectionId", ctx.requireReferenceCollection((String) refName));
         }
 
         String existingId = ctx.fieldIdByKey().get(key);
@@ -655,6 +655,13 @@ public class PackageImportService {
         final ImportOptions options;
 
         private Map<String, String> collectionIdByName;
+        /**
+         * Platform system collections (users, profiles, …) — global rows outside every tenant and
+         * never in a package, but a valid LOOKUP target (an owner field is a LOOKUP to users).
+         * Kept apart from {@link #collectionIdByName} so a package collection can never resolve to,
+         * and so overwrite, a system row.
+         */
+        private Map<String, String> systemCollectionIdByName;
         private Map<String, String> fieldIdByKey;
         final Map<String, String> globalPicklistIdByName = new HashMap<>();
         final Map<String, String> picklistValueIdByKey = new HashMap<>();
@@ -683,6 +690,9 @@ public class PackageImportService {
             collectionIdByName = new HashMap<>();
             jdbc.queryForList("SELECT id, name FROM collection WHERE tenant_id = ?", tenantId)
                     .forEach(r -> collectionIdByName.put((String) r.get("name"), (String) r.get("id")));
+            systemCollectionIdByName = new HashMap<>();
+            jdbc.queryForList("SELECT id, name FROM collection WHERE system_collection = true")
+                    .forEach(r -> systemCollectionIdByName.put((String) r.get("name"), (String) r.get("id")));
             fieldIdByKey = new HashMap<>();
             jdbc.queryForList(
                     "SELECT f.id, f.name, c.name AS coll FROM field f " +
@@ -765,6 +775,17 @@ public class PackageImportService {
 
         String requireCollection(String name) {
             String id = collectionIdByName.get(name);
+            if (id == null) {
+                throw new IllegalStateException("Collection not found in target: " + name);
+            }
+            return id;
+        }
+
+        String requireReferenceCollection(String name) {
+            String id = collectionIdByName.get(name);
+            if (id == null) {
+                id = systemCollectionIdByName.get(name);
+            }
             if (id == null) {
                 throw new IllegalStateException("Collection not found in target: " + name);
             }

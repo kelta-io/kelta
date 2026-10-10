@@ -179,6 +179,38 @@ class PackageImportServiceTest {
         }
 
         @Test
+        @DisplayName("resolves a LOOKUP to a platform system collection (users) outside the package")
+        void resolvesReferenceToSystemCollection() {
+            seedCollections(Map.of("orders", "tgt-orders"));
+            when(jdbcTemplate.queryForList(contains("WHERE system_collection = true")))
+                    .thenReturn(List.of(Map.of("id", "sys-users", "name", "users")));
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "new-field"));
+
+            var report = service.importPackage(TENANT, pkg(item("FIELD", lookupFieldData("users"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).as("report: %s", report.items()).isZero();
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> dataCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(any(), dataCaptor.capture());
+            assertThat(dataCaptor.getValue().get("referenceCollectionId")).isEqualTo("sys-users");
+        }
+
+        @Test
+        @DisplayName("a package collection named like a system collection never resolves to the system row")
+        void packageCollectionNeverResolvesToSystemRow() {
+            when(jdbcTemplate.queryForList(contains("WHERE system_collection = true")))
+                    .thenReturn(List.of(Map.of("id", "sys-users", "name", "users")));
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tenant-users"));
+
+            service.importPackage(TENANT, pkg(item("COLLECTION", collectionData("users"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            verify(queryEngine).create(any(), anyMap());
+            verify(queryEngine, never()).update(any(), eq("sys-users"), anyMap());
+        }
+
+        @Test
         @DisplayName("fails the item without writing when the referenced collection is unresolvable")
         void unresolvableReferenceFails() {
             seedCollections(Map.of("orders", "tgt-orders"));
