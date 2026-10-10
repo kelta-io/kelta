@@ -56,7 +56,7 @@ grouping, optional geo), `active`. `UNIQUE (tenant_id, source, external_id)` —
 `targetExternalId` resolves here.
 
 **`watches`** (system collection, table `watch`, written via the slice-5 controller +
-owner-guarded generic route): `member_id` (varchar(36), the portal user), `target_id` (FK →
+generic route owner-guarded by the `watches` ownership metadata): `member_id` (varchar(36), the portal user), `target_id` (FK →
 `watch_target`), `criteria` JSONB (`{dateStart, dateEnd, quantity?, minDuration?}` — the
 matcher pushes date-range overlap into SQL and evaluates the rest in Java), `channels` (JSONB
 array, subset of the member's entitled channels), `status` CHECK

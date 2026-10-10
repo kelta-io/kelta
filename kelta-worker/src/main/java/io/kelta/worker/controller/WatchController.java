@@ -58,14 +58,22 @@ import java.util.Optional;
  * two cases are deliberately indistinguishable.
  *
  * <p>Writes go through {@link QueryEngine} rather than straight to the repository
- * so the platform's hooks fire: {@code WatchGuardHook} (owner guard) and
- * {@code MemberEntitlementQuotaHook} (plan limits). Bypassing it would silently
- * skip both. This controller additionally pre-checks the quota so a member at
- * their limit gets an actionable message instead of a bare validation error.
+ * so the platform's hooks fire: the generic owner guard ({@code OwnerScopeGuardHook},
+ * driven by the {@code watches} ownership metadata: {@code ownerField=memberId},
+ * {@code ownerScope=ALL}) and {@code MemberEntitlementQuotaHook} (plan limits).
+ * Bypassing it would silently skip both. This controller additionally pre-checks the
+ * quota so a member at their limit gets an actionable message instead of a bare
+ * validation error.
  *
- * <p>The generic dynamic route reaches the same collection, which is why
- * {@code WatchGuardHook} exists — this controller is the pleasant door, not the
- * only one.
+ * <p>The generic dynamic route reaches the same collection, which is why the owner
+ * guard lives in the collection's metadata — this controller is the pleasant door,
+ * not the only one.
+ *
+ * <p><b>Support writes run as the member.</b> A support actor holding
+ * {@code MANAGE_DATA} who names a member has their create/update/delete run under
+ * {@code CallerContext} bound to that member ({@link SupportPermissions#writeAs}), so
+ * the generic guard sees the row's owner as the caller. They do not depend on the
+ * actor holding {@code MODIFY_ALL_DATA}.
  *
  * <p>Support staff (INTERNAL, holding {@code MANAGE_DATA} or the read-only {@code VIEW_ALL_DATA};
  * see {@link SupportPermissions#READ}) calling {@code list}/{@code get} with no {@code memberId}
@@ -158,7 +166,8 @@ public class WatchController implements SelfScopedController {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                         "MANAGE_DATA or VIEW_ALL_DATA permission required");
             }
-            return dynamicCollectionRouter.list(COLLECTION, params, request);
+            return SupportPermissions.readAll(
+                    () -> dynamicCollectionRouter.list(COLLECTION, params, request));
         }
         String subject = resolveSubject(request, tenantId, memberId);
 
@@ -180,7 +189,8 @@ public class WatchController implements SelfScopedController {
                                     HttpServletRequest request) {
         String tenantId = requireTenant();
         if (hasSupportRead(request)) {
-            return dynamicCollectionRouter.get(COLLECTION, id, params, request);
+            return SupportPermissions.readAll(
+                    () -> dynamicCollectionRouter.get(COLLECTION, id, params, request));
         }
         String subject = requireActor(request, tenantId);
         Watch watch = requireOwnWatch(tenantId, id, subject);
@@ -235,7 +245,8 @@ public class WatchController implements SelfScopedController {
             data.put("expiresAt", body.expiresAt());
         }
 
-        Map<String, Object> created = queryEngine.create(definition(), data);
+        Map<String, Object> created = SupportPermissions.writeAs(subject,
+                () -> queryEngine.create(definition(), data));
         log.info("Member {} started watching target {} in tenant {}",
                 subject, target.id(), tenantId);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("data", created));
@@ -286,7 +297,7 @@ public class WatchController implements SelfScopedController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nothing to update");
         }
 
-        return queryEngine.update(definition(), id, data)
+        return SupportPermissions.writeAs(subject, () -> queryEngine.update(definition(), id, data))
                 .map(updated -> Map.of("data", (Object) updated))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found"));
     }
@@ -300,7 +311,7 @@ public class WatchController implements SelfScopedController {
         String subject = resolveSubject(request, tenantId, memberId);
         requireOwnWatch(tenantId, id, subject);
 
-        queryEngine.delete(definition(), id);
+        SupportPermissions.writeAs(subject, () -> queryEngine.delete(definition(), id));
         return ResponseEntity.noContent().build();
     }
 

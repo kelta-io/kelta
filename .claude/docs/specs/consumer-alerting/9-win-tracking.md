@@ -15,14 +15,16 @@
 `/api/wins/**` static route:
 
 - `POST /api/wins` — a member records a win (owner-stamped, written via `QueryEngine` so
-  `WinGuardHook` fires).
+  the owner guard fires — originally `WinGuardHook`, now the `wins` ownership metadata enforced
+  by `OwnerScopeGuardHook`, member-data-ownership slice 4).
 - `GET /api/wins` — the caller's own wins.
 - `GET /api/wins/recent` — the **live-wins ticker feed**: recent opt-in-`isPublic` wins,
   **redacted** to ticker-safe fields (first-name claimant label, summary, category, quantity,
   time) — cross-member by design (social proof) but never exposing member identity.
 - `GET /api/wins/stats?targetId=` — per-target success stats (count + last win).
 
-Plus `WinGuardHook` (owner guard on the generic route, a faithful mirror of `WatchGuardHook`)
+Plus `WinGuardHook` (owner guard on the generic route, a faithful mirror of `WatchGuardHook`;
+retired in member-data-ownership slice 4 — `wins` declares ownership metadata instead)
 and `AnalyticsRetentionSweep`-adjacent nothing — wins are low-volume and kept.
 
 **Realtime ticker rides existing machinery.** A win create emits
@@ -79,7 +81,8 @@ three indexes. No FKs on `target_id`/`watch_id`/`alert_id`. See the numbering wa
 - Worker `controller/WinController.java` — the member API + redacted ticker feed; writes via
   `QueryEngine` (`WatchController` idiom).
 - Worker `listener/WinGuardHook.java` — owner guard, mirror of `WatchGuardHook`; registered in
-  `config/FlowConfig.java`.
+  `config/FlowConfig.java`. (Retired in member-data-ownership slice 4: `wins` declares
+  `ownerField=memberId`/`ALL` in `SystemCollectionDefinitions`.)
 - Gateway `RouteConfigService.registerStaticRoutes()` — `{"wins", "/api/wins/**", "wins"}` +
   bump the `RouteConfigServiceTest` route-count assertions.
 
@@ -100,7 +103,8 @@ not a secret; the point is that nothing about the body is evaluated for a caller
 ## 6. Test plan
 
 - **Unit** — `WinGuardHookTest` (mirror of `WatchGuardHookTest`: own/foreign/re-own/internal-tier/
-  fail-closed); `WinControllerTest` (create stamps owner + first-name label + clamps summary +
+  fail-closed; folded into the parameterised `OwnerScopeGuardHookTest` in member-data-ownership
+  slice 4); `WinControllerTest` (create stamps owner + first-name label + clamps summary +
   defaults private; `/recent` is redacted — asserts **no `memberId`/`id`**; `/list` owner-scoped;
   `/stats` count).
 - **Harness (real Postgres)** — `WinScenarioTest`: RLS isolates two tenants' wins (non-superuser
