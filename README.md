@@ -118,7 +118,8 @@ release never stand in for each other.
 **Running a different release.** Set `KELTA_VERSION` in `.env` (the tags are listed on
 `ghcr.io/kelta-io/kelta-gateway`) and run `docker compose up -d` again. The `ai` and `seed`
 profiles are not released images; they need the from-source targets (`make up-jvm-ai`,
-`make seed`).
+`make seed`). Moving an existing install to a newer release (backup, pull, migrations,
+rollback) is covered in [UPGRADING.md](UPGRADING.md).
 
 Platform admin (seeded by Flyway; kelta-auth replaces the seeded password on first boot):
 
