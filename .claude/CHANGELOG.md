@@ -191,3 +191,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-10-10 fix(security): land owner-scoped collections on main — an ownership PATCH now refreshes the serving pod synchronously (plus the NATS broadcast), and the harness scenario asserts without polling and reports response bodies on failure (KLT-471)
 - 2026-10-10 fix(worker): serialize CollectionLifecycleManager refreshes per collection so a stale in-flight NATS refresh cannot overwrite an ownership change (KLT-471)
 - 2026-10-10 fix(worker): package import resolves a LOOKUP to a platform system collection (users) — a sandbox clone of any tenant with an owner field failed with 'Collection not found in target: users' (KLT-471)
+- 2026-10-10 fix(worker): package import resolves the executing user (email on JWT logins) to a platform_user id in the target tenant before writing FLOW createdBy, falling back to the tenant's first user on a miss (KLT-474)

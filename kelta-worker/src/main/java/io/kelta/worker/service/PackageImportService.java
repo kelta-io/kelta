@@ -5,6 +5,7 @@ import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.OwnerScope;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.worker.repository.PackageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -100,15 +101,18 @@ public class PackageImportService {
     private final CollectionRegistry collectionRegistry;
     private final PackageRepository repository;
     private final ObjectMapper objectMapper;
+    private final UserIdResolver userIdResolver;
 
     public PackageImportService(QueryEngine queryEngine,
                                 CollectionRegistry collectionRegistry,
                                 PackageRepository repository,
-                                ObjectMapper objectMapper) {
+                                ObjectMapper objectMapper,
+                                UserIdResolver userIdResolver) {
         this.queryEngine = queryEngine;
         this.collectionRegistry = collectionRegistry;
         this.repository = repository;
         this.objectMapper = objectMapper;
+        this.userIdResolver = userIdResolver;
     }
 
     @SuppressWarnings("unchecked")
@@ -792,19 +796,35 @@ public class PackageImportService {
             return id;
         }
 
+        /**
+         * The executing user's {@code platform_user.id} in the target tenant, else the
+         * tenant's first user. JWT callers arrive as an email and promotion's executor
+         * may not exist in the target tenant, so the identifier is resolved and then
+         * checked against {@code platform_user} rather than trusted as an id.
+         */
         String resolveDefaultUserId() {
-            if (options.executingUserId() != null && !options.executingUserId().isBlank()) {
-                return options.executingUserId();
+            if (defaultUserId != null) {
+                return defaultUserId;
             }
-            if (defaultUserId == null) {
-                var rows = repository.getJdbcTemplate().queryForList(
-                        "SELECT id FROM platform_user WHERE tenant_id = ? ORDER BY created_at ASC LIMIT 1",
-                        tenantId);
-                if (rows.isEmpty()) {
-                    throw new IllegalStateException("Target tenant has no users to own imported flows");
+            String executing = options.executingUserId();
+            if (executing != null && !executing.isBlank()) {
+                String resolved = userIdResolver.resolve(executing, tenantId);
+                if (resolved != null && !repository.getJdbcTemplate().queryForList(
+                        "SELECT id FROM platform_user WHERE tenant_id = ? AND id = ?",
+                        tenantId, resolved).isEmpty()) {
+                    defaultUserId = resolved;
+                    return defaultUserId;
                 }
-                defaultUserId = (String) rows.get(0).get("id");
+                log.warn("Executing user '{}' has no platform_user in tenant {}; "
+                        + "imported flows fall back to the tenant's first user", executing, tenantId);
             }
+            var rows = repository.getJdbcTemplate().queryForList(
+                    "SELECT id FROM platform_user WHERE tenant_id = ? ORDER BY created_at ASC LIMIT 1",
+                    tenantId);
+            if (rows.isEmpty()) {
+                throw new IllegalStateException("Target tenant has no users to own imported flows");
+            }
+            defaultUserId = (String) rows.get(0).get("id");
             return defaultUserId;
         }
     }
