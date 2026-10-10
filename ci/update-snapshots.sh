@@ -8,7 +8,7 @@
 #
 # Runs after the compose stack is up and kelta-e2e-runner:local is built. It clones
 # SNAPSHOTS_REF (the PR head, not the merge ref), validates the specs, runs
-# `npx playwright test --update-snapshots <specs>` in the runner image on the compose
+# `npx playwright test --update-snapshots=all <specs>` in the runner image on the compose
 # network, `docker cp`s each spec's *-snapshots/ directory out (the image bakes the tests
 # in; nothing is bind-mounted), commits only those PNGs plus the marker's deletion, pushes,
 # and exits 1 so this run never reports green on tests it did not run. The push triggers
@@ -115,7 +115,9 @@ status=0
   --network "${COMPOSE_PROJECT_NAME}_kelta-network" \
   --env-file "$E2E_ENV_FILE" \
   "$E2E_IMAGE" \
-  npx playwright test --update-snapshots "${specs[@]}" || status=$?
+  # `--update-snapshots` takes an optional mode in Playwright >= 1.50 (all|changed|missing|none);
+  # a bare flag followed by a spec path parses the path as the mode and fails (PLT-476).
+  npx playwright test --update-snapshots=all "${specs[@]}" || status=$?
 
 mkdir -p "$REPORT_DIR/playwright-report" "$REPORT_DIR/test-results"
 "$DOCKER" cp "$container":/work/playwright-report/. "$REPORT_DIR/playwright-report/" 2>/dev/null || true

@@ -169,7 +169,7 @@ describe('update-snapshots.sh', () => {
     assert.match(
       calls,
       new RegExp(
-        `^run --name ci-1-1_kelta-e2e-snapshots --network ci-1-1_kelta-network --env-file ${join(root, 'runner.env')} kelta-e2e-runner:local npx playwright test --update-snapshots ${SPEC}$`,
+        `^run --name ci-1-1_kelta-e2e-snapshots --network ci-1-1_kelta-network --env-file ${join(root, 'runner.env')} kelta-e2e-runner:local npx playwright test --update-snapshots=all ${SPEC}$`,
         'm'
       )
     );
@@ -206,7 +206,7 @@ describe('update-snapshots.sh', () => {
       lastCommitFiles(),
       `A\t${SNAPSHOTS}/new-chromium-linux.png\nA\te2e-tests/tests/end-user/other.spec.ts-snapshots/new-chromium-linux.png`
     );
-    assert.match(dockerCalls(), new RegExp(`--update-snapshots ${SPEC} tests/end-user/other.spec.ts$`, 'm'));
+    assert.match(dockerCalls(), new RegExp(`--update-snapshots=all ${SPEC} tests/end-user/other.spec.ts$`, 'm'));
   });
 
   it('refuses main', async () => {
