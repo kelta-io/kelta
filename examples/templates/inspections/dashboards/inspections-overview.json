@@ -1,0 +1,76 @@
+{
+  "name": "Inspections overview",
+  "description": "Open findings by severity, inspections by status and the high-severity findings still open",
+  "accessLevel": "PUBLIC",
+  "columnCount": 3,
+  "components": [
+    {
+      "title": "Open findings",
+      "componentType": "metric",
+      "columnPosition": 1,
+      "rowPosition": 1,
+      "config": {
+        "collectionName": "findings",
+        "aggregateFunction": "COUNT",
+        "filters": [{ "field": "resolved", "operator": "eq", "value": false }]
+      }
+    },
+    {
+      "title": "Open high-severity findings",
+      "componentType": "metric",
+      "columnPosition": 2,
+      "rowPosition": 1,
+      "config": {
+        "collectionName": "findings",
+        "aggregateFunction": "COUNT",
+        "filters": [
+          { "field": "resolved", "operator": "eq", "value": false },
+          { "field": "severity", "operator": "eq", "value": "HIGH" }
+        ]
+      }
+    },
+    {
+      "title": "Sites",
+      "componentType": "metric",
+      "columnPosition": 3,
+      "rowPosition": 1,
+      "config": { "collectionName": "sites", "aggregateFunction": "COUNT" }
+    },
+    {
+      "title": "Open findings by severity",
+      "componentType": "chart",
+      "columnPosition": 1,
+      "rowPosition": 2,
+      "columnSpan": 2,
+      "config": {
+        "collectionName": "findings",
+        "groupByField": "severity",
+        "aggregateFunction": "COUNT",
+        "chartStyle": "bar",
+        "filters": [{ "field": "resolved", "operator": "eq", "value": false }]
+      }
+    },
+    {
+      "title": "Inspections by status",
+      "componentType": "chart",
+      "columnPosition": 3,
+      "rowPosition": 2,
+      "config": { "collectionName": "inspections", "groupByField": "status", "chartStyle": "pie" }
+    },
+    {
+      "title": "High-severity findings still open",
+      "componentType": "table",
+      "columnPosition": 1,
+      "rowPosition": 3,
+      "columnSpan": 3,
+      "config": {
+        "collectionName": "findings",
+        "fields": ["title", "inspection", "checklistItem", "dueDate"],
+        "filters": [
+          { "field": "resolved", "operator": "eq", "value": false },
+          { "field": "severity", "operator": "eq", "value": "HIGH" }
+        ]
+      }
+    }
+  ]
+}

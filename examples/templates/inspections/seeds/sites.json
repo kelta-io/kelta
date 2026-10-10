@@ -1,0 +1,8 @@
+[
+  { "name": "Riverside Distribution Center", "address": "1200 Riverside Way", "city": "Portland", "country": "United States", "siteManager": "Dana Whitfield", "phone": "+1 503 555 0141" },
+  { "name": "Harbor Street Bakery", "address": "48 Harbor Street", "city": "Halifax", "country": "Canada", "siteManager": "Omar Haddad", "phone": "+1 902 555 0177" },
+  { "name": "Northgate Office Tower", "address": "300 Northgate Avenue, floors 4-9", "city": "Manchester", "country": "United Kingdom", "siteManager": "Fiona Marsh", "phone": "+44 161 555 0102" },
+  { "name": "Lakeshore Assembly Plant", "address": "77 Industrial Parkway", "city": "Cleveland", "country": "United States", "siteManager": "Marcus Bell", "phone": "+1 216 555 0190" },
+  { "name": "Hillcrest Community Kitchen", "address": "9 Hillcrest Road", "city": "Dublin", "country": "Ireland", "siteManager": "Aoife Byrne", "phone": "+353 1 555 0133" },
+  { "name": "Southpoint Retail Store", "address": "Unit 14, Southpoint Mall", "city": "Melbourne", "country": "Australia", "siteManager": "Liam Nguyen", "phone": "+61 3 5550 0164" }
+]

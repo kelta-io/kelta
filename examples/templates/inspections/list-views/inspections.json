@@ -1,0 +1,5 @@
+[
+  { "name": "Upcoming and in progress", "columns": ["name", "site", "template", "status", "scheduledDate", "openHighFindings"], "filters": ["status.in=SCHEDULED,IN_PROGRESS"], "sort": "scheduledDate", "default": true, "rowLimit": 25 },
+  { "name": "Inspection board", "columns": ["name", "site", "status", "scheduledDate"], "viewType": "KANBAN", "laneField": "status", "cardFields": ["name", "site", "scheduledDate"], "rowLimit": 100 },
+  { "name": "Failed inspections", "columns": ["name", "site", "template", "completedDate", "openHighFindings"], "filters": ["status.eq=FAILED"], "sort": "-completedDate", "rowLimit": 25 }
+]

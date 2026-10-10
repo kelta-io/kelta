@@ -1,0 +1,5 @@
+[
+  { "name": "Fire safety", "description": "Exits, alarms, extinguishers and sprinklers. Based on a typical monthly fire warden walk-through.", "frequency": "Monthly", "active": true },
+  { "name": "Food hygiene", "description": "Storage temperatures, cleaning, pest control and staff hygiene in food preparation areas.", "frequency": "Weekly", "active": true },
+  { "name": "Workplace safety walk", "description": "General hazards: walkways, ladders, electrical equipment, first aid and machine guarding.", "frequency": "Quarterly", "active": true }
+]

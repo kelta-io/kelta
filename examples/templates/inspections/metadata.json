@@ -1,0 +1,2442 @@
+{
+  "formatVersion": 2,
+  "name": "inspections",
+  "version": "1.0.0",
+  "description": "Inspections checklist template: sites, inspection templates, checklist items, inspections and findings with their picklists, page layouts, and a validation rule plus a flow that stop an inspection with an open high-severity finding from being marked passed.",
+  "items": [
+    {
+      "type": "COLLECTION",
+      "data": {
+        "id": "59b91e9d-1670-4671-bf0a-903036e6e9ff",
+        "name": "sites",
+        "description": "Places that get inspected: warehouses, stores, offices, plants",
+        "active": true,
+        "current_version": 1,
+        "display_name": "Sites",
+        "path": "/api/sites",
+        "system_collection": false,
+        "display_field_id": null,
+        "adapter_config": null,
+        "track_history": false,
+        "capture_geo": false,
+        "owner_field": null,
+        "owner_scope": "NONE",
+        "owner_scope_reads": true,
+        "display_field_name": null
+      }
+    },
+    {
+      "type": "COLLECTION",
+      "data": {
+        "id": "f6e906fb-0287-4463-9175-82cfdd13ffd1",
+        "name": "inspection-templates",
+        "description": "Reusable checklists, such as fire safety or food hygiene",
+        "active": true,
+        "current_version": 1,
+        "display_name": "Inspection templates",
+        "path": "/api/inspection-templates",
+        "system_collection": false,
+        "display_field_id": null,
+        "adapter_config": null,
+        "track_history": false,
+        "capture_geo": false,
+        "owner_field": null,
+        "owner_scope": "NONE",
+        "owner_scope_reads": true,
+        "display_field_name": null
+      }
+    },
+    {
+      "type": "COLLECTION",
+      "data": {
+        "id": "4de56e52-e38b-48de-98ba-51e4c28e9f0a",
+        "name": "checklist-items",
+        "description": "The questions an inspector answers for a template",
+        "active": true,
+        "current_version": 1,
+        "display_name": "Checklist items",
+        "path": "/api/checklist-items",
+        "system_collection": false,
+        "display_field_id": null,
+        "adapter_config": null,
+        "track_history": false,
+        "capture_geo": false,
+        "owner_field": null,
+        "owner_scope": "NONE",
+        "owner_scope_reads": true,
+        "display_field_name": null
+      }
+    },
+    {
+      "type": "COLLECTION",
+      "data": {
+        "id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "inspections",
+        "description": "One visit to a site against a template",
+        "active": true,
+        "current_version": 1,
+        "display_name": "Inspections",
+        "path": "/api/inspections",
+        "system_collection": false,
+        "display_field_id": null,
+        "adapter_config": null,
+        "track_history": false,
+        "capture_geo": false,
+        "owner_field": null,
+        "owner_scope": "NONE",
+        "owner_scope_reads": true,
+        "display_field_name": null
+      }
+    },
+    {
+      "type": "COLLECTION",
+      "data": {
+        "id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "name": "findings",
+        "description": "Problems an inspector recorded during an inspection",
+        "active": true,
+        "current_version": 1,
+        "display_name": "Findings",
+        "path": "/api/findings",
+        "system_collection": false,
+        "display_field_id": null,
+        "adapter_config": null,
+        "track_history": false,
+        "capture_geo": false,
+        "owner_field": null,
+        "owner_scope": "NONE",
+        "owner_scope_reads": true,
+        "display_field_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "e0c49c69-fb11-48ba-a020-4e0061a44a23",
+        "collection_id": "59b91e9d-1670-4671-bf0a-903036e6e9ff",
+        "name": "name",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Site name",
+        "unique_constraint": true,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": true,
+        "collection_name": "sites",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "9d83f131-2812-48a4-99e4-78db1186720a",
+        "collection_id": "59b91e9d-1670-4671-bf0a-903036e6e9ff",
+        "name": "address",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Address",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "sites",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "6e52f31b-d497-4fe7-a6b1-9c4cd8f058c6",
+        "collection_id": "59b91e9d-1670-4671-bf0a-903036e6e9ff",
+        "name": "country",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Country",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "sites",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "8ec6de2b-266e-477a-9519-c02cd292ea81",
+        "collection_id": "59b91e9d-1670-4671-bf0a-903036e6e9ff",
+        "name": "siteManager",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Site manager",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "sites",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "955dfe74-e871-466e-bd59-bef15c553a20",
+        "collection_id": "59b91e9d-1670-4671-bf0a-903036e6e9ff",
+        "name": "city",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "City",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "sites",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "f8dd2a29-65cc-4337-883f-45ed3de1d9c1",
+        "collection_id": "59b91e9d-1670-4671-bf0a-903036e6e9ff",
+        "name": "phone",
+        "type": "PHONE",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Phone",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "sites",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "b5ca229c-7ead-4d78-aa2d-b9c9fd6d2fca",
+        "collection_id": "f6e906fb-0287-4463-9175-82cfdd13ffd1",
+        "name": "frequency",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Frequency",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspection-templates",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "7286a15e-89f7-4cdf-992f-dded91a75fd8",
+        "collection_id": "f6e906fb-0287-4463-9175-82cfdd13ffd1",
+        "name": "name",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Template name",
+        "unique_constraint": true,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": true,
+        "collection_name": "inspection-templates",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "74711370-64fd-49fb-9532-e67d6058a272",
+        "collection_id": "f6e906fb-0287-4463-9175-82cfdd13ffd1",
+        "name": "description",
+        "type": "TEXT",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Description",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspection-templates",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "65934056-c3a6-4796-ae01-28c03cfb35de",
+        "collection_id": "f6e906fb-0287-4463-9175-82cfdd13ffd1",
+        "name": "active",
+        "type": "BOOLEAN",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Active",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": true,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspection-templates",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "9f360b97-9893-4bcb-b5a2-9f8f3d881b8e",
+        "collection_id": "4de56e52-e38b-48de-98ba-51e4c28e9f0a",
+        "name": "code",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Code",
+        "unique_constraint": true,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "checklist-items",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "ecf7e275-5cd8-4344-86f5-19ff1bec4bd1",
+        "collection_id": "4de56e52-e38b-48de-98ba-51e4c28e9f0a",
+        "name": "template",
+        "type": "LOOKUP",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Template",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": "inspection-templates",
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": "checklistItems",
+        "cascade_delete": false,
+        "reference_collection_id": "f6e906fb-0287-4463-9175-82cfdd13ffd1",
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "checklist-items",
+        "reference_collection_name": "inspection-templates"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "913932d3-4bc6-492d-8061-5bd9ad504309",
+        "collection_id": "4de56e52-e38b-48de-98ba-51e4c28e9f0a",
+        "name": "guidance",
+        "type": "TEXT",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Guidance",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "checklist-items",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "e164e5f2-8666-4e36-a78a-8a5a30d3c113",
+        "collection_id": "4de56e52-e38b-48de-98ba-51e4c28e9f0a",
+        "name": "question",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Question",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": true,
+        "collection_name": "checklist-items",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "2941874a-9ffb-488f-a177-3459d283eb9b",
+        "collection_id": "4de56e52-e38b-48de-98ba-51e4c28e9f0a",
+        "name": "sortOrder",
+        "type": "INTEGER",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Order",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "checklist-items",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "98da4b9e-9752-4231-af3b-579cdbe88766",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "site",
+        "type": "LOOKUP",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Site",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": "sites",
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": "inspections",
+        "cascade_delete": false,
+        "reference_collection_id": "59b91e9d-1670-4671-bf0a-903036e6e9ff",
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspections",
+        "reference_collection_name": "sites"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "1eeee6f9-2298-4c67-9bc3-7562a9ff2241",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "template",
+        "type": "LOOKUP",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Template",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": "inspection-templates",
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": "inspections",
+        "cascade_delete": false,
+        "reference_collection_id": "f6e906fb-0287-4463-9175-82cfdd13ffd1",
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspections",
+        "reference_collection_name": "inspection-templates"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "4bfb4e9c-88d9-4655-a0f1-f8df1d4b7c5c",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "scheduledDate",
+        "type": "DATE",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Scheduled date",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspections",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "bde30df3-7a59-41d4-ac45-c5f4b2625895",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "completedDate",
+        "type": "DATE",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Completed date",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspections",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "b34c7eed-bf3d-4bd1-93f1-73b22c0ac0f3",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "openHighFindings",
+        "type": "INTEGER",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": "Kept up to date by the flow Count open high-severity findings",
+        "display_name": "Open high-severity findings",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": 0,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspections",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "50776727-dbc4-44f1-a4b5-d09f0904127e",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "notes",
+        "type": "TEXT",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Notes",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspections",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "d9607aa7-1e18-485a-ac77-d2b410c06c60",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "name",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Inspection",
+        "unique_constraint": true,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": true,
+        "collection_name": "inspections",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "80651ca4-5803-4c4a-b0a3-3b6883603f9d",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "inspector",
+        "type": "STRING",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Inspector",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspections",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "7672e1fb-8d04-4619-bb46-160bb190c39e",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "status",
+        "type": "PICKLIST",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Status",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "inspections",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "cd565a95-29bc-41ff-af60-671e5db3bd91",
+        "collection_id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "name": "inspection",
+        "type": "LOOKUP",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Inspection",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": "inspections",
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": "findings",
+        "cascade_delete": false,
+        "reference_collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "findings",
+        "reference_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "aba0f0c7-267f-4769-894f-8a366cdf838d",
+        "collection_id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "name": "dueDate",
+        "type": "DATE",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Due date",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "findings",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "7ccd9431-2764-46b3-9367-428c510ff814",
+        "collection_id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "name": "description",
+        "type": "TEXT",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Description",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "findings",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "8ff9e7a4-4059-445d-b703-fc9e027e0b65",
+        "collection_id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "name": "title",
+        "type": "STRING",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Finding",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": true,
+        "collection_name": "findings",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "abd81421-ce11-45ee-b403-99724a8462d3",
+        "collection_id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "name": "checklistItem",
+        "type": "LOOKUP",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Checklist item",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": "checklist-items",
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": "findings",
+        "cascade_delete": false,
+        "reference_collection_id": "4de56e52-e38b-48de-98ba-51e4c28e9f0a",
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "findings",
+        "reference_collection_name": "checklist-items"
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "62023cb1-101b-4e26-87bb-63d3f3be33a9",
+        "collection_id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "name": "resolved",
+        "type": "BOOLEAN",
+        "required": false,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Resolved",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": false,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "findings",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "FIELD",
+      "data": {
+        "id": "7e7771a9-4a3f-4ba3-973d-d1420b356730",
+        "collection_id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "name": "severity",
+        "type": "PICKLIST",
+        "required": true,
+        "active": true,
+        "constraints": null,
+        "description": null,
+        "display_name": "Severity",
+        "unique_constraint": false,
+        "indexed": false,
+        "default_value": null,
+        "reference_target": null,
+        "field_order": 0,
+        "field_type_config": null,
+        "auto_number_sequence_name": null,
+        "relationship_type": null,
+        "relationship_name": null,
+        "cascade_delete": false,
+        "reference_collection_id": null,
+        "track_history": false,
+        "column_name": null,
+        "immutable": false,
+        "searchable": false,
+        "collection_name": "findings",
+        "reference_collection_name": null
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "e7ae28d1-75ea-43ea-875f-2c8c69f3d398",
+        "picklist_source_type": "FIELD",
+        "picklist_source_id": "7e7771a9-4a3f-4ba3-973d-d1420b356730",
+        "value": "LOW",
+        "label": "Low",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 0,
+        "color": null,
+        "description": null,
+        "field_name": "severity",
+        "field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "2d3c45d4-054c-4de0-a644-59a347f18fae",
+        "picklist_source_type": "FIELD",
+        "picklist_source_id": "7672e1fb-8d04-4619-bb46-160bb190c39e",
+        "value": "SCHEDULED",
+        "label": "Scheduled",
+        "is_default": true,
+        "is_active": true,
+        "sort_order": 0,
+        "color": null,
+        "description": null,
+        "field_name": "status",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "7d1ae98d-d181-4868-9d1a-fd6a8e23dca4",
+        "picklist_source_type": "FIELD",
+        "picklist_source_id": "7e7771a9-4a3f-4ba3-973d-d1420b356730",
+        "value": "MEDIUM",
+        "label": "Medium",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 1,
+        "color": null,
+        "description": null,
+        "field_name": "severity",
+        "field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "e3248cfc-4a0b-482d-9e50-5c824806114c",
+        "picklist_source_type": "FIELD",
+        "picklist_source_id": "7672e1fb-8d04-4619-bb46-160bb190c39e",
+        "value": "IN_PROGRESS",
+        "label": "In progress",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 1,
+        "color": null,
+        "description": null,
+        "field_name": "status",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "ad5f1e5a-a76a-4f91-8eb3-c9353c6fd35f",
+        "picklist_source_type": "FIELD",
+        "picklist_source_id": "7e7771a9-4a3f-4ba3-973d-d1420b356730",
+        "value": "HIGH",
+        "label": "High",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 2,
+        "color": null,
+        "description": null,
+        "field_name": "severity",
+        "field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "ae0b58c5-ed93-4376-a1c5-d021740b185a",
+        "picklist_source_type": "FIELD",
+        "picklist_source_id": "7672e1fb-8d04-4619-bb46-160bb190c39e",
+        "value": "PASSED",
+        "label": "Passed",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 2,
+        "color": null,
+        "description": null,
+        "field_name": "status",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "c638646a-333b-4b02-9069-8a523481185c",
+        "picklist_source_type": "FIELD",
+        "picklist_source_id": "7672e1fb-8d04-4619-bb46-160bb190c39e",
+        "value": "FAILED",
+        "label": "Failed",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 3,
+        "color": null,
+        "description": null,
+        "field_name": "status",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "PICKLIST_VALUE",
+      "data": {
+        "id": "09d25e24-54a8-4a9d-a400-404104784ff9",
+        "picklist_source_type": "FIELD",
+        "picklist_source_id": "7672e1fb-8d04-4619-bb46-160bb190c39e",
+        "value": "CANCELLED",
+        "label": "Cancelled",
+        "is_default": false,
+        "is_active": true,
+        "sort_order": 4,
+        "color": null,
+        "description": null,
+        "field_name": "status",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "VALIDATION_RULE",
+      "data": {
+        "id": "f2c4f143-7737-41a3-80c8-9034986e36c6",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "No pass with open high-severity findings",
+        "description": null,
+        "active": true,
+        "error_condition_formula": "status == \"PASSED\" && BLANKVALUE(openHighFindings, 0) > 0",
+        "error_message": "An inspection with an open high-severity finding cannot be marked passed. Resolve the finding or mark the inspection failed.",
+        "error_field": "status",
+        "evaluate_on": "CREATE_AND_UPDATE",
+        "enforce_on_client": false,
+        "severity": "ERROR",
+        "collection_name": "inspections"
+      }
+    },
+    {
+      "type": "PAGE_LAYOUT",
+      "data": {
+        "id": "00996800-d33e-47a7-a320-cd34a1002bfb",
+        "collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "name": "Inspection",
+        "description": null,
+        "layout_type": "DETAIL",
+        "is_default": true,
+        "default_filter": null,
+        "default_sort_field": null,
+        "default_sort_direction": "ASC",
+        "default_row_limit": 50,
+        "header_config": {
+          "metaFields": [
+            {
+              "key": "site"
+            },
+            {
+              "key": "status"
+            },
+            {
+              "key": "scheduledDate"
+            }
+          ],
+          "titleFields": [
+            "name"
+          ]
+        },
+        "rail_blocks": null,
+        "collection_name": "inspections"
+      }
+    },
+    {
+      "type": "PAGE_LAYOUT",
+      "data": {
+        "id": "f2fdad54-3dfb-4d4b-9a04-f25c6b5d9d0d",
+        "collection_id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "name": "Finding",
+        "description": null,
+        "layout_type": "DETAIL",
+        "is_default": true,
+        "default_filter": null,
+        "default_sort_field": null,
+        "default_sort_direction": "ASC",
+        "default_row_limit": 50,
+        "header_config": {
+          "metaFields": [
+            {
+              "key": "severity"
+            },
+            {
+              "key": "inspection"
+            }
+          ],
+          "titleFields": [
+            "title"
+          ]
+        },
+        "rail_blocks": null,
+        "collection_name": "findings"
+      }
+    },
+    {
+      "type": "PAGE_LAYOUT",
+      "data": {
+        "id": "2dff3854-5e3c-4dee-94e2-78c18c78a8f6",
+        "collection_id": "4de56e52-e38b-48de-98ba-51e4c28e9f0a",
+        "name": "Checklist item",
+        "description": null,
+        "layout_type": "DETAIL",
+        "is_default": true,
+        "default_filter": null,
+        "default_sort_field": null,
+        "default_sort_direction": "ASC",
+        "default_row_limit": 50,
+        "header_config": {
+          "metaFields": [
+            {
+              "key": "template"
+            }
+          ],
+          "titleFields": [
+            "code",
+            "question"
+          ]
+        },
+        "rail_blocks": null,
+        "collection_name": "checklist-items"
+      }
+    },
+    {
+      "type": "PAGE_LAYOUT",
+      "data": {
+        "id": "23b4b9f9-9814-4856-a8be-cfeb49d90702",
+        "collection_id": "59b91e9d-1670-4671-bf0a-903036e6e9ff",
+        "name": "Site",
+        "description": null,
+        "layout_type": "DETAIL",
+        "is_default": true,
+        "default_filter": null,
+        "default_sort_field": null,
+        "default_sort_direction": "ASC",
+        "default_row_limit": 50,
+        "header_config": {
+          "metaFields": [
+            {
+              "key": "city"
+            },
+            {
+              "key": "country"
+            }
+          ],
+          "titleFields": [
+            "name"
+          ]
+        },
+        "rail_blocks": null,
+        "collection_name": "sites"
+      }
+    },
+    {
+      "type": "PAGE_LAYOUT",
+      "data": {
+        "id": "924c3372-3478-41a8-a9cd-45e48604b0f6",
+        "collection_id": "f6e906fb-0287-4463-9175-82cfdd13ffd1",
+        "name": "Inspection template",
+        "description": null,
+        "layout_type": "DETAIL",
+        "is_default": true,
+        "default_filter": null,
+        "default_sort_field": null,
+        "default_sort_direction": "ASC",
+        "default_row_limit": 50,
+        "header_config": {
+          "metaFields": [
+            {
+              "key": "frequency"
+            }
+          ],
+          "titleFields": [
+            "name"
+          ]
+        },
+        "rail_blocks": null,
+        "collection_name": "inspection-templates"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "4fae115c-7635-4998-ac1f-af3554fce141",
+        "layout_id": "00996800-d33e-47a7-a320-cd34a1002bfb",
+        "heading": "Inspection",
+        "columns": 2,
+        "sort_order": 0,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Inspection",
+        "collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "17e98989-5a37-4812-9c02-0a35e54486b6",
+        "layout_id": "f2fdad54-3dfb-4d4b-9a04-f25c6b5d9d0d",
+        "heading": "Finding",
+        "columns": 2,
+        "sort_order": 0,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Finding",
+        "collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "89ce250c-96ca-4d97-8c66-4cd16b8c25ed",
+        "layout_id": "2dff3854-5e3c-4dee-94e2-78c18c78a8f6",
+        "heading": "Checklist item",
+        "columns": 2,
+        "sort_order": 0,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Checklist item",
+        "collection_name": "checklist-items"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "6049c4e2-35e0-41b2-90f7-79d492b5f5d7",
+        "layout_id": "23b4b9f9-9814-4856-a8be-cfeb49d90702",
+        "heading": "Site",
+        "columns": 2,
+        "sort_order": 0,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Site",
+        "collection_name": "sites"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "65c23374-c6be-47cb-9c2a-d5136847aba9",
+        "layout_id": "924c3372-3478-41a8-a9cd-45e48604b0f6",
+        "heading": "Template",
+        "columns": 2,
+        "sort_order": 0,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Inspection template",
+        "collection_name": "inspection-templates"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "ce7a5a1f-9a98-40d1-97ae-d1011134dd54",
+        "layout_id": "00996800-d33e-47a7-a320-cd34a1002bfb",
+        "heading": "Notes",
+        "columns": 1,
+        "sort_order": 1,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Inspection",
+        "collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "b53ae512-22c6-47af-8433-7bc0bc5bf874",
+        "layout_id": "2dff3854-5e3c-4dee-94e2-78c18c78a8f6",
+        "heading": "Guidance",
+        "columns": 1,
+        "sort_order": 1,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Checklist item",
+        "collection_name": "checklist-items"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "68f2456a-0233-4a9f-97d4-c8675c3897ad",
+        "layout_id": "f2fdad54-3dfb-4d4b-9a04-f25c6b5d9d0d",
+        "heading": "Description",
+        "columns": 1,
+        "sort_order": 1,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Finding",
+        "collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_SECTION",
+      "data": {
+        "id": "68277a0c-cbcc-40ef-a730-cacf1cac19ad",
+        "layout_id": "924c3372-3478-41a8-a9cd-45e48604b0f6",
+        "heading": "Description",
+        "columns": 1,
+        "sort_order": 1,
+        "collapsed": false,
+        "style": "DEFAULT",
+        "section_type": "STANDARD",
+        "tab_group": null,
+        "tab_label": null,
+        "visibility_rule": null,
+        "layout_name": "Inspection template",
+        "collection_name": "inspection-templates"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "85cb7a21-8ac0-4a5c-9fe9-020a507abd4d",
+        "section_id": "4fae115c-7635-4998-ac1f-af3554fce141",
+        "field_id": "d9607aa7-1e18-485a-ac77-d2b410c06c60",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection",
+        "collection_name": "inspections",
+        "field_name": "name",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "739c05a0-1097-4344-b0ea-346caea4d274",
+        "section_id": "65c23374-c6be-47cb-9c2a-d5136847aba9",
+        "field_id": "7286a15e-89f7-4cdf-992f-dded91a75fd8",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection template",
+        "collection_name": "inspection-templates",
+        "field_name": "name",
+        "field_collection_name": "inspection-templates"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "c2ade6e4-6c7e-4274-aa71-3167c65ec691",
+        "section_id": "ce7a5a1f-9a98-40d1-97ae-d1011134dd54",
+        "field_id": "50776727-dbc4-44f1-a4b5-d09f0904127e",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 1,
+        "layout_name": "Inspection",
+        "collection_name": "inspections",
+        "field_name": "notes",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "649ed350-1c31-405d-a24a-92974b37abfb",
+        "section_id": "68277a0c-cbcc-40ef-a730-cacf1cac19ad",
+        "field_id": "74711370-64fd-49fb-9532-e67d6058a272",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 1,
+        "layout_name": "Inspection template",
+        "collection_name": "inspection-templates",
+        "field_name": "description",
+        "field_collection_name": "inspection-templates"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "7ffca3f0-fc09-4f99-abd6-cbd56f37e597",
+        "section_id": "17e98989-5a37-4812-9c02-0a35e54486b6",
+        "field_id": "8ff9e7a4-4059-445d-b703-fc9e027e0b65",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Finding",
+        "collection_name": "findings",
+        "field_name": "title",
+        "field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "902115af-5252-447c-bea9-2f50b9877539",
+        "section_id": "6049c4e2-35e0-41b2-90f7-79d492b5f5d7",
+        "field_id": "e0c49c69-fb11-48ba-a020-4e0061a44a23",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Site",
+        "collection_name": "sites",
+        "field_name": "name",
+        "field_collection_name": "sites"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "9483ae11-1e77-44cc-95ed-88d18c592502",
+        "section_id": "b53ae512-22c6-47af-8433-7bc0bc5bf874",
+        "field_id": "913932d3-4bc6-492d-8061-5bd9ad504309",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 1,
+        "layout_name": "Checklist item",
+        "collection_name": "checklist-items",
+        "field_name": "guidance",
+        "field_collection_name": "checklist-items"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "8847b310-f1cb-4c39-a5b7-51940d429974",
+        "section_id": "89ce250c-96ca-4d97-8c66-4cd16b8c25ed",
+        "field_id": "9f360b97-9893-4bcb-b5a2-9f8f3d881b8e",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Checklist item",
+        "collection_name": "checklist-items",
+        "field_name": "code",
+        "field_collection_name": "checklist-items"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "c2dccc7d-b22b-46b7-aa33-edf1398312e5",
+        "section_id": "68f2456a-0233-4a9f-97d4-c8675c3897ad",
+        "field_id": "7ccd9431-2764-46b3-9367-428c510ff814",
+        "column_number": 0,
+        "sort_order": 0,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 1,
+        "layout_name": "Finding",
+        "collection_name": "findings",
+        "field_name": "description",
+        "field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "d9445da4-37a6-4831-bed2-d6558eeea245",
+        "section_id": "65c23374-c6be-47cb-9c2a-d5136847aba9",
+        "field_id": "b5ca229c-7ead-4d78-aa2d-b9c9fd6d2fca",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection template",
+        "collection_name": "inspection-templates",
+        "field_name": "frequency",
+        "field_collection_name": "inspection-templates"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "eecac8b9-1e2f-4a59-b1b3-fe7f0ec3dc1d",
+        "section_id": "6049c4e2-35e0-41b2-90f7-79d492b5f5d7",
+        "field_id": "8ec6de2b-266e-477a-9519-c02cd292ea81",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Site",
+        "collection_name": "sites",
+        "field_name": "siteManager",
+        "field_collection_name": "sites"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "671de955-2464-4da9-a921-99bc6bfaa267",
+        "section_id": "17e98989-5a37-4812-9c02-0a35e54486b6",
+        "field_id": "7e7771a9-4a3f-4ba3-973d-d1420b356730",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Finding",
+        "collection_name": "findings",
+        "field_name": "severity",
+        "field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "13d719bc-115b-4993-ad42-6e3ea9a57852",
+        "section_id": "4fae115c-7635-4998-ac1f-af3554fce141",
+        "field_id": "7672e1fb-8d04-4619-bb46-160bb190c39e",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection",
+        "collection_name": "inspections",
+        "field_name": "status",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "3d7470f7-48d6-4754-9524-4df907bf9ce7",
+        "section_id": "89ce250c-96ca-4d97-8c66-4cd16b8c25ed",
+        "field_id": "ecf7e275-5cd8-4344-86f5-19ff1bec4bd1",
+        "column_number": 1,
+        "sort_order": 1,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Checklist item",
+        "collection_name": "checklist-items",
+        "field_name": "template",
+        "field_collection_name": "checklist-items"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "9102c80e-4cc5-4d4e-bc82-9a0e4e8710d7",
+        "section_id": "4fae115c-7635-4998-ac1f-af3554fce141",
+        "field_id": "98da4b9e-9752-4231-af3b-579cdbe88766",
+        "column_number": 0,
+        "sort_order": 2,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection",
+        "collection_name": "inspections",
+        "field_name": "site",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "389e96f1-ff83-43b2-9235-cb648f49a429",
+        "section_id": "89ce250c-96ca-4d97-8c66-4cd16b8c25ed",
+        "field_id": "e164e5f2-8666-4e36-a78a-8a5a30d3c113",
+        "column_number": 0,
+        "sort_order": 2,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Checklist item",
+        "collection_name": "checklist-items",
+        "field_name": "question",
+        "field_collection_name": "checklist-items"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "378fa1a2-0cef-4a9d-9f57-3f0ac90251a0",
+        "section_id": "65c23374-c6be-47cb-9c2a-d5136847aba9",
+        "field_id": "65934056-c3a6-4796-ae01-28c03cfb35de",
+        "column_number": 0,
+        "sort_order": 2,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection template",
+        "collection_name": "inspection-templates",
+        "field_name": "active",
+        "field_collection_name": "inspection-templates"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "4e496d74-140b-4ba7-8fb7-2d8ce0aaf13d",
+        "section_id": "17e98989-5a37-4812-9c02-0a35e54486b6",
+        "field_id": "cd565a95-29bc-41ff-af60-671e5db3bd91",
+        "column_number": 0,
+        "sort_order": 2,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Finding",
+        "collection_name": "findings",
+        "field_name": "inspection",
+        "field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "53f1b451-29e7-45a3-8a16-155930e49c4a",
+        "section_id": "6049c4e2-35e0-41b2-90f7-79d492b5f5d7",
+        "field_id": "9d83f131-2812-48a4-99e4-78db1186720a",
+        "column_number": 0,
+        "sort_order": 2,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Site",
+        "collection_name": "sites",
+        "field_name": "address",
+        "field_collection_name": "sites"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "ae3c9520-4d7f-489c-97d2-a9294664eac2",
+        "section_id": "6049c4e2-35e0-41b2-90f7-79d492b5f5d7",
+        "field_id": "f8dd2a29-65cc-4337-883f-45ed3de1d9c1",
+        "column_number": 1,
+        "sort_order": 3,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Site",
+        "collection_name": "sites",
+        "field_name": "phone",
+        "field_collection_name": "sites"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "481b7026-8402-4c5d-8517-2dc8bb3901da",
+        "section_id": "4fae115c-7635-4998-ac1f-af3554fce141",
+        "field_id": "1eeee6f9-2298-4c67-9bc3-7562a9ff2241",
+        "column_number": 1,
+        "sort_order": 3,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection",
+        "collection_name": "inspections",
+        "field_name": "template",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "1537dbde-bd48-4a3c-a5a4-423c09f0a97f",
+        "section_id": "17e98989-5a37-4812-9c02-0a35e54486b6",
+        "field_id": "62023cb1-101b-4e26-87bb-63d3f3be33a9",
+        "column_number": 1,
+        "sort_order": 3,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Finding",
+        "collection_name": "findings",
+        "field_name": "resolved",
+        "field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "6723183b-0c81-4c30-abf0-ca093aaea71f",
+        "section_id": "89ce250c-96ca-4d97-8c66-4cd16b8c25ed",
+        "field_id": "2941874a-9ffb-488f-a177-3459d283eb9b",
+        "column_number": 1,
+        "sort_order": 3,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Checklist item",
+        "collection_name": "checklist-items",
+        "field_name": "sortOrder",
+        "field_collection_name": "checklist-items"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "d893696c-9e08-40b8-a28c-9e6a330682f6",
+        "section_id": "6049c4e2-35e0-41b2-90f7-79d492b5f5d7",
+        "field_id": "955dfe74-e871-466e-bd59-bef15c553a20",
+        "column_number": 0,
+        "sort_order": 4,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Site",
+        "collection_name": "sites",
+        "field_name": "city",
+        "field_collection_name": "sites"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "1ba17376-3e2e-4684-81bb-b29e653ba9b0",
+        "section_id": "4fae115c-7635-4998-ac1f-af3554fce141",
+        "field_id": "80651ca4-5803-4c4a-b0a3-3b6883603f9d",
+        "column_number": 0,
+        "sort_order": 4,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection",
+        "collection_name": "inspections",
+        "field_name": "inspector",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "6f0fae02-db33-4f58-add3-e3b4714587c6",
+        "section_id": "17e98989-5a37-4812-9c02-0a35e54486b6",
+        "field_id": "abd81421-ce11-45ee-b403-99724a8462d3",
+        "column_number": 0,
+        "sort_order": 4,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Finding",
+        "collection_name": "findings",
+        "field_name": "checklistItem",
+        "field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "c4998031-cac6-4cf2-b8da-8a08d81af0ab",
+        "section_id": "6049c4e2-35e0-41b2-90f7-79d492b5f5d7",
+        "field_id": "6e52f31b-d497-4fe7-a6b1-9c4cd8f058c6",
+        "column_number": 1,
+        "sort_order": 5,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Site",
+        "collection_name": "sites",
+        "field_name": "country",
+        "field_collection_name": "sites"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "76e79033-35f3-442b-bd03-05a076fb27b6",
+        "section_id": "17e98989-5a37-4812-9c02-0a35e54486b6",
+        "field_id": "aba0f0c7-267f-4769-894f-8a366cdf838d",
+        "column_number": 1,
+        "sort_order": 5,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Finding",
+        "collection_name": "findings",
+        "field_name": "dueDate",
+        "field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "4bbb6f34-8115-4f53-ab5c-0a944ecd460a",
+        "section_id": "4fae115c-7635-4998-ac1f-af3554fce141",
+        "field_id": "b34c7eed-bf3d-4bd1-93f1-73b22c0ac0f3",
+        "column_number": 1,
+        "sort_order": 5,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": true,
+        "label_override": null,
+        "help_text_override": "Kept up to date from the findings. While it is above zero the inspection cannot be marked passed.",
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection",
+        "collection_name": "inspections",
+        "field_name": "openHighFindings",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "057c6517-641c-492b-8bce-3c3a296e5212",
+        "section_id": "4fae115c-7635-4998-ac1f-af3554fce141",
+        "field_id": "4bfb4e9c-88d9-4655-a0f1-f8df1d4b7c5c",
+        "column_number": 0,
+        "sort_order": 6,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection",
+        "collection_name": "inspections",
+        "field_name": "scheduledDate",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_FIELD",
+      "data": {
+        "id": "aedcf29f-a06c-44b6-9d4d-d58a88506f08",
+        "section_id": "4fae115c-7635-4998-ac1f-af3554fce141",
+        "field_id": "bde30df3-7a59-41d4-ac45-c5f4b2625895",
+        "column_number": 1,
+        "sort_order": 7,
+        "is_required_on_layout": false,
+        "is_read_only_on_layout": false,
+        "label_override": null,
+        "help_text_override": null,
+        "visibility_rule": null,
+        "column_span": 1,
+        "section_sort_order": 0,
+        "layout_name": "Inspection",
+        "collection_name": "inspections",
+        "field_name": "completedDate",
+        "field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_RELATED_LIST",
+      "data": {
+        "id": "ad45e293-7d0f-4c1a-be35-41ffecbef207",
+        "layout_id": "00996800-d33e-47a7-a320-cd34a1002bfb",
+        "related_collection_id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "relationship_field_id": "cd565a95-29bc-41ff-af60-671e5db3bd91",
+        "display_columns": [
+          "title",
+          "severity",
+          "resolved",
+          "dueDate"
+        ],
+        "sort_field": "createdAt",
+        "sort_direction": "DESC",
+        "row_limit": 25,
+        "sort_order": 0,
+        "layout_name": "Inspection",
+        "collection_name": "inspections",
+        "related_collection_name": "findings",
+        "relationship_field_name": "inspection",
+        "relationship_field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_RELATED_LIST",
+      "data": {
+        "id": "f374e3b1-b269-442a-9348-6dc7eac23423",
+        "layout_id": "2dff3854-5e3c-4dee-94e2-78c18c78a8f6",
+        "related_collection_id": "3567d5e9-aa77-498e-96de-eba4b38622da",
+        "relationship_field_id": "abd81421-ce11-45ee-b403-99724a8462d3",
+        "display_columns": [
+          "title",
+          "inspection",
+          "severity",
+          "resolved"
+        ],
+        "sort_field": "createdAt",
+        "sort_direction": "DESC",
+        "row_limit": 10,
+        "sort_order": 0,
+        "layout_name": "Checklist item",
+        "collection_name": "checklist-items",
+        "related_collection_name": "findings",
+        "relationship_field_name": "checklistItem",
+        "relationship_field_collection_name": "findings"
+      }
+    },
+    {
+      "type": "LAYOUT_RELATED_LIST",
+      "data": {
+        "id": "ea011eb6-adea-4d56-b012-b783c721cd2d",
+        "layout_id": "23b4b9f9-9814-4856-a8be-cfeb49d90702",
+        "related_collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "relationship_field_id": "98da4b9e-9752-4231-af3b-579cdbe88766",
+        "display_columns": [
+          "name",
+          "template",
+          "status",
+          "scheduledDate",
+          "openHighFindings"
+        ],
+        "sort_field": "scheduledDate",
+        "sort_direction": "DESC",
+        "row_limit": 10,
+        "sort_order": 0,
+        "layout_name": "Site",
+        "collection_name": "sites",
+        "related_collection_name": "inspections",
+        "relationship_field_name": "site",
+        "relationship_field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "LAYOUT_RELATED_LIST",
+      "data": {
+        "id": "2e3efffe-ca69-40c1-968d-cbc045ef5c2f",
+        "layout_id": "924c3372-3478-41a8-a9cd-45e48604b0f6",
+        "related_collection_id": "4de56e52-e38b-48de-98ba-51e4c28e9f0a",
+        "relationship_field_id": "ecf7e275-5cd8-4344-86f5-19ff1bec4bd1",
+        "display_columns": [
+          "code",
+          "question",
+          "sortOrder"
+        ],
+        "sort_field": "sortOrder",
+        "sort_direction": "ASC",
+        "row_limit": 25,
+        "sort_order": 0,
+        "layout_name": "Inspection template",
+        "collection_name": "inspection-templates",
+        "related_collection_name": "checklist-items",
+        "relationship_field_name": "template",
+        "relationship_field_collection_name": "checklist-items"
+      }
+    },
+    {
+      "type": "LAYOUT_RELATED_LIST",
+      "data": {
+        "id": "c278c5af-caa3-4c69-8cff-5871846538ee",
+        "layout_id": "924c3372-3478-41a8-a9cd-45e48604b0f6",
+        "related_collection_id": "1dcec3a6-a8af-4176-b020-06ca922f09c4",
+        "relationship_field_id": "1eeee6f9-2298-4c67-9bc3-7562a9ff2241",
+        "display_columns": [
+          "name",
+          "site",
+          "status",
+          "scheduledDate"
+        ],
+        "sort_field": "scheduledDate",
+        "sort_direction": "DESC",
+        "row_limit": 10,
+        "sort_order": 1,
+        "layout_name": "Inspection template",
+        "collection_name": "inspection-templates",
+        "related_collection_name": "inspections",
+        "relationship_field_name": "template",
+        "relationship_field_collection_name": "inspections"
+      }
+    },
+    {
+      "type": "FLOW",
+      "data": {
+        "id": "50bd13cb-7fd4-4604-834f-7d29235b3dc4",
+        "name": "Count open high-severity findings",
+        "description": "Keeps inspections.openHighFindings equal to the inspection's open high-severity findings",
+        "flow_type": "RECORD_TRIGGERED",
+        "active": true,
+        "version": 1,
+        "trigger_config": {
+          "events": [
+            "CREATED",
+            "UPDATED",
+            "DELETED"
+          ],
+          "collection": "findings",
+          "triggerFields": [
+            "severity",
+            "resolved",
+            "inspection"
+          ]
+        },
+        "definition": {
+          "States": {
+            "WasPassed": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Next": "ReopenInspection",
+                  "Variable": "$.inspection.records[0].status",
+                  "StringEquals": "PASSED"
+                }
+              ],
+              "Default": "StoreCount"
+            },
+            "StoreCount": {
+              "End": true,
+              "Type": "Task",
+              "Resource": "UPDATE_RECORD",
+              "Parameters": {
+                "updates": [
+                  {
+                    "field": "openHighFindings",
+                    "value": "${$.openHigh.totalCount}"
+                  }
+                ],
+                "recordId": "${$.record.data.inspection}",
+                "targetCollectionName": "inspections"
+              },
+              "ResultPath": "$.stored"
+            },
+            "HasOpenHigh": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Next": "LoadInspection",
+                  "Variable": "$.openHigh.totalCount",
+                  "NumericGreaterThan": 0
+                }
+              ],
+              "Default": "StoreCount"
+            },
+            "CountOpenHigh": {
+              "Next": "HasOpenHigh",
+              "Type": "Task",
+              "Resource": "QUERY_RECORDS",
+              "Parameters": {
+                "filters": [
+                  {
+                    "field": "inspection",
+                    "value": "${$.record.data.inspection}",
+                    "operator": "eq"
+                  },
+                  {
+                    "field": "severity",
+                    "value": "HIGH",
+                    "operator": "eq"
+                  },
+                  {
+                    "field": "resolved",
+                    "value": false,
+                    "operator": "eq"
+                  }
+                ],
+                "pageSize": 1,
+                "targetCollectionName": "findings"
+              },
+              "ResultPath": "$.openHigh"
+            },
+            "LoadInspection": {
+              "Next": "WasPassed",
+              "Type": "Task",
+              "Resource": "QUERY_RECORDS",
+              "Parameters": {
+                "filters": [
+                  {
+                    "field": "id",
+                    "value": "${$.record.data.inspection}",
+                    "operator": "eq"
+                  }
+                ],
+                "pageSize": 1,
+                "targetCollectionName": "inspections"
+              },
+              "ResultPath": "$.inspection"
+            },
+            "ReopenInspection": {
+              "End": true,
+              "Type": "Task",
+              "Resource": "UPDATE_RECORD",
+              "Parameters": {
+                "updates": [
+                  {
+                    "field": "openHighFindings",
+                    "value": "${$.openHigh.totalCount}"
+                  },
+                  {
+                    "field": "status",
+                    "value": "IN_PROGRESS"
+                  }
+                ],
+                "recordId": "${$.record.data.inspection}",
+                "targetCollectionName": "inspections"
+              },
+              "ResultPath": "$.stored"
+            }
+          },
+          "Comment": "Recounts the open high-severity findings of the finding's inspection and stores the count on the inspection, where the validation rule \"No pass with open high-severity findings\" reads it. A passed inspection that gains an open high-severity finding is moved back to In progress.",
+          "StartAt": "CountOpenHigh"
+        },
+        "published_version": null,
+        "run_as_user_id": null
+      }
+    }
+  ]
+}

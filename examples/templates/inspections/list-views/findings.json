@@ -1,0 +1,5 @@
+[
+  { "name": "Open findings", "columns": ["title", "inspection", "severity", "dueDate"], "filters": ["resolved.eq=false"], "sort": "dueDate", "default": true, "rowLimit": 25 },
+  { "name": "Open high-severity findings", "columns": ["title", "inspection", "checklistItem", "dueDate"], "filters": ["resolved.eq=false", "severity.eq=HIGH"], "sort": "dueDate", "rowLimit": 25 },
+  { "name": "All findings", "columns": ["title", "inspection", "severity", "resolved", "dueDate"], "sort": "-createdAt", "rowLimit": 50 }
+]

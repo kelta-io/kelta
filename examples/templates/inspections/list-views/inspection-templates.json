@@ -1,0 +1,4 @@
+[
+  { "name": "Active templates", "columns": ["name", "frequency", "active"], "filters": ["active.eq=true"], "sort": "name", "default": true, "rowLimit": 50 },
+  { "name": "All templates", "columns": ["name", "frequency", "active"], "sort": "name", "rowLimit": 50 }
+]
