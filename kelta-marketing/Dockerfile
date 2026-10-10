@@ -11,6 +11,10 @@ COPY kelta-web/packages/cli/COMMANDS.md kelta-web/packages/cli/AGENTS.md /app/ke
 # README.md's Quickstart is spliced into the docs quickstart page (astro.config.mjs).
 COPY README.md /app/README.md
 COPY kelta-marketing/ ./
+# Kelta collection URL the /waitlist form POSTs to (e.g. https://<tenant-host>/api/<collection>).
+# Empty (the default) builds the page in its "not open yet" state with no form.
+ARG PUBLIC_WAITLIST_ENDPOINT=
+ENV PUBLIC_WAITLIST_ENDPOINT=$PUBLIC_WAITLIST_ENDPOINT
 # postbuild runs `pagefind --site dist` (musl-static linux binary, fine on alpine).
 RUN npm run build
 
