@@ -485,6 +485,11 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     (400 `OWNER_IMMUTABLE`). `CollectionOwnershipValidationHook` (on `collections`) rejects an
     invalid `ownerField`/`ownerScope` with 400, and rejects setting ownership on a system
     collection's row (system collections declare it in `SystemCollectionDefinitions`).
+  - **Propagation:** a PATCH that changes `ownerField`/`ownerScope`/`ownerScopeReads` publishes
+    `kelta.config.collection.changed.<id>` (every pod refreshes) **and** refreshes the serving pod
+    synchronously (`CollectionConfigEventPublisher` → `refreshOrInitializeLocally`, the #910
+    read-after-write exception), so the response means that pod already enforces the new scope.
+    Other pods follow when they consume the event.
   - **Realtime:** `RecordChangedPayload.ownerScoped=true` → `RealtimeBridge` publishes
     invalidation-only (no `data`); clients refetch through the scoped JSON:API path.
   - **Not covered:** anything reading the table without `QueryEngine` → the storage adapter —

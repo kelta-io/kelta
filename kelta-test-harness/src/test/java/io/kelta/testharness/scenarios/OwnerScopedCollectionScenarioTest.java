@@ -17,7 +17,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -58,20 +57,16 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
 
         // ── Schema: folders (unowned) ← items (owned by createdBy, LOOKUP to folders) ──────
         String foldersId = createCollection(admin, slug, folders);
-        waitForStatus(admin, "/" + slug + "/api/" + folders, HttpStatus.OK, 30);
         createField(admin, slug, Map.of("collectionId", foldersId, "name", "title", "type", "STRING"), null);
 
         String itemsId = createCollection(admin, slug, items);
-        waitForStatus(admin, "/" + slug + "/api/" + items, HttpStatus.OK, 30);
         createField(admin, slug, Map.of("collectionId", itemsId, "name", "title", "type", "STRING"), null);
         createField(admin, slug, Map.of("collectionId", itemsId, "name", "folder", "type", "LOOKUP",
                 "relationshipName", "folder", "referenceTarget", folders), foldersId);
-        waitForField(admin, slug, itemsId, "folder");
-        // The fields API answers from the DB; the worker's definition and ALTER land later
-        // through the field.changed refresh. Writing before then drops or rejects attributes.
-        awaitQueryable(tenantId, slug, folders, "title");
-        awaitQueryable(tenantId, slug, items, "title", "folder");
 
+        // A field create refreshes the serving pod before it answers (FieldConfigEventPublisher,
+        // #910) and an ownership PATCH does the same (CollectionConfigEventPublisher), so the
+        // single harness worker enforces each change as soon as the request returns — no polling.
         patchCollection(admin, slug, itemsId, Map.of("ownerField", "createdBy", "ownerScope", "PORTAL"));
 
         // ── Callers ─────────────────────────────────────────────────────────────────────
@@ -88,73 +83,78 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
         String aliceItem = id(createItem(alice, tenantId, slug, items, "alice-1", folderId));
         id(createItem(alice, tenantId, slug, items, "alice-2", folderId));
 
-        // The ownership settings reach the worker through the collection.changed refresh.
-        awaitList(alice, tenantId, slug, items, body -> totalCount(body) == 2);
-
         // ── list: own rows only, with a correct SQL total ───────────────────────────────
-        Map<String, Object> aliceList = call(alice, tenantId, slug, HttpMethod.GET, "/api/" + items).getBody();
-        assertThat(totalCount(aliceList)).isEqualTo(2);
-        assertThat(titles(aliceList)).containsExactlyInAnyOrder("alice-1", "alice-2");
-        Map<String, Object> bobList = call(bob, tenantId, slug, HttpMethod.GET, "/api/" + items).getBody();
-        assertThat(totalCount(bobList)).isEqualTo(1);
-        assertThat(titles(bobList)).containsExactly("bob-1");
+        Map<String, Object> aliceList = list(alice, tenantId, slug, items);
+        assertThat(totalCount(aliceList)).as("alice list: %s", aliceList).isEqualTo(2);
+        assertThat(titles(aliceList)).as("alice list: %s", aliceList)
+                .containsExactlyInAnyOrder("alice-1", "alice-2");
+        Map<String, Object> bobList = list(bob, tenantId, slug, items);
+        assertThat(totalCount(bobList)).as("bob list: %s", bobList).isEqualTo(1);
+        assertThat(titles(bobList)).as("bob list: %s", bobList).containsExactly("bob-1");
 
         // ── get: own row 200, foreign row 404 (never 403) ───────────────────────────────
-        assertThat(call(alice, tenantId, slug, HttpMethod.GET, "/api/" + items + "/" + aliceItem)
-                .getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(call(bob, tenantId, slug, HttpMethod.GET, "/api/" + items + "/" + aliceItem)
-                .getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertStatus(call(alice, tenantId, slug, HttpMethod.GET, "/api/" + items + "/" + aliceItem),
+                HttpStatus.OK, "alice reads her own row");
+        assertStatus(call(bob, tenantId, slug, HttpMethod.GET, "/api/" + items + "/" + aliceItem),
+                HttpStatus.NOT_FOUND, "bob reads alice's row");
 
         // ── aggregate ───────────────────────────────────────────────────────────────────
         Map<String, Object> aliceAgg = call(alice, tenantId, slug, HttpMethod.GET,
                 "/api/" + items + "/aggregate?groupBy=title").getBody();
-        assertThat(((Number) aliceAgg.get("totalCount")).intValue()).isEqualTo(2);
+        assertThat(((Number) aliceAgg.get("totalCount")).intValue()).as("alice aggregate: %s", aliceAgg)
+                .isEqualTo(2);
         Map<String, Object> bobAgg = call(bob, tenantId, slug, HttpMethod.GET,
                 "/api/" + items + "/aggregate?groupBy=title").getBody();
-        assertThat(((Number) bobAgg.get("totalCount")).intValue()).isEqualTo(1);
+        assertThat(((Number) bobAgg.get("totalCount")).intValue()).as("bob aggregate: %s", bobAgg)
+                .isEqualTo(1);
 
         // ── /latest: Alice wrote the newest row overall, Bob still gets his own ─────────
         Map<String, Object> bobLatest = call(bob, tenantId, slug, HttpMethod.GET,
                 "/api/" + items + "/latest?fields=title").getBody();
-        assertThat(((Map<String, Object>) bobLatest.get("record")).get("title")).isEqualTo("bob-1");
+        assertThat(((Map<String, Object>) bobLatest.get("record")).get("title")).as("bob latest: %s", bobLatest)
+                .isEqualTo("bob-1");
 
         // ── ?include= of the owned child collection through the shared parent ───────────
         Map<String, Object> aliceFolder = call(alice, tenantId, slug, HttpMethod.GET,
                 "/api/" + folders + "/" + folderId + "?include=" + items).getBody();
         List<Map<String, Object>> included = (List<Map<String, Object>>) aliceFolder.get("included");
-        assertThat(included).as("only Alice's items are included").isNotNull();
+        assertThat(included).as("only Alice's items are included: %s", aliceFolder).isNotNull();
         assertThat(included.stream().filter(r -> items.equals(r.get("type")))
                 .map(r -> ((Map<String, Object>) r.get("attributes")).get("title")))
+                .as("included: %s", included)
                 .containsExactlyInAnyOrder("alice-1", "alice-2");
 
         // ── cross-owner writes: 404, and the row is untouched ───────────────────────────
-        assertThat(call(bob, tenantId, slug, HttpMethod.PATCH, "/api/" + items + "/" + aliceItem,
+        assertStatus(call(bob, tenantId, slug, HttpMethod.PATCH, "/api/" + items + "/" + aliceItem,
                 Map.of("data", Map.of("type", items, "id", aliceItem,
-                        "attributes", Map.of("title", "hijacked")))).getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(call(bob, tenantId, slug, HttpMethod.DELETE, "/api/" + items + "/" + aliceItem)
-                .getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+                        "attributes", Map.of("title", "hijacked")))),
+                HttpStatus.NOT_FOUND, "bob patches alice's row");
+        assertStatus(call(bob, tenantId, slug, HttpMethod.DELETE, "/api/" + items + "/" + aliceItem),
+                HttpStatus.NOT_FOUND, "bob deletes alice's row");
         Map<String, Object> stillThere = call(alice, tenantId, slug, HttpMethod.GET,
                 "/api/" + items + "/" + aliceItem).getBody();
         assertThat(((Map<String, Object>) ((Map<String, Object>) stillThere.get("data")).get("attributes"))
-                .get("title")).isEqualTo("alice-1");
+                .get("title")).as("alice's row after bob's attempts: %s", stillThere).isEqualTo("alice-1");
 
         // The owner may still change their own row.
-        assertThat(call(alice, tenantId, slug, HttpMethod.PATCH, "/api/" + items + "/" + aliceItem,
+        assertStatus(call(alice, tenantId, slug, HttpMethod.PATCH, "/api/" + items + "/" + aliceItem,
                 Map.of("data", Map.of("type", items, "id", aliceItem,
-                        "attributes", Map.of("title", "alice-1b")))).getStatusCode())
-                .isEqualTo(HttpStatus.OK);
+                        "attributes", Map.of("title", "alice-1b")))),
+                HttpStatus.OK, "alice patches her own row");
 
         // ── ALL: VIEW_ALL_DATA staff see every row; members stay scoped ─────────────────
-        assertThat(totalCount(call(staffWithoutGrant, tenantId, slug, HttpMethod.GET, "/api/" + items)
-                .getBody())).as("PORTAL scope leaves staff unscoped").isEqualTo(3);
+        Map<String, Object> staffUnderPortal = list(staffWithoutGrant, tenantId, slug, items);
+        assertThat(totalCount(staffUnderPortal)).as("PORTAL scope leaves staff unscoped: %s", staffUnderPortal)
+                .isEqualTo(3);
         patchCollection(admin, slug, itemsId, Map.of("ownerScope", "ALL"));
         // Staff without VIEW_ALL_DATA own none of the rows: an empty list proves ALL is live.
-        awaitList(staffWithoutGrant, tenantId, slug, items, body -> totalCount(body) == 0);
-        assertThat(totalCount(call(staff, tenantId, slug, HttpMethod.GET, "/api/" + items).getBody()))
-                .isEqualTo(3);
-        assertThat(totalCount(call(alice, tenantId, slug, HttpMethod.GET, "/api/" + items).getBody()))
-                .isEqualTo(2);
+        Map<String, Object> ungranted = list(staffWithoutGrant, tenantId, slug, items);
+        assertThat(totalCount(ungranted)).as("ALL scopes staff without VIEW_ALL_DATA: %s", ungranted)
+                .isEqualTo(0);
+        Map<String, Object> granted = list(staff, tenantId, slug, items);
+        assertThat(totalCount(granted)).as("VIEW_ALL_DATA staff see every row: %s", granted).isEqualTo(3);
+        Map<String, Object> aliceUnderAll = list(alice, tenantId, slug, items);
+        assertThat(totalCount(aliceUnderAll)).as("alice under ALL: %s", aliceUnderAll).isEqualTo(2);
     }
 
     @Test
@@ -168,22 +168,16 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
 
         waitForStatus(admin, "/" + slug + "/api/collections", HttpStatus.OK, 20);
         String collectionId = createCollection(admin, slug, name);
-        waitForStatus(admin, "/" + slug + "/api/" + name, HttpStatus.OK, 30);
         createField(admin, slug, Map.of("collectionId", collectionId, "name", "title", "type", "STRING"), null);
         createField(admin, slug, Map.of("collectionId", collectionId, "name", "member", "type", "LOOKUP",
                 "relationshipName", "member", "referenceTarget", "users"), systemCollectionId("users"));
-        waitForField(admin, slug, collectionId, "member");
 
-        ResponseEntity<Map> textOwner = patch(admin, slug, collectionId,
-                Map.of("ownerField", "title", "ownerScope", "PORTAL"));
-        assertThat(textOwner.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-
-        ResponseEntity<Map> noOwner = patch(admin, slug, collectionId, Map.of("ownerScope", "PORTAL"));
-        assertThat(noOwner.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-
-        ResponseEntity<Map> lookupOwner = patch(admin, slug, collectionId,
+        assertStatus(patch(admin, slug, collectionId, Map.of("ownerField", "title", "ownerScope", "PORTAL")),
+                HttpStatus.BAD_REQUEST, "a text owner field");
+        assertStatus(patch(admin, slug, collectionId, Map.of("ownerScope", "PORTAL")),
+                HttpStatus.BAD_REQUEST, "a scope without an owner field");
+        patchCollection(admin, slug, collectionId,
                 Map.of("ownerField", "member", "ownerScope", "PORTAL", "ownerScopeReads", false));
-        assertThat(lookupOwner.getStatusCode().is2xxSuccessful()).isTrue();
 
         try (Connection db = openDbConnection();
              PreparedStatement ps = db.prepareStatement(
@@ -207,7 +201,8 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
                 .body(Map.of("data", Map.of("type", "collections",
                         "attributes", Map.of("name", name, "displayName", name, "tenantScoped", true))))
                 .retrieve().toEntity(Map.class);
-        assertThat(created.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(created.getStatusCode().is2xxSuccessful()).as("create collection %s: %s", name, created.getBody())
+                .isTrue();
         return (String) ((Map<String, Object>) created.getBody().get("data")).get("id");
     }
 
@@ -221,7 +216,8 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
         ResponseEntity<Map> created = admin.post().uri("/" + slug + "/api/fields")
                 .contentType(MediaType.APPLICATION_JSON).body(Map.of("data", data))
                 .retrieve().toEntity(Map.class);
-        assertThat(created.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(created.getStatusCode().is2xxSuccessful()).as("create field %s: %s", attributes, created.getBody())
+                .isTrue();
     }
 
     private void patchCollection(RestClient admin, String slug, String collectionId, Map<String, Object> attrs) {
@@ -245,7 +241,7 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
                 .body(Map.of("email", "osc-" + name + "-" + suffix + "@example.com",
                         "firstName", name, "lastName", "Member"))
                 .retrieve().toEntity(Map.class);
-        assertThat(invited.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(invited.getStatusCode()).as("invite %s: %s", name, invited.getBody()).isEqualTo(HttpStatus.CREATED);
         return (String) invited.getBody().get("userId");
     }
 
@@ -311,43 +307,15 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
         return spec.retrieve().onStatus(HttpStatusCode::isError, (req, resp) -> {}).toEntity(Map.class);
     }
 
-    /**
-     * Polls until the worker can filter on every named field — validation rejects a field the
-     * definition lacks (400) and SQL fails on a column the ALTER has not added yet (500).
-     */
-    private void awaitQueryable(String tenantId, String slug, String collection, String... fieldNames)
-            throws InterruptedException {
-        StringBuilder uri = new StringBuilder("/api/").append(collection).append("?page[size]=1");
-        for (String field : fieldNames) {
-            uri.append("&filter[").append(field).append("][isnull]=false");
-        }
-        HttpStatusCode last = null;
-        for (int i = 0; i < 30; i++) {
-            last = call(null, tenantId, slug, HttpMethod.GET, uri.toString()).getStatusCode();
-            if (last.is2xxSuccessful()) {
-                return;
-            }
-            Thread.sleep(1000);
-        }
-        throw new AssertionError(collection + " never became queryable on " + List.of(fieldNames)
-                + "; last status " + last);
+    /** A list read that must succeed; the body is in the failure message otherwise. */
+    private Map<String, Object> list(Caller caller, String tenantId, String slug, String collection) {
+        ResponseEntity<Map> response = call(caller, tenantId, slug, HttpMethod.GET, "/api/" + collection);
+        assertStatus(response, HttpStatus.OK, "list " + collection + " as " + caller);
+        return response.getBody();
     }
 
-    /** Polls the caller's list until {@code done} holds — collection.changed refresh timing. */
-    private void awaitList(Caller caller, String tenantId, String slug, String collection,
-                           Predicate<Map<String, Object>> done) throws InterruptedException {
-        Map<String, Object> last = null;
-        for (int i = 0; i < 30; i++) {
-            ResponseEntity<Map> list = call(caller, tenantId, slug, HttpMethod.GET, "/api/" + collection);
-            if (list.getStatusCode().is2xxSuccessful()) {
-                last = list.getBody();
-                if (done.test(last)) {
-                    return;
-                }
-            }
-            Thread.sleep(1000);
-        }
-        throw new AssertionError("owner scoping never took effect for " + caller + "; last list: " + last);
+    private static void assertStatus(ResponseEntity<Map> response, HttpStatus expected, String what) {
+        assertThat(response.getStatusCode()).as("%s: %s", what, response.getBody()).isEqualTo(expected);
     }
 
     @SuppressWarnings("unchecked")
@@ -366,27 +334,5 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
     private static String id(ResponseEntity<Map> created) {
         assertThat(created.getStatusCode().is2xxSuccessful()).as("create: %s", created.getBody()).isTrue();
         return (String) ((Map<String, Object>) created.getBody().get("data")).get("id");
-    }
-
-    /** Polls the fields list until the field has propagated. */
-    @SuppressWarnings("unchecked")
-    private void waitForField(RestClient client, String slug, String collectionId, String fieldName)
-            throws InterruptedException {
-        for (int i = 0; i < 30; i++) {
-            try {
-                ResponseEntity<Map> fields = client.get()
-                        .uri("/" + slug + "/api/fields?filter[collectionId][eq]=" + collectionId)
-                        .retrieve().toEntity(Map.class);
-                List<Map<String, Object>> data = (List<Map<String, Object>>) fields.getBody().get("data");
-                if (data != null && data.stream().anyMatch(f ->
-                        fieldName.equals(((Map<String, Object>) f.get("attributes")).get("name")))) {
-                    return;
-                }
-            } catch (RuntimeException ignored) {
-                // not ready yet
-            }
-            Thread.sleep(1000);
-        }
-        throw new AssertionError("Field '" + fieldName + "' never propagated");
     }
 }

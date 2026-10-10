@@ -2089,6 +2089,11 @@ Anything that reads or writes the table some other way is **not** narrowed:
   "Realtime socket has no per-subscriber FLS").
 - **Performance** — the owner predicate is on every read; index the owner field on large
   collections (no generic index migration is added).
+- **Cross-pod window on an ownership change** — the pod that served the PATCH enforces the new
+  scope before answering (KLT-471); every other pod keeps the previous `CollectionDefinition`
+  until it consumes `kelta.config.collection.changed`. Turning scoping **on** for a collection
+  that already holds member data therefore leaves a short window where another pod still returns
+  every member's rows. Enable ownership before members write, or accept the NATS lag.
 
 ## Gateway served only static routes after starting before the worker (found 2026-10-07; fixed by bootstrap retry)
 

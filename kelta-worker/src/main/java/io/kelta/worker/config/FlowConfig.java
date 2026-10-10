@@ -267,9 +267,10 @@ public class FlowConfig {
     @Bean
     public CollectionConfigEventPublisher collectionConfigEventPublisher(
             BeforeSaveHookRegistry hookRegistry,
-            PlatformEventPublisher eventPublisher) {
+            PlatformEventPublisher eventPublisher,
+            CollectionLifecycleManager lifecycleManager) {
         CollectionConfigEventPublisher publisher =
-                new CollectionConfigEventPublisher(eventPublisher);
+                new CollectionConfigEventPublisher(eventPublisher, lifecycleManager);
         hookRegistry.register(publisher);
         return publisher;
     }
