@@ -203,6 +203,22 @@ write with `page.route(...)`, assert the request body, and `route.fulfill(...)` 
 response (`tests/admin/setup/email-settings.spec.ts`). Records a test creates are fine as long as
 it tears them down.
 
+### Writing stable visual specs
+
+A `toHaveScreenshot` spec must render the same pixels on every run, in a tenant that every other
+spec shares. Before taking the screenshot:
+
+- **Mask or stub user- and network-dependent chrome:** avatars (abort `page.route(/gravatar\.com/)`
+  so `UserMenu` renders initials), counters such as the notifications bell badge, external images,
+  timestamps (including the RecordHeader "Joined <createdAt>" meta row), and generated names. Pass a
+  fixed `displayName` to `dataFactory.createCollection(...)` rather than letting the per-run
+  `e2e_test_<ts>_<rand>` name reach the breadcrumb or header. Give each `mask` selector a one-line
+  comment naming what varies. `tests/end-user/object-detail-visual.spec.ts` is the reference.
+- **Never raise `maxDiffPixelRatio` or `retries`** to absorb churn. A test that passes only on
+  retry is nondeterministic; find the varying region and mask or stub it.
+- **Regenerate baselines through the marker** below, never by hand-editing or locally generating
+  PNGs.
+
 ### Updating visual baselines
 
 Visual baselines (`e2e-tests/tests/**/<spec>-snapshots/*-chromium-linux.png`) can only be
