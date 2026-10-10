@@ -1,0 +1,69 @@
+{
+  "name": "Sales overview",
+  "description": "Pipeline value, deals by stage and upcoming activities",
+  "accessLevel": "PUBLIC",
+  "columnCount": 3,
+  "components": [
+    {
+      "title": "Open pipeline value",
+      "componentType": "metric",
+      "columnPosition": 1,
+      "rowPosition": 1,
+      "config": {
+        "collectionName": "deals",
+        "aggregateFunction": "SUM",
+        "aggregateField": "amount",
+        "filters": [
+          { "field": "stage", "operator": "neq", "value": "CLOSED_WON" },
+          { "field": "stage", "operator": "neq", "value": "CLOSED_LOST" }
+        ]
+      }
+    },
+    {
+      "title": "Won revenue",
+      "componentType": "metric",
+      "columnPosition": 2,
+      "rowPosition": 1,
+      "config": {
+        "collectionName": "deals",
+        "aggregateFunction": "SUM",
+        "aggregateField": "amount",
+        "filters": [{ "field": "stage", "operator": "eq", "value": "CLOSED_WON" }]
+      }
+    },
+    {
+      "title": "Accounts",
+      "componentType": "metric",
+      "columnPosition": 3,
+      "rowPosition": 1,
+      "config": { "collectionName": "accounts", "aggregateFunction": "COUNT" }
+    },
+    {
+      "title": "Pipeline by stage",
+      "componentType": "chart",
+      "columnPosition": 1,
+      "rowPosition": 2,
+      "columnSpan": 2,
+      "config": { "collectionName": "deals", "groupByField": "stage", "aggregateFunction": "SUM", "aggregateField": "amount", "chartStyle": "bar" }
+    },
+    {
+      "title": "Accounts by industry",
+      "componentType": "chart",
+      "columnPosition": 3,
+      "rowPosition": 2,
+      "config": { "collectionName": "accounts", "groupByField": "industry", "chartStyle": "pie" }
+    },
+    {
+      "title": "Open activities",
+      "componentType": "table",
+      "columnPosition": 1,
+      "rowPosition": 3,
+      "columnSpan": 3,
+      "config": {
+        "collectionName": "activities",
+        "fields": ["subject", "activityType", "dueDate", "deal"],
+        "filters": [{ "field": "completed", "operator": "eq", "value": false }]
+      }
+    }
+  ]
+}

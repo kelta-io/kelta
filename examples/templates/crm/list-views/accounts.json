@@ -1,0 +1,4 @@
+[
+  { "name": "All accounts", "columns": ["name", "industry", "city", "country", "annualRevenue"], "sort": "name", "default": true, "rowLimit": 25 },
+  { "name": "Largest accounts", "columns": ["name", "industry", "annualRevenue", "country"], "filters": ["annualRevenue.gte=10000000"], "sort": "-annualRevenue", "rowLimit": 25 }
+]

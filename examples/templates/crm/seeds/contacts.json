@@ -1,0 +1,14 @@
+[
+  { "firstName": "Maria", "lastName": "Lopez", "email": "maria.lopez@northwind.example.com", "phone": "+1 206 555 0101", "jobTitle": "Head of Purchasing", "account": "Northwind Traders" },
+  { "firstName": "James", "lastName": "Carter", "email": "james.carter@northwind.example.com", "phone": "+1 206 555 0102", "jobTitle": "Store Operations Manager", "account": "Northwind Traders" },
+  { "firstName": "Priya", "lastName": "Nair", "email": "priya.nair@contoso.example.com", "phone": "+1 313 555 0143", "jobTitle": "Plant Director", "account": "Contoso Manufacturing" },
+  { "firstName": "Tom", "lastName": "Becker", "email": "tom.becker@contoso.example.com", "phone": "+1 313 555 0144", "jobTitle": "Procurement Lead", "account": "Contoso Manufacturing" },
+  { "firstName": "Aiko", "lastName": "Tanaka", "email": "aiko.tanaka@fabrikam.example.com", "phone": "+1 512 555 0178", "jobTitle": "VP Engineering", "account": "Fabrikam Software" },
+  { "firstName": "Daniel", "lastName": "Okafor", "email": "daniel.okafor@fabrikam.example.com", "phone": "+1 512 555 0179", "jobTitle": "IT Manager", "account": "Fabrikam Software" },
+  { "firstName": "Sophie", "lastName": "Martin", "email": "sophie.martin@tailspin.example.com", "phone": "+44 20 7946 0322", "jobTitle": "Chief Operating Officer", "account": "Tailspin Health" },
+  { "firstName": "Liam", "lastName": "Walsh", "email": "liam.walsh@woodgrove.example.com", "phone": "+1 212 555 0191", "jobTitle": "Director of Technology", "account": "Woodgrove Capital" },
+  { "firstName": "Elena", "lastName": "Rossi", "email": "elena.rossi@woodgrove.example.com", "phone": "+1 212 555 0192", "jobTitle": "Finance Controller", "account": "Woodgrove Capital" },
+  { "firstName": "Grace", "lastName": "Kim", "email": "grace.kim@lakeshore.example.com", "phone": "+1 312 555 0116", "jobTitle": "Head of Administration", "account": "Lakeshore Academy" },
+  { "firstName": "Noah", "lastName": "Fischer", "email": "noah.fischer@alpine.example.com", "phone": "+41 44 555 0124", "jobTitle": "E-commerce Lead", "account": "Alpine Outfitters" },
+  { "firstName": "Hannah", "lastName": "Schulz", "email": "hannah.schulz@bluebird.example.com", "phone": "+49 40 555 0189", "jobTitle": "Transport Operations Manager", "account": "Bluebird Logistics" }
+]
