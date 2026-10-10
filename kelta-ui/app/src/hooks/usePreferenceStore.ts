@@ -6,7 +6,7 @@ import { useMyIdentity } from './useMyIdentity'
 /**
  * Server-backed per-user preference storage (app-data-entry slice 1) over the
  * `user-ui-preferences` system collection — one row per (userId, prefType, prefKey)
- * holding a JSON value. Writes are owner-guarded server-side (UserPreferenceGuardHook).
+ * holding a JSON value. Rows are owner-scoped server-side (user-ui-preferences ownership metadata).
  *
  * Degrades gracefully: with no resolvable identity (logged out, offline, test render)
  * the store is localStorage-only via the caller-supplied `localKey`, which also serves

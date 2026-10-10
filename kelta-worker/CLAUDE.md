@@ -126,8 +126,8 @@ stops the rollout. Two rules follow:
 | NATS event listener | `listener/CollectionSchemaListener.java` |
 | NATS subscription wiring | `config/NatsSubscriptionConfig.java` |
 | JDBC repository | `repository/ApprovalRepository.java` |
-| Owner-guard hook, system collection (raw JDBC against the one shared table) | `listener/UserPreferenceGuardHook.java` |
-| Owner-guard hook, tenant collection (no hardcoded table — `beforeDelete` reads the row via `QueryEngine`/`CollectionRegistry` instead, since a tenant collection's physical table is schema-qualified by tenant slug and only resolved inside `PhysicalTableStorageAdapter`) | `listener/FieldReportGuardHook.java` |
+| Owner-scoped writes (don't write a per-collection owner-guard hook — declare `ownerField`/`ownerScope`/`ownerScopeReads` on the collection: `SystemCollectionDefinitions.watches()` for a system collection, collection metadata via the API for a tenant one; the wildcard guard enforces it) | `listener/OwnerScopeGuardHook.java` |
+| Support staff acting on a member's owner-scoped rows (re-bind `CallerContext` to the member for the write, add the `viewAll` bypass for a tenant-wide read) | `controller/SupportPermissions.java` (`writeAs`/`readAll`) |
 | Service with event publishing | `service/CollectionLifecycleManager.java` |
 | Unit test | `scim/service/ScimUserServiceTest.java` |
 | Controller test | `scim/controller/ScimUserControllerTest.java` |

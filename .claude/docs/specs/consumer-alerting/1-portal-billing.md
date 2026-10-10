@@ -205,7 +205,7 @@ pin, dashboard prerequisites: Products/Prices, Tax, retry settings, Billing Port
 ## 8. Risks & open questions
 
 Processor API version drift (pin + defensive JsonNode parsing) · refunds deferred · Cerbos
-visibility of billing collections to portal profiles (verify in 1A; owner-guard hooks if
-needed) · the gateway reflect-config entry is convention-only (no CI guard on the gateway
+visibility of billing collections to portal profiles (verify in 1A; ownership metadata if
+needed — `specs/member-data-ownership/`) · the gateway reflect-config entry is convention-only (no CI guard on the gateway
 side — review checklist item) · one-subscription-per-member simplification (upgrades = Billing
 Portal price change).

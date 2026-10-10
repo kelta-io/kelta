@@ -5,18 +5,23 @@ import io.kelta.runtime.context.CallerContext.UserType;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.OwnerScope;
+import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -208,5 +213,123 @@ class OwnerScopeGuardHookTest {
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.hasFieldUpdates()).isFalse();
+    }
+
+    // ------------------------------------------------------------------
+    // The seven collections whose bespoke owner-guard hooks this guard replaced (member data
+    // ownership slice 4): four system collections declared in SystemCollectionDefinitions, and
+    // three tenant collections owned by createdBy with unscoped reads, set through metadata.
+    // ------------------------------------------------------------------
+
+    static Stream<Named<CollectionDefinition>> retiredHookShapes() {
+        return Stream.of(
+                SystemCollectionDefinitions.watches(),
+                SystemCollectionDefinitions.wins(),
+                SystemCollectionDefinitions.userUiPreferences(),
+                SystemCollectionDefinitions.notes(),
+                tenantCreatedByCollection("field-reports"),
+                tenantCreatedByCollection("facility-photos"),
+                tenantCreatedByCollection("facility-comments"))
+                .map(definition -> Named.of(definition.name(), definition));
+    }
+
+    private static CollectionDefinition tenantCreatedByCollection(String name) {
+        return CollectionDefinition.builder()
+                .name(name)
+                .addField(FieldDefinition.lookup("createdBy", "users", "Created By"))
+                .addField(FieldDefinition.string("body"))
+                .ownerField("createdBy")
+                .ownerScope(OwnerScope.ALL)
+                .ownerScopeReads(false)
+                .build();
+    }
+
+    private void register(CollectionDefinition definition) {
+        when(registry.get(definition.name())).thenReturn(definition);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("retiredHookShapes")
+    @DisplayName("create on behalf of another member is rejected")
+    void shapeCreateForAnotherMemberIsRejected(CollectionDefinition definition) {
+        register(definition);
+        String owner = definition.ownerField();
+
+        BeforeSaveResult result = CallerContext.callAs(MEMBER,
+                () -> hook.beforeCreate(definition.name(), record(owner, OTHER), "t1"));
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.getErrors()).singleElement().satisfies(e -> {
+            assertThat(e.field()).isEqualTo(owner);
+            assertThat(e.code()).isEqualTo(OwnerScopeGuardHook.OWNER_MISMATCH);
+        });
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("retiredHookShapes")
+    @DisplayName("create for yourself is admitted and stamped with the caller")
+    void shapeOwnCreateIsStamped(CollectionDefinition definition) {
+        register(definition);
+
+        BeforeSaveResult result = CallerContext.callAs(MEMBER,
+                () -> hook.beforeCreate(definition.name(), record(), "t1"));
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getFieldUpdates()).containsEntry(definition.ownerField(), ME);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("retiredHookShapes")
+    @DisplayName("update of another member's record → 404; staff without MODIFY_ALL_DATA too")
+    void shapeForeignUpdateIsNotFound(CollectionDefinition definition) {
+        register(definition);
+        Map<String, Object> previous = record(definition.ownerField(), OTHER);
+
+        assertNotFound(() -> CallerContext.runAs(MEMBER,
+                () -> hook.beforeUpdate(definition.name(), "r1", record("x", "y"), previous, "t1")));
+        assertNotFound(() -> CallerContext.runAs(STAFF,
+                () -> hook.beforeUpdate(definition.name(), "r1", record("x", "y"), previous, "t1")));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("retiredHookShapes")
+    @DisplayName("delete of another member's record → 404")
+    void shapeForeignDeleteIsNotFound(CollectionDefinition definition) {
+        register(definition);
+        when(queryEngine.getById(any(), anyString()))
+                .thenReturn(Optional.of(record("id", "r1", definition.ownerField(), OTHER)));
+
+        assertNotFound(() -> CallerContext.runAs(MEMBER,
+                () -> hook.beforeDelete(definition.name(), "r1", "t1")));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("retiredHookShapes")
+    @DisplayName("internal tier (no CallerContext) is admitted for create, update and delete")
+    void shapeInternalTierIsAdmitted(CollectionDefinition definition) {
+        register(definition);
+        String owner = definition.ownerField();
+
+        assertThat(hook.beforeCreate(definition.name(), record(owner, OTHER), "t1").isSuccess()).isTrue();
+        assertThat(hook.beforeUpdate(definition.name(), "r1", record(owner, ME), record(owner, OTHER), "t1")
+                .isSuccess()).isTrue();
+        assertThat(hook.beforeDelete(definition.name(), "r1", "t1").isSuccess()).isTrue();
+        verifyNoInteractions(queryEngine);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("retiredHookShapes")
+    @DisplayName("MODIFY_ALL_DATA bypasses the guard for create, update and delete")
+    void shapeModifyAllBypassIsAdmitted(CollectionDefinition definition) {
+        register(definition);
+        String owner = definition.ownerField();
+
+        CallerContext.runAs(STAFF_MODIFY_ALL, () -> {
+            assertThat(hook.beforeCreate(definition.name(), record(owner, OTHER), "t1").isSuccess()).isTrue();
+            assertThat(hook.beforeUpdate(definition.name(), "r1", record("x", "y"), record(owner, OTHER), "t1")
+                    .isSuccess()).isTrue();
+            assertThat(hook.beforeDelete(definition.name(), "r1", "t1").isSuccess()).isTrue();
+        });
+        verifyNoInteractions(queryEngine);
     }
 }
