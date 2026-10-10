@@ -122,8 +122,8 @@ describe('pinDrift', () => {
       postgres: { image: 'pgvector/pgvector:pg15' },
       'kelta-worker': { image: 'ghcr.io/kelta-io/kelta-worker:0.1.0' },
       'kelta-ui': { image: 'ghcr.io/kelta-io/kelta-ui:0.1.0' },
-      'kelta-ai': { profiles: ['ai'] },
-      'kelta-bootstrap': { build: { context: '/w/docker/bootstrap' }, profiles: ['seed'] },
+      'kelta-ai': { image: 'kelta-ai:local', profiles: ['ai'] },
+      'kelta-bootstrap': { image: 'kelta-bootstrap:local', profiles: ['seed'] },
     },
   };
 

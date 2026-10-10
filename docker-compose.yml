@@ -316,6 +316,10 @@ services:
 
   kelta-ai:
     # Not released: built from source by docker-compose.build.yml (make up-ai / up-jvm-ai).
+    # The local name only keeps this file loadable on its own (buildx bake and other
+    # compose loaders reject a service with neither image nor build, profile or not);
+    # nothing publishes it, so `--profile ai` needs the build override.
+    image: kelta-ai:local
     container_name: kelta-ai
     restart: unless-stopped
     env_file: .env
@@ -352,7 +356,9 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════
 
   kelta-bootstrap:
-    # Not released: built from source by docker-compose.build.yml (make seed).
+    # Not released: built from source by docker-compose.build.yml (make seed). Local
+    # name for the same reason as kelta-ai's.
+    image: kelta-bootstrap:local
     container_name: kelta-bootstrap
     environment:
       GATEWAY_URL: http://kelta-gateway:8080

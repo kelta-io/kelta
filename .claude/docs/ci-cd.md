@@ -273,6 +273,9 @@ once, by hand, in the org's package settings.
   (`KELTA_VERSION`, no `build:` on any default-stack service); `docker-compose.build.yml` = HEAD
   (native `build:` stanzas for the four released services plus source-only `kelta-ai` /
   `kelta-bootstrap`, `image: !reset null` so builds keep compose's `<project>-<service>` names);
+  the base file still names `kelta-ai:local` / `kelta-bootstrap:local` (never published) because
+  `docker buildx bake` loads every service, profiled or not, and rejects one with neither
+  `image:` nor `build:` — the quickstart job's cerbos bake failed on exactly that;
   `docker-compose.jvm.yml` = JVM Dockerfiles + public build sources on top of the build file. Every
   `make up*` target uses the build file. CI overrides: `docker-compose.ci.yml` (no fixed host
   ports or container names, CI CORS, CI-only cerbos image — builds no Kelta service) and

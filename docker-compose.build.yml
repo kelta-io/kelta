@@ -14,7 +14,9 @@
 # overwrites a pulled release tag, and a pulled release never stands in for a build.
 #
 # kelta-ai (profile ai) and kelta-bootstrap (profile seed) are not released, so they
-# exist only as builds and their `build:` lives here too.
+# exist only as builds and their `build:` lives here too. The base file gives them a
+# placeholder `<service>:local` name (so it loads without this file); it is reset here
+# like the others, so concurrent builds on a shared daemon never share a tag.
 
 services:
   kelta-auth:
@@ -44,10 +46,12 @@ services:
         VITE_API_BASE_URL: http://localhost:8080
 
   kelta-ai:
+    image: !reset null
     build:
       context: .
       dockerfile: kelta-ai/Dockerfile
 
   kelta-bootstrap:
+    image: !reset null
     build:
       context: docker/bootstrap
