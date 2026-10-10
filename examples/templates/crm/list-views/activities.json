@@ -1,0 +1,4 @@
+[
+  { "name": "Open activities", "columns": ["subject", "activityType", "dueDate", "deal", "contact"], "filters": ["completed=false"], "sort": "dueDate", "default": true, "rowLimit": 25 },
+  { "name": "All activities", "columns": ["subject", "activityType", "dueDate", "completed", "deal", "contact"], "sort": "-dueDate", "rowLimit": 50 }
+]

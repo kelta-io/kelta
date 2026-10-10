@@ -1,0 +1,10 @@
+[
+  { "name": "Northwind Traders", "industry": "RETAIL", "website": "https://northwind.example.com", "phone": "+1 206 555 0100", "city": "Seattle", "country": "United States", "annualRevenue": 4200000 },
+  { "name": "Contoso Manufacturing", "industry": "MANUFACTURING", "website": "https://contoso.example.com", "phone": "+1 313 555 0142", "city": "Detroit", "country": "United States", "annualRevenue": 18500000 },
+  { "name": "Fabrikam Software", "industry": "SOFTWARE", "website": "https://fabrikam.example.com", "phone": "+1 512 555 0177", "city": "Austin", "country": "United States", "annualRevenue": 9600000 },
+  { "name": "Tailspin Health", "industry": "HEALTHCARE", "website": "https://tailspin.example.com", "phone": "+44 20 7946 0321", "city": "London", "country": "United Kingdom", "annualRevenue": 12300000 },
+  { "name": "Woodgrove Capital", "industry": "FINANCE", "website": "https://woodgrove.example.com", "phone": "+1 212 555 0190", "city": "New York", "country": "United States", "annualRevenue": 31000000 },
+  { "name": "Lakeshore Academy", "industry": "EDUCATION", "website": "https://lakeshore.example.com", "phone": "+1 312 555 0115", "city": "Chicago", "country": "United States", "annualRevenue": 2100000 },
+  { "name": "Alpine Outfitters", "industry": "RETAIL", "website": "https://alpine.example.com", "phone": "+41 44 555 0123", "city": "Zurich", "country": "Switzerland", "annualRevenue": 5400000 },
+  { "name": "Bluebird Logistics", "industry": "OTHER", "website": "https://bluebird.example.com", "phone": "+49 40 555 0188", "city": "Hamburg", "country": "Germany", "annualRevenue": 7800000 }
+]

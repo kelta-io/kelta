@@ -1,0 +1,5 @@
+[
+  { "name": "Open pipeline", "columns": ["name", "account", "stage", "amount", "expectedCloseDate"], "filters": ["stage.neq=CLOSED_WON", "stage.neq=CLOSED_LOST"], "sort": "expectedCloseDate", "default": true, "rowLimit": 25 },
+  { "name": "Pipeline board", "columns": ["name", "account", "stage", "amount"], "viewType": "KANBAN", "laneField": "stage", "cardFields": ["name", "account", "amount"], "rowLimit": 100 },
+  { "name": "Closed deals", "columns": ["name", "account", "stage", "amount", "closedAt"], "filters": ["stage.in=CLOSED_WON,CLOSED_LOST"], "sort": "-closedAt", "rowLimit": 25 }
+]

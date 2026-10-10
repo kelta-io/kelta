@@ -1,0 +1,18 @@
+[
+  { "subject": "Discovery call", "activityType": "CALL", "dueDate": "2026-10-02", "completed": true, "deal": "Northwind POS rollout", "contact": "maria.lopez@northwind.example.com", "notes": "Wants to replace the checkout system in 40 stores." },
+  { "subject": "Send POS proposal", "activityType": "EMAIL", "dueDate": "2026-10-14", "completed": false, "deal": "Northwind POS rollout", "contact": "maria.lopez@northwind.example.com" },
+  { "subject": "Intro meeting", "activityType": "MEETING", "dueDate": "2026-10-20", "completed": false, "deal": "Northwind loyalty program", "contact": "james.carter@northwind.example.com" },
+  { "subject": "Pricing negotiation", "activityType": "MEETING", "dueDate": "2026-10-16", "completed": false, "deal": "Contoso line monitoring", "contact": "priya.nair@contoso.example.com", "notes": "Asking for a multi-year discount." },
+  { "subject": "Security questionnaire", "activityType": "TASK", "dueDate": "2026-10-12", "completed": false, "deal": "Contoso line monitoring", "contact": "tom.becker@contoso.example.com" },
+  { "subject": "Kick-off call: Contoso supplier portal", "activityType": "CALL", "dueDate": "2026-09-19", "completed": true, "deal": "Contoso supplier portal", "contact": "tom.becker@contoso.example.com" },
+  { "subject": "Renewal confirmation", "activityType": "EMAIL", "dueDate": "2026-08-29", "completed": true, "deal": "Fabrikam support renewal", "contact": "daniel.okafor@fabrikam.example.com" },
+  { "subject": "Technical deep dive", "activityType": "MEETING", "dueDate": "2026-10-22", "completed": false, "deal": "Fabrikam platform expansion", "contact": "aiko.tanaka@fabrikam.example.com" },
+  { "subject": "Prepare demo environment", "activityType": "TASK", "dueDate": "2026-10-18", "completed": false, "deal": "Fabrikam platform expansion" },
+  { "subject": "Proposal walkthrough", "activityType": "MEETING", "dueDate": "2026-10-24", "completed": false, "deal": "Tailspin patient intake", "contact": "sophie.martin@tailspin.example.com" },
+  { "subject": "Loss review", "activityType": "TASK", "dueDate": "2026-09-30", "completed": true, "deal": "Woodgrove audit tooling", "contact": "elena.rossi@woodgrove.example.com", "notes": "Lost on price; revisit next fiscal year." },
+  { "subject": "Contract redlines", "activityType": "EMAIL", "dueDate": "2026-10-15", "completed": false, "deal": "Woodgrove client reporting", "contact": "liam.walsh@woodgrove.example.com" },
+  { "subject": "Needs assessment", "activityType": "CALL", "dueDate": "2026-10-28", "completed": false, "deal": "Lakeshore enrolment system", "contact": "grace.kim@lakeshore.example.com" },
+  { "subject": "First contact", "activityType": "EMAIL", "dueDate": "2026-10-09", "completed": true, "deal": "Alpine online store", "contact": "noah.fischer@alpine.example.com" },
+  { "subject": "Route data review", "activityType": "MEETING", "dueDate": "2026-10-21", "completed": false, "deal": "Bluebird route planning", "contact": "hannah.schulz@bluebird.example.com" },
+  { "subject": "Quarterly check-in", "activityType": "CALL", "dueDate": "2026-11-03", "completed": false, "contact": "james.carter@northwind.example.com" }
+]

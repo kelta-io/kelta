@@ -1,0 +1,14 @@
+[
+  { "name": "Northwind POS rollout", "account": "Northwind Traders", "primaryContact": "maria.lopez@northwind.example.com", "stage": "PROPOSAL", "amount": 48000, "expectedCloseDate": "2026-11-20" },
+  { "name": "Northwind loyalty program", "account": "Northwind Traders", "primaryContact": "james.carter@northwind.example.com", "stage": "PROSPECTING", "amount": 22000, "expectedCloseDate": "2027-01-15" },
+  { "name": "Contoso line monitoring", "account": "Contoso Manufacturing", "primaryContact": "priya.nair@contoso.example.com", "stage": "NEGOTIATION", "amount": 135000, "expectedCloseDate": "2026-10-31" },
+  { "name": "Contoso supplier portal", "account": "Contoso Manufacturing", "primaryContact": "tom.becker@contoso.example.com", "stage": "CLOSED_WON", "amount": 64000, "expectedCloseDate": "2026-09-15", "closedAt": "2026-09-12T15:30:00Z" },
+  { "name": "Fabrikam support renewal", "account": "Fabrikam Software", "primaryContact": "daniel.okafor@fabrikam.example.com", "stage": "CLOSED_WON", "amount": 18000, "expectedCloseDate": "2026-08-31", "closedAt": "2026-08-28T10:00:00Z" },
+  { "name": "Fabrikam platform expansion", "account": "Fabrikam Software", "primaryContact": "aiko.tanaka@fabrikam.example.com", "stage": "QUALIFICATION", "amount": 90000, "expectedCloseDate": "2026-12-12" },
+  { "name": "Tailspin patient intake", "account": "Tailspin Health", "primaryContact": "sophie.martin@tailspin.example.com", "stage": "PROPOSAL", "amount": 76000, "expectedCloseDate": "2026-11-30" },
+  { "name": "Woodgrove audit tooling", "account": "Woodgrove Capital", "primaryContact": "elena.rossi@woodgrove.example.com", "stage": "CLOSED_LOST", "amount": 55000, "expectedCloseDate": "2026-09-30", "closedAt": "2026-09-25T09:45:00Z" },
+  { "name": "Woodgrove client reporting", "account": "Woodgrove Capital", "primaryContact": "liam.walsh@woodgrove.example.com", "stage": "NEGOTIATION", "amount": 120000, "expectedCloseDate": "2026-11-05" },
+  { "name": "Lakeshore enrolment system", "account": "Lakeshore Academy", "primaryContact": "grace.kim@lakeshore.example.com", "stage": "QUALIFICATION", "amount": 30000, "expectedCloseDate": "2027-02-01" },
+  { "name": "Alpine online store", "account": "Alpine Outfitters", "primaryContact": "noah.fischer@alpine.example.com", "stage": "PROSPECTING", "amount": 42000, "expectedCloseDate": "2027-01-31" },
+  { "name": "Bluebird route planning", "account": "Bluebird Logistics", "primaryContact": "hannah.schulz@bluebird.example.com", "stage": "PROPOSAL", "amount": 68000, "expectedCloseDate": "2026-12-05" }
+]
