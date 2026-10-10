@@ -91,7 +91,8 @@ To choose the initial password yourself instead, set `KELTA_BOOTSTRAP_ADMIN_PASS
 **before the first start**. It is applied once, never logged, and you are still asked to change it at first
 sign-in. Setting it after the first boot has no effect.
 
-You land in the admin console. Continue with [your first app](/docs/getting-started/first-app/).
+You land in the admin console. Continue with [your first app](/docs/getting-started/first-app/), or install a
+ready-made CRM or inspections app with one command: [Start from a template](/docs/getting-started/start-from-a-template/).
 
 ## Service ports
 
