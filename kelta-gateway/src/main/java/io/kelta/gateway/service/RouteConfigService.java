@@ -235,7 +235,8 @@ public class RouteConfigService {
                 {"billing", "/api/billing/**", "billing"},
                 // Member-facing watch API (consumer-alerting slice 5) — a static-
                 // route, so only API_ACCESS is checked here; WatchController owns
-                // member scoping and WatchGuardHook covers the generic route.
+                // member scoping and the collection's ownership metadata
+                // (OwnerScopeGuardHook) covers the generic route.
                 {"watches", "/api/watches/**", "watches"},
                 // Read-only alert delivery latency summary — a static- route, so only
                 // API_ACCESS is checked here; AlertLatencyController requires MANAGE_DATA.

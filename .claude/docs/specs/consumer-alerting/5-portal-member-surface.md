@@ -3,7 +3,9 @@
 > Child of `specs/consumer-alerting/README.md`. Depends on slices 3 (watches) + 1
 > (entitlements). **Security-typed → NO auto-merge** (public signup + portal authz boundary).
 
-> **Landed.** `WatchController`, `WatchGuardHook`, `PortalSignupController`,
+> **Landed.** `WatchController`, `WatchGuardHook` (since retired — `watches` now declares
+> ownership metadata enforced by `OwnerScopeGuardHook`, member-data-ownership slice 4),
+> `PortalSignupController`,
 > `InternalPortalSignupController`, the `selfSignupEnabled` setting, and 27 unit tests. Four
 > notes against the design below:
 > - **Signup creates the account via the worker, not in kelta-auth.** §5 reads as though
@@ -72,7 +74,8 @@ Actor from `X-User-Id`/`X-User-Type`. INTERNAL users holding `MANAGE_DATA` may p
 also admits the read-only `VIEW_ALL_DATA`; naming a member and every mutation stay
 `MANAGE_DATA`-only.
 
-**Generic-route lockdown**: `WatchGuardHook` (BeforeSaveHook, `UserPreferenceGuardHook` idiom)
+**Generic-route lockdown**: originally `WatchGuardHook`; since member-data-ownership slice 4 the
+`watches` ownership metadata (`memberId`, `ALL`, reads scoped — `OwnerScopeGuardHook`)
 owner-guards writes to `watches` arriving via dynamic routes; portal reads of `watches` and
 the billing collections via generic routes are denied (Cerbos policy or gateway check — pick
 in-slice after verifying the seeded Portal User profile's reach; the parent Security section
@@ -89,7 +92,8 @@ None expected (the watch table ships in slice 3; `selfSignupEnabled` lives in
   the `PortalLoginService` signup path; `AuthorizationServerConfig` permitAll list +=
   `/portal/api/signup`.
 - kelta-worker: `controller/WatchController.java`, `service/availability/WatchService.java`,
-  `listener/WatchGuardHook.java` (+ `FlowConfig` registration); `PortalAuthSettingsController`
+  `listener/WatchGuardHook.java` (+ `FlowConfig` registration; retired in member-data-ownership
+  slice 4 for ownership metadata); `PortalAuthSettingsController`
   gains `selfSignupEnabled`.
 - kelta-gateway: static route `{"watches", "/api/watches/**", "watches"}` in
   `RouteConfigService.registerStaticRoutes()`; `IpRateLimitFilter` path set becomes

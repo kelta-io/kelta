@@ -11,7 +11,8 @@ import java.util.Optional;
 
 /**
  * Reads the {@code win} table (consumer-alerting slice 9). Writes go through {@code QueryEngine}
- * in {@code WinController} so the platform hooks fire ({@code WinGuardHook} owner guard); this
+ * in {@code WinController} so the platform hooks fire (the {@code wins} ownership metadata, enforced by
+ * {@code OwnerScopeGuardHook}); this
  * repository is read-only plus the claimant-name lookup used at create time.
  *
  * <p>Runs under the request tenant context, so Postgres RLS scopes every row to the tenant; the

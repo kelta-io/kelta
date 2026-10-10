@@ -22,8 +22,8 @@ import java.util.UUID;
  * {@link SpotopenedMediaStorageService}'s javadoc for why it's a separate
  * service). The client PUTs bytes to storage, then creates the metadata row
  * itself via the ordinary generic route ({@code POST /api/facility-photos}),
- * which is independently Cerbos-gated and guarded by {@code PhotoGuardHook}
- * -- there is nothing here to "finalize" because nothing here writes to a
+ * which is independently Cerbos-gated and owner-guarded by the collection's
+ * ownership metadata ({@code OwnerScopeGuardHook}) -- there is nothing here to "finalize" because nothing here writes to a
  * database.
  *
  * <p>Nested under {@code /api/facility-photos}, NOT a standalone top-level

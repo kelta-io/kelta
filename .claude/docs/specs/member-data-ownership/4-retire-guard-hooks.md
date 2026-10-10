@@ -2,6 +2,16 @@
 
 > Parent: [`README.md`](README.md). Depends on slice 2. **Security — never auto-merged.**
 
+> **Delivered (KLT-380, 2026-10-10).** The seven hooks, `OwnerGuardCaller` and their tests are
+> deleted; the four system collections declare ownership in `SystemCollectionDefinitions`
+> (`SystemCollectionOwnershipTest`). Support mode: `WatchController` writes on a named member's
+> watch run under `CallerContext` bound to that member (`SupportPermissions.writeAs`, after the
+> `MANAGE_DATA` check), and support list/get delegations run with the `viewAll` bypass
+> (`readAll`). §4's migration was **not** added — the owner indexes already exist:
+> `V163` `user_ui_preference(tenant_id, user_id, pref_type)`, `V179`
+> `watch(tenant_id, member_id, status)`, `V184` `win(tenant_id, member_id, claimed_at)`. The
+> tenant metadata step was applied before deploy.
+
 ## 1. Goal & scope
 
 **Delivers:** the seven per-collection hooks (`WatchGuardHook`, `WinGuardHook`,

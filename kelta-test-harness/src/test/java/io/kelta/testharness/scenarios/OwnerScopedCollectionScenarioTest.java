@@ -157,6 +157,83 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
         assertThat(totalCount(aliceUnderAll)).as("alice under ALL: %s", aliceUnderAll).isEqualTo(2);
     }
 
+    /**
+     * The shape of a public-read, owner-write collection (member data ownership slice 4 — what
+     * replaced the bespoke per-collection owner-guard hooks): {@code ownerField=createdBy},
+     * {@code ownerScope=ALL}, {@code ownerScopeReads=false}. Every member reads every row; only
+     * the author, or staff holding {@code MODIFY_ALL_DATA}, may change one.
+     */
+    @Test
+    @DisplayName("createdBy / ALL / unscoped reads: members list everyone's rows but change only their own")
+    @SuppressWarnings("unchecked")
+    void publicReadOwnerWriteCollection() throws Exception {
+        String adminToken = auth.loginAsAdmin();
+        String tenantId = auth.extractTenantId(adminToken);
+        String slug = tenants.slugForTenantId(tenantId);
+        RestClient admin = gatewayClientWithToken(adminToken);
+        String suffix = Long.toString(System.nanoTime() % 1_000_000_000L, 36);
+        String reports = "oscreports" + suffix;
+
+        waitForStatus(admin, "/" + slug + "/api/collections", HttpStatus.OK, 20);
+        String reportsId = createCollection(admin, slug, reports);
+        try {
+            createField(admin, slug, Map.of("collectionId", reportsId, "name", "title", "type", "STRING"), null);
+            patchCollection(admin, slug, reportsId,
+                    Map.of("ownerField", "createdBy", "ownerScope", "ALL", "ownerScopeReads", false));
+
+            Caller alice = new Caller(invitePortalMember(admin, slug, "ralice", suffix), "PORTAL", null);
+            Caller bob = new Caller(invitePortalMember(admin, slug, "rbob", suffix), "PORTAL", null);
+            String adminUser = AuthFixture.adminUsername(TenantFixture.DEFAULT_SLUG);
+            Caller staffWithoutGrant = new Caller(adminUser, "INTERNAL", null);
+            Caller modifyAll = new Caller(adminUser, "INTERNAL", profileGranting(tenantId, "MODIFY_ALL_DATA"));
+
+            String aliceReport = id(createReport(alice, tenantId, slug, reports, "alice-1"));
+            id(createReport(alice, tenantId, slug, reports, "alice-2"));
+            id(createReport(bob, tenantId, slug, reports, "bob-1"));
+
+            // ── reads are unscoped: Bob's list holds Alice's rows, and he can open one ──────
+            Map<String, Object> bobList = list(bob, tenantId, slug, reports);
+            assertThat(totalCount(bobList)).as("bob list: %s", bobList).isEqualTo(3);
+            assertThat(titles(bobList)).as("bob list: %s", bobList)
+                    .containsExactlyInAnyOrder("alice-1", "alice-2", "bob-1");
+            assertStatus(call(bob, tenantId, slug, HttpMethod.GET, "/api/" + reports + "/" + aliceReport),
+                    HttpStatus.OK, "bob reads alice's row");
+
+            // ── writes are owner-only: Bob's PATCH and DELETE of Alice's row are 404 ────────
+            assertStatus(call(bob, tenantId, slug, HttpMethod.PATCH, "/api/" + reports + "/" + aliceReport,
+                    Map.of("data", Map.of("type", reports, "id", aliceReport,
+                            "attributes", Map.of("title", "hijacked")))),
+                    HttpStatus.NOT_FOUND, "bob patches alice's row");
+            assertStatus(call(bob, tenantId, slug, HttpMethod.DELETE, "/api/" + reports + "/" + aliceReport),
+                    HttpStatus.NOT_FOUND, "bob deletes alice's row");
+            // Under ALL, staff without MODIFY_ALL_DATA are owner-scoped for writes too.
+            assertStatus(call(staffWithoutGrant, tenantId, slug, HttpMethod.PATCH,
+                    "/api/" + reports + "/" + aliceReport,
+                    Map.of("data", Map.of("type", reports, "id", aliceReport,
+                            "attributes", Map.of("title", "staff-edit")))),
+                    HttpStatus.NOT_FOUND, "staff without MODIFY_ALL_DATA patch alice's row");
+            Map<String, Object> untouched = call(alice, tenantId, slug, HttpMethod.GET,
+                    "/api/" + reports + "/" + aliceReport).getBody();
+            assertThat(((Map<String, Object>) ((Map<String, Object>) untouched.get("data")).get("attributes"))
+                    .get("title")).as("alice's row after the refused writes: %s", untouched).isEqualTo("alice-1");
+
+            // ── the author, and MODIFY_ALL_DATA staff, may change it ────────────────────────
+            assertStatus(call(alice, tenantId, slug, HttpMethod.PATCH, "/api/" + reports + "/" + aliceReport,
+                    Map.of("data", Map.of("type", reports, "id", aliceReport,
+                            "attributes", Map.of("title", "alice-1b")))),
+                    HttpStatus.OK, "alice patches her own row");
+            assertStatus(call(modifyAll, tenantId, slug, HttpMethod.PATCH, "/api/" + reports + "/" + aliceReport,
+                    Map.of("data", Map.of("type", reports, "id", aliceReport,
+                            "attributes", Map.of("title", "moderated")))),
+                    HttpStatus.OK, "MODIFY_ALL_DATA staff patch alice's row");
+            assertStatus(call(alice, tenantId, slug, HttpMethod.DELETE, "/api/" + reports + "/" + aliceReport),
+                    HttpStatus.NO_CONTENT, "alice deletes her own row");
+        } finally {
+            admin.delete().uri("/" + slug + "/api/collections/" + reportsId + "?force=true")
+                    .retrieve().onStatus(st -> true, (req, resp) -> {}).toBodilessEntity();
+        }
+    }
+
     @Test
     @DisplayName("ownership validation: a LOOKUP to users is a valid owner field, a text field is a 400")
     void ownerFieldValidationAgainstRealFields() throws Exception {
@@ -280,6 +357,15 @@ class OwnerScopedCollectionScenarioTest extends ScenarioBase {
         ResponseEntity<Map> created = call(caller, tenantId, slug, HttpMethod.POST, "/api/" + items,
                 Map.of("data", Map.of("type", items,
                         "attributes", Map.of("title", title, "folder", folderId))));
+        assertThat(created.getStatusCode().is2xxSuccessful())
+                .as("create %s as %s: %s", title, caller.userId(), created.getBody()).isTrue();
+        return created;
+    }
+
+    private ResponseEntity<Map> createReport(Caller caller, String tenantId, String slug, String reports,
+                                             String title) {
+        ResponseEntity<Map> created = call(caller, tenantId, slug, HttpMethod.POST, "/api/" + reports,
+                Map.of("data", Map.of("type", reports, "attributes", Map.of("title", title))));
         assertThat(created.getStatusCode().is2xxSuccessful())
                 .as("create %s as %s: %s", title, caller.userId(), created.getBody()).isTrue();
         return created;
