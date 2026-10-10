@@ -14,7 +14,8 @@ Index: [Flow action handler](#1-add-a-flow-action-handler) ·
 [MCP tool](#4-add-an-mcp-tool) ·
 [System collection](#5-add-a-system-collection) ·
 [Field type](#6-add-a-field-type) ·
-[Member-owned collection](#9-make-a-collection-member-owned)
+[External portal: member's own profile](#9-let-an-external-portal-edit-the-signed-in-members-own-profile) ·
+[Member-owned collection](#10-make-a-collection-member-owned)
 
 ---
 
@@ -393,7 +394,35 @@ column (RLS-scoped) — never `ALL TABLES IN SCHEMA public`, which includes `use
 
 ---
 
-## 9. Make a collection member-owned
+## 9. Let an external portal edit the signed-in member's own profile
+
+An external site (a consumer frontend, a patient portal) signs a member in with the portal
+magic-link flow or gives them a PAT, and wants a "settings" page for that member. **Do not**
+grant the Portal User profile `MANAGE_USERS` or object permissions on `users`, and do not route
+the write through a backend-for-frontend holding a service account: the platform already has a
+member-safe endpoint.
+
+**Call, with the member's own token**
+- `GET /{tenantSlug}/api/me/profile` → `{"data":{"type":"users","id":"<uuid>","attributes":{email,firstName,lastName,locale,timezone,userType}}}`.
+- `PATCH /{tenantSlug}/api/me/profile` with `{"data":{"type":"users","attributes":{"timezone":"Europe/Lisbon"}}}`
+  — send only the fields that changed. Editable: `firstName`, `lastName` (≤ 100 chars),
+  `locale` (`en`, `pt_BR`, `es-419` …), `timezone` (IANA). Anything else → 400
+  `FIELD_NOT_EDITABLE` with `source.pointer` `/data/attributes/<field>`; bad values → 400
+  `VALIDATION_FAILED`. No signed-in user → 404.
+
+**What it does not do — and where that data goes instead**
+- The allow-list is fixed in code (`MyProfileController.EDITABLE_FIELDS`), and the `users`
+  definition is fixed: a tenant cannot add fields to it. Site-specific member data (a region, UI
+  preferences, …) belongs in a **tenant collection the member owns**, not on `users`; push
+  registration uses the existing `/api/devices`.
+- Email, status, profile, user type, manager, MFA and `settings` stay admin-only
+  (`MANAGE_USERS`, or delegated administration within a scope).
+
+**Platform side** (when touching it): `MyProfileController` → `SelfProfileWriteContext` →
+`IdentityCollectionGuardHook`. Widening the allow-list is a security change (`concerns.md` →
+Member self-profile); the in-app equivalent is `ProfileDialog` behind the user menu's Profile item.
+
+## 10. Make a collection member-owned
 
 Use this when each record belongs to one user and other users (portal members, or everyone
 without `VIEW_ALL_DATA`) must not see or change it. It is pure metadata: **do not** write a

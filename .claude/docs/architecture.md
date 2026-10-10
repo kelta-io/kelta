@@ -383,7 +383,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
 
   | Static route | Checked | Write override | Why reads are (not) checked |
   |---|---|---|---|
-  | `/api/users/**` | every method | `MANAGE_USERS` (as `IdentityCollectionGuardHook`) | `read` is checked — the record advice already emptied the list for callers without it; no self-service sub-paths exist (the caller's own record is `/api/me/**`, which stays `API_ACCESS`-only) |
+  | `/api/users/**` | every method | `MANAGE_USERS` (as `IdentityCollectionGuardHook`) | `read` is checked — the record advice already emptied the list for callers without it; no self-service sub-paths exist (the caller's own record is `/api/me/profile`, under `/api/me/**`, which stays `API_ACCESS`-only) |
   | `/api/profiles/**` | writes | `MANAGE_USERS` | **intentionally `API_ACCESS`-only**: the user admin pages (gated on `MANAGE_USERS`, not a collection grant) list profiles, and the grants themselves live in `profile-*-permissions`, whose own routes are object-checked |
   | `/api/collections/**` | writes, except `/{name}/import`, `/duplicates`, `/merge` | `CUSTOMIZE_APPLICATION` (the setup pages' gate) | **intentionally `API_ACCESS`-only**: every record page, form and list reads collection and field metadata. The exempt sub-paths act on the named collection's records, not on the collections collection |
 
@@ -498,6 +498,19 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     raw-`JdbcTemplate` repositories/controllers and the `search_index` full-text search. Those
     stay code-scoped (concerns.md → Owner-scoped collections). A new endpoint over an
     owner-scoped collection must go through `QueryEngine` or scope itself.
+- **Member self-profile** (`GET`/`PATCH /api/me/profile`, `MyProfileController`;
+  member-data-ownership slice 3, security). Rides the existing `/api/me/**` static route —
+  `API_ACCESS` only, **no new gateway route** — and the worker advices skip `/api/me/`, so the
+  controller is the whole authorization: the caller is `CallerContext.current().userId()` only
+  (never a path or body id; none bound → **404**), reads return `email`/`firstName`/`lastName`/
+  `locale`/`timezone`/`userType` of that row, and PATCH accepts the code-fixed allow-list
+  `firstName`/`lastName`/`locale`/`timezone` (any other attribute → 400 `FIELD_NOT_EDITABLE`,
+  pointer `/data/attributes/<field>`; bad tag/zone/length → 400 `VALIDATION_FAILED`). The write is
+  `queryEngine.update(users, callerId, attrs)` inside `SelfProfileWriteContext.callAuthorized(...)`
+  — a ScopedValue of `(userId, allowedFields)` that `IdentityCollectionGuardHook` admits only for a
+  `users` **update** of that id touching only those fields (+ the engine's `updatedAt`); every other
+  write under it is judged as unbound. Works for INTERNAL and PORTAL callers, JWT or PAT; the UI is
+  `ProfileDialog` (user menu → Profile); external portals: `playbooks.md` §9.
 - **User preference writes** (`/api/user-ui-preferences`, generic route): owner-guarded by
   `UserPreferenceGuardHook` (BeforeSaveHook, order −100) — the row's `userId` must equal the
   caller's canonical UUID (`X-User-Id` → `UserIdResolver`; fail-closed on unresolvable,
@@ -513,7 +526,10 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `beforeDelete` SPI) blocks any *identified* HTTP write to `users`/`user-permission-sets`/
   `group-memberships`/`delegated-admin-scopes` that lacks `MANAGE_USERS`/`MODIFY_ALL_DATA` (or
   `MANAGE_DELEGATED_ADMINS` for scopes) unless a `DelegatedWriteContext` is bound — this is what
-  makes the delegated path safe against the generic collection route and `/api/operations`. The
+  makes the delegated path safe against the generic collection route and `/api/operations`.
+  **Self-edit is a separate path, not delegation:** the delegated controller still rejects editing
+  yourself; a caller's own name/locale/timezone go through `/api/me/profile` (below), whose
+  `SelfProfileWriteContext` the guard honours only for that caller's id and those four fields. The
   gateway `IdentityHeaderStripFilter` (order −400) strips client-supplied `X-User-Email`/
   `X-User-Profile-Id`/`X-User-Profile-Name`/`X-Cerbos-Scope`/`X-User-Type` at the chain head so the
   worker never trusts a forged identity header on any path.
