@@ -37,6 +37,7 @@ export function rewriteAnchors(markdown: string, anchors: Record<string, string>
 export const QUICKSTART_ANCHORS: Record<string, string> = {
   'native-vs-jvm-images': '#native-images',
   'local-development': '#service-ports',
+  'from-source-contributors': '#build-from-source',
 };
 
 /** README.md's `## Quickstart` body, as rendered on the docs quickstart page. */

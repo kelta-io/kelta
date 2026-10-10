@@ -74,6 +74,10 @@ e2e:
   - 'kelta-ui/**'
   - 'e2e-tests/**'
   - 'ci/admin-first-sign-in.sh'
+  - 'docker-compose.yml'
+  - 'docker-compose.build.yml'
+  - 'docker-compose.ci.yml'
+  - 'docker-compose.ci-build.yml'
 
 # Runtime-installable modules (kelta-modules/**). Built and tested separately from the
 # platform reactor, but they COMPILE AGAINST the runtime API — so a change to KeltaModule,
@@ -93,6 +97,7 @@ quickstart:
   - *web
   - 'kelta-ui/**'
   - 'docker-compose.yml'
+  - 'docker-compose.build.yml'
   - 'docker-compose.jvm.yml'
   - 'docker-compose.ci.yml'
   - 'Makefile'

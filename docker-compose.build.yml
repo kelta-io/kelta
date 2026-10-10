@@ -1,0 +1,53 @@
+# From-source override: build the Kelta services from this checkout instead of
+# pulling the released images.
+#
+# docker-compose.yml on its own is the self-hoster's quickstart: it runs the Kelta
+# release named by KELTA_VERSION (.env), pulled from ghcr.io/kelta-io. Layer this file
+# on top to run HEAD instead — every `make up*` target does:
+#
+#   make up        -f docker-compose.yml -f docker-compose.build.yml              (native)
+#   make up-jvm    -f docker-compose.yml -f docker-compose.build.yml \
+#                  -f docker-compose.jvm.yml                                       (JVM)
+#
+# `image: !reset null` drops the ghcr name for the built services, so compose names
+# the build <project>-<service> as it always has. A from-source build then never
+# overwrites a pulled release tag, and a pulled release never stands in for a build.
+#
+# kelta-ai (profile ai) and kelta-bootstrap (profile seed) are not released, so they
+# exist only as builds and their `build:` lives here too.
+
+services:
+  kelta-auth:
+    image: !reset null
+    build:
+      context: .
+      dockerfile: kelta-auth/Dockerfile
+
+  kelta-worker:
+    image: !reset null
+    build:
+      context: .
+      dockerfile: kelta-worker/Dockerfile
+
+  kelta-gateway:
+    image: !reset null
+    build:
+      context: .
+      dockerfile: kelta-gateway/Dockerfile
+
+  kelta-ui:
+    image: !reset null
+    build:
+      context: .
+      dockerfile: kelta-ui/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8080
+
+  kelta-ai:
+    build:
+      context: .
+      dockerfile: kelta-ai/Dockerfile
+
+  kelta-bootstrap:
+    build:
+      context: docker/bootstrap

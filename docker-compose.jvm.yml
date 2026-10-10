@@ -2,7 +2,11 @@
 #
 # Why this exists
 # ---------------
-# The base compose builds kelta-auth, kelta-worker and kelta-gateway from their
+# Layer it on top of docker-compose.build.yml (which supplies the build context and
+# drops the pulled ghcr image names); on the base file alone it would build under the
+# release's image tag.
+#
+# The from-source override builds kelta-auth, kelta-worker and kelta-gateway from their
 # native `Dockerfile`s, which end in `mvn -Pnative native:compile`. Compose builds
 # those three concurrently, and GraalVM's `native-image` sizes its heap to ~80% of
 # whatever the cgroup reports — so on a Docker Desktop with, say, 12 GB allocated,
@@ -14,8 +18,8 @@
 # For day-to-day work the JVM variants are equivalent in behavior, build in a few
 # minutes, and fit comfortably in a default Docker Desktop allocation.
 #
-# Unlike docker-compose.ci.yml (which also strips host ports and container_names
-# for the shared CI daemon), this override touches ONLY the build stanzas, so
+# Unlike the CI overrides (which also strip host ports and container_names for the
+# shared CI daemon), this override touches ONLY the build stanzas, so
 # localhost ports, container names, healthchecks and env all stay as in base.
 #
 # Usage:  make up-jvm       (or up-jvm-ai / up-jvm-full)
@@ -23,7 +27,7 @@
 
 # Public sources for local builds. The Dockerfile.jvm defaults point at the homelab
 # Harbor/Nexus caches CI and production rely on; overriding them HERE — and only here —
-# means `make up-jvm` works for anyone, with nothing changed for CI (docker-compose.ci.yml
+# means `make up-jvm` works for anyone, with nothing changed for CI (docker-compose.ci-build.yml
 # and the deploy workflow build the same Dockerfiles without these args).
 x-public-build-args: &public-build-args
   BASE_REGISTRY: docker.io/library   # official images straight from Docker Hub

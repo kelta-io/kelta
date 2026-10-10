@@ -1,0 +1,36 @@
+# CI from-source override (e2e job). Layer it last, on top of docker-compose.build.yml
+# (which supplies the build context and drops the ghcr image names) and
+# docker-compose.ci.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml \
+#     -f docker-compose.ci.yml -f docker-compose.ci-build.yml ...
+#
+#   1. Swap native GraalVM Dockerfiles for JVM variants so PR builds stay
+#      under ~5 min per service instead of the ~10 min native compile. Unlike
+#      docker-compose.jvm.yml this keeps the Dockerfile.jvm build-arg defaults,
+#      i.e. the homelab Harbor/Nexus caches the CI runners sit next to.
+#   2. Rebuild UI with VITE_API_BASE_URL=http://kelta-gateway:8080 so the
+#      SPA's API calls from the Playwright container resolve via container DNS,
+#      not localhost.
+
+services:
+  kelta-auth:
+    build:
+      dockerfile: kelta-auth/Dockerfile.jvm
+
+  kelta-worker:
+    build:
+      dockerfile: kelta-worker/Dockerfile.jvm
+
+  kelta-gateway:
+    build:
+      dockerfile: kelta-gateway/Dockerfile.jvm
+
+  kelta-ai:
+    build:
+      dockerfile: kelta-ai/Dockerfile.jvm
+
+  kelta-ui:
+    build:
+      args:
+        VITE_API_BASE_URL: http://kelta-gateway:8080

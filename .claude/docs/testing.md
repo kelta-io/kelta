@@ -207,8 +207,9 @@ it tears them down.
 
 `.github/workflows/ci.yml`'s `quickstart` job proves the README [Quickstart](../../README.md#quickstart)
 section actually works and stays fast, rather than trusting docs to stay in sync with the
-compose file by hand. It builds the JVM-mode images (`docker-compose.yml` + `docker-compose.ci.yml`
-— same port-safe overlay the `e2e` job uses, for the shared k8s-runner daemon), then wraps
+compose file by hand. It builds no Kelta image: it pulls the release `.env.example` pins
+(`ghcr.io/kelta-io/*:${KELTA_VERSION}`, base `docker-compose.yml` + `docker-compose.ci.yml` — the
+port-safe overlay the `e2e` job also uses, for the shared k8s-runner daemon), then wraps
 `ci/quickstart-run.sh` (`docker compose up -d --wait`; read the platform admin's first-boot
 password from `docker compose logs kelta-auth` the way `quickstart.md` tells a new user to — no
 `KELTA_BOOTSTRAP_ADMIN_PASSWORD` here, on purpose; complete the forced change with
@@ -218,7 +219,7 @@ into a `curlimages/curl` sibling container on the compose network — via `kelta
 in `timeout 300`. The check script goes in over **stdin, not a bind mount** — Docker on
 `k8s-runner-integration` is remote and can't see the runner's filesystem (same reason
 `docker-compose.ci.yml` bakes cerbos config into an image instead of mounting it). Only the wall
-clock from `docker compose up` to that API call succeeding counts against the budget — image build
-happens first and isn't timed. Gated on the `quickstart` path filter (`.github/path-filters.yml`):
-backend/frontend source, `docker-compose*.yml`, `Makefile`, `docker/bootstrap/**`. Uses `make up`'s
+clock from `docker compose up` to that API call succeeding counts against the budget — the image
+pull happens first and isn't timed. Gated on the `quickstart` path filter (`.github/path-filters.yml`):
+backend/frontend source, `docker-compose*.yml`, `Makefile`, `docker/bootstrap/**`. Uses the
 default-profile services only — no `--profile ai`, matching what a first-time user actually runs.

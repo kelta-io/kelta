@@ -3,18 +3,23 @@
 # First time:   make setup
 # Every day:    make up-jvm   (or `make up` for native images — needs ~24 GB for Docker)
 # After setup:  make seed   ← confirms health + prints credentials
+#
+# Every `up*` target builds this checkout from source (docker-compose.build.yml).
+# To run a released version instead, skip make: `docker compose up -d` pulls the
+# ghcr.io/kelta-io images pinned by KELTA_VERSION in .env (README → Quickstart).
 # ─────────────────────────────────────────────────────────────────────────────
 
-COMPOSE       := docker compose
-COMPOSE_AI    := docker compose --profile ai
-COMPOSE_FULL  := docker compose --profile ai --profile tools
-COMPOSE_TELE  := docker compose --profile telehealth
+BUILD_FILES   := -f docker-compose.yml -f docker-compose.build.yml
+COMPOSE       := docker compose $(BUILD_FILES)
+COMPOSE_AI    := docker compose $(BUILD_FILES) --profile ai
+COMPOSE_FULL  := docker compose $(BUILD_FILES) --profile ai --profile tools
+COMPOSE_TELE  := docker compose $(BUILD_FILES) --profile telehealth
 
 # JVM-mode overlay: builds the Java services from their Dockerfile.jvm variants
 # instead of GraalVM native-image. Three concurrent native builds need ~24 GB
 # allocated to Docker; the JVM path fits a default allocation and is ~5x faster.
 # See the header of docker-compose.jvm.yml.
-JVM_FILES         := -f docker-compose.yml -f docker-compose.jvm.yml
+JVM_FILES         := $(BUILD_FILES) -f docker-compose.jvm.yml
 COMPOSE_JVM       := docker compose $(JVM_FILES)
 COMPOSE_JVM_AI    := docker compose $(JVM_FILES) --profile ai
 COMPOSE_JVM_FULL  := docker compose $(JVM_FILES) --profile ai --profile tools
@@ -28,7 +33,8 @@ COMPOSE_JVM_FULL  := docker compose $(JVM_FILES) --profile ai --profile tools
 ## setup: copy .env.example → .env and generate dev RSA key (idempotent)
 setup: copy-env gen-keys
 	@echo ""
-	@echo "✅  Setup complete. Run 'make up-jvm' to start the stack"
+	@echo "✅  Setup complete. Run 'docker compose up -d' to start the released stack,"
+	@echo "    or 'make up-jvm' to build this checkout from source"
 	@echo "    ('make up' builds GraalVM native images and needs ~24 GB allocated to Docker)."
 
 ## copy-env: copy .env.example to .env if it doesn't already exist

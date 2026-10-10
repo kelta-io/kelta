@@ -1,6 +1,6 @@
 ---
 title: Quickstart with Docker Compose
-description: Run the full Kelta stack on your machine in three commands and sign in to the console.
+description: Run a released Kelta stack on your machine in two commands and sign in to the console.
 section: getting-started
 order: 20
 ---
@@ -23,10 +23,10 @@ cd kelta
 
 ## Prerequisites
 
-- Docker and Docker Compose (Docker Desktop or the Docker Engine plugin).
+- Docker and Docker Compose v2.24+ (Docker Desktop or the Docker Engine plugin).
 - `make` and `git`.
-- **Memory.** A default Docker Desktop allocation is enough — the commands above build JVM images. The
-  GraalVM native images production runs need roughly **24 GB allocated to Docker**; see
+- **Memory.** A default Docker Desktop allocation is enough — the commands above pull prebuilt JVM images.
+  Building the GraalVM native images production runs needs roughly **24 GB allocated to Docker**; see
   [Native images](#native-images) if you want them.
 
 ## What the commands do
@@ -35,8 +35,20 @@ cd kelta
 for JWT signing (`JWK_SET`) and an AES-256 key for envelope encryption (`KELTA_ENCRYPTION_KEY`). Services that need a
 signing key fail to start without one rather than falling back to a shared value.
 
-`make up-jvm` builds the same JVM images the `quickstart` CI job builds and times on every relevant change, so
-it is the path known to work on a laptop.
+`docker compose up -d --wait` pulls `ghcr.io/kelta-io/{kelta-auth,kelta-worker,kelta-gateway,kelta-ui}` at the
+version `KELTA_VERSION` names in `.env`, starts them with the backing stores, and returns once every service is
+healthy. Nothing is compiled. The `quickstart` CI job pulls the same images and times this path on every relevant
+change. To run another release, change `KELTA_VERSION` and run the command again.
+
+## Build from source
+
+To run your own checkout rather than a release, use the make targets: each layers `docker-compose.build.yml` on
+`docker-compose.yml` and builds the Kelta services from source.
+
+```bash
+make up-jvm   # JVM images: a default Docker allocation, ~2–3 min per service
+make seed     # waits for a healthy stack, prints login info
+```
 
 ## Native images
 
@@ -76,7 +88,7 @@ docker compose logs kelta-auth | grep -o 'Password: *[A-Za-z0-9]*'
 printed only once — on later restarts the account is already changed and nothing is logged.
 
 To choose the initial password yourself instead, set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` in `.env` (or your shell)
-**before the first `make up`**. It is applied once, never logged, and you are still asked to change it at first
+**before the first start**. It is applied once, never logged, and you are still asked to change it at first
 sign-in. Setting it after the first boot has no effect.
 
 You land in the admin console. Continue with [your first app](/docs/getting-started/first-app/).
@@ -99,6 +111,8 @@ You land in the admin console. Continue with [your first app](/docs/getting-star
 | Redis Commander | 8091 | `--profile tools` |
 
 ## Optional profiles
+
+These build from source (`kelta-ai` is not a released image):
 
 ```bash
 make up-ai          # + kelta-ai — needs ANTHROPIC_API_KEY in .env
@@ -139,8 +153,9 @@ kelta auth login --url http://localhost:8080 --tenant default --token klt_...
 ## Troubleshooting
 
 - **Gateway answers 404 for `/api/...` right after start.** The gateway builds its route table from the worker's
-  collection registry on startup; wait for `make seed` to report healthy (it polls readiness, not liveness).
+  collection registry on startup; wait for `docker compose up -d --wait` to return (or `make seed` to report
+  healthy) — both wait on the gateway's readiness check, not liveness.
 - **Emails never arrive.** In the compose stack all mail goes to Mailpit on http://localhost:8025 — start it with
   `--profile tools` / `make up-full`.
-- **`cannot allocate memory` during build.** See [Start the stack](#start-the-stack): use `make up-jvm` or raise
+- **`cannot allocate memory` during build.** See [Native images](#native-images): use `make up-jvm` or raise
   Docker's memory limit.
