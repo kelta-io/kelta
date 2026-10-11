@@ -1,6 +1,7 @@
 package io.kelta.worker.repository;
 
 import org.junit.jupiter.api.*;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
@@ -68,6 +69,23 @@ class PackageRepositoryTest {
 
         var result = repository.findCollectionsByIds("t1", List.of("col-1"));
         assertThat(result).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("Field export carries the bound global picklist's name (BUILD-LOG error 14)")
+    void fieldExportJoinsGlobalPicklistName() {
+        when(jdbcTemplate.queryForList(anyString(), any(Object[].class)))
+                .thenReturn(List.of(Map.of("name", "stage", "global_picklist_name", "crm-deal-stage")));
+
+        var result = repository.findFieldsWithNamesByCollectionIds("t1", List.of("col-1"));
+
+        assertThat(result.get(0)).containsEntry("global_picklist_name", "crm-deal-stage");
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForList(sql.capture(), any(Object[].class));
+        assertThat(sql.getValue())
+                .contains("gp.name AS global_picklist_name")
+                .contains("LEFT JOIN global_picklist gp ON gp.tenant_id = c.tenant_id "
+                        + "AND gp.id = f.field_type_config->>'globalPicklistId'");
     }
 
     @Test

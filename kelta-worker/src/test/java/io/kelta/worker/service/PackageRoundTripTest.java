@@ -35,7 +35,7 @@ class PackageRoundTripTest {
             "collection_name", "reference_collection_name", "layout_name", "section_sort_order",
             "field_name", "field_collection_name", "picklist_name", "related_collection_name",
             "relationship_field_name", "relationship_field_collection_name",
-            "menu_name", "parent_label");
+            "menu_name", "parent_label", "global_picklist_name");
 
     /** Owned by the engine (ids) or by the export (stripped before the item is built). */
     private static final Set<String> NON_ROUND_TRIP_COLUMNS = Set.of(
@@ -118,7 +118,11 @@ class PackageRoundTripTest {
                         "name", "status", "type", "PICKLIST"),
                 row("id", "src-order", "collection_id", "src-lines", "collection_name", "order_lines",
                         "name", "order", "type", "LOOKUP",
-                        "reference_collection_id", "src-orders", "reference_collection_name", "orders")));
+                        "reference_collection_id", "src-orders", "reference_collection_name", "orders"),
+                row("id", "src-stage", "collection_id", "src-orders", "collection_name", "orders",
+                        "name", "stage", "type", "PICKLIST",
+                        "field_type_config", Map.of("globalPicklistId", "src-picklist"),
+                        "global_picklist_name", "statuses")));
         when(exportRepository.findGlobalPicklistsByIds(SOURCE, List.of("src-picklist"))).thenReturn(List.of(
                 row("id", "src-picklist", "name", "statuses")));
         when(exportRepository.findGlobalPicklistValues(SOURCE, List.of("src-picklist"))).thenReturn(List.of(
@@ -224,6 +228,14 @@ class PackageRoundTripTest {
                 .filter(c -> c.getKey().equals("picklist-values"))
                 .map(c -> c.getValue().get("color")))
                 .containsExactlyInAnyOrder("#22c55e", "#64748b");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stageConfig = (Map<String, Object>)
+                written("fields", r -> "stage".equals(r.get("name"))).get("fieldTypeConfig");
+        assertThat(stageConfig.get("globalPicklistId"))
+                .as("bound to the target's id for 'statuses', not the source id (BUILD-LOG error 14)")
+                .isEqualTo(idOf("global-picklists", "statuses"))
+                .isNotEqualTo("src-picklist");
 
         Map<String, Object> child = written("ui-menu-items", r -> "Orders".equals(r.get("label")));
         assertThat(child.get("parentId"))

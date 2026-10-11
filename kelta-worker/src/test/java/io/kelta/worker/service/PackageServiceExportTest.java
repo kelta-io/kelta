@@ -191,6 +191,30 @@ class PackageServiceExportTest {
     }
 
     @Test
+    @DisplayName("a field bound to a global picklist exports the picklist's name (BUILD-LOG error 14)")
+    @SuppressWarnings("unchecked")
+    void exportsGlobalPicklistNameOnBoundField() throws Exception {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.of("acme"));
+        when(repository.findCollectionsByIds(TENANT, List.of("c1"))).thenReturn(List.of(
+                row("id", "c1", "name", "deals")));
+        when(repository.findFieldsWithNamesByCollectionIds(TENANT, List.of("c1"))).thenReturn(List.of(
+                row("id", "fld1", "name", "stage", "type", "PICKLIST", "collection_name", "deals",
+                        "field_type_config", jsonb("{\"globalPicklistId\":\"gp-1\"}"),
+                        "global_picklist_name", "crm-deal-stage")));
+
+        var pkg = service.exportPackage(TENANT,
+                Map.of("name", "pkg", "version", "1.0.0", "collectionIds", List.of("c1")), false);
+        Map<String, Object> received = new ObjectMapper().readValue(
+                new ObjectMapper().writeValueAsString(pkg), Map.class);
+
+        var field = ((List<Map<String, Object>>) received.get("items")).stream()
+                .filter(i -> "FIELD".equals(i.get("type"))).findFirst().orElseThrow();
+        assertThat((Map<String, Object>) field.get("data"))
+                .containsEntry("global_picklist_name", "crm-deal-stage")
+                .containsEntry("field_type_config", Map.of("globalPicklistId", "gp-1"));
+    }
+
+    @Test
     @DisplayName("a request naming no ids exports the whole tenant")
     @SuppressWarnings("unchecked")
     void noIdsMeansWholeTenant() {

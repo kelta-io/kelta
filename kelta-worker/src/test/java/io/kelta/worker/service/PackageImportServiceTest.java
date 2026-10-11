@@ -810,6 +810,162 @@ class PackageImportServiceTest {
     }
 
     // ------------------------------------------------------------------
+    // Global picklist binding (BUILD-LOG error 14)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("supportedTypes() imports GLOBAL_PICKLIST before FIELD")
+    void globalPicklistsImportBeforeFields() {
+        List<String> order = PackageImportService.supportedTypes();
+        assertThat(order.indexOf("GLOBAL_PICKLIST")).isLessThan(order.indexOf("FIELD"));
+        assertThat(order).containsSubsequence("COLLECTION", "GLOBAL_PICKLIST", "FIELD", "PICKLIST_VALUE");
+    }
+
+    @Nested
+    @DisplayName("field bound to a global picklist (BUILD-LOG error 14)")
+    class GlobalPicklistBinding {
+
+        private Map<String, Object> boundFieldData(String name, String sourcePicklistId, String picklistName) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("id", "src-" + name);
+            data.put("collection_name", "deals");
+            data.put("name", name);
+            data.put("type", "PICKLIST");
+            data.put("field_type_config", Map.of("globalPicklistId", sourcePicklistId, "restricted", true));
+            if (picklistName != null) {
+                data.put("global_picklist_name", picklistName);
+            }
+            return data;
+        }
+
+        private Map<String, Object> picklistData(String name) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("id", "src-gp-" + name);
+            data.put("name", name);
+            return data;
+        }
+
+        private void seedTargetPicklists(Map<String, String> nameToId) {
+            List<Map<String, Object>> rows = new ArrayList<>();
+            nameToId.forEach((name, id) -> rows.add(Map.of("id", id, "name", name)));
+            when(jdbcTemplate.queryForList(contains("FROM global_picklist"), eq(TENANT))).thenReturn(rows);
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> writtenFieldTypeConfig(String fieldName) {
+            ArgumentCaptor<CollectionDefinition> defs = ArgumentCaptor.forClass(CollectionDefinition.class);
+            ArgumentCaptor<Map<String, Object>> records = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine, atLeastOnce()).create(defs.capture(), records.capture());
+            for (int i = 0; i < defs.getAllValues().size(); i++) {
+                if ("fields".equals(defs.getAllValues().get(i).name())
+                        && fieldName.equals(records.getAllValues().get(i).get("name"))) {
+                    return (Map<String, Object>) records.getAllValues().get(i).get("fieldTypeConfig");
+                }
+            }
+            throw new AssertionError("field not written: " + fieldName);
+        }
+
+        @Test
+        @DisplayName("points the field at the id the same import gave the picklist")
+        void remapsToPicklistCreatedByTheImport() {
+            seedCollections(Map.of("deals", "tgt-deals"));
+            when(queryEngine.create(argThat(d -> d != null && "global-picklists".equals(d.name())), anyMap()))
+                    .thenReturn(Map.of("id", "tgt-gp-stage"));
+            when(queryEngine.create(argThat(d -> d != null && "fields".equals(d.name())), anyMap()))
+                    .thenReturn(Map.of("id", "tgt-field"));
+
+            // FIELD listed first, as an export may order it — TYPE_ORDER must still run the picklist first.
+            var report = service.importPackage(TENANT, pkg(
+                    item("FIELD", boundFieldData("stage", "src-gp-crm-deal-stage", "crm-deal-stage")),
+                    item("GLOBAL_PICKLIST", picklistData("crm-deal-stage"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).as("%s", report.items()).isZero();
+            assertThat(writtenFieldTypeConfig("stage"))
+                    .containsEntry("globalPicklistId", "tgt-gp-stage")
+                    .containsEntry("restricted", true);
+        }
+
+        @Test
+        @DisplayName("points the field at a picklist of the same name that already exists in the target")
+        void remapsToExistingTargetPicklist() {
+            seedCollections(Map.of("deals", "tgt-deals"));
+            seedTargetPicklists(Map.of("crm-deal-stage", "tgt-existing-gp"));
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-field"));
+
+            var report = service.importPackage(TENANT,
+                    pkg(item("FIELD", boundFieldData("stage", "src-gp-crm-deal-stage", "crm-deal-stage"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).as("%s", report.items()).isZero();
+            assertThat(writtenFieldTypeConfig("stage")).containsEntry("globalPicklistId", "tgt-existing-gp");
+        }
+
+        @Test
+        @DisplayName("an unknown picklist name fails only that field, naming collection, field and picklist")
+        void unknownNameFailsOnlyThatField() {
+            seedCollections(Map.of("deals", "tgt-deals"));
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-new"));
+
+            Map<String, Object> plain = new LinkedHashMap<>();
+            plain.put("collection_name", "deals");
+            plain.put("name", "amount");
+            plain.put("type", "NUMBER");
+
+            var report = service.importPackage(TENANT, pkg(
+                    item("COLLECTION", collectionData("accounts")),
+                    item("FIELD", boundFieldData("stage", "src-gp-x", "missing-picklist")),
+                    item("FIELD", plain)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isEqualTo(1);
+            assertThat(report.created()).as("%s", report.items()).isEqualTo(2);
+            var failed = report.items().stream().filter(i -> "FAILED".equals(i.action())).findFirst().orElseThrow();
+            assertThat(failed.type()).isEqualTo("FIELD");
+            assertThat(failed.naturalKey()).isEqualTo("deals.stage");
+            assertThat(failed.error()).isEqualTo("Field deals.stage references global picklist "
+                    + "'missing-picklist', which is neither in the package nor in the target tenant");
+            assertThat(report.items()).extracting(PackageImportService.ItemResult::naturalKey)
+                    .containsExactlyInAnyOrder("accounts", "deals.stage", "deals.amount");
+            verify(queryEngine, never()).create(any(),
+                    ArgumentMatchers.<Map<String, Object>>argThat(m -> m != null && "stage".equals(m.get("name"))));
+        }
+
+        @Test
+        @DisplayName("a package without global_picklist_name keeps an id that exists in the target")
+        void legacyPackageKeepsTargetId() {
+            seedCollections(Map.of("deals", "tgt-deals"));
+            seedTargetPicklists(Map.of("crm-deal-stage", "gp-same-tenant"));
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-field"));
+
+            var report = service.importPackage(TENANT,
+                    pkg(item("FIELD", boundFieldData("stage", "gp-same-tenant", null))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).as("%s", report.items()).isZero();
+            assertThat(writtenFieldTypeConfig("stage")).containsEntry("globalPicklistId", "gp-same-tenant");
+        }
+
+        @Test
+        @DisplayName("a package without global_picklist_name fails on an id the target does not have")
+        void legacyPackageFailsOnForeignId() {
+            seedCollections(Map.of("deals", "tgt-deals"));
+            seedTargetPicklists(Map.of("crm-deal-stage", "gp-target"));
+
+            var report = service.importPackage(TENANT,
+                    pkg(item("FIELD", boundFieldData("stage", "gp-from-another-tenant", null))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isEqualTo(1);
+            assertThat(report.items().get(0).error())
+                    .contains("deals.stage")
+                    .contains("gp-from-another-tenant")
+                    .contains("re-export");
+            verify(queryEngine, never()).create(any(), anyMap());
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Picklist values
     // ------------------------------------------------------------------
 
