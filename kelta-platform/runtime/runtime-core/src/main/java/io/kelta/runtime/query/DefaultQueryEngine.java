@@ -556,11 +556,15 @@ public class DefaultQueryEngine implements QueryEngine {
      * <p>This must run before validation so that required fields with defaults
      * (e.g., {@code currentVersion} on the collections system collection) are
      * populated before the validation engine checks required constraints.
+     *
+     * <p>Defaults are stored as metadata strings (e.g. {@code "true"}, {@code "0"}),
+     * so each one is coerced to the field type exactly as a client value would be.
+     * An uncoercible default is left as-is for validation to reject.
      */
     private void applyFieldDefaults(CollectionDefinition definition, Map<String, Object> data) {
         for (FieldDefinition field : definition.fields()) {
             if (field.defaultValue() != null && !data.containsKey(field.name())) {
-                data.put(field.name(), field.defaultValue());
+                data.put(field.name(), TypeCoercionService.coerceValue(field.defaultValue(), field.type()));
             }
         }
     }
