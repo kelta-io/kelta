@@ -70,6 +70,26 @@ describe('README quickstart section', () => {
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end - start).toBeLessThanOrEqual(30);
   });
+
+  // K-3: a stranger lands on the README and starts from nothing.
+  it('is the first h2 in README.md, ignoring headings inside fences', () => {
+    let inFence = false;
+    const h2s = readFileSync(readmePath, 'utf8')
+      .split('\n')
+      .filter((line) => {
+        if (/^(```|~~~)/.test(line)) inFence = !inFence;
+        return !inFence && /^## /.test(line);
+      });
+    expect(h2s[0]).toBe('## Quickstart');
+  });
+
+  it('starts its first fence with the git clone line', () => {
+    const fence = extractSection(readFileSync(readmePath, 'utf8'), 'Quickstart').match(/^```[^\n]*\n([\s\S]*?)^```/m);
+    expect(fence).not.toBeNull();
+    const lines = fence![1].split('\n').filter((l) => l.trim());
+    expect(lines[0]).toBe('git clone https://github.com/kelta-io/kelta.git');
+    expect(lines[1]).toBe('cd kelta');
+  });
 });
 
 describe('docs quickstart page', () => {

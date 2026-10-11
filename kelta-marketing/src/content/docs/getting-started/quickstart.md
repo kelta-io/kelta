@@ -12,13 +12,6 @@ Check the [prerequisites](#prerequisites) below first, then run the steps in thi
 
 ## Start the stack
 
-Clone the repository:
-
-```bash
-git clone https://github.com/kelta-io/kelta.git
-cd kelta
-```
-
 <!-- include: readme-quickstart -->
 
 ## Prerequisites

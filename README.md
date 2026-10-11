@@ -12,6 +12,35 @@ See the [public roadmap](https://www.kelta.io/roadmap) for what's shipped, in pr
 generated CLI docs, read in place — editing those files republishes the site. Preview locally with
 `cd kelta-marketing && npm run dev` (search needs `npm run build && npm run preview`).
 
+## Quickstart
+
+Start a released Kelta stack, open the UI, and create your first collection. Nothing is
+built: Compose pulls the version pinned by `KELTA_VERSION` in `.env` from `ghcr.io/kelta-io`,
+so you need only Docker Compose v2.24+, `make` and `git` — no JDK, Maven or Node.
+
+```bash
+git clone https://github.com/kelta-io/kelta.git
+cd kelta
+make setup                  # first time only: copies .env.example → .env, generates dev signing keys
+docker compose up -d --wait # pulls + starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
+```
+
+To build this checkout from source instead, run `make up-jvm` — see
+[From source](#from-source-contributors).
+
+1. Open **http://localhost:5173/default/** and sign in as `admin@kelta.local` with the
+   first-boot password kelta-auth prints once in its log
+   (`docker compose logs kelta-auth | grep -o 'Password: *[A-Za-z0-9]*'`), then choose your own.
+   Set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` in `.env` before the first start to pick it instead. The
+   `/default/` path is the tenant — the bare `http://localhost:5173` shows a *Tenant Required* page.
+2. Go to **Setup → Data Model → Collections**, click **Create Collection**, fill in
+   the wizard (Basics → Fields → Authorization → Review), then click **Create
+   Collection** on the Review step.
+
+That's it — a running, runtime-configurable Kelta instance with your first collection.
+See [Local Development](#local-development) below for ports, debugging, and the full
+service list.
+
 ## Architecture
 
 ```
@@ -57,44 +86,18 @@ provided by the internal `kelta-auth` service — no external identity server re
 
 **Deployment:** Docker, Kubernetes, ArgoCD
 
-## Prerequisites
+## Local Development
+
+### Contributor prerequisites
+
+To build, test or debug this checkout (the Quickstart needs none of this):
 
 - Java 25 (GraalVM Community 25.0.2; see `.tool-versions`)
 - Maven 3.9+
 - Node.js 20.19+ (pinned by `kelta-ui/app`'s `engines`; on 18 its test suite cannot start)
-- Docker & Docker Compose (v2.24+) — all the [Quickstart](#quickstart) needs; the rest is for
-  building from source
+- Docker & Docker Compose (v2.24+)
   - `make up` builds GraalVM native images and needs **~24 GB allocated to Docker**.
     With less, use `make up-jvm` — see [Native vs JVM images](#native-vs-jvm-images).
-
-## Quickstart
-
-Start a released Kelta stack, open the UI, and create your first collection. Nothing is
-built: Compose pulls the version pinned by `KELTA_VERSION` in `.env` from `ghcr.io/kelta-io`,
-so Docker and `make` are all you need — no JDK, Maven or Node.
-
-```bash
-make setup                  # first time only: copies .env.example → .env, generates dev signing keys
-docker compose up -d --wait # pulls + starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
-```
-
-To build this checkout from source instead, run `make up-jvm` — see
-[From source](#from-source-contributors).
-
-1. Open **http://localhost:5173/default/** and sign in as `admin@kelta.local` with the
-   first-boot password kelta-auth prints once in its log
-   (`docker compose logs kelta-auth | grep -o 'Password: *[A-Za-z0-9]*'`), then choose your own.
-   Set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` in `.env` before the first start to pick it instead. The
-   `/default/` path is the tenant — the bare `http://localhost:5173` shows a *Tenant Required* page.
-2. Go to **Setup → Data Model → Collections**, click **Create Collection**, fill in
-   the wizard (Basics → Fields → Authorization → Review), then click **Create
-   Collection** on the Review step.
-
-That's it — a running, runtime-configurable Kelta instance with your first collection.
-See [Local Development](#local-development) below for ports, debugging, and the full
-service list.
-
-## Local Development
 
 ### From source (contributors)
 
