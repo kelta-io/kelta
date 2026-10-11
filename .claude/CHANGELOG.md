@@ -1,6 +1,6 @@
 # Kelta Platform changelog
 
-This file tracks merged autopilot work. Entries are appended by autopilot workers as the final step of each task, one line per merged change, in the format `- YYYY-MM-DD <type>(<scope>): <one-line summary> (<task-id>)`. Newest dates appear at the bottom; group entries under an H2 date heading.
+This file holds merged work up to 2026-10-11 and is no longer edited. Each change now adds its own one-line fragment under `.claude/changelog.d/` (one file per change, same `- YYYY-MM-DD <type>(<scope>): <one-line summary> (<task-id>)` format); see `.claude/changelog.d/README.md` for naming and for reading the full log.
 
 ## 2026-05-10
 
