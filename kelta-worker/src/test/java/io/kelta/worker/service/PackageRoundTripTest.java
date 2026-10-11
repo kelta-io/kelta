@@ -8,6 +8,7 @@ import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.postgresql.util.PGobject;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
@@ -260,6 +261,46 @@ class PackageRoundTripTest {
         assertThat(report.failed()).as("%s", report.items()).isZero();
         assertThat(report.created()).isZero();
         assertThat(report.updated()).isEqualTo(items.size());
+    }
+
+    @Test
+    @DisplayName("jsonb columns survive export → JSON → apply as structures (BUILD-LOG error 13)")
+    @SuppressWarnings("unchecked")
+    void jsonbColumnsSurviveTheHttpRoundTrip() throws Exception {
+        List<String> collectionIds = List.of("src-orders", "src-lines");
+        when(exportRepository.findFieldsWithNamesByCollectionIds(SOURCE, collectionIds)).thenReturn(List.of(
+                row("id", "src-status", "collection_id", "src-orders", "collection_name", "orders",
+                        "name", "status", "type", "PICKLIST",
+                        "field_type_config", jsonb("{\"restricted\":true}")),
+                row("id", "src-order", "collection_id", "src-lines", "collection_name", "order_lines",
+                        "name", "order", "type", "LOOKUP",
+                        "reference_collection_id", "src-orders", "reference_collection_name", "orders")));
+        when(exportRepository.findFlowsByIds(SOURCE, List.of("src-flow"))).thenReturn(List.of(
+                row("id", "src-flow", "name", "Stamp closed deals", "flow_type", "RECORD_TRIGGERED",
+                        "active", false, "version", 1,
+                        "definition", jsonb("{\"StartAt\":\"stamp\",\"States\":{\"stamp\":{\"Type\":\"Succeed\"}}}"))));
+
+        ObjectMapper http = new ObjectMapper();
+        String body = http.writeValueAsString(packageService.exportPackage(SOURCE, Map.of(), false));
+        Map<String, Object> received = http.readValue(body, Map.class);
+
+        var report = importService.importPackage(TARGET, received,
+                PackageImportService.ImportOptions.defaults());
+
+        assertThat(report.failed()).as("%s", report.items()).isZero();
+        Object definition = written("flows").get("definition");
+        assertThat(definition).isInstanceOf(Map.class);
+        assertThat((Map<String, Object>) definition).containsEntry("StartAt", "stamp");
+        Object fieldTypeConfig = written("fields", r -> "status".equals(r.get("name"))).get("fieldTypeConfig");
+        assertThat(fieldTypeConfig).isInstanceOf(Map.class);
+        assertThat((Map<String, Object>) fieldTypeConfig).containsEntry("restricted", true);
+    }
+
+    private static PGobject jsonb(String json) throws Exception {
+        PGobject value = new PGobject();
+        value.setType("jsonb");
+        value.setValue(json);
+        return value;
     }
 
     // ------------------------------------------------------------------
