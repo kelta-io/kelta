@@ -657,13 +657,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No image tag changes — nothing to commit (all builds were skipped)."
-          else
-            git commit -m "chore: update Kelta images to main-${{ steps.sha.outputs.short }}"
-            git push
-          fi
+          # Rebases and retries a push rejected by a homelab-argo commit that landed after
+          # checkout (run 38169547207).
+          bash ../emf-src/ci/push-argo-bump.sh "chore: update Kelta images to main-${{ steps.sha.outputs.short }}"
 
   # ===========================================================================
   # Smoke tests on k8s runner (post-deployment verification)
@@ -952,7 +948,11 @@ jobs:
   rollback-on-smoke-failure:
     name: Auto-rollback (smoke failed)
     needs: smoke-test
-    if: failure() && github.ref == 'refs/heads/main'
+    # Only when smoke-test itself failed. `failure()` alone is also true when an upstream job
+    # failed and smoke-test was skipped, which rolled back with nothing deployed in run
+    # 38169547207. `failure()` stays: without a status function the implicit `success()` would
+    # keep this job from ever running after smoke-test fails.
+    if: failure() && needs.smoke-test.result == 'failure' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout EMF (for rollback script)

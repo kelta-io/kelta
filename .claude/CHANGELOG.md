@@ -221,3 +221,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-10-11 doc(module-platform): Write the slice-3 lifecycle spec `specs/module-platform/3-lifecycle.md` — manifest v2, `minPlatformVersion` checked against `KELTA_VERSION`, install plan + `planHash`, upgrade in place, uninstall of unedited `CREATED` resources with `purgeData` consent, no migration (head V206), split into PRs 3a–3c (KLT-537)
 - 2026-10-11 docs(readme): Put the README quickstart first and self-contained from `git clone`; add the stranger-test protocol (KLT-538)
 - 2026-10-11 fix(cli): `fields add` passes exact native FieldType names (TEXT, FORMULA, …) through before aliases, adds `textarea` (CLI + MCP) and `--values a,b,c` for field-scoped picklists (KLT-534)
+- 2026-10-11 fix(ci): Rebase and retry the homelab-argo image-bump push on rejection; auto-rollback only when smoke-test itself failed (PLT-554)
