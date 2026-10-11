@@ -1662,6 +1662,20 @@ both now fixed:
    `waitFor`. Fixed by waiting for the button to re-enable before the test ends —
    the same pattern already used by `CollectionForm.test.tsx`'s sibling test.
 
+**Recurrence and real root cause (2026-10-11, PLT-521):** the same test failed again
+on `expect(field-editor-submit).toBeDisabled()` (run 38111380935, main @ fd7526a — a
+CI/docs commit unrelated to FieldEditor), skipping every image build. Neither PLT-266
+fix touched the core race: `onSave` resolved after a **real** `setTimeout(resolve, 100)`,
+so the disabled state existed for only 100 ms of wall-clock time. On a starved runner
+`waitFor`'s first poll could land after the timer fired and the wrapper's `finally` had
+re-enabled the button, and `waitFor` then polled an enabled button until it timed out.
+Shrinking the timer to 0 ms fails both this test and `CollectionForm.test.tsx`'s
+identical sibling every time. Fixed in both tests by making `onSave`/`onSubmit` a
+deferred the test resolves itself: assert disabled while it is pending, `act(() =>
+release())`, then assert re-enabled — no timing window remains (rule in `testing.md` →
+Component Testing). The components were not changed and no timeout was raised. The
+underlying runner contention is still open.
+
 ## Collections become undeletable once used; e2e leaked litter into a product tenant (2026-08-06)
 
 `PhysicalTableStorageAdapter.delete` issues a raw `DELETE` on the `collection`
