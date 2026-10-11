@@ -2164,3 +2164,28 @@ got), and an unrouted request (reason-less 404 or `NoResourceFoundException`) an
 `detail: "No route found for path: /api/<x>"`. `GlobalErrorHandlerTest.testUnroutedCollectionApiReturnsFullErrorObject`
 and `testNoResourceFoundExceptionReturnsFullErrorObject` reproduce the empty body with a mapper that
 sees no bean properties (PLT-456).
+
+## Metadata export wrote JSON columns as the driver's `PGobject` (found 2026-10-10; fixed KLT-479)
+
+**Symptom:** `examples/templates/crm/BUILD-LOG.md` error 13 — `kelta metadata apply` of a fresh
+`kelta metadata export` failed every flow with `definition: Required field 'StartAt' is missing or
+not a string`, and stored layout `headerConfig`, related-list `displayColumns` and field
+`fieldTypeConfig` silently corrupted.
+
+**Cause:** `PackageService.buildItem` copied `queryForList` rows verbatim, so every json/jsonb
+column was an `org.postgresql.util.PGobject`, which Jackson serializes as the bean
+`{"null":false,"type":"jsonb","value":"<json text>"}`. `PackageImportService.normalizeValue`
+unwrapped a live `PGobject` or a JSON *string*, but not the `Map` that bean deserializes to, so
+apply stored the wrapper. In-process paths (sandbox clone) never serialize and were unaffected;
+every HTTP export → apply (CLI, templates, promotion over HTTP) was.
+
+**Fix:** export parses each `PGobject` to its JSON (Map/List/scalar; a null value becomes `null`).
+Import still accepts packages exported before the fix: a `Map` whose keys are **exactly**
+`{null, type, value}` with `type` `json`/`jsonb` is unwrapped (`null:true` → `null`), and an
+unparseable `value` fails the item with an error naming the column. Any other map — tenant JSON
+that merely has a `type` key — passes through untouched. Covered by
+`PackageServiceExportTest.exportsJsonbColumnsAsJson`, `PackageImportServiceTest.LegacyJsonWrapper`
+and `PackageRoundTripTest.jsonbColumnsSurviveTheHttpRoundTrip` (export → JSON string → apply).
+
+**Keep it that way:** any new exporter that reads rows with `queryForList` must convert `PGobject`
+before the value leaves the service.
