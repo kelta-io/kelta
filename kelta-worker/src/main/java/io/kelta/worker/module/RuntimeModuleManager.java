@@ -60,7 +60,7 @@ public class RuntimeModuleManager {
     private final ModuleContext moduleContext;
     private final ModuleSignatureVerifier signatureVerifier;
     private final BeforeSaveHookRegistry beforeSaveHookRegistry;
-    private final ModuleCollectionProvisioner collectionProvisioner;
+    private final ModuleMetadataProvisioner metadataProvisioner;
     /** Resolves tenantId -> slug for webhook dispatch; may be null in tests. */
     private final TenantSlugResolver tenantSlugResolver;
 
@@ -125,7 +125,7 @@ public class RuntimeModuleManager {
                                  ModuleContext moduleContext,
                                  ModuleSignatureVerifier signatureVerifier,
                                  BeforeSaveHookRegistry beforeSaveHookRegistry,
-                                 ModuleCollectionProvisioner collectionProvisioner,
+                                 ModuleMetadataProvisioner metadataProvisioner,
                                  TenantSlugResolver tenantSlugResolver,
                                  ModuleServiceRegistry moduleServiceRegistry) {
         this.moduleStore = Objects.requireNonNull(moduleStore);
@@ -136,7 +136,7 @@ public class RuntimeModuleManager {
         this.moduleContext = moduleContext;
         this.signatureVerifier = signatureVerifier;
         this.beforeSaveHookRegistry = beforeSaveHookRegistry;
-        this.collectionProvisioner = collectionProvisioner;
+        this.metadataProvisioner = metadataProvisioner;
         this.tenantSlugResolver = tenantSlugResolver;
         this.moduleServiceRegistry = moduleServiceRegistry;
     }
@@ -149,9 +149,9 @@ public class RuntimeModuleManager {
                                  ModuleContext moduleContext,
                                  ModuleSignatureVerifier signatureVerifier,
                                  BeforeSaveHookRegistry beforeSaveHookRegistry,
-                                 ModuleCollectionProvisioner collectionProvisioner) {
+                                 ModuleMetadataProvisioner metadataProvisioner) {
         this(moduleStore, actionHandlerRegistry, objectMapper, jarService, moduleContext,
-            signatureVerifier, beforeSaveHookRegistry, collectionProvisioner, null, null);
+            signatureVerifier, beforeSaveHookRegistry, metadataProvisioner, null, null);
     }
 
     /** Overload without a service registry -- a module then publishes no platform-callable services. */
@@ -162,10 +162,10 @@ public class RuntimeModuleManager {
                                  ModuleContext moduleContext,
                                  ModuleSignatureVerifier signatureVerifier,
                                  BeforeSaveHookRegistry beforeSaveHookRegistry,
-                                 ModuleCollectionProvisioner collectionProvisioner,
+                                 ModuleMetadataProvisioner metadataProvisioner,
                                  TenantSlugResolver tenantSlugResolver) {
         this(moduleStore, actionHandlerRegistry, objectMapper, jarService, moduleContext,
-            signatureVerifier, beforeSaveHookRegistry, collectionProvisioner, tenantSlugResolver, null);
+            signatureVerifier, beforeSaveHookRegistry, metadataProvisioner, tenantSlugResolver, null);
     }
 
     /**
@@ -252,7 +252,7 @@ public class RuntimeModuleManager {
             moduleStore.createActions(actions);
         }
 
-        provisionCollections(tenantId, manifest, id);
+        provisionCollections(tenantId, manifest, id, installedBy);
 
         log.info("Installed module '{}' v{} for tenant {} with {} action handlers",
             manifest.name(), manifest.version(), tenantId, actions.size());
@@ -347,7 +347,7 @@ public class RuntimeModuleManager {
             moduleStore.createActions(actions);
         }
 
-        provisionCollections(tenantId, manifest, id);
+        provisionCollections(tenantId, manifest, id, installedBy);
 
         log.info("Installed module '{}' v{} for tenant {} with JAR (s3Key={}, {} bytes)",
             manifest.name(), manifest.version(), tenantId, s3Key, jarBytes.length);
@@ -356,60 +356,67 @@ public class RuntimeModuleManager {
     }
 
     /**
-     * Creates the collections the manifest declares, in the installing tenant, and records what it
+     * Provisions the metadata the manifest declares, in the installing tenant, and records what it
      * created versus adopted.
      *
      * <p>Failure is still not thrown: the module row and its action records are already persisted
      * at this point, so propagating would leave a half-installed module the admin cannot see or
-     * uninstall. But it is no longer only a log line either — the module is marked {@code FAILED},
-     * which is the state an admin can actually see and act on. Retrying by reinstalling is safe;
-     * a collection that already exists is adopted rather than recreated.
+     * uninstall. The module is marked {@code FAILED} instead — on a thrown error or on any failed
+     * import item — which is the state an admin can actually see and act on. Provenance is still
+     * recorded for the items that succeeded, so a retry finds its own half-created collection
+     * already recorded as {@code CREATED}.
      *
      * @param moduleRowId the {@code tenant_module} row, so a failure can be recorded against it
      */
-    private void provisionCollections(String tenantId, ModuleManifest manifest, String moduleRowId) {
-        if (collectionProvisioner == null || manifest.collections().isEmpty()) {
+    private void provisionCollections(String tenantId, ModuleManifest manifest, String moduleRowId,
+                                      String installedBy) {
+        if (metadataProvisioner == null || manifest.collections().isEmpty()) {
             return;
         }
         try {
-            var result = collectionProvisioner.provisionWithOwnership(
-                tenantId, manifest.collections());
+            var result = metadataProvisioner.provision(tenantId, manifest, installedBy);
             recordProvenance(tenantId, manifest, result);
-            log.info("Module '{}' provisioned {} collection(s) for tenant {} "
-                    + "({} created, {} adopted)",
-                manifest.id(), result.total(), tenantId,
-                result.created().size(), result.adopted().size());
+            if (result.hasFailures()) {
+                log.error("Module '{}' failed to provision {} item(s) for tenant {} and is marked "
+                        + "FAILED: {}", manifest.id(), result.failures().size(), tenantId,
+                    result.failures());
+                markFailed(moduleRowId);
+                return;
+            }
+            log.info("Module '{}' provisioned {} resource(s) for tenant {}",
+                manifest.id(), result.resources().size(), tenantId);
         } catch (RuntimeException e) {
             log.error("Module '{}' failed to provision collections for tenant {} "
                     + "and is marked FAILED: {}",
                 manifest.id(), tenantId, e.getMessage(), e);
-            try {
-                moduleStore.updateStatus(moduleRowId, TenantModuleData.STATUS_FAILED);
-            } catch (RuntimeException ignored) {
-                // Bookkeeping must not mask the provisioning error above.
-            }
+            markFailed(moduleRowId);
+        }
+    }
+
+    private void markFailed(String moduleRowId) {
+        try {
+            moduleStore.updateStatus(moduleRowId, TenantModuleData.STATUS_FAILED);
+        } catch (RuntimeException ignored) {
+            // Bookkeeping must not mask the provisioning error.
         }
     }
 
     /**
-     * Records which collections this module created and which it adopted.
+     * Records one provenance row per resource the run created or adopted.
      *
      * <p>Best-effort: losing the bookkeeping must not fail an install that otherwise succeeded. The
      * cost of a missing record is a conservative uninstall, which is the behaviour today anyway.
      */
     private void recordProvenance(String tenantId, ModuleManifest manifest,
-                                  ModuleCollectionProvisioner.ProvisionResult result) {
+                                  ModuleMetadataProvisioner.ProvisionResult result) {
         if (provenanceStore == null) {
             return;
         }
         try {
-            for (String name : result.created()) {
+            for (var resource : result.resources()) {
                 provenanceStore.record(tenantId, manifest.id(), manifest.version(),
-                    "COLLECTION", name, null, ModuleProvenanceStore.OWNERSHIP_CREATED, null);
-            }
-            for (String name : result.adopted()) {
-                provenanceStore.record(tenantId, manifest.id(), manifest.version(),
-                    "COLLECTION", name, null, ModuleProvenanceStore.OWNERSHIP_ADOPTED, null);
+                    resource.type(), resource.naturalKey(), resource.resourceId(),
+                    resource.ownership(), resource.contentHash());
             }
         } catch (RuntimeException e) {
             log.warn("Could not record provenance for module '{}' in tenant {}: {}",

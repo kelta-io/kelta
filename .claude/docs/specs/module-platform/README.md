@@ -71,8 +71,9 @@ provisioning engine, and modules are not using it.**
 | Module→platform services | `ModuleServiceRegistry`, tenant-scoped, identity-based removal | `runtime-core/.../module/service/ModuleServiceRegistry.java` |
 | i18n | `ui-translations` rows, overlaid client-side over bundled strings | `SystemCollectionDefinitions`, `bootstrapCache.ts` |
 
-`ModuleCollectionProvisioner` is a weaker re-implementation of two of `PackageImportService`'s
-thirteen types. Slice 2 retires it — see [`2-provenance-provisioning.md`](2-provenance-provisioning.md).
+`ModuleCollectionProvisioner` was a weaker re-implementation of two of `PackageImportService`'s
+thirteen types. Slice 2 retired it: module metadata is now provisioned by `ModuleMetadataProvisioner`
+through `PackageImportService` — see [`2-provenance-provisioning.md`](2-provenance-provisioning.md).
 
 ---
 
@@ -146,7 +147,7 @@ This is the exact defect fixed in #1390; it is a contract, not a preference.
 |---|---|---|---|
 | 0 — Fail closed | not needed — slice shipped | **backend, security** — kill the silent stub fallback | ✅ **Shipped.** CI job `worker-image-is-jvm` in `.github/workflows/ci.yml` asserts `build-and-publish-containers.yml` builds the worker from `kelta-worker/Dockerfile.jvm`, and is in `quality-gate`'s `needs`. `V189__module_fail_closed.sql` adds `QUARANTINED`/`DEGRADED`/`STUB` to `chk_module_status` and `tenant_module.last_error`, `last_error_at`, `last_loaded_at`, `load_attempts`. `RuntimeModuleManager` quarantines on signature, checksum or classload failure (`quarantine(...)` registers `createQuarantinedHandler`, which throws `ModuleUnavailableException` rather than returning a failure, because `TaskStateExecutor` would relabel any failed `ActionResult` as `ActionFailed`). Stub handlers only under the explicit `kelta.modules.stub-mode` opt-in (`application.yml` `${KELTA_MODULES_STUB_MODE:false}`, wired in `ModuleConfig`). `GET /api/modules/{id}/health` (`ModuleController`) reports `loadedOnThisPod` + `podName`. `ModulesPage` installs a signed JAR through `/api/modules/install-jar`. Test: `RuntimeModuleManagerQuarantineTest`. Not done: `STATUS_DEGRADED` exists in `TenantModuleData` but nothing writes it |
 | 1 — Billable-channel guard | not needed — slice shipped | backend (money risk, ~20 lines) | ✅ **Shipped in code.** `AlertDispatchService.java` declares `BILLABLE_CHANNELS = Set.of(CHANNEL_SMS)` and, when no `channels` entitlement resolves, delivers only the non-billable requested channels. `WatchController.java` applies the same filter when it narrows a watch's requested channels. SMS therefore goes out only on an affirmative entitlement. Gap: no unit test pins the "no entitlement → SMS dropped" case (`AlertDispatchServiceTest.noEntitlementMeansNoGating` covers `push` only); worth adding with the next change to either file |
-| 2 — Provenance + unified provisioning | [`2-provenance-provisioning.md`](2-provenance-provisioning.md) | backend (DB, reuse `PackageImportService`) | 🟡 **Partial.** Done: `V190__module_provisioned_resource.sql` (table + RLS) and `ModuleProvenanceStore` (`record` / `findByModule` / `deleteForModule`); `RuntimeModuleManager.recordProvenance` writes `COLLECTION` rows as `CREATED` or `ADOPTED`. Not done: provisioning still runs through `ModuleCollectionProvisioner` (wired in `ModuleConfig`), not `PackageImportService`; `content_hash` is always written `null`; nothing reads `findByModule` and nothing calls `deleteForModule` (uninstall leaves the provenance rows) |
+| 2 — Provenance + unified provisioning | [`2-provenance-provisioning.md`](2-provenance-provisioning.md) | backend (DB, reuse `PackageImportService`) | ✅ **Shipped** (KLT-504). `ModuleMetadataProvisioner` translates the manifest's `collections` into a package and applies it through `PackageImportService.importPackage` (dry run, then a filtered apply pass so an existing collection is adopted with none of its fields written); `ModuleCollectionProvisioner` is deleted. `module_provisioned_resource` (V190) gets one row per `COLLECTION` and `FIELD`, with `resource_id` and a SHA-256 `content_hash` for `CREATED` rows (null for `ADOPTED`); `ModuleProvenanceStore.record` never downgrades a `CREATED` row. `GET /api/modules/{moduleId}/provisioned-resources` lists the caller tenant's rows, including after uninstall. Left for slice 3: nothing calls `deleteForModule` and uninstall removes nothing |
 | 3 — Lifecycle | `3-lifecycle.md` (not written) | backend (manifest v2, install plan, upgrade, uninstall) | 🔴 **Not started.** Installing over an existing module id still throws "already installed" (`RuntimeModuleManager.installModule` / `installModuleWithJar`); no manifest v2, install plan or `planHash` |
 | 4 — Permission catalog | `4-permission-catalog.md` (not written) | **backend + UI, security** | 🔴 **Not started.** `manifest.permissions` is parsed by `ModuleManifestParser` and read by no other main code; no `system_permission` catalog table |
 | 5 — Module settings | `5-module-settings.md` (not written) | backend + UI (credential-ref) | 🔴 **Not started.** No settings in `ModuleManifest`, DB, SPI, API or UI |
@@ -192,11 +193,12 @@ record until a slice closes them.
    duplicate check before `jarService.uploadJar` (`RuntimeModuleManager.java`, commented "Duplicate
    check BEFORE the upload"). Still open: v2 over v1 is rejected as "already installed" on both
    install paths (slice 3).
-6. **PARTIAL — uninstall leaves data with no provenance.** V190 `module_provisioned_resource` and
-   `ModuleProvenanceStore` now record which collections a module created or adopted. Still open:
-   only `COLLECTION` rows are recorded, `content_hash` is always `null`, and `uninstallModule`
-   neither reads nor clears the records, so an admin still has no surface that lists a removed
-   module's leftovers (slice 2, then slice 3 for uninstall).
+6. **PARTIAL — uninstall leaves data behind.** The provenance half is FIXED (slice 2):
+   `module_provisioned_resource` records every `COLLECTION` and `FIELD` a module created or adopted,
+   with a content hash for `CREATED` rows, ownership survives uninstall + reinstall, and
+   `GET /api/modules/{moduleId}/provisioned-resources` lists a removed module's leftovers. Still
+   open: uninstall removes nothing — removing `CREATED` resources whose hash still matches is
+   slice 3.
 7. **OPEN — no module settings** anywhere: manifest, DB, SPI, API or UI (slice 5).
 8. **PARTIAL — observability.** Done: `GET /api/modules/{id}/health` returns `isLoaded()` as
    `loadedOnThisPod` with `podName`, `routesRegisteredOnThisPod` and the V189 load diagnostics
