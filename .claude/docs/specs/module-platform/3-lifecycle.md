@@ -77,8 +77,8 @@ read, the apply refuses and returns the new plan.
 ### The three PRs
 
 Each part is one PR, filed in order. Each part's code task gets the acceptance lines below
-verbatim. Every part also carries the standing lines: `verify.sh` green; `.claude/CHANGELOG.md`
-entry; the §7 docs for that part.
+verbatim. Every part also carries the standing lines: `verify.sh` green; a `.claude/changelog.d/`
+fragment; the §7 docs for that part.
 
 **3a — Manifest v2 + platform version check** (runtime-core + worker; touches
 `kelta-platform/runtime/runtime-core/src/main/java/io/kelta/runtime/module/ModuleManifest.java`,

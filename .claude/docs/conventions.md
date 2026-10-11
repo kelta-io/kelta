@@ -579,3 +579,11 @@ stderr error envelope carrying the platform's stable `code`, exit codes 0/1/2/3/
 `--yes` gating for destructive commands) is owned by `specs/kelta-cli/README.md` →
 Shared contracts. Discovery surface: `kelta manifest` (versioned command catalog with
 JSON Schemas) and `packages/cli/AGENTS.md` (generated — `npm run gen:docs`).
+
+## Changelog
+
+Every change adds one fragment file under `.claude/changelog.d/` — named after the task key
+or a short slug (`KLT-123.md`, `fix-login-redirect.md`) and holding a single line
+`- YYYY-MM-DD <type>(<scope>): <summary> (<key>)`. `.claude/CHANGELOG.md` is frozen history
+and is no longer edited; there is no fold step. Naming and how to read the full log:
+`.claude/changelog.d/README.md`.
