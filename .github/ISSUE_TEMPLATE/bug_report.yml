@@ -1,0 +1,83 @@
+name: Bug report
+description: Report something in Kelta Platform that isn't working as documented
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Never report a security vulnerability here — see the security policy instead.
+  - type: input
+    id: version
+    attributes:
+      label: Kelta version
+      description: "`KELTA_VERSION` from `.env`, or the commit SHA if you built from source"
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How you run Kelta
+      options:
+        - Quickstart compose (pulled release images)
+        - Built from source (`make up-jvm`)
+        - Built from source (`make up`, native)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: dropdown
+    id: services
+    attributes:
+      label: Service(s) affected
+      multiple: true
+      options:
+        - gateway
+        - worker
+        - auth
+        - ai
+        - mcp
+        - kelta-ui
+        - kelta-web SDK
+        - other
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste relevant log output. Redact secrets (tokens, passwords, keys) and tenant data before posting.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Screenshots or anything else that would help diagnose this. Redact tenant data and secrets.
+    validations:
+      required: false

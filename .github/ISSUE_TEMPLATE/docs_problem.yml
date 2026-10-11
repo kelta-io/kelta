@@ -1,0 +1,20 @@
+name: Documentation problem
+description: Report something missing, wrong or unclear in the Kelta docs
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: input
+    id: page-url
+    attributes:
+      label: Page URL
+      description: The docs page (kelta.io/docs/… or a file in this repo) with the problem.
+      placeholder: https://kelta.io/docs/
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing
+      description: Quote the text that is wrong, or describe what you expected to find.
+    validations:
+      required: true

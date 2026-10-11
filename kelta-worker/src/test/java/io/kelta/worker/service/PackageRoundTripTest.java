@@ -8,6 +8,7 @@ import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.postgresql.util.PGobject;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
@@ -34,7 +35,7 @@ class PackageRoundTripTest {
             "collection_name", "reference_collection_name", "layout_name", "section_sort_order",
             "field_name", "field_collection_name", "picklist_name", "related_collection_name",
             "relationship_field_name", "relationship_field_collection_name",
-            "menu_name", "parent_label");
+            "menu_name", "parent_label", "global_picklist_name");
 
     /** Owned by the engine (ids) or by the export (stripped before the item is built). */
     private static final Set<String> NON_ROUND_TRIP_COLUMNS = Set.of(
@@ -117,7 +118,11 @@ class PackageRoundTripTest {
                         "name", "status", "type", "PICKLIST"),
                 row("id", "src-order", "collection_id", "src-lines", "collection_name", "order_lines",
                         "name", "order", "type", "LOOKUP",
-                        "reference_collection_id", "src-orders", "reference_collection_name", "orders")));
+                        "reference_collection_id", "src-orders", "reference_collection_name", "orders"),
+                row("id", "src-stage", "collection_id", "src-orders", "collection_name", "orders",
+                        "name", "stage", "type", "PICKLIST",
+                        "field_type_config", Map.of("globalPicklistId", "src-picklist"),
+                        "global_picklist_name", "statuses")));
         when(exportRepository.findGlobalPicklistsByIds(SOURCE, List.of("src-picklist"))).thenReturn(List.of(
                 row("id", "src-picklist", "name", "statuses")));
         when(exportRepository.findGlobalPicklistValues(SOURCE, List.of("src-picklist"))).thenReturn(List.of(
@@ -224,6 +229,14 @@ class PackageRoundTripTest {
                 .map(c -> c.getValue().get("color")))
                 .containsExactlyInAnyOrder("#22c55e", "#64748b");
 
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stageConfig = (Map<String, Object>)
+                written("fields", r -> "stage".equals(r.get("name"))).get("fieldTypeConfig");
+        assertThat(stageConfig.get("globalPicklistId"))
+                .as("bound to the target's id for 'statuses', not the source id (BUILD-LOG error 14)")
+                .isEqualTo(idOf("global-picklists", "statuses"))
+                .isNotEqualTo("src-picklist");
+
         Map<String, Object> child = written("ui-menu-items", r -> "Orders".equals(r.get("label")));
         assertThat(child.get("parentId"))
                 .isEqualTo(createdIds.get(written("ui-menu-items", r -> "Sales".equals(r.get("label")))));
@@ -260,6 +273,46 @@ class PackageRoundTripTest {
         assertThat(report.failed()).as("%s", report.items()).isZero();
         assertThat(report.created()).isZero();
         assertThat(report.updated()).isEqualTo(items.size());
+    }
+
+    @Test
+    @DisplayName("jsonb columns survive export → JSON → apply as structures (BUILD-LOG error 13)")
+    @SuppressWarnings("unchecked")
+    void jsonbColumnsSurviveTheHttpRoundTrip() throws Exception {
+        List<String> collectionIds = List.of("src-orders", "src-lines");
+        when(exportRepository.findFieldsWithNamesByCollectionIds(SOURCE, collectionIds)).thenReturn(List.of(
+                row("id", "src-status", "collection_id", "src-orders", "collection_name", "orders",
+                        "name", "status", "type", "PICKLIST",
+                        "field_type_config", jsonb("{\"restricted\":true}")),
+                row("id", "src-order", "collection_id", "src-lines", "collection_name", "order_lines",
+                        "name", "order", "type", "LOOKUP",
+                        "reference_collection_id", "src-orders", "reference_collection_name", "orders")));
+        when(exportRepository.findFlowsByIds(SOURCE, List.of("src-flow"))).thenReturn(List.of(
+                row("id", "src-flow", "name", "Stamp closed deals", "flow_type", "RECORD_TRIGGERED",
+                        "active", false, "version", 1,
+                        "definition", jsonb("{\"StartAt\":\"stamp\",\"States\":{\"stamp\":{\"Type\":\"Succeed\"}}}"))));
+
+        ObjectMapper http = new ObjectMapper();
+        String body = http.writeValueAsString(packageService.exportPackage(SOURCE, Map.of(), false));
+        Map<String, Object> received = http.readValue(body, Map.class);
+
+        var report = importService.importPackage(TARGET, received,
+                PackageImportService.ImportOptions.defaults());
+
+        assertThat(report.failed()).as("%s", report.items()).isZero();
+        Object definition = written("flows").get("definition");
+        assertThat(definition).isInstanceOf(Map.class);
+        assertThat((Map<String, Object>) definition).containsEntry("StartAt", "stamp");
+        Object fieldTypeConfig = written("fields", r -> "status".equals(r.get("name"))).get("fieldTypeConfig");
+        assertThat(fieldTypeConfig).isInstanceOf(Map.class);
+        assertThat((Map<String, Object>) fieldTypeConfig).containsEntry("restricted", true);
+    }
+
+    private static PGobject jsonb(String json) throws Exception {
+        PGobject value = new PGobject();
+        value.setType("jsonb");
+        value.setValue(json);
+        return value;
     }
 
     // ------------------------------------------------------------------

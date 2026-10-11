@@ -367,11 +367,33 @@ public class PackageService {
         cleanData.remove("tenant_id");
         cleanData.remove("created_by");
         cleanData.remove("updated_by");
+        cleanData.replaceAll((column, value) -> jsonColumnValue(value));
 
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("type", type);
         item.put("data", cleanData);
         return item;
+    }
+
+    /**
+     * json/jsonb columns come back from {@code queryForList} as the driver's
+     * {@code PGobject}; serialized as-is that is {@code {"null","type","value"}}
+     * and the importer stores the wrapper instead of the document (BUILD-LOG
+     * error 13). Matched by class name: the driver is a runtime-only dependency.
+     */
+    private Object jsonColumnValue(Object value) {
+        if (value == null || !"org.postgresql.util.PGobject".equals(value.getClass().getName())) {
+            return value;
+        }
+        String json = value.toString();
+        if (json == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, Object.class);
+        } catch (Exception e) {
+            return json;
+        }
     }
 
     private static String blankToNull(String value) {

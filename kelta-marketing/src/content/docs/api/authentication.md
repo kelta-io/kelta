@@ -12,8 +12,10 @@ order: 20
 | JWT | `Authorization: Bearer eyJ…` | Kelta's OIDC provider — the app's session, a connected app's OAuth flow, or the CLI's browser login |
 | Personal access token | `Authorization: Bearer klt_…` | *Profile → API tokens* in the app, `kelta token create`, or an administrator minting one for a service user |
 
-Both authenticate a **user**: a PAT acts exactly as its owner. There is no anonymous access to `/api/**` except
-the inbound-webhook endpoints documented under [Triggers](/docs/automation/triggers/).
+Both authenticate a **user**: a PAT acts exactly as its owner. Apart from the inbound-webhook endpoints documented
+under [Triggers](/docs/automation/triggers/), a request with no credential is `401` — unless the tenant has created a
+profile named `Guest`, in which case it runs as that profile. See
+[Anonymous access (Guest profile)](/docs/security/anonymous-access/).
 
 The caller's profile must grant `API_ACCESS`; without it every `/api/**` call answers `403 API access not
 permitted`, whatever the credential.

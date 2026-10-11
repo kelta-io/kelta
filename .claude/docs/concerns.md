@@ -2176,3 +2176,58 @@ got), and an unrouted request (reason-less 404 or `NoResourceFoundException`) an
 `detail: "No route found for path: /api/<x>"`. `GlobalErrorHandlerTest.testUnroutedCollectionApiReturnsFullErrorObject`
 and `testNoResourceFoundExceptionReturnsFullErrorObject` reproduce the empty body with a mapper that
 sees no bean properties (PLT-456).
+
+## Metadata export wrote JSON columns as the driver's `PGobject` (found 2026-10-10; fixed KLT-479)
+
+**Symptom:** `examples/templates/crm/BUILD-LOG.md` error 13 — `kelta metadata apply` of a fresh
+`kelta metadata export` failed every flow with `definition: Required field 'StartAt' is missing or
+not a string`, and stored layout `headerConfig`, related-list `displayColumns` and field
+`fieldTypeConfig` silently corrupted.
+
+**Cause:** `PackageService.buildItem` copied `queryForList` rows verbatim, so every json/jsonb
+column was an `org.postgresql.util.PGobject`, which Jackson serializes as the bean
+`{"null":false,"type":"jsonb","value":"<json text>"}`. `PackageImportService.normalizeValue`
+unwrapped a live `PGobject` or a JSON *string*, but not the `Map` that bean deserializes to, so
+apply stored the wrapper. In-process paths (sandbox clone) never serialize and were unaffected;
+every HTTP export → apply (CLI, templates, promotion over HTTP) was.
+
+**Fix:** export parses each `PGobject` to its JSON (Map/List/scalar; a null value becomes `null`).
+Import still accepts packages exported before the fix: a `Map` whose keys are **exactly**
+`{null, type, value}` with `type` `json`/`jsonb` is unwrapped (`null:true` → `null`), and an
+unparseable `value` fails the item with an error naming the column. Any other map — tenant JSON
+that merely has a `type` key — passes through untouched. Covered by
+`PackageServiceExportTest.exportsJsonbColumnsAsJson`, `PackageImportServiceTest.LegacyJsonWrapper`
+and `PackageRoundTripTest.jsonbColumnsSurviveTheHttpRoundTrip` (export → JSON string → apply).
+
+**Keep it that way:** any new exporter that reads rows with `queryForList` must convert `PGobject`
+before the value leaves the service.
+
+## Metadata apply kept a field's source-tenant global picklist id (found 2026-10-10; fixed KLT-480)
+
+**Symptom:** `examples/templates/crm/BUILD-LOG.md` error 14 — after `kelta metadata apply`,
+`deals.stage` kept the source tenant's `fieldTypeConfig.globalPicklistId` instead of the id of the
+`crm-deal-stage` picklist the same import had just created. The id resolves to nothing in the
+target, so `usePicklistOptions` showed no options. The CRM template avoided global picklists
+because of it.
+
+**Cause:** picklist *values* were remapped by picklist name (`importPicklistValue`), but
+`PackageImportService.importField` copied `fieldTypeConfig` verbatim, the field export query
+(`PackageRepository.findFieldsWithNamesByCollectionIds`) carried no picklist name to remap by, and
+`TYPE_ORDER` imported `FIELD` before `GLOBAL_PICKLIST`.
+
+**Fix:** the export query `LEFT JOIN`s `global_picklist` on `field_type_config->>'globalPicklistId'`
+(same tenant) and emits `global_picklist_name`; `TYPE_ORDER` runs `GLOBAL_PICKLIST` before `FIELD`;
+`importField` rewrites `globalPicklistId` to the target's id for that name, or fails the item with
+`Field <collection>.<field> references global picklist '<name>', which is neither in the package nor
+in the target tenant`. A package exported before the fix (no `global_picklist_name`) keeps the id
+only if the target tenant has a global picklist with that id, else fails the item and asks for a
+re-export. Covered by `PackageImportServiceTest.GlobalPicklistBinding`,
+`PackageRoundTripTest.firstApplyCreatesEverything`, `PackageRepositoryTest.fieldExportJoinsGlobalPicklistName`
+and `PackageServiceExportTest.exportsGlobalPicklistNameOnBoundField`.
+
+**Open gap:** `MetadataPromotionService.parentKeys` does not yet list `GLOBAL_PICKLIST:<name>` as a
+parent of a bound FIELD, so a selective promotion of that field without its picklist into a target
+lacking the picklist now fails the field (loudly) instead of pulling the picklist in.
+
+**Keep it that way:** any other id stored inside a JSON config column (`fieldTypeConfig`, layout
+JSON, flow definitions) is a source-tenant id too — export a natural key next to it and remap on import.
