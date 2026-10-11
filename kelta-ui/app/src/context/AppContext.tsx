@@ -2,11 +2,23 @@
  * AppContext
  *
  * Manages end-user application state: recent items, favorites,
- * and active app/tab selection. State is persisted to localStorage.
+ * and active app/tab selection. Recents live in per-tenant localStorage;
+ * favorites are server-persisted per user (`user-ui-preferences`, prefType
+ * `favorites`) with the same localStorage key as warm cache and offline fallback.
  */
 
-import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react'
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  useRef,
+} from 'react'
 import { useTenantStorageScope } from './TenantContext'
+import { useAuth } from './AuthContext'
+import { usePreferenceValue } from '../hooks/usePreferenceStore'
 
 // ---- Types ----
 
@@ -145,6 +157,57 @@ function saveToStorage<T>(key: string, value: T): void {
   }
 }
 
+// ---- Server sync ----
+
+type SaveFavorites = (favorites: Favorite[]) => void
+
+interface FavoritesPreferenceSyncProps {
+  scope: string
+  onServerValue: (favorites: Favorite[]) => void
+  saveRef: React.MutableRefObject<SaveFavorites | null>
+}
+
+/**
+ * Server half of favorites (app-data-entry slice 1). Mounted only for a signed-in
+ * user: the preference store resolves `/api/me/identity`, and a 401 on the login page
+ * would redirect the login page to itself. Keyed by scope so each workspace syncs once.
+ */
+function FavoritesPreferenceSync({
+  scope,
+  onServerValue,
+  saveRef,
+}: FavoritesPreferenceSyncProps): null {
+  const pref = usePreferenceValue<unknown>('favorites', 'default', {
+    localKey: favoritesStorageKey(scope),
+  })
+  const { isLoaded, value, save } = pref
+  const syncedRef = useRef(false)
+
+  // Server wins once loaded; an absent row with local favorites is the one-time push.
+  useEffect(() => {
+    if (!isLoaded || syncedRef.current) return
+    syncedRef.current = true
+    if (value !== null) {
+      onServerValue(Array.isArray(value) ? value.filter(isFavoriteEntry) : [])
+      return
+    }
+    const local = loadFavorites(scope)
+    if (local.length > 0) save(local)
+  }, [isLoaded, value, scope, save, onServerValue])
+
+  // Writes go to the server only after the load, so an early toggle can never create
+  // a second row next to one that has not arrived yet.
+  useEffect(() => {
+    if (!isLoaded) return
+    saveRef.current = save
+    return () => {
+      if (saveRef.current === save) saveRef.current = null
+    }
+  }, [isLoaded, save, saveRef])
+
+  return null
+}
+
 // ---- Context ----
 
 const AppContext = createContext<AppContextValue | undefined>(undefined)
@@ -158,6 +221,8 @@ export function AppContextProvider({ children }: AppContextProviderProps): React
   const scope = useTenantStorageScope()
   const [recentItems, setRecentItems] = useState<RecentItem[]>(() => loadRecentItems(scope))
   const [favorites, setFavorites] = useState<Favorite[]>(() => loadFavorites(scope))
+  const { isAuthenticated } = useAuth()
+  const saveFavoritesRef = useRef<SaveFavorites | null>(null)
 
   // Re-hydrate when the workspace changes (in-app navigation between slugs).
   // Writes happen inside the updaters, not in a persist effect, so a scope
@@ -183,16 +248,29 @@ export function AppContextProvider({ children }: AppContextProviderProps): React
     [scope]
   )
 
-  const toggleFavorite = useCallback(
-    (item: Favorite) => {
-      setFavorites((prev) => {
-        const exists = prev.some((f) => f.key === item.key)
-        const updated = exists ? prev.filter((f) => f.key !== item.key) : [...prev, item]
-        saveToStorage(favoritesStorageKey(scope), updated)
-        return updated
-      })
+  const adoptServerFavorites = useCallback(
+    (serverFavorites: Favorite[]) => {
+      saveToStorage(favoritesStorageKey(scope), serverFavorites)
+      setFavorites(serverFavorites)
     },
     [scope]
+  )
+
+  // Computed outside a state updater: StrictMode double-invokes updaters, and a save
+  // inside one would write the server row twice.
+  const toggleFavorite = useCallback(
+    (item: Favorite) => {
+      const exists = favorites.some((f) => f.key === item.key)
+      const updated = exists ? favorites.filter((f) => f.key !== item.key) : [...favorites, item]
+      setFavorites(updated)
+      const save = saveFavoritesRef.current
+      if (save) {
+        save(updated)
+      } else {
+        saveToStorage(favoritesStorageKey(scope), updated)
+      }
+    },
+    [favorites, scope]
   )
 
   const isFavorite = useCallback(
@@ -219,7 +297,19 @@ export function AppContextProvider({ children }: AppContextProviderProps): React
     [recentItems, favorites, addRecentItem, toggleFavorite, isFavorite, clearRecentItems]
   )
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>
+  return (
+    <AppContext.Provider value={value}>
+      {isAuthenticated && (
+        <FavoritesPreferenceSync
+          key={scope}
+          scope={scope}
+          onServerValue={adoptServerFavorites}
+          saveRef={saveFavoritesRef}
+        />
+      )}
+      {children}
+    </AppContext.Provider>
+  )
 }
 
 /**
