@@ -431,6 +431,13 @@ class AddFieldToolTest {
     }
 
     @Test
+    void mapsTextareaAliasToStringAndKeepsNativeTextType() {
+        assertThat(FieldBodyBuilder.resolveNativeType("textarea")).isEqualTo("STRING");
+        assertThat(FieldBodyBuilder.resolveNativeType("text")).isEqualTo("STRING");
+        assertThat(FieldBodyBuilder.resolveNativeType("TEXT")).isEqualTo("TEXT");
+    }
+
+    @Test
     void resolvesCollectionIdFromRealisticLookupResponse() {
         // Regression: worker responses serialize relationships (whose
         // createdBy/updatedBy carry the USER's UUID) before the record's own
