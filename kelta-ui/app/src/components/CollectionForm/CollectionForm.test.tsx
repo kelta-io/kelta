@@ -691,7 +691,7 @@ describe('CollectionForm Integration', () => {
     // A deferred the test resolves itself: the disabled state lasts until
     // release() rather than for a wall-clock window (see the comment below).
     let release!: () => void
-    const onSubmit = vi.fn(
+    const onSubmit = vi.fn<(data: CollectionFormData) => Promise<void>>(
       () =>
         new Promise<void>((resolve) => {
           release = resolve

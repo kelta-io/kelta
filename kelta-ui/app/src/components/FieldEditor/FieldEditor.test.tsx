@@ -1013,7 +1013,7 @@ describe('FieldEditor Integration', () => {
     // A deferred the test resolves itself: the disabled state lasts until
     // release() rather than for a wall-clock window (see the comment below).
     let release!: () => void
-    const onSave = vi.fn(
+    const onSave = vi.fn<(data: FieldDefinition) => Promise<void>>(
       () =>
         new Promise<void>((resolve) => {
           release = resolve
