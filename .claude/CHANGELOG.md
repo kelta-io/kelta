@@ -224,3 +224,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-10-11 chore(release): Add release.ts pin/check-pin and fail the quickstart job on KELTA_VERSION drift between .env.example and docker-compose.yml (KLT-539)
 - 2026-10-11 fix(cli): `picklists get` returns the picklist's values sorted by sortOrder; add dangerous `flows delete` (KLT-535)
 - 2026-10-11 fix(ci): Rebase and retry the homelab-argo image-bump push on rejection; auto-rollback only when smoke-test itself failed (PLT-554)
+- 2026-10-11 feat(dashboards): chart `aggregateOver: "groupSizes"` returns a key-free group-size histogram with nearest-rank percentiles, paging up to 50,000 rows (SPO-549)
