@@ -44,3 +44,14 @@ export const QUICKSTART_ANCHORS: Record<string, string> = {
 export function readmeQuickstart(readmePath: string): string {
   return rewriteAnchors(extractSection(readFileSync(readmePath, 'utf8'), 'Quickstart'), QUICKSTART_ANCHORS);
 }
+
+/**
+ * The non-blank lines of the first ```bash fence in README.md's `## Quickstart`,
+ * verbatim (trailing `# comments` included), for the home page's "Run it locally".
+ */
+export function readmeQuickstartCommands(readmePath: string): string[] {
+  const section = extractSection(readFileSync(readmePath, 'utf8'), 'Quickstart');
+  const fence = section.match(/^```bash[ \t]*\n([\s\S]*?)^```/m);
+  if (!fence) throw new Error('no ```bash fence in README.md\'s "## Quickstart" section');
+  return fence[1].split('\n').filter((line) => line.trim() !== '');
+}
