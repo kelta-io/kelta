@@ -68,7 +68,7 @@ export interface FieldSpec {
   indexed?: boolean;
   searchable?: boolean;
   description?: string;
-  defaultValue?: string;
+  defaultValue?: string | number | boolean;
   /** Global picklist name or id (PICKLIST/MULTI_PICKLIST). */
   picklist?: string;
   /** Target collection name or id (LOOKUP/MASTER_DETAIL). */

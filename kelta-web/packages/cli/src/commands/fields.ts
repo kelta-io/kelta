@@ -1,8 +1,31 @@
 import { z } from 'zod';
-import { buildFieldBody } from '../admin/fieldBody.js';
+import { buildFieldBody, resolveFieldType } from '../admin/fieldBody.js';
 import { collectionIdByName } from '../admin/lookups.js';
 import { readDataArgument } from '../data.js';
+import { CliError, EXIT } from '../errors.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
+
+const INTEGER_TYPES = new Set(['INTEGER', 'LONG']);
+const DECIMAL_TYPES = new Set(['DOUBLE', 'CURRENCY', 'PERCENT']);
+
+/** Turn `--default` into the JSON value the field type stores (BOOLEAN → boolean, numeric → number). */
+export function typedDefault(type: string, value: string): string | number | boolean {
+  const nativeType = resolveFieldType(type);
+  if (nativeType === 'BOOLEAN') {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+  } else if (INTEGER_TYPES.has(nativeType) || DECIMAL_TYPES.has(nativeType)) {
+    const n = Number(value);
+    const valid = INTEGER_TYPES.has(nativeType) ? Number.isSafeInteger(n) : Number.isFinite(n);
+    if (value.trim() !== '' && valid) return n;
+  } else {
+    return value;
+  }
+  throw new CliError(`--default "${value}" is not a valid ${nativeType} value`, {
+    code: 'INVALID_ARGUMENTS',
+    exitCode: EXIT.USAGE,
+  });
+}
 
 const list = defineCommand({
   group: 'fields',
@@ -44,7 +67,10 @@ const add = defineCommand({
     { flag: '--indexed', description: 'Create an index' },
     { flag: '--searchable', description: 'Full-text searchable' },
     { flag: '--description <text>', description: 'Description' },
-    { flag: '--default <value>', description: 'Default value' },
+    {
+      flag: '--default <value>',
+      description: 'Default value (true|false for BOOLEAN, a number for numeric types)',
+    },
     { flag: '--picklist <name|id>', description: 'Global picklist source (picklist types)' },
     { flag: '--reference <collection>', description: 'Target collection (reference types)' },
     { flag: '--relationship-name <name>', description: 'Relationship name (reference types)' },
@@ -80,7 +106,8 @@ const add = defineCommand({
       indexed: input.indexed,
       searchable: input.searchable,
       description: input.description,
-      defaultValue: input.default,
+      defaultValue:
+        input.default === undefined ? undefined : typedDefault(input.type, input.default),
       picklist: input.picklist,
       reference: input.reference,
       relationshipName: input.relationshipName,

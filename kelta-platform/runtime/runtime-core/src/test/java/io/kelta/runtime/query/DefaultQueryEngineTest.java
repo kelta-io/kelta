@@ -9,6 +9,8 @@ import io.kelta.runtime.formula.BuiltInFunctions;
 import io.kelta.runtime.formula.FormulaEvaluator;
 import io.kelta.runtime.formula.FormulaFunction;
 import io.kelta.runtime.model.*;
+import io.kelta.runtime.service.AutoNumberService;
+import io.kelta.runtime.service.FieldEncryptionService;
 import io.kelta.runtime.storage.StorageAdapter;
 import io.kelta.runtime.validation.CustomValidationRuleEngine;
 import io.kelta.runtime.validation.DefaultValidationEngine;
@@ -356,6 +358,105 @@ class DefaultQueryEngineTest {
             Map<String, Object> result = engineNoValidation.create(testCollection, inputData);
             
             assertNotNull(result.get("id"));
+        }
+    }
+
+    @Nested
+    @DisplayName("create field defaults")
+    class CreateFieldDefaultTests {
+
+        private DefaultQueryEngine engineRealValidation;
+
+        @BeforeEach
+        void setUp() {
+            engineRealValidation = new DefaultQueryEngine(
+                storageAdapter, new DefaultValidationEngine(storageAdapter));
+            when(storageAdapter.create(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        }
+
+        private CollectionDefinition settingsWithDefaults(Object activeDefault, Object retriesDefault) {
+            return new CollectionDefinitionBuilder()
+                .name("settings")
+                .displayName("Settings")
+                .addField(new FieldDefinitionBuilder()
+                    .name("label").type(FieldType.STRING).nullable(true).build())
+                .addField(new FieldDefinitionBuilder()
+                    .name("active").type(FieldType.BOOLEAN).nullable(true)
+                    .defaultValue(activeDefault).build())
+                .addField(new FieldDefinitionBuilder()
+                    .name("retries").type(FieldType.INTEGER).nullable(true)
+                    .defaultValue(retriesDefault).build())
+                .build();
+        }
+
+        @Test
+        @DisplayName("Should coerce string defaults to the field type before validation")
+        void shouldCoerceStringDefaultsToFieldType() {
+            CollectionDefinition settings = settingsWithDefaults("true", "0");
+
+            Map<String, Object> created = engineRealValidation.create(settings, Map.of("label", "x"));
+
+            assertEquals(Boolean.TRUE, created.get("active"));
+            assertEquals(Integer.valueOf(0), created.get("retries"));
+        }
+
+        @Test
+        @DisplayName("Should reject an uncoercible default with an error naming the field")
+        void shouldRejectUncoercibleDefault() {
+            CollectionDefinition settings = settingsWithDefaults("false", "abc");
+
+            ValidationException ex = assertThrows(ValidationException.class, () ->
+                engineRealValidation.create(settings, Map.of("label", "x")));
+
+            assertTrue(ex.getValidationResult().hasErrorsForField("retries"));
+            assertFalse(ex.getValidationResult().hasErrorsForField("active"));
+            verify(storageAdapter, never()).create(any(), any());
+        }
+
+        @Test
+        @DisplayName("Should keep a client-supplied value over the default")
+        void shouldKeepClientValueOverDefault() {
+            CollectionDefinition settings = settingsWithDefaults("true", "0");
+
+            Map<String, Object> created = engineRealValidation.create(settings,
+                Map.of("label", "x", "active", "false", "retries", 5));
+
+            assertEquals(Boolean.FALSE, created.get("active"));
+            assertEquals(5, created.get("retries"));
+        }
+
+        @Test
+        @DisplayName("Should leave ENCRYPTED and AUTO_NUMBER fields as before")
+        void shouldLeaveEncryptedAndAutoNumberFieldsUnchanged() {
+            FieldEncryptionService encryptionService = mock(FieldEncryptionService.class);
+            AutoNumberService autoNumberService = mock(AutoNumberService.class);
+            byte[] cipher = {1, 2, 3};
+            when(encryptionService.encrypt("s3cret", "default")).thenReturn(cipher);
+            when(autoNumberService.generateNext(anyString(), anyString(), anyInt())).thenReturn("INV-000001");
+            ValidationEngine passing = mock(ValidationEngine.class);
+            when(passing.validate(any(), any(), any())).thenReturn(ValidationResult.success());
+            DefaultQueryEngine engine = new DefaultQueryEngine(storageAdapter, passing,
+                encryptionService, autoNumberService, null, null, null, null, null);
+
+            CollectionDefinition invoices = new CollectionDefinitionBuilder()
+                .name("invoices")
+                .displayName("Invoices")
+                .addField(new FieldDefinitionBuilder()
+                    .name("secret").type(FieldType.ENCRYPTED).nullable(true).build())
+                .addField(new FieldDefinitionBuilder()
+                    .name("pin").type(FieldType.ENCRYPTED).nullable(true)
+                    .defaultValue("0000").build())
+                .addField(new FieldDefinitionBuilder()
+                    .name("number").type(FieldType.AUTO_NUMBER).nullable(true)
+                    .defaultValue("ignored").build())
+                .build();
+
+            Map<String, Object> created = engine.create(invoices, Map.of("secret", "s3cret"));
+
+            assertSame(cipher, created.get("secret"));
+            assertEquals("0000", created.get("pin"));
+            assertEquals("INV-000001", created.get("number"));
         }
     }
 

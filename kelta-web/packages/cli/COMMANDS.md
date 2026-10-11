@@ -122,7 +122,7 @@ Add a field to a collection (friendly type aliases: text, number, picklist, refe
 - `--indexed` — Create an index
 - `--searchable` — Full-text searchable
 - `--description <text>` — Description
-- `--default <value>` — Default value
+- `--default <value>` — Default value (true|false for BOOLEAN, a number for numeric types)
 - `--picklist <name|id>` — Global picklist source (picklist types)
 - `--reference <collection>` — Target collection (reference types)
 - `--relationship-name <name>` — Relationship name (reference types)
