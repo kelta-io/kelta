@@ -38,8 +38,13 @@ public class ModuleProvenanceStore {
     }
 
     /**
-     * Records one provisioned resource, replacing any earlier record of the same natural key so a
-     * reinstall or upgrade re-states ownership rather than accumulating duplicates.
+     * Records one provisioned resource, upserting on the natural key so a reinstall or upgrade
+     * re-states the record rather than accumulating duplicates.
+     *
+     * <p><b>Ownership never downgrades.</b> Uninstall keeps these rows, so on reinstall the
+     * module's own earlier collection "already exists" and is reported {@code ADOPTED}. Overwriting
+     * would make it unremovable forever; a row already {@code CREATED} therefore keeps that
+     * ownership and its original content hash.
      */
     public void record(String tenantId, String moduleId, String moduleVersion,
                        String resourceType, String naturalKey, String resourceId,
@@ -51,9 +56,12 @@ public class ModuleProvenanceStore {
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 + "ON CONFLICT (tenant_id, module_id, resource_type, natural_key) DO UPDATE SET "
                 + "  module_version = EXCLUDED.module_version, "
-                + "  resource_id = EXCLUDED.resource_id, "
-                + "  ownership = EXCLUDED.ownership, "
-                + "  content_hash = EXCLUDED.content_hash",
+                + "  resource_id = COALESCE(EXCLUDED.resource_id, "
+                + "module_provisioned_resource.resource_id), "
+                + "  ownership = CASE WHEN module_provisioned_resource.ownership = 'CREATED' "
+                + "THEN 'CREATED' ELSE EXCLUDED.ownership END, "
+                + "  content_hash = CASE WHEN module_provisioned_resource.ownership = 'CREATED' "
+                + "THEN module_provisioned_resource.content_hash ELSE EXCLUDED.content_hash END",
             UUID.randomUUID().toString(), tenantId, moduleId, moduleVersion,
             resourceType, naturalKey, resourceId, ownership, contentHash);
     }
@@ -61,7 +69,7 @@ public class ModuleProvenanceStore {
     /** Everything recorded for one module, newest first. */
     public List<Map<String, Object>> findByModule(String tenantId, String moduleId) {
         return jdbcTemplate.queryForList(
-            "SELECT resource_type, natural_key, resource_id, ownership, content_hash, "
+            "SELECT id, resource_type, natural_key, resource_id, ownership, content_hash, "
                 + "module_version, created_at FROM module_provisioned_resource "
                 + "WHERE tenant_id = ? AND module_id = ? ORDER BY created_at DESC",
             tenantId, moduleId);

@@ -87,7 +87,17 @@ public class PackageImportService {
         }
     }
 
-    public record ItemResult(String type, String naturalKey, String action, String error) {}
+    /**
+     * One item's outcome. {@code resourceId} is the target row the item created, updated or
+     * skipped over (a {@code dry-run:} placeholder on a dry-run create), and null when it failed.
+     */
+    public record ItemResult(String type, String naturalKey, String action, String error,
+                             String resourceId) {
+
+        public ItemResult(String type, String naturalKey, String action, String error) {
+            this(type, naturalKey, action, error, null);
+        }
+    }
 
     public record ImportReport(int created, int updated, int skipped, int failed,
                                List<ItemResult> items) {
@@ -560,20 +570,22 @@ public class PackageImportService {
             // through these maps and must see the item that is already there.
             register.accept(existingId);
             if (ctx.options.conflictMode() == ConflictMode.SKIP) {
-                return new ItemResult(type, key, "SKIPPED", null);
+                return new ItemResult(type, key, "SKIPPED", null, existingId);
             }
             if (!ctx.options.dryRun()) {
                 queryEngine.update(def, existingId, mapped);
             }
-            return new ItemResult(type, key, "UPDATED", null);
+            return new ItemResult(type, key, "UPDATED", null, existingId);
         }
         if (ctx.options.dryRun()) {
-            register.accept("dry-run:" + UUID.randomUUID());
-            return new ItemResult(type, key, "CREATED", null);
+            String placeholderId = "dry-run:" + UUID.randomUUID();
+            register.accept(placeholderId);
+            return new ItemResult(type, key, "CREATED", null, placeholderId);
         }
         Map<String, Object> created = queryEngine.create(def, mapped);
-        register.accept(String.valueOf(created.get("id")));
-        return new ItemResult(type, key, "CREATED", null);
+        String createdId = String.valueOf(created.get("id"));
+        register.accept(createdId);
+        return new ItemResult(type, key, "CREATED", null, createdId);
     }
 
 

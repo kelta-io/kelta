@@ -822,9 +822,8 @@ rows *outside* that path had to stamp the column itself, since a `NOT NULL` colu
 default breaks any INSERT that doesn't supply it: the two raw-SQL seeders —
 `SystemCollectionSeeder` (`SYSTEM_TENANT_ID` for every system collection's built-in fields)
 and `MigrationFieldRepository` (`TenantContext.get()` for the destructive schema-migration
-path) — and the two direct `queryEngine.create(fieldsDef, …)` callers,
-`ExternalEntityMaterializer` and `ModuleCollectionProvisioner`, which already did this for
-their `collections` row (the storage adapter writes `tenant_id` only when the record map
+path) — and the direct `queryEngine.create(fieldsDef, …)` caller
+`ExternalEntityMaterializer`, which already did this for its `collections` row (the storage adapter writes `tenant_id` only when the record map
 carries `tenantId`). `PackageImportService` needed nothing: it stamps `tenantId` for any
 `tenantScoped()` definition. **Get-by-id is guarded router-side too**
 (`DynamicCollectionRouter.visibleToTenant`, the counterpart of `injectTenantFilter`): a

@@ -4,6 +4,7 @@ import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.event.ModuleChangeType;
 import io.kelta.runtime.module.TenantModuleData;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
+import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleSignatureException;
 import io.kelta.worker.module.ModuleRouteRegistry;
 import io.kelta.worker.module.RuntimeModuleManager;
@@ -40,12 +41,17 @@ public class ModuleController {
     private final ModuleRouteRegistry moduleRouteRegistry;
     private final ModuleConfigEventPublisher eventPublisher;
 
+    /** Null when module support is switched off; provisioned resources then list empty. */
+    private final ModuleProvenanceStore provenanceStore;
+
     public ModuleController(RuntimeModuleManager runtimeModuleManager,
                              ModuleConfigEventPublisher eventPublisher,
-                            ObjectProvider<ModuleRouteRegistry> moduleRouteRegistry) {
+                            ObjectProvider<ModuleRouteRegistry> moduleRouteRegistry,
+                            ObjectProvider<ModuleProvenanceStore> provenanceStore) {
         this.runtimeModuleManager = runtimeModuleManager;
         this.eventPublisher = eventPublisher;
         this.moduleRouteRegistry = moduleRouteRegistry.getIfAvailable();
+        this.provenanceStore = provenanceStore.getIfAvailable();
     }
 
     /**
@@ -256,6 +262,39 @@ public class ModuleController {
                 })
                 .toList();
         return ResponseEntity.ok(JsonApiResponseBuilder.collection("module-actions", actionRecords));
+    }
+
+    /**
+     * Lists what a module provisioned in the caller's tenant: which collections and fields it
+     * created and which it adopted.
+     *
+     * <p>Answers for a module that is no longer installed too — uninstall keeps these records, and
+     * "what did the module I removed leave behind?" is the question this exists for. An unknown
+     * module id is therefore an empty list, not a 404.
+     */
+    @GetMapping("/{moduleId}/provisioned-resources")
+    public ResponseEntity<Map<String, Object>> getProvisionedResources(
+            @RequestHeader("X-Tenant-ID") String tenantId,
+            @PathVariable String moduleId) {
+        List<Map<String, Object>> rows = provenanceStore == null
+            ? List.of() : provenanceStore.findByModule(tenantId, moduleId);
+        List<Map<String, Object>> records = rows.stream()
+                .map(row -> {
+                    Map<String, Object> map = new LinkedHashMap<>();
+                    map.put("id", row.get("id"));
+                    map.put("resourceType", row.get("resource_type"));
+                    map.put("naturalKey", row.get("natural_key"));
+                    map.put("resourceId", row.get("resource_id"));
+                    map.put("ownership", row.get("ownership"));
+                    map.put("contentHash", row.get("content_hash"));
+                    map.put("moduleVersion", row.get("module_version"));
+                    map.put("createdAt", row.get("created_at") instanceof java.sql.Timestamp ts
+                        ? ts.toInstant().toString() : row.get("created_at"));
+                    return map;
+                })
+                .toList();
+        return ResponseEntity.ok(
+                JsonApiResponseBuilder.collection("module-provisioned-resources", records));
     }
 
     /**

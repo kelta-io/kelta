@@ -1,12 +1,11 @@
 # Slice 2 — Provenance + Unified Provisioning
 
-> **Status:** partial — planned remainder. Shipped:
-> `kelta-worker/src/main/resources/db/migration/V190__module_provisioned_resource.sql` and
-> `kelta-worker/src/main/java/io/kelta/worker/module/ModuleProvenanceStore.java`, written by
-> `RuntimeModuleManager.recordProvenance` as `COLLECTION` rows marked `CREATED` or `ADOPTED`.
-> This spec covers the rest: provisioning through `PackageImportService` instead of
-> `ModuleCollectionProvisioner`, content hashes, FIELD provenance, ownership that survives a
-> reinstall, and a read surface so an admin can find what a module left behind.
+> **Status:** ✅ shipped (KLT-504). `ModuleMetadataProvisioner` provisions through
+> `PackageImportService`, `ModuleCollectionProvisioner` is deleted, `COLLECTION` and `FIELD`
+> provenance carries `resource_id` and a content hash, ownership never downgrades, and
+> `GET /api/modules/{moduleId}/provisioned-resources` is the read surface. The sections below are
+> the spec as written. Not done here: the `kelta-test-harness` scenario §6 suggests for the upsert
+> against real Postgres (the unit test pins the SQL text).
 > Source-verified against main `ece7925` on 2026-10-11 (Flyway head V206).
 
 > Child of [`.claude/docs/specs/module-platform/README.md`](README.md). Implements the parent's
