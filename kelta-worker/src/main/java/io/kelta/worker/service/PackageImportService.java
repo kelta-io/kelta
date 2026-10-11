@@ -51,7 +51,7 @@ public class PackageImportService {
      * which a sandbox seeds itself via TenantProvisioningHook.
      */
     private static final List<String> TYPE_ORDER = List.of(
-            "COLLECTION", "FIELD", "GLOBAL_PICKLIST", "PICKLIST_VALUE",
+            "COLLECTION", "GLOBAL_PICKLIST", "FIELD", "PICKLIST_VALUE",
             "VALIDATION_RULE", "PAGE_LAYOUT", "LAYOUT_SECTION", "LAYOUT_FIELD",
             "LAYOUT_RELATED_LIST", "FLOW", "UI_PAGE", "UI_MENU", "UI_MENU_ITEM");
 
@@ -338,10 +338,45 @@ public class PackageImportService {
             }
             mapped.put("referenceCollectionId", ctx.requireReferenceCollection((String) refName));
         }
+        remapGlobalPicklist(ctx, key, data, mapped);
 
         String existingId = ctx.fieldIdByKey().get(key);
         return upsertViaEngine(ctx, "FIELD", key, def, existingId, mapped,
                 id -> ctx.fieldIdByKey().put(key, id));
+    }
+
+    /**
+     * {@code fieldTypeConfig.globalPicklistId} is a source-tenant id: resolve it through the
+     * exported {@code global_picklist_name} (GLOBAL_PICKLIST imports before FIELD, so a picklist
+     * the same package creates is already registered). A package exported before the name was
+     * carried keeps the id only when it is a global picklist of the target tenant.
+     */
+    @SuppressWarnings("unchecked")
+    private void remapGlobalPicklist(ImportContext ctx, String key, Map<String, Object> data,
+                                     Map<String, Object> mapped) {
+        if (!(mapped.get("fieldTypeConfig") instanceof Map<?, ?> config)
+                || config.get("globalPicklistId") == null) {
+            return;
+        }
+        String sourceId = String.valueOf(config.get("globalPicklistId"));
+        Object picklistName = data.get("global_picklist_name");
+        String targetId;
+        if (picklistName != null) {
+            targetId = ctx.globalPicklistIdByName.get(String.valueOf(picklistName));
+            if (targetId == null) {
+                throw new IllegalStateException("Field " + key + " references global picklist '"
+                        + picklistName + "', which is neither in the package nor in the target tenant");
+            }
+        } else if (ctx.globalPicklistIdByName.containsValue(sourceId)) {
+            targetId = sourceId;
+        } else {
+            throw new IllegalStateException("Field " + key + " references global picklist id '"
+                    + sourceId + "', which is not in the target tenant, and the package carries no "
+                    + "global_picklist_name to remap it by — re-export the package and apply again");
+        }
+        Map<String, Object> remapped = new LinkedHashMap<>((Map<String, Object>) config);
+        remapped.put("globalPicklistId", targetId);
+        mapped.put("fieldTypeConfig", remapped);
     }
 
     private ItemResult importSimpleByName(ImportContext ctx, String type, String key,

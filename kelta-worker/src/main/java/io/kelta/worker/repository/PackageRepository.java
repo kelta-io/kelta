@@ -179,7 +179,10 @@ public class PackageRepository {
                 "SELECT id FROM " + table + " WHERE tenant_id = ?", String.class, tenantId);
     }
 
-    /** Fields enriched with owning + referenced collection names for cross-tenant remap. */
+    /**
+     * Fields enriched with owning + referenced collection names and the name of the global
+     * picklist a field is bound to ({@code fieldTypeConfig.globalPicklistId}) for cross-tenant remap.
+     */
     public List<Map<String, Object>> findFieldsWithNamesByCollectionIds(String tenantId, List<String> collectionIds) {
         if (collectionIds.isEmpty()) return List.of();
         String placeholders = String.join(",", collectionIds.stream().map(i -> "?").toList());
@@ -187,9 +190,12 @@ public class PackageRepository {
         params[0] = tenantId;
         for (int i = 0; i < collectionIds.size(); i++) params[i + 1] = collectionIds.get(i);
         return jdbcTemplate.queryForList(
-                "SELECT f.*, c.name AS collection_name, rc.name AS reference_collection_name " +
+                "SELECT f.*, c.name AS collection_name, rc.name AS reference_collection_name, " +
+                        "gp.name AS global_picklist_name " +
                         "FROM field f JOIN collection c ON f.collection_id = c.id " +
                         "LEFT JOIN collection rc ON f.reference_collection_id = rc.id " +
+                        "LEFT JOIN global_picklist gp ON gp.tenant_id = c.tenant_id " +
+                        "AND gp.id = f.field_type_config->>'globalPicklistId' " +
                         "WHERE c.tenant_id = ? AND f.collection_id IN (" + placeholders + ")",
                 params
         );
