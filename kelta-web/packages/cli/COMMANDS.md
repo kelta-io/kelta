@@ -513,6 +513,10 @@ Update a flow by id
 - `--definition <json>` — Definition as JSON, @file, or -
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+### `kelta flows delete <flowId>`
+
+Delete a flow (the server refuses flows that have runs) **(destructive — needs --yes off-TTY)**
+
 ### `kelta flows execute <flowId>`
 
 Start a flow run (flows read input as $.input.<key>)

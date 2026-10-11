@@ -1,7 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { AxiosError, AxiosHeaders } from 'axios';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mapError } from '../errors.js';
 import type { CommandContext, RegisteredCommand } from '../registry/types.js';
 import { auditCommands } from './audit.js';
 import { collectionCommands } from './collections.js';
@@ -174,6 +176,47 @@ describe('picklist value-add', () => {
         },
       },
     });
+  });
+});
+
+describe('picklists get', () => {
+  const routes = {
+    '/api/global-picklists?filter[name][EQ]=crm-stage': { data: [{ id: CID }] },
+    [`/api/global-picklists/${CID}`]: {
+      data: { id: CID, type: 'global-picklists', attributes: { name: 'crm-stage' } },
+    },
+    '/api/picklist-values?': {
+      data: [
+        { id: 'v3', attributes: { value: 'WON', label: 'Won', sortOrder: 2, isActive: true } },
+        { id: 'v1', attributes: { value: 'LEAD', label: 'Lead', sortOrder: 0, isActive: true } },
+        { id: 'v2', attributes: { value: 'DEMO', label: 'Demo', sortOrder: 1, isActive: false } },
+      ],
+    },
+  };
+
+  it('fetches the GLOBAL values by source id and returns them in sortOrder', async () => {
+    const axios = fakeAxios(routes);
+    const result = await run(picklistCommands, 'get', { picklist: 'crm-stage' }, axios);
+    const urls = axios.get.mock.calls.map(([url]) => url as string);
+    expect(urls).toContain(`/api/global-picklists/${CID}`);
+    const valuesUrl = urls.find((url) => url.startsWith('/api/picklist-values?'));
+    expect(valuesUrl).toContain(`filter[picklistSourceId][EQ]=${CID}`);
+    expect(valuesUrl).toContain('filter[picklistSourceType][EQ]=GLOBAL');
+    const data = result.data as { id: string; name: string; values: { sortOrder: number }[] };
+    expect(data).toMatchObject({ id: CID, name: 'crm-stage' });
+    expect(data.values.map((v) => v.sortOrder)).toEqual([0, 1, 2]);
+    expect(result.human).toMatch(/VALUE\s+LABEL\s+SORT\s+ACTIVE/);
+    expect(result.human?.indexOf('LEAD')).toBeLessThan(result.human?.indexOf('WON') ?? -1);
+  });
+
+  it('--raw keeps the picklist resource under data and the raw values beside it', async () => {
+    const axios = fakeAxios(routes);
+    const result = await run(picklistCommands, 'get', { picklist: 'crm-stage' }, axios, {
+      raw: true,
+    });
+    const data = result.data as { data: { id: string }; values: { id: string }[] };
+    expect(data.data.id).toBe(CID);
+    expect(data.values.map((v) => v.id)).toEqual(['v1', 'v2', 'v3']);
   });
 });
 
@@ -549,6 +592,45 @@ describe('flows', () => {
     expect(axios.post).toHaveBeenCalledWith('/api/flows/f1/publish', { changeSummary: 'v2' });
     await run(flowCommands, 'retry', { executionId: 'e1', mode: 'from-failure' }, axios);
     expect(axios.post).toHaveBeenCalledWith('/api/flows/executions/e1/retry?mode=from-failure');
+  });
+});
+
+describe('flows delete', () => {
+  it('is dangerous and deletes the flow by id', async () => {
+    const axios = fakeAxios();
+    expect(command(flowCommands, 'delete').dangerous).toBe(true);
+    const result = await run(flowCommands, 'delete', { flowId: 'flow-1' }, axios);
+    expect(axios.delete).toHaveBeenCalledWith('/api/flows/flow-1');
+    expect(result.ids).toEqual(['flow-1']);
+  });
+
+  it('takes no force flag', () => {
+    const def = command(flowCommands, 'delete');
+    expect(def.options ?? []).toEqual([]);
+  });
+
+  it("propagates the server's refusal detail through the errors.ts mapping", async () => {
+    const axios = fakeAxios();
+    const headers = new AxiosHeaders();
+    const refusal = new AxiosError(
+      'Request failed',
+      'ERR_BAD_REQUEST',
+      { headers },
+      {},
+      {
+        status: 409,
+        statusText: '',
+        headers: {},
+        config: { headers },
+        data: { errors: [{ status: '409', code: 'CONFLICT', detail: 'Flow has 3 runs' }] },
+      }
+    );
+    axios.delete.mockRejectedValueOnce(refusal);
+    const error = await run(flowCommands, 'delete', { flowId: 'flow-1' }, axios).catch(
+      (e: unknown) => e
+    );
+    expect(error).toBe(refusal);
+    expect(mapError(error).message).toBe('Flow has 3 runs');
   });
 });
 

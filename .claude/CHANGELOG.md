@@ -222,3 +222,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-10-11 docs(readme): Put the README quickstart first and self-contained from `git clone`; add the stranger-test protocol (KLT-538)
 - 2026-10-11 fix(cli): `fields add` passes exact native FieldType names (TEXT, FORMULA, …) through before aliases, adds `textarea` (CLI + MCP) and `--values a,b,c` for field-scoped picklists (KLT-534)
 - 2026-10-11 chore(release): Add release.ts pin/check-pin and fail the quickstart job on KELTA_VERSION drift between .env.example and docker-compose.yml (KLT-539)
+- 2026-10-11 fix(cli): `picklists get` returns the picklist's values sorted by sortOrder; add dangerous `flows delete` (KLT-535)

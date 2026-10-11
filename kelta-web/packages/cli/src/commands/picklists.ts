@@ -1,7 +1,14 @@
 import { z } from 'zod';
 import { picklistIdByName } from '../admin/lookups.js';
 import { parseList } from '../query.js';
+import { flattenBody, flattenResource } from '../render/flatten.js';
+import { renderTable } from '../render/table.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
+
+interface JsonApiResource {
+  id?: string;
+  attributes?: Record<string, unknown>;
+}
 
 const list = defineCommand({
   group: 'picklists',
@@ -33,10 +40,31 @@ const get = defineCommand({
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
     const id = await picklistIdByName(axios, input.picklist);
-    const response = await axios.get<unknown>(
-      `/api/global-picklists/${id}?include=picklist-values`
+    const picklist = await axios.get<{ data?: JsonApiResource }>(`/api/global-picklists/${id}`);
+    const valuesResponse = await axios.get<{ data?: JsonApiResource[] }>(
+      `/api/picklist-values?filter[picklistSourceId][EQ]=${encodeURIComponent(id)}` +
+        `&filter[picklistSourceType][EQ]=GLOBAL&page[size]=200`
     );
-    return { data: response.data };
+    const values = [...(valuesResponse.data.data ?? [])].sort(
+      (a, b) => Number(a.attributes?.sortOrder ?? 0) - Number(b.attributes?.sortOrder ?? 0)
+    );
+    const flatValues = values.map(flattenResource);
+    const name = String(picklist.data.data?.attributes?.name ?? input.picklist);
+    return {
+      data: ctx.global.raw
+        ? { data: picklist.data.data, values }
+        : { ...(flattenBody(picklist.data) as Record<string, unknown>), values: flatValues },
+      verbatim: true,
+      human:
+        `Picklist ${name} (${id})\n` +
+        renderTable(flatValues, [
+          { key: 'value', header: 'VALUE' },
+          { key: 'label', header: 'LABEL' },
+          { key: 'sortOrder', header: 'SORT' },
+          { key: 'isActive', header: 'ACTIVE' },
+        ]),
+      ids: [id],
+    };
   },
 });
 
