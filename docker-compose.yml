@@ -111,7 +111,7 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════
 
   kelta-auth:
-    image: ghcr.io/kelta-io/kelta-auth:${KELTA_VERSION:-0.1.0}
+    image: ghcr.io/kelta-io/kelta-auth:${KELTA_VERSION:-0.2.0}
     container_name: kelta-auth
     restart: unless-stopped
     env_file: .env
@@ -167,7 +167,7 @@ services:
           - auth.localhost
 
   kelta-worker:
-    image: ghcr.io/kelta-io/kelta-worker:${KELTA_VERSION:-0.1.0}
+    image: ghcr.io/kelta-io/kelta-worker:${KELTA_VERSION:-0.2.0}
     container_name: kelta-worker
     restart: unless-stopped
     env_file: .env
@@ -227,7 +227,7 @@ services:
       - kelta-network
 
   kelta-gateway:
-    image: ghcr.io/kelta-io/kelta-gateway:${KELTA_VERSION:-0.1.0}
+    image: ghcr.io/kelta-io/kelta-gateway:${KELTA_VERSION:-0.2.0}
     container_name: kelta-gateway
     restart: unless-stopped
     environment:
@@ -293,7 +293,7 @@ services:
       - kelta-network
 
   kelta-ui:
-    image: ghcr.io/kelta-io/kelta-ui:${KELTA_VERSION:-0.1.0}
+    image: ghcr.io/kelta-io/kelta-ui:${KELTA_VERSION:-0.2.0}
     container_name: kelta-ui
     restart: unless-stopped
     ports:
