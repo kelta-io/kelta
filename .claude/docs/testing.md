@@ -187,6 +187,23 @@ it('should add filter when button clicked', async () => {
 });
 ```
 
+**Transient states (loading, disabled, spinners) are asserted while a test-controlled
+deferred is pending — never against a wall-clock timer.** A mock like
+`new Promise((r) => setTimeout(r, 100))` makes the state exist for 100 ms of real time;
+on a starved CI runner `waitFor` can first poll after it has ended and then time out
+(PLT-521, `concerns.md` → "Frontend suite starves under concurrent image builds"). Hold
+the promise open yourself, then release it and wait for the settled state so nothing
+dangles past the test:
+
+```typescript
+let release!: () => void;
+const onSave = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
+// ...render, submit...
+await waitFor(() => expect(screen.getByTestId('submit')).toBeDisabled());
+act(() => release());
+await waitFor(() => expect(screen.getByTestId('submit')).toBeEnabled());
+```
+
 ## End-to-end (Playwright)
 
 E2E specs live in `e2e-tests/` (see `e2e-tests/README.md` for setup, auth, and subsets).

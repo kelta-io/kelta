@@ -16,7 +16,7 @@
 
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { FieldEditor } from './FieldEditor'
 import type { FieldDefinition, CollectionSummary, FetchCollectionFields } from './FieldEditor'
@@ -1010,9 +1010,15 @@ describe('FieldEditor Component', () => {
 
 describe('FieldEditor Integration', () => {
   it('should work with async submission', async () => {
-    const onSave = vi
-      .fn()
-      .mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 100)))
+    // A deferred the test resolves itself: the disabled state lasts until
+    // release() rather than for a wall-clock window (see the comment below).
+    let release!: () => void
+    const onSave = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
     const user = userEvent.setup()
 
     const TestComponent = () => {
@@ -1047,24 +1053,21 @@ describe('FieldEditor Integration', () => {
     fireEvent.change(screen.getByTestId('field-name-input'), { target: { value: 'my_field' } })
     await user.click(screen.getByTestId('field-editor-submit'))
 
-    // Should show loading state
+    // Should show loading state. onSave is still pending, so the button stays
+    // disabled until release() below — no timing window. The previous mock
+    // resolved after a real setTimeout(100); on a runner starved by concurrent
+    // native builds, waitFor's first poll could land after the timer fired and
+    // the wrapper's `finally` had re-enabled the button, so it polled an enabled
+    // button until it timed out (concerns.md -> "Frontend suite starves under
+    // concurrent image builds", PLT-521).
     await waitFor(() => {
       expect(screen.getByTestId('field-editor-submit')).toBeDisabled()
     })
+    expect(onSave).toHaveBeenCalled()
 
-    // Should complete submission
-    await waitFor(() => {
-      expect(onSave).toHaveBeenCalled()
-    })
-
-    // Wait for the 100ms mock to resolve and the wrapper's `finally` to flip
-    // isSubmitting back, otherwise that setState lands after this test has
-    // returned. Distinct root cause from the render-storm fix above: the
-    // dangling real setTimeout leaks past the test boundary and its resolve()
-    // callback then fires during whichever test runs next, competing for the
-    // same starved event loop right as that test does its own waitFor — the
-    // kind of interaction only `--repeat`-style rerunning surfaces. Same
-    // hardening as CollectionForm.test.tsx's "should work with async submission".
+    // Resolve the submission and wait for the wrapper's `finally` to flip
+    // isSubmitting back, so no setState lands after this test has returned.
+    act(() => release())
     await waitFor(() => {
       expect(screen.getByTestId('field-editor-submit')).toBeEnabled()
     })
