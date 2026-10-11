@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { AxiosInstance } from 'axios';
 import { buildFieldBody, resolveFieldType } from './fieldBody.js';
 import { collectionIdByName, fieldIdsByName, picklistIdByName } from './lookups.js';
-import { CliError } from '../errors.js';
+import { CliError, EXIT } from '../errors.js';
 
 const COLLECTION_ID = '11111111-2222-3333-4444-555555555555';
 const TARGET_ID = '99999999-8888-7777-6666-555555555555';
@@ -33,6 +36,37 @@ describe('resolveFieldType', () => {
     ['rich_text', 'RICH_TEXT'],
   ])('maps alias %s to %s (MCP parity)', (alias, native) => {
     expect(resolveFieldType(alias)).toBe(native);
+  });
+
+  it('passes every runtime-core FieldType constant through (REFERENCE → LOOKUP)', () => {
+    const javaFile = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../../../../kelta-platform/runtime/runtime-core/src/main/java/io/kelta/runtime/model/FieldType.java'
+    );
+    const source = readFileSync(javaFile, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+    const constants = (source.match(/enum FieldType\s*\{([^;]*);/)?.[1] ?? '')
+      .replace(/@\w+/g, '')
+      .split(',')
+      .map((c) => c.trim())
+      .filter((c) => c !== '');
+    expect(constants).toContain('TEXT');
+    expect(constants.length).toBeGreaterThanOrEqual(28);
+    for (const name of constants) {
+      expect(resolveFieldType(name)).toBe(name === 'REFERENCE' ? 'LOOKUP' : name);
+    }
+  });
+
+  it('native TEXT wins over the text alias; textarea is a STRING alias', () => {
+    expect(resolveFieldType('TEXT')).toBe('TEXT');
+    expect(resolveFieldType('text')).toBe('STRING');
+    expect(resolveFieldType('textarea')).toBe('STRING');
+  });
+
+  it('lists the aliases and native names when the type is unknown', () => {
+    expect(() => resolveFieldType('nope')).toThrow(/TEXT/);
+    expect(() => resolveFieldType('nope')).toThrow(/textarea/);
   });
 
   it('passes native enum names through and rejects unknowns', () => {
@@ -93,7 +127,33 @@ describe('buildFieldBody', () => {
     });
     await expect(
       buildFieldBody(axios, { collection: 'invoices', name: 'x', type: 'picklist' })
-    ).rejects.toThrow(/--picklist/);
+    ).rejects.toThrow(/--picklist.*--values/);
+  });
+
+  it('picklist fields with --values carry no fieldTypeConfig', async () => {
+    const body = await buildFieldBody(axios, {
+      collection: 'invoices',
+      name: 'stage',
+      type: 'picklist',
+      values: ['a', 'b'],
+    });
+    expect(body.data.attributes).not.toHaveProperty('fieldTypeConfig');
+  });
+
+  it('rejects --values with --picklist or on a non-picklist type before any request', async () => {
+    await expect(
+      buildFieldBody(axios, {
+        collection: 'invoices',
+        name: 'x',
+        type: 'picklist',
+        picklist: 'statuses',
+        values: ['a'],
+      })
+    ).rejects.toMatchObject({ exitCode: EXIT.USAGE });
+    await expect(
+      buildFieldBody(axios, { collection: 'invoices', name: 'x', type: 'text', values: ['a'] })
+    ).rejects.toMatchObject({ exitCode: EXIT.USAGE });
+    expect((axios.get as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
   });
 
   it('reference fields send the name attribute AND the id relationship', async () => {

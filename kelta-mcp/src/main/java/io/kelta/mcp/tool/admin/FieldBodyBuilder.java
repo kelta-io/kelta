@@ -270,7 +270,7 @@ final class FieldBodyBuilder {
         if (trimmed.isEmpty()) return null;
         String mapped = switch (trimmed) {
             case "text", "string", "String", "STRING" -> "STRING";
-            case "longText", "longtext", "long_text" -> "STRING";
+            case "longText", "longtext", "long_text", "textarea" -> "STRING";
             case "number", "integer", "Integer", "INTEGER" -> "INTEGER";
             case "decimal", "double", "Double", "DOUBLE" -> "DOUBLE";
             case "long", "Long", "LONG" -> "LONG";
