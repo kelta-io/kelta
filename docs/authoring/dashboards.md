@@ -73,14 +73,84 @@ Per type:
 | `chart` | `aggregateField` | string | yes, unless `COUNT` | Numeric field aggregated per group. |
 | `chart` | `maxGroups` | integer | no | Default `20`. |
 | `chart` | `chartStyle` | string | no | `bar` (default) or `pie`. |
+| `chart` | `aggregateOver` | string | no | Only `groupSizes`: report how many records each group holds, without the group values (see "Group-size distribution" below). `aggregateFunction` must then be `COUNT` or unset. |
+| `chart` | `bucketBounds` | integer array | no | With `aggregateOver`. Histogram bucket lower bounds, strictly ascending positive integers. Default `[1, 2, 5, 10, 25]`. |
+| `chart` | `percentiles` | integer array | no | With `aggregateOver`. Strictly ascending integers in `1`–`100`. Default `[50, 90, 99]`. |
+| `chart` | `sizeThresholds` | integer array | no | With `aggregateOver`. Strictly ascending positive integers. Default `[10, 25]`. |
 | `table` | `fields` | string array | no | Columns, in order; all fields when omitted. A comma-separated string is also accepted. |
 | `table` | `sortBy` | string or array | no | `"-amount,name"`, or `[{"field": "amount", "direction": "DESC"}]` (`direction` defaults to `ASC`). |
 | `recent` | `fields` | string array | no | As for `table`. |
 | `recent` | `limit` | integer | no | Default `10`, maximum `100`. |
 
 `metric` and `chart` aggregate over at most the first 1,000 matching
-records (a `COUNT` metric reports the true total). `table` pages at 25
-rows by default (maximum 500).
+records (a `COUNT` metric reports the true total). A `chart` with
+`aggregateOver: "groupSizes"` is the exception: it pages through every
+matching record, up to 50,000 (see below). `table` pages at 25 rows by
+default (maximum 500).
+
+## Group-size distribution (`aggregateOver: "groupSizes"`)
+
+Use this for questions like "how many tickets does each agent hold" when
+the chart must not reveal who the agents are. The widget groups by
+`groupByField` as usual, then discards the group values and reports only
+how big the groups are. No group value (raw id or resolved lookup label)
+appears anywhere in the response, a lookup `groupByField` is never
+resolved to its display value, and segments are not drill-through
+targets. Records with no value in `groupByField` form one group, as in an
+ordinary chart.
+
+```json
+{ "collectionName": "tickets", "groupByField": "assignee",
+  "aggregateOver": "groupSizes", "chartStyle": "bar" }
+```
+
+The `data` payload:
+
+```json
+{
+  "groupByField": "assignee",
+  "aggregateFunction": "COUNT",
+  "groupSizes": true,
+  "series": [
+    { "label": "1",     "count": 1, "value": 1 },
+    { "label": "2–4",   "count": 1, "value": 1 },
+    { "label": "5–9",   "count": 0, "value": 0 },
+    { "label": "10–24", "count": 1, "value": 1 },
+    { "label": "25+",   "count": 0, "value": 0 }
+  ],
+  "summary": {
+    "groups": 3,
+    "records": 17,
+    "percentiles": { "50": 4, "90": 12, "99": 12 },
+    "max": 12,
+    "countGroupsAtLeast": { "10": 1, "25": 0 }
+  },
+  "totalRecords": 17,
+  "truncated": false
+}
+```
+
+- `series` has one point per bucket, in `bucketBounds` order, including
+  empty buckets. Bucket `i` holds groups whose size is at least
+  `bucketBounds[i]` and below `bucketBounds[i+1]`; the last bucket is
+  open-ended (`25+`). A bucket covering a single size is labelled with
+  that size (`1`), otherwise with an en-dash range (`2–4`). `value` and
+  `count` are both the number of groups in the bucket. No point carries a
+  `key`. Groups smaller than the first bound fall in no bucket but still
+  count in `summary`.
+- `summary.groups` is the number of groups and `summary.records` the
+  number of records counted.
+- `summary.percentiles` maps each entry of `percentiles` to the
+  nearest-rank group size: sort the sizes ascending and take the
+  `ceil(p / 100 × groups)`-th (1-based). With no groups every percentile
+  and `max` is `0`.
+- `summary.max` is the largest group size.
+- `summary.countGroupsAtLeast` maps each entry of `sizeThresholds` to the
+  number of groups holding at least that many records.
+- `totalRecords` is the number of records matching the widget's filters.
+- `truncated` is `true` when more than 50,000 records matched. The widget
+  reads matching records 1,000 at a time and stops at 50,000; the
+  distribution and `summary` then describe those 50,000 records only.
 
 Examples, one per family (the `config` value of a `dashboard-components`
 row):

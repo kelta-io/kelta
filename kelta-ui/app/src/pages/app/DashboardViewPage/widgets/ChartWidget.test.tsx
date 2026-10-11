@@ -66,6 +66,35 @@ describe('ChartWidget', () => {
     expect(onSegmentClick).toHaveBeenCalledWith('proj-1')
   })
 
+  it('does not drill through when the payload is a group-size distribution', () => {
+    const onSegmentClick = vi.fn()
+    const groupSizesData = {
+      groupByField: 'stage',
+      groupSizes: true,
+      series: [
+        { label: '1', count: 1, value: 1 },
+        { label: '2–4', count: 1, value: 1 },
+      ],
+    }
+    render(<ChartWidget data={groupSizesData} onSegmentClick={onSegmentClick} />)
+    screen.getByTestId('bar-won').click()
+    screen.getByTestId('bar-with-key').click()
+    expect(onSegmentClick).not.toHaveBeenCalled()
+  })
+
+  it('does not drill through a group-size distribution pie segment', () => {
+    const onSegmentClick = vi.fn()
+    render(
+      <ChartWidget
+        data={{ groupSizes: true, series: [{ label: '1', count: 1, value: 1 }] }}
+        chartStyle="pie"
+        onSegmentClick={onSegmentClick}
+      />
+    )
+    screen.getByTestId('pie').click()
+    expect(onSegmentClick).not.toHaveBeenCalled()
+  })
+
   it('renders a placeholder with no series', () => {
     render(<ChartWidget data={{ series: [] }} />)
     expect(screen.getByTestId('chart-empty')).toBeTruthy()

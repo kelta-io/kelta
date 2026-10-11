@@ -88,9 +88,67 @@ public class DashboardComponentValidator {
             validateFilters(collection, config.get("filters"), errors);
         }
 
+        validateAggregateOver(componentType, config, errors);
         validateGridPosition(component, errors);
 
         return errors;
+    }
+
+    // =========================================================================
+    // Group-size distribution (aggregateOver)
+    // =========================================================================
+
+    private void validateAggregateOver(String componentType, Map<String, Object> config,
+                                        List<BeforeSaveResult.ValidationError> errors) {
+        String aggregateOver = stringValue(config.get("aggregateOver"));
+        if (aggregateOver == null) {
+            return;
+        }
+        if (componentType == null || !"chart".equalsIgnoreCase(componentType)) {
+            errors.add(error("config/aggregateOver", "aggregateOver is only supported on chart components"));
+            return;
+        }
+        if (!DashboardDataService.AGGREGATE_OVER_GROUP_SIZES.equals(aggregateOver)) {
+            errors.add(error("config/aggregateOver", "Unknown aggregateOver '" + aggregateOver
+                    + "'; expected " + DashboardDataService.AGGREGATE_OVER_GROUP_SIZES));
+            return;
+        }
+        String aggregateFunction = stringValue(config.get("aggregateFunction"));
+        if (aggregateFunction != null && !"COUNT".equalsIgnoreCase(aggregateFunction)) {
+            errors.add(error("config/aggregateFunction",
+                    "aggregateOver groupSizes requires aggregateFunction COUNT, got '" + aggregateFunction + "'"));
+        }
+        validateAscendingPositiveInts(config.get("bucketBounds"), "config/bucketBounds", Integer.MAX_VALUE, errors);
+        validateAscendingPositiveInts(config.get("percentiles"), "config/percentiles", 100, errors);
+        validateAscendingPositiveInts(config.get("sizeThresholds"), "config/sizeThresholds", Integer.MAX_VALUE, errors);
+    }
+
+    private void validateAscendingPositiveInts(Object value, String pointer, int max,
+                                                List<BeforeSaveResult.ValidationError> errors) {
+        if (value == null) {
+            return;
+        }
+        if (!(value instanceof List<?> list) || list.isEmpty()) {
+            errors.add(error(pointer, "Must be a non-empty array of integers"));
+            return;
+        }
+        long previous = 0;
+        for (Object item : list) {
+            if (!(item instanceof Integer || item instanceof Long || item instanceof Short)) {
+                errors.add(error(pointer, "Must contain only integers"));
+                return;
+            }
+            long n = ((Number) item).longValue();
+            if (n < 1 || n > max) {
+                errors.add(error(pointer, "Values must be between 1 and " + max));
+                return;
+            }
+            if (n <= previous) {
+                errors.add(error(pointer, "Values must be strictly ascending"));
+                return;
+            }
+            previous = n;
+        }
     }
 
     // =========================================================================

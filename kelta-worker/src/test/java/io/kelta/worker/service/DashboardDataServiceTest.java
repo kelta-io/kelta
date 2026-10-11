@@ -362,6 +362,217 @@ class DashboardDataServiceTest {
     }
 
     // =========================================================================
+    // Chart aggregateOver: "groupSizes" — key-free group-size distribution
+    // =========================================================================
+
+    /** Rows whose {@code field} takes value {@code "g<i>"} exactly {@code sizes[i]} times. */
+    private static List<Map<String, Object>> rowsWithGroupSizes(String field, int... sizes) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (int g = 0; g < sizes.length; g++) {
+            for (int i = 0; i < sizes[g]; i++) {
+                rows.add(Map.of(field, "g" + g));
+            }
+        }
+        return rows;
+    }
+
+    /** Stubs the query engine to serve {@code rows} page by page, honouring the request's pagination. */
+    private void stubPagedQuery(CollectionDefinition collDef, List<Map<String, Object>> rows, long totalCount) {
+        when(queryEngine.executeQuery(eq(collDef), any())).thenAnswer(inv -> {
+            QueryRequest req = inv.getArgument(1);
+            Pagination p = req.pagination();
+            int from = Math.min((p.pageNumber() - 1) * p.pageSize(), rows.size());
+            int to = Math.min(from + p.pageSize(), rows.size());
+            return QueryResult.of(rows.subList(from, to), totalCount, p);
+        });
+    }
+
+    @Test
+    void shouldReportGroupSizeHistogramAndNearestRankSummary() {
+        CollectionDefinition collDef = CollectionDefinition.builder()
+            .name("tickets").displayName("Tickets")
+            .addField(FieldDefinition.string("assignee"))
+            .build();
+        when(collectionRegistry.get("tickets")).thenReturn(collDef);
+        List<Map<String, Object>> rows = rowsWithGroupSizes("assignee", 1, 4, 12);
+        stubPagedQuery(collDef, rows, rows.size());
+
+        WidgetResult result = service.executeWidget(buildComponent("comp-gs", "chart",
+            Map.of("collectionName", "tickets", "groupByField", "assignee",
+                   "aggregateOver", "groupSizes")), Map.of(), null);
+
+        assertEquals("chart", result.type());
+        assertEquals(true, result.data().get("groupSizes"));
+        assertEquals(false, result.data().get("truncated"));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> series = (List<Map<String, Object>>) result.data().get("series");
+        Map<String, Long> buckets = new LinkedHashMap<>();
+        for (Map<String, Object> point : series) {
+            assertFalse(point.containsKey("key"));
+            buckets.put((String) point.get("label"), ((Number) point.get("value")).longValue());
+            assertEquals(point.get("value"), point.get("count"));
+        }
+        assertEquals(List.of("1", "2\u20134", "5\u20139", "10\u201324", "25+"), new ArrayList<>(buckets.keySet()));
+        assertEquals(1L, buckets.get("1"));
+        assertEquals(1L, buckets.get("2\u20134"));
+        assertEquals(0L, buckets.get("5\u20139"));
+        assertEquals(1L, buckets.get("10\u201324"));
+        assertEquals(0L, buckets.get("25+"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) result.data().get("summary");
+        assertEquals(3, summary.get("groups"));
+        assertEquals(17, summary.get("records"));
+        // Ascending sizes [1, 4, 12]: p50 → rank ceil(1.5)=2 → 4; p90 → rank 3 → 12; p99 → 12.
+        assertEquals(Map.of("50", 4, "90", 12, "99", 12), summary.get("percentiles"));
+        assertEquals(12, summary.get("max"));
+        assertEquals(Map.of("10", 1L, "25", 0L), summary.get("countGroupsAtLeast"));
+    }
+
+    @Test
+    void shouldHonourConfiguredBucketBoundsPercentilesAndThresholds() {
+        CollectionDefinition collDef = CollectionDefinition.builder()
+            .name("tickets").displayName("Tickets")
+            .addField(FieldDefinition.string("assignee"))
+            .build();
+        when(collectionRegistry.get("tickets")).thenReturn(collDef);
+        List<Map<String, Object>> rows = rowsWithGroupSizes("assignee", 1, 2, 3, 8);
+        stubPagedQuery(collDef, rows, rows.size());
+
+        WidgetResult result = service.executeWidget(buildComponent("comp-gs-cfg", "chart",
+            Map.of("collectionName", "tickets", "groupByField", "assignee",
+                   "aggregateOver", "groupSizes", "bucketBounds", List.of(1, 3),
+                   "percentiles", List.of(25, 100), "sizeThresholds", List.of(3))), Map.of(), null);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> series = (List<Map<String, Object>>) result.data().get("series");
+        assertEquals("1\u20132", series.get(0).get("label"));
+        assertEquals(2L, series.get(0).get("value"));
+        assertEquals("3+", series.get(1).get("label"));
+        assertEquals(2L, series.get(1).get("value"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) result.data().get("summary");
+        assertEquals(Map.of("25", 1, "100", 8), summary.get("percentiles"));
+        assertEquals(Map.of("3", 2L), summary.get("countGroupsAtLeast"));
+    }
+
+    @Test
+    void shouldNeverEmitOrResolveLookupGroupValuesInGroupSizesMode() throws Exception {
+        CollectionDefinition tasksDef = CollectionDefinition.builder()
+            .name("tasks")
+            .displayName("Tasks")
+            .addField(FieldDefinition.lookup("project", "projects", "tasks"))
+            .build();
+        CollectionDefinition projectsDef = CollectionDefinition.builder()
+            .name("projects")
+            .displayName("Projects")
+            .addField(FieldDefinition.string("name"))
+            .displayFieldName("name")
+            .build();
+        when(collectionRegistry.get("tasks")).thenReturn(tasksDef);
+        when(collectionRegistry.get("projects")).thenReturn(projectsDef);
+        when(lifecycleManager.getDisplayFieldName("projects")).thenReturn("name");
+
+        List<Map<String, Object>> taskRows = List.of(
+            Map.of("project", "proj-1"), Map.of("project", "proj-1"), Map.of("project", "proj-2"));
+        stubPagedQuery(tasksDef, taskRows, taskRows.size());
+        when(queryEngine.executeQuery(eq(projectsDef), any())).thenReturn(QueryResult.of(
+            List.of(Map.of("id", "proj-1", "name", "Apollo"), Map.of("id", "proj-2", "name", "Zeus")),
+            2L, new Pagination(1, 2)));
+
+        WidgetResult result = service.executeWidget(buildComponent("comp-gs-lk", "chart",
+            Map.of("collectionName", "tasks", "groupByField", "project",
+                   "aggregateOver", "groupSizes")), Map.of(), null);
+
+        String serialized = objectMapper.writeValueAsString(result.toMap());
+        for (String leaked : List.of("proj-1", "proj-2", "Apollo", "Zeus")) {
+            assertFalse(serialized.contains(leaked), "serialized result leaked " + leaked + ": " + serialized);
+        }
+        // resolveReferenceGroupLabels' only side effects: display-field lookup and the target query.
+        verify(lifecycleManager, never()).getDisplayFieldName(anyString());
+        verify(collectionRegistry, never()).get("projects");
+        verify(queryEngine, never()).executeQuery(eq(projectsDef), any());
+    }
+
+    @Test
+    void shouldPageThroughAllMatchingRecordsInGroupSizesMode() {
+        CollectionDefinition collDef = CollectionDefinition.builder()
+            .name("orders").displayName("Orders")
+            .addField(FieldDefinition.string("customer"))
+            .build();
+        when(collectionRegistry.get("orders")).thenReturn(collDef);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (int i = 0; i < 1_500; i++) {
+            rows.add(Map.of("customer", "c" + (i % 300)));
+        }
+        stubPagedQuery(collDef, rows, rows.size());
+
+        WidgetResult result = service.executeWidget(buildComponent("comp-gs-page", "chart",
+            Map.of("collectionName", "orders", "groupByField", "customer",
+                   "aggregateOver", "groupSizes")), Map.of(), null);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) result.data().get("summary");
+        assertEquals(1500, summary.get("records"));
+        assertEquals(300, summary.get("groups"));
+        assertEquals(false, result.data().get("truncated"));
+        verify(queryEngine, times(2)).executeQuery(eq(collDef), any());
+        verify(queryEngine).executeQuery(eq(collDef), argThat(req ->
+            req.pagination().pageNumber() == 2 && req.pagination().pageSize() == Pagination.MAX_PAGE_SIZE));
+    }
+
+    @Test
+    void shouldStopAtRowCapAndFlagTruncatedInGroupSizesMode() {
+        CollectionDefinition collDef = CollectionDefinition.builder()
+            .name("orders").displayName("Orders")
+            .addField(FieldDefinition.string("customer"))
+            .build();
+        when(collectionRegistry.get("orders")).thenReturn(collDef);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (int i = 0; i < 60_000; i++) {
+            rows.add(Map.of("customer", "c" + (i % 1000)));
+        }
+        stubPagedQuery(collDef, rows, rows.size());
+
+        WidgetResult result = service.executeWidget(buildComponent("comp-gs-cap", "chart",
+            Map.of("collectionName", "orders", "groupByField", "customer",
+                   "aggregateOver", "groupSizes")), Map.of(), null);
+
+        assertEquals(true, result.data().get("truncated"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) result.data().get("summary");
+        assertEquals(DashboardDataService.GROUP_SIZES_ROW_CAP, summary.get("records"));
+        verify(queryEngine, times(DashboardDataService.GROUP_SIZES_ROW_CAP / Pagination.MAX_PAGE_SIZE))
+            .executeQuery(eq(collDef), any());
+    }
+
+    @Test
+    void shouldRejectUnknownAggregateOverAtExecution() {
+        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        when(collectionRegistry.get("cases")).thenReturn(collDef);
+
+        Map<String, Object> component = buildComponent("comp-gs-bad", "chart",
+            Map.of("collectionName", "cases", "groupByField", "status", "aggregateOver", "groupNames"));
+
+        assertThrows(WidgetExecutionException.class,
+            () -> service.executeWidget(component, Map.of(), null));
+        verify(queryEngine, never()).executeQuery(any(), any());
+    }
+
+    @Test
+    void shouldStillRejectMaskedGroupByInGroupSizesMode() {
+        withMaskedSsn(true);
+        Map<String, Object> component = buildComponent("comp-gs-mask", "chart",
+            Map.of("collectionName", "people", "groupByField", "ssn", "aggregateOver", "groupSizes"));
+
+        assertThrows(WidgetExecutionException.class,
+            () -> service.executeWidget(component, Map.of(), MASKED_VIEWER));
+        verify(queryEngine, never()).executeQuery(any(), any());
+    }
+
+    // =========================================================================
     // Table widget tests
     // =========================================================================
 
