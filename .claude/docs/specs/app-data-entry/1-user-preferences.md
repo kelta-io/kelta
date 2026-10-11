@@ -24,8 +24,11 @@ Server-persisted per-user UI preferences: the `user-ui-preferences` system colle
 `usePreferenceValue` store seam. `useSavedViews` becomes server-backed (prefType
 `list-view`, prefKey = collection) with the legacy localStorage key as warm cache, offline
 fallback, and one-time migration source — saved views finally follow the user across
-browsers. **Not delivered:** favorites/recents migration (AppContext keeps localStorage —
-deliberate scope cut, see §8), SavedView v2 fields (slice 2), row-level read policy
+browsers. **Favorites delivered later (2026-10-11, KLT-481):** `AppContext` backs favorites
+with `usePreferenceValue('favorites', 'default', { localKey: favoritesStorageKey(scope) })`
+— server wins once loaded, one-time push of local favorites when the row is absent, invalid
+server entries dropped, per-tenant localStorage as warm cache and offline fallback. Recents
+stay local by decision (see §8). **Not delivered:** SavedView v2 fields (slice 2), row-level read policy
 (documented tenant-readable gap — closed by the ownership metadata above).
 
 ## 2. UI samples
@@ -83,13 +86,21 @@ memory.
 
 ## 8. Risks & open questions
 
-- **Favorites/recents deferred**: `AppContext` is a load-bearing provider consumed
-  app-wide; migrating it is mechanical but belongs in its own small PR rather than
-  padding a security-typed one. The store seam is ready for it.
+- **Favorites shipped separately (KLT-481); recents stay local by decision.** Favorites
+  moved to the store in their own PR (prefType `favorites`, prefKey `default`, one row per
+  user holding the array). The sync only mounts for a signed-in user: `AppContextProvider`
+  also wraps the login route, and resolving `/api/me/identity` there would 401 and
+  redirect the login page to itself. Server writes start only after the row has loaded, so
+  an early toggle cannot create a second row; until then it writes localStorage and the
+  server value wins on load. **Recents are not migrated**: `addRecentItem` runs on every
+  record visit, so server persistence would cost a preference write per navigation for a
+  list that is a convenience cache, not user-authored data. They remain per-tenant
+  localStorage (`kelta_recent_items:<scope>`) and do not follow the user across browsers.
 - **Rows are tenant-readable** (generic-route read gap class) — preferences are
   low-sensitivity but saved-view filters can embed data values; added to the existing
   concerns entry; row-level read policy is the shared v2 fix.
 - **StrictMode double-invoke** can fire `prefSave` twice from a mutation updater — the
-  save is an idempotent upsert; harmless.
+  save is an idempotent upsert; harmless. `AppContext.toggleFavorite` avoids it outright:
+  it computes the next array and calls `setFavorites` and `save` outside any updater.
 - **Concurrent browsers last-write-wins** on the whole view array (single row per
   collection) — acceptable for preferences; no ETag plumbing in v1.

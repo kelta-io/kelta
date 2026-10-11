@@ -22,7 +22,7 @@ Read this parent first; every child references it.
 | Slice | Child spec | Axis |
 |-------|-----------|------|
 | 0 — This spec + doc wiring | (this file) | foundation (docs) |
-| 1 — `user-ui-preferences` + server-side views | `1-user-preferences.md` — **SHIPPED 2026-07-08** (favorites/recents migration deferred to its own PR) | **backend+FE, security** |
+| 1 — `user-ui-preferences` + server-side views | `1-user-preferences.md` — **SHIPPED 2026-07-08**; favorites server-backed 2026-10-11 (KLT-481), recents stay localStorage by decision (§8) | **backend+FE, security** |
 | 2 — List power pack | `2-list-power.md` — **SHIPPED 2026-07-08** (FE-only: the parent's "multi-sort needs a backend extension" claim was wrong — the server already accepts `sort=a,-b` end-to-end) | **columns/sort/density (FE)** |
 | 3 — Page grouping + aggregates | `3-grouping.md` — **SHIPPED 2026-07-08** (client-side page grouping, collapsible headers, count + numeric sums; group field prepended to server sort) | **list UX (FE)** |
 | 4 — Main-list mass edit | `4-mass-edit.md` — **SHIPPED 2026-07-08** (bulk-job submit/poll extracted to shared `utils/bulkUpdate.ts`; RelatedList refactored onto it) | **bulk UX (FE)** |
