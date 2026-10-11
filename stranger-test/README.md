@@ -9,5 +9,8 @@ they got stuck, if anywhere) checked into this directory.
 **Status: pending.** This needs an actual human unfamiliar with the codebase; it cannot
 be produced by an automated task. No transcript is included here — do not fabricate one.
 
+How to run it — who qualifies, the handoff, observer rules, recording, pass criteria and
+redaction — is in [PROTOCOL.md](PROTOCOL.md).
+
 Once run, add the transcript (or a link to a recording) alongside this file and update
 this status.
