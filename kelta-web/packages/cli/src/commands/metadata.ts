@@ -1,11 +1,14 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { AxiosInstance, AxiosResponse } from 'axios';
 import { z } from 'zod';
+import { parseList } from '../query.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
 
 export interface ExportOptions {
   name?: string;
   version?: string;
+  /** Collection API names; the server adds their rules, layouts, triggered flows and picklists. */
+  collections?: string[];
   output?: string;
 }
 
@@ -14,13 +17,14 @@ export type ConflictMode = 'skip' | 'overwrite';
 /**
  * Export this tenant's metadata as a package file (GitOps-friendly).
  * POST /api/packages/export → write the returned package JSON to disk.
- * Name and version are sent only when given; an empty body means "the whole
- * tenant, named after it" and is the default. Returns the path written.
+ * Name, version and collections are sent only when given; an empty body means
+ * "the whole tenant, named after it" and is the default. Returns the path written.
  */
 export async function runExport(client: AxiosInstance, opts: ExportOptions): Promise<string> {
-  const body: Record<string, string> = {};
+  const body: Record<string, unknown> = {};
   if (opts.name) body.name = opts.name;
   if (opts.version) body.version = opts.version;
+  if (opts.collections?.length) body.collectionNames = opts.collections;
   const res = await client.post('/api/packages/export', body, { responseType: 'arraybuffer' });
   if (res.status !== 200) {
     throw new Error(`Export failed (status ${String(res.status)})`);
@@ -80,17 +84,25 @@ const exportCommand = defineCommand({
   options: [
     { flag: '-n, --name <name>', description: 'Package name (default: the tenant slug)' },
     { flag: '-v, --version <version>', description: 'Package version (default: 1.0.0)' },
+    {
+      flag: '--collections <list>',
+      description:
+        'Collection names, comma-separated: export only these, with their validation rules, ' +
+        'page layouts, record-triggered flows and global picklists (default: the whole tenant)',
+    },
     { flag: '-o, --out <file>', description: 'Output file (default: the name the server returns)' },
   ],
   input: z.object({
     name: z.string().min(1).optional(),
     version: z.string().min(1).optional(),
+    collections: z.string().min(1).optional(),
     out: z.string().optional(),
   }),
   handler: async (ctx, input) => {
     const path = await runExport(ctx.client.getAxiosInstance(), {
       name: input.name,
       version: input.version,
+      collections: input.collections ? parseList(input.collections) : undefined,
       output: input.out,
     });
     return { data: { file: path }, message: `Exported package to ${path}` };

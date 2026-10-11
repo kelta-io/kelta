@@ -367,4 +367,42 @@ public class PackageRepository {
                 params
         );
     }
+
+    // ------------------------------------------------------------------
+    // Collection-scoped export: what hangs off a set of collections
+    // ------------------------------------------------------------------
+
+    public List<String> findValidationRuleIdsByCollectionIds(String tenantId, List<String> collectionIds) {
+        return findIdsIn("SELECT id FROM validation_rule WHERE tenant_id = ? AND collection_id IN (%s)",
+                tenantId, collectionIds);
+    }
+
+    public List<String> findPageLayoutIdsByCollectionIds(String tenantId, List<String> collectionIds) {
+        return findIdsIn("SELECT id FROM page_layout WHERE tenant_id = ? AND collection_id IN (%s)",
+                tenantId, collectionIds);
+    }
+
+    /** Flows whose {@code trigger_config.collection} names one of the collections. */
+    public List<String> findFlowIdsByTriggerCollections(String tenantId, List<String> collectionNames) {
+        return findIdsIn("SELECT id FROM flow WHERE tenant_id = ? "
+                + "AND trigger_config->>'collection' IN (%s)", tenantId, collectionNames);
+    }
+
+    /** Global picklists the collections' fields are bound to via {@code fieldTypeConfig.globalPicklistId}. */
+    public List<String> findGlobalPicklistIdsReferencedByCollections(String tenantId, List<String> collectionIds) {
+        return findIdsIn("SELECT DISTINCT gp.id FROM field f "
+                + "JOIN collection c ON f.collection_id = c.id "
+                + "JOIN global_picklist gp ON gp.tenant_id = c.tenant_id "
+                + "AND gp.id = f.field_type_config->>'globalPicklistId' "
+                + "WHERE c.tenant_id = ? AND f.collection_id IN (%s)", tenantId, collectionIds);
+    }
+
+    private List<String> findIdsIn(String sqlTemplate, String tenantId, List<String> values) {
+        if (values.isEmpty()) return List.of();
+        String placeholders = String.join(",", values.stream().map(i -> "?").toList());
+        Object[] params = new Object[values.size() + 1];
+        params[0] = tenantId;
+        for (int i = 0; i < values.size(); i++) params[i + 1] = values.get(i);
+        return jdbcTemplate.queryForList(sqlTemplate.formatted(placeholders), String.class, params);
+    }
 }

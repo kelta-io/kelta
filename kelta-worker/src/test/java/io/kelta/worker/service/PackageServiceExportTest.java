@@ -3,12 +3,15 @@ package io.kelta.worker.service;
 import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.*;
 import org.postgresql.util.PGobject;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -248,6 +251,171 @@ class PackageServiceExportTest {
         var value = items.stream().filter(i -> "PICKLIST_VALUE".equals(i.get("type")))
                 .findFirst().orElseThrow();
         assertThat((Map<String, Object>) value.get("data")).containsEntry("color", "#22c55e");
+    }
+
+    /**
+     * Two app collections ({@code sites}, {@code inspections}) share the tenant with
+     * an unrelated {@code leads} collection that has its own layout, rule and flow,
+     * plus a UI page and menu. The whole-tenant listings would return all of them.
+     */
+    private void stubTenantWithTwoApps() {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.of("acme"));
+        when(repository.findAllIds("ui_page", TENANT)).thenReturn(List.of("up1"));
+        when(repository.findAllIds("ui_menu", TENANT)).thenReturn(List.of("um1"));
+        when(repository.findAllIds("flow", TENANT)).thenReturn(List.of("f-insp", "f-leads"));
+        when(repository.findAllIds("page_layout", TENANT)).thenReturn(List.of("pl-sites", "pl-leads"));
+        when(repository.findAllIds("validation_rule", TENANT)).thenReturn(List.of("vr-insp", "vr-leads"));
+        when(repository.findAllIds("global_picklist", TENANT)).thenReturn(List.of("gp-status", "gp-lead"));
+        when(jdbcTemplate.queryForList(contains("FROM collection"), eq(String.class), eq(TENANT)))
+                .thenReturn(List.of("c-sites", "c-insp", "c-leads"));
+
+        List<String> appIds = List.of("c-sites", "c-insp");
+        when(repository.findCollectionsByNames(TENANT, List.of("sites", "inspections"))).thenReturn(List.of(
+                row("id", "c-sites", "name", "sites", "system_collection", false),
+                row("id", "c-insp", "name", "inspections", "system_collection", false)));
+        when(repository.findValidationRuleIdsByCollectionIds(TENANT, appIds)).thenReturn(List.of("vr-insp"));
+        when(repository.findPageLayoutIdsByCollectionIds(TENANT, appIds)).thenReturn(List.of("pl-sites"));
+        when(repository.findFlowIdsByTriggerCollections(TENANT, List.of("sites", "inspections")))
+                .thenReturn(List.of("f-insp"));
+        when(repository.findGlobalPicklistIdsReferencedByCollections(TENANT, appIds))
+                .thenReturn(List.of("gp-status"));
+
+        when(repository.findCollectionsByIds(eq(TENANT), anyList())).thenAnswer(inv -> {
+            List<String> ids = inv.getArgument(1);
+            return ids.stream().map(id -> row("id", id, "name", switch (id) {
+                case "c-sites" -> "sites";
+                case "c-insp" -> "inspections";
+                default -> "leads";
+            })).toList();
+        });
+        when(repository.findFieldsWithNamesByCollectionIds(TENANT, appIds)).thenReturn(List.of(
+                row("id", "fld-site", "name", "site", "type", "LOOKUP", "collection_name", "inspections",
+                        "reference_collection_name", "sites"),
+                row("id", "fld-status", "name", "status", "type", "PICKLIST",
+                        "collection_name", "inspections", "global_picklist_name", "inspection-status"),
+                row("id", "fld-grade", "name", "grade", "type", "PICKLIST", "collection_name", "sites")));
+        when(repository.findFieldPicklistValues(TENANT, appIds)).thenReturn(List.of(
+                row("id", "pv-a", "value", "A", "picklist_source_type", "FIELD",
+                        "field_name", "grade", "collection_name", "sites")));
+        when(repository.findGlobalPicklistsByIds(TENANT, List.of("gp-status"))).thenReturn(List.of(
+                row("id", "gp-status", "name", "inspection-status")));
+        when(repository.findGlobalPicklistValues(TENANT, List.of("gp-status"))).thenReturn(List.of(
+                row("id", "pv-open", "value", "open", "picklist_source_type", "GLOBAL",
+                        "picklist_name", "inspection-status")));
+        when(repository.findValidationRulesByIds(TENANT, List.of("vr-insp"))).thenReturn(List.of(
+                row("id", "vr-insp", "name", "require_site", "collection_name", "inspections")));
+        when(repository.findPageLayoutsByIds(TENANT, List.of("pl-sites"))).thenReturn(List.of(
+                row("id", "pl-sites", "name", "Site Layout", "collection_name", "sites")));
+        when(repository.findLayoutSectionsByLayoutIds(TENANT, List.of("pl-sites"))).thenReturn(List.of(
+                row("id", "ls1", "name", "Details", "layout_name", "Site Layout", "collection_name", "sites")));
+        when(repository.findLayoutFieldsByLayoutIds(TENANT, List.of("pl-sites"))).thenReturn(List.of(
+                row("id", "lf1", "name", "grade", "layout_name", "Site Layout", "field_name", "grade")));
+        when(repository.findLayoutRelatedListsByLayoutIds(TENANT, List.of("pl-sites"))).thenReturn(List.of(
+                row("id", "rl1", "name", "inspections", "layout_name", "Site Layout",
+                        "related_collection_name", "inspections")));
+        when(repository.findFlowsByIds(TENANT, List.of("f-insp"))).thenReturn(List.of(
+                row("id", "f-insp", "name", "notify_on_inspection", "flow_type", "RECORD_TRIGGERED")));
+        // What a whole-tenant export would have pulled in on top.
+        when(repository.findValidationRulesByIds(TENANT, List.of("vr-insp", "vr-leads"))).thenReturn(List.of(
+                row("id", "vr-insp", "name", "require_site"), row("id", "vr-leads", "name", "require_email")));
+        when(repository.findPageLayoutsByIds(TENANT, List.of("pl-sites", "pl-leads"))).thenReturn(List.of(
+                row("id", "pl-sites", "name", "Site Layout"), row("id", "pl-leads", "name", "Lead Layout")));
+        when(repository.findFlowsByIds(TENANT, List.of("f-insp", "f-leads"))).thenReturn(List.of(
+                row("id", "f-insp", "name", "notify_on_inspection"), row("id", "f-leads", "name", "assign_lead")));
+        when(repository.findUiPagesByIds(TENANT, List.of("up1"))).thenReturn(List.of(
+                row("id", "up1", "name", "home")));
+        when(repository.findUiMenusByIds(TENANT, List.of("um1"))).thenReturn(List.of(
+                row("id", "um1", "name", "main")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> typedNames(Map<String, Object> pkg) {
+        return ((List<Map<String, Object>>) pkg.get("items")).stream()
+                .map(i -> {
+                    var data = (Map<String, Object>) i.get("data");
+                    return i.get("type") + ":" + data.getOrDefault("name", data.get("value"));
+                })
+                .toList();
+    }
+
+    @Test
+    @DisplayName("collectionNames exports those collections and what hangs off them, nothing else (BUILD-LOG error 6)")
+    void collectionNamesScopesToCollectionsAndDependents() {
+        stubTenantWithTwoApps();
+
+        var pkg = service.exportPackage(TENANT,
+                Map.of("collectionNames", List.of("sites", "inspections")), false);
+
+        assertThat(typedNames(pkg)).containsExactlyInAnyOrder(
+                "COLLECTION:sites", "COLLECTION:inspections",
+                "FIELD:site", "FIELD:status", "FIELD:grade",
+                "PICKLIST_VALUE:A", "GLOBAL_PICKLIST:inspection-status", "PICKLIST_VALUE:open",
+                "VALIDATION_RULE:require_site",
+                "PAGE_LAYOUT:Site Layout", "LAYOUT_SECTION:Details", "LAYOUT_FIELD:grade",
+                "LAYOUT_RELATED_LIST:inspections",
+                "FLOW:notify_on_inspection");
+        assertThat(typedNames(pkg)).doesNotContain(
+                "COLLECTION:leads", "PAGE_LAYOUT:Lead Layout", "VALIDATION_RULE:require_email",
+                "FLOW:assign_lead", "UI_PAGE:home", "UI_MENU:main");
+        verify(repository, never()).findAllIds(anyString(), anyString());
+        verify(repository).findUiPagesByIds(TENANT, List.of());
+        verify(repository).findUiMenusByIds(TENANT, List.of());
+    }
+
+    @Test
+    @DisplayName("an explicit dependent id list wins over the collectionNames fill")
+    void explicitFlowIdsWinOverCollectionNames() {
+        stubTenantWithTwoApps();
+
+        var pkg = service.exportPackage(TENANT,
+                Map.of("collectionNames", List.of("sites", "inspections"), "flowIds", List.of()), false);
+
+        assertThat(typedNames(pkg)).noneMatch(n -> n.startsWith("FLOW:"));
+        assertThat(typedNames(pkg)).contains("COLLECTION:sites", "VALIDATION_RULE:require_site");
+        verify(repository, never()).findFlowIdsByTriggerCollections(anyString(), anyList());
+    }
+
+    @Test
+    @DisplayName("collectionNames unions with explicit collectionIds")
+    void collectionNamesUnionWithCollectionIds() {
+        stubTenantWithTwoApps();
+
+        var options = service.resolveExportOptions(TENANT,
+                Map.of("collectionNames", List.of("sites", "inspections"),
+                        "collectionIds", List.of("c-leads", "c-sites")));
+
+        assertThat(options.get("collectionIds")).isEqualTo(List.of("c-leads", "c-sites", "c-insp"));
+    }
+
+    @Test
+    @DisplayName("an unknown or system collection name is a 400 naming it")
+    void unknownCollectionNameIsBadRequest() {
+        stubTenantWithTwoApps();
+        when(repository.findCollectionsByNames(TENANT, List.of("sites", "nope", "users"))).thenReturn(List.of(
+                row("id", "c-sites", "name", "sites", "system_collection", false),
+                row("id", "c-users", "name", "users", "system_collection", true)));
+
+        assertThatThrownBy(() -> service.exportPackage(TENANT,
+                Map.of("collectionNames", List.of("sites", "nope", "users"))))
+                .isInstanceOfSatisfying(ResponseStatusException.class, e -> {
+                    assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(e.getReason()).contains("nope").contains("users").doesNotContain("sites");
+                });
+        verify(repository, never()).save(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("an empty options map still exports the whole tenant, other apps included")
+    void emptyOptionsStillExportsWholeTenant() {
+        stubTenantWithTwoApps();
+
+        var pkg = service.exportPackage(TENANT, Map.of(), false);
+
+        assertThat(typedNames(pkg)).contains(
+                "COLLECTION:sites", "COLLECTION:inspections", "COLLECTION:leads",
+                "PAGE_LAYOUT:Lead Layout", "VALIDATION_RULE:require_email", "FLOW:assign_lead",
+                "UI_PAGE:home", "UI_MENU:main");
+        verify(repository, never()).findCollectionsByNames(anyString(), anyList());
     }
 
     @Test
