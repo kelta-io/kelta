@@ -134,9 +134,14 @@ export function imageDrift(release: Image[], compose: Image[]): string[] {
   return errors;
 }
 
-export type Commit = { sha: string; subject: string };
+export type Commit = { sha: string; subject: string; body?: string };
 
 const CONVENTIONAL = /^(\w+)(\([^)]*\))?(!)?:\s*(.+)$/;
+// A squash merge's body lists the PR's commits as `* type(scope): …`.
+const BODY_CONVENTIONAL = /^\*?\s*(\w+)(\([^)]*\))?(!)?:/;
+const BREAKING_FOOTER = /^\*?\s*BREAKING[ -]CHANGE:\s*(.+)$/;
+// Only these count as a type, so a trailer like `Task: KLT-480` never does.
+const KNOWN_TYPES = new Set(['feat', 'fix', 'perf', 'refactor', 'docs', 'test', 'ci', 'build', 'chore', 'security', 'revert']);
 
 const SECTIONS = [
   { key: 'feat', title: 'Features' },
@@ -144,28 +149,64 @@ const SECTIONS = [
   { key: 'other', title: 'Other changes' },
 ] as const;
 
+export const MIGRATIONS_DIR = 'kelta-worker/src/main/resources/db/migration/';
+
 // GitHub rejects a release body over 125,000 characters; the first release covers the
 // whole history, so each section is capped and the rest is left to the compare link.
 export const MAX_PER_SECTION = 250;
+
+function knownType(m: RegExpExecArray | null): { type: string; bang: boolean } | undefined {
+  const type = m?.[1]?.toLowerCase();
+  return m && type && KNOWN_TYPES.has(type) ? { type, bang: Boolean(m[3]) } : undefined;
+}
+
+// The subject's type when it has a known one, else the first conventional body line's: the
+// `<KEY>: <title> (#n)` squash subjects carry their type only in the body.
+function classify(c: Commit): { type: string; breaking: boolean; footers: string[] } {
+  const lines = (c.body ?? '').split('\n').map((l) => l.trim());
+  const footers = lines.flatMap((l) => BREAKING_FOOTER.exec(l)?.[1] ?? []);
+  const bodyTypes = lines.flatMap((l) => knownType(BODY_CONVENTIONAL.exec(l)) ?? []);
+  const own = knownType(CONVENTIONAL.exec(c.subject)) ?? bodyTypes[0];
+  const bang = own?.bang || bodyTypes.some((t) => t.bang);
+  return { type: own?.type ?? 'other', breaking: bang || footers.length > 0, footers };
+}
 
 export function renderNotes(opts: {
   commits: Commit[];
   repo: string;
   previousTag: string;
   ref: string;
+  migrations?: string[];
 }): string {
   const groups: Record<string, string[]> = { feat: [], fix: [], other: [] };
+  const breakingChanges: string[] = [];
   for (const c of opts.commits) {
-    const m = CONVENTIONAL.exec(c.subject);
-    const type = m?.[1]?.toLowerCase();
+    const { type, breaking, footers } = classify(c);
     const key = type === 'feat' || type === 'fix' ? type : 'other';
-    const breaking = m?.[3] ? '**BREAKING** ' : '';
-    groups[key].push(`- ${breaking}${c.subject} (${c.sha.slice(0, 7)})`);
+    const entry = `${c.subject} (${c.sha.slice(0, 7)})`;
+    groups[key].push(`- ${breaking ? '**BREAKING** ' : ''}${entry}`);
+    if (breaking) {
+      breakingChanges.push(`- ${entry}${footers.length > 0 ? `: ${footers.join('; ')}` : ''}`);
+    }
   }
 
   const range = opts.previousTag ? `since ${opts.previousTag}` : 'since the start of the history';
   const n = opts.commits.length;
   const lines = [`${n} ${n === 1 ? 'commit' : 'commits'} ${range}.`, ''];
+  if (breakingChanges.length > 0) {
+    lines.push('## Breaking changes', '', ...breakingChanges, '');
+  }
+  const migrations = opts.migrations ?? [];
+  if (migrations.length > 0) {
+    lines.push(
+      '## Database migrations',
+      '',
+      ...migrations.map((f) => `- \`${f.split('/').pop()}\``),
+      '',
+      `Back up before upgrading; Flyway does not run down-migrations. See [UPGRADING.md](https://github.com/${opts.repo}/blob/${opts.ref}/UPGRADING.md) or https://kelta.io/docs/deploy/upgrading/.`,
+      '',
+    );
+  }
   for (const { key, title } of SECTIONS) {
     const entries = groups[key];
     if (entries.length === 0) continue;

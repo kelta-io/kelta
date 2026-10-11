@@ -170,6 +170,10 @@ describe('renderNotes', () => {
       [
         '5 commits since v0.1.0.',
         '',
+        '## Breaking changes',
+        '',
+        '- refactor(sdk)!: remove the legacy roles APIs (#1632) (3333333)',
+        '',
         '## Features',
         '',
         '- feat(ui): export flows from Packages (#1633) (1111111)',
@@ -202,5 +206,97 @@ describe('renderNotes', () => {
     const notes = renderNotes({ commits: many, repo: 'kelta-io/kelta', previousTag: '', ref: 'v0.1.0' });
     assert.equal(notes.split('\n').filter((l) => l.startsWith('- chore:')).length, MAX_PER_SECTION);
     assert.match(notes, /- …and 7 more/);
+  });
+
+  const at = (notes: string, title: string): string =>
+    notes.split('## ').find((s) => s.startsWith(title)) ?? '';
+
+  it('types a squash-merge subject from its body and keeps the subject text', () => {
+    const notes = renderNotes({
+      commits: [{ sha: '6666666ffff', subject: 'KLT-1: Do a thing (#9)', body: '* fix(x): do a thing\n\nTask: KLT-1' }],
+      repo: 'kelta-io/kelta',
+      previousTag: 'v0.1.0',
+      ref: 'v0.1.1',
+    });
+    assert.match(at(notes, 'Bug fixes'), /^- KLT-1: Do a thing \(#9\) \(6666666\)$/m);
+    assert.doesNotMatch(notes, /## Other changes|## Breaking changes/);
+  });
+
+  it('takes the first conventional body line, not a later one', () => {
+    const notes = renderNotes({
+      commits: [
+        {
+          sha: '7777777aaaa',
+          subject: 'KLT-2: Add a widget (#10)',
+          body: 'Adds the widget.\n\n* feat(ui): add a widget\n* chore: tidy imports\n\nTask: KLT-2',
+        },
+      ],
+      repo: 'kelta-io/kelta',
+      previousTag: 'v0.1.0',
+      ref: 'v0.1.1',
+    });
+    assert.match(at(notes, 'Features'), /^- KLT-2: Add a widget \(#10\) \(7777777\)$/m);
+    assert.doesNotMatch(notes, /## Other changes/);
+  });
+
+  it('leaves a subject with no conventional body line, or only a trailer, under Other changes', () => {
+    const notes = renderNotes({
+      commits: [
+        { sha: '8888888aaaa', subject: 'KLT-3: Rename a page (#11)', body: 'Just prose here.\nNo prefix.' },
+        { sha: '9999999aaaa', subject: 'KLT-4: Move a file (#12)', body: 'Task: KLT-1' },
+      ],
+      repo: 'kelta-io/kelta',
+      previousTag: 'v0.1.0',
+      ref: 'v0.1.1',
+    });
+    const other = at(notes, 'Other changes');
+    assert.match(other, /^- KLT-3: Rename a page \(#11\) \(8888888\)$/m);
+    assert.match(other, /^- KLT-4: Move a file \(#12\) \(9999999\)$/m);
+    assert.doesNotMatch(notes, /## Features|## Bug fixes/);
+  });
+
+  it('lists BREAKING CHANGE footers and `!` types under Breaking changes', () => {
+    const notes = renderNotes({
+      commits: [
+        { sha: 'aaaaaaa1111', subject: 'KLT-5: Drop an env var (#13)', body: '* chore(ops): drop X\n\nBREAKING CHANGE: drops the X env var' },
+        { sha: 'bbbbbbb2222', subject: 'feat!: new auth flow (#14)' },
+        { sha: 'ccccccc3333', subject: 'KLT-6: Rework the API (#15)', body: '* refactor(api)!: rework the API' },
+        { sha: 'ddddddd4444', subject: 'fix: not breaking (#16)' },
+      ],
+      repo: 'kelta-io/kelta',
+      previousTag: 'v0.1.0',
+      ref: 'v0.1.1',
+    });
+    assert.match(notes, /^4 commits since v0\.1\.0\.\n\n## Breaking changes\n/);
+    const breaking = at(notes, 'Breaking changes');
+    assert.match(breaking, /^- KLT-5: Drop an env var \(#13\) \(aaaaaaa\): drops the X env var$/m);
+    assert.match(breaking, /^- feat!: new auth flow \(#14\) \(bbbbbbb\)$/m);
+    assert.match(breaking, /^- KLT-6: Rework the API \(#15\) \(ccccccc\)$/m);
+    assert.doesNotMatch(breaking, /not breaking/);
+    assert.match(at(notes, 'Features'), /^- \*\*BREAKING\*\* feat!: new auth flow/m);
+    assert.match(at(notes, 'Other changes'), /^- \*\*BREAKING\*\* KLT-5: Drop an env var/m);
+  });
+
+  it('lists the migrations a release adds with a pointer to the upgrade guide', () => {
+    const notes = renderNotes({
+      commits: commits.slice(1, 2),
+      repo: 'kelta-io/kelta',
+      previousTag: 'v0.1.0',
+      ref: 'v0.1.1',
+      migrations: [
+        'kelta-worker/src/main/resources/db/migration/V2__add_widgets.sql',
+        'kelta-worker/src/main/resources/db/migration/V3__index_widgets.sql',
+      ],
+    });
+    const section = at(notes, 'Database migrations');
+    assert.match(section, /^- `V2__add_widgets\.sql`$/m);
+    assert.match(section, /^- `V3__index_widgets\.sql`$/m);
+    assert.match(section, /Back up before upgrading; Flyway does not run down-migrations/);
+    assert.match(section, /UPGRADING\.md/);
+  });
+
+  it('omits the migrations section when the release adds none', () => {
+    const notes = renderNotes({ commits: commits.slice(1, 2), repo: 'kelta-io/kelta', previousTag: 'v0.1.0', ref: 'v0.1.1', migrations: [] });
+    assert.doesNotMatch(notes, /## Database migrations/);
   });
 });

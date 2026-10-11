@@ -3,10 +3,10 @@
 //   node .github/release/release.ts check-images <build.json> <base.json>  → GITHUB_OUTPUT: images; exit 1 on drift
 //     build.json = docker-compose.yml + docker-compose.build.yml + docker-compose.jvm.yml (what the release builds)
 //     base.json  = docker-compose.yml alone (what the quickstart pulls)
-//   node .github/release/release.ts notes <ref> <out.md>    → release notes since the previous v* tag
+//   node .github/release/release.ts notes <ref> <out.md>    → release notes + added migrations since the previous v* tag
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { composeBuiltImages, imageDrift, pinDrift, renderNotes, resolvePlan } from './lib.ts';
+import { MIGRATIONS_DIR, composeBuiltImages, imageDrift, pinDrift, renderNotes, resolvePlan } from './lib.ts';
 import type { Commit, Image } from './lib.ts';
 
 function output(values: Record<string, string | boolean>): void {
@@ -62,16 +62,24 @@ switch (command) {
   case 'notes': {
     const [ref, out] = args;
     const prev = previousTag(ref);
-    const log = git('log', '--no-merges', '--format=%H%x1f%s', prev ? `${prev}..${ref}` : ref);
+    const range = prev ? `${prev}..${ref}` : ref;
+    // Bodies span lines, so records end in \x1e (RS) and fields split on \x1f (US).
+    const log = git('log', '--no-merges', '--format=%H%x1f%s%x1f%b%x1e', range);
     const commits: Commit[] = log
-      ? log.split('\n').map((line) => {
-          const [sha, subject] = line.split('\x1f');
-          return { sha, subject };
-        })
+      .split('\x1e')
+      .map((record) => record.trim())
+      .filter(Boolean)
+      .map((record) => {
+        const [sha, subject, body] = record.split('\x1f');
+        return { sha, subject, body };
+      });
+    // A first release has no previous schema to migrate from, so it lists none.
+    const migrations = prev
+      ? git('diff', '--name-only', '--diff-filter=A', prev, ref, '--', MIGRATIONS_DIR).split('\n').filter(Boolean)
       : [];
     const repo = process.env.GITHUB_REPOSITORY ?? 'kelta-io/kelta';
-    writeFileSync(out, renderNotes({ commits, repo, previousTag: prev, ref }));
-    console.log(`Wrote ${commits.length} commits since ${prev || 'the first commit'} to ${out}`);
+    writeFileSync(out, renderNotes({ commits, repo, previousTag: prev, ref, migrations }));
+    console.log(`Wrote ${commits.length} commits and ${migrations.length} migrations since ${prev || 'the first commit'} to ${out}`);
     break;
   }
   default:
