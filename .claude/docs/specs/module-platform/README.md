@@ -10,10 +10,12 @@
 > compiled-in Spring controller resolving a member's entitlements out of a signed, uploaded JAR —
 > so the mechanism is proven. What is not proven is everything around it.
 >
-> Source-verified against the codebase on 2026-08-31 (Flyway directory head **V188** — next new
-> migration is **V189**; deployed `flyway_schema_history` keeps pre-flatten numbering, so always
-> check the directory *and* deployed history before numbering). If code and this doc disagree,
-> trust the code and fix this doc.
+> Source-verified against the codebase on **2026-10-11** at main `ece7925` (Flyway directory head
+> **V206** (`V206__collection_ownership.sql`) — next new migration is **V207**; deployed
+> `flyway_schema_history` keeps pre-flatten numbering, so always check the directory *and* deployed
+> history before numbering). Originally written 2026-08-31 against head V188; the per-slice state
+> and the Known defects below were re-checked against code on 2026-10-11. If code and this doc
+> disagree, trust the code and fix this doc.
 
 ## How to use this document
 
@@ -60,8 +62,8 @@ provisioning engine, and modules are not using it.**
 
 | Need | Existing thing to reuse | Location |
 |---|---|---|
-| Provision collections, fields, picklists, validation rules, layouts, flows, UI pages, menus | `PackageImportService` — upserts **12 types by natural key**, SKIP/OVERWRITE, dry-run, per-item report, routed through `QueryEngine` so NATS broadcast + table DDL fire normally | `kelta-worker/.../service/PackageImportService.java` (582 lines) |
-| Module HTTP surface | `/api/modules/**` is **already a static gateway route**; `RouteAuthorizationFilter` enforces `API_ACCESS` on static routes and leaves finer checks to the worker | `kelta-gateway/.../service/RouteConfigService.java:180` |
+| Provision collections, fields, picklists, validation rules, layouts, flows, UI pages, menus | `PackageImportService` — upserts **13 types by natural key** (`TYPE_ORDER`), SKIP/OVERWRITE, dry-run, per-item report, and (since #1660) resolves a FIELD's LOOKUP target to a system collection such as `users`, routed through `QueryEngine` so NATS broadcast + table DDL fire normally | `kelta-worker/.../service/PackageImportService.java` (831 lines at 2026-10-11) |
+| Module HTTP surface | `/api/modules/**` is **already a static gateway route**; `RouteAuthorizationFilter` enforces `API_ACCESS` on static routes and leaves finer checks to the worker | `kelta-gateway/.../service/RouteConfigService.java:190` |
 | Unauthenticated inbound | Generic platform-owned webhook route + tenant binding | `kelta-worker/.../controller/ModuleWebhookController.java` |
 | Permission enforcement | Cerbos policies are **generated from `profile_system_permission` rows** and pushed at runtime — one Cerbos action per distinct permission name. **No Cerbos change is needed to add a permission** | `CerbosPolicyGenerator`, `CerbosPolicySyncService` |
 | Secrets | The credential vault: encryption, rotation, `MANAGE_CREDENTIALS` gating, and resolve auditing (V188) | `CredentialResolverPort` via `ModuleContext.getExtension(...)` |
@@ -70,7 +72,7 @@ provisioning engine, and modules are not using it.**
 | i18n | `ui-translations` rows, overlaid client-side over bundled strings | `SystemCollectionDefinitions`, `bootstrapCache.ts` |
 
 `ModuleCollectionProvisioner` is a weaker re-implementation of two of `PackageImportService`'s
-twelve types. Slice 2 retires it.
+thirteen types. Slice 2 retires it — see [`2-provenance-provisioning.md`](2-provenance-provisioning.md).
 
 ---
 
@@ -140,17 +142,17 @@ This is the exact defect fixed in #1390; it is a contract, not a preference.
 
 ## Slice plan
 
-| Slice | Child spec | Axis |
-|---|---|---|
-| 0 — Fail closed | `0-fail-closed.md` | **backend, security** — kill the silent stub fallback |
-| 1 — Billable-channel guard | `1-billable-channel-guard.md` | backend (money risk, ~20 lines) |
-| 2 — Provenance + unified provisioning | `2-provenance-provisioning.md` | backend (DB, reuse `PackageImportService`) |
-| 3 — Lifecycle | `3-lifecycle.md` | backend (manifest v2, install plan, upgrade, uninstall) |
-| 4 — Permission catalog | `4-permission-catalog.md` | **backend + UI, security** |
-| 5 — Module settings | `5-module-settings.md` | backend + UI (credential-ref) |
-| 6 — Module HTTP routes | `6-module-routes.md` | **backend, security** |
-| 7 — Capability gating | `7-capability-gating.md` | **security** (closes an open hole) |
-| 8 — Billing removal | `8-billing-removal.md` | **the proving slice** — 6 PRs, ends with a Flyway drop |
+| Slice | Child spec | Axis | State (verified 2026-10-11) |
+|---|---|---|---|
+| 0 — Fail closed | not needed — slice shipped | **backend, security** — kill the silent stub fallback | ✅ **Shipped.** CI job `worker-image-is-jvm` in `.github/workflows/ci.yml` asserts `build-and-publish-containers.yml` builds the worker from `kelta-worker/Dockerfile.jvm`, and is in `quality-gate`'s `needs`. `V189__module_fail_closed.sql` adds `QUARANTINED`/`DEGRADED`/`STUB` to `chk_module_status` and `tenant_module.last_error`, `last_error_at`, `last_loaded_at`, `load_attempts`. `RuntimeModuleManager` quarantines on signature, checksum or classload failure (`quarantine(...)` registers `createQuarantinedHandler`, which throws `ModuleUnavailableException` rather than returning a failure, because `TaskStateExecutor` would relabel any failed `ActionResult` as `ActionFailed`). Stub handlers only under the explicit `kelta.modules.stub-mode` opt-in (`application.yml` `${KELTA_MODULES_STUB_MODE:false}`, wired in `ModuleConfig`). `GET /api/modules/{id}/health` (`ModuleController`) reports `loadedOnThisPod` + `podName`. `ModulesPage` installs a signed JAR through `/api/modules/install-jar`. Test: `RuntimeModuleManagerQuarantineTest`. Not done: `STATUS_DEGRADED` exists in `TenantModuleData` but nothing writes it |
+| 1 — Billable-channel guard | not needed — slice shipped | backend (money risk, ~20 lines) | ✅ **Shipped in code.** `AlertDispatchService.java` declares `BILLABLE_CHANNELS = Set.of(CHANNEL_SMS)` and, when no `channels` entitlement resolves, delivers only the non-billable requested channels. `WatchController.java` applies the same filter when it narrows a watch's requested channels. SMS therefore goes out only on an affirmative entitlement. Gap: no unit test pins the "no entitlement → SMS dropped" case (`AlertDispatchServiceTest.noEntitlementMeansNoGating` covers `push` only); worth adding with the next change to either file |
+| 2 — Provenance + unified provisioning | [`2-provenance-provisioning.md`](2-provenance-provisioning.md) | backend (DB, reuse `PackageImportService`) | 🟡 **Partial.** Done: `V190__module_provisioned_resource.sql` (table + RLS) and `ModuleProvenanceStore` (`record` / `findByModule` / `deleteForModule`); `RuntimeModuleManager.recordProvenance` writes `COLLECTION` rows as `CREATED` or `ADOPTED`. Not done: provisioning still runs through `ModuleCollectionProvisioner` (wired in `ModuleConfig`), not `PackageImportService`; `content_hash` is always written `null`; nothing reads `findByModule` and nothing calls `deleteForModule` (uninstall leaves the provenance rows) |
+| 3 — Lifecycle | `3-lifecycle.md` (not written) | backend (manifest v2, install plan, upgrade, uninstall) | 🔴 **Not started.** Installing over an existing module id still throws "already installed" (`RuntimeModuleManager.installModule` / `installModuleWithJar`); no manifest v2, install plan or `planHash` |
+| 4 — Permission catalog | `4-permission-catalog.md` (not written) | **backend + UI, security** | 🔴 **Not started.** `manifest.permissions` is parsed by `ModuleManifestParser` and read by no other main code; no `system_permission` catalog table |
+| 5 — Module settings | `5-module-settings.md` (not written) | backend + UI (credential-ref) | 🔴 **Not started.** No settings in `ModuleManifest`, DB, SPI, API or UI |
+| 6 — Module HTTP routes | `6-module-routes.md` (not written) | **backend, security** | 🟡 **Partial, built ahead of its spec.** `ModuleManifest.RouteManifest` (`path`, `methods`, `handlerKey`), `ModuleRouteRegistry` (registered on load, after the code loaded) and `ModuleHttpController` (`/api/modules/{moduleId}/x/**`, depth-1..3 patterns) dispatch module routes; the health endpoint reports `routesRegisteredOnThisPod`. Not done: a route declares no permission, so the only check is the gateway's `API_ACCESS` on the static `/api/modules/**` route |
+| 7 — Capability gating | `7-capability-gating.md` (not written) | **security** (closes an open hole) | 🟡 **Partial.** `RuntimeModuleManager.registerTenantServices` refuses any port in `getServices()` the manifest's `services` list does not declare, and withdraws the module's already-accepted ports. Not done: no capability list and no admin approval of declared ports at install |
+| 8 — Billing removal | `8-billing-removal.md` (not written) | **the proving slice** — 6 PRs, ends with a Flyway drop | 🟡 **Partial, out of scope here.** No `/api/billing` controller or Stripe client remains in `kelta-worker/src/main`; `kelta-modules/billing` serves checkout/portal/webhooks. Still compiled in: `service/billing/` (`EntitlementServiceImpl`, `ModuleAwareEntitlementService`, `BillingPassExpirySweep`, `BillingEntitlementRuleCache`), the `repository/Billing*` classes, the billing tables, and the gateway's `/api/billing/**` static route in `RouteConfigService` |
 
 Slice 8 exercises every earlier slice: routes (checkout/portal), webhooks (Stripe), settings
 (`credential-ref` to the Stripe key), permissions (`MANAGE_BILLING`), provisioning (five
@@ -161,41 +163,61 @@ fail-closed (billing must **never** stub-succeed).
 
 ## Known defects this spec exists to fix
 
-Each is source-verified as of 2026-08-31.
+Each was source-verified as of 2026-08-31 and **re-checked against code on 2026-10-11**. Each
+entry leads with its current state. `concerns.md` tracks defects 1 and 2 (one combined entry,
+"FIXED — a rejected module reported success"); it has no entry for 3–9, so this list is their
+record until a slice closes them.
 
-1. **The stub fallback reports success.** `RuntimeModuleManager.loadFromJar` catches every
-   exception and calls `loadWithStubs`; `createStubHandler` returns
-   `ActionResult.success({"status":"EXECUTED","mode":"stub"})` while the module reports `ACTIVE`.
-   A cryptographically rejected module is indistinguishable from a working one, and flows calling
-   it pass.
-2. **The admin UI cannot install a signed JAR.** `ModulesPage` only calls
-   `/api/modules/install` (manifest JSON), never `/install-jar` — there is no file upload or
-   signature field. Every UI-installed module is stub-mode by construction.
-3. **`manifest.permissions` and `minPlatformVersion` are dead.** Parsed, stored, and read by zero
-   non-test code. A module author would reasonably believe both work.
-4. **`getServices()` is ungated.** `registerTenantServices` registers whatever the module returns.
-   Any installed module can publish `EntitlementProvider` and silently become that tenant's
-   entitlement authority. Needs a signed JAR and an admin install, so not remotely exploitable —
-   but a module should only publish ports it declared and an admin approved.
-5. **No upgrade path.** v2 over v1 throws 409, and in `installModuleWithJar` the S3 upload happens
-   *before* the duplicate check, orphaning a JAR that nothing ever deletes.
-6. **Uninstall leaves data with no provenance.** Nothing records which collection came from which
-   module, so an admin cannot find the orphans afterwards.
-7. **No module settings** anywhere — manifest, DB, SPI, API, or UI.
-8. **No observability.** No metrics, no health, no per-module error attribution; `isLoaded()` exists
-   and no endpoint returns it; `FAILED` is written in exactly one place and is nearly unreachable
-   because the stub fallback swallows the exception first.
-9. **Cross-pod divergence is silent.** Install/enable rely on a fire-and-forget NATS event with no
-   ack; a pod that misses one diverges while the API reports `ACTIVE`.
+1. **FIXED (2026-08-31; `concerns.md` → "FIXED — a rejected module reported success") — the stub
+   fallback reported success.** `RuntimeModuleManager.loadFromJar` caught every exception and
+   called `loadWithStubs`; `createStubHandler` returned
+   `ActionResult.success({"status":"EXECUTED","mode":"stub"})` while the module reported `ACTIVE`.
+   Fixed in `RuntimeModuleManager.java`: load failure calls `quarantine(...)`, whose handlers throw
+   `ModuleUnavailableException`, records `QUARANTINED` with the reason in `tenant_module.last_error`
+   (V189), and stubs remain only behind `kelta.modules.stub-mode`. Test:
+   `RuntimeModuleManagerQuarantineTest`.
+2. **FIXED (2026-08-31; same `concerns.md` entry) — the admin UI could not install a signed JAR.**
+   `ModulesPage` only called `/api/modules/install` (manifest JSON). Fixed in
+   `kelta-ui/app/src/pages/ModulesPage/ModulesPage.tsx`: with a JAR selected it posts multipart to
+   `/api/modules/install-jar`.
+3. **OPEN — `manifest.permissions` and `minPlatformVersion` are dead.** Still parsed by
+   `ModuleManifestParser`, stored, and read by no other main code. A module author would
+   reasonably believe both work. Slice 4 (permissions) and slice 3 (`minPlatformVersion`).
+4. **PARTIAL — `getServices()` was ungated.** `RuntimeModuleManager.registerTenantServices` now
+   refuses any port the manifest's `services` list does not declare and withdraws the module's
+   already-accepted ports, so a module can no longer publish an undeclared port such as
+   `EntitlementProvider`. Still open: nothing shows the declared ports to an admin or asks them to
+   approve them at install (slice 7).
+5. **PARTIAL — no upgrade path.** The orphan-JAR half is FIXED: `installModuleWithJar` now runs the
+   duplicate check before `jarService.uploadJar` (`RuntimeModuleManager.java`, commented "Duplicate
+   check BEFORE the upload"). Still open: v2 over v1 is rejected as "already installed" on both
+   install paths (slice 3).
+6. **PARTIAL — uninstall leaves data with no provenance.** V190 `module_provisioned_resource` and
+   `ModuleProvenanceStore` now record which collections a module created or adopted. Still open:
+   only `COLLECTION` rows are recorded, `content_hash` is always `null`, and `uninstallModule`
+   neither reads nor clears the records, so an admin still has no surface that lists a removed
+   module's leftovers (slice 2, then slice 3 for uninstall).
+7. **OPEN — no module settings** anywhere: manifest, DB, SPI, API or UI (slice 5).
+8. **PARTIAL — observability.** Done: `GET /api/modules/{id}/health` returns `isLoaded()` as
+   `loadedOnThisPod` with `podName`, `routesRegisteredOnThisPod` and the V189 load diagnostics
+   (`last_error`, `last_error_at`, `last_loaded_at`, `load_attempts`); `FAILED` is reachable again
+   (a provisioning failure sets it). Still missing: no Micrometer metrics in
+   `kelta-worker/.../module/` (load outcomes, quarantines, handler invocations or errors per module),
+   no per-module attribution of handler failures beyond the log line, and `DEGRADED` is defined but
+   never written.
+9. **OPEN — cross-pod divergence is silent.** Install/enable still rely on a fire-and-forget NATS
+   event (`ModuleEventListener`) with no ack and no periodic reconcile. The health endpoint makes
+   divergence *observable*, one pod per request; nothing detects or repairs it.
 
 ---
 
 ## Deploy hazards that apply to every slice
 
 1. **The worker must stay JVM.** `build-and-publish-containers.yml` pins `Dockerfile.jvm` because a
-   native image cannot classload an uploaded JAR — a native worker turns **every** module into
-   stubs. Before slice 8d that is degraded-but-covered; after it, it silently ungates every tenant.
-   Slice 0 adds a CI assertion that the worker build references `Dockerfile.jvm`.
+   native image cannot classload an uploaded JAR — a native worker quarantines **every** module
+   (before slice 0 it silently turned them into success-reporting stubs). Before slice 8d that is degraded-but-covered; after it, it silently ungates every tenant.
+   Slice 0 added that CI assertion: the `worker-image-is-jvm` job in `ci.yml`, a
+   `quality-gate` dependency.
 2. **The merge-train trap.** The deploy workflow sets `cancel-in-progress: true` and filters paths
    against the previous push, so merging a second PR before the first's build completes can leave
    merged code unbuilt with green CI. In slice 8 that means a migration deploying without its code,
