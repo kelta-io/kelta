@@ -1,41 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-
-const columns = [
-  {
-    title: 'Shipped',
-    accent: 'border-t-cyan',
-    items: [
-      'Runtime data platform — collections, fields, relationships, validation, and an auto-generated JSON:API REST API',
-      'Visual workflow automation with a drag-and-drop flow canvas and a library of built-in action handlers',
-      'Enterprise security — role-based access control, field-level security and data masking, row-level multi-tenancy',
-      'Realtime collaboration — presence, live record updates, in-app chat and video',
-      'Consumer alerting — availability watches, matching, and push notifications for end users',
-      'AI integration — in-app assistant and an MCP server so AI agents can operate the platform directly',
-      'Cross-platform CLI with self-updating binaries',
-      'Runtime-installable modules, so capabilities can be added without redeploying the platform',
-      'Sandboxes and promotion — clone a tenant into a sandbox, export/diff/apply metadata, and promote changes between environments from the CLI',
-      'Generated, typed SDK artifacts for your tenant\'s collections from a single CLI command',
-      'A documentation site at kelta.io/docs, rendered from the same Markdown the CLI and MCP server ship',
-    ],
-  },
-  {
-    title: 'In progress',
-    accent: 'border-t-blue',
-    items: [
-      'A first-class module marketplace — provenance, permissions, and consent for installed modules',
-      'Public, SEO-friendly pages generated from tenant data for consumer-facing use cases',
-    ],
-  },
-  {
-    title: 'Exploring',
-    accent: 'border-t-navy',
-    items: [
-      'More worked examples and end-to-end tutorials',
-      'A fully managed, hosted version of Kelta — see the waitlist below',
-    ],
-  },
-];
+import { roadmap } from '../data/roadmap';
 ---
 
 <BaseLayout title="Roadmap" description="What's shipped, in progress, and next for Kelta — the open-source enterprise application platform.">
@@ -47,13 +12,14 @@ const columns = [
         not dates — for exact status, watch
         <a href="https://github.com/kelta-io/kelta" class="font-semibold text-cyan hover:text-blue" target="_blank" rel="noopener noreferrer">the repository</a>.
       </p>
+      <p class="mt-4 text-sm text-kelta-700">Last updated <time datetime={roadmap.updated}>{roadmap.updated}</time></p>
     </div>
   </section>
 
   <section class="py-20">
     <div class="mx-auto max-w-7xl px-6">
       <div class="grid gap-8 md:grid-cols-3">
-        {columns.map((column) => (
+        {roadmap.columns.map((column) => (
           <div class={`rounded-xl border border-gray-100 border-t-4 ${column.accent} bg-white p-8 shadow-sm`}>
             <h2 class="mb-4 text-xl font-bold text-navy">{column.title}</h2>
             <ul class="space-y-3 text-sm leading-relaxed text-kelta-700">
