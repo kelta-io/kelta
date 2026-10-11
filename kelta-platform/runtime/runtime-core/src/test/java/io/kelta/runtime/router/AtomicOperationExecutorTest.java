@@ -7,6 +7,7 @@ import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -16,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -219,6 +221,74 @@ class AtomicOperationExecutorTest {
                         var aoe = (AtomicOperationExecutor.AtomicOperationException) ex;
                         assertThat(aoe.getOperationIndex()).isEqualTo(1);
                     });
+        }
+    }
+
+    @Nested
+    @DisplayName("Audit Stamping")
+    @SuppressWarnings("unchecked")
+    class AuditStamping {
+        private Map<String, Object> capturedCreate() {
+            ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(eq(contactsDef), captor.capture());
+            return captor.getValue();
+        }
+
+        @Test
+        void addStampsCreatedByAndUpdatedBy() {
+            var op = new AtomicOperation("add", null,
+                    new AtomicOperation.ResourceData("contacts", null, null, Map.of("name", "John"), null));
+            when(queryEngine.create(eq(contactsDef), anyMap())).thenReturn(Map.of("id", "server-1"));
+
+            executor.execute(List.of(op), "u-1");
+
+            assertThat(capturedCreate())
+                    .containsEntry("name", "John")
+                    .containsEntry("createdBy", "u-1")
+                    .containsEntry("updatedBy", "u-1");
+        }
+
+        @Test
+        void updateStampsOnlyUpdatedBy() {
+            var op = new AtomicOperation("update",
+                    new AtomicOperation.ResourceRef("contacts", "123", null),
+                    new AtomicOperation.ResourceData("contacts", null, null, Map.of("name", "Updated"), null));
+            when(queryEngine.update(eq(contactsDef), eq("123"), anyMap()))
+                    .thenReturn(Optional.of(Map.of("id", "123")));
+
+            executor.execute(List.of(op), "u-1");
+
+            ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).update(eq(contactsDef), eq("123"), captor.capture());
+            assertThat(captor.getValue())
+                    .containsExactlyInAnyOrderEntriesOf(Map.of("name", "Updated", "updatedBy", "u-1"));
+        }
+
+        @Test
+        void addOverwritesClientSuppliedCreatedBy() {
+            var op = new AtomicOperation("add", null,
+                    new AtomicOperation.ResourceData("contacts", null, null,
+                            Map.of("name", "John", "createdBy", "spoofed", "updatedBy", "spoofed"), null));
+            when(queryEngine.create(eq(contactsDef), anyMap())).thenReturn(Map.of("id", "server-1"));
+
+            executor.execute(List.of(op), "u-1");
+
+            assertThat(capturedCreate())
+                    .containsEntry("createdBy", "u-1")
+                    .containsEntry("updatedBy", "u-1");
+        }
+
+        @Test
+        void nullActingUserLeavesAttributesUnchanged() {
+            var op = new AtomicOperation("add", null,
+                    new AtomicOperation.ResourceData("contacts", null, null,
+                            Map.of("name", "John", "createdBy", "client-value"), null));
+            when(queryEngine.create(eq(contactsDef), anyMap())).thenReturn(Map.of("id", "server-1"));
+
+            executor.execute(List.of(op), null);
+
+            assertThat(capturedCreate())
+                    .containsExactlyInAnyOrderEntriesOf(Map.of("name", "John", "createdBy", "client-value"));
         }
     }
 }

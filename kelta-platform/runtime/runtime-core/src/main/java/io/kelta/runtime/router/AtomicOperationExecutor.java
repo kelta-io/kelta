@@ -42,6 +42,21 @@ public class AtomicOperationExecutor {
      * @throws AtomicOperationException if any operation fails (caller should rollback)
      */
     public List<AtomicResult> execute(List<AtomicOperation> operations) {
+        return execute(operations, null);
+    }
+
+    /**
+     * Executes all operations sequentially, stamping {@code createdBy}/{@code updatedBy}
+     * with {@code actingUserId} the way {@link DynamicCollectionRouter} does for a single
+     * write — overwriting any client-supplied value.
+     *
+     * @param operations   the list of atomic operations to execute
+     * @param actingUserId the caller's {@code platform_user} UUID, or null to stamp nothing
+     *                     (internal tier)
+     * @return the list of results, one per operation
+     * @throws AtomicOperationException if any operation fails (caller should rollback)
+     */
+    public List<AtomicResult> execute(List<AtomicOperation> operations, String actingUserId) {
         // Validate all operations first
         for (int i = 0; i < operations.size(); i++) {
             operations.get(i).validate(i);
@@ -53,7 +68,7 @@ public class AtomicOperationExecutor {
         for (int i = 0; i < operations.size(); i++) {
             AtomicOperation op = operations.get(i);
             try {
-                AtomicResult result = executeOne(op, i, lidMap);
+                AtomicResult result = executeOne(op, i, lidMap, actingUserId);
                 results.add(result);
             } catch (AtomicOperationException e) {
                 throw e; // Already has operation index
@@ -65,16 +80,18 @@ public class AtomicOperationExecutor {
         return results;
     }
 
-    private AtomicResult executeOne(AtomicOperation op, int index, Map<String, String> lidMap) {
+    private AtomicResult executeOne(AtomicOperation op, int index, Map<String, String> lidMap,
+                                    String actingUserId) {
         return switch (op.op()) {
-            case "add" -> executeAdd(op, index, lidMap);
-            case "update" -> executeUpdate(op, index, lidMap);
+            case "add" -> executeAdd(op, index, lidMap, actingUserId);
+            case "update" -> executeUpdate(op, index, lidMap, actingUserId);
             case "remove" -> executeRemove(op, index, lidMap);
             default -> throw new AtomicOperationException(index, op.op(), "Unknown operation: " + op.op());
         };
     }
 
-    private AtomicResult executeAdd(AtomicOperation op, int index, Map<String, String> lidMap) {
+    private AtomicResult executeAdd(AtomicOperation op, int index, Map<String, String> lidMap,
+                                    String actingUserId) {
         String type = op.data().type();
         CollectionDefinition definition = resolveCollection(type, index);
 
@@ -84,6 +101,11 @@ public class AtomicOperationExecutor {
 
         // Resolve any lid references in relationship attributes
         resolveLidsInAttributes(attributes, lidMap);
+
+        if (actingUserId != null) {
+            attributes.put("createdBy", actingUserId);
+            attributes.put("updatedBy", actingUserId);
+        }
 
         Map<String, Object> created = queryEngine.create(definition, attributes);
         String id = (String) created.get("id");
@@ -97,7 +119,8 @@ public class AtomicOperationExecutor {
         return AtomicResult.of(type, id, op.data().lid(), stripId(created));
     }
 
-    private AtomicResult executeUpdate(AtomicOperation op, int index, Map<String, String> lidMap) {
+    private AtomicResult executeUpdate(AtomicOperation op, int index, Map<String, String> lidMap,
+                                       String actingUserId) {
         String type = op.ref().type();
         String id = resolveId(op.ref(), lidMap, index);
         CollectionDefinition definition = resolveCollection(type, index);
@@ -107,6 +130,10 @@ public class AtomicOperationExecutor {
                 : new LinkedHashMap<>();
 
         resolveLidsInAttributes(attributes, lidMap);
+
+        if (actingUserId != null) {
+            attributes.put("updatedBy", actingUserId);
+        }
 
         Optional<Map<String, Object>> updated = queryEngine.update(definition, id, attributes);
         if (updated.isEmpty()) {
