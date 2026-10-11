@@ -1,7 +1,19 @@
 // node --test .github/release/lib.test.ts   (Node >= 24)
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
-import { MAX_PER_SECTION, composeBuiltImages, imageDrift, parseTag, pinDrift, renderNotes, resolvePlan } from './lib.ts';
+import {
+  MAX_PER_SECTION,
+  composeBuiltImages,
+  imageDrift,
+  parseTag,
+  pinDrift,
+  pinErrors,
+  pinVersions,
+  renderNotes,
+  resolvePlan,
+  rewritePin,
+} from './lib.ts';
 
 const ctx = { event: 'push', refType: 'tag', refName: 'v1.2.3', dryRunInput: '', sha: 'abcdef0123456789' };
 
@@ -299,4 +311,78 @@ describe('renderNotes', () => {
     const notes = renderNotes({ commits: commits.slice(1, 2), repo: 'kelta-io/kelta', previousTag: 'v0.1.0', ref: 'v0.1.1', migrations: [] });
     assert.doesNotMatch(notes, /## Database migrations/);
   });
+});
+
+const envExample = (v: string): string => `# comment\nPOSTGRES_PASSWORD=x\nKELTA_VERSION=${v}\nOTHER=y\n`;
+const composeFile = (...versions: string[]): string =>
+  'services:\n' +
+  versions.map((v, i) => `  svc${i}:\n    image: ghcr.io/kelta-io/svc${i}:\${KELTA_VERSION:-${v}}\n`).join('');
+
+const errorsFor = (env: string, compose: string): string[] => pinErrors(pinVersions(env, compose));
+
+describe('pinVersions / pinErrors', () => {
+  it('reads the .env.example value and every compose default', () => {
+    assert.deepEqual(pinVersions(envExample('0.1.0'), composeFile('0.1.0', '0.1.0', '0.1.0', '0.1.0')), {
+      env: '0.1.0',
+      compose: ['0.1.0', '0.1.0', '0.1.0', '0.1.0'],
+    });
+  });
+
+  it('accepts four agreeing defaults', () => {
+    assert.deepEqual(errorsFor(envExample('0.1.0'), composeFile('0.1.0', '0.1.0', '0.1.0', '0.1.0')), []);
+  });
+
+  it('flags .env.example drifting from compose', () => {
+    const errors = errorsFor(envExample('9.9.9'), composeFile('0.1.0', '0.1.0', '0.1.0', '0.1.0'));
+    assert.deepEqual(errors, ['.env.example pins KELTA_VERSION=9.9.9, docker-compose.yml defaults to 0.1.0']);
+  });
+
+  it('flags compose defaults that disagree with each other', () => {
+    const errors = errorsFor(envExample('0.2.0'), composeFile('0.2.0', '0.2.0', '0.1.0', '0.2.0'));
+    assert.ok(errors.some((e) => /defaults disagree: 0\.2\.0, 0\.1\.0/.test(e)), errors.join('\n'));
+  });
+
+  it('flags fewer than four compose defaults', () => {
+    const errors = errorsFor(envExample('0.1.0'), composeFile('0.1.0', '0.1.0', '0.1.0'));
+    assert.deepEqual(errors, [
+      'docker-compose.yml has 3 ${KELTA_VERSION:-X} defaults, expected at least 4 (one per released image)',
+    ]);
+  });
+
+  it('flags a missing KELTA_VERSION= line', () => {
+    const pins = pinVersions('POSTGRES_PASSWORD=x\n# KELTA_VERSION=0.1.0\n', composeFile('0.1.0', '0.1.0', '0.1.0', '0.1.0'));
+    assert.equal(pins.env, null);
+    assert.deepEqual(pinErrors(pins), ['.env.example has no KELTA_VERSION= line']);
+  });
+
+  it('agrees on the real .env.example and docker-compose.yml', () => {
+    const root = new URL('../../', import.meta.url);
+    const pins = pinVersions(
+      readFileSync(new URL('.env.example', root), 'utf8'),
+      readFileSync(new URL('docker-compose.yml', root), 'utf8'),
+    );
+    assert.deepEqual(pinErrors(pins), []);
+    assert.ok(pins.compose.length >= 4);
+    assert.doesNotThrow(() => parseTag(`v${pins.env}`));
+  });
+});
+
+describe('rewritePin', () => {
+  it('moves both forms and leaves everything else alone', () => {
+    const env = rewritePin(envExample('0.1.0'), '0.2.0');
+    const compose = rewritePin(composeFile('0.1.0', '0.1.0', '0.1.0', '0.1.0'), '0.2.0');
+    assert.equal(env, envExample('0.2.0'));
+    assert.equal(compose, composeFile('0.2.0', '0.2.0', '0.2.0', '0.2.0'));
+    assert.deepEqual(errorsFor(env, compose), []);
+  });
+
+  it('accepts a prerelease version', () => {
+    assert.equal(rewritePin(envExample('0.1.0'), '1.0.0-rc.1'), envExample('1.0.0-rc.1'));
+  });
+
+  for (const bad of ['v0.2.0', '0.2', '0.2.0.1', '0.2.0+build', '01.2.0', '']) {
+    it(`rejects the invalid version "${bad}"`, () => {
+      assert.throws(() => rewritePin(envExample('0.1.0'), bad), /not vMAJOR/);
+    });
+  }
 });
