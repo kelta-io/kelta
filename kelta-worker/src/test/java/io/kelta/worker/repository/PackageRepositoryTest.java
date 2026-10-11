@@ -88,6 +88,55 @@ class PackageRepositoryTest {
                         + "AND gp.id = f.field_type_config->>'globalPicklistId'");
     }
 
+    private String capturedIdSql(Object... params) {
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForList(sql.capture(), eq(String.class), eq(params));
+        return sql.getValue();
+    }
+
+    @Test
+    @DisplayName("Collection-scoped export finds the collections' rules and layouts by collection id")
+    void findsRulesAndLayoutsByCollectionIds() {
+        repository.findValidationRuleIdsByCollectionIds("t1", List.of("c1", "c2"));
+        assertThat(capturedIdSql("t1", "c1", "c2"))
+                .isEqualTo("SELECT id FROM validation_rule WHERE tenant_id = ? AND collection_id IN (?,?)");
+
+        reset(jdbcTemplate);
+        repository.findPageLayoutIdsByCollectionIds("t1", List.of("c1"));
+        assertThat(capturedIdSql("t1", "c1"))
+                .isEqualTo("SELECT id FROM page_layout WHERE tenant_id = ? AND collection_id IN (?)");
+    }
+
+    @Test
+    @DisplayName("Collection-scoped export finds flows by trigger_config.collection name")
+    void findsFlowsByTriggerCollection() {
+        repository.findFlowIdsByTriggerCollections("t1", List.of("sites", "inspections"));
+        assertThat(capturedIdSql("t1", "sites", "inspections"))
+                .contains("FROM flow WHERE tenant_id = ?")
+                .contains("trigger_config->>'collection' IN (?,?)");
+    }
+
+    @Test
+    @DisplayName("Collection-scoped export finds global picklists bound by the collections' fields")
+    void findsReferencedGlobalPicklists() {
+        repository.findGlobalPicklistIdsReferencedByCollections("t1", List.of("c1"));
+        assertThat(capturedIdSql("t1", "c1"))
+                .contains("SELECT DISTINCT gp.id FROM field f")
+                .contains("JOIN global_picklist gp ON gp.tenant_id = c.tenant_id "
+                        + "AND gp.id = f.field_type_config->>'globalPicklistId'")
+                .contains("WHERE c.tenant_id = ? AND f.collection_id IN (?)");
+    }
+
+    @Test
+    @DisplayName("Collection-scoped lookups skip the query for an empty list")
+    void collectionScopedLookupsSkipEmptyLists() {
+        assertThat(repository.findValidationRuleIdsByCollectionIds("t1", List.of())).isEmpty();
+        assertThat(repository.findPageLayoutIdsByCollectionIds("t1", List.of())).isEmpty();
+        assertThat(repository.findFlowIdsByTriggerCollections("t1", List.of())).isEmpty();
+        assertThat(repository.findGlobalPicklistIdsReferencedByCollections("t1", List.of())).isEmpty();
+        verifyNoInteractions(jdbcTemplate);
+    }
+
     @Test
     @DisplayName("Should expose JdbcTemplate")
     void shouldExposeJdbcTemplate() {
