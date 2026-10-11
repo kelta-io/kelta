@@ -170,6 +170,23 @@ const execute = defineCommand({
   },
 });
 
+const remove = defineCommand({
+  group: 'flows',
+  name: 'delete',
+  summary: 'Delete a flow (the server refuses flows that have runs)',
+  dangerous: true,
+  positionals: [{ name: 'flowId', description: 'Flow id', required: true }],
+  input: z.object({ flowId: z.string().min(1) }),
+  handler: async (ctx, input) => {
+    await ctx.client.getAxiosInstance().delete(`/api/flows/${input.flowId}`);
+    return {
+      data: { deleted: true, id: input.flowId },
+      message: `Flow ${input.flowId} deleted`,
+      ids: [input.flowId],
+    };
+  },
+});
+
 const runs = defineCommand({
   group: 'flows',
   name: 'runs',
@@ -297,6 +314,7 @@ export const flowCommands: RegisteredCommand[] = [
   describe,
   create,
   update,
+  remove,
   execute,
   runs,
   run,
