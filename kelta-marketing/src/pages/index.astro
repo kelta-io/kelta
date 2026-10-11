@@ -1,6 +1,15 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import FeatureCard from '../components/FeatureCard.astro';
+import { resolve } from 'node:path';
+import { readmeQuickstartCommands } from '../docs/readme-section';
+
+const oneLiner =
+  'The open-source application platform your AI agents can actually operate — schema, flows, and approvals over an API and an MCP server.';
+
+// Read at build time from the repo-root README.md (astro builds from kelta-marketing/),
+// so the home page always shows the commands ci/quickstart-check.sh exercises.
+const quickstartCommands = readmeQuickstartCommands(resolve('..', 'README.md'));
 
 const features = [
   {
@@ -65,14 +74,15 @@ const howItWorks = [
 ];
 ---
 
-<BaseLayout title="Build microservices. Not boilerplate." description="Kelta is a metadata-driven platform for building enterprise applications at runtime. Define collections, fields, workflows, and APIs — without redeploying.">
+<BaseLayout title={oneLiner} description="Kelta is a metadata-driven platform for building enterprise applications at runtime. Define collections, fields, workflows, and APIs — without redeploying.">
   <!-- Hero -->
   <section class="relative overflow-hidden bg-gradient-to-b from-kelta-50 to-white">
     <div class="mx-auto max-w-7xl px-6 py-24 text-center md:py-32">
       <div class="mx-auto max-w-3xl">
         <h1 class="text-4xl font-extrabold tracking-tight text-navy md:text-6xl">
-          Build microservices.
-          <span class="bg-gradient-to-r from-cyan to-blue bg-clip-text text-transparent">Not boilerplate.</span>
+          The open-source application platform your AI agents
+          <span class="bg-gradient-to-r from-cyan to-blue bg-clip-text text-transparent">can actually operate</span>
+          <span class="mt-4 block text-xl font-semibold tracking-normal text-kelta-700 md:text-2xl">— schema, flows, and approvals over an API and an MCP server.</span>
         </h1>
         <p class="mt-6 text-lg leading-relaxed text-kelta-700 md:text-xl">
           Kelta is a metadata-driven platform for building enterprise applications at runtime. Define collections, fields, workflows, and APIs — without redeploying.
@@ -92,6 +102,18 @@ const howItWorks = [
           </a>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- Run it locally -->
+  <section class="bg-white pb-16">
+    <div class="mx-auto max-w-3xl px-6">
+      <h2 class="mb-4 text-center text-2xl font-bold text-navy">Run it locally</h2>
+      <pre class="overflow-x-auto rounded-xl bg-navy p-6 text-left font-mono text-sm leading-relaxed text-white"><code>{quickstartCommands.join('\n')}</code></pre>
+      <p class="mt-4 text-center text-sm text-kelta-700">
+        Docker and <code>make</code> are all you need.
+        <a href="/docs/getting-started/quickstart/" class="font-semibold text-cyan hover:underline">Read the quickstart →</a>
+      </p>
     </div>
   </section>
 
@@ -204,7 +226,7 @@ const howItWorks = [
         <div class="rounded-xl border border-gray-100 bg-white p-8">
           <h3 class="mb-3 text-lg font-semibold text-navy">Stop rebuilding the same platform layer</h3>
           <p class="text-sm leading-relaxed text-kelta-700">
-            Every microservices team writes the same infrastructure: auth, RBAC, CRUD APIs, event buses, tenant isolation, rate limiting. Kelta ships all of it as a configurable runtime so your team can focus on what makes your product different.
+            Every product team ends up writing the same infrastructure: auth, RBAC, CRUD APIs, event buses, tenant isolation, rate limiting. Kelta ships all of it as a configurable runtime so your team can focus on what makes your product different.
           </p>
         </div>
         <div class="rounded-xl border border-gray-100 bg-white p-8">

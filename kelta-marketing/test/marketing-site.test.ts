@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readmeQuickstartCommands } from '../src/docs/readme-section';
 
 const repoRoot = join(import.meta.dirname, '..', '..');
 const marketingRoot = join(repoRoot, 'kelta-marketing');
@@ -249,5 +250,40 @@ describe('deploy wiring', () => {
     // PLT-282: Phase 1 and Phase 2 keep their own deadlines.
     expect(smoke).toContain('EXISTENCE_DEADLINE=$(( $(date +%s) + 300 ))');
     expect(smoke).toContain('SERVE_DEADLINE=$(( $(date +%s) + 180 ))');
+  });
+});
+
+describe('home page', () => {
+  const page = read('kelta-marketing', 'src', 'pages', 'index.astro');
+
+  it('leads with the STRATEGY.md one-liner', () => {
+    expect(page).toContain(
+      'The open-source application platform your AI agents can actually operate — schema, flows, and approvals over an API and an MCP server.',
+    );
+  });
+
+  it('drops the old microservices positioning', () => {
+    expect(page).not.toMatch(/microservices/i);
+  });
+
+  it('renders the README quickstart instead of hard-coding commands', () => {
+    expect(page).toMatch(/import \{[^}]*\breadmeQuickstartCommands\b[^}]*\} from '\.\.\/docs\/readme-section'/);
+    expect(page).not.toContain('docker compose up');
+    expect(page).not.toContain('make setup');
+  });
+
+  it('shows a "Run it locally" block linking the docs quickstart', () => {
+    const block = page.slice(page.indexOf('Run it locally'));
+    expect(block).toContain('<pre');
+    expect(block).toContain('quickstartCommands');
+    expect(block).toContain('href="/docs/getting-started/quickstart/"');
+  });
+});
+
+describe('readmeQuickstartCommands', () => {
+  it("returns the repo README's quickstart commands", () => {
+    const commands = readmeQuickstartCommands(join(repoRoot, 'README.md'));
+    expect(commands.some((line) => line.startsWith('docker compose up -d --wait'))).toBe(true);
+    expect(commands.every((line) => line.trim() !== '')).toBe(true);
   });
 });
