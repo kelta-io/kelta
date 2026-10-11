@@ -709,6 +709,7 @@ Export this tenant's metadata as a package file
 
 - `-n, --name <name>` — Package name (default: the tenant slug)
 - `-v, --version <version>` — Package version (default: 1.0.0)
+- `--collections <list>` — Collection names, comma-separated: export only these, with their validation rules, page layouts, record-triggered flows and global picklists (default: the whole tenant)
 - `-o, --out <file>` — Output file (default: the name the server returns)
 
 ### `kelta metadata diff <file>`
