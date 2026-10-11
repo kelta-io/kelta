@@ -124,6 +124,7 @@ Add a field to a collection (friendly type aliases: text, number, picklist, refe
 - `--description <text>` — Description
 - `--default <value>` — Default value (true|false for BOOLEAN, a number for numeric types)
 - `--picklist <name|id>` — Global picklist source (picklist types)
+- `--values <a,b,c>` — Comma-separated field-scoped picklist values (picklist types, instead of --picklist)
 - `--reference <collection>` — Target collection (reference types)
 - `--relationship-name <name>` — Relationship name (reference types)
 - `--dimension <n>` — Vector dimension (vector type)
