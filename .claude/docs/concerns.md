@@ -462,6 +462,14 @@ allow/deny/dedup/no-identity with a mocked authz service. Guardrail: keep this c
 collection **UUID** (`getCollectionIdByName`), not the name — the `collection` policy CEL is
 UUID-keyed (see architecture.md "Cerbos collectionId keying").
 
+**`POST /api/operations` stamps `createdBy`/`updatedBy` (KLT-500), but still differs from the single-record route.**
+`AtomicOperationsController` passes `CallerContext.current()`'s `platform_user` UUID to
+`AtomicOperationExecutor.execute(operations, actingUserId)`, which stamps `createdBy`+`updatedBy` on
+`add` and `updatedBy` on `update` (overwriting client values, as `DynamicCollectionRouter` does); no
+caller bound ⇒ nothing stamped. Known remaining gaps vs `DynamicCollectionRouter`, not fixed:
+- `createdGeo`/`updatedGeo` are never stamped on the atomic path (the router's `stampGeo` reads the gateway `X-Geo-*` headers for `captureGeo` collections), so batch-written rows on those collections carry no geo.
+- `tenantId` is not injected for tenant-scoped **system** collections on the atomic path (the router's `injectTenantId` fills it from `X-Tenant-ID` when the client omits it).
+
 **Delegated administration is a privilege-boundary surface (V157).** Guardrails that MUST stay
 intact: the `DelegatedAdminScopeValidationHook` rejection of privileged profiles/permsets at scope
 save, the `DelegatedAdminService.effectiveScope` **request-time re-filter** (a profile granted a

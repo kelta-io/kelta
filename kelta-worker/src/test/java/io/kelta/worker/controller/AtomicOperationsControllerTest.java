@@ -1,6 +1,8 @@
 package io.kelta.worker.controller;
 
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.service.CerbosAuthorizationService;
@@ -12,13 +14,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.ResponseEntity;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -36,6 +41,7 @@ class AtomicOperationsControllerTest {
 
     private AtomicOperationsController controller;
     private QueryEngine queryEngine;
+    private CollectionRegistry registry;
     private CollectionLifecycleManager lifecycleManager;
     private CerbosAuthorizationService authzService;
     private CerbosPermissionResolver permissionResolver;
@@ -44,7 +50,7 @@ class AtomicOperationsControllerTest {
     @BeforeEach
     void setUp() {
         queryEngine = mock(QueryEngine.class);
-        CollectionRegistry registry = mock(CollectionRegistry.class);
+        registry = mock(CollectionRegistry.class);
         lifecycleManager = mock(CollectionLifecycleManager.class);
         authzService = mock(CerbosAuthorizationService.class);
         permissionResolver = mock(CerbosPermissionResolver.class);
@@ -178,5 +184,49 @@ class AtomicOperationsControllerTest {
 
         verify(authzService, org.mockito.Mockito.times(1))
                 .checkCollectionAccess(anyString(), anyString(), anyString(), eq("uuid-c"), eq("create"));
+    }
+
+    // ---- Audit stamping ------------------------------------------------------------
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> executeAddAndCaptureCreate() {
+        CollectionDefinition contacts = mock(CollectionDefinition.class);
+        when(registry.get("contacts")).thenReturn(contacts);
+        when(lifecycleManager.getCollectionIdByName("contacts")).thenReturn("uuid-c");
+        when(authzService.checkCollectionAccess(anyString(), anyString(), anyString(), eq("uuid-c"), eq("create")))
+                .thenReturn(true);
+        when(queryEngine.create(eq(contacts), anyMap())).thenReturn(Map.of("id", "rec-1", "name", "x"));
+
+        ResponseEntity<?> response = controller.executeOperations(
+                Map.of("atomic:operations", List.of(addOp("contacts"))), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(queryEngine).create(eq(contacts), captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    @DisplayName("stamps createdBy/updatedBy with the bound caller's platform_user UUID")
+    void stampsAuditFieldsFromCallerContext() {
+        String userId = UUID.randomUUID().toString();
+        CallerContext caller = new CallerContext(userId, CallerContext.UserType.INTERNAL, false, false);
+
+        List<Map<String, Object>> captured = new java.util.ArrayList<>();
+        CallerContext.runAs(caller, () -> captured.add(executeAddAndCaptureCreate()));
+
+        assertThat(captured.get(0))
+                .containsEntry("createdBy", userId)
+                .containsEntry("updatedBy", userId);
+    }
+
+    @Test
+    @DisplayName("stamps no audit fields when no caller is bound")
+    void noAuditFieldsWithoutCallerContext() {
+        Map<String, Object> attributes = executeAddAndCaptureCreate();
+
+        assertThat(attributes)
+                .doesNotContainKey("createdBy")
+                .doesNotContainKey("updatedBy");
     }
 }

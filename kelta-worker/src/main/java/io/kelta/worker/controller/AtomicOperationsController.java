@@ -3,6 +3,7 @@ package io.kelta.worker.controller;
 import tools.jackson.databind.ObjectMapper;
 import io.kelta.jsonapi.AtomicOperation;
 import io.kelta.jsonapi.AtomicResult;
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
@@ -111,7 +112,9 @@ public class AtomicOperationsController {
 
         // Execute within transaction
         try {
-            List<AtomicResult> results = executor.execute(operations);
+            // CallerContextFilter has already resolved X-User-Id to the platform_user UUID.
+            String actingUserId = CallerContext.current().map(CallerContext::userId).orElse(null);
+            List<AtomicResult> results = executor.execute(operations, actingUserId);
 
             log.info("Atomic operations completed: {} operations for tenant {}",
                     operations.size(), tenantId);
