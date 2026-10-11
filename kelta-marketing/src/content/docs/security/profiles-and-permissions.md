@@ -66,6 +66,9 @@ Per profile and field: `VISIBLE`, `READ_ONLY`, `HIDDEN` or `MASKED`. See
 
 Built-in profiles are `isSystem: true` but editable. Create your own under Setup → Administration → Profiles.
 
+There is no built-in profile for unauthenticated callers. A profile you create named exactly `Guest` turns on
+anonymous access for the tenant — see [Anonymous access (Guest profile)](/docs/security/anonymous-access/).
+
 ## How access is evaluated
 
 1. **Route** — the gateway asks Cerbos whether the caller's profile may perform the action implied by the HTTP
