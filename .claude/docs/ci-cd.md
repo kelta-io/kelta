@@ -229,9 +229,20 @@ bakes Netty's clock origin in at build time (kelta#1627). `kelta-ai` (profile `a
 
 **Release notes** (`.github/release/`): commits (`--no-merges`) since the previous `v*` tag
 (`git describe` from `<tag>^`), or the whole history when there is none, grouped into Features
-(`feat`), Bug fixes (`fix`) and Other changes (any other type, or no conventional prefix);
-`type!:` is marked **BREAKING**. Each section is capped at 250 entries so a full-history first
-release stays under GitHub's 125,000-character body limit, with a compare / history link.
+(`feat`), Bug fixes (`fix`) and Other changes (any other type, or no conventional prefix).
+`git log` reads subject **and body** (`%H%x1f%s%x1f%b%x1e`): a subject without a known type
+(`feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `ci`, `build`, `chore`, `security`,
+`revert`) — the `<KEY>: <title> (#n)` squash merges — takes the type of the **first** body line
+matching `* type(scope)!: …` with a known type, so trailers like `Task: KLT-480` never count; the
+entry text stays the subject. A `!` on the subject or a body type line, or a
+`BREAKING CHANGE:`/`BREAKING-CHANGE:` footer, lists the commit (with the footer text) in a top
+`## Breaking changes` section and marks it **BREAKING** in its type section. Files added under
+`kelta-worker/src/main/resources/db/migration/` between the tags (`git diff --name-only
+--diff-filter=A`) are listed in `## Database migrations` with a back-up/no-down-migrations
+pointer to `UPGRADING.md`; the section is omitted when there are none, and a first release lists
+none. Each type section is capped at 250 entries so a full-history first release stays under
+GitHub's 125,000-character body limit, with a compare / history link. `release.yml`'s
+`fetch-depth: 0` checkout already has the tags and history this needs.
 
 A new ghcr.io package created by the first push may be **private**; its visibility is set
 once, by hand, in the org's package settings.
