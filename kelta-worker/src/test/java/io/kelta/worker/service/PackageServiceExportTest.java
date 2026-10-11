@@ -2,6 +2,7 @@ package io.kelta.worker.service;
 
 import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.*;
+import org.postgresql.util.PGobject;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
@@ -148,6 +149,69 @@ class PackageServiceExportTest {
                 .containsEntry("layout_name", "Default")
                 .containsEntry("related_collection_name", "order_lines")
                 .containsEntry("relationship_field_name", "order");
+    }
+
+    private static PGobject jsonb(String json) throws Exception {
+        PGobject value = new PGobject();
+        value.setType("jsonb");
+        value.setValue(json);
+        return value;
+    }
+
+    @Test
+    @DisplayName("exports jsonb columns as JSON, not as the driver's {null,type,value} wrapper")
+    @SuppressWarnings("unchecked")
+    void exportsJsonbColumnsAsJson() throws Exception {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.of("acme"));
+        when(repository.findCollectionsByIds(TENANT, List.of("c1"))).thenReturn(List.of(
+                row("id", "c1", "name", "orders")));
+        when(repository.findFieldsWithNamesByCollectionIds(TENANT, List.of("c1"))).thenReturn(List.of(
+                row("id", "fld1", "name", "amount", "type", "CURRENCY", "collection_name", "orders",
+                        "field_type_config", jsonb("{\"precision\":2,\"currency\":\"USD\"}"),
+                        "constraints", jsonb(null))));
+        when(repository.findFlowsByIds(TENANT, List.of("f1"))).thenReturn(List.of(
+                row("id", "f1", "name", "Stamp closed deals", "flow_type", "RECORD_TRIGGERED",
+                        "definition", jsonb("{\"StartAt\":\"stamp\",\"States\":{\"stamp\":{\"Type\":\"Succeed\"}}}"))));
+
+        var pkg = service.exportPackage(TENANT,
+                Map.of("name", "pkg", "version", "1.0.0", "collectionIds", List.of("c1"),
+                        "flowIds", List.of("f1")), false);
+        String json = new ObjectMapper().writeValueAsString(pkg);
+
+        assertThat(json)
+                .doesNotContain("\"type\":\"jsonb\"")
+                .doesNotContain("\"null\":false")
+                .contains("\"field_type_config\":{\"precision\":2,\"currency\":\"USD\"}")
+                .contains("\"definition\":{\"StartAt\":\"stamp\"")
+                .contains("\"constraints\":null");
+        var items = (List<Map<String, Object>>) pkg.get("items");
+        var flow = (Map<String, Object>) items.stream().filter(i -> "FLOW".equals(i.get("type")))
+                .findFirst().orElseThrow().get("data");
+        assertThat((Map<String, Object>) flow.get("definition")).containsEntry("StartAt", "stamp");
+    }
+
+    @Test
+    @DisplayName("a field bound to a global picklist exports the picklist's name (BUILD-LOG error 14)")
+    @SuppressWarnings("unchecked")
+    void exportsGlobalPicklistNameOnBoundField() throws Exception {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.of("acme"));
+        when(repository.findCollectionsByIds(TENANT, List.of("c1"))).thenReturn(List.of(
+                row("id", "c1", "name", "deals")));
+        when(repository.findFieldsWithNamesByCollectionIds(TENANT, List.of("c1"))).thenReturn(List.of(
+                row("id", "fld1", "name", "stage", "type", "PICKLIST", "collection_name", "deals",
+                        "field_type_config", jsonb("{\"globalPicklistId\":\"gp-1\"}"),
+                        "global_picklist_name", "crm-deal-stage")));
+
+        var pkg = service.exportPackage(TENANT,
+                Map.of("name", "pkg", "version", "1.0.0", "collectionIds", List.of("c1")), false);
+        Map<String, Object> received = new ObjectMapper().readValue(
+                new ObjectMapper().writeValueAsString(pkg), Map.class);
+
+        var field = ((List<Map<String, Object>>) received.get("items")).stream()
+                .filter(i -> "FIELD".equals(i.get("type"))).findFirst().orElseThrow();
+        assertThat((Map<String, Object>) field.get("data"))
+                .containsEntry("global_picklist_name", "crm-deal-stage")
+                .containsEntry("field_type_config", Map.of("globalPicklistId", "gp-1"));
     }
 
     @Test

@@ -13,9 +13,11 @@ Everything merged here must be a generic platform feature (Critical Rule 0 in `C
 
 Maintainers respond to new issues and pull requests from outside contributors within
 **48 hours** — a first response (triage, question, or review), not necessarily a
-resolution. Use the [bug report](.github/ISSUE_TEMPLATE/bug_report.md) or
-[feature request](.github/ISSUE_TEMPLATE/feature_request.md) template so we have what
-we need to respond quickly.
+resolution. Use the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml),
+[feature request](.github/ISSUE_TEMPLATE/feature_request.yml) or
+[documentation problem](.github/ISSUE_TEMPLATE/docs_problem.yml) form (all listed at
+<https://github.com/kelta-io/kelta/issues/new/choose>) so we have what we need to respond
+quickly. Never report a security vulnerability as an issue — see [`SECURITY.md`](SECURITY.md).
 
 ---
 
