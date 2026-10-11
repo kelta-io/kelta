@@ -63,6 +63,7 @@ jobs:
       quickstart: ${{ steps.filter.outputs.quickstart }}
       templates: ${{ steps.filter.outputs.templates }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      ci_scripts: ${{ steps.filter.outputs.ci_scripts }}
       dora: ${{ steps.filter.outputs.dora }}
       update_snapshots: ${{ steps.snapshots.outputs.update_snapshots }}
     steps:
@@ -1166,15 +1167,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      # ci/update-snapshots.sh pushes to PR branches; its own tests run with the workflow lint.
-      - name: Set up Node.js 24 (ci/update-snapshots.test.ts strips types natively)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      - name: Test ci/update-snapshots.sh
-        run: node --test ci/update-snapshots.test.ts
-
       - name: Install actionlint
         run: |
           curl -fsSL --retry 5 --retry-delay 3 \
@@ -1190,6 +1182,84 @@ jobs:
         run: |
           actionlint -color \
             -ignore 'constant expression "false" in condition'
+
+  # ===========================================================================
+  # CI scripts — every ci/ script's own tests, plus a syntax check and shellcheck of
+  # ci/*.sh and scripts/ci/*.sh, whenever ci/, scripts/ci/ or the workflows change.
+  #
+  # Added after #1675 changed ci/update-snapshots.sh: its tests ran only in
+  # lint-workflows, which is gated on the workflows filter, so they were skipped and
+  # the change broke the script. A ci/ script's tests live next to it as
+  # ci/<name>.test.ts or ci/<name>.test.sh; both globs pick a new one up with no edit
+  # here. Node 24 because the .test.ts files rely on native type stripping.
+  #
+  # Every ci/*.test.* file runs here. Some also run elsewhere, on purpose:
+  #   - ci/templates-install-check.test.ts also runs inside the templates job's runner
+  #     container (ci/templates-install-check.sh), before it installs any template.
+  #   - ci/upgrade-verify.test.sh also runs in upgrade-test.yml's seed/verify image,
+  #     before that workflow boots a stack.
+  # shellcheck runs at its default severity, the same as actionlint's run: linting in
+  # lint-workflows. Fix new findings rather than excluding files.
+  # ===========================================================================
+  test-ci-scripts:
+    name: Test CI Scripts
+    needs: changes
+    runs-on: k8s-runner
+    if: needs.changes.outputs.ci_scripts == 'true' || needs.changes.outputs.workflows == 'true'
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js 24 (the ci/*.test.ts files strip types natively)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # ci/templates-install-check.test.ts drives its script with bash, curl, jq and
+      # timeout; ci/upgrade-verify.test.sh needs jq. shellcheck lints the scripts.
+      - name: Install script dependencies
+        run: |
+          missing=()
+          for tool in curl jq timeout shellcheck; do
+            command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Installing: ${missing[*]}"
+            sudo_cmd=()
+            [ "$(id -u)" -eq 0 ] || sudo_cmd=(sudo)
+            packages=("${missing[@]/#timeout/coreutils}")
+            "${sudo_cmd[@]}" apt-get update
+            "${sudo_cmd[@]}" apt-get install -y --no-install-recommends "${packages[@]}"
+          fi
+          bash --version | head -1
+          jq --version
+          shellcheck --version
+
+      - name: Test ci/*.test.ts
+        run: node --test ci/*.test.ts
+
+      - name: Test ci/*.test.sh
+        run: |
+          shopt -s nullglob
+          for test in ci/*.test.sh; do
+            echo "::group::${test}"
+            bash "${test}"
+            echo "::endgroup::"
+          done
+
+      - name: Syntax-check ci/*.sh and scripts/ci/*.sh
+        run: |
+          shopt -s nullglob
+          for script in ci/*.sh scripts/ci/*.sh; do
+            bash -n "${script}"
+          done
+
+      - name: Shellcheck ci/*.sh and scripts/ci/*.sh
+        run: |
+          shopt -s nullglob
+          scripts=(ci/*.sh scripts/ci/*.sh)
+          shellcheck "${scripts[@]}"
 
   # ===========================================================================
   # Marketing site (kelta.io) — Astro static build + route guards. Node 22 to
@@ -1245,13 +1315,13 @@ jobs:
 
   quality-gate:
     name: Quality Gate
-    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, worker-image-is-jvm, dependency-audit, lint-workflows, test-dora]
+    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, worker-image-is-jvm, dependency-audit, lint-workflows, test-ci-scripts, test-dora]
     if: always()
     runs-on: k8s-runner
     steps:
       - name: Check job results
         run: |
-          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart templates worker-image-is-jvm dependency-audit lint-workflows test-dora; do
+          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart templates worker-image-is-jvm dependency-audit lint-workflows test-ci-scripts test-dora; do
             case "${job}" in
               test-java)         result="${{ needs.test-java.result }}" ;;
               test-runtime)      result="${{ needs.test-runtime.result }}" ;;
@@ -1265,6 +1335,7 @@ jobs:
               worker-image-is-jvm) result="${{ needs.worker-image-is-jvm.result }}" ;;
               dependency-audit)  result="${{ needs.dependency-audit.result }}" ;;
               lint-workflows)    result="${{ needs.lint-workflows.result }}" ;;
+              test-ci-scripts)   result="${{ needs.test-ci-scripts.result }}" ;;
               test-dora)         result="${{ needs.test-dora.result }}" ;;
             esac
             echo "${job}: ${result}"
