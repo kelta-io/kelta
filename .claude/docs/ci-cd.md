@@ -465,3 +465,17 @@ run that first built that tag, and `EXPECT` can never arrive. The step compares 
 to the pushed tag before polling and asserts against the **served** version when they match
 (run 31510066633 is the case that proved it). Do not reintroduce a bare
 `1.0.<run_number>` assertion.
+
+**The manifest poll is not proof that the old pod is gone.** The poll breaks on the *first*
+response reporting `EXPECT`, which can be the first request that happened to reach the new pod,
+and `kubectl rollout status` returns while a terminating old pod can still sit in the Service
+endpoints. The old pod only has the previous version's `/cli/releases/<version>/` directory, so
+the binary download 404'd and auto-rollback reverted a healthy bump (run 38177710973,
+`curl: (22) The requested URL returned error: 404 Not Found`, homelab-argo `dfbd6ed` reverted;
+the next run passed unchanged). After `rollout status` the step now **waits (≤120 s) until every
+pod behind the Deployment's own `spec.selector.matchLabels` runs the pushed tag and none has a
+`deletionTimestamp`**, failing with `::error::` naming the leftover pods, and the `/health` check
+and binary download (both branches) are **retried up to 5 times, 5 s apart, still with `curl -f`**
+— a real 404 fails after the last attempt. The marketing step's Phase 3 docs probes carry the
+same old-pod wait. Worst-case caps for the cli-downloads step sum to ~11 min, so the smoke-test
+job's `timeout-minutes` is 15.

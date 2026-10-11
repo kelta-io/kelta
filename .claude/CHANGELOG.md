@@ -227,3 +227,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-10-11 feat(dashboards): chart `aggregateOver: "groupSizes"` returns a key-free group-size histogram with nearest-rank percentiles, paging up to 50,000 rows (SPO-549)
 - 2026-10-11 fix(ci): Load the e2e Playwright runner image (`docker buildx build --load`) so PR CI runs the branch's specs instead of a stale `kelta-e2e-runner:local`, and regenerate the record-detail visual baselines that stale image rendered from the pre-PLT-476 spec (PLT-522)
 - 2026-10-11 chore(release): Pin the quickstart (`.env.example` and the four `docker-compose.yml` defaults) to Kelta v0.2.0 with `release.ts pin 0.2.0` (K-10)
+- 2026-10-11 fix(ci): CLI-downloads smoke waits for old pods to leave the Deployment and retries health/binary fetch (5×5s); marketing Phase 3 gets the same old-pod wait; smoke-test timeout 10→15m (PLT-559)

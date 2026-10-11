@@ -669,7 +669,10 @@ jobs:
     needs: [changes, deploy]
     if: needs.deploy.result == 'success'
     runs-on: k8s-runner
-    timeout-minutes: 10
+    # 15, not 10 (PLT-559): the cli-downloads step's caps now sum to ~11m (manifest poll 5m +
+    # rollout 3m + old-pod wait 2m + 2 bounded retries ~1m). A cap that is hit fails the step
+    # anyway; this keeps a slow-but-succeeding run from being cut off by the job timeout.
+    timeout-minutes: 15
     steps:
       - name: Detect namespace and deployment names
         id: k8s
@@ -750,6 +753,24 @@ jobs:
           BASE="http://${DEPLOY}.${NS}.svc.cluster.local"
           EXPECT="1.0.${{ github.run_number }}"
 
+          # Bounded retry for the Service-level asserts: 5 attempts, 5s apart (≤~20s of sleep
+          # plus curl time). A pod draining out of the Service endpoints can answer one request
+          # wrong (run 38177710973), but a real 404/unhealthy still fails after the last attempt.
+          retry() {
+            desc=$1; shift
+            for attempt in 1 2 3 4 5; do
+              if "$@"; then return 0; fi
+              if [ "${attempt}" -lt 5 ]; then
+                echo "${desc} failed (attempt ${attempt}/5), retrying in 5s…"
+                sleep 5
+              fi
+            done
+            echo "::error::${desc} failed after 5 attempts."
+            return 1
+          }
+          health_up() { curl -fsS "${BASE}/health" | grep -q '"status":"UP"'; }
+          fetch_binary() { curl -fsS "${BASE}/cli/releases/$1/kelta-linux-x64" -o /tmp/kelta-smoke; }
+
           # The served version and the thing that triggers a rollout are keyed on different
           # values: CLI_VERSION is baked in as 1.0.<run_number>, but ArgoCD only rolls when
           # the image *tag* (main-<sha>) changes. A rebuild at a commit whose tag is already
@@ -771,8 +792,8 @@ jobs:
               echo "::error::${DEPLOY} is running ${PUSHED_TAG} but served no manifest version."
               exit 1
             fi
-            curl -fsS "${BASE}/health" | grep -q '"status":"UP"'
-            curl -fsS "${BASE}/cli/releases/${SERVED}/kelta-linux-x64" -o /tmp/kelta-smoke
+            retry "${BASE}/health" health_up || exit 1
+            retry "Download of ${BASE}/cli/releases/${SERVED}/kelta-linux-x64" fetch_binary "${SERVED}" || exit 1
             chmod +x /tmp/kelta-smoke
             /tmp/kelta-smoke version --output json | grep -q "\"version\": \"${SERVED}\"" || {
               echo "::error::Downloaded binary does not report the served version ${SERVED}"; exit 1;
@@ -801,11 +822,42 @@ jobs:
             exit 1
           fi
 
+          # Worst case for the path below: manifest poll 300s + rollout 180s + old-pod wait 120s
+          # + health/download retries (4×5s sleep + curl each) ≈ 11m, inside timeout-minutes: 15.
           # Version has converged; the deployment is now the new ReplicaSet.
           kubectl -n ${NS} rollout status deploy/${DEPLOY} --timeout=180s
-          curl -fsS "${BASE}/health" | grep -q '"status":"UP"'
 
-          curl -fsS "${BASE}/cli/releases/${EXPECT}/kelta-linux-x64" -o /tmp/kelta-smoke
+          # The manifest poll breaks on the FIRST response reporting EXPECT, which can be the
+          # first request that happened to reach the new pod, and `rollout status` returns while
+          # a terminating old pod can still sit in the Service endpoints. The old pod only has
+          # the previous version's release directory, so the binary download 404'd and the
+          # auto-rollback reverted a healthy bump (run 38177710973). Wait until every pod behind
+          # the Deployment's selector runs PUSHED_TAG and none is terminating (≤120s).
+          SELECTOR=$(kubectl -n ${NS} get deploy ${DEPLOY} \
+            -o jsonpath='{.spec.selector.matchLabels}' | sed 's/[{}"]//g; s/:/=/g')
+          if [ -z "${SELECTOR}" ]; then
+            echo "::error::${DEPLOY} has no spec.selector.matchLabels — cannot find its pods to wait for old ones to leave."
+            exit 1
+          fi
+          DRAIN_DEADLINE=$(( $(date +%s) + 120 ))
+          while :; do
+            LEFTOVER=$(kubectl -n ${NS} get pods -l "${SELECTOR}" \
+              -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.containers[0].image}{" "}{.metadata.deletionTimestamp}{"\n"}{end}' \
+              | awk -v tag="${PUSHED_TAG}" 'NF { n = split($2, a, ":"); if (a[n] != tag || $3 != "") print $1 }' \
+              | tr '\n' ' ')
+            if [ -z "${LEFTOVER}" ]; then
+              break
+            fi
+            if [ "$(date +%s)" -ge "${DRAIN_DEADLINE}" ]; then
+              echo "::error::${DEPLOY} pods not on ${PUSHED_TAG} or still terminating after 120s: ${LEFTOVER}"
+              exit 1
+            fi
+            echo "waiting for old ${DEPLOY} pods to leave: ${LEFTOVER}"
+            sleep 5
+          done
+
+          retry "${BASE}/health" health_up || exit 1
+          retry "Download of ${BASE}/cli/releases/${EXPECT}/kelta-linux-x64" fetch_binary "${EXPECT}" || exit 1
           chmod +x /tmp/kelta-smoke
           OUT=$(/tmp/kelta-smoke version --output json)
           echo "binary says: ${OUT}"
@@ -833,10 +885,12 @@ jobs:
       # ArgoCD may need to sync; serving gets its own fresh 3 minutes once the
       # Deployment is confirmed to exist (the hard part — getting ArgoCD to sync — is
       # already done at that point, so a smaller budget is enough for the pod to pull
-      # its image and pass readiness). Worst case for this step is 5m + 3m = 8m, inside
-      # the job's 10-minute timeout-minutes even stacked after the gateway/worker
-      # health steps above, which in practice resolve quickly here because "Wait for
-      # rollout" already waited on those two Deployments before this step ever runs.
+      # its image and pass readiness). Phases 1+2 cap at 5m + 3m = 8m, inside the job's
+      # 15-minute timeout-minutes even stacked after the gateway/worker health steps
+      # above, which in practice resolve quickly here because "Wait for rollout" already
+      # waited on those two Deployments before this step ever runs. Phase 3 only runs
+      # after the site already serves, so its tag poll (≤5m) and rollout (≤3m) are
+      # normally near-instant; its old-pod wait adds at most 2m.
       - name: Verify marketing site (when built)
         if: needs.changes.outputs.marketing == 'true'
         run: |
@@ -902,6 +956,33 @@ jobs:
             sleep 10
           done
           kubectl -n "${NS}" rollout status deploy/"${DEPLOY}" --timeout=180s
+
+          # Same endpoint-drain race as the cli-downloads step (run 38177710973): a terminating
+          # old pod still in the Service endpoints serves the previous image, which 404s the
+          # new docs paths below. Wait until every pod behind the Deployment's selector runs
+          # PUSHED_TAG and none is terminating (≤120s) before probing.
+          SELECTOR=$(kubectl -n "${NS}" get deploy "${DEPLOY}" \
+            -o jsonpath='{.spec.selector.matchLabels}' | sed 's/[{}"]//g; s/:/=/g')
+          if [ -z "${SELECTOR}" ]; then
+            echo "::error::${DEPLOY} has no spec.selector.matchLabels — cannot find its pods to wait for old ones to leave."
+            exit 1
+          fi
+          DRAIN_DEADLINE=$(( $(date +%s) + 120 ))
+          while :; do
+            LEFTOVER=$(kubectl -n "${NS}" get pods -l "${SELECTOR}" \
+              -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.containers[0].image}{" "}{.metadata.deletionTimestamp}{"\n"}{end}' \
+              | awk -v tag="${PUSHED_TAG}" 'NF { n = split($2, a, ":"); if (a[n] != tag || $3 != "") print $1 }' \
+              | tr '\n' ' ')
+            if [ -z "${LEFTOVER}" ]; then
+              break
+            fi
+            if [ "$(date +%s)" -ge "${DRAIN_DEADLINE}" ]; then
+              echo "::error::${DEPLOY} pods not on ${PUSHED_TAG} or still terminating after 120s: ${LEFTOVER}"
+              exit 1
+            fi
+            echo "waiting for old ${DEPLOY} pods to leave: ${LEFTOVER}"
+            sleep 5
+          done
 
           # `rollout status` returns once the old ReplicaSet scales to zero, but a
           # terminating old pod can still sit in the Service endpoints for a moment, so
