@@ -36,11 +36,8 @@ vi.mock('../hooks/usePreferenceStore', async (importOriginal) => {
 })
 
 let mockAuthenticated = true
-let mockNoAuthProvider = false
 vi.mock('./AuthContext', () => ({
-  useOptionalAuth: vi.fn(() =>
-    mockNoAuthProvider ? undefined : { isAuthenticated: mockAuthenticated }
-  ),
+  useAuth: vi.fn(() => ({ isAuthenticated: mockAuthenticated })),
 }))
 
 let mockIdentity: { userId: string } | undefined
@@ -142,7 +139,6 @@ describe('AppContext tenant scoping', () => {
     // No resolvable identity: the real store is localStorage-only, as before slice 1.
     mockPref = null
     mockAuthenticated = true
-    mockNoAuthProvider = false
     mockIdentity = undefined
   })
 
@@ -256,7 +252,6 @@ describe('AppContext server-backed favorites', () => {
     storage = useMemoryLocalStorage()
     mockPref = null
     mockAuthenticated = true
-    mockNoAuthProvider = false
     mockIdentity = undefined
   })
 
@@ -371,17 +366,6 @@ describe('AppContext server-backed favorites', () => {
 
   it('does not touch the preference store while signed out', () => {
     mockAuthenticated = false
-    storage.setItem(favoritesStorageKey('couchpicks'), JSON.stringify([titlesFavorite]))
-
-    renderAt('/couchpicks/app/home')
-    act(() => screen.getByText('fav').click())
-
-    expect(usePreferenceValue).not.toHaveBeenCalled()
-    expect(storage.getItem(favoritesStorageKey('couchpicks'))).toBe('[]')
-  })
-
-  it('keeps favorites in localStorage when there is no AuthProvider', () => {
-    mockNoAuthProvider = true
     storage.setItem(favoritesStorageKey('couchpicks'), JSON.stringify([titlesFavorite]))
 
     renderAt('/couchpicks/app/home')

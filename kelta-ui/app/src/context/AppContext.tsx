@@ -17,7 +17,7 @@ import React, {
   useRef,
 } from 'react'
 import { useTenantStorageScope } from './TenantContext'
-import { useOptionalAuth } from './AuthContext'
+import { useAuth } from './AuthContext'
 import { usePreferenceValue } from '../hooks/usePreferenceStore'
 
 // ---- Types ----
@@ -221,7 +221,7 @@ export function AppContextProvider({ children }: AppContextProviderProps): React
   const scope = useTenantStorageScope()
   const [recentItems, setRecentItems] = useState<RecentItem[]>(() => loadRecentItems(scope))
   const [favorites, setFavorites] = useState<Favorite[]>(() => loadFavorites(scope))
-  const isAuthenticated = useOptionalAuth()?.isAuthenticated ?? false
+  const { isAuthenticated } = useAuth()
   const saveFavoritesRef = useRef<SaveFavorites | null>(null)
 
   // Re-hydrate when the workspace changes (in-app navigation between slugs).
