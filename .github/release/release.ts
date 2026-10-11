@@ -4,9 +4,21 @@
 //     build.json = docker-compose.yml + docker-compose.build.yml + docker-compose.jvm.yml (what the release builds)
 //     base.json  = docker-compose.yml alone (what the quickstart pulls)
 //   node .github/release/release.ts notes <ref> <out.md>    → release notes + added migrations since the previous v* tag
+//   node .github/release/release.ts check-pin               → exit 1 when .env.example and docker-compose.yml pin different versions
+//   node .github/release/release.ts pin <version>           → rewrite the quickstart pin in .env.example and docker-compose.yml
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { MIGRATIONS_DIR, composeBuiltImages, imageDrift, pinDrift, renderNotes, resolvePlan } from './lib.ts';
+import {
+  MIGRATIONS_DIR,
+  composeBuiltImages,
+  imageDrift,
+  pinDrift,
+  pinErrors,
+  pinVersions,
+  renderNotes,
+  resolvePlan,
+  rewritePin,
+} from './lib.ts';
 import type { Commit, Image } from './lib.ts';
 
 function output(values: Record<string, string | boolean>): void {
@@ -27,6 +39,22 @@ function previousTag(ref: string): string {
   } catch {
     return ''; // no earlier v* tag (or a root commit): the first release covers everything
   }
+}
+
+// Run from the repo root, as the workflows do.
+const ENV_EXAMPLE = '.env.example';
+const COMPOSE = 'docker-compose.yml';
+
+function checkPin(): boolean {
+  const pins = pinVersions(readFileSync(ENV_EXAMPLE, 'utf8'), readFileSync(COMPOSE, 'utf8'));
+  const errors = pinErrors(pins);
+  for (const e of errors) console.log(`::error::${e}`);
+  if (errors.length > 0) {
+    console.log('Move every pin together: node .github/release/release.ts pin <version>');
+    return false;
+  }
+  console.log(`Quickstart pin agrees: KELTA_VERSION=${pins.env} in ${ENV_EXAMPLE} and ${pins.compose.length} defaults in ${COMPOSE}`);
+  return true;
 }
 
 const [command, ...args] = process.argv.slice(2);
@@ -82,7 +110,25 @@ switch (command) {
     console.log(`Wrote ${commits.length} commits and ${migrations.length} migrations since ${prev || 'the first commit'} to ${out}`);
     break;
   }
+  case 'check-pin': {
+    if (!checkPin()) process.exit(1);
+    break;
+  }
+  case 'pin': {
+    const [version] = args;
+    if (!version) {
+      console.error('usage: node .github/release/release.ts pin <version>   (e.g. 0.2.0, no leading v)');
+      process.exit(2);
+    }
+    // Validate before touching either file, so a bad version never leaves them half-rewritten.
+    const env = rewritePin(readFileSync(ENV_EXAMPLE, 'utf8'), version);
+    const compose = rewritePin(readFileSync(COMPOSE, 'utf8'), version);
+    writeFileSync(ENV_EXAMPLE, env);
+    writeFileSync(COMPOSE, compose);
+    if (!checkPin()) process.exit(1);
+    break;
+  }
   default:
-    console.error(`unknown command "${command}" (plan | check-images | notes)`);
+    console.error(`unknown command "${command}" (plan | check-images | notes | check-pin | pin <version>)`);
     process.exit(2);
 }

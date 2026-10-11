@@ -223,3 +223,47 @@ export function renderNotes(opts: {
   }
   return lines.join('\n') + '\n';
 }
+
+// The quickstart pin lives in two files: `KELTA_VERSION=` in .env.example (what `make setup`
+// copies into .env) and the `${KELTA_VERSION:-X}` default on each released image in
+// docker-compose.yml (what a .env that predates KELTA_VERSION falls back to).
+const ENV_PIN = /^KELTA_VERSION=(.*)$/m;
+const COMPOSE_PIN = /\$\{KELTA_VERSION:-([^}]*)\}/g;
+
+// One compose default per released image: kelta-auth, kelta-worker, kelta-gateway, kelta-ui.
+export const MIN_COMPOSE_PINS = 4;
+
+export function pinVersions(envExample: string, compose: string): { env: string | null; compose: string[] } {
+  return {
+    env: ENV_PIN.exec(envExample)?.[1].trim() ?? null,
+    compose: [...compose.matchAll(COMPOSE_PIN)].map((m) => m[1].trim()),
+  };
+}
+
+export function pinErrors(pins: { env: string | null; compose: string[] }): string[] {
+  const errors: string[] = [];
+  if (pins.env === null) {
+    errors.push('.env.example has no KELTA_VERSION= line');
+  }
+  if (pins.compose.length < MIN_COMPOSE_PINS) {
+    errors.push(
+      `docker-compose.yml has ${pins.compose.length} \${KELTA_VERSION:-X} defaults, expected at least ${MIN_COMPOSE_PINS} (one per released image)`,
+    );
+  }
+  const distinct = [...new Set(pins.compose)];
+  if (distinct.length > 1) {
+    errors.push(`docker-compose.yml defaults disagree: ${distinct.join(', ')}`);
+  }
+  if (pins.env !== null && pins.compose.some((v) => v !== pins.env)) {
+    errors.push(`.env.example pins KELTA_VERSION=${pins.env}, docker-compose.yml defaults to ${distinct.join(', ')}`);
+  }
+  return errors;
+}
+
+export function rewritePin(text: string, version: string): string {
+  parseTag(`v${version}`);
+  // Function replacers, so nothing in the replacement is read as a `$` pattern.
+  return text
+    .replace(ENV_PIN, () => `KELTA_VERSION=${version}`)
+    .replace(COMPOSE_PIN, () => `\${KELTA_VERSION:-${version}}`);
+}
