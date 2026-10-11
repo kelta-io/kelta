@@ -13,7 +13,7 @@
 
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CollectionForm } from './CollectionForm'
 import type { Collection, CollectionFormData } from './CollectionForm'
@@ -688,9 +688,15 @@ describe('CollectionForm Component', () => {
 
 describe('CollectionForm Integration', () => {
   it('should work with async submission', async () => {
-    const onSubmit = vi
-      .fn()
-      .mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 100)))
+    // A deferred the test resolves itself: the disabled state lasts until
+    // release() rather than for a wall-clock window (see the comment below).
+    let release!: () => void
+    const onSubmit = vi.fn<(data: CollectionFormData) => Promise<void>>(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
     const user = userEvent.setup()
 
     const TestComponent = () => {
@@ -716,19 +722,18 @@ describe('CollectionForm Integration', () => {
     await user.type(screen.getByTestId('collection-display-name-input'), 'My Collection')
     await user.click(screen.getByTestId('collection-form-submit'))
 
-    // Should show loading state
+    // Should show loading state. onSubmit is still pending, so the button stays
+    // disabled until release() below — asserting it against a real 100ms timer
+    // raced a starved CI runner (same fix as FieldEditor.test.tsx, PLT-521).
     await waitFor(() => {
       expect(screen.getByTestId('collection-form-submit')).toBeDisabled()
     })
+    expect(onSubmit).toHaveBeenCalled()
 
-    // Should complete submission
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalled()
-    })
-
-    // Wait for the 100ms mock to resolve and the wrapper's `finally` to flip
+    // Resolve the submission and wait for the wrapper's `finally` to flip
     // isSubmitting back, otherwise that setState lands after jsdom teardown and
     // vitest reports an unhandled "window is not defined" rejection.
+    act(() => release())
     await waitFor(() => {
       expect(screen.getByTestId('collection-form-submit')).toBeEnabled()
     })

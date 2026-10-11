@@ -462,6 +462,14 @@ allow/deny/dedup/no-identity with a mocked authz service. Guardrail: keep this c
 collection **UUID** (`getCollectionIdByName`), not the name — the `collection` policy CEL is
 UUID-keyed (see architecture.md "Cerbos collectionId keying").
 
+**`POST /api/operations` stamps `createdBy`/`updatedBy` (KLT-500), but still differs from the single-record route.**
+`AtomicOperationsController` passes `CallerContext.current()`'s `platform_user` UUID to
+`AtomicOperationExecutor.execute(operations, actingUserId)`, which stamps `createdBy`+`updatedBy` on
+`add` and `updatedBy` on `update` (overwriting client values, as `DynamicCollectionRouter` does); no
+caller bound ⇒ nothing stamped. Known remaining gaps vs `DynamicCollectionRouter`, not fixed:
+- `createdGeo`/`updatedGeo` are never stamped on the atomic path (the router's `stampGeo` reads the gateway `X-Geo-*` headers for `captureGeo` collections), so batch-written rows on those collections carry no geo.
+- `tenantId` is not injected for tenant-scoped **system** collections on the atomic path (the router's `injectTenantId` fills it from `X-Tenant-ID` when the client omits it).
+
 **Delegated administration is a privilege-boundary surface (V157).** Guardrails that MUST stay
 intact: the `DelegatedAdminScopeValidationHook` rejection of privileged profiles/permsets at scope
 save, the `DelegatedAdminService.effectiveScope` **request-time re-filter** (a profile granted a
@@ -814,9 +822,8 @@ rows *outside* that path had to stamp the column itself, since a `NOT NULL` colu
 default breaks any INSERT that doesn't supply it: the two raw-SQL seeders —
 `SystemCollectionSeeder` (`SYSTEM_TENANT_ID` for every system collection's built-in fields)
 and `MigrationFieldRepository` (`TenantContext.get()` for the destructive schema-migration
-path) — and the two direct `queryEngine.create(fieldsDef, …)` callers,
-`ExternalEntityMaterializer` and `ModuleCollectionProvisioner`, which already did this for
-their `collections` row (the storage adapter writes `tenant_id` only when the record map
+path) — and the direct `queryEngine.create(fieldsDef, …)` caller
+`ExternalEntityMaterializer`, which already did this for its `collections` row (the storage adapter writes `tenant_id` only when the record map
 carries `tenantId`). `PackageImportService` needed nothing: it stamps `tenantId` for any
 `tenantScoped()` definition. **Get-by-id is guarded router-side too**
 (`DynamicCollectionRouter.visibleToTenant`, the counterpart of `injectTenantFilter`): a
@@ -1653,6 +1660,20 @@ both now fixed:
    source of event-loop contention right as that iteration runs its own
    `waitFor`. Fixed by waiting for the button to re-enable before the test ends —
    the same pattern already used by `CollectionForm.test.tsx`'s sibling test.
+
+**Recurrence and real root cause (2026-10-11, PLT-521):** the same test failed again
+on `expect(field-editor-submit).toBeDisabled()` (run 38111380935, main @ fd7526a — a
+CI/docs commit unrelated to FieldEditor), skipping every image build. Neither PLT-266
+fix touched the core race: `onSave` resolved after a **real** `setTimeout(resolve, 100)`,
+so the disabled state existed for only 100 ms of wall-clock time. On a starved runner
+`waitFor`'s first poll could land after the timer fired and the wrapper's `finally` had
+re-enabled the button, and `waitFor` then polled an enabled button until it timed out.
+Shrinking the timer to 0 ms fails both this test and `CollectionForm.test.tsx`'s
+identical sibling every time. Fixed in both tests by making `onSave`/`onSubmit` a
+deferred the test resolves itself: assert disabled while it is pending, `act(() =>
+release())`, then assert re-enabled — no timing window remains (rule in `testing.md` →
+Component Testing). The components were not changed and no timeout was raised. The
+underlying runner contention is still open.
 
 ## Collections become undeletable once used; e2e leaked litter into a product tenant (2026-08-06)
 

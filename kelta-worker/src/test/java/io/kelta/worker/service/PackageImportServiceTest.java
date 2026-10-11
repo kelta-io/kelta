@@ -261,6 +261,8 @@ class PackageImportServiceTest {
 
             assertThat(report.skipped()).isEqualTo(1);
             assertThat(report.created()).isZero();
+            // The existing row's id, so a caller can tell which record it skipped over.
+            assertThat(report.items().get(0).resourceId()).isEqualTo("existing-id");
             verify(queryEngine, never()).create(any(), anyMap());
             verify(queryEngine, never()).update(any(), anyString(), anyMap());
         }
@@ -583,6 +585,44 @@ class PackageImportServiceTest {
         assertThat(report.items()).hasSize(1);
         assertThat(report.items().get(0).naturalKey()).isEqualTo("alpha");
         verify(queryEngine, times(1)).create(any(), anyMap());
+    }
+
+    @Test
+    @DisplayName("a CREATED item carries the id the engine assigned, and its field resolves to it")
+    void createdItemCarriesResourceId() {
+        when(queryEngine.create(any(), anyMap())).thenAnswer(inv -> {
+            Map<String, Object> data = inv.getArgument(1);
+            return Map.of("id", "tgt-" + data.get("name"));
+        });
+        Map<String, Object> field = new LinkedHashMap<>();
+        field.put("collection_name", "orders");
+        field.put("name", "reference");
+        field.put("type", "STRING");
+
+        var report = service.importPackage(TENANT,
+                pkg(item("COLLECTION", collectionData("orders")), item("FIELD", field)),
+                PackageImportService.ImportOptions.defaults());
+
+        assertThat(report.items()).extracting(
+                        PackageImportService.ItemResult::naturalKey,
+                        PackageImportService.ItemResult::action,
+                        PackageImportService.ItemResult::resourceId)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("orders", "CREATED", "tgt-orders"),
+                        org.assertj.core.groups.Tuple.tuple("orders.reference", "CREATED", "tgt-reference"));
+    }
+
+    @Test
+    @DisplayName("a FAILED item has no resourceId, and the 4-argument constructor leaves it null")
+    void failedItemHasNoResourceId() {
+        var report = service.importPackage(TENANT,
+                pkg(item("FIELD", lookupFieldData("customers"))),
+                PackageImportService.ImportOptions.defaults());
+
+        assertThat(report.items().get(0).action()).isEqualTo("FAILED");
+        assertThat(report.items().get(0).resourceId()).isNull();
+        assertThat(new PackageImportService.ItemResult("COLLECTION", "x", "SKIPPED", null).resourceId())
+                .isNull();
     }
 
     // ------------------------------------------------------------------

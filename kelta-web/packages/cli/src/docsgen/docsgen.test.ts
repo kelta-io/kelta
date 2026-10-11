@@ -29,6 +29,20 @@ describe('generated docs freshness', () => {
     expect(committed('COMMANDS.md')).toBe(renderCommandsMd(buildManifest(allCommands)));
   });
 
+  it('embeds every tri-published authoring topic', () => {
+    expect(Object.keys(AUTHORING_DOCS).sort()).toEqual(
+      [
+        'dashboards',
+        'flows',
+        'jsonapi',
+        'list-views',
+        'page-layouts',
+        'ui-menus',
+        'ui-pages',
+      ].sort()
+    );
+  });
+
   it.each(Object.keys(AUTHORING_DOCS))(
     'authoringDocs.ts["%s"] matches docs/authoring/%s.md — keep the embedded copy in sync',
     (topic) => {

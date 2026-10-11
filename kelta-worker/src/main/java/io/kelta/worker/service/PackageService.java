@@ -3,7 +3,9 @@ package io.kelta.worker.service;
 import io.kelta.worker.repository.PackageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
@@ -18,6 +20,9 @@ public class PackageService {
     private static final List<String> ID_OPTION_KEYS = List.of(
             "collectionIds", "uiPageIds", "uiMenuIds", "flowIds", "pageLayoutIds",
             "validationRuleIds", "globalPicklistIds");
+
+    /** Collection API names whose collections and dependents (rules, layouts, flows, picklists) to export. */
+    private static final String COLLECTION_NAMES_OPTION = "collectionNames";
 
     private static final String DEFAULT_VERSION = "1.0.0";
     private static final String DEFAULT_NAME = "metadata";
@@ -66,7 +71,8 @@ public class PackageService {
      * ({@code POST /api/packages/export {}} — the common {@code kelta metadata
      * export} case) means the whole tenant, and name/version fall back to the
      * tenant slug and {@value #DEFAULT_VERSION}. An explicit (even empty) id
-     * list is respected as-is.
+     * list is respected as-is; {@code collectionNames} scopes the export to those
+     * collections and what hangs off them.
      */
     public Map<String, Object> resolveExportOptions(String tenantId, Map<String, Object> options) {
         String name = blankToNull((String) options.get("name"));
@@ -78,13 +84,55 @@ public class PackageService {
             version = DEFAULT_VERSION;
         }
 
-        Map<String, Object> resolved = ID_OPTION_KEYS.stream().anyMatch(options::containsKey)
+        boolean scoped = options.containsKey(COLLECTION_NAMES_OPTION)
+                || ID_OPTION_KEYS.stream().anyMatch(options::containsKey);
+        Map<String, Object> resolved = scoped
                 ? new LinkedHashMap<>(options)
                 : exportAllOptions(tenantId, name, version);
         resolved.putAll(options);
+        if (options.containsKey(COLLECTION_NAMES_OPTION)) {
+            addCollectionDependents(tenantId, getStringList(options, COLLECTION_NAMES_OPTION), resolved);
+        }
         resolved.put("name", name);
         resolved.put("version", version);
         return resolved;
+    }
+
+    /**
+     * Resolves {@code collectionNames} to ids (unioned with any explicit
+     * {@code collectionIds}) and fills each dependent id list the caller did not
+     * pass: the collections' validation rules and page layouts, the flows they
+     * trigger, and the global picklists their fields are bound to. UI pages and
+     * menus are never pulled in implicitly.
+     */
+    private void addCollectionDependents(String tenantId, List<String> names, Map<String, Object> resolved) {
+        List<String> distinctNames = names.stream().distinct().toList();
+        var rows = repository.findCollectionsByNames(tenantId, distinctNames);
+        Map<String, String> idsByName = new LinkedHashMap<>();
+        for (var row : rows) {
+            if (!Boolean.TRUE.equals(row.get("system_collection"))) {
+                idsByName.put((String) row.get("name"), (String) row.get("id"));
+            }
+        }
+        List<String> unknown = distinctNames.stream().filter(n -> !idsByName.containsKey(n)).toList();
+        if (!unknown.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Unknown collection(s) in collectionNames: " + String.join(", ", unknown));
+        }
+
+        List<String> namedIds = distinctNames.stream().map(idsByName::get).toList();
+        Set<String> collectionIds = new LinkedHashSet<>(getStringList(resolved, "collectionIds"));
+        collectionIds.addAll(namedIds);
+        resolved.put("collectionIds", new ArrayList<>(collectionIds));
+
+        resolved.computeIfAbsent("validationRuleIds",
+                k -> repository.findValidationRuleIdsByCollectionIds(tenantId, namedIds));
+        resolved.computeIfAbsent("pageLayoutIds",
+                k -> repository.findPageLayoutIdsByCollectionIds(tenantId, namedIds));
+        resolved.computeIfAbsent("flowIds",
+                k -> repository.findFlowIdsByTriggerCollections(tenantId, distinctNames));
+        resolved.computeIfAbsent("globalPicklistIds",
+                k -> repository.findGlobalPicklistIdsReferencedByCollections(tenantId, namedIds));
     }
 
     @SuppressWarnings("unchecked")

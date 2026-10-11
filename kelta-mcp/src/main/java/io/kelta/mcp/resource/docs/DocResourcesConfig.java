@@ -40,7 +40,7 @@ public class DocResourcesConfig {
     @Bean
     public DocResource dashboardsDocResource() {
         return new DocResource("dashboards",
-                "Authoring dashboards: 1-based grid, widget catalogue, operator vocabulary, reportId.");
+                "Authoring dashboards: 1-based grid, widget catalogue and config keys, operator vocabulary, reportId.");
     }
 
     @Bean
@@ -53,5 +53,11 @@ public class DocResourcesConfig {
     public DocResource uiMenusDocResource() {
         return new DocResource("ui-menus",
                 "Authoring UI menus: path grammar, grouping via parentId.");
+    }
+
+    @Bean
+    public DocResource flowsDocResource() {
+        return new DocResource("flows",
+                "Authoring flows: trigger config, state envelope, ${...} substitution, ResultPath, task Parameters.");
     }
 }

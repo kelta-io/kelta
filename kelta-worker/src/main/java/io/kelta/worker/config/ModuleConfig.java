@@ -12,9 +12,9 @@ import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import io.kelta.runtime.workflow.module.ModuleContext;
 import io.kelta.worker.module.JdbcModuleSigningKeyStore;
 import io.kelta.worker.module.JdbcModuleStore;
-import io.kelta.worker.module.ModuleCollectionProvisioner;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
 import io.kelta.worker.module.ModuleJarService;
+import io.kelta.worker.module.ModuleMetadataProvisioner;
 import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleRouteRegistry;
 import io.kelta.worker.module.ModuleSignatureVerifier;
@@ -106,7 +106,7 @@ public class ModuleConfig {
                                                        @Nullable FormulaEvaluator formulaEvaluator,
                                                        ModuleSignatureVerifier signatureVerifier,
                                                        BeforeSaveHookRegistry beforeSaveHookRegistry,
-                                                       ModuleCollectionProvisioner collectionProvisioner,
+                                                       ModuleMetadataProvisioner metadataProvisioner,
                                                        @Nullable CredentialResolverPort credentialResolverPort,
                                                        TenantSlugResolver tenantSlugResolver,
                                                        ModuleServiceRegistry moduleServiceRegistry,
@@ -136,7 +136,7 @@ public class ModuleConfig {
 
         RuntimeModuleManager manager = new RuntimeModuleManager(moduleStore, actionHandlerRegistry,
             objectMapper, jarService, moduleContext, signatureVerifier, beforeSaveHookRegistry,
-            collectionProvisioner, tenantSlugResolver, moduleServiceRegistry);
+            metadataProvisioner, tenantSlugResolver, moduleServiceRegistry);
         manager.setStubModeEnabled(stubModeEnabled);
         manager.setProvenanceStore(provenanceStore);
         manager.setModuleRouteRegistry(moduleRouteRegistry);

@@ -187,6 +187,23 @@ it('should add filter when button clicked', async () => {
 });
 ```
 
+**Transient states (loading, disabled, spinners) are asserted while a test-controlled
+deferred is pending — never against a wall-clock timer.** A mock like
+`new Promise((r) => setTimeout(r, 100))` makes the state exist for 100 ms of real time;
+on a starved CI runner `waitFor` can first poll after it has ended and then time out
+(PLT-521, `concerns.md` → "Frontend suite starves under concurrent image builds"). Hold
+the promise open yourself, then release it and wait for the settled state so nothing
+dangles past the test:
+
+```typescript
+let release!: () => void;
+const onSave = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
+// ...render, submit...
+await waitFor(() => expect(screen.getByTestId('submit')).toBeDisabled());
+act(() => release());
+await waitFor(() => expect(screen.getByTestId('submit')).toBeEnabled());
+```
+
 ## End-to-end (Playwright)
 
 E2E specs live in `e2e-tests/` (see `e2e-tests/README.md` for setup, auth, and subsets).
@@ -281,7 +298,28 @@ specs. The branch must already contain `ci/update-snapshots.sh`, so rebase it if
 the script.
 
 The script's own tests are `ci/update-snapshots.test.ts` (`node --test`, Node ≥ 24). They run
-in the `lint-workflows` job, against a local bare repo and a fake `docker`.
+in the `test-ci-scripts` job, against a local bare repo and a fake `docker`.
+
+## CI script tests
+
+**A `ci/` script's tests live next to it as `ci/<name>.test.ts` or `ci/<name>.test.sh`.** The
+`test-ci-scripts` job in `ci.yml` (job detail: `ci-cd.md`) runs whenever `ci/**`, `scripts/ci/**`
+or the workflows change, and picks tests up by glob — `node --test ci/*.test.ts` and `bash` on
+each `ci/*.test.sh` — so a new test needs no workflow edit. It also runs `bash -n` and
+`shellcheck` 0.10.0 (pinned; default severity) over every `ci/*.sh` and `scripts/ci/*.sh` — use
+the same release locally, since older distro builds report findings the job does not. Locally:
+
+```bash
+node --test ci/*.test.ts          # Node >= 24 (native type stripping)
+for t in ci/*.test.sh; do bash "$t"; done
+shellcheck ci/*.sh scripts/ci/*.sh
+```
+
+A test may also run inside the job that uses its script (`ci/templates-install-check.test.ts`
+in `templates`, `ci/upgrade-verify.test.sh` in `upgrade-test.yml`), but never *only* there: one
+this job cannot run must be named in a comment in the job with the reason and the job that runs
+it. Before this job, `ci/update-snapshots.test.ts` ran only when a workflow changed, so #1675's
+change to the script skipped its tests and broke it.
 
 ## Upgrade test (CI)
 

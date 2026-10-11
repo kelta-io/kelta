@@ -17,6 +17,7 @@ const EXTERNAL_SOURCES: Record<string, string> = {
   'authoring/dashboards': 'docs/authoring/dashboards.md',
   'authoring/ui-pages': 'docs/authoring/ui-pages.md',
   'authoring/ui-menus': 'docs/authoring/ui-menus.md',
+  'authoring/flows': 'docs/authoring/flows.md',
   'cli/commands': 'kelta-web/packages/cli/COMMANDS.md',
   'cli/agents': 'kelta-web/packages/cli/AGENTS.md',
 };

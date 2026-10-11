@@ -127,7 +127,7 @@ mkdir -p "$REPORT_DIR/playwright-report" "$REPORT_DIR/test-results"
 
 for spec in "${specs[@]}"; do
   mkdir -p "$head/e2e-tests/$spec-snapshots"
-  "$DOCKER" cp "$container":"/work/$spec-snapshots/." "$head/e2e-tests/$spec-snapshots/" \
+  "$DOCKER" cp "$container:/work/$spec-snapshots/." "$head/e2e-tests/$spec-snapshots/" \
     || echo "::warning::no $spec-snapshots directory in the container (the spec takes no screenshots?)"
   if compgen -G "$head/e2e-tests/$spec-snapshots/*.png" >/dev/null; then
     git -C "$head" add -- ":(glob)e2e-tests/$spec-snapshots/*.png"

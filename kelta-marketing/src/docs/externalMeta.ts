@@ -60,6 +60,12 @@ export const externalMeta: Record<`authoring/${string}` | `cli/${string}`, Exter
     section: 'reference',
     order: 70,
   },
+  'authoring/flows': {
+    title: 'Authoring Flows',
+    description: 'The flow record and state machine: trigger config, the state envelope, ${…} substitution, ResultPath and the Parameters of the common task resources.',
+    section: 'reference',
+    order: 80,
+  },
   'cli/commands': {
     title: 'kelta CLI — Command Reference',
     description: 'Every kelta command group, command, flag and default — generated from the CLI command registry.',

@@ -3,7 +3,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AxiosInstance } from 'axios';
-import { runApply, runDiff, runExport } from './metadata.js';
+import type { CommandContext } from '../registry/types.js';
+import { metadataCommands, runApply, runDiff, runExport } from './metadata.js';
 
 let dir: string;
 
@@ -44,6 +45,24 @@ describe('runExport', () => {
     expect(post).toHaveBeenCalledWith(
       '/api/packages/export',
       {},
+      expect.objectContaining({ responseType: 'arraybuffer' })
+    );
+  });
+
+  it('`kelta metadata export --collections sites,inspections` posts collectionNames', async () => {
+    const post = vi
+      .fn()
+      .mockResolvedValue({ status: 200, data: new Uint8Array([123]).buffer, headers: {} });
+    const out = join(dir, 'inspections.json');
+    const def = metadataCommands.find((c) => c.name === 'export');
+    if (!def) throw new Error('no export command');
+    const ctx = { client: { getAxiosInstance: () => client(post) } } as unknown as CommandContext;
+
+    await def.handler(ctx, def.input.parse({ collections: 'sites,inspections', out }) as never);
+
+    expect(post).toHaveBeenCalledWith(
+      '/api/packages/export',
+      { collectionNames: ['sites', 'inspections'] },
       expect.objectContaining({ responseType: 'arraybuffer' })
     );
   });
