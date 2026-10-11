@@ -27,6 +27,13 @@ export function typedDefault(type: string, value: string): string | number | boo
   });
 }
 
+function parseValues(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((v) => v.trim())
+    .filter((v) => v !== '');
+}
+
 const list = defineCommand({
   group: 'fields',
   name: 'list',
@@ -72,6 +79,11 @@ const add = defineCommand({
       description: 'Default value (true|false for BOOLEAN, a number for numeric types)',
     },
     { flag: '--picklist <name|id>', description: 'Global picklist source (picklist types)' },
+    {
+      flag: '--values <a,b,c>',
+      description:
+        'Comma-separated field-scoped picklist values (picklist types, instead of --picklist)',
+    },
     { flag: '--reference <collection>', description: 'Target collection (reference types)' },
     { flag: '--relationship-name <name>', description: 'Relationship name (reference types)' },
     { flag: '--dimension <n>', description: 'Vector dimension (vector type)' },
@@ -89,6 +101,7 @@ const add = defineCommand({
     description: z.string().optional(),
     default: z.string().optional(),
     picklist: z.string().optional(),
+    values: z.string().optional(),
     reference: z.string().optional(),
     relationshipName: z.string().optional(),
     dimension: z.coerce.number().int().optional(),
@@ -96,6 +109,7 @@ const add = defineCommand({
   }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
+    const values = input.values === undefined ? undefined : parseValues(input.values);
     const body = await buildFieldBody(axios, {
       collection: input.collection,
       name: input.name,
@@ -109,16 +123,41 @@ const add = defineCommand({
       defaultValue:
         input.default === undefined ? undefined : typedDefault(input.type, input.default),
       picklist: input.picklist,
+      values,
       reference: input.reference,
       relationshipName: input.relationshipName,
       dimension: input.dimension,
       extra: input.data ? readDataArgument(input.data) : undefined,
     });
     const response = await axios.post<{ data?: { id?: string } }>('/api/fields', body);
+    const fieldId = response.data.data?.id;
+    if (values) {
+      if (!fieldId) {
+        throw new CliError('POST /api/fields returned no field id; picklist values not added', {
+          code: 'API_ERROR',
+          exitCode: EXIT.API,
+        });
+      }
+      for (const [sortOrder, value] of values.entries()) {
+        await axios.post('/api/picklist-values', {
+          data: {
+            type: 'picklist-values',
+            attributes: {
+              value,
+              label: value,
+              picklistSourceType: 'FIELD',
+              picklistSourceId: fieldId,
+              sortOrder,
+              isActive: true,
+            },
+          },
+        });
+      }
+    }
     return {
       data: response.data,
-      message: `Field "${input.name}" (${String(body.data.attributes.type)}) added to ${input.collection}`,
-      ids: response.data.data?.id ? [response.data.data.id] : [],
+      message: `Field "${input.name}" (${String(body.data.attributes.type)}) added to ${input.collection}${values ? ` with ${values.length} picklist values` : ''}`,
+      ids: fieldId ? [fieldId] : [],
     };
   },
 });

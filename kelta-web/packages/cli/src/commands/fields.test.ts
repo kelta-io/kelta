@@ -65,6 +65,74 @@ describe('fields add --default', () => {
   });
 });
 
+describe('fields add --values', () => {
+  function postBodies(post: ReturnType<typeof vi.fn>) {
+    return post.mock.calls.map(([url, body]) => ({
+      url: url as string,
+      attributes: (body as { data: { attributes: Record<string, unknown> } }).data.attributes,
+    }));
+  }
+
+  it('creates the field without fieldTypeConfig, then one FIELD-scoped value per entry', async () => {
+    const { ctx, post } = fakeCtx();
+    const def = addCommand();
+    const input = def.input.parse({
+      collection: 'deals',
+      name: 'stage',
+      type: 'picklist',
+      values: 'a,b,c',
+    });
+    await def.handler(ctx, input as never);
+
+    const calls = postBodies(post);
+    expect(calls.map((c) => c.url)).toEqual([
+      '/api/fields',
+      '/api/picklist-values',
+      '/api/picklist-values',
+      '/api/picklist-values',
+    ]);
+    expect(calls[0]?.attributes).not.toHaveProperty('fieldTypeConfig');
+    expect(calls[0]?.attributes.type).toBe('PICKLIST');
+    expect(calls.slice(1).map((c) => c.attributes)).toEqual(
+      ['a', 'b', 'c'].map((value, sortOrder) => ({
+        value,
+        label: value,
+        picklistSourceType: 'FIELD',
+        picklistSourceId: 'f1',
+        sortOrder,
+        isActive: true,
+      }))
+    );
+  });
+
+  it('rejects --values together with --picklist before any POST', async () => {
+    const { ctx, post } = fakeCtx();
+    const def = addCommand();
+    const input = def.input.parse({
+      collection: 'deals',
+      name: 'stage',
+      type: 'picklist',
+      picklist: 'stages',
+      values: 'a,b',
+    });
+    await expect(def.handler(ctx, input as never)).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENTS',
+      exitCode: EXIT.USAGE,
+    });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('names both --picklist and --values when a picklist has neither', async () => {
+    const { ctx, post } = fakeCtx();
+    const def = addCommand();
+    const input = def.input.parse({ collection: 'deals', name: 'stage', type: 'picklist' });
+    const run = def.handler(ctx, input as never);
+    await expect(run).rejects.toMatchObject({ exitCode: EXIT.USAGE });
+    await expect(run).rejects.toThrow(/--picklist.*--values/);
+    expect(post).not.toHaveBeenCalled();
+  });
+});
+
 describe('typedDefault', () => {
   it.each([
     ['bool', 'true', true],
