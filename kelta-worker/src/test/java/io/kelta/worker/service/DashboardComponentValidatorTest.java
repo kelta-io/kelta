@@ -275,4 +275,66 @@ class DashboardComponentValidatorTest {
 
         assertTrue(errors.isEmpty());
     }
+
+    // =========================================================================
+    // aggregateOver: "groupSizes"
+    // =========================================================================
+
+    private Map<String, Object> groupSizesChart(Map<String, Object> extra) {
+        Map<String, Object> config = new HashMap<>(Map.of(
+            "collectionName", "accounts", "groupByField", "name", "aggregateOver", "groupSizes"));
+        config.putAll(extra);
+        return component("chart", config);
+    }
+
+    private void assertSingleError(List<BeforeSaveResult.ValidationError> errors, String field) {
+        assertEquals(1, errors.size(), errors.toString());
+        assertEquals(field, errors.get(0).field());
+    }
+
+    @Test
+    void acceptsGroupSizesChartWithDefaultsAndExplicitCount() {
+        assertTrue(validator.validate(groupSizesChart(Map.of())).isEmpty());
+        assertTrue(validator.validate(groupSizesChart(Map.of(
+            "aggregateFunction", "count",
+            "bucketBounds", List.of(1, 2, 5, 10, 25),
+            "percentiles", List.of(50, 90, 100),
+            "sizeThresholds", List.of(10, 25)))).isEmpty());
+    }
+
+    @Test
+    void rejectsAggregateOverOnMetric() {
+        assertSingleError(validator.validate(component("metric",
+            Map.of("collectionName", "accounts", "aggregateOver", "groupSizes"))), "config/aggregateOver");
+    }
+
+    @Test
+    void rejectsUnknownAggregateOverValue() {
+        assertSingleError(validator.validate(groupSizesChart(Map.of("aggregateOver", "groupNames"))),
+            "config/aggregateOver");
+    }
+
+    @Test
+    void rejectsNonCountAggregateFunctionWithGroupSizes() {
+        assertSingleError(validator.validate(groupSizesChart(Map.of(
+            "aggregateFunction", "SUM", "aggregateField", "amount"))), "config/aggregateFunction");
+    }
+
+    @Test
+    void rejectsDescendingOrNonPositiveDistributionLists() {
+        for (String key : List.of("bucketBounds", "percentiles", "sizeThresholds")) {
+            assertSingleError(validator.validate(groupSizesChart(Map.of(key, List.of(10, 5)))), "config/" + key);
+            assertSingleError(validator.validate(groupSizesChart(Map.of(key, List.of(5, 5)))), "config/" + key);
+            assertSingleError(validator.validate(groupSizesChart(Map.of(key, List.of(0, 5)))), "config/" + key);
+            assertSingleError(validator.validate(groupSizesChart(Map.of(key, List.of(-1)))), "config/" + key);
+            assertSingleError(validator.validate(groupSizesChart(Map.of(key, List.of(1.5)))), "config/" + key);
+            assertSingleError(validator.validate(groupSizesChart(Map.of(key, List.of()))), "config/" + key);
+        }
+    }
+
+    @Test
+    void rejectsPercentileAboveHundred() {
+        assertSingleError(validator.validate(groupSizesChart(Map.of("percentiles", List.of(50, 101)))),
+            "config/percentiles");
+    }
 }

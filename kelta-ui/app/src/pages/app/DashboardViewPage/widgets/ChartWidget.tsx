@@ -23,7 +23,9 @@ export interface ChartSeriesEntry {
 }
 
 export interface ChartWidgetProps {
-  /** Widget data: {groupByField, aggregateFunction, series, totalRecords}. */
+  /** Widget data: {groupByField, aggregateFunction, series, totalRecords}. With
+   *  `groupSizes: true` the series is a key-free histogram of group sizes (plus
+   *  `summary`/`truncated`), so its segments are not drill-through targets. */
   data: Record<string, unknown>
   chartStyle?: 'bar' | 'pie'
   /** Called with the clicked segment's drill-through value: `key` when present
@@ -36,10 +38,11 @@ const PIE_COLORS = ['#3B82F6', '#06B6D4', '#8B5CF6', '#F59E0B', '#10B981', '#EF4
 /** Grouped-aggregate chart over the server's `series: [{label, count, value}]`. */
 export function ChartWidget({ data, chartStyle = 'bar', onSegmentClick }: ChartWidgetProps) {
   const series = (data.series as ChartSeriesEntry[]) ?? []
+  const drillable = Boolean(onSegmentClick) && data.groupSizes !== true
 
   const handleClick = (entry: { label?: string; key?: string } | undefined) => {
     const drillValue = entry?.key ?? entry?.label
-    if (onSegmentClick && drillValue && drillValue !== '(empty)') {
+    if (drillable && onSegmentClick && drillValue && drillValue !== '(empty)') {
       onSegmentClick(drillValue)
     }
   }
@@ -62,7 +65,7 @@ export function ChartWidget({ data, chartStyle = 'bar', onSegmentClick }: ChartW
               dataKey="value"
               nameKey="label"
               onClick={(entry) => handleClick(entry as unknown as { label?: string })}
-              cursor={onSegmentClick ? 'pointer' : undefined}
+              cursor={drillable ? 'pointer' : undefined}
             >
               {series.map((entry, i) => (
                 <Cell key={entry.label} fill={PIE_COLORS[i % PIE_COLORS.length]} />
@@ -81,7 +84,7 @@ export function ChartWidget({ data, chartStyle = 'bar', onSegmentClick }: ChartW
               dataKey="value"
               fill="#3B82F6"
               onClick={(entry) => handleClick(entry as unknown as { label?: string })}
-              cursor={onSegmentClick ? 'pointer' : undefined}
+              cursor={drillable ? 'pointer' : undefined}
             />
           </BarChart>
         )}

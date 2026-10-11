@@ -39,6 +39,11 @@ public class DashboardDataService {
     private static final int DEFAULT_RECENT_RECORDS = 10;
     private static final int MAX_TABLE_PAGE_SIZE = 500;
     private static final int DEFAULT_TABLE_PAGE_SIZE = 25;
+    static final String AGGREGATE_OVER_GROUP_SIZES = "groupSizes";
+    static final int GROUP_SIZES_ROW_CAP = 50_000;
+    static final List<Integer> DEFAULT_BUCKET_BOUNDS = List.of(1, 2, 5, 10, 25);
+    static final List<Integer> DEFAULT_PERCENTILES = List.of(50, 90, 99);
+    static final List<Integer> DEFAULT_SIZE_THRESHOLDS = List.of(10, 25);
 
     private final QueryEngine queryEngine;
     private final CollectionRegistry collectionRegistry;
@@ -280,6 +285,19 @@ public class DashboardDataService {
         rejectMaskedField(maskedFields, groupByField, "group by");
 
         String aggregateFunction = getConfigString(config, "aggregateFunction", "COUNT");
+        String aggregateOver = getConfigString(config, "aggregateOver", null);
+        if (aggregateOver != null) {
+            if (!AGGREGATE_OVER_GROUP_SIZES.equals(aggregateOver)) {
+                throw new WidgetExecutionException("Unsupported aggregateOver '" + aggregateOver
+                    + "'; expected " + AGGREGATE_OVER_GROUP_SIZES);
+            }
+            if (!"COUNT".equalsIgnoreCase(aggregateFunction)) {
+                throw new WidgetExecutionException(
+                    "aggregateOver groupSizes requires aggregateFunction COUNT");
+            }
+            return executeGroupSizesChart(collection, config, filters, groupByField);
+        }
+
         String aggregateField = getConfigString(config, "aggregateField", null);
         int maxGroups = getConfigInt(config, "maxGroups", 20);
 
@@ -345,6 +363,92 @@ public class DashboardDataService {
         data.put("aggregateFunction", aggregateFunction);
         data.put("series", series);
         data.put("totalRecords", queryResult.metadata().totalCount());
+
+        return new WidgetResult("chart", data, null, null);
+    }
+
+    /**
+     * {@code aggregateOver: "groupSizes"} chart: groups by {@code groupByField}, then
+     * discards the keys and reports only the distribution of group sizes — a histogram
+     * over {@code bucketBounds} plus summary statistics. No group value (raw or resolved)
+     * ever leaves this method, so reference labels are never resolved. Pages through every
+     * matching record up to {@link #GROUP_SIZES_ROW_CAP}; {@code truncated} flags the cap.
+     */
+    private WidgetResult executeGroupSizesChart(CollectionDefinition collection,
+                                                Map<String, Object> config,
+                                                List<FilterCondition> filters,
+                                                String groupByField) {
+        List<Integer> bucketBounds = getConfigPositiveAscendingInts(
+            config, "bucketBounds", DEFAULT_BUCKET_BOUNDS, Integer.MAX_VALUE);
+        List<Integer> percentiles = getConfigPositiveAscendingInts(
+            config, "percentiles", DEFAULT_PERCENTILES, 100);
+        List<Integer> sizeThresholds = getConfigPositiveAscendingInts(
+            config, "sizeThresholds", DEFAULT_SIZE_THRESHOLDS, Integer.MAX_VALUE);
+
+        Map<String, Integer> groupSizes = new HashMap<>();
+        int records = 0;
+        long totalCount = 0;
+        List<SortField> stableOrder = List.of(new SortField("id", SortDirection.ASC));
+        for (int page = 1; records < GROUP_SIZES_ROW_CAP; page++) {
+            QueryRequest request = new QueryRequest(
+                new Pagination(page, Pagination.MAX_PAGE_SIZE), stableOrder, List.of(groupByField), filters);
+            QueryResult queryResult = queryEngine.executeQuery(collection, request);
+            totalCount = queryResult.metadata().totalCount();
+            for (Map<String, Object> record : queryResult.data()) {
+                if (records >= GROUP_SIZES_ROW_CAP) break;
+                String key = formatValue(record.get(groupByField));
+                groupSizes.merge(key.isEmpty() ? "(empty)" : key, 1, Integer::sum);
+                records++;
+            }
+            if (queryResult.data().size() < Pagination.MAX_PAGE_SIZE || records >= totalCount) break;
+        }
+
+        int[] sizes = groupSizes.values().stream().mapToInt(Integer::intValue).sorted().toArray();
+
+        List<Map<String, Object>> series = new ArrayList<>();
+        for (int i = 0; i < bucketBounds.size(); i++) {
+            int lower = bucketBounds.get(i);
+            Integer upper = i + 1 < bucketBounds.size() ? bucketBounds.get(i + 1) - 1 : null;
+            String label = upper == null ? lower + "+"
+                : upper == lower ? String.valueOf(lower)
+                : lower + "\u2013" + upper;
+            long groupsInBucket = Arrays.stream(sizes)
+                .filter(size -> size >= lower && (upper == null || size <= upper))
+                .count();
+            Map<String, Object> point = new LinkedHashMap<>();
+            point.put("label", label);
+            point.put("count", groupsInBucket);
+            point.put("value", groupsInBucket);
+            series.add(point);
+        }
+
+        Map<String, Object> percentileValues = new LinkedHashMap<>();
+        for (int p : percentiles) {
+            // Nearest rank: the ceil(p/100 * N)-th smallest size (1-based).
+            int rank = (int) (((long) p * sizes.length + 99) / 100);
+            percentileValues.put(String.valueOf(p), sizes.length == 0 ? 0 : sizes[Math.max(rank, 1) - 1]);
+        }
+        Map<String, Object> countGroupsAtLeast = new LinkedHashMap<>();
+        for (int threshold : sizeThresholds) {
+            countGroupsAtLeast.put(String.valueOf(threshold),
+                Arrays.stream(sizes).filter(size -> size >= threshold).count());
+        }
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("groups", sizes.length);
+        summary.put("records", records);
+        summary.put("percentiles", percentileValues);
+        summary.put("max", sizes.length == 0 ? 0 : sizes[sizes.length - 1]);
+        summary.put("countGroupsAtLeast", countGroupsAtLeast);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("groupByField", groupByField);
+        data.put("aggregateFunction", "COUNT");
+        data.put("groupSizes", true);
+        data.put("series", series);
+        data.put("summary", summary);
+        data.put("totalRecords", totalCount);
+        data.put("truncated", totalCount > GROUP_SIZES_ROW_CAP);
 
         return new WidgetResult("chart", data, null, null);
     }
@@ -759,6 +863,34 @@ public class DashboardDataService {
             catch (NumberFormatException e) { return defaultValue; }
         }
         return defaultValue;
+    }
+
+    /**
+     * Reads a strictly ascending list of positive integers (each {@code <= max}) from
+     * {@code config}, or {@code defaultValue} when the key is absent.
+     */
+    List<Integer> getConfigPositiveAscendingInts(Map<String, Object> config, String key,
+                                                 List<Integer> defaultValue, int max) {
+        Object val = config == null ? null : config.get(key);
+        if (val == null) return defaultValue;
+        if (!(val instanceof List<?> list) || list.isEmpty()) {
+            throw new WidgetExecutionException(key + " must be a non-empty array of integers");
+        }
+        List<Integer> result = new ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof Integer || item instanceof Long || item instanceof Short)) {
+                throw new WidgetExecutionException(key + " must contain only integers");
+            }
+            long n = ((Number) item).longValue();
+            if (n < 1 || n > max) {
+                throw new WidgetExecutionException(key + " values must be between 1 and " + max);
+            }
+            if (!result.isEmpty() && n <= result.get(result.size() - 1)) {
+                throw new WidgetExecutionException(key + " must be strictly ascending");
+            }
+            result.add((int) n);
+        }
+        return result;
     }
 
     private int getIntParam(Map<String, String> params, String key, int defaultValue) {
