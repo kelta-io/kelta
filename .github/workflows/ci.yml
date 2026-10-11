@@ -707,7 +707,10 @@ jobs:
         run: |
           # Image tag must match the @playwright/test version in package-lock.json
           # (resolved from ^1.50.0 → currently 1.58.2). Update both together.
-          docker build -t kelta-e2e-runner:local -f - . <<'DOCKERFILE'
+          # --load: BUILDX_BUILDER selects the docker-container kelta-ci builder, which keeps
+          # an unloaded result in its cache only, so `docker run` silently used whatever stale
+          # kelta-e2e-runner:local the node already had (old specs; PLT-522).
+          docker buildx build --load -t kelta-e2e-runner:local -f - . <<'DOCKERFILE'
           FROM mcr.microsoft.com/playwright:v1.58.2-noble
           WORKDIR /work
           COPY e2e-tests/package.json e2e-tests/package-lock.json ./
