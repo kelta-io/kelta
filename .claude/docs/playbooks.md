@@ -194,11 +194,18 @@ platform type fails).
        "fields": [ { "name": "reference", "type": "STRING", "required": true } ] }
    ]
    ```
-   `ModuleCollectionProvisioner` creates them at install via `queryEngine.create` on the
-   `collections`/`fields` system collections — the standard admin write path, so the NATS config
-   broadcast and lifecycle init (including the physical table) fire on every pod. Collection names
-   must match `^[a-z][a-z0-9_]*$`; field names cannot be the platform's reserved ones
-   (`id`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `tenantId`).
+   `ModuleMetadataProvisioner` translates them into a package and applies it at install through
+   `PackageImportService.importPackage` — the importer sandbox clone, promotion and package import
+   use, writing via `queryEngine` on the `collections`/`fields` system collections, so the NATS
+   config broadcast and lifecycle init (including the physical table) fire on every pod. It runs a
+   dry run first, then applies every collection plus the fields of only the collections that did
+   not exist. Collection names must match `^[a-z][a-z0-9_]*$`; field names cannot be the platform's
+   reserved ones (`id`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `tenantId`); a malformed
+   manifest is rejected before anything is imported. Each collection and field is recorded in
+   `module_provisioned_resource` as `CREATED` (with a SHA-256 `content_hash` of what the manifest
+   asked for) or `ADOPTED` (null hash); a row once `CREATED` stays `CREATED` across uninstall +
+   reinstall. `GET /api/modules/{moduleId}/provisioned-resources` lists them for the caller's
+   tenant, including after uninstall. A failed import item marks the module `FAILED`.
 3. **Accept webhooks** by naming one of your action handlers in `"webhookHandlerKey"`. External
    systems then POST to `/api/modules/webhooks/{tenantId}/{moduleId}` — one generic,
    platform-owned route (`ModuleWebhookController`), since a module cannot contribute a
@@ -243,8 +250,10 @@ would have silently stopped applying**, including paid SMS for free-tier members
 Populate first, install second:
 
 1. Create the collections through the normal admin API (same names and fields as the manifest).
-   `ModuleCollectionProvisioner` **skips collections that already exist**, so the later install
-   will not clobber them.
+   Install **adopts collections that already exist and leaves them completely alone** — no field
+   is added or updated on them (`ModuleMetadataProvisioner` → `PackageImportService` in `SKIP`
+   mode, with the adopted collections' fields filtered out), so the later install will not clobber
+   them.
 2. Migrate the data the module will answer from, and verify it.
 3. Install + enable, then confirm the module — not the fallback — is answering.
 
@@ -292,7 +301,8 @@ and the module reports `QUARANTINED` with the reason in `tenant_module.last_erro
 **Tests**: `RuntimeModuleManagerHookTest` and `ModuleWebhookDispatchTest` load a real JAR through
 the real sandboxed classloader — copy that shape rather than mocking the module instance, since
 hook registration and handler resolution only happen inside `loadFromJar`.
-`ModuleCollectionProvisionerTest` covers manifest → collection creation;
+`ModuleMetadataProvisionerTest` covers manifest → package translation, created vs adopted and
+the content hash; `ModuleProvenanceStoreTest` pins the ownership-preserving upsert;
 `ModuleWebhookControllerTest` covers the HTTP status contract.
 **Docs**: [`status.md`](status.md) (Extensibility / modules row); adding an unauthenticated path
 also means updating `kelta-gateway` `application.yml` (`unauthenticated-paths`),

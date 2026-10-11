@@ -4,6 +4,7 @@ import io.kelta.runtime.module.ModuleStore;
 import io.kelta.runtime.module.TenantModuleData;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
 import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
+import io.kelta.worker.service.PackageImportService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -109,10 +111,20 @@ class RuntimeModuleManagerHookTest {
                 .isSuccess()).isTrue();
     }
 
-    @Test
-    @DisplayName("Installing provisions the manifest's collections")
-    void installProvisionsDeclaredCollections() {
-        ModuleCollectionProvisioner provisioner = mock(ModuleCollectionProvisioner.class);
+    private static final String MANIFEST_WITH_COLLECTIONS = """
+        {
+          "id": "test-module",
+          "name": "Hook Providing Test Module",
+          "version": "1.0.0",
+          "moduleClass": "%s",
+          "collections": [
+            { "name": "invoices", "fields": [ { "name": "reference", "type": "STRING" } ] }
+          ]
+        }
+        """.formatted(MODULE_CLASS);
+
+    private RuntimeModuleManager provisioningManager(ModuleMetadataProvisioner provisioner,
+                                                     ModuleProvenanceStore provenanceStore) {
         ModuleJarService jarService = mock(ModuleJarService.class);
         when(jarService.uploadJar(any(), any(), any(), any())).thenReturn("s3/key.jar");
         when(moduleStore.findByTenantAndModuleId(any(), any())).thenReturn(Optional.empty());
@@ -120,26 +132,70 @@ class RuntimeModuleManagerHookTest {
         RuntimeModuleManager provisioningManager = new RuntimeModuleManager(
                 moduleStore, new ActionHandlerRegistry(), new ObjectMapper(), jarService,
                 null, null, hookRegistry, provisioner);
+        provisioningManager.setProvenanceStore(provenanceStore);
+        return provisioningManager;
+    }
 
-        String manifestWithCollections = """
-            {
-              "id": "test-module",
-              "name": "Hook Providing Test Module",
-              "version": "1.0.0",
-              "moduleClass": "%s",
-              "collections": [
-                { "name": "invoices", "fields": [ { "name": "reference", "type": "STRING" } ] }
-              ]
-            }
-            """.formatted(MODULE_CLASS);
+    @Test
+    @DisplayName("Installing provisions the manifest's collections and records one provenance row per resource")
+    void installProvisionsDeclaredCollections() {
+        ModuleMetadataProvisioner provisioner = mock(ModuleMetadataProvisioner.class);
+        ModuleProvenanceStore provenanceStore = mock(ModuleProvenanceStore.class);
+        when(provisioner.provision(eq(TENANT_ID), any(), eq("user-1"))).thenReturn(
+                new ModuleMetadataProvisioner.ProvisionResult(List.of(
+                        new ModuleMetadataProvisioner.ProvisionedResource(
+                                "COLLECTION", "invoices", "col-1", "CREATED", "a".repeat(64)),
+                        new ModuleMetadataProvisioner.ProvisionedResource(
+                                "FIELD", "invoices.reference", "fld-1", "CREATED", "b".repeat(64))),
+                        List.of()));
 
-        provisioningManager.installModuleWithJar(
-                TENANT_ID, manifestWithCollections, jarBytes, "user-1");
+        provisioningManager(provisioner, provenanceStore).installModuleWithJar(
+                TENANT_ID, MANIFEST_WITH_COLLECTIONS, jarBytes, "user-1");
 
-        // provisionWithOwnership, not provision: the install path needs to know which collections
-        // it created versus adopted so uninstall can act on that difference.
-        verify(provisioner).provisionWithOwnership(eq(TENANT_ID), argThat(collections ->
-                collections.size() == 1 && "invoices".equals(collections.get(0).name())));
+        verify(provisioner).provision(eq(TENANT_ID), argThat(manifest ->
+                manifest.collections().size() == 1
+                        && "invoices".equals(manifest.collections().get(0).name())), eq("user-1"));
+        verify(provenanceStore).record(TENANT_ID, "test-module", "1.0.0",
+                "COLLECTION", "invoices", "col-1", "CREATED", "a".repeat(64));
+        verify(provenanceStore).record(TENANT_ID, "test-module", "1.0.0",
+                "FIELD", "invoices.reference", "fld-1", "CREATED", "b".repeat(64));
+        verify(moduleStore, never()).updateStatus(any(), eq(TenantModuleData.STATUS_FAILED));
+    }
+
+    @Test
+    @DisplayName("A provisioner that reports failures marks the module FAILED; install still returns")
+    void failedItemsMarkModuleFailed() {
+        ModuleMetadataProvisioner provisioner = mock(ModuleMetadataProvisioner.class);
+        ModuleProvenanceStore provenanceStore = mock(ModuleProvenanceStore.class);
+        when(provisioner.provision(any(), any(), any())).thenReturn(
+                new ModuleMetadataProvisioner.ProvisionResult(
+                        List.of(new ModuleMetadataProvisioner.ProvisionedResource(
+                                "COLLECTION", "invoices", "col-1", "CREATED", "a".repeat(64))),
+                        List.of(new PackageImportService.ItemResult(
+                                "FIELD", "invoices.reference", "FAILED", "boom"))));
+
+        TenantModuleData installed = provisioningManager(provisioner, provenanceStore)
+                .installModuleWithJar(TENANT_ID, MANIFEST_WITH_COLLECTIONS, jarBytes, "user-1");
+
+        assertThat(installed).isNotNull();
+        verify(moduleStore).updateStatus(any(), eq(TenantModuleData.STATUS_FAILED));
+        // What did succeed is still recorded, so a retry knows the module created it.
+        verify(provenanceStore).record(TENANT_ID, "test-module", "1.0.0",
+                "COLLECTION", "invoices", "col-1", "CREATED", "a".repeat(64));
+    }
+
+    @Test
+    @DisplayName("A provisioner that throws marks the module FAILED; install still returns")
+    void thrownProvisioningMarksModuleFailed() {
+        ModuleMetadataProvisioner provisioner = mock(ModuleMetadataProvisioner.class);
+        when(provisioner.provision(any(), any(), any()))
+                .thenThrow(new IllegalArgumentException("bad manifest"));
+
+        TenantModuleData installed = provisioningManager(provisioner, mock(ModuleProvenanceStore.class))
+                .installModuleWithJar(TENANT_ID, MANIFEST_WITH_COLLECTIONS, jarBytes, "user-1");
+
+        assertThat(installed).isNotNull();
+        verify(moduleStore).updateStatus(any(), eq(TenantModuleData.STATUS_FAILED));
     }
 
     private TenantModuleData moduleData() {
