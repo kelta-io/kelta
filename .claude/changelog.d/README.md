@@ -22,8 +22,8 @@ everything since. To read both, oldest first:
 
 ```bash
 cat .claude/CHANGELOG.md
-grep -h '^- ' .claude/changelog.d/*.md | sort   # fragments only; skips this README
+cat .claude/changelog.d/[A-Za-z]*-*.md | sort   # fragments only; the glob skips this README
 ```
 
-`cat .claude/changelog.d/[A-Za-z]*-*.md | sort` works too, as long as the glob excludes this
-`README.md`.
+`grep -h '^- [0-9]' .claude/changelog.d/*.md | sort` does the same without relying on the
+file names (it matches only dated entry lines, not this README's bullets).
