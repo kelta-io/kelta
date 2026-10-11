@@ -223,3 +223,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-10-11 fix(cli): `fields add` passes exact native FieldType names (TEXT, FORMULA, …) through before aliases, adds `textarea` (CLI + MCP) and `--values a,b,c` for field-scoped picklists (KLT-534)
 - 2026-10-11 chore(release): Add release.ts pin/check-pin and fail the quickstart job on KELTA_VERSION drift between .env.example and docker-compose.yml (KLT-539)
 - 2026-10-11 fix(cli): `picklists get` returns the picklist's values sorted by sortOrder; add dangerous `flows delete` (KLT-535)
+- 2026-10-11 fix(ci): Rebase and retry the homelab-argo image-bump push on rejection; auto-rollback only when smoke-test itself failed (PLT-554)
