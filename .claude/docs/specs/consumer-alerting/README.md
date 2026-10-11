@@ -136,7 +136,7 @@ with every piece reusable by any other tenant.
 | Inbound signed webhook | LiveKit pattern: `VideoSessionController` raw-body + verify + `ON CONFLICT (event_id) DO NOTHING` dedupe (`LiveKitWebhookService`), gateway `unauthenticated-paths` |
 | System collection + config broadcast | `SystemCollectionDefinitions` factory + Flyway + RLS + `<Name>RefreshHook` in `FlowConfig` publishing collection-changed (Critical Rule 1) |
 | Member login / signup verify | `PortalLoginService` magic-link machinery + `PortalAuthApiController` JSON API |
-| Owner-scoped writes on generic routes | `UserPreferenceGuardHook` idiom |
+| Owner-scoped writes on generic routes | Ownership metadata (`ownerField`/`ownerScope`/`ownerScopeReads`) enforced by `OwnerScopeGuardHook` — `specs/member-data-ownership/` (the per-collection guard-hook idiom was retired in slice 4) |
 | Push delivery | `DefaultPushService` + `PushProvider` SPI (`FcmPushProvider` reference) |
 | Email delivery | `DefaultEmailService`/`SmtpEmailProvider` (+ templates, per-tenant SMTP) |
 | Retention sweep shape | `RetentionPurgeSweep`/`AutoArchiveSweep` (@Scheduled, SKIP LOCKED, dry-run gate) |
@@ -197,8 +197,10 @@ Every new stream gets its own `ensureStream(...)` in `JetStreamInitializer`; eve
 - **Portal users are deny-by-default on member data.** Watch reads go only through the
   owner-scoped `WatchController` (`WHERE member_id = caller`); generic-route reads of the
   watch/billing collections are denied to `user_type=PORTAL`; generic-route writes are
-  owner-guarded by hook. Slice 1 and 3 reviews must confirm the seeded Portal User profile
-  cannot reach another member's rows through the dynamic API; add owner-guard hooks if it can.
+  owner-guarded by the collection's ownership metadata (`OwnerScopeGuardHook`; see
+  `specs/member-data-ownership/`). Slice 1 and 3 reviews must confirm the seeded Portal User
+  profile cannot reach another member's rows through the dynamic API; declare ownership on the
+  collection if it can — do not add a per-collection hook.
 - **`WatchController`/`WinController` `list`/`get` have two response modes (K-8 support-list
   slice).** A PORTAL caller, or an INTERNAL caller naming a specific `?memberId=`, gets exactly
   today's owner-scoped shape: `{"data": [...]}` (list) or `{"data": {...}}` (get by id), no

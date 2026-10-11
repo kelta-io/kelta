@@ -8,6 +8,15 @@
 > **Security-typed — never auto-merged** (the guard hook is the authorization control on a
 > user-writable collection).
 
+> **Superseded guard (2026-10-10, member-data-ownership slice 4 / KLT-380).** The bespoke
+> `UserPreferenceGuardHook` described below is deleted. `user-ui-preferences` now declares
+> ownership metadata in `SystemCollectionDefinitions.userUiPreferences()` — `ownerField=userId`,
+> `ownerScope=ALL`, `ownerScopeReads=true` — enforced by the generic `OwnerScopeGuardHook`
+> (writes) and the `PhysicalTableStorageAdapter` owner predicate (reads). Two behaviour changes:
+> reads are now **owner-filtered** (closing the tenant-readable gap noted in §1), and a foreign
+> update/delete is a **404** (was a 400). See `specs/member-data-ownership/` and architecture.md →
+> Owner-scoped collections.
+
 ## 1. Goal & scope
 
 Server-persisted per-user UI preferences: the `user-ui-preferences` system collection
@@ -17,7 +26,7 @@ Server-persisted per-user UI preferences: the `user-ui-preferences` system colle
 fallback, and one-time migration source — saved views finally follow the user across
 browsers. **Not delivered:** favorites/recents migration (AppContext keeps localStorage —
 deliberate scope cut, see §8), SavedView v2 fields (slice 2), row-level read policy
-(documented tenant-readable gap).
+(documented tenant-readable gap — closed by the ownership metadata above).
 
 ## 2. UI samples
 
@@ -30,7 +39,8 @@ Table + collection per the parent contract (V163, unique `(tenant, user, prefTyp
 prefKey)`, generic route `/api/user-ui-preferences`, no static route, **no NATS hook** —
 rows are read per-request, nothing caches them in a registry; re-verified).
 
-**Guard (`UserPreferenceGuardHook`, order −100, this collection only):** caller =
+**Guard (`UserPreferenceGuardHook`, order −100, this collection only — retired, see the note
+at the top):** caller =
 `X-User-Id` header → `UserIdResolver` → UUID (the Phase-1 approval-hardening chain).
 Create: `record.userId` must equal caller. Update: `previous.userId` must equal caller and
 the row cannot be re-owned. Delete: owner looked up by id (the `beforeDelete` SPI carries

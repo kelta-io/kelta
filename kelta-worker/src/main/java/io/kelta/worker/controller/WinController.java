@@ -37,9 +37,12 @@ import java.util.Map;
  *
  * <p>{@code /api/wins/**} is a {@code static-} gateway route, so the gateway applies only the
  * blanket {@code API_ACCESS} check — <b>all</b> scoping is enforced here. Writes go through
- * {@link QueryEngine} rather than straight to the repository so {@code WinGuardHook} (owner
- * guard) fires; the generic dynamic route reaches the same collection, which is why that hook
- * exists — this controller is the pleasant door, not the only one.
+ * {@link QueryEngine} rather than straight to the repository so the generic owner guard
+ * ({@code OwnerScopeGuardHook}, driven by the {@code wins} ownership metadata:
+ * {@code ownerField=memberId}, {@code ownerScope=ALL}) fires; the generic dynamic route reaches
+ * the same collection, which is why the guard lives in the collection's metadata — this
+ * controller is the pleasant door, not the only one. Every write here is the caller's own win,
+ * so no support write needs to run as another member.
  *
  * <p>{@code GET /recent} is the deliberately cross-member ticker: it exposes ONLY opt-in
  * {@code isPublic} wins and ONLY the redacted fields a ticker needs (first-name claimant label,
@@ -154,7 +157,8 @@ public class WinController implements SelfScopedController {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                         "MANAGE_DATA or VIEW_ALL_DATA permission required");
             }
-            return dynamicCollectionRouter.list(COLLECTION, params, request);
+            return SupportPermissions.readAll(
+                    () -> dynamicCollectionRouter.list(COLLECTION, params, request));
         }
         String subject = resolveSubject(request, tenantId, memberId);
 
@@ -176,7 +180,8 @@ public class WinController implements SelfScopedController {
                                     HttpServletRequest request) {
         String tenantId = requireTenant();
         if (hasSupportRead(request)) {
-            return dynamicCollectionRouter.get(COLLECTION, id, params, request);
+            return SupportPermissions.readAll(
+                    () -> dynamicCollectionRouter.get(COLLECTION, id, params, request));
         }
         String subject = requireActor(request, tenantId);
         Win win = requireOwnWin(tenantId, id, subject);

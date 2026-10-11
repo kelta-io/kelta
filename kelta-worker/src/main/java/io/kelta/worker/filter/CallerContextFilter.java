@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * Binds {@link CallerContext} once per request, so everything downstream (owner-guard hooks,
+ * Binds {@link CallerContext} once per request, so everything downstream (the owner-scope guard,
  * Cerbos principals, owner scoping) reads one resolved identity instead of re-resolving
  * {@code X-User-Id}.
  *
@@ -41,8 +41,8 @@ import java.util.stream.Collectors;
  * <ul>
  *   <li>No {@code X-User-Id}, or no tenant → nothing is bound (internal tier).</li>
  *   <li>An email that resolves to no {@code platform_user} in the tenant → <b>401
- *       {@code CALLER_UNRESOLVED}</b>. Fail closed, as the owner-guard hooks' {@code CALLER_REJECTED}
- *       does: a caller that cannot be identified must not be mistaken for the internal tier.</li>
+ *       {@code CALLER_UNRESOLVED}</b>. Fail closed: a caller that cannot be identified must not
+ *       be mistaken for the internal tier.</li>
  *   <li>An identifier that is neither a UUID nor an email is a machine identity (a connected
  *       app's client id, stamped from the token {@code sub}) — nothing is bound, exactly as
  *       before this filter existed.</li>

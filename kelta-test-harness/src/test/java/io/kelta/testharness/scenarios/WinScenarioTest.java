@@ -30,9 +30,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li><b>Per-target stats count correctly</b> across public and private wins.</li>
  * </ul>
  *
- * <p>Owner-scoping (a member cannot touch another's win) is an app-layer guard
- * ({@code WinGuardHook}) and is covered by {@code WinGuardHookTest}. Read queries below are
- * copied verbatim from {@code WinRepository} — <b>keep them in sync</b>.
+ * <p>Owner-scoping (a member cannot touch another's win) comes from the {@code wins} ownership
+ * metadata ({@code ownerField=memberId}, {@code ownerScope=ALL}), enforced by the generic
+ * {@code OwnerScopeGuardHook} and covered by {@code OwnerScopeGuardHookTest} and
+ * {@code OwnerScopedCollectionScenarioTest}. Read queries below are copied verbatim from
+ * {@code WinRepository} — <b>keep them in sync</b>.
  */
 @DisplayName("Win Scenario")
 class WinScenarioTest extends ScenarioBase {
