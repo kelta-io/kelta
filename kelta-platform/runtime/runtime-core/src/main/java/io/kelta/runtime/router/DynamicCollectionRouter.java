@@ -1955,12 +1955,18 @@ public class DynamicCollectionRouter {
      * {@code TenantContext}, which the worker unbinds for a platform admin's tenant listing
      * ({@code TenantManagementScopeFilter}). A cached full listing would otherwise be served to
      * the next caller of the same tenant with the same query.
+     *
+     * <p>Collections whose reads are owner-scoped ({@code ownerField} + {@code ownerScopeReads})
+     * are never cached for the same reason: the storage adapter narrows each read to the bound
+     * caller's rows, but the cache key carries no caller, so one member's cached listing would be
+     * served to the next member who sends the same query.
      */
     private boolean cacheable(CollectionDefinition definition) {
         return definition.systemCollection()
                 && !definition.readOnly()
                 && !NEVER_CACHED_SYSTEM_COLLECTIONS.contains(definition.name())
                 && !SystemCollectionTenancy.isSelfScoped(definition)
+                && !(definition.isOwnerScoped() && definition.ownerScopeReads())
                 && systemCollectionCache != null;
     }
 
