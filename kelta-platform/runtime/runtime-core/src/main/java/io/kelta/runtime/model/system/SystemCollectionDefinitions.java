@@ -1017,12 +1017,16 @@ public final class SystemCollectionDefinitions {
      * shape must stay stable — see {@code WatchCriteria}, which versions it.
      * {@code channels} is the subset of the member's entitled alert channels.
      *
-     * <p>Written through the slice-5 owner-scoped controller; the generic route is
-     * owner-guarded there too.
+     * <p>Owned by {@code memberId} for every caller ({@link OwnerScope#ALL}): reads are narrowed
+     * to the caller's rows and writes guarded by the worker's generic owner-scope guard, on the
+     * slice-5 controller and the generic route alike.
      */
     public static CollectionDefinition watches() {
         return systemBuilder("watches", "Watches", "watch")
             .displayFieldName("id")
+            .ownerField("memberId")
+            .ownerScope(OwnerScope.ALL)
+            .ownerScopeReads(true)
             .addField(FieldDefinition.lookup("memberId", "users", "Member")
                 .withColumnName("member_id")
                 .withDescription("Portal member this row belongs to."))
@@ -1103,8 +1107,9 @@ public final class SystemCollectionDefinitions {
      * social-proof + retention engine: claim confirmations feed per-target success stats and
      * the live-wins ticker.
      *
-     * <p>Written through the owner-scoped {@code WinController} (generic route owner-guarded by
-     * {@code WinGuardHook}). {@code targetId}/{@code watchId}/{@code alertId} are plain ids with
+     * <p>Owned by {@code memberId} for every caller ({@link OwnerScope#ALL}, reads scoped too), so
+     * the generic route is owner-guarded like {@code WinController}. The ticker reads public wins
+     * through its own repository, not this definition. {@code targetId}/{@code watchId}/{@code alertId} are plain ids with
      * NO FK — a win outlives the target/watch/alert it references, and the alert ledger is
      * pruned by retention. {@code isPublic} gates whether a win appears on the ticker;
      * {@code claimantName} is a server-set FIRST NAME only (never more) so the public feed can
@@ -1113,6 +1118,9 @@ public final class SystemCollectionDefinitions {
     public static CollectionDefinition wins() {
         return systemBuilder("wins", "Wins", "win")
             .displayFieldName("summary")
+            .ownerField("memberId")
+            .ownerScope(OwnerScope.ALL)
+            .ownerScopeReads(true)
             .addField(FieldDefinition.lookup("memberId", "users", "Member")
                 .withColumnName("member_id")
                 .withDescription("Portal member this row belongs to."))
@@ -1484,13 +1492,15 @@ public final class SystemCollectionDefinitions {
 
     /**
      * Per-user UI preferences (saved list views, favorites, recents). One row per
-     * (userId, prefType, prefKey); writes are owner-guarded by the worker's
-     * UserPreferenceGuardHook — any tenant user may otherwise reach this collection
-     * through the generic route.
+     * (userId, prefType, prefKey). Owned by {@code userId} for every caller: reads and writes
+     * are both limited to the caller's own rows, on the generic route included.
      */
     public static CollectionDefinition userUiPreferences() {
         return systemBuilder("user-ui-preferences", "User UI Preferences", "user_ui_preference")
             .displayFieldName("prefKey")
+            .ownerField("userId")
+            .ownerScope(OwnerScope.ALL)
+            .ownerScopeReads(true)
             .addField(FieldDefinition.requiredString("userId", 36)
                 .withColumnName("user_id")
                 .withDescription("User this row belongs to."))
@@ -2436,8 +2446,15 @@ public final class SystemCollectionDefinitions {
     // Collaboration Collections
     // =========================================================================
 
+    /**
+     * Notes on any record. Only the author ({@code createdBy}) may edit or delete one; reads stay
+     * unscoped because a note is read through its parent record's access.
+     */
     public static CollectionDefinition notes() {
         return systemBuilder("notes", "Notes", "note")
+            .ownerField("createdBy")
+            .ownerScope(OwnerScope.ALL)
+            .ownerScopeReads(false)
             .addImmutableField("collectionId")
             .addImmutableField("recordId")
             .addField(FieldDefinition.masterDetail("collectionId", "collections", "Collection")

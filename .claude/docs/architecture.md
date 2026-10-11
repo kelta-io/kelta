@@ -458,8 +458,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   nothing bound; an **email that resolves to no user → 401 `CALLER_UNRESOLVED`** (fail closed);
   an identifier that is neither a UUID nor an email (a connected app's client id, stamped from
   `sub`) → nothing bound, unchanged. The anonymous Guest principal stamps the nil UUID and binds
-  as INTERNAL. `/internal/**` and `/actuator/**` are skipped. The owner-guard hooks read it via
-  `listener/OwnerGuardCaller` (header re-resolution only when nothing was bound).
+  as INTERNAL. `/internal/**` and `/actuator/**` are skipped.
   `CallerContext.ownerScoped(scope, READ|WRITE)` is the owner-scoping decision slice 2 uses.
   Both Cerbos principals (`CerbosPrincipalBuilder`, worker `CerbosAuthorizationService`) carry
   the UUID as **`P.attr.userId`**; `P.id` stays the email (integrations.md → Cerbos principal
@@ -478,13 +477,26 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     can only remove more rows; no double-404). Under `ALL` the predicate is
     `owner = :caller OR id IN (record_share for caller or caller's groups)`, because
     `RecordShareAccessService.widen` only re-admits rows the query already returned. Skipped
-    when `ownerScopeReads=false` (public-read, author-edit).
+    when `ownerScopeReads=false` (public-read, author-edit). A system collection with scoped reads
+    is never served from `SystemCollectionCache` (`DynamicCollectionRouter.cacheable`): its key is
+    tenant + query, with no caller, so one member's cached listing would answer the next member's
+    identical query.
   - **Writes** are guarded by `OwnerScopeGuardHook` (wildcard `BeforeSaveHook`, order −100,
     `FlowConfig`): create stamps the owner (different supplied owner → 400 `OWNER_MISMATCH`);
     update/delete of a row whose stored owner is not the caller → **404**; owner field immutable
     (400 `OWNER_IMMUTABLE`). `CollectionOwnershipValidationHook` (on `collections`) rejects an
     invalid `ownerField`/`ownerScope` with 400, and rejects setting ownership on a system
     collection's row (system collections declare it in `SystemCollectionDefinitions`).
+  - **This is the only owner write guard** (member-data-ownership slice 4). The seven
+    per-collection owner-guard hooks are gone; their collections declare ownership instead —
+    system: `watches`/`wins` (`memberId`, `ALL`, reads scoped), `user-ui-preferences` (`userId`,
+    `ALL`, reads scoped), `notes` (`createdBy`, `ALL`, reads **unscoped** — read through the
+    parent record); tenant collections set it as metadata (public-read, author-edit =
+    `createdBy`/`ALL`/`ownerScopeReads=false`). A new owner-protected collection declares
+    metadata; it does not get a hook. Differences from the retired hooks: a foreign
+    update/delete is **404** (was 400), `MODIFY_ALL_DATA` staff bypass under `ALL` (the hooks had
+    no escape hatch), and a connected app's machine identity binds no `CallerContext` and is
+    therefore admitted as the internal tier (the hooks rejected it as unresolvable).
   - **Propagation:** a PATCH that changes `ownerField`/`ownerScope`/`ownerScopeReads` publishes
     `kelta.config.collection.changed.<id>` (every pod refreshes) **and** refreshes the serving pod
     synchronously (`CollectionConfigEventPublisher` → `refreshOrInitializeLocally`, the #910
@@ -511,10 +523,10 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `users` **update** of that id touching only those fields (+ the engine's `updatedAt`); every other
   write under it is judged as unbound. Works for INTERNAL and PORTAL callers, JWT or PAT; the UI is
   `ProfileDialog` (user menu → Profile); external portals: `playbooks.md` §9.
-- **User preference writes** (`/api/user-ui-preferences`, generic route): owner-guarded by
-  `UserPreferenceGuardHook` (BeforeSaveHook, order −100) — the row's `userId` must equal the
-  caller's canonical UUID (`X-User-Id` → `UserIdResolver`; fail-closed on unresolvable,
-  internal tier admitted). Reads remain tenant-scoped only (see concerns.md).
+- **User preferences** (`/api/user-ui-preferences`, generic route): ownership metadata
+  (`ownerField=userId`, `ownerScope=ALL`, `ownerScopeReads=true`) — reads return only the caller's
+  rows and writes are owner-only (foreign update/delete 404), unless the caller holds
+  `VIEW_ALL_DATA` / `MODIFY_ALL_DATA`. Internal tier unscoped.
 - **Delegated administration** (`/api/admin/delegated*`, security feature): full admins define
   `delegated-admin-scopes` (V157) so listed non-admins manage users within limits without
   `MANAGE_USERS`. `DelegatedAdminScopeController` (`MANAGE_DELEGATED_ADMINS`) owns scope CRUD;
@@ -630,8 +642,8 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `countFilter` JSON. Rejection is `BeforeSaveResult.error(...)` → `ValidationException` →
   **HTTP 400** with JSON:API code `beforeSaveHook`. The hook **fails open** (unknown
   collection, unparseable filter, failed count → allow), matching the governor-limit hooks and
-  deliberately unlike the fail-closed guard hooks: those protect other users' data, this one
-  protects revenue.
+  deliberately unlike the owner write guard (`OwnerScopeGuardHook`): that protects other users'
+  data, this one protects revenue.
 - **Portal billing** (consumer-alerting slice 1, V178) is **no longer a platform surface**. Both
   halves moved to the `kelta-billing` module: the Stripe webhook now arrives on
   `POST /api/modules/webhooks/{tenantId}/kelta-billing` and the member endpoints on
@@ -679,12 +691,16 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   lookup, so a portal profile that happens to grant either permission still gets the
   owner-scoped view, and an INTERNAL caller holding neither is 403 rather
   than silently scoped to an empty self. Writes go through `QueryEngine`, not the repository, so
-  `WatchGuardHook` and `MemberEntitlementQuotaHook` both fire. `WatchGuardHook` (BeforeSaveHook on
-  `watches`, order -100) covers the **generic dynamic route**, which bypasses the controller
-  entirely for writes — it blocks creating/editing/deleting another member's watch and, notably,
-  re-owning one; it **fails closed** on an unresolvable identity (unlike the fail-open quota
-  hook: this protects other members' data, not revenue) and admits internal-tier writes with no
-  HTTP identity.
+  the owner guard and `MemberEntitlementQuotaHook` both fire. `watches` declares ownership
+  (`memberId`, `ALL`, reads scoped), so `OwnerScopeGuardHook` covers the **generic dynamic
+  route**, which bypasses the controller entirely for writes — creating/editing/deleting another
+  member's watch is refused (404 on update/delete) and the owner field is immutable. **Support
+  writes run as the member:** once `resolveSubject` has required `MANAGE_DATA`, the controller
+  binds `CallerContext` to the named member for the `QueryEngine` call
+  (`SupportPermissions.writeAs`), so the guard sees the row's owner as the caller — it does not
+  rely on the actor holding `MODIFY_ALL_DATA`. The support **read** delegations to
+  `DynamicCollectionRouter` run with the `viewAll` bypass (`SupportPermissions.readAll`), since
+  `MANAGE_DATA` alone would otherwise leave the tenant-wide view owner-filtered.
 - **Alert delivery latency** (consumer-alerting slice-4 addendum): `GET /api/alerts/latency`
   (`AlertLatencyController`) rides the `static-alerts` route (`/api/alerts/**`, also an
   authoritative static path in `RouteRegistry`), so the gateway checks only `API_ACCESS`; the
@@ -706,9 +722,10 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `GET /api/wins/{id}` are self-only (owner from `X-User-Id`) with the same
   `?memberId=`/full-tenant-view support-mode branching as `WatchController` (mirrored idiom,
   including the PORTAL short-circuit and the 403 for a non-support INTERNAL caller); writes go
-  through `QueryEngine` so `WinGuardHook` (BeforeSaveHook on `wins`, order -100, mirror of
-  `WatchGuardHook`, **fails closed**) locks the generic route against creating/re-owning/
-  publishing/deleting another member's win. `GET /api/wins/recent` is the **live-wins ticker** —
+  through `QueryEngine` so the `wins` ownership metadata (`memberId`, `ALL`, reads scoped —
+  enforced by `OwnerScopeGuardHook`) locks the generic route against creating/re-owning/
+  publishing/deleting another member's win. Every controller write is the caller's own win; the
+  support list/get delegation runs with the `viewAll` bypass (`SupportPermissions.readAll`). `GET /api/wins/recent` is the **live-wins ticker** —
   deliberately cross-member (social proof) but returns ONLY opt-in `isPublic` rows and ONLY
   redacted fields (first-name claimant label, summary, category, quantity, time), never
   `memberId`. `GET /api/wins/stats?targetId=` is an aggregate COUNT. The realtime ticker reuses

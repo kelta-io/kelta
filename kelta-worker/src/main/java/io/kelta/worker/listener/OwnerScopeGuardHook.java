@@ -36,8 +36,7 @@ import java.util.Optional;
  * provisioning) and is admitted, as is any caller the scope does not limit (INTERNAL staff under
  * {@code PORTAL}; {@code MODIFY_ALL_DATA} under {@code ALL}).
  *
- * <p>Wildcard, order −100 — where the bespoke owner-guard hooks run — so a denied write does no
- * earlier side work. Collections without ownership return immediately after one registry read.
+ * <p>Wildcard, order −100, so a denied write does no earlier side work. Collections without ownership return immediately after one registry read.
  */
 public class OwnerScopeGuardHook implements BeforeSaveHook {
 

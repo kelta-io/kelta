@@ -3,6 +3,7 @@ package io.kelta.runtime.router;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.CollectionDefinitionBuilder;
 import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.model.OwnerScope;
 import io.kelta.runtime.query.Pagination;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.query.QueryRequest;
@@ -78,6 +79,19 @@ class DynamicCollectionRouterCacheTest {
                 .systemCollection(true)
                 .tenantScoped(true)
                 .readOnly(true)
+                .build();
+    }
+
+    private CollectionDefinition buildOwnerScopedSystemCollection(String name, boolean scopedReads) {
+        return new CollectionDefinitionBuilder()
+                .name(name)
+                .displayName(name)
+                .addField(FieldDefinition.requiredString("userId"))
+                .systemCollection(true)
+                .tenantScoped(true)
+                .ownerField("userId")
+                .ownerScope(OwnerScope.ALL)
+                .ownerScopeReads(scopedReads)
                 .build();
     }
 
@@ -220,6 +234,42 @@ class DynamicCollectionRouterCacheTest {
         }
 
         @Test
+        @DisplayName("Should NOT cache owner-scoped reads — the cache key carries no caller")
+        void list_doesNotCache_forOwnerScopedReads() throws Exception {
+            // The storage adapter narrows the read to the bound caller's rows. A cached listing
+            // keyed only on tenant + query would be served to the next member with the same query.
+            CollectionDefinition def = buildOwnerScopedSystemCollection("user-ui-preferences", true);
+            when(registry.get("user-ui-preferences")).thenReturn(def);
+
+            QueryResult result = QueryResult.empty(Pagination.defaults());
+            when(queryEngine.executeQuery(eq(def), any(QueryRequest.class))).thenReturn(result);
+
+            mockMvc.perform(get("/api/user-ui-preferences")
+                            .header("X-Tenant-ID", "tenant-1"))
+                    .andExpect(status().isOk());
+
+            verify(cache, never()).getListResponse(any(), any(), any());
+            verify(cache, never()).putListResponse(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should still cache owner-scoped collections whose reads are unscoped")
+        void list_stillCaches_forOwnerScopedWritesOnly() throws Exception {
+            CollectionDefinition def = buildOwnerScopedSystemCollection("notes", false);
+            when(registry.get("notes")).thenReturn(def);
+            when(cache.getListResponse(any(), any(), any())).thenReturn(Optional.empty());
+
+            QueryResult result = QueryResult.empty(Pagination.defaults());
+            when(queryEngine.executeQuery(eq(def), any(QueryRequest.class))).thenReturn(result);
+
+            mockMvc.perform(get("/api/notes")
+                            .header("X-Tenant-ID", "tenant-1"))
+                    .andExpect(status().isOk());
+
+            verify(cache).putListResponse(any(), any(), any(), any());
+        }
+
+        @Test
         @DisplayName("Should NOT cache response when include parameter is present")
         void list_doesNotCache_whenIncludePresent() throws Exception {
             CollectionDefinition def = buildSystemCollection("collections");
@@ -294,6 +344,23 @@ class DynamicCollectionRouterCacheTest {
             when(queryEngine.getById(def, "abc")).thenReturn(Optional.of(record));
 
             mockMvc.perform(get("/api/record-versions/abc")
+                            .header("X-Tenant-ID", "tenant-1"))
+                    .andExpect(status().isOk());
+
+            verify(cache, never()).getByIdResponse(any(), any(), any());
+            verify(cache, never()).putByIdResponse(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should NOT consult or fill cache for owner-scoped reads")
+        void get_doesNotUseCache_forOwnerScopedReads() throws Exception {
+            CollectionDefinition def = buildOwnerScopedSystemCollection("user-ui-preferences", true);
+            when(registry.get("user-ui-preferences")).thenReturn(def);
+
+            Map<String, Object> record = Map.of("id", "abc", "userId", "u-1");
+            when(queryEngine.getById(def, "abc")).thenReturn(Optional.of(record));
+
+            mockMvc.perform(get("/api/user-ui-preferences/abc")
                             .header("X-Tenant-ID", "tenant-1"))
                     .andExpect(status().isOk());
 

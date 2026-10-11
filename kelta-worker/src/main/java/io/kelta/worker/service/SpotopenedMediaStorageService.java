@@ -36,7 +36,8 @@ import java.time.Duration;
  * <p>Read-only in the sense that matters: this class only ever mints PUT
  * URLs. The metadata row (facilityId, storageKey, caption, ...) is written
  * through the ordinary generic route ({@code POST /api/facility-photos}),
- * which is already Cerbos-gated and guarded by {@code PhotoGuardHook} --
+ * which is already Cerbos-gated and owner-guarded by the collection's
+ * ownership metadata ({@code OwnerScopeGuardHook}) --
  * there is no separate "finalize" step or pending-row bookkeeping the way
  * {@link AttachmentUploadController} needs, because nothing here writes to
  * a database at all.

@@ -60,10 +60,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
      *
      *  <p>This also means {@code JdbcUserIdResolver.resolve} short-circuits on it (UUID-shaped
      *  input returns unchanged, no DB lookup), so both {@code DynamicCollectionRouter}'s
-     *  createdBy stamping and a guard hook's own {@code callerUuid()} resolve it to the exact
-     *  same value with no special case needed on either side -- see PhotoGuardHook/
-     *  CommentGuardHook, which no longer need the guest-specific branch an earlier version of
-     *  this had. */
+     *  createdBy stamping and the worker's {@code CallerContextFilter} resolve it to the exact
+     *  same value with no special case needed on either side, so the generic owner guard
+     *  ({@code OwnerScopeGuardHook}) stamps and compares the guest's createdBy like any other
+     *  caller's. */
     static final String GUEST_USER_ID = "00000000-0000-0000-0000-000000000000";
     static final String GUEST_PROFILE_NAME = "Guest";
 
