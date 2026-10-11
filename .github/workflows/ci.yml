@@ -878,6 +878,17 @@ jobs:
             || docker buildx create --name kelta-ci --driver docker-container
           docker buildx inspect --bootstrap kelta-ci
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # 24 runs the .ts helpers directly (native type stripping) — no install step.
+          node-version: 24
+
+      # KELTA_VERSION in .env.example and the four ${KELTA_VERSION:-X} compose defaults must
+      # name the same release, or a self-hoster whose .env predates KELTA_VERSION runs another.
+      - name: Check quickstart pin (.env.example vs docker-compose.yml)
+        run: node .github/release/release.ts check-pin
+
       - name: Generate .env (JWK_SET + encryption key)
         run: make setup
 
