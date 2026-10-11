@@ -116,6 +116,9 @@ templates:
 workflows:
   - '.github/workflows/**'
   - '.github/path-filters.yml'
+  # CI scripts whose own tests run in the Lint Workflows job (#1675 changed one, its
+  # tests were skipped, and the change broke it).
+  - 'ci/update-snapshots.*'
 
 # DORA collector (node --test, no build).
 dora:

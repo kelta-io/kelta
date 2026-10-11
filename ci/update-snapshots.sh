@@ -111,12 +111,13 @@ trap '"$DOCKER" rm -f "$container" >/dev/null 2>&1 || true' EXIT
 
 echo "Regenerating baselines for: $spec_list"
 status=0
+# `--update-snapshots` takes an optional mode in Playwright >= 1.50 (all|changed|missing|none);
+# a bare flag followed by a spec path parses the path as the mode and fails (PLT-476). Keep
+# comments out of the continued command below: a `# ...` line ends it at the image name.
 "$DOCKER" run --name "$container" \
   --network "${COMPOSE_PROJECT_NAME}_kelta-network" \
   --env-file "$E2E_ENV_FILE" \
   "$E2E_IMAGE" \
-  # `--update-snapshots` takes an optional mode in Playwright >= 1.50 (all|changed|missing|none);
-  # a bare flag followed by a spec path parses the path as the mode and fails (PLT-476).
   npx playwright test --update-snapshots=all "${specs[@]}" || status=$?
 
 mkdir -p "$REPORT_DIR/playwright-report" "$REPORT_DIR/test-results"
