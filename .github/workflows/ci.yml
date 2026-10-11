@@ -1198,8 +1198,9 @@ jobs:
   #     container (ci/templates-install-check.sh), before it installs any template.
   #   - ci/upgrade-verify.test.sh also runs in upgrade-test.yml's seed/verify image,
   #     before that workflow boots a stack.
-  # shellcheck runs at its default severity, the same as actionlint's run: linting in
-  # lint-workflows. Fix new findings rather than excluding files.
+  # shellcheck (pinned release, not the runner's apt package) runs at its default
+  # severity, the same as actionlint's run: linting in lint-workflows. Fix new
+  # findings rather than excluding files.
   # ===========================================================================
   test-ci-scripts:
     name: Test CI Scripts
@@ -1217,11 +1218,11 @@ jobs:
           node-version: '24'
 
       # ci/templates-install-check.test.ts drives its script with bash, curl, jq and
-      # timeout; ci/upgrade-verify.test.sh needs jq. shellcheck lints the scripts.
+      # timeout; ci/upgrade-verify.test.sh needs jq. xz unpacks the shellcheck release.
       - name: Install script dependencies
         run: |
           missing=()
-          for tool in curl jq timeout shellcheck; do
+          for tool in curl jq timeout xz; do
             command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
           done
           if [ "${#missing[@]}" -gt 0 ]; then
@@ -1229,12 +1230,27 @@ jobs:
             sudo_cmd=()
             [ "$(id -u)" -eq 0 ] || sudo_cmd=(sudo)
             packages=("${missing[@]/#timeout/coreutils}")
+            packages=("${packages[@]/#xz/xz-utils}")
             "${sudo_cmd[@]}" apt-get update
             "${sudo_cmd[@]}" apt-get install -y --no-install-recommends "${packages[@]}"
           fi
           bash --version | head -1
           jq --version
-          shellcheck --version
+
+      # Pinned, not apt: the distro package is as old as the runner's base image, and
+      # attempt 1 of this job failed on a finding (SC2140) that only shellcheck 0.7.x reports.
+      - name: Install shellcheck
+        run: |
+          mkdir -p "$RUNNER_TEMP/shellcheck"
+          curl -fsSL --retry 5 --retry-delay 3 -o "$RUNNER_TEMP/shellcheck.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          tar xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP/shellcheck" --strip-components=1
+          echo "$RUNNER_TEMP/shellcheck" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/shellcheck/shellcheck" --version
+        env:
+          SHELLCHECK_VERSION: 0.10.0
+          SHELLCHECK_SHA256: 6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
 
       - name: Test ci/*.test.ts
         run: node --test ci/*.test.ts

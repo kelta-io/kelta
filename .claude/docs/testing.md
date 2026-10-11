@@ -290,7 +290,8 @@ in the `test-ci-scripts` job, against a local bare repo and a fake `docker`.
 `test-ci-scripts` job in `ci.yml` (job detail: `ci-cd.md`) runs whenever `ci/**`, `scripts/ci/**`
 or the workflows change, and picks tests up by glob — `node --test ci/*.test.ts` and `bash` on
 each `ci/*.test.sh` — so a new test needs no workflow edit. It also runs `bash -n` and
-`shellcheck` (default severity) over every `ci/*.sh` and `scripts/ci/*.sh`. Locally:
+`shellcheck` 0.10.0 (pinned; default severity) over every `ci/*.sh` and `scripts/ci/*.sh` — use
+the same release locally, since older distro builds report findings the job does not. Locally:
 
 ```bash
 node --test ci/*.test.ts          # Node >= 24 (native type stripping)
