@@ -728,6 +728,88 @@ class PackageImportServiceTest {
     }
 
     // ------------------------------------------------------------------
+    // Legacy jsonb wrappers (packages exported before BUILD-LOG error 13)
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("legacy {null,type,value} jsonb wrapper")
+    class LegacyJsonWrapper {
+
+        private Map<String, Object> wrapper(boolean isNull, String value) {
+            return mapOf("null", isNull, "type", "jsonb", "value", value);
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> importFlow(Object definition) {
+            when(jdbcTemplate.queryForList(contains("FROM platform_user"), eq(TENANT)))
+                    .thenReturn(List.of(Map.of("id", "u-1")));
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-flow"));
+            Map<String, Object> data = flowData();
+            data.put("definition", definition);
+
+            var report = service.importPackage(TENANT, pkg(item("FLOW", data)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).as("%s", report.items()).isZero();
+            ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(any(), captor.capture());
+            return captor.getValue();
+        }
+
+        @Test
+        @DisplayName("a wrapped value imports as the parsed object")
+        @SuppressWarnings("unchecked")
+        void unwrapsToParsedObject() {
+            Map<String, Object> written = importFlow(
+                    wrapper(false, "{\"StartAt\":\"stamp\",\"States\":{\"stamp\":{\"Type\":\"Succeed\"}}}"));
+
+            assertThat(written.get("definition")).isInstanceOf(Map.class);
+            assertThat((Map<String, Object>) written.get("definition"))
+                    .containsEntry("StartAt", "stamp")
+                    .doesNotContainKeys("null", "type", "value");
+        }
+
+        @Test
+        @DisplayName("null:true imports as null")
+        void nullWrapperImportsAsNull() {
+            Map<String, Object> written = importFlow(wrapper(true, null));
+
+            assertThat(written).doesNotContainKey("definition");
+        }
+
+        @Test
+        @DisplayName("an unparseable value fails the item, naming the column")
+        void malformedWrapperFailsItem() {
+            when(jdbcTemplate.queryForList(contains("FROM platform_user"), eq(TENANT)))
+                    .thenReturn(List.of(Map.of("id", "u-1")));
+            Map<String, Object> data = flowData();
+            data.put("definition", wrapper(false, "{not json"));
+
+            var report = service.importPackage(TENANT, pkg(item("FLOW", data)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isEqualTo(1);
+            var failed = report.items().get(0);
+            assertThat(failed.action()).isEqualTo("FAILED");
+            assertThat(failed.naturalKey()).isEqualTo("myflow");
+            assertThat(failed.error()).contains("definition");
+            verify(queryEngine, never()).create(any(), anyMap());
+        }
+
+        @Test
+        @DisplayName("a Map without exactly the keys null/type/value passes through unchanged")
+        void otherMapsPassThrough() {
+            Map<String, Object> tenantJson = mapOf("type", "jsonb", "value", "{}", "label", "x");
+            Map<String, Object> twoKeys = mapOf("type", "jsonb", "value", "{}");
+            Map<String, Object> otherType = mapOf("null", false, "type", "text", "value", "{}");
+
+            assertThat(service.normalizeValue("config", tenantJson)).isSameAs(tenantJson);
+            assertThat(service.normalizeValue("config", twoKeys)).isSameAs(twoKeys);
+            assertThat(service.normalizeValue("config", otherType)).isSameAs(otherType);
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Picklist values
     // ------------------------------------------------------------------
 

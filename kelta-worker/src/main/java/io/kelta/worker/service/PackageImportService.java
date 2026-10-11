@@ -613,7 +613,7 @@ public class PackageImportService {
             if (!row.containsKey(column)) {
                 continue;
             }
-            Object value = normalizeValue(row.get(column));
+            Object value = normalizeValue(column, row.get(column));
             if (value != null) {
                 mapped.put(fd.name(), value);
             }
@@ -621,9 +621,12 @@ public class PackageImportService {
         return mapped;
     }
 
-    private Object normalizeValue(Object value) {
+    Object normalizeValue(String column, Object value) {
         if (value == null) {
             return null;
+        }
+        if (isLegacyJsonWrapper(value)) {
+            return unwrapLegacyJson(column, (Map<?, ?>) value);
         }
         // JSONB columns come back as org.postgresql.util.PGobject from
         // queryForList, or as raw JSON strings from a deserialized package.
@@ -648,6 +651,32 @@ public class PackageImportService {
             return ts.toInstant().toString();
         }
         return value;
+    }
+
+    /**
+     * Packages exported before BUILD-LOG error 13 was fixed carry each json/jsonb
+     * column as the serialized driver object {@code {"null","type","value"}}.
+     * Only that exact key set is treated as the wrapper, so tenant JSON that
+     * merely has a {@code type} key is left alone.
+     */
+    private static boolean isLegacyJsonWrapper(Object value) {
+        return value instanceof Map<?, ?> map
+                && map.size() == 3
+                && map.keySet().equals(Set.of("null", "type", "value"))
+                && ("json".equals(map.get("type")) || "jsonb".equals(map.get("type")));
+    }
+
+    private Object unwrapLegacyJson(String column, Map<?, ?> wrapper) {
+        Object json = wrapper.get("value");
+        if (Boolean.TRUE.equals(wrapper.get("null")) || json == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(String.valueOf(json), Object.class);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Column '" + column
+                    + "' holds a legacy " + wrapper.get("type") + " wrapper whose value is not valid JSON");
+        }
     }
 
     // ------------------------------------------------------------------
