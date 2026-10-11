@@ -29,15 +29,80 @@ page-layouts` → "One call: the layout tree").
 
 ## Widget catalogue (`componentType`)
 
-Exactly four types are supported server-side; anything else fails widget
-execution:
+Exactly four types are supported server-side (`metric`, `chart`,
+`table`, `recent`, case-insensitive); the component hook rejects any
+other value on save.
 
-- `metric` — a single aggregate value. `config` selects the aggregate
-  function: `SUM`, `AVG`, `MIN`, `MAX`, or `COUNT` (case-insensitive).
-- `chart` — `config.chartStyle` of `pie` or (default) `bar`.
-- `table` — a record grid.
-- `recent` — a record grid, styled as a "recent activity" feed. Shares
-  its data path with `table`.
+- `metric` — a single aggregate value.
+- `chart` — grouped aggregates, drawn as `config.chartStyle` `pie` or
+  (default) `bar`.
+- `table` — a paged record grid.
+- `recent` — the newest records (sorted by `createdAt` descending),
+  styled as a "recent activity" feed.
+
+## Widget `config` keys
+
+`config` is free JSON, but on save the component hook checks
+`collectionName` and every field it names (`fields`, `groupByField`,
+`aggregateField`, `timeField`, `filters[].field`) against the target
+collection, and each `filters[].operator` against the operator
+vocabulary below. `POST /api/dashboards/{id}/validate` runs the same
+checks as a dry run.
+
+Keys every type accepts:
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `collectionName` | string | Target collection. Optional when `collectionId` or `reportId` resolves it (see `reportId` below). |
+| `collectionId` | string | Target collection by id; used only when `collectionName` is unset. |
+| `filters` | array | `[{"field", "operator", "value"}]`, ANDed. A missing `operator` means `eq`. |
+| `timeField` | string | `DATE`/`DATETIME` field the time range filters on. Default `createdAt`. |
+| `timeRange` | string | Default time range when the page supplies none: `TODAY`, `7D`, `30D`, `90D`, `1Y` (or the `LAST_*` forms). |
+| `fixedTimeRange` | string | Same values; overrides the page's time range. |
+| `ignoreTimeRange` | boolean | `true` ignores every time range (for "current state" widgets). Default `false`. |
+
+Per type:
+
+| `componentType` | Key | Type | Required | Notes |
+|-----------------|-----|------|----------|-------|
+| `metric` | `aggregateFunction` | string | no | `COUNT` (default), `SUM`, `AVG`, `MIN`, `MAX`; case-insensitive. |
+| `metric` | `aggregateField` | string | yes, unless `COUNT` | Numeric field to aggregate. Not a `ROLLUP_SUMMARY` or `FORMULA` field. |
+| `metric` | `label` | string | no | Caption; defaults to the function name. |
+| `chart` | `groupByField` | string | **yes** | One bar/slice per distinct value. Not a `ROLLUP_SUMMARY` or `FORMULA` field; a lookup groups by the referenced record's display value. |
+| `chart` | `aggregateFunction` | string | no | As for `metric`; default `COUNT` (records per group). |
+| `chart` | `aggregateField` | string | yes, unless `COUNT` | Numeric field aggregated per group. |
+| `chart` | `maxGroups` | integer | no | Default `20`. |
+| `chart` | `chartStyle` | string | no | `bar` (default) or `pie`. |
+| `table` | `fields` | string array | no | Columns, in order; all fields when omitted. A comma-separated string is also accepted. |
+| `table` | `sortBy` | string or array | no | `"-amount,name"`, or `[{"field": "amount", "direction": "DESC"}]` (`direction` defaults to `ASC`). |
+| `recent` | `fields` | string array | no | As for `table`. |
+| `recent` | `limit` | integer | no | Default `10`, maximum `100`. |
+
+`metric` and `chart` aggregate over at most the first 1,000 matching
+records (a `COUNT` metric reports the true total). `table` pages at 25
+rows by default (maximum 500).
+
+Examples, one per family (the `config` value of a `dashboard-components`
+row):
+
+```json
+{ "collectionName": "deals", "aggregateFunction": "SUM", "aggregateField": "amount",
+  "label": "Open pipeline", "filters": [ { "field": "stage", "operator": "neq", "value": "CLOSED_LOST" } ] }
+```
+
+```json
+{ "collectionName": "deals", "groupByField": "stage", "aggregateFunction": "COUNT",
+  "chartStyle": "pie", "ignoreTimeRange": true }
+```
+
+```json
+{ "collectionName": "deals", "fields": ["name", "stage", "amount"], "sortBy": "-amount",
+  "filters": [ { "field": "stage", "operator": "eq", "value": "NEGOTIATION" } ] }
+```
+
+```json
+{ "collectionName": "activities", "fields": ["subject", "activityType"], "limit": 5 }
+```
 
 ## Operator vocabulary
 

@@ -120,7 +120,8 @@ class McpApplicationTest {
                 "kelta://docs/list-views",
                 "kelta://docs/dashboards",
                 "kelta://docs/ui-pages",
-                "kelta://docs/ui-menus"
+                "kelta://docs/ui-menus",
+                "kelta://docs/flows"
         );
     }
 
@@ -138,7 +139,8 @@ class McpApplicationTest {
                 "kelta://docs/list-views",
                 "kelta://docs/dashboards",
                 "kelta://docs/ui-pages",
-                "kelta://docs/ui-menus"
+                "kelta://docs/ui-menus",
+                "kelta://docs/flows"
         );
     }
 

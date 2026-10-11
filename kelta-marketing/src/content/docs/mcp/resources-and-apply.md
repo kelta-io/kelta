@@ -12,9 +12,9 @@ order: 40
 | `kelta://collections` | both | the collection list |
 | `kelta://collections/{name}` | both | one collection's schema |
 | `kelta://openapi.json` | user | the tenant's OpenAPI document |
-| `kelta://docs/jsonapi`, `kelta://docs/page-layouts`, `kelta://docs/list-views`, `kelta://docs/dashboards`, `kelta://docs/ui-pages`, `kelta://docs/ui-menus` | both | the authoring reference — byte-identical to the [Authoring reference](/docs/reference/jsonapi/) pages and to `kelta docs <topic>` |
+| `kelta://docs/jsonapi`, `kelta://docs/page-layouts`, `kelta://docs/list-views`, `kelta://docs/dashboards`, `kelta://docs/ui-pages`, `kelta://docs/ui-menus`, `kelta://docs/flows` | both | the authoring reference — byte-identical to the [Authoring reference](/docs/reference/jsonapi/) pages and to `kelta docs <topic>` |
 
-Read the relevant `kelta://docs/*` resource before writing filters, layouts, pages, menus or dashboards by hand.
+Read the relevant `kelta://docs/*` resource before writing filters, layouts, pages, menus, dashboards or flows by hand.
 
 ## The `apply_*` contract
 
