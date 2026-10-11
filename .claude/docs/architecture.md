@@ -477,7 +477,10 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     can only remove more rows; no double-404). Under `ALL` the predicate is
     `owner = :caller OR id IN (record_share for caller or caller's groups)`, because
     `RecordShareAccessService.widen` only re-admits rows the query already returned. Skipped
-    when `ownerScopeReads=false` (public-read, author-edit).
+    when `ownerScopeReads=false` (public-read, author-edit). A system collection with scoped reads
+    is never served from `SystemCollectionCache` (`DynamicCollectionRouter.cacheable`): its key is
+    tenant + query, with no caller, so one member's cached listing would answer the next member's
+    identical query.
   - **Writes** are guarded by `OwnerScopeGuardHook` (wildcard `BeforeSaveHook`, order −100,
     `FlowConfig`): create stamps the owner (different supplied owner → 400 `OWNER_MISMATCH`);
     update/delete of a row whose stored owner is not the caller → **404**; owner field immutable
