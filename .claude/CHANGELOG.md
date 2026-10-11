@@ -199,3 +199,4 @@ This file tracks merged autopilot work. Entries are appended by autopilot worker
 - 2026-10-10 fix(marketing): /waitlist no longer builds a `mailto:waitlist@kelta.io` link that bounced (kelta.io has no MX); it POSTs JSON:API to the build-time `PUBLIC_WAITLIST_ENDPOINT` with a honeypot, and renders a "not open yet" page linking GitHub releases while that is empty (KLT-482)
 - 2026-10-10 docs(marketing): "Start from a template" getting-started page with the one-command install and contents of the crm and inspections templates, linked from the quickstart, plus an examples/README.md index (KLT-420)
 - 2026-10-10 fix(ci): ci/update-snapshots.sh passes `--update-snapshots=all`; a bare `--update-snapshots <spec>` makes Playwright 1.58 parse the spec path as the mode and reject it, so every marker run failed (PLT-476 attempt 1, run 38094693391)
+- 2026-10-11 docs(marketing): document anonymous access through a tenant's Guest profile on kelta.io/docs (KLT-483)
