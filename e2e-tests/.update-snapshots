@@ -1,4 +1,0 @@
-# The committed baselines were rendered by a stale runner image (pre-PLT-476 spec: generated
-# collection name, unmasked "Joined" row and bell) because ci.yml built kelta-e2e-runner:local
-# on the kelta-ci builder without --load (PLT-522).
-tests/end-user/object-detail-visual.spec.ts
