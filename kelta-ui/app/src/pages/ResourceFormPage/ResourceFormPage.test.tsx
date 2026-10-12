@@ -1265,3 +1265,137 @@ describe('ResourceFormPage', () => {
     })
   })
 })
+
+describe('ResourceFormPage — optimistic concurrency (If-Match)', () => {
+  let cleanupAuthMocks: () => void
+  /** What the record GET serves (body + ETag header); a test swaps it to simulate a reload. */
+  let served: { resource: Resource; etag: string }
+
+  const STALE_WRITE_BODY = {
+    errors: [
+      {
+        status: '409',
+        code: 'STALE_WRITE',
+        title: 'Conflict',
+        detail:
+          'This record was modified since you opened it. Reload the latest version and try again.',
+      },
+    ],
+  }
+
+  beforeEach(() => {
+    cleanupAuthMocks = setupAuthMocks()
+    resetMockAxios()
+    mockNavigate.mockReset()
+    served = { resource: mockResource, etag: '"v1"' }
+    mockAxios.get.mockImplementation((url: string) => {
+      if (url.includes('/api/collections/') && url.includes('include=fields')) {
+        return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
+      }
+      if (url.includes('/users/res-123') && !url.includes('/api/collections')) {
+        return Promise.resolve({ data: served.resource, headers: { etag: served.etag } })
+      }
+      return Promise.reject(createAxiosError(404))
+    })
+  })
+
+  afterEach(() => {
+    cleanupAuthMocks()
+    vi.clearAllMocks()
+  })
+
+  async function openEditForm() {
+    renderWithProviders(<ResourceFormPage />, { route: '/resources/users/res-123/edit' })
+    await waitFor(() => expect(screen.getByTestId('field-name')).toHaveValue('John Doe'))
+  }
+
+  function patchHeaders(callIndex = 0): unknown {
+    return (mockAxios.patch.mock.calls[callIndex] as unknown[])[2]
+  }
+
+  it("sends the loaded record's ETag as If-Match on update", async () => {
+    const user = userEvent.setup()
+    mockAxios.patch.mockResolvedValueOnce({ data: mockResource })
+    await openEditForm()
+
+    await user.click(screen.getByTestId('submit-button'))
+
+    await waitFor(() => expect(mockAxios.patch).toHaveBeenCalled())
+    expect(mockAxios.patch.mock.calls[0][0]).toBe('/api/users/res-123')
+    expect(patchHeaders()).toEqual({ headers: { 'If-Match': '"v1"' } })
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith('/default/resources/users/res-123')
+    )
+  })
+
+  it('on a stale write keeps the edits, shows the conflict prompt and does not navigate', async () => {
+    const user = userEvent.setup()
+    mockAxios.patch.mockRejectedValueOnce(createAxiosError(409, STALE_WRITE_BODY))
+    await openEditForm()
+
+    const nameInput = screen.getByTestId('field-name')
+    await user.clear(nameInput)
+    await user.type(nameInput, 'Mine')
+    await user.click(screen.getByTestId('submit-button'))
+
+    expect(await screen.findByTestId('record-conflict-dialog')).toBeInTheDocument()
+    expect(screen.getByText('This record was changed')).toBeInTheDocument()
+    expect(screen.getByTestId('field-name')).toHaveValue('Mine')
+    expect(mockNavigate).not.toHaveBeenCalled()
+
+    // Keep editing: the prompt closes, the edits stay, Save is usable again.
+    await user.click(screen.getByTestId('record-conflict-keep-editing'))
+    await waitFor(() => expect(screen.queryByTestId('record-conflict-dialog')).toBeNull())
+    expect(screen.getByTestId('field-name')).toHaveValue('Mine')
+    expect(screen.getByTestId('submit-button')).toBeEnabled()
+  })
+
+  it('Reload refetches the record, resets the form to it and saves with the new ETag', async () => {
+    const user = userEvent.setup()
+    mockAxios.patch
+      .mockRejectedValueOnce(createAxiosError(409, STALE_WRITE_BODY))
+      .mockResolvedValueOnce({ data: mockResource })
+    await openEditForm()
+
+    const nameInput = screen.getByTestId('field-name')
+    await user.clear(nameInput)
+    await user.type(nameInput, 'Mine')
+    await user.click(screen.getByTestId('submit-button'))
+    expect(await screen.findByTestId('record-conflict-dialog')).toBeInTheDocument()
+
+    served = { resource: { ...mockResource, name: 'Theirs' }, etag: '"v2"' }
+    await user.click(screen.getByTestId('record-conflict-reload'))
+
+    await waitFor(() => expect(screen.queryByTestId('record-conflict-dialog')).toBeNull())
+    await waitFor(() => expect(screen.getByTestId('field-name')).toHaveValue('Theirs'))
+
+    await user.click(screen.getByTestId('submit-button'))
+    await waitFor(() => expect(mockAxios.patch).toHaveBeenCalledTimes(2))
+    expect(patchHeaders(1)).toEqual({ headers: { 'If-Match': '"v2"' } })
+  })
+
+  it('shows a non-stale 409 (unique violation) as a field error, not the conflict prompt', async () => {
+    const user = userEvent.setup()
+    mockAxios.patch.mockRejectedValueOnce(
+      createAxiosError(409, {
+        errors: [
+          {
+            status: '409',
+            code: 'UNIQUE_VIOLATION',
+            title: 'Conflict',
+            detail: 'Email must be unique',
+            source: { pointer: '/data/attributes/email' },
+          },
+        ],
+      })
+    )
+    await openEditForm()
+
+    await user.click(screen.getByTestId('submit-button'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('error-email')).toHaveTextContent('Email must be unique')
+    )
+    expect(screen.queryByTestId('record-conflict-dialog')).toBeNull()
+  })
+})

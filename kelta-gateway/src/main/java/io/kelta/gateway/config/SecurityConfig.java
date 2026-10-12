@@ -73,15 +73,19 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOriginPatterns(originPatterns);
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        // If-Match / ETag: record optimistic locking (unified record slice 5). The SPA calls the
+        // gateway cross-origin, so without these the browser can neither read a record's ETag nor
+        // send it back — the preflight would reject an If-Match write outright.
         configuration.setAllowedHeaders(List.of(
                 "Authorization", "Content-Type", "Accept", "X-Correlation-ID",
-                "X-Tenant-ID", "X-Tenant-Slug", "X-Requested-With",
+                "X-Tenant-ID", "X-Tenant-Slug", "X-Requested-With", "If-Match",
                 "traceparent", "tracestate", "baggage",
                 "b3", "X-B3-TraceId", "X-B3-SpanId", "X-B3-ParentSpanId", "X-B3-Sampled"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
         configuration.setExposedHeaders(Arrays.asList(
-                "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"));
+                "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After",
+                "ETag"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

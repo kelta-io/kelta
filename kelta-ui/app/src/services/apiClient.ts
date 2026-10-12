@@ -69,6 +69,28 @@ export class ApiError extends Error {
   }
 }
 
+/** JSON:API error code the worker returns (as a 409) when a write's `If-Match` is stale. */
+export const STALE_WRITE_CODE = 'STALE_WRITE'
+
+/**
+ * Whether an error is an optimistic-locking conflict: the record changed since its ETag was read
+ * (worker `409 STALE_WRITE`, unified record slice 5). Other 409s that carry their own code —
+ * `UNIQUE_VIOLATION`, `REFERENCED_RECORD`, a hook conflict — are not, so callers keep showing
+ * those as ordinary save errors.
+ */
+export function isStaleWriteError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const { status, fieldErrors } = error as { status?: unknown; fieldErrors?: ApiFieldError[] }
+  if (status !== 409) return false
+  const codes = (fieldErrors ?? []).map((e) => e.code).filter(Boolean)
+  return codes.length === 0 || codes.includes(STALE_WRITE_CODE)
+}
+
+/** A client-side `409 STALE_WRITE`, for a conflict detected before the write is sent. */
+export function staleWriteError(message: string): ApiError {
+  return new ApiError(409, message, [{ field: '', message, code: STALE_WRITE_CODE }])
+}
+
 /**
  * Parse an Axios error into an ApiError with structured field-level details.
  *

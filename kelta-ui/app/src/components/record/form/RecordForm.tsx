@@ -19,11 +19,12 @@
  * form's correctness features (client validation rules, blur rules, schema
  * defaults, clear-to-null, per-field validation with linked a11y errors, create
  * → new record's detail page, i18n); P4 rendered fields through the
- * fieldControl registry. See `.claude/docs/conventions.md` →
- * Component reuse.
+ * fieldControl registry; P5 sent the record's ETag as `If-Match` on update and
+ * shows `RecordConflictDialog` on a concurrent edit (edits kept until the user
+ * reloads). See `.claude/docs/conventions.md` → Component reuse.
  */
 
-import React, { useCallback } from 'react'
+import React, { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Save, X, Loader2, AlertCircle } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -36,6 +37,7 @@ import type { LayoutFormFieldDefinition } from '@/components/LayoutFormSections/
 import { usePlugins } from '@/context/PluginContext'
 import { useI18n } from '@/context/I18nContext'
 import { InsufficientPrivileges } from '@/components/InsufficientPrivileges'
+import { RecordConflictDialog } from '@/components/record/RecordConflictDialog'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { PageLayoutDto } from '@/hooks/usePageLayout'
 import type { RecordType } from '@/types/collections'
@@ -107,6 +109,10 @@ interface RecordFormBodyProps {
   onRecordTypeChange?: (id: string | undefined) => void
   /** Collection validation rules enforced on the client */
   validationRules?: CollectionValidationRule[]
+  /** The loaded record's ETag (edit mode) — sent as `If-Match` on update. */
+  etag?: string
+  /** Refetch the record and re-initialise the form (the conflict prompt's Reload). */
+  onReload: () => Promise<void>
 }
 
 /**
@@ -133,6 +139,8 @@ function RecordFormBody({
   selectedRecordTypeId,
   onRecordTypeChange,
   validationRules,
+  etag,
+  onReload,
 }: RecordFormBodyProps): React.ReactElement {
   const { getFieldRenderer } = usePlugins()
   const { t } = useI18n()
@@ -145,6 +153,8 @@ function RecordFormBody({
     handleFieldBlur,
     handleSave,
     isSaving,
+    conflict,
+    dismissConflict,
   } = useRecordFormState({
     isNew,
     initialData,
@@ -156,7 +166,19 @@ function RecordFormBody({
     layout,
     selectedRecordTypeId,
     validationRules,
+    etag,
   })
+
+  // Reload re-keys this body (fresh values, ETag and conflict state) once the refetch lands.
+  const [reloading, setReloading] = useState(false)
+  const handleReload = useCallback(async () => {
+    setReloading(true)
+    try {
+      await onReload()
+    } finally {
+      setReloading(false)
+    }
+  }, [onReload])
 
   const pageTitle = isNew
     ? t('recordForm.newTitle', { collection: collectionLabel })
@@ -194,6 +216,13 @@ function RecordFormBody({
       </div>
 
       <Separator />
+
+      <RecordConflictDialog
+        open={conflict}
+        reloading={reloading}
+        onReload={() => void handleReload()}
+        onKeepEditing={dismissConflict}
+      />
 
       {/* Record Type Selector — shown when collection has record types */}
       {recordTypes && recordTypes.length > 0 && (
@@ -313,6 +342,8 @@ export function RecordForm({
     validationRules,
     initialData,
     formKey,
+    etag,
+    reload,
   } = useRecordFormModel({ collectionName, recordId, prefill })
 
   // Handle cancel (also used by the error state)
@@ -384,6 +415,8 @@ export function RecordForm({
       selectedRecordTypeId={selectedRecordTypeId}
       onRecordTypeChange={setSelectedRecordTypeId}
       validationRules={validationRules}
+      etag={etag}
+      onReload={reload}
     />
   )
 }

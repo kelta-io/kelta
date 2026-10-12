@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ApiClient, ApiError } from './apiClient'
+import { ApiClient, ApiError, isStaleWriteError, staleWriteError } from './apiClient'
 import { mockAxios, createAxiosError, resetMockAxios } from '../test/testUtils'
 
 describe('ApiError', () => {
@@ -484,5 +484,31 @@ describe('parseAxiosError', () => {
     const reparsed = parseAxiosError(thrown)
 
     expect(reparsed.fieldErrors.map((e) => e.field)).toEqual(['title'])
+  })
+})
+
+describe('isStaleWriteError', () => {
+  it('is true for the worker 409 STALE_WRITE and the client-side equivalent', () => {
+    expect(
+      isStaleWriteError(
+        new ApiError(409, 'modified', [{ field: '', message: 'modified', code: 'STALE_WRITE' }])
+      )
+    ).toBe(true)
+    expect(isStaleWriteError(staleWriteError('changed'))).toBe(true)
+  })
+
+  it('treats a bare 409 (no error code) as stale', () => {
+    expect(isStaleWriteError(new ApiError(409, 'Conflict'))).toBe(true)
+  })
+
+  it('is false for other 409s, other statuses and non-errors', () => {
+    expect(
+      isStaleWriteError(
+        new ApiError(409, 'dup', [{ field: 'email', message: 'dup', code: 'UNIQUE_VIOLATION' }])
+      )
+    ).toBe(false)
+    expect(isStaleWriteError(new ApiError(400, 'bad'))).toBe(false)
+    expect(isStaleWriteError(new Error('boom'))).toBe(false)
+    expect(isStaleWriteError(undefined)).toBe(false)
   })
 })

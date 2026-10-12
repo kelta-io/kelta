@@ -15,6 +15,11 @@
  *
  * Moved from `ObjectFormPage`'s `ObjectFormBody` (record-stack convergence P2);
  * P3 ported the admin form's correctness features listed above.
+ *
+ * P5 (optimistic concurrency): an update sends the record's ETag — pinned when
+ * the body mounts, so a background refetch cannot silently move it — as
+ * `If-Match`. A `409 STALE_WRITE` keeps the user's edits and raises `conflict`
+ * (the caller shows `RecordConflictDialog`) instead of a toast.
  */
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
@@ -26,7 +31,7 @@ import { useI18n } from '@/context/I18nContext'
 import { dtosToLayoutRules } from '@/utils/layoutRules'
 import { useRecordMutation } from '@/hooks/useRecordMutation'
 import { useToast } from '@/components/Toast'
-import { ApiError } from '@/services/apiClient'
+import { ApiError, isStaleWriteError } from '@/services/apiClient'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { PageLayoutDto } from '@/hooks/usePageLayout'
 import { buildSaveAttributes } from './formData'
@@ -49,6 +54,8 @@ export interface UseRecordFormStateOptions {
   selectedRecordTypeId?: string
   /** Collection validation rules with `enforceOnClient` (from `useRecordFormModel`). */
   validationRules?: CollectionValidationRule[]
+  /** The record's ETag at load (edit mode); read once on mount and sent as `If-Match`. */
+  etag?: string
 }
 
 export interface RecordFormState {
@@ -63,6 +70,10 @@ export interface RecordFormState {
   handleFieldBlur: (name: string) => void
   handleSave: () => void
   isSaving: boolean
+  /** True after an update was rejected as stale (`409 STALE_WRITE`); the edits are kept. */
+  conflict: boolean
+  /** Close the conflict prompt, keeping the edits in the form. */
+  dismissConflict: () => void
 }
 
 export function useRecordFormState({
@@ -76,12 +87,19 @@ export function useRecordFormState({
   layout,
   selectedRecordTypeId,
   validationRules,
+  etag,
 }: UseRecordFormStateOptions): RecordFormState {
   const navigate = useNavigate()
   const { showToast } = useToast()
   const { t } = useI18n()
   const [formData, setFormData] = useState<Record<string, unknown>>(initialData)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  // The version this form's values were loaded from. Pinned at mount (like `formData`): if a
+  // background refetch moved it while the user still edits the old values, the update would
+  // overwrite the newer version without a conflict.
+  const [ifMatch] = useState(etag)
+  const [conflict, setConflict] = useState(false)
+  const dismissConflict = useCallback(() => setConflict(false), [])
 
   // Layout client-side rules engine: compute/validate/default/transform rules
   // attached to the resolved layout, plus the collection's validation rules marked
@@ -137,6 +155,11 @@ export function useRecordFormState({
       }
     },
     onError: (error: Error) => {
+      // Concurrent edit: keep the user's values and let them choose (reload vs keep editing).
+      if (!isNew && isStaleWriteError(error)) {
+        setConflict(true)
+        return
+      }
       showToast(error.message || t('recordForm.saveFailed'), 'error')
       if (error instanceof ApiError && error.fieldErrors.length > 0) {
         const serverErrors: Record<string, string> = {}
@@ -224,7 +247,7 @@ export function useRecordFormState({
     if (isNew) {
       mutations.create.mutate(attributes)
     } else {
-      mutations.update.mutate({ id: recordId!, data: attributes })
+      mutations.update.mutate({ id: recordId!, data: attributes, ...(ifMatch ? { ifMatch } : {}) })
     }
   }, [
     editableFields,
@@ -233,6 +256,7 @@ export function useRecordFormState({
     isNew,
     mutations,
     recordId,
+    ifMatch,
     selectedRecordTypeId,
     ruleEngine,
     showToast,
@@ -250,5 +274,7 @@ export function useRecordFormState({
     handleFieldBlur,
     handleSave,
     isSaving,
+    conflict,
+    dismissConflict,
   }
 }

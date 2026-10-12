@@ -364,8 +364,9 @@ test.describe("Record parity (admin vs end-user)", () => {
           .toBe("gone");
       });
 
-      test.fixme("a concurrent edit (409) prompts instead of overwriting", async ({ page }) => {
-        // Neither form sends If-Match on save or shows a concurrent-edit (409) prompt yet.
+      test("a concurrent edit (409) prompts instead of overwriting", async ({ page }) => {
+        // Both forms send the loaded record's ETag as If-Match; a stale save keeps the edits
+        // and opens the shared conflict prompt instead of overwriting the other change.
         const title = uniqueTitle(variant, "conflict");
         const id = await seedRecord(title);
 
@@ -380,14 +381,17 @@ test.describe("Record parity (admin vs end-user)", () => {
         await ui.fillField(F.title.name, `${title} (mine)`);
         await ui.save();
 
-        await expect(
-          page.getByRole("alertdialog").or(page.getByRole("alert")).filter({
-            hasText: /conflict|modified|changed since/i,
-          }),
-        ).toBeVisible();
+        await expect(ui.conflictPrompt).toBeVisible({ timeout: 15_000 });
+        await expect(ui.conflictPrompt).toHaveRole("alertdialog");
         await expect(page).toHaveURL(ui.editUrlPattern(schema.records));
+        await expect(ui.field(F.title.name)).toHaveValue(`${title} (mine)`);
         const saved = await factory.getRecord(schema.records, id);
         expect(saved.attributes[F.title.name]).toBe(theirs);
+
+        // Reload latest: the form re-initialises from the other user's version.
+        await ui.conflictReloadButton.click();
+        await expect(ui.conflictPrompt).toBeHidden();
+        await expect(ui.field(F.title.name)).toHaveValue(theirs);
       });
     });
   }

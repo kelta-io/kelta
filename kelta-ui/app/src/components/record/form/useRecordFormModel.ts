@@ -17,6 +17,11 @@
  * client validation rules, schema defaults on create, and the edit-mode record
  * type taken from the loaded record. Both the end-user and (later) admin form
  * wrappers use it.
+ *
+ * P5 (optimistic concurrency): exposes the loaded record's `etag` (echoed as
+ * `If-Match` on update) and `reload()`, which refetches the record and bumps
+ * `formKey` so the body re-initialises from the latest version — the conflict
+ * prompt's "Reload latest".
  */
 
 import { useState, useMemo, useCallback } from 'react'
@@ -101,6 +106,14 @@ export interface RecordFormModel {
   initialData: Record<string, unknown>
   /** Changes whenever the form's data source changes — key the body on it. */
   formKey: string
+  /**
+   * The loaded record's optimistic-locking version (GET `ETag`); undefined on create or when
+   * the record came from the offline replica. The body pins it at mount and sends it as
+   * `If-Match` on update.
+   */
+  etag: string | undefined
+  /** Refetch the record, then re-initialise the form from it (discards unsaved edits). */
+  reload: () => Promise<void>
 }
 
 const NO_VALIDATION_RULES: CollectionValidationRule[] = []
@@ -130,7 +143,12 @@ export function useRecordFormModel({
   } = useCollectionSchema(collectionName)
 
   // Fetch existing record for edit mode
-  const { record, isLoading: recordLoading } = useRecord({
+  const {
+    record,
+    isLoading: recordLoading,
+    etag,
+    refetch: refetchRecord,
+  } = useRecord({
     collectionName,
     recordId,
     enabled: !isNew,
@@ -341,9 +359,16 @@ export function useRecordFormModel({
     () => computeInitialFormData(isNew, record, enrichedFields, queryDefaults),
     [isNew, record, enrichedFields, queryDefaults]
   )
+  // `reloadCount` re-keys the body after a conflict reload: a plain refetch keeps the same
+  // record id, so without it the body would keep the stale values (and pinned ETag).
+  const [reloadCount, setReloadCount] = useState(0)
+  const reload = useCallback(async () => {
+    await refetchRecord()
+    setReloadCount((count) => count + 1)
+  }, [refetchRecord])
   const formKey = isNew
     ? `new:${enrichedFields.length}:${prefillKey(prefill)}`
-    : `edit:${recordId}:${record?.id ?? 'loading'}`
+    : `edit:${recordId}:${record?.id ?? 'loading'}:${reloadCount}`
 
   return {
     isNew,
@@ -360,5 +385,7 @@ export function useRecordFormModel({
     validationRules,
     initialData,
     formKey,
+    etag,
+    reload,
   }
 }

@@ -65,6 +65,8 @@ import { useSystemPermissions } from '@/hooks/useSystemPermissions'
 import { useApi } from '@/context/ApiContext'
 import { getFieldControl } from '@/components/fieldControl'
 import { runBulkUpdate } from '@/utils/bulkUpdate'
+import { resolveRowIfMatch } from '@/utils/rowVersion'
+import { isStaleWriteError } from '@/services/apiClient'
 import { MassEditDialog } from '@/components/RelatedList/MassEditDialog'
 import { buildIncludedDisplayMap } from '@/utils/jsonapi'
 import { REFERENCE_FIELD_TYPES, referenceIncludeParam } from './listIncludes'
@@ -410,13 +412,36 @@ export function ObjectListPage(): React.ReactElement {
     announce('Record deleted successfully')
   }, [announce])
 
-  // In-place cell edit in the list grid (unified record experience, slice 3).
+  // In-place cell edit in the list grid (unified record experience, slice 3). Optimistic
+  // concurrency (P5): the row's version is checked against the stored record and the write
+  // carries its ETag as If-Match. A conflict reverts the cell — the commit resolves so the
+  // editor closes on the refetched latest value — and says why; any other error stays inline.
   const handleCellCommit = useCallback(
     async (recordId: string, fieldName: string, value: unknown): Promise<void> => {
-      await mutations.patch.mutateAsync({ id: recordId, data: { [fieldName]: value } })
+      const staleMessage = t('recordConflict.cellReverted')
+      try {
+        const ifMatch = await resolveRowIfMatch(
+          apiClient,
+          collectionName || '',
+          recordId,
+          records.find((r) => r.id === recordId),
+          staleMessage
+        )
+        await mutations.patch.mutateAsync({
+          id: recordId,
+          data: { [fieldName]: value },
+          ...(ifMatch ? { ifMatch } : {}),
+        })
+      } catch (e) {
+        if (!isStaleWriteError(e)) throw e
+        toast.error(staleMessage)
+        announce(staleMessage, 'assertive')
+        await refetch()
+        return
+      }
       await refetch()
     },
-    [mutations.patch, refetch]
+    [apiClient, collectionName, records, mutations.patch, refetch, t, announce]
   )
 
   /**
