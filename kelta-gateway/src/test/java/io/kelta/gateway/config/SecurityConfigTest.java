@@ -51,6 +51,15 @@ class SecurityConfigTest {
     }
 
     @Test
+    @DisplayName("a browser may read a record's ETag and send it back as If-Match (optimistic locking)")
+    void optimisticLockingHeaders() {
+        CorsConfiguration cfg = corsFor(withOriginPattern("https://app.kelta.io"));
+        assertThat(cfg.getExposedHeaders()).contains("ETag");
+        assertThat(cfg.getAllowedHeaders()).contains("If-Match");
+        assertThat(cfg.checkHeaders(List.of("content-type", "if-match"))).contains("if-match");
+    }
+
+    @Test
     @DisplayName("blank config fails fast (misconfiguration must not silently allow nothing)")
     void blankThrows() {
         assertThatThrownBy(() -> withOriginPattern("  ").corsConfigurationSource())

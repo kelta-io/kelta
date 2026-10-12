@@ -19,8 +19,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
 import { useApi } from '../../context/ApiContext'
-import { ApiClient } from '../../services/apiClient'
+import { ApiClient, isStaleWriteError } from '../../services/apiClient'
 import { unwrapCollection } from '../../utils/jsonapi'
+import { resolveRowIfMatch } from '../../utils/rowVersion'
 // The shared fetcher: the `['collection-schema', name]` cache entry must hold the full schema
 // shape (incl. displayFieldName, trackHistory) every other reader expects.
 import { fetchCollectionSchema, type FieldDefinition } from '../../hooks/useCollectionSchema'
@@ -733,19 +734,41 @@ export function ResourceListPage({
   // Inline edit save callback (T11)
   // Persist a single inline-edited cell via the JSON:API partial-PATCH path, then
   // refetch the list (drives ObjectDataTable's opt-in inline edit via the shared
-  // InlineFieldValue control).
+  // InlineFieldValue control). Optimistic concurrency (P5): the row's version is checked
+  // against the stored record and the PATCH carries its ETag as If-Match. A conflict reverts
+  // the cell (the commit resolves on the refetched latest value) and says why. The refetch is
+  // awaited so a second edit on the same row starts from the version this one wrote.
   const handleCellCommit = useCallback(
     async (recordId: string, fieldName: string, value: unknown) => {
-      await apiClient.patch(`/api/${collectionName}/${recordId}`, {
-        data: {
-          type: collectionName,
-          id: recordId,
-          attributes: { [fieldName]: value },
-        },
-      })
-      queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
+      const staleMessage = t('recordConflict.cellReverted')
+      try {
+        const ifMatch = await resolveRowIfMatch(
+          apiClient,
+          collectionName || '',
+          recordId,
+          resourcesData?.data.find((r) => r.id === recordId),
+          staleMessage
+        )
+        await apiClient.patch(
+          `/api/${collectionName}/${recordId}`,
+          {
+            data: {
+              type: collectionName,
+              id: recordId,
+              attributes: { [fieldName]: value },
+            },
+          },
+          ifMatch
+        )
+      } catch (e) {
+        if (!isStaleWriteError(e)) throw e
+        showToast(staleMessage, 'error')
+        await queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
+        return
+      }
+      await queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
     },
-    [apiClient, collectionName, queryClient]
+    [apiClient, collectionName, queryClient, resourcesData, showToast, t]
   )
 
   // Cell rendering + sort indicators are owned by the shared ObjectDataTable

@@ -242,6 +242,20 @@ export class RecordVariant extends BasePage {
       : this.testId(`field-error-${name}`);
   }
 
+  /**
+   * The concurrent-edit prompt a save opens when the record changed since the form loaded
+   * (`409 STALE_WRITE` on the If-Match update). Both stacks render the shared
+   * `RecordConflictDialog` — an `alertdialog`.
+   */
+  get conflictPrompt(): Locator {
+    return this.testId("record-conflict-dialog");
+  }
+
+  /** The prompt's "Reload latest": refetch the record and reset the form to it. */
+  get conflictReloadButton(): Locator {
+    return this.testId("record-conflict-reload");
+  }
+
   // ---------------------------------------------------------------------------
   // Detail
   // ---------------------------------------------------------------------------

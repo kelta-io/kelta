@@ -28,7 +28,8 @@ export interface UseRecordReturn {
   record: CollectionRecord | undefined
   isLoading: boolean
   error: Error | null
-  refetch: () => void
+  /** Refetch the record; resolves once the fresh record (and its ETag) is in the cache. */
+  refetch: () => Promise<unknown>
   /** Raw JSON:API response for building display maps from included resources */
   rawResponse: unknown
   /** Optimistic-locking version token from the GET `ETag` (slice 5); echo as `If-Match` on write. */

@@ -8,7 +8,9 @@
  * end-user breadcrumb. It also pins the core behaviour the end-user form gained
  * from the admin form (record-stack convergence P3): client validation rules,
  * blur rules, schema defaults, clear-to-null on update, per-field validation,
- * create → the new record's detail page, and the edit-mode record type.
+ * create → the new record's detail page, and the edit-mode record type — and the
+ * optimistic-concurrency contract (P5): If-Match on update, the conflict prompt on a
+ * stale write, and Reload.
  * (`FormFieldRow` itself is covered in `components/record/form/FormFieldRow.test.tsx`.)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -16,6 +18,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/context/I18nContext'
+import { ApiError } from '@/services/apiClient'
 import { ObjectFormPage } from './ObjectFormPage'
 
 interface TestField {
@@ -36,13 +39,25 @@ const BASE_FIELDS: TestField[] = [
 let fields: TestField[] = BASE_FIELDS
 let record: Record<string, unknown> | undefined
 let recordLoading = false
+let etag: string | undefined
+/** Stands in for `useRecord().refetch`; a test sets what the "server" returns next. */
+let nextServed: { record: Record<string, unknown>; etag: string } | undefined
+const refetchRecord = vi.fn(async () => {
+  if (nextServed) {
+    record = nextServed.record
+    etag = nextServed.etag
+  }
+})
 let layout: Record<string, unknown> | null = null
 let permissions = { canCreate: true, canRead: true, canEdit: true, canDelete: true }
 const createMutate = vi.fn()
 const updateMutate = vi.fn()
 const showToast = vi.fn()
 const layoutRequests: Array<string | undefined> = []
-let mutationOptions: { onSuccess?: (saved?: { id: string }) => void } = {}
+let mutationOptions: {
+  onSuccess?: (saved?: { id: string }) => void
+  onError?: (error: Error) => void
+} = {}
 /** `apiClient.getList` responses by URL prefix (default: an empty list). */
 let listResponses: Record<string, unknown[]> = {}
 const getList = vi.fn(async (url: string) => {
@@ -71,7 +86,12 @@ vi.mock('@/hooks/useCollectionSchema', () => ({
   }),
 }))
 vi.mock('@/hooks/useRecord', () => ({
-  useRecord: () => ({ record: recordLoading ? undefined : record, isLoading: recordLoading }),
+  useRecord: () => ({
+    record: recordLoading ? undefined : record,
+    isLoading: recordLoading,
+    etag: recordLoading ? undefined : etag,
+    refetch: refetchRecord,
+  }),
 }))
 vi.mock('@/hooks/useCollectionPermissions', () => ({
   useCollectionPermissions: () => ({
@@ -91,7 +111,7 @@ vi.mock('@/hooks/useLookupDisplayMap', () => ({
   useLookupDisplayMap: () => ({ lookupDisplayMap: undefined }),
 }))
 vi.mock('@/hooks/useRecordMutation', () => ({
-  useRecordMutation: (opts: { onSuccess?: (saved?: { id: string }) => void }) => {
+  useRecordMutation: (opts: typeof mutationOptions) => {
     mutationOptions = opts
     return {
       create: { mutate: createMutate, isPending: false },
@@ -128,6 +148,9 @@ beforeEach(() => {
   fields = BASE_FIELDS
   record = undefined
   recordLoading = false
+  etag = undefined
+  nextServed = undefined
+  refetchRecord.mockClear()
   layout = null
   listResponses = {}
   layoutRequests.length = 0
@@ -384,5 +407,99 @@ describe('ObjectFormPage (edit)', () => {
     expect(screen.getByText('Insufficient privileges')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Go Back' }))
     expect(screen.getByTestId('location').textContent).toBe('/acme/app/o/accounts/r1')
+  })
+})
+
+describe('ObjectFormPage — optimistic concurrency (If-Match)', () => {
+  const staleWrite = () =>
+    new ApiError(409, 'This record was modified since you opened it.', [
+      { field: '', message: 'This record was modified since you opened it.', code: 'STALE_WRITE' },
+    ])
+
+  beforeEach(() => {
+    record = { id: 'r1', name: 'Ada', notes: 'hi' }
+    etag = '"v1"'
+  })
+
+  it("sends the loaded record's ETag as If-Match on update", () => {
+    renderAt('/acme/app/o/accounts/r1/edit')
+    fireEvent.click(screen.getByTestId('save-button'))
+    expect(updateMutate).toHaveBeenCalledWith({
+      id: 'r1',
+      data: { name: 'Ada', notes: 'hi' },
+      ifMatch: '"v1"',
+    })
+  })
+
+  it('does not send If-Match on create', () => {
+    renderAt('/acme/app/o/accounts/new?name=Ada')
+    fireEvent.click(screen.getByTestId('save-button'))
+    expect(createMutate).toHaveBeenCalledTimes(1)
+    expect(createMutate.mock.calls[0]).toEqual([{ name: 'Ada' }])
+  })
+
+  it('keeps the ETag it loaded with even if the cached record moves on underneath the form', () => {
+    const view = renderAt('/acme/app/o/accounts/r1/edit')
+    etag = '"v2"' // a background refetch landed while the user was editing the v1 values
+    view.rerender()
+    fireEvent.click(screen.getByTestId('save-button'))
+    expect(updateMutate).toHaveBeenCalledWith(expect.objectContaining({ ifMatch: '"v1"' }))
+  })
+
+  it('on a stale write keeps the edits and shows the conflict prompt instead of a toast', async () => {
+    renderAt('/acme/app/o/accounts/r1/edit')
+    fireEvent.change(screen.getByTestId('field-name'), { target: { value: 'Mine' } })
+    fireEvent.click(screen.getByTestId('save-button'))
+    act(() => mutationOptions.onError?.(staleWrite()))
+
+    expect(await screen.findByTestId('record-conflict-dialog')).toBeInTheDocument()
+    expect(screen.getByText('This record was changed')).toBeInTheDocument()
+    expect(screen.getByTestId('field-name')).toHaveValue('Mine')
+    expect(showToast).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('location')).toBeNull()
+
+    // Keep editing: the prompt closes and the edits stay.
+    fireEvent.click(screen.getByTestId('record-conflict-keep-editing'))
+    await waitFor(() => expect(screen.queryByTestId('record-conflict-dialog')).toBeNull())
+    expect(screen.getByTestId('field-name')).toHaveValue('Mine')
+    expect(refetchRecord).not.toHaveBeenCalled()
+  })
+
+  it('Reload refetches the record, resets the form to it and saves with the new ETag', async () => {
+    renderAt('/acme/app/o/accounts/r1/edit')
+    fireEvent.change(screen.getByTestId('field-name'), { target: { value: 'Mine' } })
+    fireEvent.click(screen.getByTestId('save-button'))
+    act(() => mutationOptions.onError?.(staleWrite()))
+    expect(await screen.findByTestId('record-conflict-dialog')).toBeInTheDocument()
+
+    nextServed = { record: { id: 'r1', name: 'Theirs', notes: 'hi' }, etag: '"v2"' }
+    fireEvent.click(screen.getByTestId('record-conflict-reload'))
+
+    await waitFor(() => expect(screen.getByTestId('field-name')).toHaveValue('Theirs'))
+    expect(refetchRecord).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.queryByTestId('record-conflict-dialog')).toBeNull())
+
+    updateMutate.mockClear()
+    fireEvent.click(screen.getByTestId('save-button'))
+    expect(updateMutate).toHaveBeenCalledWith({
+      id: 'r1',
+      data: { name: 'Theirs', notes: 'hi' },
+      ifMatch: '"v2"',
+    })
+  })
+
+  it('shows any other save error as before (toast + field errors), not the conflict prompt', () => {
+    renderAt('/acme/app/o/accounts/r1/edit')
+    fireEvent.click(screen.getByTestId('save-button'))
+    act(() =>
+      mutationOptions.onError?.(
+        new ApiError(409, 'Name must be unique', [
+          { field: 'name', message: 'Name must be unique', code: 'UNIQUE_VIOLATION' },
+        ])
+      )
+    )
+    expect(screen.queryByTestId('record-conflict-dialog')).toBeNull()
+    expect(showToast).toHaveBeenCalledWith('Name must be unique', 'error')
+    expect(screen.getByTestId('field-error-name')).toHaveTextContent('Name must be unique')
   })
 })

@@ -9,6 +9,10 @@
  * - 11.6: Resource browser allows creating new resources
  * - 11.9: Resource browser allows editing existing resources
  * - 12.4: Use custom field renderers when registered, fall back to defaults
+ *
+ * Optimistic concurrency (record-stack convergence P5): an update sends the record's ETag
+ * (pinned when the form is initialised) as `If-Match`; a `409 STALE_WRITE` keeps the user's
+ * edits and shows the shared `RecordConflictDialog` (Reload latest / Keep editing).
  */
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
@@ -34,7 +38,8 @@ import {
   type CollectionSchema as SharedCollectionSchema,
   type FieldDefinition as SchemaFieldDefinition,
 } from '../../hooks/useCollectionSchema'
-import { ApiError } from '../../services/apiClient'
+import { RecordConflictDialog } from '../../components/record/RecordConflictDialog'
+import { ApiError, isStaleWriteError } from '../../services/apiClient'
 import type { ApiClient } from '../../services/apiClient'
 
 /**
@@ -149,10 +154,11 @@ async function updateResource(
   collectionName: string,
   resourceId: string,
   data: FormData,
-  relationshipFields?: Record<string, string>
+  relationshipFields?: Record<string, string>,
+  ifMatch?: string
 ): Promise<Resource> {
   const body = wrapResource(collectionName, data, resourceId, relationshipFields)
-  const response = await apiClient.patch(`/api/${collectionName}/${resourceId}`, body)
+  const response = await apiClient.patch(`/api/${collectionName}/${resourceId}`, body, ifMatch)
   return unwrapResource<Resource>(response)
 }
 
@@ -516,6 +522,7 @@ export function ResourceFormPage({
     data: resourceEnvelope,
     isLoading: resourceLoading,
     error: resourceError,
+    refetch: refetchResource,
   } = useQuery({
     queryKey: ['resource', collectionName, resourceId],
     queryFn: () => fetchResource(apiClient, collectionName, resourceId!),
@@ -527,6 +534,11 @@ export function ResourceFormPage({
   const [formData, setFormData] = useState<FormData>({})
   const [formErrors, setFormErrors] = useState<FormErrors>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // The ETag the form's values were loaded from — pinned at initialisation (not read live
+  // from the query) so a background refetch can't let an update overwrite a newer version.
+  const [formIfMatch, setFormIfMatch] = useState<string | undefined>(undefined)
+  const [conflict, setConflict] = useState(false)
+  const [reloading, setReloading] = useState(false)
 
   // Track the key for which form was initialized
   const currentResourceKey = isEditMode
@@ -566,6 +578,7 @@ export function ResourceFormPage({
     setInitializedKey(currentResourceKey ?? null)
     setFormData(computedInitialData)
     setFormErrors({})
+    setFormIfMatch(isEditMode ? resourceEnvelope?.etag : undefined)
   }
 
   // Sort fields by order
@@ -603,7 +616,14 @@ export function ResourceFormPage({
   // Update mutation
   const updateMutation = useMutation({
     mutationFn: (data: FormData) =>
-      updateResource(apiClient, collectionName, resourceId!, data, relationshipFieldsMap),
+      updateResource(
+        apiClient,
+        collectionName,
+        resourceId!,
+        data,
+        relationshipFieldsMap,
+        formIfMatch
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
       queryClient.invalidateQueries({ queryKey: ['resource', collectionName, resourceId] })
@@ -611,6 +631,12 @@ export function ResourceFormPage({
       navigate(`/${getTenantSlug()}/resources/${collectionName}/${resourceId}`)
     },
     onError: (error: Error) => {
+      setIsSubmitting(false)
+      // Concurrent edit: keep the user's values and let them choose (reload vs keep editing).
+      if (isStaleWriteError(error)) {
+        setConflict(true)
+        return
+      }
       showToast(error.message || t('errors.generic'), 'error')
       if (error instanceof ApiError && error.fieldErrors.length > 0) {
         const serverErrors: FormErrors = {}
@@ -619,7 +645,6 @@ export function ResourceFormPage({
         }
         setFormErrors((prev) => ({ ...prev, ...serverErrors }))
       }
-      setIsSubmitting(false)
     },
   })
 
@@ -1007,6 +1032,18 @@ export function ResourceFormPage({
       ruleEngine,
     ]
   )
+
+  /** Conflict prompt → Reload latest: refetch, then re-initialise the form from it. */
+  const handleConflictReload = useCallback(async () => {
+    setReloading(true)
+    try {
+      await refetchResource()
+      setInitializedKey(null)
+      setConflict(false)
+    } finally {
+      setReloading(false)
+    }
+  }, [refetchResource])
 
   /**
    * Handle cancel action
@@ -1603,6 +1640,13 @@ export function ResourceFormPage({
           )}
         </div>
       </header>
+
+      <RecordConflictDialog
+        open={conflict}
+        reloading={reloading}
+        onReload={() => void handleConflictReload()}
+        onKeepEditing={() => setConflict(false)}
+      />
 
       {/* Form */}
       <form

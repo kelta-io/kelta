@@ -1471,6 +1471,13 @@
     "validationFailed": "Validation failed",
     "fixInvalidJson": "Fix invalid JSON before saving"
   },
+  "recordConflict": {
+    "title": "This record was changed",
+    "message": "Someone else saved this record after you opened it, so your changes were not saved. Reload to see the latest version (your edits will be discarded), or keep editing to copy them first.",
+    "reload": "Reload latest",
+    "keepEditing": "Keep editing",
+    "cellReverted": "This record was changed by someone else, so your edit was not saved. The latest values are shown."
+  },
   "fieldEditor": {
     "namePlaceholder": "e.g., first_name",
     "displayNamePlaceholder": "e.g., First Name",
