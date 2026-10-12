@@ -1,0 +1,1 @@
+- 2026-10-12 fix(gateway): Authorize child-resource paths against the child collection as well as the parent, and apply the child's record and field rules in the worker (child-route-authz)

@@ -15,10 +15,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
@@ -34,6 +37,7 @@ import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -942,6 +946,227 @@ class RouteAuthorizationFilterTest {
 
             verify(filterChain).filter(any());
             verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+        }
+    }
+
+    // ================================================================
+    // Child-resource paths: /api/{parent}/{parentId}/{child}[/{childId}]
+    // ================================================================
+
+    @Nested
+    @DisplayName("Child-resource paths under a collection route")
+    class ChildResourcePathTests {
+
+        private final RouteRegistry registry = new RouteRegistry();
+        private RouteAuthorizationFilter filter;
+        private GatewayPrincipal principal;
+
+        @BeforeEach
+        void setUp() {
+            registry.addRoute(new RouteDefinition("accounts-uuid", "/api/accounts/**", "http://worker:80",
+                    "accounts", null, 0, "tenant-1"));
+            registry.addRoute(new RouteDefinition("contacts-uuid", "/api/contacts/**", "http://worker:80",
+                    "contacts", null, 0, "tenant-1"));
+            // Only another tenant has an "invoices" collection
+            registry.addRoute(new RouteDefinition("invoices-uuid", "/api/invoices/**", "http://worker:80",
+                    "invoices", null, 0, "tenant-2"));
+            registry.addRoute(new RouteDefinition("fields-uuid", "/api/fields/**", "http://worker:80",
+                    "fields", null, 0, "platform-tenant").withSystemCollection(true));
+            registry.addRoute(new RouteDefinition("attachments-uuid", "/api/attachments/**", "http://worker:80",
+                    "attachments", null, 0, "platform-tenant").withSystemCollection(true));
+            RouteDefinition staticUsers = new RouteDefinition("static-users", "/api/users/**", "http://worker:80",
+                    "users").withCollectionCheck(new StaticCollectionCheck(true, "MANAGE_USERS"));
+            registry.addRoute(staticUsers);
+            registry.addRoute(new RouteDefinition("users-uuid", "/api/users/**", "http://worker:80",
+                    "users", null, 0, "platform-tenant").withSystemCollection(true));
+            registry.addRoute(new RouteDefinition("static-admin", "/api/admin/**", "http://worker:80", "admin"));
+            registry.addRoute(new RouteDefinition("static-tenants", "/api/tenants/**", "http://worker:80",
+                    "tenants"));
+
+            filter = new RouteAuthorizationFilter(
+                    registry, true, publicPathMatcher, metrics, new ObjectMapper(), cerbosService);
+            principal = principalWithIdentity("member@test.com");
+            lenient().when(cerbosService.checkSystemPermission(principal, "API_ACCESS")).thenReturn(Mono.just(true));
+            lenient().when(cerbosService.checkSystemPermission(eq(principal), argThat(p -> !"API_ACCESS".equals(p))))
+                    .thenReturn(Mono.just(false));
+            lenient().when(cerbosService.checkObjectPermission(eq(principal), any(), any()))
+                    .thenReturn(Mono.just(false));
+        }
+
+        private void grant(String collectionId, String action) {
+            lenient().when(cerbosService.checkObjectPermission(principal, collectionId, action)).thenReturn(Mono.just(true));
+        }
+
+        private MockServerWebExchange run(MockServerHttpRequest request) {
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+            exchange.getAttributes().put(PRINCIPAL_ATTR, principal);
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-1");
+            StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+            return exchange;
+        }
+
+        private void assertForwarded(MockServerWebExchange exchange) {
+            assertThat(exchange.getResponse().getStatusCode()).isNull();
+            verify(filterChain).filter(any());
+        }
+
+        private void assertStatus(MockServerWebExchange exchange, HttpStatus status) {
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(status);
+            verify(filterChain, never()).filter(any());
+        }
+
+        @Test
+        @DisplayName("Listing children needs read on the parent and read on the child")
+        void listWithBothGrantsIsForwarded() {
+            grant("accounts-uuid", "read");
+            grant("contacts-uuid", "read");
+
+            assertForwarded(run(MockServerHttpRequest.get("/api/accounts/a1/contacts").build()));
+            verify(cerbosService).checkObjectPermission(principal, "accounts-uuid", "read");
+            verify(cerbosService).checkObjectPermission(principal, "contacts-uuid", "read");
+        }
+
+        @Test
+        @DisplayName("A grant on the parent alone does not reach the child collection")
+        void parentOnlyIsForbidden() {
+            grant("accounts-uuid", "read");
+
+            MockServerWebExchange exchange = run(MockServerHttpRequest.get("/api/accounts/a1/contacts").build());
+
+            assertStatus(exchange, HttpStatus.FORBIDDEN);
+            verify(metrics).recordAuthzDenied(any(), eq("contacts"), eq("GET"));
+        }
+
+        @Test
+        @DisplayName("A grant on the child alone does not allow navigating through the parent")
+        void childOnlyIsForbidden() {
+            grant("contacts-uuid", "read");
+
+            assertStatus(run(MockServerHttpRequest.get("/api/accounts/a1/contacts").build()), HttpStatus.FORBIDDEN);
+            verify(cerbosService, never()).checkObjectPermission(principal, "contacts-uuid", "read");
+        }
+
+        @ParameterizedTest(name = "{0} {1} -> {2} on the child")
+        @CsvSource({
+                "GET, /api/accounts/a1/contacts/c1, read",
+                "POST, /api/accounts/a1/contacts, create",
+                "PUT, /api/accounts/a1/contacts/c1, edit",
+                "PATCH, /api/accounts/a1/contacts/c1, edit",
+                "DELETE, /api/accounts/a1/contacts/c1, delete"
+        })
+        @DisplayName("The HTTP method maps to the child's action; the parent always needs read")
+        void methodMapsToTheChildAction(String method, String path, String action) {
+            grant("accounts-uuid", "read");
+            grant("contacts-uuid", action);
+
+            assertForwarded(run(MockServerHttpRequest.method(HttpMethod.valueOf(method), path).build()));
+            verify(cerbosService).checkObjectPermission(principal, "contacts-uuid", action);
+            verify(cerbosService, never()).checkObjectPermission(eq(principal), eq("accounts-uuid"),
+                    argThat(a -> !"read".equals(a)));
+        }
+
+        @ParameterizedTest(name = "{0} {1} without {2} on the child")
+        @CsvSource({
+                "GET, /api/accounts/a1/contacts/c1, read",
+                "POST, /api/accounts/a1/contacts, create",
+                "PUT, /api/accounts/a1/contacts/c1, edit",
+                "PATCH, /api/accounts/a1/contacts/c1, edit",
+                "DELETE, /api/accounts/a1/contacts/c1, delete"
+        })
+        @DisplayName("Without the child's action the request is refused before the worker")
+        void missingChildActionIsForbidden(String method, String path, String action) {
+            grant("accounts-uuid", "read");
+            grant("accounts-uuid", action);
+
+            MockServerWebExchange exchange = run(MockServerHttpRequest.method(HttpMethod.valueOf(method), path).build());
+
+            assertStatus(exchange, HttpStatus.FORBIDDEN);
+            assertThat(exchange.getResponse().getBodyAsString().block())
+                    .contains("Insufficient permissions for " + action + " on contacts");
+        }
+
+        @Test
+        @DisplayName("A child segment naming only another tenant's collection is 404, never authorized against it")
+        void otherTenantsCollectionIsNotFound() {
+            grant("accounts-uuid", "read");
+
+            assertStatus(run(MockServerHttpRequest.get("/api/accounts/a1/invoices").build()), HttpStatus.NOT_FOUND);
+            verify(cerbosService, never()).checkObjectPermission(any(), eq("invoices-uuid"), any());
+        }
+
+        @Test
+        @DisplayName("A child segment that is no collection at all is 404")
+        void unknownChildIsNotFound() {
+            assertStatus(run(MockServerHttpRequest.delete("/api/accounts/a1/nothing-here/x").build()),
+                    HttpStatus.NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("A system collection child is checked like a direct request to it")
+        void systemCollectionChildIsChecked() {
+            grant("accounts-uuid", "read");
+
+            assertStatus(run(MockServerHttpRequest.get("/api/accounts/a1/fields").build()), HttpStatus.FORBIDDEN);
+            verify(cerbosService).checkObjectPermission(principal, "fields-uuid", "read");
+        }
+
+        @Test
+        @DisplayName("A child behind a collection-checked static route gets that route's check")
+        void staticCollectionCheckedChildUsesItsCheck() {
+            grant("accounts-uuid", "read");
+
+            assertStatus(run(MockServerHttpRequest.get("/api/accounts/a1/users").build()), HttpStatus.FORBIDDEN);
+            verify(cerbosService).checkObjectPermission(principal, "users-uuid", "read");
+        }
+
+        @Test
+        @DisplayName("A child on an API_ACCESS-only static route keeps API_ACCESS")
+        void plainStaticChildStaysApiAccessOnly() {
+            grant("accounts-uuid", "read");
+
+            assertForwarded(run(MockServerHttpRequest.get("/api/accounts/a1/admin").build()));
+        }
+
+        @Test
+        @DisplayName("The own-tenant view of /api/tenants does not carry over to a child list")
+        void narrowedTenantsChildIsForbidden() {
+            grant("accounts-uuid", "read");
+
+            assertStatus(run(MockServerHttpRequest.get("/api/accounts/a1/tenants").build()), HttpStatus.FORBIDDEN);
+        }
+
+        @Test
+        @DisplayName("A static parent route keeps its own rule (child shape is not reinterpreted)")
+        void staticParentIsUnchanged() {
+            assertForwarded(run(MockServerHttpRequest.get("/api/admin/jobs/j1/runs").build()));
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("A dedicated controller sub-path keeps the parent route's decision")
+        void dedicatedSubResourceKeepsParentDecision() {
+            grant("attachments-uuid", "create");
+
+            assertForwarded(run(MockServerHttpRequest.post("/api/attachments/a1/finalize").build()));
+            verify(cerbosService).checkObjectPermission(principal, "attachments-uuid", "create");
+        }
+
+        @Test
+        @DisplayName("The dedicated-path match is method-specific: GET on the same path is a child request")
+        void dedicatedMatchIsMethodSpecific() {
+            grant("attachments-uuid", "read");
+
+            assertStatus(run(MockServerHttpRequest.get("/api/attachments/a1/finalize").build()), HttpStatus.NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("A percent-encoded child name is resolved and checked as the decoded collection")
+        void encodedChildNameIsChecked() {
+            grant("accounts-uuid", "read");
+
+            assertStatus(run(MockServerHttpRequest.method(HttpMethod.GET,
+                    java.net.URI.create("/api/accounts/a1/c%6Fntacts")).build()), HttpStatus.FORBIDDEN);
+            verify(cerbosService).checkObjectPermission(principal, "contacts-uuid", "read");
         }
     }
 }

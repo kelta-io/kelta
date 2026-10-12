@@ -60,7 +60,7 @@ Order values below are the live `getOrder()` returns from source (lower runs fir
 | -50 | RateLimitFilter / UserIdentityResolutionFilter | Per-**user** then per-tenant rate limit; user identity |
 | -45 | GeoEnrichmentFilter | GeoLite2 lookup of the client IP → `gateway.geo` attr, trusted `X-Geo-*` headers, `GatewayPrincipal.geoCountry` |
 | -40 | TenantIpAllowlistFilter | Per-tenant IP allowlist on `/api/**` (fail-open; `MANAGE_TENANTS` bypass) |
-| 0 | RouteAuthorizationFilter | Cerbos object-level permission check (DynamicRouteLocator then forwards to worker) |
+| 0 | RouteAuthorizationFilter | Cerbos object-level permission check; a child-resource path is also checked against the child collection (DynamicRouteLocator then forwards to worker) |
 | 50 | HeaderTransformationFilter | Inject `X-Tenant-*` headers for worker |
 | 100 | SecurityHeadersFilter | Response security headers |
 | 200 | SecurityAuditFilter | Record final response status |
@@ -366,6 +366,33 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `CerbosRecordAuthorizationAdvice.isRecordReadable` because a redirect has no body for the
   record advice to filter (`integrations.md` → Media fields). Literal segments beat the router's
   variables at equal depth, but test the mapping with the router stand-in registered.
+  **Exception — three or four segments after `/api`:** that is the child-resource shape (next
+  bullet), which the gateway authorizes against the child named by the third segment and answers
+  404 when the caller's tenant has no such collection. A dedicated controller at that depth on a
+  collection without a `static-` route (`POST /api/attachments/{id}/finalize`,
+  `POST /api/credentials/{id}/test`, `GET /api/api-specs/{id}/details`, …) must be listed in
+  `RouteAuthorizationFilter.DEDICATED_SUB_RESOURCES` (method + path pattern) so it keeps the
+  parent route's own check.
+- **Child-resource paths** (`/api/{parent}/{parentId}/{child}` list/create,
+  `/api/{parent}/{parentId}/{child}/{childId}` get/update/delete — `DynamicCollectionRouter`'s
+  sub-resource handlers, which read and write the **child** collection's records): when the
+  parent route is a collection route (not `static-`), `RouteAuthorizationFilter.authorizeChildPath`
+  requires **both** `read` on the parent (the caller addresses the records through a parent record)
+  **and** exactly the decision a direct request to `/api/{child}[/{childId}]` with the same method
+  would get — the same `decide(...)` function, so the child's Cerbos object permission for the
+  method's action (GET→`read`, POST→`create`, PUT/PATCH→`edit`, DELETE→`delete`), or for a child
+  that is itself a `static-` route that route's rule. The child segment is read the way the worker
+  matches it (percent-decoded, path parameters dropped) and resolved with
+  `RouteRegistry.findTenantVisibleByPath` — the caller's own collection, a `static-` route or a
+  system collection, **never another tenant's** same-named collection. No match → 404 (the worker
+  resolves the child in the caller's tenant and would 404 too). A narrowed allow (the own-tenant
+  view of `/api/tenants`) counts as a denial for a child, since the forwarded request is not the
+  narrowed one. Worker side, `CerbosRecordAuthorizationAdvice` and `CerbosFieldWriteSecurityAdvice`
+  take the collection from the matched handler's `childName` path variable (`ApiPaths.collectionName`),
+  so child records are filtered and child writes stripped by the **child's** record/field rules —
+  the same as `CerbosFieldSecurityAdvice` (JSON:API `type`) and `MaskedFieldPredicateInterceptor`.
+  Record-level rules on writes behave exactly as on a direct write: the write runs, the response
+  record is filtered (there is no pre-write record check on either path).
 - **Static routes** (`/api/admin/**`, `/api/me/**`, `/api/_search/**`, `/api/metrics/**`,
   `/api/operations`): `RouteAuthorizationFilter` **skips** ids starting `static-` — they get only
   the blanket `API_ACCESS` system-permission check. The worker advices **exclude** `/api/admin/` — and the record-level advice also excludes `/api/telehealth/` (those controllers scope access per participant themselves; the generic record check emptied portal users' appointment lists, fixed 2026-07-12).

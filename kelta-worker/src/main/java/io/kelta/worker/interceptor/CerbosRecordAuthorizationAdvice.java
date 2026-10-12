@@ -111,7 +111,8 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
         String email = permissionResolver.getEmail(httpRequest);
         String profileId = permissionResolver.getProfileId(httpRequest);
         String tenantId = permissionResolver.getTenantId(httpRequest);
-        String collectionId = extractCollectionId(path);
+        // The collection the handler served — the child on a child-resource route.
+        String collectionId = ApiPaths.collectionName(httpRequest);
         String action = mapMethodToAction(httpRequest.getMethod());
 
         if (data instanceof List<?> records) {
@@ -293,15 +294,6 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
                 || path.startsWith("/api/credentials")
                 || path.startsWith("/api/connected-apps")
                 || path.startsWith("/api/devices");
-    }
-
-    private String extractCollectionId(String path) {
-        // Path format: /api/{collectionName} or /api/{collectionName}/{id}
-        String[] parts = path.split("/");
-        if (parts.length >= 3) {
-            return parts[2];
-        }
-        return "";
     }
 
     private String mapMethodToAction(String method) {

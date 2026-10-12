@@ -263,6 +263,55 @@ public class RouteRegistry {
         return Optional.empty();
     }
 
+    /**
+     * Finds the route for a request path only if it is one the tenant can actually address: the
+     * tenant's own collection, a platform-wide ({@code static-}) route, or a bootstrap system
+     * collection. Unlike {@link #findByPath(String, String)} it never falls back to another
+     * tenant's collection — use it where "this tenant has no collection here" must stay
+     * distinguishable from "some tenant does" (e.g. the child segment of
+     * {@code /api/{parent}/{parentId}/{child}}, which the worker resolves in the caller's tenant).
+     *
+     * @param path     The request path to match against registered route patterns
+     * @param tenantId The caller's resolved tenant id (null for none)
+     * @return the route, or empty when the tenant has nothing at this path
+     */
+    public Optional<RouteDefinition> findTenantVisibleByPath(String path, String tenantId) {
+        if (path == null || path.isEmpty()) {
+            return Optional.empty();
+        }
+        ConcurrentHashMap<String, RouteDefinition> exact = routes.get(path);
+        if (exact != null) {
+            Optional<RouteDefinition> chosen = pickTenantVisible(exact, tenantId);
+            if (chosen.isPresent()) {
+                return chosen;
+            }
+        }
+        for (var entry : routes.entrySet()) {
+            if (matchesPath(path, entry.getKey())) {
+                Optional<RouteDefinition> chosen = pickTenantVisible(entry.getValue(), tenantId);
+                if (chosen.isPresent()) {
+                    return chosen;
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Tenant's own route, else the platform-wide one, else a system collection — never another tenant's. */
+    private static Optional<RouteDefinition> pickTenantVisible(ConcurrentHashMap<String, RouteDefinition> byTenant,
+                                                               String tenantId) {
+        String key = tenantKey(tenantId);
+        RouteDefinition own = GLOBAL.equals(key) ? null : byTenant.get(key);
+        if (own != null) {
+            return Optional.of(own);
+        }
+        RouteDefinition global = byTenant.get(GLOBAL);
+        if (global != null) {
+            return Optional.of(global);
+        }
+        return byTenant.values().stream().filter(RouteDefinition::isSystemCollection).findFirst();
+    }
+
     /** Tenant's own route, else the platform-wide one, else any. */
     private static Optional<RouteDefinition> pick(ConcurrentHashMap<String, RouteDefinition> byTenant,
                                                   String tenantId) {

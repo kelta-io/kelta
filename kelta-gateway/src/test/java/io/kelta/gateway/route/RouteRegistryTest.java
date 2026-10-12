@@ -550,4 +550,32 @@ private RouteDefinition createRoute(String id, String path) {
 
         assertTrue(registry.findCollectionRouteBehind(staticUsers).isEmpty());
     }
+
+    @Test
+    void tenantVisibleLookupNeverFallsBackToAnotherTenantsCollection() {
+        registry.addRoute(new RouteDefinition("other-orders", "/api/orders/**", "http://worker:80", "orders",
+                null, 0, "tenant-2"));
+
+        assertTrue(registry.findByPath("/api/orders", "tenant-1").isPresent(),
+                "the authorization lookup still resolves some collection so it can deny");
+        assertTrue(registry.findTenantVisibleByPath("/api/orders", "tenant-1").isEmpty());
+        assertEquals("other-orders",
+                registry.findTenantVisibleByPath("/api/orders/1", "tenant-2").orElseThrow().getId());
+    }
+
+    @Test
+    void tenantVisibleLookupResolvesOwnStaticAndSystemRoutes() {
+        registry.addRoute(new RouteDefinition("own-orders", "/api/orders/**", "http://worker:80", "orders",
+                null, 0, "tenant-1"));
+        registry.addRoute(new RouteDefinition("other-orders", "/api/orders/**", "http://worker:80", "orders",
+                null, 0, "tenant-2"));
+        registry.addRoute(new RouteDefinition("static-admin", "/api/admin/**", "http://worker:80", "admin"));
+        registry.addRoute(new RouteDefinition("fields-uuid", "/api/fields/**", "http://worker:80", "fields",
+                null, 0, "platform-tenant").withSystemCollection(true));
+
+        assertEquals("own-orders", registry.findTenantVisibleByPath("/api/orders/1", "tenant-1").orElseThrow().getId());
+        assertEquals("static-admin", registry.findTenantVisibleByPath("/api/admin", "tenant-1").orElseThrow().getId());
+        assertEquals("fields-uuid", registry.findTenantVisibleByPath("/api/fields/9", "tenant-1").orElseThrow().getId());
+        assertTrue(registry.findTenantVisibleByPath("/api/orders-archive", "tenant-1").isEmpty());
+    }
 }

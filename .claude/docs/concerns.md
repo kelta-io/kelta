@@ -511,6 +511,11 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **Any state the gateway loads only at startup needs a retry.** `RouteInitializer` retries the
   `/internal/bootstrap` fetch with backoff; without it a gateway that started before the worker
   served static routes only for hours.
+- **`RouteAuthorizationFilter.DEDICATED_SUB_RESOURCES` mirrors worker controllers.** A path with
+  three or four segments after `/api` under a collection route is treated as a child resource and
+  404s when its third segment names no collection of the caller's tenant; a dedicated controller
+  mapped at that depth on a non-`static-` collection (attachments finalize, credentials test/OAuth,
+  api-spec details/raw/operations) must be listed there, method included.
 - **Error bodies are built from `JsonApiError.toMap()`**, never the bean — on native images the
   bean serializes as `{"errors":[{}]}` (worker `GlobalExceptionHandler`, gateway `GlobalErrorHandler`).
 
@@ -743,6 +748,7 @@ One line each; full write-ups are in git history.
 - 2026-07-05 — `POST /api/operations` skipped per-collection authorization; `checkCollectionAccess` added.
 - PLT-330 (2026-10-04) — any token (and, via the public path, anyone) could list every tenant; gateway narrowing (#1603/#1604) + self-scoped storage predicate.
 - PLT-331 (2026-10-04) — static routes for `users`/`profiles`/`collections` skipped the collection check; `COLLECTION_CHECKED_STATIC_ROUTES` + advice count correction.
+- 2026-10-12 (child-route-authz) — child-resource paths `/api/{parent}/{parentId}/{child}[/{childId}]` were authorized against the parent collection only; the gateway now also requires the child's own decision (parent needs `read`), and the record/field-write advices use the child collection.
 - PLT-337 (2026-10-04, V204) — provisioned tenant admins shared the password `password`; claim by invite.
 - PLT-343 (2026-10-05) — platform admin shipped with a well-known password; `BaselineAdminPasswordInitializer`.
 - PLT-355 (2026-10-05) — client tenant headers could select a tenant; now a claim that must match the credential.
