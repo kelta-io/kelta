@@ -257,6 +257,19 @@ the shared admin session (sign-in, sign-out, portal login) import the plain Play
 with an empty `storageState`: the `fixtures` page re-injects the admin's tokens on every
 navigation.
 
+### Record parity harness (admin vs end-user)
+
+`e2e-tests/tests/journeys/record-parity.spec.ts` runs one record journey (create → land on
+the record → values persisted → edit → clear an optional field → required-field error →
+cancel → list → delete, plus a 409 concurrent-edit case) against both record stacks —
+`/resources/<collection>` and `/app/o/<collection>` — through the variant-aware page object
+`e2e-tests/pages/record-variant.page.ts` (`new RecordVariant(page, tenantSlug, 'admin' | 'enduser')`).
+It guards the convergence of the two stacks (unified-record slice 8). Persistence is asserted
+through the API (`DataFactory.queryRecords` / `getRecord`), not only the UI. A step where a
+stack differs from the target today is `test.fixme` with the gap named; removing the fixme is
+the signal that the gap is closed. A new record behavior that both stacks should share gets a
+step here rather than a stack-specific spec. Gated on `E2E_EPHEMERAL_STACK`.
+
 ### Writing stable visual specs
 
 A `toHaveScreenshot` spec must render the same pixels on every run, in a tenant that every other
