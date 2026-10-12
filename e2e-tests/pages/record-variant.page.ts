@@ -30,10 +30,11 @@ function escapeRegExp(text: string): string {
  * the same steps against the admin and the end-user record stacks (record-parity.spec.ts).
  *
  * Selectors are each stack's existing ones — no test ids were added for this. What the two
- * stacks share is used directly: form controls carry `id="field-<name>"` in both
- * (`<input>`, `<select>`, the native checkbox, and the LookupSelect trigger button),
- * and both lists render the shared ObjectDataTable (`data-testid="data-table"`). Everything
- * else is mapped per variant below.
+ * stacks share is used directly: both create/edit pages render the shared `RecordForm` core
+ * (`form-fields`, `save-button`, `cancel-button`, controls with `id="field-<name>"`, errors
+ * `field-error-<name>`), and both lists render the shared ObjectDataTable
+ * (`data-testid="data-table"`). Everything else (list toolbar, detail page) is mapped per
+ * variant below.
  */
 export class RecordVariant extends BasePage {
   constructor(
@@ -155,11 +156,12 @@ export class RecordVariant extends BasePage {
     await this.waitForLoadingComplete();
   }
 
-  /** The element that holds the form's field controls once the form has loaded. */
+  /**
+   * The element that holds the form's field controls once the form has loaded — the shared
+   * `RecordForm` core's, in both stacks.
+   */
   get form(): Locator {
-    return this.kind === "admin"
-      ? this.testId("resource-form")
-      : this.testId("form-fields");
+    return this.testId("form-fields");
   }
 
   async waitForForm(): Promise<void> {
@@ -167,9 +169,8 @@ export class RecordVariant extends BasePage {
   }
 
   /**
-   * The control for a field: `<input>`, `<select>`, native checkbox (both stacks — the end-user
-   * form renders the fieldControl registry's) or the LookupSelect trigger button — all
-   * `id="field-<name>"`.
+   * The control for a field: `<input>`, `<select>`, native checkbox (the fieldControl registry's)
+   * or the LookupSelect trigger button — all `id="field-<name>"`.
    */
   field(name: string): Locator {
     return this.form.locator(`[id="field-${name}"]`);
@@ -199,9 +200,9 @@ export class RecordVariant extends BasePage {
   }
 
   /**
-   * Pick a lookup / master-detail target by its display label through the shared
-   * LookupSelect. Both stacks render it once the target collection's options have loaded
-   * (admin briefly shows a plain text input before that), so wait for the combobox first.
+   * Pick a lookup / master-detail target by its display label through the shared LookupSelect
+   * (the fieldControl registry's lookup control). Its options load asynchronously; the option
+   * click waits for the target record's label to appear.
    */
   async selectLookup(name: string, label: string): Promise<void> {
     const trigger = this.form.locator(`[id="field-${name}"][role="combobox"]`);
@@ -214,9 +215,7 @@ export class RecordVariant extends BasePage {
   }
 
   get saveButton(): Locator {
-    return this.kind === "admin"
-      ? this.testId("submit-button")
-      : this.testId("save-button");
+    return this.testId("save-button");
   }
 
   get cancelButton(): Locator {
@@ -232,14 +231,11 @@ export class RecordVariant extends BasePage {
   }
 
   /**
-   * The inline error under a field. Both stacks validate on the client; admin renders it as
-   * `error-<name>`, the shared record form core (end-user) as `field-error-<name>` — which also
-   * carries a server JSON:API field error. Both are `role="alert"`.
+   * The inline error under a field (`role="alert"`): a client validation error or a server
+   * JSON:API field error, rendered by the shared record form core in both stacks.
    */
   fieldError(name: string): Locator {
-    return this.kind === "admin"
-      ? this.testId(`error-${name}`)
-      : this.testId(`field-error-${name}`);
+    return this.testId(`field-error-${name}`);
   }
 
   /**

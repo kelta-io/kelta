@@ -13,6 +13,12 @@
  * `aria-describedby` → the error alert `id="field-<name>-error"`,
  * `data-testid="field-error-<name>"`, `role="alert"`.
  *
+ * Type hint (opt-in, `showTypeHint`): the field type's translated name (`fields.types.<type>`)
+ * under the label, `data-testid="field-type-<name>"` — the admin form shows it.
+ *
+ * Plugin renderers receive `metadata` with `fieldId` (the control id), `type` / `fieldType`,
+ * `required`, `displayName`, `referenceTarget` and, when there is an error, `errorId`.
+ *
  * Blur: focus leaving the whole row's control (not moving between a composite control's inner
  * elements) reports `onBlur(name)` — the client `onBlur` rules.
  *
@@ -46,6 +52,8 @@ export interface FormFieldRowProps {
   helpText?: string
   /** Optional plugin-provided custom renderer for this field type */
   pluginRenderer?: React.ComponentType<FieldRendererProps>
+  /** Show the field type's name under the label (admin form chrome). */
+  showTypeHint?: boolean
 }
 
 /** Types whose control shows a "Select…" empty option / prompt. */
@@ -72,6 +80,7 @@ export function FormFieldRow({
   error,
   helpText,
   pluginRenderer: PluginRenderer,
+  showTypeHint = false,
 }: FormFieldRowProps): React.ReactElement {
   const { t } = useI18n()
   const isReadOnly = READ_ONLY_TYPES.has(field.type) || readOnly
@@ -108,8 +117,12 @@ export function FormFieldRow({
           disabled={isReadOnly}
           error={error}
           metadata={{
+            fieldId,
+            type: field.type,
             fieldType: field.type,
             required: field.required,
+            displayName: field.displayName,
+            referenceTarget: field.referenceTarget,
             errorId: error ? errorId : undefined,
           }}
         />
@@ -160,6 +173,12 @@ export function FormFieldRow({
     </p>
   ) : null
 
+  const typeHintEl = showTypeHint ? (
+    <p className="text-xs text-muted-foreground" data-testid={`field-type-${field.name}`}>
+      {t(`fields.types.${field.type.toLowerCase()}`)}
+    </p>
+  ) : null
+
   const helpEl = helpText ? (
     <p className="text-xs text-muted-foreground" data-testid={`field-help-${field.name}`}>
       {helpText}
@@ -174,6 +193,7 @@ export function FormFieldRow({
           {control}
           {labelEl}
         </div>
+        {typeHintEl}
         {helpEl}
         {errorEl}
       </div>
@@ -183,6 +203,7 @@ export function FormFieldRow({
   return (
     <div className="space-y-2">
       {labelEl}
+      {typeHintEl}
       <div onBlur={handleBlur}>{control}</div>
       {helpEl}
       {errorEl}

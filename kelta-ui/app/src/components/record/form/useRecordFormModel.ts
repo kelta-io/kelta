@@ -15,13 +15,19 @@
  *
  * Moved from `ObjectFormPage` (record-stack convergence P2); P3 added the
  * client validation rules, schema defaults on create, and the edit-mode record
- * type taken from the loaded record. Both the end-user and (later) admin form
+ * type taken from the loaded record. Both the end-user and the admin form
  * wrappers use it.
  *
  * P5 (optimistic concurrency): exposes the loaded record's `etag` (echoed as
  * `If-Match` on update) and `reload()`, which refetches the record and bumps
  * `formKey` so the body re-initialises from the latest version — the conflict
  * prompt's "Reload latest".
+ *
+ * P6 (admin convergence): `cloneFromId` — a create pre-filled from an existing
+ * record (`computeCloneFormData`: the source's schema-field values minus system,
+ * encrypted and masked fields; the source's record type) — and `recordError`, set
+ * when the record being edited or cloned failed to load or does not exist, so the
+ * form never falls back to an empty create over a record it could not read.
  */
 
 import { useState, useMemo, useCallback } from 'react'
@@ -40,7 +46,7 @@ import type { UseCollectionPermissionsReturn } from '@/hooks/useCollectionPermis
 import type { PageLayoutDto } from '@/hooks/usePageLayout'
 import type { LookupOption } from '@/components/LookupSelect'
 import type { RecordType } from '@/types/collections'
-import { computeInitialFormData } from './formData'
+import { computeCloneFormData, computeInitialFormData } from './formData'
 import { REFERENCE_TYPES } from './formFieldTypes'
 
 /** Picklist value returned from the API (field names match backend schema) */
@@ -72,11 +78,23 @@ export interface UseRecordFormModelOptions {
    * list). Only keys naming a schema field are applied; ignored in edit mode.
    */
   prefill?: Record<string, unknown>
+  /**
+   * Create mode only: an existing record to copy. Its schema-field values (minus system,
+   * encrypted and masked fields) seed the new record; `prefill` still wins. Ignored on edit.
+   */
+  cloneFromId?: string
 }
 
 export interface RecordFormModel {
   isNew: boolean
-  /** True until schema, record (edit), permissions and layout have loaded. */
+  /** A create seeded from `cloneFromId`. */
+  isClone: boolean
+  /**
+   * The record being edited (or the clone source) failed to load or was not found. The form
+   * shows an error instead of an empty form that would save over a record it never read.
+   */
+  recordError: Error | null
+  /** True until schema, record (edit) or clone source, permissions and layout have loaded. */
   isLoading: boolean
   schemaError: Error | null
   /** Object-level CRUD permission flags. */
@@ -130,8 +148,12 @@ export function useRecordFormModel({
   collectionName,
   recordId,
   prefill,
+  cloneFromId,
 }: UseRecordFormModelOptions): RecordFormModel {
   const isNew = !recordId
+  const isClone = isNew && !!cloneFromId
+  // The record the form reads: the one being edited, or (create) the clone source.
+  const sourceId = isNew ? (isClone ? cloneFromId : undefined) : recordId
   const { apiClient } = useApi()
 
   // Fetch collection schema
@@ -142,17 +164,20 @@ export function useRecordFormModel({
     error: schemaError,
   } = useCollectionSchema(collectionName)
 
-  // Fetch existing record for edit mode
+  // Fetch the existing record (edit mode) or the clone source (create from a copy)
   const {
     record,
     isLoading: recordLoading,
-    etag,
+    error: recordFetchError,
+    etag: recordEtag,
     refetch: refetchRecord,
   } = useRecord({
     collectionName,
-    recordId,
-    enabled: !isNew,
+    recordId: sourceId,
+    enabled: !!sourceId,
   })
+  // Only an edit carries the version forward; a clone is a new record.
+  const etag = isNew ? undefined : recordEtag
 
   // Fetch permissions (combined object + field in one call)
   const {
@@ -178,15 +203,16 @@ export function useRecordFormModel({
 
   // The selected record type is derived until the user picks one: edit mode takes the
   // loaded record's type (the record is not loaded on the first render, so it can't be
-  // captured once), create mode the collection's default type.
+  // captured once), a clone the source's type (else the default), a plain create the
+  // collection's default type.
   const [recordTypeChoice, setRecordTypeChoice] = useState<{ id: string | undefined } | null>(null)
   const recordRecordTypeId =
-    !isNew && record?.recordTypeId ? String(record.recordTypeId) : undefined
+    sourceId && record?.recordTypeId ? String(record.recordTypeId) : undefined
   const defaultRecordTypeId = isNew ? recordTypes?.find((rt) => rt.isDefault)?.id : undefined
   const selectedRecordTypeId = recordTypeChoice
     ? recordTypeChoice.id
     : isNew
-      ? defaultRecordTypeId
+      ? (recordRecordTypeId ?? defaultRecordTypeId)
       : recordRecordTypeId
   const setSelectedRecordTypeId = useCallback((id: string | undefined) => {
     setRecordTypeChoice({ id })
@@ -343,7 +369,15 @@ export function useRecordFormModel({
   ])
 
   const isLoading =
-    schemaLoading || (!isNew && recordLoading) || permissionsLoading || layoutLoading
+    schemaLoading || (!!sourceId && recordLoading) || permissionsLoading || layoutLoading
+
+  // A record the form needed but could not read: a fetch error, or a load that came back empty
+  // (e.g. the offline replica has no copy).
+  const recordError = useMemo<Error | null>(() => {
+    if (!sourceId || recordLoading) return null
+    if (recordFetchError) return recordFetchError
+    return record ? null : new Error(`Record ${sourceId} not found`)
+  }, [sourceId, recordLoading, recordFetchError, record])
 
   // Collection label
   const collectionLabel =
@@ -356,8 +390,11 @@ export function useRecordFormModel({
   // Compute initial data and a key that changes when the data source changes.
   // The key forces the form body to remount, running useState with fresh initialData.
   const initialData = useMemo(
-    () => computeInitialFormData(isNew, record, enrichedFields, queryDefaults),
-    [isNew, record, enrichedFields, queryDefaults]
+    () =>
+      isClone && record
+        ? computeCloneFormData(record, enrichedFields, queryDefaults)
+        : computeInitialFormData(isNew, isNew ? undefined : record, enrichedFields, queryDefaults),
+    [isClone, isNew, record, enrichedFields, queryDefaults]
   )
   // `reloadCount` re-keys the body after a conflict reload: a plain refetch keeps the same
   // record id, so without it the body would keep the stale values (and pinned ETag).
@@ -366,12 +403,16 @@ export function useRecordFormModel({
     await refetchRecord()
     setReloadCount((count) => count + 1)
   }, [refetchRecord])
-  const formKey = isNew
-    ? `new:${enrichedFields.length}:${prefillKey(prefill)}`
-    : `edit:${recordId}:${record?.id ?? 'loading'}:${reloadCount}`
+  const formKey = isClone
+    ? `clone:${cloneFromId}:${record?.id ?? 'loading'}:${enrichedFields.length}:${prefillKey(prefill)}`
+    : isNew
+      ? `new:${enrichedFields.length}:${prefillKey(prefill)}`
+      : `edit:${recordId}:${record?.id ?? 'loading'}:${reloadCount}`
 
   return {
     isNew,
+    isClone,
+    recordError,
     isLoading,
     schemaError,
     permissions,
