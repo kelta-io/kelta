@@ -2,8 +2,8 @@
  * OIDCProvidersPage Component
  *
  * Displays a list of all OIDC providers with status indicators and provides
- * add, edit, delete, and test connection functionality.
- * Uses TanStack Query for data fetching and includes a modal form for provider management.
+ * add, edit, delete, and test connection functionality. Built on the shared
+ * AdminCrud building block.
  *
  * Requirements:
  * - 6.1: Display a list of all OIDC providers with status (active/inactive)
@@ -13,11 +13,20 @@
  * - 6.9: Display provider status (connected/disconnected)
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useState, useCallback, useMemo } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { useToast, ConfirmDialog } from '../../components'
+import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
+import {
+  AdminCrudPage,
+  CrudFormDialog,
+  CrudTextField,
+  useAdminCrud,
+} from '../../components/AdminCrud'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 /**
@@ -50,51 +59,6 @@ export interface OIDCProvider {
 }
 
 /**
- * Form data for creating/editing an OIDC provider
- */
-interface OIDCProviderFormData {
-  name: string
-  issuer: string
-  clientId: string
-  clientSecret: string
-  scopes: string
-  // OIDC Discovery endpoint overrides
-  jwksUri?: string
-  authorizationUri?: string
-  tokenUri?: string
-  userinfoUri?: string
-  endSessionUri?: string
-  // Claim mapping fields
-  rolesClaim?: string
-  rolesMapping?: string
-  emailClaim?: string
-  usernameClaim?: string
-  nameClaim?: string
-  groupsClaim?: string
-  groupsProfileMapping?: string
-}
-
-/**
- * Form validation errors
- */
-interface FormErrors {
-  name?: string
-  issuer?: string
-  clientId?: string
-  clientSecret?: string
-  scopes?: string
-  // Claim mapping error fields
-  rolesClaim?: string
-  rolesMapping?: string
-  emailClaim?: string
-  usernameClaim?: string
-  nameClaim?: string
-  groupsClaim?: string
-  groupsProfileMapping?: string
-  [key: string]: string | undefined
-}
-
-/**
  * Test connection result
  */
 interface TestConnectionResult {
@@ -110,98 +74,74 @@ export interface OIDCProvidersPageProps {
   testId?: string
 }
 
-/**
- * Validate OIDC provider form data
- */
-function validateForm(
-  data: OIDCProviderFormData,
-  t: (key: string) => string,
-  isEditing: boolean
-): FormErrors {
-  const errors: FormErrors = {}
+const isBlank = (v: string): boolean => v.trim().length === 0
 
-  // Name validation
-  if (!data.name.trim()) {
-    errors.name = t('oidc.validation.nameRequired')
-  } else if (data.name.length > 100) {
-    errors.name = t('oidc.validation.nameTooLong')
-  }
-
-  // Issuer URL validation
-  if (!data.issuer.trim()) {
-    errors.issuer = t('oidc.validation.issuerRequired')
-  } else {
+function parses(parse: (v: string) => unknown) {
+  return (v: string): boolean => {
+    if (isBlank(v)) return true
     try {
-      new URL(data.issuer)
+      parse(v)
+      return true
     } catch {
-      errors.issuer = t('oidc.validation.issuerInvalid')
+      return false
     }
   }
-
-  // Client ID validation
-  if (!data.clientId.trim()) {
-    errors.clientId = t('oidc.validation.clientIdRequired')
-  } else if (data.clientId.length > 255) {
-    errors.clientId = t('oidc.validation.clientIdTooLong')
-  }
-
-  // Client Secret validation (required only for new providers)
-  if (!isEditing && !data.clientSecret.trim()) {
-    errors.clientSecret = t('oidc.validation.clientSecretRequired')
-  }
-
-  // Scopes validation
-  if (!data.scopes.trim()) {
-    errors.scopes = t('oidc.validation.scopesRequired')
-  }
-
-  // Roles mapping JSON validation (Requirement 6.5)
-  if (data.rolesMapping && data.rolesMapping.trim()) {
-    try {
-      JSON.parse(data.rolesMapping)
-    } catch {
-      errors.rolesMapping = t('oidc.validation.rolesMappingInvalidJson')
-    }
-  }
-
-  // Claim path length validations (Requirement 6.6)
-  if (data.rolesClaim && data.rolesClaim.length > 200) {
-    errors.rolesClaim = t('oidc.validation.claimPathTooLong')
-  }
-  if (data.emailClaim && data.emailClaim.length > 200) {
-    errors.emailClaim = t('oidc.validation.claimPathTooLong')
-  }
-  if (data.usernameClaim && data.usernameClaim.length > 200) {
-    errors.usernameClaim = t('oidc.validation.claimPathTooLong')
-  }
-  if (data.nameClaim && data.nameClaim.length > 200) {
-    errors.nameClaim = t('oidc.validation.claimPathTooLong')
-  }
-
-  return errors
 }
 
 /**
- * OIDCProviderForm Component
- *
- * Modal form for creating and editing OIDC providers.
+ * OIDC provider form validation. Every form field is in the schema so none is
+ * stripped from the submitted values, and refinements never transform them. The
+ * client secret is required only when creating: on edit a blank secret is sent
+ * unchanged and means "keep the existing secret".
  */
-interface OIDCProviderFormProps {
-  provider?: OIDCProvider
-  onSubmit: (data: OIDCProviderFormData) => void
-  onCancel: () => void
-  isSubmitting: boolean
+function buildProviderSchema(t: (key: string) => string, isEditing: boolean) {
+  const claimPath = z.string().max(200, t('oidc.validation.claimPathTooLong'))
+  return z.object({
+    name: z
+      .string()
+      .refine((v) => !isBlank(v), t('oidc.validation.nameRequired'))
+      .refine((v) => v.length <= 100, t('oidc.validation.nameTooLong')),
+    issuer: z
+      .string()
+      .refine((v) => !isBlank(v), t('oidc.validation.issuerRequired'))
+      .refine(
+        parses((v) => new URL(v)),
+        t('oidc.validation.issuerInvalid')
+      ),
+    clientId: z
+      .string()
+      .refine((v) => !isBlank(v), t('oidc.validation.clientIdRequired'))
+      .refine((v) => v.length <= 255, t('oidc.validation.clientIdTooLong')),
+    clientSecret: z
+      .string()
+      .refine((v) => isEditing || !isBlank(v), t('oidc.validation.clientSecretRequired')),
+    scopes: z.string().refine((v) => !isBlank(v), t('oidc.validation.scopesRequired')),
+    // OIDC Discovery endpoint overrides
+    jwksUri: z.string(),
+    authorizationUri: z.string(),
+    tokenUri: z.string(),
+    userinfoUri: z.string(),
+    endSessionUri: z.string(),
+    // Claim mapping fields
+    rolesClaim: claimPath,
+    rolesMapping: z
+      .string()
+      .refine(parses(JSON.parse), t('oidc.validation.rolesMappingInvalidJson')),
+    emailClaim: claimPath,
+    usernameClaim: claimPath,
+    nameClaim: claimPath,
+    groupsClaim: z.string(),
+    groupsProfileMapping: z.string(),
+  })
 }
 
-function OIDCProviderForm({
-  provider,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: OIDCProviderFormProps): React.ReactElement {
-  const { t } = useI18n()
-  const isEditing = !!provider
-  const [formData, setFormData] = useState<OIDCProviderFormData>({
+/**
+ * Form data for creating/editing an OIDC provider
+ */
+type OIDCProviderFormData = z.infer<ReturnType<typeof buildProviderSchema>>
+
+function providerFormDefaults(provider: OIDCProvider | undefined): OIDCProviderFormData {
+  return {
     name: provider?.name ?? '',
     issuer: provider?.issuer ?? '',
     clientId: provider?.clientId ?? '',
@@ -221,599 +161,34 @@ function OIDCProviderForm({
     nameClaim: provider?.nameClaim ?? '',
     groupsClaim: provider?.groupsClaim ?? '',
     groupsProfileMapping: provider?.groupsProfileMapping ?? '',
-  })
-  const [errors, setErrors] = useState<FormErrors>({})
-  const [touched, setTouched] = useState<Record<string, boolean>>({})
-  const nameInputRef = useRef<HTMLInputElement>(null)
-
-  // Focus name input on mount
-  useEffect(() => {
-    nameInputRef.current?.focus()
-  }, [])
-
-  const handleChange = useCallback(
-    (field: keyof OIDCProviderFormData, value: string) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-      // Clear error when user starts typing
-      if (errors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: undefined }))
-      }
-    },
-    [errors]
-  )
-
-  const handleBlur = useCallback(
-    (field: keyof OIDCProviderFormData) => {
-      setTouched((prev) => ({ ...prev, [field]: true }))
-      // Validate on blur
-      const validationErrors = validateForm(formData, t, isEditing)
-      if (validationErrors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: validationErrors[field] }))
-      }
-    },
-    [formData, t, isEditing]
-  )
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-
-      // Validate all fields
-      const validationErrors = validateForm(formData, t, isEditing)
-      setErrors(validationErrors)
-      setTouched({ name: true, issuer: true, clientId: true, clientSecret: true, scopes: true })
-
-      // If no errors, submit
-      if (Object.keys(validationErrors).length === 0) {
-        onSubmit(formData)
-      }
-    },
-    [formData, onSubmit, t, isEditing]
-  )
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel()
-      }
-    },
-    [onCancel]
-  )
-
-  const title = isEditing ? t('oidc.editProvider') : t('oidc.addProvider')
-
-  const inputClassName = (field: keyof FormErrors) =>
-    cn(
-      'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-      touched[field] && errors[field] ? 'border-destructive' : 'border-border'
-    )
-
-  const textareaClassName = (field: keyof FormErrors) =>
-    cn(
-      'w-full min-h-[80px] resize-y rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-      touched[field] && errors[field] ? 'border-destructive' : 'border-border'
-    )
-
-  return (
-    <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={handleKeyDown}
-      data-testid="oidc-form-overlay"
-      role="presentation"
-    >
-      <div
-        className="w-full max-w-[600px] max-h-[90vh] overflow-y-auto rounded-lg bg-card shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="oidc-form-title"
-        data-testid="oidc-form-modal"
-      >
-        <div className="flex items-center justify-between border-b border-border p-6">
-          <h2 id="oidc-form-title" className="m-0 text-lg font-semibold text-foreground">
-            {title}
-          </h2>
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={onCancel}
-            aria-label={t('common.close')}
-            data-testid="oidc-form-close"
-          >
-            &times;
-          </button>
-        </div>
-        <div className="p-6">
-          <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-            {/* Name Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-name" className="text-sm font-medium text-foreground">
-                {t('oidc.providerName')}
-                <span className="ml-0.5 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                ref={nameInputRef}
-                id="oidc-name"
-                type="text"
-                className={inputClassName('name')}
-                value={formData.name}
-                onChange={(e) => handleChange('name', e.target.value)}
-                onBlur={() => handleBlur('name')}
-                placeholder={t('oidc.namePlaceholder')}
-                aria-required="true"
-                aria-invalid={touched.name && !!errors.name}
-                aria-describedby={errors.name ? 'oidc-name-error' : undefined}
-                disabled={isSubmitting}
-                data-testid="oidc-name-input"
-              />
-              {touched.name && errors.name && (
-                <span id="oidc-name-error" className="mt-1 text-xs text-destructive" role="alert">
-                  {errors.name}
-                </span>
-              )}
-            </div>
-
-            {/* Issuer URL Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-issuer" className="text-sm font-medium text-foreground">
-                {t('oidc.issuer')}
-                <span className="ml-0.5 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                id="oidc-issuer"
-                type="url"
-                className={inputClassName('issuer')}
-                value={formData.issuer}
-                onChange={(e) => handleChange('issuer', e.target.value)}
-                onBlur={() => handleBlur('issuer')}
-                placeholder={t('oidc.issuerPlaceholder')}
-                aria-required="true"
-                aria-invalid={touched.issuer && !!errors.issuer}
-                aria-describedby={errors.issuer ? 'oidc-issuer-error' : 'oidc-issuer-hint'}
-                disabled={isSubmitting}
-                data-testid="oidc-issuer-input"
-              />
-              <span id="oidc-issuer-hint" className="mt-1 text-xs text-muted-foreground">
-                {t('oidc.issuerHint')}
-              </span>
-              {touched.issuer && errors.issuer && (
-                <span id="oidc-issuer-error" className="mt-1 text-xs text-destructive" role="alert">
-                  {errors.issuer}
-                </span>
-              )}
-            </div>
-
-            {/* Client ID Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-client-id" className="text-sm font-medium text-foreground">
-                {t('oidc.clientId')}
-                <span className="ml-0.5 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                id="oidc-client-id"
-                type="text"
-                className={inputClassName('clientId')}
-                value={formData.clientId}
-                onChange={(e) => handleChange('clientId', e.target.value)}
-                onBlur={() => handleBlur('clientId')}
-                placeholder={t('oidc.clientIdPlaceholder')}
-                aria-required="true"
-                aria-invalid={touched.clientId && !!errors.clientId}
-                aria-describedby={errors.clientId ? 'oidc-client-id-error' : undefined}
-                disabled={isSubmitting}
-                data-testid="oidc-client-id-input"
-              />
-              {touched.clientId && errors.clientId && (
-                <span
-                  id="oidc-client-id-error"
-                  className="mt-1 text-xs text-destructive"
-                  role="alert"
-                >
-                  {errors.clientId}
-                </span>
-              )}
-            </div>
-
-            {/* Client Secret Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-client-secret" className="text-sm font-medium text-foreground">
-                {t('oidc.clientSecret')}
-                {!isEditing && (
-                  <span className="ml-0.5 text-destructive" aria-hidden="true">
-                    *
-                  </span>
-                )}
-              </label>
-              <input
-                id="oidc-client-secret"
-                type="password"
-                className={inputClassName('clientSecret')}
-                value={formData.clientSecret}
-                onChange={(e) => handleChange('clientSecret', e.target.value)}
-                onBlur={() => handleBlur('clientSecret')}
-                placeholder={
-                  isEditing
-                    ? t('oidc.clientSecretPlaceholderEdit')
-                    : t('oidc.clientSecretPlaceholder')
-                }
-                aria-required={!isEditing}
-                aria-invalid={touched.clientSecret && !!errors.clientSecret}
-                aria-describedby={
-                  errors.clientSecret ? 'oidc-client-secret-error' : 'oidc-client-secret-hint'
-                }
-                disabled={isSubmitting}
-                data-testid="oidc-client-secret-input"
-              />
-              <span id="oidc-client-secret-hint" className="mt-1 text-xs text-muted-foreground">
-                {isEditing ? t('oidc.clientSecretHintEdit') : t('oidc.clientSecretHint')}
-              </span>
-              {touched.clientSecret && errors.clientSecret && (
-                <span
-                  id="oidc-client-secret-error"
-                  className="mt-1 text-xs text-destructive"
-                  role="alert"
-                >
-                  {errors.clientSecret}
-                </span>
-              )}
-            </div>
-
-            {/* Scopes Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-scopes" className="text-sm font-medium text-foreground">
-                {t('oidc.scopes')}
-                <span className="ml-0.5 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                id="oidc-scopes"
-                type="text"
-                className={inputClassName('scopes')}
-                value={formData.scopes}
-                onChange={(e) => handleChange('scopes', e.target.value)}
-                onBlur={() => handleBlur('scopes')}
-                placeholder={t('oidc.scopesPlaceholder')}
-                aria-required="true"
-                aria-invalid={touched.scopes && !!errors.scopes}
-                aria-describedby={errors.scopes ? 'oidc-scopes-error' : 'oidc-scopes-hint'}
-                disabled={isSubmitting}
-                data-testid="oidc-scopes-input"
-              />
-              <span id="oidc-scopes-hint" className="mt-1 text-xs text-muted-foreground">
-                {t('oidc.scopesHint')}
-              </span>
-              {touched.scopes && errors.scopes && (
-                <span id="oidc-scopes-error" className="mt-1 text-xs text-destructive" role="alert">
-                  {errors.scopes}
-                </span>
-              )}
-            </div>
-
-            {/* Roles Claim Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-roles-claim" className="text-sm font-medium text-foreground">
-                {t('oidc.rolesClaim')}
-              </label>
-              <input
-                id="oidc-roles-claim"
-                type="text"
-                className={inputClassName('rolesClaim')}
-                value={formData.rolesClaim || ''}
-                onChange={(e) => handleChange('rolesClaim', e.target.value)}
-                onBlur={() => handleBlur('rolesClaim')}
-                placeholder="roles, realm_access.roles, groups"
-                aria-describedby="oidc-roles-claim-hint"
-                disabled={isSubmitting}
-                data-testid="oidc-roles-claim-input"
-              />
-              <span id="oidc-roles-claim-hint" className="mt-1 text-xs text-muted-foreground">
-                {t('oidc.rolesClaimHint')}
-              </span>
-              {touched.rolesClaim && errors.rolesClaim && (
-                <span className="mt-1 text-xs text-destructive" role="alert">
-                  {errors.rolesClaim}
-                </span>
-              )}
-            </div>
-
-            {/* Roles Mapping Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-roles-mapping" className="text-sm font-medium text-foreground">
-                {t('oidc.rolesMapping')}
-              </label>
-              <textarea
-                id="oidc-roles-mapping"
-                className={textareaClassName('rolesMapping')}
-                value={formData.rolesMapping || ''}
-                onChange={(e) => handleChange('rolesMapping', e.target.value)}
-                onBlur={() => handleBlur('rolesMapping')}
-                placeholder='{"external-admin": "ADMIN", "external-user": "USER"}'
-                rows={4}
-                aria-describedby="oidc-roles-mapping-hint"
-                disabled={isSubmitting}
-                data-testid="oidc-roles-mapping-input"
-              />
-              <span id="oidc-roles-mapping-hint" className="mt-1 text-xs text-muted-foreground">
-                {t('oidc.rolesMappingHint')}
-              </span>
-              {touched.rolesMapping && errors.rolesMapping && (
-                <span className="mt-1 text-xs text-destructive" role="alert">
-                  {errors.rolesMapping}
-                </span>
-              )}
-            </div>
-
-            {/* Email Claim Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-email-claim" className="text-sm font-medium text-foreground">
-                {t('oidc.emailClaim')}
-              </label>
-              <input
-                id="oidc-email-claim"
-                type="text"
-                className={inputClassName('emailClaim')}
-                value={formData.emailClaim || ''}
-                onChange={(e) => handleChange('emailClaim', e.target.value)}
-                onBlur={() => handleBlur('emailClaim')}
-                placeholder="email (default)"
-                aria-describedby="oidc-email-claim-hint"
-                disabled={isSubmitting}
-                data-testid="oidc-email-claim-input"
-              />
-              <span id="oidc-email-claim-hint" className="mt-1 text-xs text-muted-foreground">
-                {t('oidc.emailClaimHint')}
-              </span>
-              {touched.emailClaim && errors.emailClaim && (
-                <span className="mt-1 text-xs text-destructive" role="alert">
-                  {errors.emailClaim}
-                </span>
-              )}
-            </div>
-
-            {/* Username Claim Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-username-claim" className="text-sm font-medium text-foreground">
-                {t('oidc.usernameClaim')}
-              </label>
-              <input
-                id="oidc-username-claim"
-                type="text"
-                className={inputClassName('usernameClaim')}
-                value={formData.usernameClaim || ''}
-                onChange={(e) => handleChange('usernameClaim', e.target.value)}
-                onBlur={() => handleBlur('usernameClaim')}
-                placeholder="preferred_username (default)"
-                aria-describedby="oidc-username-claim-hint"
-                disabled={isSubmitting}
-                data-testid="oidc-username-claim-input"
-              />
-              <span id="oidc-username-claim-hint" className="mt-1 text-xs text-muted-foreground">
-                {t('oidc.usernameClaimHint')}
-              </span>
-              {touched.usernameClaim && errors.usernameClaim && (
-                <span className="mt-1 text-xs text-destructive" role="alert">
-                  {errors.usernameClaim}
-                </span>
-              )}
-            </div>
-
-            {/* Name Claim Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-name-claim" className="text-sm font-medium text-foreground">
-                {t('oidc.nameClaim')}
-              </label>
-              <input
-                id="oidc-name-claim"
-                type="text"
-                className={inputClassName('nameClaim')}
-                value={formData.nameClaim || ''}
-                onChange={(e) => handleChange('nameClaim', e.target.value)}
-                onBlur={() => handleBlur('nameClaim')}
-                placeholder="name (default)"
-                aria-describedby="oidc-name-claim-hint"
-                disabled={isSubmitting}
-                data-testid="oidc-name-claim-input"
-              />
-              <span id="oidc-name-claim-hint" className="mt-1 text-xs text-muted-foreground">
-                {t('oidc.nameClaimHint')}
-              </span>
-              {touched.nameClaim && errors.nameClaim && (
-                <span className="mt-1 text-xs text-destructive" role="alert">
-                  {errors.nameClaim}
-                </span>
-              )}
-            </div>
-
-            {/* Groups Claim Field */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="oidc-groups-claim" className="text-sm font-medium text-foreground">
-                Groups Claim
-              </label>
-              <input
-                id="oidc-groups-claim"
-                type="text"
-                className={inputClassName('groupsClaim')}
-                value={formData.groupsClaim || ''}
-                onChange={(e) => handleChange('groupsClaim', e.target.value)}
-                onBlur={() => handleBlur('groupsClaim')}
-                placeholder="groups (default)"
-                aria-describedby="oidc-groups-claim-hint"
-                disabled={isSubmitting}
-                data-testid="oidc-groups-claim-input"
-              />
-              <span id="oidc-groups-claim-hint" className="mt-1 text-xs text-muted-foreground">
-                Path to groups claim in the JWT token (e.g., groups, memberOf)
-              </span>
-            </div>
-
-            {/* Groups Profile Mapping Field */}
-            <div className="flex flex-col gap-1">
-              <label
-                htmlFor="oidc-groups-profile-mapping"
-                className="text-sm font-medium text-foreground"
-              >
-                Groups to Profile Mapping
-              </label>
-              <textarea
-                id="oidc-groups-profile-mapping"
-                className={textareaClassName('groupsProfileMapping')}
-                value={formData.groupsProfileMapping || ''}
-                onChange={(e) => handleChange('groupsProfileMapping', e.target.value)}
-                onBlur={() => handleBlur('groupsProfileMapping')}
-                placeholder='{"admin-group": "System Administrator", "user-group": "Standard User"}'
-                rows={4}
-                aria-describedby="oidc-groups-profile-mapping-hint"
-                disabled={isSubmitting}
-                data-testid="oidc-groups-profile-mapping-input"
-              />
-              <span
-                id="oidc-groups-profile-mapping-hint"
-                className="mt-1 text-xs text-muted-foreground"
-              >
-                JSON mapping of OIDC group names to internal profile names. Users without a match
-                require manual profile assignment.
-              </span>
-            </div>
-
-            {/* OIDC Discovery Endpoint Overrides */}
-            <div className="mt-2 border-t border-border pt-4">
-              <h3 className="mb-3 text-sm font-semibold text-foreground">Endpoint overrides</h3>
-              <p className="mb-3 text-xs text-muted-foreground">
-                Leave blank to auto-discover from the issuer URL. Override when Discovery is
-                unavailable.
-              </p>
-
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="oidc-jwks-uri"
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    JWKS URI
-                  </label>
-                  <input
-                    id="oidc-jwks-uri"
-                    type="url"
-                    className={inputClassName('name')}
-                    value={formData.jwksUri || ''}
-                    onChange={(e) => handleChange('jwksUri', e.target.value)}
-                    placeholder="Auto-discovered from issuer"
-                    disabled={isSubmitting}
-                    data-testid="oidc-jwks-uri-input"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="oidc-authorization-uri"
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    Authorization URI
-                  </label>
-                  <input
-                    id="oidc-authorization-uri"
-                    type="url"
-                    className={inputClassName('name')}
-                    value={formData.authorizationUri || ''}
-                    onChange={(e) => handleChange('authorizationUri', e.target.value)}
-                    placeholder="Auto-discovered from issuer"
-                    disabled={isSubmitting}
-                    data-testid="oidc-authorization-uri-input"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="oidc-token-uri"
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    Token URI
-                  </label>
-                  <input
-                    id="oidc-token-uri"
-                    type="url"
-                    className={inputClassName('name')}
-                    value={formData.tokenUri || ''}
-                    onChange={(e) => handleChange('tokenUri', e.target.value)}
-                    placeholder="Auto-discovered from issuer"
-                    disabled={isSubmitting}
-                    data-testid="oidc-token-uri-input"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="oidc-userinfo-uri"
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    UserInfo URI
-                  </label>
-                  <input
-                    id="oidc-userinfo-uri"
-                    type="url"
-                    className={inputClassName('name')}
-                    value={formData.userinfoUri || ''}
-                    onChange={(e) => handleChange('userinfoUri', e.target.value)}
-                    placeholder="Auto-discovered from issuer"
-                    disabled={isSubmitting}
-                    data-testid="oidc-userinfo-uri-input"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="oidc-end-session-uri"
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    End Session URI
-                  </label>
-                  <input
-                    id="oidc-end-session-uri"
-                    type="url"
-                    className={inputClassName('name')}
-                    value={formData.endSessionUri || ''}
-                    onChange={(e) => handleChange('endSessionUri', e.target.value)}
-                    placeholder="Auto-discovered from issuer"
-                    disabled={isSubmitting}
-                    data-testid="oidc-end-session-uri-input"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Form Actions */}
-            <div className="mt-4 flex justify-end gap-2 border-t border-border pt-4">
-              <button
-                type="button"
-                className="rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
-                onClick={onCancel}
-                disabled={isSubmitting}
-                data-testid="oidc-form-cancel"
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                type="submit"
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                disabled={isSubmitting}
-                data-testid="oidc-form-submit"
-              >
-                {isSubmitting ? t('common.loading') : t('common.save')}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  )
+  }
 }
+
+/** Create/update request body: every form field, with scopes split into a list. */
+function toProviderPayload(data: OIDCProviderFormData): OIDCProvider {
+  const payload: Record<string, unknown> = {
+    ...data,
+    scopes: data.scopes
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  }
+  if (data.rolesClaim.trim()) payload.rolesClaim = data.rolesClaim.trim()
+  if (data.rolesMapping.trim()) payload.rolesMapping = data.rolesMapping.trim()
+  if (data.emailClaim.trim()) payload.emailClaim = data.emailClaim.trim()
+  if (data.usernameClaim.trim()) payload.usernameClaim = data.usernameClaim.trim()
+  if (data.nameClaim.trim()) payload.nameClaim = data.nameClaim.trim()
+  return payload as unknown as OIDCProvider
+}
+
+/** OIDC Discovery endpoint override fields, all optional URLs. */
+const ENDPOINT_OVERRIDES = [
+  { name: 'jwksUri', id: 'oidc-jwks-uri', label: 'JWKS URI' },
+  { name: 'authorizationUri', id: 'oidc-authorization-uri', label: 'Authorization URI' },
+  { name: 'tokenUri', id: 'oidc-token-uri', label: 'Token URI' },
+  { name: 'userinfoUri', id: 'oidc-userinfo-uri', label: 'UserInfo URI' },
+  { name: 'endSessionUri', id: 'oidc-end-session-uri', label: 'End Session URI' },
+] as const
 
 /**
  * Status Badge Component
@@ -848,18 +223,9 @@ function StatusBadge({ active }: StatusBadgeProps): React.ReactElement {
 export function OIDCProvidersPage({
   testId = 'oidc-providers-page',
 }: OIDCProvidersPageProps): React.ReactElement {
-  const queryClient = useQueryClient()
   const { t, formatDate } = useI18n()
   const { keltaClient } = useApi()
   const { showToast } = useToast()
-
-  // Modal state
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingProvider, setEditingProvider] = useState<OIDCProvider | undefined>(undefined)
-
-  // Delete confirmation dialog state
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [providerToDelete, setProviderToDelete] = useState<OIDCProvider | null>(null)
 
   // Test connection state
   const [testingProviderId, setTestingProviderId] = useState<string | null>(null)
@@ -874,74 +240,25 @@ export function OIDCProvidersPage({
     queryKey: ['oidc-providers'],
     queryFn: () => keltaClient.admin.oidc.list(),
   })
+  const providerList = providers as OIDCProvider[]
 
-  // Create mutation
-  const createMutation = useMutation({
-    mutationFn: (data: OIDCProviderFormData) => {
-      const payload: Record<string, unknown> = {
-        ...data,
-        scopes: data.scopes
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      }
-      if (data.rolesClaim?.trim()) payload.rolesClaim = data.rolesClaim.trim()
-      if (data.rolesMapping?.trim()) payload.rolesMapping = data.rolesMapping.trim()
-      if (data.emailClaim?.trim()) payload.emailClaim = data.emailClaim.trim()
-      if (data.usernameClaim?.trim()) payload.usernameClaim = data.usernameClaim.trim()
-      if (data.nameClaim?.trim()) payload.nameClaim = data.nameClaim.trim()
-      return keltaClient.admin.oidc.create(payload as unknown as OIDCProvider)
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['oidc-providers'] })
-      showToast(t('success.created', { item: t('navigation.oidcProviders') }), 'success')
-      handleCloseForm()
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+  const item = t('navigation.oidcProviders')
+  const crud = useAdminCrud<OIDCProvider, OIDCProviderFormData>({
+    queryKey: ['oidc-providers'],
+    create: (data) => keltaClient.admin.oidc.create(toProviderPayload(data)),
+    update: (provider, data) => keltaClient.admin.oidc.update(provider.id, toProviderPayload(data)),
+    remove: (provider) => keltaClient.admin.oidc.delete(provider.id),
+    messages: {
+      created: t('success.created', { item }),
+      updated: t('success.updated', { item }),
+      deleted: t('success.deleted', { item }),
+      error: t('errors.generic'),
     },
   })
 
-  // Update mutation
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: OIDCProviderFormData }) => {
-      const payload: Record<string, unknown> = {
-        ...data,
-        scopes: data.scopes
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      }
-      if (data.rolesClaim?.trim()) payload.rolesClaim = data.rolesClaim.trim()
-      if (data.rolesMapping?.trim()) payload.rolesMapping = data.rolesMapping.trim()
-      if (data.emailClaim?.trim()) payload.emailClaim = data.emailClaim.trim()
-      if (data.usernameClaim?.trim()) payload.usernameClaim = data.usernameClaim.trim()
-      if (data.nameClaim?.trim()) payload.nameClaim = data.nameClaim.trim()
-      return keltaClient.admin.oidc.update(id, payload as unknown as OIDCProvider)
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['oidc-providers'] })
-      showToast(t('success.updated', { item: t('navigation.oidcProviders') }), 'success')
-      handleCloseForm()
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
-    },
-  })
-
-  // Delete mutation
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => keltaClient.admin.oidc.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['oidc-providers'] })
-      showToast(t('success.deleted', { item: t('navigation.oidcProviders') }), 'success')
-      setDeleteDialogOpen(false)
-      setProviderToDelete(null)
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
-    },
-  })
+  const editing = crud.editing
+  const isEditing = editing !== undefined
+  const schema = useMemo(() => buildProviderSchema(t, isEditing), [t, isEditing])
 
   // Test connection mutation
   // Note: The test connection action endpoint is temporarily unavailable
@@ -965,55 +282,6 @@ export function OIDCProvidersPage({
     },
   })
 
-  // Handle create action
-  const handleCreate = useCallback(() => {
-    setEditingProvider(undefined)
-    setIsFormOpen(true)
-  }, [])
-
-  // Handle edit action
-  const handleEdit = useCallback((provider: OIDCProvider) => {
-    setEditingProvider(provider)
-    setIsFormOpen(true)
-  }, [])
-
-  // Handle close form
-  const handleCloseForm = useCallback(() => {
-    setIsFormOpen(false)
-    setEditingProvider(undefined)
-  }, [])
-
-  // Handle form submit
-  const handleFormSubmit = useCallback(
-    (data: OIDCProviderFormData) => {
-      if (editingProvider) {
-        updateMutation.mutate({ id: editingProvider.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editingProvider, createMutation, updateMutation]
-  )
-
-  // Handle delete action - open confirmation dialog
-  const handleDeleteClick = useCallback((provider: OIDCProvider) => {
-    setProviderToDelete(provider)
-    setDeleteDialogOpen(true)
-  }, [])
-
-  // Handle delete confirmation
-  const handleDeleteConfirm = useCallback(() => {
-    if (providerToDelete) {
-      deleteMutation.mutate(providerToDelete.id)
-    }
-  }, [providerToDelete, deleteMutation])
-
-  // Handle delete cancel
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteDialogOpen(false)
-    setProviderToDelete(null)
-  }, [])
-
   // Handle test connection
   const handleTestConnection = useCallback(
     (provider: OIDCProvider) => {
@@ -1023,206 +291,278 @@ export function OIDCProvidersPage({
     [testConnectionMutation]
   )
 
-  // Render loading state
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <div className="flex min-h-[400px] items-center justify-center">
-          <LoadingSpinner size="large" label={t('common.loading')} />
-        </div>
-      </div>
-    )
-  }
-
-  // Render error state
-  if (error) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <ErrorMessage
-          error={error instanceof Error ? error : new Error(t('errors.generic'))}
-          onRetry={() => refetch()}
-        />
-      </div>
-    )
-  }
-
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const columns = useMemo<AdminColumn<OIDCProvider>[]>(
+    () => [
+      {
+        id: 'name',
+        header: t('oidc.providerName'),
+        cellClassName: 'font-medium text-foreground',
+      },
+      {
+        id: 'issuer',
+        header: t('oidc.issuer'),
+        cell: (provider) => (
+          <span
+            className="block overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground"
+            title={provider.issuer}
+          >
+            {provider.issuer}
+          </span>
+        ),
+        cellClassName: 'max-w-[300px]',
+      },
+      {
+        id: 'clientId',
+        header: t('oidc.clientId'),
+        cell: (provider) => (
+          <code className="inline-block max-w-full overflow-hidden text-ellipsis whitespace-nowrap rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">
+            {provider.clientId}
+          </code>
+        ),
+        cellClassName: 'max-w-[200px]',
+      },
+      {
+        id: 'active',
+        header: t('collections.status'),
+        cell: (provider) => <StatusBadge active={provider.active} />,
+      },
+      {
+        id: 'createdAt',
+        header: t('collections.created'),
+        cell: (provider) =>
+          formatDate(new Date(provider.createdAt), {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          }),
+        cellClassName: 'text-muted-foreground',
+      },
+    ],
+    [t, formatDate]
+  )
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-      {/* Page Header */}
-      <header className="flex items-center justify-between">
-        <h1 className="m-0 text-2xl font-semibold text-foreground">{t('oidc.title')}</h1>
-        <button
+    <AdminCrudPage
+      testId={testId}
+      title={t('oidc.title')}
+      actions={
+        <Button
           type="button"
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          onClick={handleCreate}
+          onClick={crud.openCreate}
           aria-label={t('oidc.addProvider')}
           data-testid="add-provider-button"
         >
           {t('oidc.addProvider')}
-        </button>
-      </header>
-
-      {/* Providers Table */}
-      {providers.length === 0 ? (
-        <div
-          className="rounded-lg border border-border bg-card p-16 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          <p>{t('common.noResults')}</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table
-            className="w-full border-collapse text-sm"
-            role="grid"
-            aria-label={t('oidc.title')}
-            data-testid="providers-table"
-          >
-            <thead>
-              <tr role="row" className="bg-muted">
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="whitespace-nowrap border-b-2 border-border px-4 py-3 text-left font-semibold text-foreground"
-                >
-                  {t('oidc.providerName')}
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="whitespace-nowrap border-b-2 border-border px-4 py-3 text-left font-semibold text-foreground"
-                >
-                  {t('oidc.issuer')}
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="whitespace-nowrap border-b-2 border-border px-4 py-3 text-left font-semibold text-foreground"
-                >
-                  {t('oidc.clientId')}
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="whitespace-nowrap border-b-2 border-border px-4 py-3 text-left font-semibold text-foreground"
-                >
-                  {t('collections.status')}
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="whitespace-nowrap border-b-2 border-border px-4 py-3 text-left font-semibold text-foreground"
-                >
-                  {t('collections.created')}
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="whitespace-nowrap border-b-2 border-border px-4 py-3 text-left font-semibold text-foreground"
-                >
-                  {t('common.actions')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {(providers as OIDCProvider[]).map((provider: OIDCProvider, index: number) => (
-                <tr
-                  key={provider.id}
-                  role="row"
-                  className="border-b border-border transition-colors last:border-b-0 hover:bg-muted/50"
-                  data-testid={`provider-row-${index}`}
-                >
-                  <td role="gridcell" className="px-4 py-3 font-medium text-foreground">
-                    {provider.name}
-                  </td>
-                  <td role="gridcell" className="max-w-[300px] px-4 py-3">
-                    <span
-                      className="block overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground"
-                      title={provider.issuer}
-                    >
-                      {provider.issuer}
-                    </span>
-                  </td>
-                  <td role="gridcell" className="max-w-[200px] px-4 py-3">
-                    <code className="inline-block max-w-full overflow-hidden text-ellipsis whitespace-nowrap rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">
-                      {provider.clientId}
-                    </code>
-                  </td>
-                  <td role="gridcell" className="whitespace-nowrap px-4 py-3">
-                    <StatusBadge active={provider.active} />
-                  </td>
-                  <td role="gridcell" className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                    {formatDate(new Date(provider.createdAt), {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                  </td>
-                  <td role="gridcell" className="w-[1%] whitespace-nowrap px-4 py-3">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="rounded border border-blue-300 px-2 py-1 text-xs font-medium text-blue-700 hover:border-blue-500 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-700 dark:text-blue-300 dark:hover:border-blue-400 dark:hover:bg-blue-950"
-                        onClick={() => handleTestConnection(provider)}
-                        disabled={testingProviderId === provider.id}
-                        aria-label={`${t('oidc.testConnection')} ${provider.name}`}
-                        data-testid={`test-button-${index}`}
-                      >
-                        {testingProviderId === provider.id
-                          ? t('common.loading')
-                          : t('oidc.testConnection')}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded border border-border px-2 py-1 text-xs font-medium text-primary hover:border-primary hover:bg-muted"
-                        onClick={() => handleEdit(provider)}
-                        aria-label={`${t('common.edit')} ${provider.name}`}
-                        data-testid={`edit-button-${index}`}
-                      >
-                        {t('common.edit')}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded border border-border px-2 py-1 text-xs font-medium text-destructive hover:border-destructive hover:bg-destructive/10"
-                        onClick={() => handleDeleteClick(provider)}
-                        aria-label={`${t('common.delete')} ${provider.name}`}
-                        data-testid={`delete-button-${index}`}
-                      >
-                        {t('common.delete')}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* OIDC Provider Form Modal */}
-      {isFormOpen && (
-        <OIDCProviderForm
-          provider={editingProvider}
-          onSubmit={handleFormSubmit}
-          onCancel={handleCloseForm}
-          isSubmitting={isSubmitting}
+        </Button>
+      }
+      isLoading={isLoading}
+      error={error}
+      onRetry={() => refetch()}
+      isEmpty={providerList.length === 0}
+      emptyMessage={t('common.noResults')}
+      list={
+        <AdminDataTable
+          tableId="oidc-providers"
+          testId="providers-table"
+          ariaLabel={t('oidc.title')}
+          actionsHeader={t('common.actions')}
+          columns={columns}
+          rows={providerList}
+          rowKey={(provider) => provider.id}
+          rowTestId={(_, index) => `provider-row-${index}`}
+          renderActions={(provider, index) => (
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => handleTestConnection(provider)}
+                disabled={testingProviderId === provider.id}
+                aria-label={`${t('oidc.testConnection')} ${provider.name}`}
+                data-testid={`test-button-${index}`}
+              >
+                {testingProviderId === provider.id ? t('common.loading') : t('oidc.testConnection')}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => crud.openEdit(provider)}
+                aria-label={`${t('common.edit')} ${provider.name}`}
+                data-testid={`edit-button-${index}`}
+              >
+                {t('common.edit')}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={() => crud.requestDelete(provider)}
+                aria-label={`${t('common.delete')} ${provider.name}`}
+                data-testid={`delete-button-${index}`}
+              >
+                {t('common.delete')}
+              </Button>
+            </div>
+          )}
         />
-      )}
+      }
+    >
+      <CrudFormDialog<OIDCProviderFormData>
+        open={crud.isFormOpen}
+        onClose={crud.closeForm}
+        title={isEditing ? t('oidc.editProvider') : t('oidc.addProvider')}
+        schema={schema}
+        defaultValues={providerFormDefaults(editing)}
+        onSubmit={crud.submit}
+        isSubmitting={crud.isSaving}
+        testIdPrefix="oidc"
+        submittingLabel={t('common.loading')}
+        className="sm:max-w-[600px]"
+      >
+        <CrudTextField<OIDCProviderFormData>
+          name="name"
+          id="oidc-name"
+          label={t('oidc.providerName')}
+          required
+          placeholder={t('oidc.namePlaceholder')}
+          testId="oidc-name-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="issuer"
+          id="oidc-issuer"
+          type="url"
+          label={t('oidc.issuer')}
+          required
+          placeholder={t('oidc.issuerPlaceholder')}
+          hint={t('oidc.issuerHint')}
+          testId="oidc-issuer-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="clientId"
+          id="oidc-client-id"
+          label={t('oidc.clientId')}
+          required
+          placeholder={t('oidc.clientIdPlaceholder')}
+          testId="oidc-client-id-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="clientSecret"
+          id="oidc-client-secret"
+          type="password"
+          label={t('oidc.clientSecret')}
+          required={!isEditing}
+          placeholder={
+            isEditing ? t('oidc.clientSecretPlaceholderEdit') : t('oidc.clientSecretPlaceholder')
+          }
+          hint={isEditing ? t('oidc.clientSecretHintEdit') : t('oidc.clientSecretHint')}
+          testId="oidc-client-secret-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="scopes"
+          id="oidc-scopes"
+          label={t('oidc.scopes')}
+          required
+          placeholder={t('oidc.scopesPlaceholder')}
+          hint={t('oidc.scopesHint')}
+          testId="oidc-scopes-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="rolesClaim"
+          id="oidc-roles-claim"
+          label={t('oidc.rolesClaim')}
+          placeholder="roles, realm_access.roles, groups"
+          hint={t('oidc.rolesClaimHint')}
+          testId="oidc-roles-claim-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="rolesMapping"
+          id="oidc-roles-mapping"
+          label={t('oidc.rolesMapping')}
+          multiline
+          rows={4}
+          placeholder='{"external-admin": "ADMIN", "external-user": "USER"}'
+          hint={t('oidc.rolesMappingHint')}
+          testId="oidc-roles-mapping-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="emailClaim"
+          id="oidc-email-claim"
+          label={t('oidc.emailClaim')}
+          placeholder="email (default)"
+          hint={t('oidc.emailClaimHint')}
+          testId="oidc-email-claim-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="usernameClaim"
+          id="oidc-username-claim"
+          label={t('oidc.usernameClaim')}
+          placeholder="preferred_username (default)"
+          hint={t('oidc.usernameClaimHint')}
+          testId="oidc-username-claim-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="nameClaim"
+          id="oidc-name-claim"
+          label={t('oidc.nameClaim')}
+          placeholder="name (default)"
+          hint={t('oidc.nameClaimHint')}
+          testId="oidc-name-claim-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="groupsClaim"
+          id="oidc-groups-claim"
+          label="Groups Claim"
+          placeholder="groups (default)"
+          hint="Path to groups claim in the JWT token (e.g., groups, memberOf)"
+          testId="oidc-groups-claim-input"
+        />
+        <CrudTextField<OIDCProviderFormData>
+          name="groupsProfileMapping"
+          id="oidc-groups-profile-mapping"
+          label="Groups to Profile Mapping"
+          multiline
+          rows={4}
+          placeholder='{"admin-group": "System Administrator", "user-group": "Standard User"}'
+          hint="JSON mapping of OIDC group names to internal profile names. Users without a match require manual profile assignment."
+          testId="oidc-groups-profile-mapping-input"
+        />
 
-      {/* Delete Confirmation Dialog */}
+        {/* OIDC Discovery Endpoint Overrides */}
+        <div className="mt-2 flex flex-col gap-3 border-t border-border pt-4">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Endpoint overrides</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Leave blank to auto-discover from the issuer URL. Override when Discovery is
+              unavailable.
+            </p>
+          </div>
+          {ENDPOINT_OVERRIDES.map((endpoint) => (
+            <CrudTextField<OIDCProviderFormData>
+              key={endpoint.name}
+              name={endpoint.name}
+              id={endpoint.id}
+              type="url"
+              label={endpoint.label}
+              placeholder="Auto-discovered from issuer"
+              testId={`${endpoint.id}-input`}
+            />
+          ))}
+        </div>
+      </CrudFormDialog>
+
       <ConfirmDialog
-        open={deleteDialogOpen}
+        open={crud.deleteTarget !== null}
         title={t('oidc.deleteProvider')}
         message={t('oidc.confirmDelete')}
         confirmLabel={t('common.delete')}
         cancelLabel={t('common.cancel')}
-        onConfirm={handleDeleteConfirm}
-        onCancel={handleDeleteCancel}
+        onConfirm={crud.confirmDelete}
+        onCancel={crud.cancelDelete}
         variant="danger"
       />
-    </div>
+    </AdminCrudPage>
   )
 }
 

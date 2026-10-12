@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/context/I18nContext'
+import { ToastProvider } from '@/components/Toast'
 import { ListViewsPage } from './ListViewsPage'
 
 // Typed as variadic so the assertions can index the call args the page passes.
@@ -69,17 +70,15 @@ vi.mock('../../hooks/useCollectionSchema', () => ({
     error: null,
   }),
 }))
-vi.mock('../../components', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  useToast: () => ({ showToast: vi.fn() }),
-}))
-
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // Toasts come from the shared AdminCrud mutations, which need the provider.
   return render(
     <I18nProvider>
       <QueryClientProvider client={qc}>
-        <ListViewsPage />
+        <ToastProvider>
+          <ListViewsPage />
+        </ToastProvider>
       </QueryClientProvider>
     </I18nProvider>
   )
@@ -162,6 +161,40 @@ describe('ListViewsPage renderer editors', () => {
     expect(payload.typeConfig).toEqual({
       calendar: { dateField: 'dueAt', endDateField: undefined },
     })
+  })
+
+  it('round-trips columns, filters and sort unchanged when a view is renamed', async () => {
+    listRows = [
+      {
+        ...EXISTING,
+        columns: ['title', 'status'],
+        filters: [{ field: 'status', op: 'eq', value: 'open' }],
+        sort: [{ field: 'dueAt', direction: 'DESC' }],
+        sortField: 'dueAt',
+        sortDirection: 'DESC',
+      },
+    ]
+    renderPage()
+    fireEvent.click(await screen.findByTestId('edit-button-0'))
+    expect(screen.getByTestId('listview-collectionId-input')).toBeDisabled()
+
+    fireEvent.change(screen.getByTestId('listview-name-input'), { target: { value: 'Renamed' } })
+    fireEvent.click(screen.getByTestId('listview-form-submit'))
+
+    await waitFor(() => expect(update).toHaveBeenCalled())
+    expect(update.mock.calls[0][0]).toBe('lv-1')
+    const payload = update.mock.calls[0][1] as Record<string, unknown>
+    expect(payload).toMatchObject({
+      name: 'Renamed',
+      visibility: 'PUBLIC',
+      columns: JSON.stringify(['title', 'status']),
+      filters: JSON.stringify([{ field: 'status', op: 'eq', value: 'open' }]),
+      sort: JSON.stringify([{ field: 'dueAt', direction: 'DESC' }]),
+      sortField: 'dueAt',
+      sortDirection: 'DESC',
+    })
+    // the collection is fixed once a view exists; an update never moves it
+    expect(payload).not.toHaveProperty('collectionId')
   })
 
   it('sends a null typeConfig for a plain table view', async () => {

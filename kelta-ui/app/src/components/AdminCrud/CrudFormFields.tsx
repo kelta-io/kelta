@@ -24,6 +24,56 @@ interface CrudFieldBaseProps<TValues extends FieldValues> {
   disabled?: boolean
 }
 
+function describedBy(id: string, hint: boolean, error: boolean): string | undefined {
+  const ids = [hint && `${id}-hint`, error && `${id}-error`].filter(Boolean)
+  return ids.length > 0 ? ids.join(' ') : undefined
+}
+
+function FieldHint({ id, children }: { id: string; children: React.ReactNode }) {
+  return (
+    <span id={`${id}-hint`} className="text-xs text-muted-foreground">
+      {children}
+    </span>
+  )
+}
+
+function FieldError({
+  id,
+  testId,
+  children,
+}: {
+  id: string
+  testId?: string
+  children: React.ReactNode
+}) {
+  return (
+    <span id={`${id}-error`} className="text-xs text-destructive" role="alert" data-testid={testId}>
+      {children}
+    </span>
+  )
+}
+
+function FieldLabel({
+  htmlFor,
+  label,
+  required,
+}: {
+  htmlFor: string
+  label: string
+  required?: boolean
+}) {
+  return (
+    <label htmlFor={htmlFor} className={FIELD_LABEL_CLASS}>
+      {label}
+      {required && (
+        <span className="ml-0.5 text-destructive" aria-hidden="true">
+          *
+        </span>
+      )}
+    </label>
+  )
+}
+
 export interface CrudTextFieldProps<
   TValues extends FieldValues,
 > extends CrudFieldBaseProps<TValues> {
@@ -31,6 +81,8 @@ export interface CrudTextFieldProps<
   placeholder?: string
   /** Test id for the validation message. */
   errorTestId?: string
+  /** Help text under the control, wired to `aria-describedby` as `<id>-hint`. */
+  hint?: React.ReactNode
   /** Render a `<textarea>` instead of an `<input>`. */
   multiline?: boolean
   rows?: number
@@ -46,6 +98,7 @@ export function CrudTextField<TValues extends FieldValues = FieldValues>({
   required,
   placeholder,
   errorTestId,
+  hint,
   multiline,
   rows = 3,
   type = 'text',
@@ -56,42 +109,101 @@ export function CrudTextField<TValues extends FieldValues = FieldValues>({
   } = useFormContext<TValues>()
   const { isSubmitting } = useCrudFormState()
   const error = get(errors, name)?.message as string | undefined
-  const errorId = `${id}-error`
   const controlProps = {
     id,
     placeholder,
     disabled: isSubmitting || disabled,
     'aria-required': required || undefined,
     'aria-invalid': !!error,
-    'aria-describedby': error ? errorId : undefined,
+    'aria-describedby': describedBy(id, hint != null, !!error),
     'data-testid': testId,
     ...register(name),
   }
 
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className={FIELD_LABEL_CLASS}>
-        {label}
-        {required && (
-          <span className="ml-0.5 text-destructive" aria-hidden="true">
-            *
-          </span>
-        )}
-      </label>
+      <FieldLabel htmlFor={id} label={label} required={required} />
       {multiline ? (
         <Textarea rows={rows} className="resize-y" {...controlProps} />
       ) : (
         <Input type={type} {...controlProps} />
       )}
+      {hint != null && <FieldHint id={id}>{hint}</FieldHint>}
       {error && (
-        <span
-          id={errorId}
-          className="text-xs text-destructive"
-          role="alert"
-          data-testid={errorTestId}
-        >
+        <FieldError id={id} testId={errorTestId}>
           {error}
-        </span>
+        </FieldError>
+      )}
+    </div>
+  )
+}
+
+export interface CrudSelectOption {
+  value: string
+  label: string
+}
+
+export interface CrudSelectFieldProps<
+  TValues extends FieldValues,
+> extends CrudFieldBaseProps<TValues> {
+  options: readonly CrudSelectOption[]
+  /** Leading empty-value option (e.g. "Select a collection"). */
+  placeholder?: string
+  required?: boolean
+  /** Test id for the validation message. */
+  errorTestId?: string
+  /** Help text under the control, wired to `aria-describedby` as `<id>-hint`. */
+  hint?: React.ReactNode
+}
+
+const SELECT_CLASS =
+  'border-input h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs outline-none transition-[color,box-shadow] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40'
+
+/** A native `<select>` bound to the form; the value is always a string. */
+export function CrudSelectField<TValues extends FieldValues = FieldValues>({
+  name,
+  id,
+  label,
+  testId,
+  disabled,
+  options,
+  placeholder,
+  required,
+  errorTestId,
+  hint,
+}: CrudSelectFieldProps<TValues>): React.ReactElement {
+  const {
+    register,
+    formState: { errors },
+  } = useFormContext<TValues>()
+  const { isSubmitting } = useCrudFormState()
+  const error = get(errors, name)?.message as string | undefined
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <FieldLabel htmlFor={id} label={label} required={required} />
+      <select
+        id={id}
+        className={SELECT_CLASS}
+        disabled={isSubmitting || disabled}
+        aria-required={required || undefined}
+        aria-invalid={!!error}
+        aria-describedby={describedBy(id, hint != null, !!error)}
+        data-testid={testId}
+        {...register(name)}
+      >
+        {placeholder !== undefined && <option value="">{placeholder}</option>}
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {hint != null && <FieldHint id={id}>{hint}</FieldHint>}
+      {error && (
+        <FieldError id={id} testId={errorTestId}>
+          {error}
+        </FieldError>
       )}
     </div>
   )
