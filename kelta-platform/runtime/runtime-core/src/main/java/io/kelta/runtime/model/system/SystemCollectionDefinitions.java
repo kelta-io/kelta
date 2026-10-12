@@ -129,14 +129,6 @@ public final class SystemCollectionDefinitions {
         // Archival & retention (telehealth slice 7)
         definitions.add(telehealthArchives());
 
-        // Portal billing (consumer-alerting slice 1) — LEGACY. Billing now runs only as the
-        // kelta-billing runtime module, which keeps its data in its own collections; no
-        // platform code reads or writes these five billing-* collections any more. They stay
-        // registered so existing rows remain visible until their tables are dropped
-        // (module-platform slice 8).
-        definitions.add(billingPlans());
-        definitions.add(billingEntitlementRules());
-
         // Availability alerting (consumer-alerting slice 3)
         definitions.add(watchTargets());
         definitions.add(watches());
@@ -189,9 +181,6 @@ public final class SystemCollectionDefinitions {
         definitions.add(collectionVersions());
         definitions.add(fieldVersions());
         definitions.add(migrationSteps());
-        definitions.add(billingCustomers());
-        definitions.add(billingSubscriptions());
-        definitions.add(billingPasses());
 
         return Collections.unmodifiableList(definitions);
     }
@@ -916,76 +905,6 @@ public final class SystemCollectionDefinitions {
     }
 
     /**
-     * Billing plans a tenant offers its portal members (consumer-alerting slice 1).
-     * {@code entitlements} is an OPAQUE tenant-defined map — the platform merges and
-     * compares its values but never interprets the keys, so tenants add limits
-     * without a schema change. {@code kind=DEFAULT} is the free/lapsed baseline.
-     */
-    public static CollectionDefinition billingPlans() {
-        return systemBuilder("billing-plans", "Billing Plans", "billing_plan")
-            .displayFieldName("name")
-            .addImmutableField("code")
-            .addField(FieldDefinition.requiredString("code", 100)
-                .withDescription("Stable machine key for this plan."))
-            .addField(FieldDefinition.requiredString("name", 255)
-                .withDescription("Human-readable name."))
-            .addField(FieldDefinition.text("description")
-                .withDescription("Free-text description of what this record is for."))
-            .addField(FieldDefinition.requiredString("kind", 20)
-                .withDefault("SUBSCRIPTION")
-                .withEnumValues(List.of("SUBSCRIPTION", "ONE_TIME", "DEFAULT"))
-                .withDescription("Whether the plan is a recurring subscription or a one-off pass."))
-            .addField(FieldDefinition.string("stripeProductId", 100)
-                .withColumnName("stripe_product_id")
-                .withDescription("Stripe product id backing the plan."))
-            .addField(FieldDefinition.string("stripePriceId", 100)
-                .withColumnName("stripe_price_id")
-                .withDescription("Stripe price id backing the plan."))
-            .addField(FieldDefinition.json("entitlements").withDefault(Map.of())
-                .withDescription("JSON entitlement map granted by the plan."))
-            .addField(FieldDefinition.integer("passDurationDays")
-                .withColumnName("pass_duration_days")
-                .withDescription("How many days a one-off pass stays valid."))
-            .addField(FieldDefinition.bool("active", true)
-                .withDescription("Whether the record is active; inactive rows are ignored by the runtime."))
-            .addField(FieldDefinition.integer("sortOrder").withColumnName("sort_order")
-                .withDescription("Ordinal position among sibling rows (ascending)."))
-            .build();
-    }
-
-    /**
-     * Quota enforcement as configuration (consumer-alerting slice 1): "records in
-     * collection X are capped by entitlement key Y".
-     *
-     * <p><b>Legacy — enforces nothing.</b> The compiled-in quota hook that read these rows
-     * was removed; quotas are enforced only by the billing module's own hook, from its
-     * {@code billing_entitlement_rules} collection.
-     */
-    public static CollectionDefinition billingEntitlementRules() {
-        return systemBuilder("billing-entitlement-rules", "Billing Entitlement Rules",
-                "billing_entitlement_rule")
-            .displayFieldName("limitKey")
-            .addField(FieldDefinition.requiredString("collectionName", 100)
-                .withColumnName("collection_name")
-                .withDescription("Name of the collection this row applies to."))
-            .addField(FieldDefinition.requiredString("limitKey", 100)
-                .withColumnName("limit_key")
-                .withDescription("Entitlement key this rule enforces."))
-            .addField(FieldDefinition.json("countFilter").withColumnName("count_filter")
-                .withDescription("JSON filter selecting the rows counted against the limit."))
-            .addField(FieldDefinition.requiredString("appliesTo", 20)
-                .withColumnName("applies_to")
-                .withDefault("PORTAL")
-                .withEnumValues(List.of("PORTAL", "ALL"))
-                .withDescription("Which subjects the rule applies to."))
-            .addField(FieldDefinition.string("message", 500)
-                .withDescription("Message shown when the rule denies the action."))
-            .addField(FieldDefinition.bool("active", true)
-                .withDescription("Whether the record is active; inactive rows are ignored by the runtime."))
-            .build();
-    }
-
-    /**
      * Something watchable — a campsite, an interview slot pool, a race, a permit
      * (consumer-alerting slice 3). Identified by {@code (source, externalId)}, so
      * two sources that happen to reuse the same upstream id cannot collide; that
@@ -1200,93 +1119,6 @@ public final class SystemCollectionDefinitions {
             .addField(FieldDefinition.datetime("generatedAt")
                 .withColumnName("generated_at")
                 .withDescription("When the page content was last generated."))
-            .build();
-    }
-
-    /**
-     * Member-to-processor customer mapping (consumer-alerting slice 1). Read-only:
-     * rows are written only by the verified webhook and checkout paths.
-     */
-    public static CollectionDefinition billingCustomers() {
-        return readOnlySystemBuilder("billing-customers", "Billing Customers",
-                "billing_customer")
-            .tenantScoped(true)
-            .displayFieldName("email")
-            .addField(FieldDefinition.lookup("userId", "users", "Member")
-                .withColumnName("user_id")
-                .withDescription("User this row belongs to."))
-            .addField(FieldDefinition.requiredString("stripeCustomerId", 100)
-                .withColumnName("stripe_customer_id")
-                .withDescription("Stripe customer id."))
-            .addField(FieldDefinition.string("email", 255)
-                .withDescription("Email recorded on the Stripe customer."))
-            .build();
-    }
-
-    /**
-     * Mirrored subscription state (consumer-alerting slice 1). {@code status} holds
-     * the processor's own vocabulary verbatim rather than a platform enum, so an
-     * unrecognized status degrades to "not entitled" instead of dropping the event.
-     */
-    public static CollectionDefinition billingSubscriptions() {
-        return readOnlySystemBuilder("billing-subscriptions", "Billing Subscriptions",
-                "billing_subscription")
-            .tenantScoped(true)
-            .displayFieldName("stripeSubscriptionId")
-            .addField(FieldDefinition.lookup("userId", "users", "Member")
-                .withColumnName("user_id")
-                .withDescription("User this row belongs to."))
-            .addField(FieldDefinition.lookup("planId", "billing-plans", "Plan")
-                .withColumnName("plan_id")
-                .withDescription("Billing plan this row refers to."))
-            .addField(FieldDefinition.requiredString("stripeSubscriptionId", 100)
-                .withColumnName("stripe_subscription_id")
-                .withDescription("Stripe subscription id."))
-            .addField(FieldDefinition.string("stripeCustomerId", 100)
-                .withColumnName("stripe_customer_id")
-                .withDescription("Stripe customer id."))
-            .addField(FieldDefinition.requiredString("status", 40)
-                .withDescription("Current lifecycle status."))
-            .addField(FieldDefinition.datetime("currentPeriodEnd")
-                .withColumnName("current_period_end")
-                .withDescription("End of the current paid period."))
-            .addField(FieldDefinition.bool("cancelAtPeriodEnd", false)
-                .withColumnName("cancel_at_period_end")
-                .withDescription("Whether the subscription ends when the current period does."))
-            .addField(FieldDefinition.datetime("canceledAt").withColumnName("canceled_at")
-                .withDescription("When the subscription was cancelled."))
-            .build();
-    }
-
-    /**
-     * One-time passes (consumer-alerting slice 1) — a bounded window of elevated
-     * entitlements. Expired passes are ignored at resolution time regardless of
-     * row status; the expiry sweep only tidies the stored status.
-     */
-    public static CollectionDefinition billingPasses() {
-        return readOnlySystemBuilder("billing-passes", "Billing Passes", "billing_pass")
-            .tenantScoped(true)
-            .displayFieldName("stripeCheckoutSessionId")
-            .addField(FieldDefinition.lookup("userId", "users", "Member")
-                .withColumnName("user_id")
-                .withDescription("User this row belongs to."))
-            .addField(FieldDefinition.lookup("planId", "billing-plans", "Plan")
-                .withColumnName("plan_id")
-                .withDescription("Billing plan this row refers to."))
-            .addField(FieldDefinition.requiredString("stripeCheckoutSessionId", 100)
-                .withColumnName("stripe_checkout_session_id")
-                .withDescription("Stripe checkout session that created the pass."))
-            .addField(FieldDefinition.string("stripePaymentIntentId", 100)
-                .withColumnName("stripe_payment_intent_id")
-                .withDescription("Stripe payment intent that paid for the pass."))
-            .addField(FieldDefinition.requiredString("status", 20)
-                .withDefault("ACTIVE")
-                .withEnumValues(List.of("ACTIVE", "EXPIRED", "REFUNDED"))
-                .withDescription("Current lifecycle status."))
-            .addField(FieldDefinition.datetime("startsAt").withColumnName("starts_at")
-                .withDescription("When the pass becomes valid."))
-            .addField(FieldDefinition.datetime("expiresAt").withColumnName("expires_at")
-                .withDescription("When this record stops being valid."))
             .build();
     }
 

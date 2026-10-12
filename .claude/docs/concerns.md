@@ -375,15 +375,9 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 | `SchemaMigrationEngine.java` (runtime-core) | 1,106 | Split non-destructive vs destructive paths |
 
 **Other:**
-- **Legacy billing data left inert (module-platform slice 8, 2026-10-11).** Compiled-in billing is
-  gone (entitlements come only from the `kelta-billing` module, else `EMPTY`; V207 dropped
-  `billing_webhook_event`), but the five V178 tables (`billing_plan`/`_customer`/`_subscription`/
-  `_pass`/`_entitlement_rule`) and their `billing-*` system collections remain and nothing reads
-  them — editing `billing-plans`/`billing-entitlement-rules` changes nothing. Copy any tenant data
-  still there into the module's collections (`kelta-modules/billing/VERIFICATION.md` → prod
-  rollout) before the follow-up migration drops tables + definitions. The `KELTA_BILLING` JetStream
-  stream is no longer provisioned, but an existing one stays on the NATS server until removed by
-  hand (`nats stream rm KELTA_BILLING`); nothing publishes to `kelta.billing.>`.
+- **Stale `KELTA_BILLING` JetStream stream.** Compiled-in billing is gone (module-platform slice 8),
+  so the stream is no longer provisioned, but an existing one stays on the NATS server until
+  removed by hand (`nats stream rm KELTA_BILLING`); nothing publishes to `kelta.billing.>`.
 - **Email templates have two lookup axes** — `EmailRepository.findTemplateByKey` (`template_key`,
   V133 `user.*` seeds) and `findTemplateByName` (`name`, V141 seeds). Both fall back
   tenant → `'system'`, so the "wrong" axis still works but may land on a different seed row.
@@ -763,6 +757,7 @@ One line each; full write-ups are in git history.
 - Older: federated users stuck PENDING_ACTIVATION; password reset sent no email; `EmptyResultDataAccessException` and null `reset_token_expires_at` in `PasswordController`.
 
 **Tech debt / test infrastructure**
+- 2026-10-12 — module-platform slice 8 finished: V207/V209 dropped `billing_webhook_event` and the five V178 billing tables with their `billing-*` system collections (prod checked first: only `billing_plan` had rows, all already in the module's own plans collection).
 - DB-design cleanup complete: permission sets removed (#1186), package authz export + config-health query fixed (#1187), orphan tables dropped (#1188), **Flyway history flattened to `V1__baseline` (#1189)**.
 - Feature-flag audit: frontend `RENDER_TREE_V2` removed (#1137).
 - 2026-10 dead-code batch A (#1718) — removed runtime-core `datapath`, `WorkflowRuleToFlowMigrator`, the no-op `evaluateBeforeSaveWorkflows`, `TriggerFlowActionHandler`'s `workflowRuleId` fallback (missing `flowId` now fails "flowId is required"), SDK `AdminClient.workflowRules`, `TenantCellResolver` (`tenant.cell_id` column kept), unreachable kelta-ui files, unused e2e page objects and npm deps; `FieldType.LOOKUP` lost a wrong `@Deprecated` (live type).

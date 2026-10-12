@@ -1,0 +1,1 @@
+- 2026-10-12 chore(billing): Drop the legacy V178 billing tables and billing-* system collections (drop-legacy-billing-tables)
