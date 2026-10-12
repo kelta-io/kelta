@@ -1,0 +1,1 @@
+- 2026-10-11 chore(cleanup): Remove dead code — runtime datapath package, workflow-rule leftovers, tenant-cell resolver, unreachable kelta-ui files, unused deps and e2e page objects (dead-code-cleanup-batch-a)

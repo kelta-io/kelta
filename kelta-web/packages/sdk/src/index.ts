@@ -116,8 +116,6 @@ export type {
   CampaignStats,
   CampaignRecipient,
   EmailSuppression,
-  WorkflowRule,
-  CreateWorkflowRuleRequest,
   ApprovalProcess,
   ApprovalInstance,
   CreateApprovalProcessRequest,

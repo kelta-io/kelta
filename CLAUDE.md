@@ -143,7 +143,7 @@ visual system.
 | **Governor limit** | Per-tenant resource quota (API/day, storage, users, collections…). |
 | **Layout / List view / Record type** | UI metadata: page layout · saved list config · collection subtype. |
 | **Tenant** | Isolated customer; resolved by URL slug or custom domain; enforced by Postgres RLS via `app.current_tenant_id`. |
-| **Cell** | (Planned) tenant-sharding unit; runtime does not yet route by `cell_id`. |
+| **Cell** | (Planned) tenant-sharding unit. The `tenant.cell_id` column exists, but nothing reads it — there is no cell resolver and the runtime does not route by `cell_id`. |
 | **PAT** | Personal access token (`klt_…`) for programmatic API auth. |
 
 ---

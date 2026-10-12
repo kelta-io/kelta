@@ -143,7 +143,6 @@ npm run test:coverage    # Run tests with coverage (80% threshold)
 npm run lint             # ESLint check
 npm run typecheck        # TypeScript validation
 npm run format:check     # Prettier check
-npm run generate-types   # Generate types from OpenAPI spec
 ```
 
 ## Development
@@ -156,7 +155,7 @@ npm run build
 
 ## Testing
 
-Vitest with jsdom, Testing Library, MSW for API mocking, and fast-check for property-based tests.
+Vitest with jsdom and Testing Library.
 
 ```bash
 npm run test             # Watch mode

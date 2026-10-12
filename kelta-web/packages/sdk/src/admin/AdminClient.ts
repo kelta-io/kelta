@@ -94,9 +94,6 @@ import type {
   CampaignRecipient,
   EmailSuppression,
   CreateCampaignRequest,
-  WorkflowRule,
-  WorkflowExecutionLog,
-  CreateWorkflowRuleRequest,
   ApprovalProcess,
   ApprovalInstance,
   CreateApprovalProcessRequest,
@@ -1712,53 +1709,6 @@ export class AdminClient {
       await this.axios.delete('/api/admin/campaigns/suppressions', {
         params: { email },
       });
-    },
-  };
-
-  // ---------------------------------------------------------------------------
-  // Workflow rules (already on /api/)
-  // ---------------------------------------------------------------------------
-
-  readonly workflowRules = {
-    list: async (_tenantId?: string): Promise<WorkflowRule[]> => {
-      const response = await this.axios.get('/api/workflow-rules');
-      return unwrapJsonApiList<WorkflowRule>(response.data);
-    },
-
-    get: async (id: string): Promise<WorkflowRule> => {
-      const response = await this.axios.get(`/api/workflow-rules/${id}`);
-      return unwrapJsonApiResource<WorkflowRule>(response.data);
-    },
-
-    create: async (
-      _tenantId: string,
-      request: CreateWorkflowRuleRequest
-    ): Promise<WorkflowRule> => {
-      const body = toJsonApiBody('workflow-rules', request as unknown as Record<string, unknown>);
-      const response = await this.axios.post('/api/workflow-rules', body);
-      return unwrapJsonApiResource<WorkflowRule>(response.data);
-    },
-
-    update: async (
-      id: string,
-      request: Partial<CreateWorkflowRuleRequest>
-    ): Promise<WorkflowRule> => {
-      const body = toJsonApiBody(
-        'workflow-rules',
-        request as unknown as Record<string, unknown>,
-        id
-      );
-      const response = await this.axios.patch(`/api/workflow-rules/${id}`, body);
-      return unwrapJsonApiResource<WorkflowRule>(response.data);
-    },
-
-    delete: async (id: string): Promise<void> => {
-      await this.axios.delete(`/api/workflow-rules/${id}`);
-    },
-
-    listLogs: async (_tenantId?: string): Promise<WorkflowExecutionLog[]> => {
-      const response = await this.axios.get('/api/workflow-execution-logs');
-      return unwrapJsonApiList<WorkflowExecutionLog>(response.data);
     },
   };
 

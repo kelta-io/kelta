@@ -125,11 +125,6 @@ public class FlowConfig {
         return new InitialStateBuilder();
     }
 
-    @Bean
-    public WorkflowRuleToFlowMigrator workflowRuleToFlowMigrator() {
-        return new WorkflowRuleToFlowMigrator();
-    }
-
     // ---------------------------------------------------------------------------
     // Kelta compile-time module beans — registered as Spring beans so that the
     // ModuleRegistry can discover them. These modules live in runtime-module-*

@@ -1120,6 +1120,21 @@ for removal ("inline the current value"). Findings:
   + removing is a prod behavior + security change requiring the gateway client-credentials path
   verified first — a scoped follow-up, not a mechanical inline.
 
+**Dead-code cleanup, batch A (2026-10).** Removed code with zero references: runtime-core
+`io.kelta.runtime.datapath` (never wired; the worker's campaign `MergeFieldRenderer` is a separate
+class), `WorkflowRuleToFlowMigrator` + its worker bean, the no-op
+`DefaultQueryEngine.evaluateBeforeSaveWorkflows`, `TriggerFlowActionHandler`'s `workflowRuleId`
+fallback (a config with no `flowId` now fails as "flowId is required"), the SDK
+`AdminClient.workflowRules` namespace (`/api/workflow-rules` has had no backing collection since
+V72), `TenantCellResolver`/`JdbcTenantCellResolver` (unwired; the `tenant.cell_id` column stays),
+unreachable kelta-ui files (`InlineEditCell`, `HomePage`, unused barrel `index.ts` files,
+`usePageBindingContext`), unused e2e page objects, and the unused npm deps `next-themes`/`fast-check`
+(kelta-ui) and `fast-check`/`msw` (kelta-web root). `FieldType.LOOKUP` lost a wrong `@Deprecated` —
+LOOKUP is a live, supported relationship type. **`npm run knip` is not a CI gate**: after this batch it
+reports zero unused files but still ~300 unused exports, ~300 unused exported types, ~100
+default+named duplicate exports and a few unlisted deps, so wiring it in would fail every build.
+Clear those (or scope knip to `--include files,dependencies`) before adding it to `ci.yml`.
+
 **Deliberately-retained code (audit judged deletion riskier than the cleanliness gain):**
 - Email-template dual lookup (`findTemplateByKey` vs `findTemplateByName`, see below) — both axes
   are live on the transactional-email path (password reset/invite); consolidating risks that path

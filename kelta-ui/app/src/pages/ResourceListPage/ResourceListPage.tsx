@@ -823,8 +823,8 @@ export function ResourceListPage({
 
   // Inline edit save callback (T11)
   // Persist a single inline-edited cell via the JSON:API partial-PATCH path, then
-  // refetch the list (drives ObjectDataTable's opt-in inline edit — the shared
-  // control replaces the legacy InlineEditCell).
+  // refetch the list (drives ObjectDataTable's opt-in inline edit via the shared
+  // InlineFieldValue control).
   const handleCellCommit = useCallback(
     async (recordId: string, fieldName: string, value: unknown) => {
       await apiClient.patch(`/api/${collectionName}/${recordId}`, {

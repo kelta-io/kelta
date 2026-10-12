@@ -138,13 +138,11 @@ database contract.
 - **Vitest** — 1.3.1 (kelta-web), 4.0.18 (kelta-ui)
 - **jsdom** — DOM environment
 - **React Testing Library** — 14.2.1 (kelta-web), 16.3.2 (kelta-ui)
-- **MSW** — 2.2.1 (kelta-web), 2.12.7 (kelta-ui)
-- **fast-check** — 3.15.1 (kelta-web), 4.5.3 (kelta-ui)
+- **MSW** — 2.12.7 (kelta-ui only)
 - **Playwright** 1.50.0 — E2E testing (`e2e-tests/`)
 
 ### Organization
 - Co-located: `FileName.test.ts` alongside source
-- Property tests: `FileName.property.test.ts`
 - Coverage thresholds: 80% (branches, functions, lines, statements) for kelta-web
 
 ### Structure

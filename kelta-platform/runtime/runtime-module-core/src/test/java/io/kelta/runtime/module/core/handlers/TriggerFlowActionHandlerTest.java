@@ -40,9 +40,10 @@ class TriggerFlowActionHandlerTest {
         }
 
         @Test
-        @DisplayName("Should accept legacy config with workflowRuleId for backward compatibility")
-        void shouldAcceptLegacyConfig() {
-            assertDoesNotThrow(() -> handler.validate("{\"workflowRuleId\": \"rule-123\"}"));
+        @DisplayName("Should reject config that only carries the removed workflowRuleId key")
+        void shouldRejectWorkflowRuleIdOnlyConfig() {
+            assertThrows(IllegalArgumentException.class,
+                () -> handler.validate("{\"workflowRuleId\": \"rule-123\"}"));
         }
     }
 
@@ -98,8 +99,8 @@ class TriggerFlowActionHandlerTest {
         }
 
         @Test
-        @DisplayName("Should return failure for legacy workflowRuleId config")
-        void shouldReturnFailureForLegacyConfig() {
+        @DisplayName("Should fail with flowId-required when config only has workflowRuleId")
+        void shouldFailForWorkflowRuleIdOnlyConfig() {
             String config = """
                 {"workflowRuleId": "rule-123"}
                 """;
@@ -110,7 +111,7 @@ class TriggerFlowActionHandlerTest {
             ActionResult result = handler.execute(ctx);
 
             assertFalse(result.successful());
-            assertTrue(result.errorMessage().contains("deprecated"));
+            assertTrue(result.errorMessage().contains("'flowId' is required"));
         }
 
         @Test
