@@ -216,8 +216,9 @@ unique: (tenant, userId, prefType, prefKey)
   optional `imageField` (attachment/URL) with `FieldRenderer` fallback header, title +
   cardFields, same pagination.
 
-Every FE slice: Vitest in-PR; post-deploy Playwright skip-gated under
-`e2e-tests/tests/end-user/` (precedent: `approvals-inbox.spec.ts`); i18n keys for all new
+Every FE slice: Vitest in-PR; a Playwright spec under `e2e-tests/tests/end-user/` that runs
+in the PR's E2E job, never skip-gated (precedent: `approvals-inbox.spec.ts`; `testing.md` →
+End-to-end); i18n keys for all new
 strings; DESIGN.md rules (11px labels, table recipe, no new status colors).
 
 ## Child-spec template

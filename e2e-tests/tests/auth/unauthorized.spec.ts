@@ -1,53 +1,48 @@
 import { test, expect } from "../../fixtures";
 
-const tenantSlug = process.env.E2E_TENANT_SLUG || "default";
-
+/**
+ * The Access Denied page (`/{tenant}/unauthorized`, `UnauthorizedPage`). `ProtectedRoute` /
+ * `RequirePermission` send a signed-in user here when a route needs a permission they lack;
+ * the route itself is public, so it can be opened directly.
+ */
 test.describe("Unauthorized Page", () => {
-  // Skip: The /unauthorized route may not exist or may not have the expected
-  // structure (data-testid="unauthorized-page", "home" button, "back" button).
-  // These tests will be re-enabled once the unauthorized page UI is confirmed
-  // and has stable data-testid attributes.
-
-  test.skip("displays unauthorized page for restricted access", async ({
+  test("renders the access-denied page for a signed-in user", async ({
     page,
+    tenantSlug,
   }) => {
-    // The /unauthorized page may not be implemented yet or may redirect
-    // elsewhere depending on auth state.
     await page.goto(`/${tenantSlug}/unauthorized`);
-    await page.waitForLoadState("load");
 
-    const unauthorizedContainer = page.getByTestId("unauthorized-page");
-    await expect(unauthorizedContainer).toBeVisible();
+    const container = page.getByTestId("unauthorized-page");
+    await expect(container).toBeVisible();
+    await expect(
+      container.getByRole("heading", { name: "Access Denied" }),
+    ).toBeVisible();
+    // The signed-in identity is shown so the user knows which account was refused.
+    await expect(container.getByText(/^Logged in as: /)).toBeVisible();
   });
 
-  test.skip("shows go home button that navigates back", async ({ page }) => {
-    // Depends on the unauthorized page having a "home" button with a
-    // specific role/label. Skipped until the page structure is confirmed.
+  test("Go to Dashboard leaves the page for the tenant's app", async ({
+    page,
+    tenantSlug,
+  }) => {
     await page.goto(`/${tenantSlug}/unauthorized`);
-    await page.waitForLoadState("load");
 
-    const goHomeButton = page.getByRole("button", { name: /home/i });
-    await expect(goHomeButton).toBeVisible();
+    await page.getByRole("button", { name: "Go to Dashboard" }).click();
 
-    await goHomeButton.click();
-
-    await expect(page).not.toHaveURL(new RegExp(`/${tenantSlug}/unauthorized`));
+    // `/{tenant}` redirects a signed-in user to the end-user app.
+    await expect(page).toHaveURL(new RegExp(`/${tenantSlug}/app(/|$|\\?)`));
+    await expect(page.getByTestId("unauthorized-page")).toHaveCount(0);
   });
 
-  test.skip("shows go back button", async ({ page }) => {
-    // Depends on the unauthorized page having a "back" button with a
-    // specific role/label. Skipped until the page structure is confirmed.
-    await page.goto(`/${tenantSlug}/collections`);
-    await page.waitForLoadState("load");
+  test("Go Back returns to the previous page", async ({ page, tenantSlug }) => {
+    await page.goto(`/${tenantSlug}/app/home`);
+    await expect(page).toHaveURL(new RegExp(`/${tenantSlug}/app/home`));
 
     await page.goto(`/${tenantSlug}/unauthorized`);
-    await page.waitForLoadState("load");
+    await expect(page.getByTestId("unauthorized-page")).toBeVisible();
 
-    const goBackButton = page.getByRole("button", { name: /back/i });
-    await expect(goBackButton).toBeVisible();
+    await page.getByRole("button", { name: "Go Back" }).click();
 
-    await goBackButton.click();
-
-    await expect(page).not.toHaveURL(new RegExp(`/${tenantSlug}/unauthorized`));
+    await expect(page).toHaveURL(new RegExp(`/${tenantSlug}/app/home`));
   });
 });

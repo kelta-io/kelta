@@ -136,8 +136,9 @@ backend-touching slice and reviews cleaner alone).
   disabled states; history resets on page open/save-reload; unsaved-changes flag stays
   accurate (undo back to the saved snapshot clears it).
 
-Every FE slice: Vitest in-PR; post-deploy Playwright skip-gated under
-`e2e-tests/tests/`; i18n keys for all new strings; DESIGN.md rules. Slice 3 backend:
+Every FE slice: Vitest in-PR; a Playwright spec under `e2e-tests/tests/` that runs in the
+PR's E2E job (never skip-gated — `testing.md` → End-to-end); i18n keys for all new strings;
+DESIGN.md rules. Slice 3 backend:
 worker unit tests + a `kelta-test-harness` scenario only if a real-DB behavior (RLS,
 constraint) is in play — the column-add + broadcast path is covered by unit + existing
 harness warm-up.

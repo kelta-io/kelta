@@ -264,9 +264,10 @@ helper into `pages/app/ObjectListPage/listUrlState.ts` and both slices use it.
   hardcoded first-6 rule — falls back to it when a view has no columns). Owns the
   `listUrlState.ts` extraction if slice 3 hasn't landed it.
 
-Every FE slice: Vitest in-PR; post-deploy Playwright spec (skip-gated
-`test.describe.skip` until the route is live, per `page-builder-v2.spec.ts` precedent) under
-`e2e-tests/tests/end-user/`; i18n keys for every new string (other locales fall back).
+Every FE slice: Vitest in-PR; a Playwright spec under `e2e-tests/tests/end-user/` that runs
+in the PR's own E2E job (it builds HEAD, so a new route exists there — never
+`test.describe.skip` a spec until deploy; see `testing.md` → End-to-end); i18n keys for every
+new string (other locales fall back).
 
 ## Child-spec template
 

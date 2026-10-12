@@ -843,7 +843,8 @@ worker + kelta-ui) — every telehealth tenant gets it, not just this sample.
   refetch. Reached from a **"My availability"** link on the staff Appointments
   page. i18n en + pt-PT; 3 unit tests. (kelta-ui has no typecheck in its prod
   image — `tsc -b && vite build` was run locally; the changed files are type-clean.)
-- Skip-gated `provider-availability.spec.ts` (telehealth e2e precedent).
+- `provider-availability.spec.ts` (skip-gated at the time; un-gated in the e2e-honesty
+  batch and now runs in CI's E2E job).
 
 Deployed via the platform image pipeline (kelta-worker native + kelta-ui).
 
