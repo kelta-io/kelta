@@ -13,15 +13,20 @@ import io.kelta.runtime.query.QueryResult;
 import io.kelta.runtime.registry.CollectionOnDemandLoader;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.router.RecordWritePipeline.WriteTarget;
+import io.kelta.runtime.router.SubResourceAuthorizer.Access;
+import io.kelta.runtime.router.SubResourceAuthorizer.Decision;
+import io.kelta.runtime.router.SubResourceAuthorizer.Operation;
 import io.kelta.runtime.router.jsonapi.JsonApiRecordSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,6 +60,8 @@ import java.util.regex.Pattern;
  *   <li>PUT /api/{parent}/{parentId}/{child}/{childId} - Update a child record</li>
  *   <li>DELETE /api/{parent}/{parentId}/{child}/{childId} - Delete a child record</li>
  * </ul>
+ * A registered {@link SubResourceAuthorizer} is consulted on each of them once the relationship
+ * has resolved.
  *
  * <p>Query Parameters for list endpoint:
  * <ul>
@@ -119,6 +126,13 @@ public class DynamicCollectionRouter {
     private SystemCollectionCache systemCollectionCache;
 
     /**
+     * Optional authorizer for the sub-resource handlers. When present, every sub-resource request
+     * is checked once its parent/child relationship has resolved and before any record is read or
+     * written; see {@link SubResourceAuthorizer}.
+     */
+    private SubResourceAuthorizer subResourceAuthorizer;
+
+    /**
      * Creates a new DynamicCollectionRouter.
      *
      * @param registry the collection registry
@@ -149,6 +163,11 @@ public class DynamicCollectionRouter {
     @Autowired(required = false)
     public void setSystemCollectionCache(SystemCollectionCache systemCollectionCache) {
         this.systemCollectionCache = systemCollectionCache;
+    }
+
+    @Autowired(required = false)
+    public void setSubResourceAuthorizer(SubResourceAuthorizer subResourceAuthorizer) {
+        this.subResourceAuthorizer = subResourceAuthorizer;
     }
 
     /**
@@ -440,7 +459,7 @@ public class DynamicCollectionRouter {
 
         return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = collections.resolveSubResource(parentName, childName, request);
-            if (relation == null) {
+            if (relation == null || !authorizeSubResource(relation, parentId, null, Operation.READ, request)) {
                 return ResponseEntity.notFound().build();
             }
 
@@ -485,7 +504,7 @@ public class DynamicCollectionRouter {
 
         return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = collections.resolveSubResource(parentName, childName, request);
-            if (relation == null) {
+            if (relation == null || !authorizeSubResource(relation, parentId, childId, Operation.READ, request)) {
                 return ResponseEntity.notFound().build();
             }
 
@@ -523,7 +542,7 @@ public class DynamicCollectionRouter {
 
         return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = collections.resolveSubResource(parentName, childName, request);
-            if (relation == null) {
+            if (relation == null || !authorizeSubResource(relation, parentId, null, Operation.CREATE, request)) {
                 return ResponseEntity.notFound().build();
             }
             return writePipeline.create(WriteTarget.child(relation, childName, parentId), requestBody, request);
@@ -590,7 +609,7 @@ public class DynamicCollectionRouter {
 
         return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = collections.resolveSubResource(parentName, childName, request);
-            if (relation == null) {
+            if (relation == null || !authorizeSubResource(relation, parentId, childId, Operation.EDIT, request)) {
                 return ResponseEntity.notFound().build();
             }
             return writePipeline.update(WriteTarget.child(relation, childName, parentId), childId,
@@ -621,11 +640,34 @@ public class DynamicCollectionRouter {
 
         return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = collections.resolveSubResource(parentName, childName, request);
-            if (relation == null) {
+            if (relation == null || !authorizeSubResource(relation, parentId, childId, Operation.DELETE, request)) {
                 return ResponseEntity.notFound().build();
             }
             return writePipeline.delete(WriteTarget.child(relation, childName, parentId), childId, request);
         });
+    }
+
+    /**
+     * Applies the {@link SubResourceAuthorizer}, if one is registered, to a sub-resource request.
+     *
+     * @return {@code true} to run the handler, {@code false} to answer 404 as for an absent record
+     * @throws ResponseStatusException 403 when the authorizer forbids the request (rendered in the
+     *         standard JSON:API error envelope by {@link GlobalExceptionHandler})
+     */
+    private boolean authorizeSubResource(SubResourceRelation relation, String parentId, String childId,
+                                         Operation operation, HttpServletRequest request) {
+        SubResourceAuthorizer authorizer = subResourceAuthorizer;
+        if (authorizer == null) {
+            return true;
+        }
+        Decision decision = authorizer.authorize(
+                new Access(relation.parentDef(), parentId, relation.childDef(), childId, operation), request);
+        return switch (decision.outcome()) {
+            case ALLOW -> true;
+            case NOT_FOUND -> false;
+            case FORBIDDEN -> throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    decision.detail() != null ? decision.detail() : "Forbidden");
+        };
     }
 
     /**

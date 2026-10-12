@@ -187,7 +187,7 @@ Check the relevant `pom.xml` / `package.json` for exact current versions before 
 - **Field-Level Security** is enforced read-side by `CerbosFieldSecurityAdvice`
   (`@ControllerAdvice`) — strips denied keys from JSON:API `attributes` **and to-one
   `relationships`**; preserves has-many and system audit fields. Write-side:
-  `CerbosFieldWriteSecurityAdvice`. Add Cerbos policy rules for new field permissions.
+  `CerbosFieldWriteSecurityAdvice` — same rule on create and update. Add Cerbos policy rules for new field permissions.
   **Data masking** rides the same advice (strip → mask): `MASKED` visibility denies the
   `unmask` + `write` Cerbos actions; mask shape lives in `fieldTypeConfig.masking`;
   masked records carry `meta.maskedFields`. See `architecture.md` → Data masking.

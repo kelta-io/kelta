@@ -1,0 +1,1 @@
+- 2026-10-12 fix(worker): Authorize the generic child-resource handlers against the child collection under every parent route, and apply field-level write rules to creates and to-one relationships as to updates (child-authz-static-and-create)

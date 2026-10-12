@@ -400,6 +400,23 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   the same as `CerbosFieldSecurityAdvice` (JSON:API `type`) and `MaskedFieldPredicateInterceptor`.
   Record-level rules on writes behave exactly as on a direct write: the write runs, the response
   record is filtered (there is no pre-write record check on either path).
+  **The worker authorizes the router's generic child handlers as well**, under every parent —
+  `static-` parents included, where the gateway cannot tell those handlers from a dedicated
+  controller at the same depth. `DynamicCollectionRouter` calls the runtime-core
+  `SubResourceAuthorizer` hook once the parent/child relationship resolves, before any record is
+  read or written; the worker's `CerbosSubResourceAuthorizer` requires the same pair: `read` on
+  the parent and the decision a direct request to the child gets at the gateway. That is the
+  child's Cerbos `collection` permission for the action, keyed on the collection id the gateway
+  route carries (`CollectionLifecycleManager.getTenantVisibleCollectionId`). For a system
+  collection behind a `static-` route it is that route's rule, mirrored in `GatewayStaticRoutes`
+  (users/profiles/collections checks with their override permissions, the tenants and
+  module-signing-key rules, `API_ACCESS` otherwise) and pinned to the gateway sources by
+  `GatewayStaticRoutesSyncTest`. System permissions use the gateway's `system_feature` check
+  (`CerbosAuthorizationService.checkSystemPermission`). A denial is a 403 `FORBIDDEN` JSON:API
+  error; a `tenants` child row the caller may not see is a 404. The hook matches handler methods,
+  not path depth, so dedicated controllers are untouched; requests without the gateway's identity
+  headers (in-cluster service calls) are not checked, the same boundary as the record and field
+  advices.
 - **Static routes** (`/api/admin/**`, `/api/me/**`, `/api/_search/**`, `/api/metrics/**`,
   `/api/operations`): `RouteAuthorizationFilter` **skips** ids starting `static-` — they get only
   the blanket `API_ACCESS` system-permission check. The worker advices **exclude** `/api/admin/` — and the record-level advice also excludes `/api/telehealth/` (those controllers scope access per participant themselves; the generic record check emptied portal users' appointment lists, fixed 2026-07-12).
@@ -1530,6 +1547,18 @@ not collection fields and are preserved. System audit fields (`createdAt`,
 `updatedAt`, `createdBy`, `updatedBy`) are never stripped; `meta` (pagination)
 is untouched. Metadata/admin paths (`/api/collections`, `/api/admin/**`, etc.)
 are skipped. Gated by `kelta.gateway.security.permissions-enabled`.
+
+**Write-side field-level security** — `CerbosFieldWriteSecurityAdvice` (order 10) removes from a
+record write body every field the caller cannot `write` (HIDDEN, READ_ONLY, MASKED), from
+`attributes` **and** to-one `relationships` (the router stores a relationship as the field's
+value). The rule is the same for create and update: PUT/PATCH bodies, and the POST bodies of the
+router's `create`/`createChild` handlers (matched on the handler method — other POST controllers
+under `/api` are not record writes). A removed field keeps its stored value on an update and gets
+its default (or null) on a create; a required field with no default that the caller cannot write
+fails the create's validation. `POST /api/operations` applies the same rule to each add/update
+operation's attributes (`FieldWriteGuard`, shared by both). Audit fields are never checked;
+metadata paths are skipped, matched by path segment (`ApiPaths.isMetadataPath`) as on the read
+side. Fail-closed: a Cerbos failure strips every non-system field.
 
 **Data masking** — layered on the same advice, strictly **after** stripping (a
 HIDDEN field is never masked into existence). A field opts in via
