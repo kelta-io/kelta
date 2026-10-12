@@ -63,6 +63,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationValidator;
+import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcLogoutAuthenticationProvider;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -90,7 +91,10 @@ public class AuthorizationServerConfig {
         OAuth2AuthorizationServerConfigurer authorizationServerConfigurer =
                 new OAuth2AuthorizationServerConfigurer();
         authorizationServerConfigurer
-                .oidc(Customizer.withDefaults())
+                // The platform UI signs out to a tenant-scoped URI on its own origin, which
+                // Spring's exact-match post-logout check would reject before ending the session.
+                .oidc(oidc -> oidc.logoutEndpoint(logout -> logout
+                        .authenticationProviders(configurePostLogoutRedirectUriValidator(authDomainResolver))))
                 // Spring AS has no built-in client-authentication path for public-client
                 // refresh_token requests (PublicClientAuthenticationConverter matches PKCE
                 // authorization_code only), so the SPA's silent refresh would 302 to the
@@ -408,6 +412,21 @@ public class AuthorizationServerConfig {
             for (AuthenticationProvider provider : authenticationProviders) {
                 if (provider instanceof OAuth2AuthorizationCodeRequestAuthenticationProvider authCodeProvider) {
                     authCodeProvider.setAuthenticationValidator(new PlatformRedirectUriValidator(resolver));
+                }
+            }
+        };
+    }
+
+    /**
+     * Replaces the default post_logout_redirect_uri validator on the OIDC logout
+     * authentication provider with {@link PlatformPostLogoutRedirectUriValidator}.
+     */
+    private Consumer<List<AuthenticationProvider>> configurePostLogoutRedirectUriValidator(
+            AuthDomainResolver resolver) {
+        return authenticationProviders -> {
+            for (AuthenticationProvider provider : authenticationProviders) {
+                if (provider instanceof OidcLogoutAuthenticationProvider logoutProvider) {
+                    logoutProvider.setAuthenticationValidator(new PlatformPostLogoutRedirectUriValidator(resolver));
                 }
             }
         };

@@ -568,6 +568,11 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **Any new authorization-request validator must throw with a token whose redirect URI is null**
   for redirect-URI failures (#1636 — otherwise Spring AS redirects to the unregistered URI, an open
   redirect). Errors after the URI is validated may redirect to the registered URI.
+- **The SPA client's post-logout redirect is validated by origin, not registered**
+  (`PlatformPostLogoutRedirectUriValidator` on `/connect/logout`): a `kelta-platform` URI is
+  accepted on a registered redirect-URI origin or a verified custom domain (https only). Spring's
+  default rejects anything not registered verbatim *before* ending the session, so narrowing this
+  rule silently leaves users signed in at kelta-auth — keep `OidcLogoutEndpointTest` green.
 - **Cerbos `collectionId` keying:** the `collection` policy is UUID-keyed (gateway passes the
   route id); the `record` policy keys on the collection **name** (`architecture.md`). Mixing them
   silently denies every record to non-admin profiles.
@@ -788,6 +793,7 @@ One line each; full write-ups are in git history.
 - PLT-343 (2026-10-05) — platform admin shipped with a well-known password; `BaselineAdminPasswordInitializer`.
 - PLT-355 (2026-10-05) — client tenant headers could select a tenant; now a claim that must match the credential.
 - #1636 (2026-10-06) — kelta-auth open redirect on rejected `redirect_uri`.
+- 2026-10-12 (spa-post-logout-redirect) — post-logout redirect URIs were not registered for the SPA client, so `/connect/logout` answered 400 and sign-out left the kelta-auth session alive; origin-based `PlatformPostLogoutRedirectUriValidator`.
 - KLT-377 (2026-10-06) — own-record CEL rules compared a UUID with the caller's email; PATs were always INTERNAL.
 - KLT-380 (2026-10-10) — `user-ui-preferences` rows were tenant-readable; owner-scoped.
 - KLT-206 — `GET /api/fields` returned every tenant's fields; `field.tenant_id` (V198) + `visibleToTenant`.

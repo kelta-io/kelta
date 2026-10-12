@@ -1,0 +1,1 @@
+- 2026-10-12 fix(auth): Sign-out now ends the kelta-auth session — post-logout redirect URIs were not registered for the SPA client, so the end-session endpoint rejected the tenant-scoped return URI; the SPA client's post-logout redirect is now validated by origin like its login redirect (spa-post-logout-redirect)

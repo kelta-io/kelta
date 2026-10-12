@@ -55,6 +55,16 @@ io.kelta.auth/
    token exists solely for the CLI to mint a PAT (`POST /api/me/tokens`) and is
    then discarded. Registered by `ConnectedAppRegistrar.registerCliClient()`.
    Spec: `specs/kelta-cli/2-browser-login.md`.
+8. Sign-out: the SPA routes through `/logout/saml2/initiate` (SAML SLO, else a
+   passthrough) to the OIDC end-session endpoint `/connect/logout` with
+   `id_token_hint` and `post_logout_redirect_uri={ui-origin}/{tenant-slug}?logged_out=true`.
+   No post-logout URIs are registered on `kelta-platform`; for that client ONLY,
+   `PlatformPostLogoutRedirectUriValidator` accepts any path/query on the origin of
+   a registered redirect URI or an `https` verified custom domain (absolute
+   http(s), no userinfo/fragment). Other clients keep Spring's exact match. A
+   rejected URI is a 400 with no redirect — and the session is NOT ended, so an
+   over-strict rule here means sign-out silently keeps the user signed in.
+   Endpoint test: `OidcLogoutEndpointTest`.
 
 ### First-boot platform admin password
 `config/BaselineAdminPasswordInitializer` (`ApplicationRunner`) replaces the Flyway baseline's
