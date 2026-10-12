@@ -26,7 +26,7 @@ import java.util.Map;
  *
  * <p>Index naming follows the convention {@code uniq_<table>_<col1>_<col2>...}
  * (clamped to PostgreSQL's 63-character identifier limit via
- * {@link PhysicalTableStorageAdapter#buildBoundedIdentifier(String, String, String)}).
+ * {@link SqlIdentifiers#buildBoundedIdentifier(String, String, String)}).
  * Listing is filtered by the {@code uniq_<table>_} prefix so unique indexes
  * Kelta did not create (Flyway-managed primary keys, etc.) are not surfaced.
  */
@@ -62,18 +62,18 @@ public class CompositeUniqueConstraintService {
 
         List<String> columns = resolveColumns(definition, fieldNames);
         TableRef tableRef = storageAdapter.getTableRef(definition);
-        String baseTable = PhysicalTableStorageAdapter.getBaseTableName(definition);
+        String baseTable = SqlIdentifiers.getBaseTableName(definition);
         String indexName = buildIndexName(baseTable, columns);
 
         // Quote the column refs (reserved words like `user` are legal field names);
         // the index NAME stays unquoted so catalog lookups by name still match.
         String columnList = columns.stream()
-                .map(PhysicalTableStorageAdapter::quoteIdentifier)
+                .map(SqlIdentifiers::quoteIdentifier)
                 .reduce((a, b) -> a + ", " + b)
                 .orElseThrow();
 
         String sql = "CREATE UNIQUE INDEX IF NOT EXISTS "
-                + PhysicalTableStorageAdapter.sanitizeIdentifier(indexName)
+                + SqlIdentifiers.sanitizeIdentifier(indexName)
                 + " ON " + tableRef.toSql() + " (" + columnList + ")";
 
         try {
@@ -98,7 +98,7 @@ public class CompositeUniqueConstraintService {
      */
     public List<ConstraintInfo> list(CollectionDefinition definition) {
         TableRef tableRef = storageAdapter.getTableRef(definition);
-        String baseTable = PhysicalTableStorageAdapter.getBaseTableName(definition);
+        String baseTable = SqlIdentifiers.getBaseTableName(definition);
 
         String sql = "SELECT indexname, indexdef FROM pg_indexes "
                 + "WHERE schemaname = ? AND tablename = ? AND indexname LIKE ?";
@@ -130,7 +130,7 @@ public class CompositeUniqueConstraintService {
             throw new IllegalArgumentException("indexName cannot be blank");
         }
         TableRef tableRef = storageAdapter.getTableRef(definition);
-        String baseTable = PhysicalTableStorageAdapter.getBaseTableName(definition);
+        String baseTable = SqlIdentifiers.getBaseTableName(definition);
 
         Integer match = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = ? AND tablename = ? AND indexname = ?",
@@ -140,9 +140,9 @@ public class CompositeUniqueConstraintService {
         }
 
         String dropSql = "DROP INDEX " + (tableRef.isPublicSchema()
-                ? PhysicalTableStorageAdapter.sanitizeIdentifier(indexName)
+                ? SqlIdentifiers.sanitizeIdentifier(indexName)
                 : "\"" + tableRef.schema() + "\"."
-                        + PhysicalTableStorageAdapter.sanitizeIdentifier(indexName));
+                        + SqlIdentifiers.sanitizeIdentifier(indexName));
         try {
             jdbcTemplate.execute(dropSql);
             log.info("Dropped composite unique constraint '{}' on '{}'", indexName, tableRef.toSql());
@@ -170,7 +170,7 @@ public class CompositeUniqueConstraintService {
             }
             String column = definition.systemCollection()
                     ? definition.getEffectiveColumnName(fieldName)
-                    : PhysicalTableStorageAdapter.toSnakeCase(fieldName);
+                    : SqlIdentifiers.toSnakeCase(fieldName);
             columns.add(column);
         }
         return columns;
@@ -178,9 +178,9 @@ public class CompositeUniqueConstraintService {
 
     static String buildIndexName(String baseTable, List<String> columns) {
         String suffix = String.join("_", columns);
-        return PhysicalTableStorageAdapter.buildBoundedIdentifier(
+        return SqlIdentifiers.buildBoundedIdentifier(
                 INDEX_PREFIX,
-                PhysicalTableStorageAdapter.identifierPart(baseTable),
+                SqlIdentifiers.identifierPart(baseTable),
                 suffix);
     }
 
@@ -207,7 +207,7 @@ public class CompositeUniqueConstraintService {
         for (FieldDefinition f : definition.fields()) {
             String col = definition.systemCollection()
                     ? definition.getEffectiveColumnName(f.name())
-                    : PhysicalTableStorageAdapter.toSnakeCase(f.name());
+                    : SqlIdentifiers.toSnakeCase(f.name());
             columnToField.put(col, f.name());
         }
         List<String> result = new ArrayList<>(columns.size());

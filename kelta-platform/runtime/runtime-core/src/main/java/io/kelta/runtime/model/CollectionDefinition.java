@@ -253,7 +253,7 @@ public record CollectionDefinition(
 
     /**
      * Every record carries these regardless of what the collection declares. They are real,
-     * filterable columns — {@code PhysicalTableStorageAdapter#resolveColumnName} maps each to its
+     * filterable columns — {@code SqlIdentifiers#resolveColumnName} maps each to its
      * snake_case column — but they are NOT in {@link #fields()}, so {@link #hasField} returns
      * false for all of them.
      */
