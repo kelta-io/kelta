@@ -78,6 +78,11 @@ kelta:
   # Generate with: openssl rand -base64 32
   encryption:
     key: ${KELTA_ENCRYPTION_KEY:}
+  # Outbound fetches of tenant-supplied URLs (OIDC discovery) refuse non-public addresses
+  # (loopback, RFC 1918, link-local/metadata, CGNAT, ULA…). List comma-separated CIDRs here
+  # only for ranges that legitimately host such targets, e.g. a self-hosted identity provider.
+  outbound:
+    allowed-private-cidrs: ${KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS:}
   auth:
     issuer-uri: ${KELTA_AUTH_ISSUER_URI:https://auth.kelta.io}
   external-base-url: ${EXTERNAL_BASE_URL:http://localhost:8080}

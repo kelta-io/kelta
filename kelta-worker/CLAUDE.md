@@ -139,6 +139,8 @@ A presence-gated hook (secret/integration configured) uses `@ConditionalOnProper
 | Unit test | `scim/service/ScimUserServiceTest.java` |
 | Controller test | `scim/controller/ScimUserControllerTest.java` |
 | Action handler | `handler/SubmitForApprovalActionHandler.java` |
+| Write-only secret input (not a field) encrypted into a server-only field; plaintext removed before anything else sees it; blank keeps the stored value; refuse, never drop, when encryption is unconfigured | `listener/OidcProviderSecretHook.java` |
+| Fetching a tenant-supplied URL (SSRF guard: non-public addresses refused unless allow-listed, no redirects, overall deadline, size cap, tree-model JSON) | `service/OutboundUrlGuard.java` + `listener/OidcDiscoveryHook.java` |
 | Transient vs permanent failure (fail closed on the pod, never persist a terminal status for an infrastructure error, per-pod `@Scheduled` retry with capped backoff, runtime-checked enable flag) | `module/ModuleLoadFailureClassifier.java`, `module/ModuleLoadRetryScheduler.java` |
 
 ## Running Tests

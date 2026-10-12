@@ -35,8 +35,13 @@ public class SpanBodyEnrichmentFilter extends OncePerRequestFilter {
             "/actuator", "/health"
     );
 
-    private static final Pattern SENSITIVE_FIELD_PATTERN = Pattern.compile(
-            "(\"(?:password|secret|token|apiKey|api_key|creditCard|credit_card|ssn|authorization)\"\\s*:\\s*)\"[^\"]*\"",
+    /**
+     * A JSON string member whose key names secret material: any key <em>containing</em> one of the
+     * words (so {@code clientSecret}, {@code newPassword}, {@code accessToken} are covered, not just
+     * the bare words), or exactly {@code ssn}. The value pattern honours escaped quotes.
+     */
+    static final Pattern SENSITIVE_FIELD_PATTERN = Pattern.compile(
+            "(\"(?:[^\"\\\\]*(?:password|secret|token|apikey|api_key|creditcard|credit_card|authorization)[^\"\\\\]*|ssn)\"\\s*:\\s*)\"(?:[^\"\\\\]|\\\\.)*\"",
             Pattern.CASE_INSENSITIVE
     );
 
@@ -106,7 +111,8 @@ public class SpanBodyEnrichmentFilter extends OncePerRequestFilter {
         // Capture JSON-like content types
         if (contentType != null && (contentType.contains("json") || contentType.contains("text"))) {
             String body = new String(content, StandardCharsets.UTF_8);
-            return sanitize(truncate(body));
+            // Redact before truncating: a cut inside a secret value would leave it unmatched.
+            return truncate(sanitize(body));
         }
         return null;
     }
@@ -141,7 +147,7 @@ public class SpanBodyEnrichmentFilter extends OncePerRequestFilter {
         return body;
     }
 
-    private String sanitize(String body) {
+    static String sanitize(String body) {
         return SENSITIVE_FIELD_PATTERN.matcher(body).replaceAll("$1\"[REDACTED]\"");
     }
 }

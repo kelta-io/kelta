@@ -1633,8 +1633,10 @@ and from the `record.changed` payloads (`data` and `previousData`), so includes,
 flows, MCP, realtime and webhooks inherit it; it rejects a server-only field as a filter, sort or
 aggregation key with 400 (a predicate over a value the engine never returns would disclose it);
 and it drops a caller-supplied value on create/update before the before-save hooks run, so only a
-hook (e.g. `CredentialEncryptionHook`) can set one — hooks themselves
-receive the full record. Defence in depth: `JsonApiRecordSerializer.resourceObject` (the router's serializer) skips
+hook (e.g. `CredentialEncryptionHook`, `OidcProviderSecretHook`) can set one — hooks themselves
+receive the full record. Such a hook takes the secret as a write-only, non-field input, encrypts
+it into the server-only field and removes the input from the record; the `record.updated`
+payload is merged from the patch *after* the hooks, so a consumed input never reaches the event. Defence in depth: `JsonApiRecordSerializer.resourceObject` (the router's serializer) skips
 them, `CollectionSchemaController` and `OpenApiGenerator` leave them out of the API shape, and
 `SearchIndexService`, `FieldHistoryHook`, `RecordVersionHook` and `AuditBeforeSaveHook` exclude them.
 Code that needs the value (credential resolution, OIDC token exchange, connected-app/OAuth token

@@ -28,6 +28,7 @@ import io.kelta.worker.service.CollectionLifecycleManager;
 import io.kelta.worker.service.DashboardComponentValidator;
 import io.kelta.worker.service.FieldMaskingService;
 import io.kelta.worker.service.FormulaRecomputeService;
+import io.kelta.worker.service.OutboundUrlGuard;
 import io.kelta.worker.service.ParticipantShareSupport;
 import io.kelta.worker.service.S3StorageService;
 import io.kelta.worker.service.SearchIndexService;
@@ -77,9 +78,8 @@ import static org.mockito.Mockito.mock;
  * {@code FlowConfig} / {@code MailboxConfig} / {@code TenantProvisioningConfig}, before hooks
  * became discovered beans. A new platform hook is added to the expected lists here.
  *
- * <p>Two classes implement {@link BeforeSaveHook} but were never registered and still are not:
- * {@code OidcDiscoveryHook} and {@code OidcProviderSecretHook}. The exact lists below (no
- * {@code oidc-providers} key) keep it that way until that is changed on purpose.
+ * <p>{@code OidcProviderSecretHook} and {@code OidcDiscoveryHook} are the two hooks added after
+ * that capture: they had never been registered before, and were turned on deliberately.
  */
 @DisplayName("BeforeSaveHook wiring")
 class BeforeSaveHookWiringTest {
@@ -130,6 +130,7 @@ class BeforeSaveHookWiringTest {
         m.put("layout-sections", List.of("LayoutSectionRefreshHook"));
         m.put("list-views", List.of("ListViewConfigHook"));
         m.put("mailbox-templates", List.of("MailboxTemplateGuardHook"));
+        m.put("oidc-providers", List.of("OidcProviderSecretHook", "OidcDiscoveryHook"));
         m.put("page-layouts", List.of("PageLayoutConfigEventPublisher"));
         m.put("profile-field-permissions", List.of("FieldPermissionSyncHook"));
         m.put("profile-object-permissions", List.of("ProfilePermissionSyncHook"));
@@ -220,7 +221,7 @@ class BeforeSaveHookWiringTest {
             FormulaRecomputeService.class, ParticipantShareSupport.class, S3StorageService.class,
             SearchIndexService.class, SetupAuditService.class, TenantQuotaResolver.class,
             UiPageConfigValidator.class, UserInviteService.class, VectorMaintenanceService.class,
-            EncryptionService.class, CredentialTypeRegistry.class);
+            EncryptionService.class, CredentialTypeRegistry.class, OutboundUrlGuard.class);
 
     /** Collection key → the hooks registered directly on it (wildcard hooks excluded), in order. */
     private static Map<String, List<String>> registeredHooks(BeforeSaveHookRegistry registry) {
@@ -319,6 +320,27 @@ class BeforeSaveHookWiringTest {
     void hookOrdersAreDistinctPerCollection() {
         runner().run(BeforeSaveHookWiringTest::assertNoOrderTies);
         withAllIntegrations(runner()).run(BeforeSaveHookWiringTest::assertNoOrderTies);
+    }
+
+    @Test
+    @DisplayName("the OIDC provider hooks register even when no encryption key is configured")
+    void oidcHooksRegisterWithoutEncryptionKey() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(BeforeSaveHookRegistrar.class)
+                .withBean(BeforeSaveHookRegistry.class, BeforeSaveHookRegistry::new)
+                .withBean(ObjectMapper.class, () -> JsonMapper.builder().build())
+                .withBean(OutboundUrlGuard.class, () -> new OutboundUrlGuard(""))
+                .withBean(io.kelta.worker.listener.OidcProviderSecretHook.class)
+                .withBean(io.kelta.worker.listener.OidcDiscoveryHook.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(EncryptionService.class);
+                    List<String> names = context.getBean(BeforeSaveHookRegistry.class)
+                            .getHooks("oidc-providers").stream()
+                            .map(hook -> hook.getClass().getSimpleName())
+                            .toList();
+                    assertThat(names).containsExactly("OidcProviderSecretHook", "OidcDiscoveryHook");
+                });
     }
 
     @Test

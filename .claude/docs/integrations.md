@@ -614,6 +614,35 @@ FAILED SMS delivery, not a dead service.
 Per-tenant VAPID overrides could ride `TenantPushSettings` (as APNs/FCM overrides already
 do) but are platform-level in v1.
 
+## OIDC federation providers (`oidc-providers`)
+
+A tenant's external identity providers are rows of the `oidc-providers` system collection
+(`oidc_provider`), edited on the admin OIDC Providers page or through the API. kelta-auth turns
+each active row with a client id and a stored secret into an OAuth2 client registration
+(`DynamicClientRegistrationRepository`, 5-min cache), offered as an SSO button and via
+`idp_hint`; it reads rows over the worker's internal bootstrap endpoints
+(`/internal/oidc/providers`, `/internal/oidc/by-issuer`).
+
+**Client secret (write-only).** Callers send `clientSecret`, which is not a field.
+`OidcProviderSecretHook` (worker, order -100) encrypts it with the platform `EncryptionService`
+into the server-only `clientSecretEnc` and removes the plaintext before any other hook, the
+storage adapter or the `record.changed` event sees it. An absent or blank value keeps the stored
+secret (the form's "leave blank to keep"); there is no API to clear one. Without
+`KELTA_ENCRYPTION_KEY` a save that carries a secret is refused (400) rather than dropped.
+kelta-auth decrypts with the same key. The secret is never returned, filterable or logged.
+
+**Discovery.** `OidcDiscoveryHook` (order -50) fetches `<issuer>/.well-known/openid-configuration`
+on create, and on update when the issuer changes or the last discovery did not succeed, then
+fills the endpoint fields (`jwksUri`, `authorizationUri`, `tokenUri`, `userinfoUri`,
+`endSessionUri`) the admin left blank. `discoveryStatus` is `discovered`, `error` (fetch failed,
+host does not resolve, or the document names another issuer) or `blocked` (refused by the
+outbound URL guard); a failure **never blocks the save** — kelta-auth resolves endpoints itself at
+login time (overrides first, then its own discovery), and endpoints can be entered by hand. On an
+issuer change, endpoint values still equal to the previous discovery are replaced, or cleared if
+the new issuer cannot be discovered. The fetch goes through `OutboundUrlGuard` (non-public
+addresses refused unless listed in `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS`), never follows
+redirects, and is bounded (3 s connect, 5 s overall, 256 KB).
+
 ## Portal magic-link login (telehealth slice 1)
 
 Passwordless sign-in for external `user_type=PORTAL` users. kelta-auth serves the pages
