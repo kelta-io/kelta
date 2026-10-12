@@ -12,34 +12,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useApi } from '../context/ApiContext'
 import { unwrapResource, extractIncluded } from '../utils/jsonapi'
 import type { ApiClient } from '../services/apiClient'
+import { normalizeFieldType } from '../utils/normalizeFieldType'
+import type { FieldType } from '../types/collections'
 
-/**
- * Field type union covering all supported field types.
- */
-export type FieldType =
-  | 'string'
-  | 'number'
-  | 'boolean'
-  | 'date'
-  | 'datetime'
-  | 'json'
-  | 'reference'
-  | 'picklist'
-  | 'multi_picklist'
-  | 'currency'
-  | 'percent'
-  | 'auto_number'
-  | 'phone'
-  | 'email'
-  | 'url'
-  | 'rich_text'
-  | 'encrypted'
-  | 'external_id'
-  | 'geolocation'
-  | 'lookup'
-  | 'master_detail'
-  | 'formula'
-  | 'rollup_summary'
+/** Field type union covering all supported field types (canonical: `types/collections`). */
+export type { FieldType }
 
 /**
  * Field definition from the collection schema.
@@ -78,27 +55,6 @@ export interface CollectionSchema {
   /** Collection-level record versioning toggle — gates the record History tab */
   trackHistory?: boolean
   fields: FieldDefinition[]
-}
-
-/**
- * Reverse mapping from backend canonical types (uppercase) to UI types (lowercase).
- */
-const BACKEND_TYPE_TO_UI: Record<string, FieldType> = {
-  DOUBLE: 'number',
-  INTEGER: 'number',
-  LONG: 'number',
-  JSON: 'json',
-  ARRAY: 'json',
-  REFERENCE: 'master_detail',
-  LOOKUP: 'master_detail',
-}
-
-function normalizeFieldType(backendType: string): FieldType {
-  const upper = backendType.toUpperCase()
-  if (upper in BACKEND_TYPE_TO_UI) {
-    return BACKEND_TYPE_TO_UI[upper]
-  }
-  return backendType.toLowerCase() as FieldType
 }
 
 /**

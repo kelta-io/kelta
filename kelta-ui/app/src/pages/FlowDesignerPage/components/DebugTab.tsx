@@ -11,6 +11,7 @@ import { CheckCircle2, XCircle, Clock, RotateCcw, Copy, ChevronDown, ChevronUp }
 import { FlowExecutionViewer } from './FlowExecutionViewer'
 import { StepDetailPanel } from './StepDetailPanel'
 import { ExecutionTimeline } from './ExecutionTimeline'
+import { formatDuration } from '@/utils/formatDuration'
 
 interface FlowExecution {
   id: string
@@ -50,13 +51,6 @@ interface DebugTabProps {
   executionId: string
   nodes: Node[]
   edges: Edge[]
-}
-
-function formatDuration(ms: number | null): string {
-  if (ms == null) return '-'
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  return `${(ms / 60000).toFixed(1)}m`
 }
 
 function JsonViewer({ data, label }: { data: unknown; label: string }) {

@@ -20,6 +20,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useApi } from './ApiContext'
 import { useAuth } from './AuthContext'
 import type { CollectionSchema, FieldDefinition } from '../hooks/useCollectionSchema'
+import { normalizeFieldType } from '../utils/normalizeFieldType'
 
 /** Extended field definition with parent collection reference */
 export interface StoredField extends FieldDefinition {
@@ -41,25 +42,6 @@ export interface CollectionStoreValue {
 }
 
 const CollectionStoreContext = createContext<CollectionStoreValue | undefined>(undefined)
-
-// Type normalization (matches useCollectionSchema.ts)
-const BACKEND_TYPE_TO_UI: Record<string, string> = {
-  DOUBLE: 'number',
-  INTEGER: 'number',
-  LONG: 'number',
-  JSON: 'json',
-  ARRAY: 'json',
-  REFERENCE: 'master_detail',
-  LOOKUP: 'master_detail',
-}
-
-function normalizeFieldType(backendType: string): string {
-  const upper = backendType.toUpperCase()
-  if (upper in BACKEND_TYPE_TO_UI) {
-    return BACKEND_TYPE_TO_UI[upper]
-  }
-  return backendType.toLowerCase()
-}
 
 /** JSON:API resource shape */
 interface RawResource {

@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { formatDuration } from '@/utils/formatDuration'
 
 interface StepData {
   id: string
@@ -20,13 +21,6 @@ const statusColors: Record<string, string> = {
   FAILED: 'bg-red-500',
   RUNNING: 'bg-blue-500 animate-pulse',
   SKIPPED: 'bg-gray-300',
-}
-
-function formatDuration(ms: number | null): string {
-  if (ms == null) return '-'
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  return `${(ms / 60000).toFixed(1)}m`
 }
 
 export function ExecutionTimeline({ steps, selectedStepId, onStepSelect }: ExecutionTimelineProps) {

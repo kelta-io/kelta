@@ -27,26 +27,7 @@ import { CustomPage } from '../CustomPage/CustomPage'
 import { resolveHomePageSlug } from './homePage'
 import { parseResourcePath } from '@/shells/EndUserShell/navTabs'
 import type { MenuConfig, MenuItemConfig } from '@/types/config'
-
-/**
- * Format a timestamp into a human-readable relative time string.
- */
-function formatRelativeTime(timestamp: number): string {
-  const now = Date.now()
-  const diffMs = now - timestamp
-  const diffSeconds = Math.floor(diffMs / 1000)
-  const diffMinutes = Math.floor(diffSeconds / 60)
-  const diffHours = Math.floor(diffMinutes / 60)
-  const diffDays = Math.floor(diffHours / 24)
-
-  if (diffSeconds < 60) return 'just now'
-  if (diffMinutes < 60) return `${diffMinutes}m ago`
-  if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays === 1) return 'yesterday'
-  if (diffDays < 7) return `${diffDays}d ago`
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`
-  return new Date(timestamp).toLocaleDateString()
-}
+import { formatRelativeTime } from '@/utils/formatRelativeTime'
 
 /**
  * Extract collection tabs from menu config for quick actions.
@@ -192,7 +173,10 @@ export function AppHomePage(): React.ReactElement {
                       {item.collectionName}
                     </Badge>
                     <span className="whitespace-nowrap text-xs text-muted-foreground">
-                      {formatRelativeTime(item.timestamp)}
+                      {formatRelativeTime(item.timestamp, {
+                        lowercase: true,
+                        beyondWeek: 'weeks',
+                      })}
                     </span>
                     <ArrowRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                   </button>

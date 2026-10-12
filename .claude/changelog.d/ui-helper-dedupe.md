@@ -1,0 +1,1 @@
+- 2026-10-12 refactor(ui): Consolidate duplicated formatRelativeTime, formatDuration/formatLatency, normalizeFieldType and FieldType/FieldDefinition copies in kelta-ui into shared utils with table-driven tests — no user-visible output change (ui-helper-dedupe)

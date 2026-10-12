@@ -21,6 +21,7 @@ import { parseRecordVersion } from '@/components/RecordHistory/useRecordVersions
 
 import type { ApiClient } from '../../services/apiClient'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
+import { formatRelativeTime } from '@/utils/formatRelativeTime'
 
 /**
  * Approval step instance from the control plane
@@ -185,43 +186,6 @@ export interface ActivityTimelineProps {
  * Default number of entries to show before requiring "Show More"
  */
 const DEFAULT_VISIBLE_COUNT = 5
-
-/**
- * Format a date string as a relative time (e.g., "3 hours ago", "2 days ago").
- * Uses simple threshold-based formatting without external dependencies.
- */
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffSeconds = Math.floor(diffMs / 1000)
-  const diffMinutes = Math.floor(diffSeconds / 60)
-  const diffHours = Math.floor(diffMinutes / 60)
-  const diffDays = Math.floor(diffHours / 24)
-  const diffWeeks = Math.floor(diffDays / 7)
-  const diffMonths = Math.floor(diffDays / 30)
-  const diffYears = Math.floor(diffDays / 365)
-
-  if (diffSeconds < 60) {
-    return 'just now'
-  }
-  if (diffMinutes < 60) {
-    return diffMinutes === 1 ? '1 minute ago' : `${diffMinutes} minutes ago`
-  }
-  if (diffHours < 24) {
-    return diffHours === 1 ? '1 hour ago' : `${diffHours} hours ago`
-  }
-  if (diffDays < 7) {
-    return diffDays === 1 ? '1 day ago' : `${diffDays} days ago`
-  }
-  if (diffWeeks < 5) {
-    return diffWeeks === 1 ? '1 week ago' : `${diffWeeks} weeks ago`
-  }
-  if (diffMonths < 12) {
-    return diffMonths === 1 ? '1 month ago' : `${diffMonths} months ago`
-  }
-  return diffYears === 1 ? '1 year ago' : `${diffYears} years ago`
-}
 
 /**
  * Get Tailwind classes for a timeline entry type icon
@@ -760,7 +724,9 @@ export function ActivityTimeline({
                   </p>
                 )}
                 <p className="m-0 text-xs text-muted-foreground leading-snug">
-                  <time dateTime={entry.timestamp}>{formatRelativeTime(entry.timestamp)}</time>
+                  <time dateTime={entry.timestamp}>
+                    {formatRelativeTime(entry.timestamp, { style: 'long', beyondWeek: 'units' })}
+                  </time>
                 </p>
                 {entry.user && (
                   <p
