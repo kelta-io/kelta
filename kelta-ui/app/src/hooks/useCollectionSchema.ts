@@ -33,6 +33,13 @@ export interface FieldDefinition {
   referenceCollectionId?: string
   /** Type-specific config (JSONB — may arrive as parsed object or JSON string) */
   fieldTypeConfig?: string | Record<string, unknown>
+  /** Value applied to a new record when none is supplied (JSON — typed per field) */
+  defaultValue?: unknown
+  /**
+   * Validation constraints (JSON — parsed object or JSON string): min/max length or value,
+   * pattern, email/url. Read by the record form's client validation.
+   */
+  constraints?: string | Record<string, unknown>
   /** Picklist enum values (populated at runtime by form pages) */
   enumValues?: string[]
   /**

@@ -1,12 +1,42 @@
 /**
  * Pure form-state helpers for the record form (`RecordForm`): initial form data from a record
- * (or defaults for a new one) and the reverse mapping back to a JSON:API
+ * (or schema defaults for a new one) and the reverse mapping back to a JSON:API
  * attributes payload on save.
  */
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
+import { isEmptyFormValue } from './validation'
+
+/**
+ * Convert a stored/API value to what the field's control edits: date/datetime strings
+ * trimmed for HTML inputs, JSON pretty-printed as text.
+ */
+function toFormValue(field: FieldDefinition, value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (field.type === 'date') {
+      // HTML date input expects YYYY-MM-DD
+      return value.split('T')[0]
+    }
+    if (field.type === 'datetime') {
+      // HTML datetime-local input expects YYYY-MM-DDTHH:MM
+      return value.slice(0, 16)
+    }
+    if (field.type === 'boolean') {
+      return value === 'true'
+    }
+    return value
+  }
+  if (field.type === 'json' && typeof value === 'object' && value !== null) {
+    // JSON arrives parsed — edit it as text
+    return JSON.stringify(value, null, 2)
+  }
+  return value
+}
 
 /**
  * Compute initial form data from record (edit) or field defaults (create).
+ *
+ * Create: booleans start `false`; a field's schema `defaultValue` applies next; then
+ * `queryDefaults` (e.g. `?order_ref=<id>` from a related list) win over both.
  * Formats date/datetime values for HTML input compatibility and JSON values
  * as pretty-printed text for the textarea editor.
  */
@@ -21,18 +51,8 @@ export function computeInitialFormData(
     for (const field of fields) {
       const value = data[field.name]
       if (value == null) continue
-      if (typeof value === 'string') {
-        if (field.type === 'date') {
-          // HTML date input expects YYYY-MM-DD
-          data[field.name] = value.split('T')[0]
-        } else if (field.type === 'datetime') {
-          // HTML datetime-local input expects YYYY-MM-DDTHH:MM
-          data[field.name] = value.slice(0, 16)
-        }
-      } else if (field.type === 'json' && typeof value === 'object') {
-        // JSON arrives parsed — edit it as text
-        data[field.name] = JSON.stringify(value, null, 2)
-      }
+      if (field.type === 'boolean') continue
+      data[field.name] = toFormValue(field, value)
     }
     return data
   }
@@ -40,6 +60,9 @@ export function computeInitialFormData(
   for (const field of fields) {
     if (field.type === 'boolean') {
       defaults[field.name] = false
+    }
+    if (field.defaultValue !== undefined && field.defaultValue !== null) {
+      defaults[field.name] = toFormValue(field, field.defaultValue)
     }
   }
   // Apply query parameter defaults (e.g. ?order_ref=<id> from related list)
@@ -54,29 +77,54 @@ export function computeInitialFormData(
   return defaults
 }
 
+export interface BuildSaveAttributesOptions {
+  /**
+   * The form's initial values when editing an existing record. A field the user emptied
+   * whose initial value was non-empty is sent as `null` so the clear persists; without
+   * it (create), empty fields are omitted.
+   */
+  initialData?: Record<string, unknown>
+  /** Field error for unparseable JSON text (translated by the caller). */
+  invalidJsonMessage?: string
+}
+
 /**
  * Build the JSON:API attributes payload from form state. JSON fields are edited as
  * text — parse them back to structured JSON here; a parse failure becomes a field
  * error so the raw string never overwrites structured data.
+ *
+ * Empty values (`undefined` / `''`) are omitted, except on update for a field that was
+ * non-empty when the form loaded: that is a deliberate clear, sent as `null`.
  */
 export function buildSaveAttributes(
   editableFields: FieldDefinition[],
-  formData: Record<string, unknown>
+  formData: Record<string, unknown>,
+  options: BuildSaveAttributesOptions = {}
 ): { attributes: Record<string, unknown>; errors: Record<string, string> } {
+  const { initialData, invalidJsonMessage = 'Invalid JSON' } = options
   const attributes: Record<string, unknown> = {}
   const errors: Record<string, string> = {}
   for (const field of editableFields) {
     const value = formData[field.name]
-    if (value === undefined || value === '') continue
+    if (value === undefined || value === '' || (field.type === 'json' && isBlankText(value))) {
+      if (initialData && !isEmptyFormValue(initialData[field.name])) {
+        attributes[field.name] = null
+      }
+      continue
+    }
     if (field.type === 'json' && typeof value === 'string') {
       try {
         attributes[field.name] = JSON.parse(value)
       } catch {
-        errors[field.name] = 'Invalid JSON'
+        errors[field.name] = invalidJsonMessage
       }
       continue
     }
     attributes[field.name] = value
   }
   return { attributes, errors }
+}
+
+function isBlankText(value: unknown): boolean {
+  return typeof value === 'string' && value.trim() === ''
 }

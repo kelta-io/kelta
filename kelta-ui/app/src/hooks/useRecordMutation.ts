@@ -16,8 +16,11 @@ import type { CollectionRecord } from './useCollectionRecords'
 export interface UseRecordMutationOptions {
   /** Collection name (URL slug) */
   collectionName: string
-  /** Callback on successful mutation */
-  onSuccess?: () => void
+  /**
+   * Callback on successful mutation. Create / update / patch pass the saved record
+   * (create: the new record, so a caller can navigate to it); delete passes nothing.
+   */
+  onSuccess?: (record?: CollectionRecord) => void
   /** Callback on mutation error */
   onError?: (error: Error) => void
 }
@@ -100,9 +103,9 @@ export function useRecordMutation(options: UseRecordMutationOptions): UseRecordM
       const response = await apiClient.post(`/api/${collectionName}`, body)
       return unwrapResource<CollectionRecord>(response)
     },
-    onSuccess: () => {
+    onSuccess: (record: CollectionRecord) => {
       invalidateRecords()
-      onSuccess?.()
+      onSuccess?.(record)
     },
     onError: handleError,
   })
@@ -125,9 +128,9 @@ export function useRecordMutation(options: UseRecordMutationOptions): UseRecordM
       const response = await apiClient.put(`/api/${collectionName}/${id}`, body, ifMatch)
       return unwrapResource<CollectionRecord>(response)
     },
-    onSuccess: () => {
+    onSuccess: (record: CollectionRecord) => {
       invalidateRecords()
-      onSuccess?.()
+      onSuccess?.(record)
     },
     onError: handleError,
   })
@@ -152,9 +155,9 @@ export function useRecordMutation(options: UseRecordMutationOptions): UseRecordM
       const response = await apiClient.patch(`/api/${collectionName}/${id}`, body, ifMatch)
       return unwrapResource<CollectionRecord>(response)
     },
-    onSuccess: () => {
+    onSuccess: (record: CollectionRecord) => {
       invalidateRecords()
-      onSuccess?.()
+      onSuccess?.(record)
     },
     onError: handleError,
   })

@@ -231,8 +231,9 @@ export class RecordVariant extends BasePage {
   }
 
   /**
-   * The inline error under a field. Admin validates on the client (`error-<name>`); end-user
-   * shows the server's JSON:API field error (`field-error-<name>`). Both are `role="alert"`.
+   * The inline error under a field. Both stacks validate on the client; admin renders it as
+   * `error-<name>`, the shared record form core (end-user) as `field-error-<name>` — which also
+   * carries a server JSON:API field error. Both are `role="alert"`.
    */
   fieldError(name: string): Locator {
     return this.kind === "admin"

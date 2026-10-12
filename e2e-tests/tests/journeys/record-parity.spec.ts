@@ -216,10 +216,6 @@ test.describe("Record parity (admin vs end-user)", () => {
       });
 
       test("create lands on the new record's detail page", async ({ page }) => {
-        test.fixme(
-          variant === "enduser",
-          "End-user form navigates to the list after create; the target is the new record's detail page, as on admin.",
-        );
         const title = uniqueTitle(variant, "landing");
 
         await ui.gotoNew(schema.records);
@@ -272,10 +268,6 @@ test.describe("Record parity (admin vs end-user)", () => {
       });
 
       test("clearing an optional field persists the empty value", async ({ page }) => {
-        test.fixme(
-          variant === "enduser",
-          "End-user form leaves empty values out of the save payload, so clearing a field does not persist.",
-        );
         const title = uniqueTitle(variant, "clear");
         const id = await seedRecord(title, 7);
 

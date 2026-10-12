@@ -2,22 +2,27 @@
  * useRecordFormState — the state side of the record form core.
  *
  * Owns the form values and field errors, hosts the client layout-rule engine
- * (`useLayoutRules`), and implements field change and save (layout-rule
- * `onBeforeSave` gate → JSON parse → `useRecordMutation` create/update →
- * server field errors mapped back onto fields). On success it navigates via
- * the caller's `routes`.
+ * (`useLayoutRules`, fed the layout's rules AND the collection's client-enforced
+ * validation rules), and implements field change, field blur (`onBlur` rules)
+ * and save (per-field client validation → layout-rule `onBeforeSave` gate →
+ * JSON parse → `useRecordMutation` create/update, an emptied field sent as
+ * `null` on update → server field errors mapped back onto fields). On success
+ * it navigates via the caller's `routes` — create to the NEW record's detail
+ * page, edit back to the record's detail page.
  *
  * Must run in a component keyed on `useRecordFormModel().formKey`: the
  * `useState` initializer reads `initialData` once, on mount.
  *
  * Moved from `ObjectFormPage`'s `ObjectFormBody` (record-stack convergence P2);
- * behavior is unchanged.
+ * P3 ported the admin form's correctness features listed above.
  */
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLayoutRules } from '@kelta/components'
 import type { UseLayoutRulesResult } from '@kelta/components'
+import type { CollectionValidationRule } from '@kelta/sdk'
+import { useI18n } from '@/context/I18nContext'
 import { dtosToLayoutRules } from '@/utils/layoutRules'
 import { useRecordMutation } from '@/hooks/useRecordMutation'
 import { useToast } from '@/components/Toast'
@@ -26,6 +31,7 @@ import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { PageLayoutDto } from '@/hooks/usePageLayout'
 import { buildSaveAttributes } from './formData'
 import { READ_ONLY_TYPES, SYSTEM_FIELDS } from './formFieldTypes'
+import { validateFormValues } from './validation'
 import type { RecordFormRoutes } from './RecordForm'
 
 export interface UseRecordFormStateOptions {
@@ -41,6 +47,8 @@ export interface UseRecordFormStateOptions {
   layout?: PageLayoutDto | null
   /** Currently selected record type ID — sent as `recordTypeId` on save */
   selectedRecordTypeId?: string
+  /** Collection validation rules with `enforceOnClient` (from `useRecordFormModel`). */
+  validationRules?: CollectionValidationRule[]
 }
 
 export interface RecordFormState {
@@ -51,6 +59,8 @@ export interface RecordFormState {
   /** Non-system, non-read-only-type fields shown on the form. */
   displayFields: FieldDefinition[]
   handleFieldChange: (name: string, value: unknown) => void
+  /** Runs the client rules' `onBlur` event for a field (e.g. TRANSFORM rules). */
+  handleFieldBlur: (name: string) => void
   handleSave: () => void
   isSaving: boolean
 }
@@ -65,15 +75,17 @@ export function useRecordFormState({
   isFieldEditable,
   layout,
   selectedRecordTypeId,
+  validationRules,
 }: UseRecordFormStateOptions): RecordFormState {
   const navigate = useNavigate()
   const { showToast } = useToast()
+  const { t } = useI18n()
   const [formData, setFormData] = useState<Record<string, unknown>>(initialData)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
   // Layout client-side rules engine: compute/validate/default/transform rules
-  // attached to the resolved layout. The engine is no-op when the layout has
-  // no rules (engine.enabled === false).
+  // attached to the resolved layout, plus the collection's validation rules marked
+  // enforceOnClient. The engine is no-op when there are neither.
   const layoutRules = useMemo(() => dtosToLayoutRules(layout?.rules, ''), [layout?.rules])
   const setFieldValueForEngine = useCallback((name: string, value: unknown) => {
     setFormData((prev) => ({ ...prev, [name]: value }))
@@ -91,6 +103,7 @@ export function useRecordFormState({
   }, [])
   const ruleEngine = useLayoutRules({
     rules: layoutRules,
+    validationRules,
     values: formData,
     setFieldValue: setFieldValueForEngine,
     setFieldError: setFieldErrorForEngine,
@@ -115,15 +128,16 @@ export function useRecordFormState({
   // Mutations
   const mutations = useRecordMutation({
     collectionName,
-    onSuccess: () => {
+    onSuccess: (saved) => {
       if (isNew) {
-        navigate(routes.list)
+        // Land on the new record; fall back to the list if the API returned no id.
+        navigate(saved?.id ? routes.detail(String(saved.id)) : routes.list)
       } else {
         navigate(routes.detail(recordId!))
       }
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to save record', 'error')
+      showToast(error.message || t('recordForm.saveFailed'), 'error')
       if (error instanceof ApiError && error.fieldErrors.length > 0) {
         const serverErrors: Record<string, string> = {}
         for (const fe of error.fieldErrors) {
@@ -166,20 +180,39 @@ export function useRecordFormState({
     [ruleEngine]
   )
 
+  const handleFieldBlur = useCallback(
+    (name: string) => {
+      ruleEngine.onFieldBlur(name, formDataRef.current)
+    },
+    [ruleEngine]
+  )
+
   // Handle save
   const handleSave = useCallback(() => {
+    // Per-field client validation (required, format, configured constraints) on
+    // the fields the user can edit. Advisory — the worker re-validates.
+    const fieldErrors = validateFormValues(editableFields, formData, t)
+    if (Object.keys(fieldErrors).length > 0) {
+      setFormErrors((prev) => ({ ...prev, ...fieldErrors }))
+      showToast(t('errors.validation'), 'error')
+      return
+    }
+
     // Layout-rule beforeSave gate: collect violations from the engine and
     // block submit for ERROR severity. Warnings allow submit to proceed.
     const ruleResult = ruleEngine.runBeforeSave()
     if (ruleResult.blocked) {
-      showToast(ruleResult.violations[0]?.message ?? 'Validation failed', 'error')
+      showToast(ruleResult.violations[0]?.message ?? t('recordForm.validationFailed'), 'error')
       return
     }
 
-    const { attributes, errors } = buildSaveAttributes(editableFields, formData)
+    const { attributes, errors } = buildSaveAttributes(editableFields, formData, {
+      initialData: isNew ? undefined : initialData,
+      invalidJsonMessage: t('resourceForm.validation.invalidJson'),
+    })
     if (Object.keys(errors).length > 0) {
       setFormErrors((prev) => ({ ...prev, ...errors }))
-      showToast('Fix invalid JSON before saving', 'error')
+      showToast(t('recordForm.fixInvalidJson'), 'error')
       return
     }
 
@@ -196,12 +229,14 @@ export function useRecordFormState({
   }, [
     editableFields,
     formData,
+    initialData,
     isNew,
     mutations,
     recordId,
     selectedRecordTypeId,
     ruleEngine,
     showToast,
+    t,
   ])
 
   const isSaving = mutations.create.isPending || mutations.update.isPending
@@ -212,6 +247,7 @@ export function useRecordFormState({
     ruleEngine,
     displayFields,
     handleFieldChange,
+    handleFieldBlur,
     handleSave,
     isSaving,
   }

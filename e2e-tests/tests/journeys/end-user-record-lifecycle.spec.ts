@@ -40,8 +40,11 @@ test.describe("End-User Record Lifecycle Journey", () => {
     await formPage.fillField("title", recordTitle);
     await formPage.save();
 
-    // Should navigate to the record detail or list after save
-    await page.waitForURL(new RegExp(`/app/o/${collectionName}`));
+    // Create lands on the new record's detail page. Wait until the URL has left
+    // the /new form — a bare `/app/o/<collection>` pattern already matches it.
+    await page.waitForURL(
+      new RegExp(`/app/o/${collectionName}(?:/(?!new$)[^/]+)?$`),
+    );
 
     // Step 3: View the created record
     // Extract the record ID from the URL if we landed on a detail page
