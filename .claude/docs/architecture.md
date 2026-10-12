@@ -869,9 +869,12 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   route in `kelta-gateway/.../service/RouteConfigService.registerStaticRoutes()` (and
   `config/RouteInitializer.registerStaticRoutes()`) or the gateway returns **404**. Sub-paths
   under an existing segment need no new route. Static-route segments are reserved: a tenant
-  collection cannot be created with (or renamed to) one of those names
-  (`ReservedCollectionNameHook`, backed by the worker's `GatewayStaticRoutes` copy, which
-  `GatewayStaticRoutesSyncTest` keeps in sync with the gateway).
+  collection cannot be created with one of those names (`ReservedCollectionNameHook`, backed
+  by the worker's `GatewayStaticRoutes` copy, which `GatewayStaticRoutesSyncTest` keeps in sync
+  with the gateway). A collection's name is fixed once created — `CollectionLifecycleHook`
+  rejects an update that changes it, because the physical table, API path, gateway route and
+  name-keyed references (lookup `reference_target`, menu paths, search index) all derive from
+  it and none follow a rename.
 - **Public (unauthenticated) endpoint**: to expose a path with no JWT, add its prefix to
   `kelta.gateway.security.unauthenticated-paths` (all methods) or `public-paths` (GET/HEAD only)
   in the gateway `application.yml`, *and* register its worker static route. Example: mass-email
