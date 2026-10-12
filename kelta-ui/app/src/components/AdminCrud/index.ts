@@ -16,3 +16,5 @@ export {
   type UpdateVariables,
 } from './useCrudMutations'
 export { useAdminCrud } from './useAdminCrud'
+export { CrudNumberField, type CrudNumberFieldProps } from './CrudNumberField'
+export { useCrudFormState } from './crudFormState'

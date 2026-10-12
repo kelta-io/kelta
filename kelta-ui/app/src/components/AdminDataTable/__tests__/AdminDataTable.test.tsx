@@ -89,6 +89,21 @@ describe('AdminDataTable', () => {
     expect(screen.getByTestId('admin-data-table-filter')).toBeInTheDocument()
   })
 
+  it('hides the filter toggle when filterable is false', () => {
+    render(
+      <AdminDataTable
+        tableId="t5b"
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => r.id}
+        filterable={false}
+      />
+    )
+    expect(screen.queryByTestId('admin-data-table-filter-toggle')).toBeNull()
+    expect(screen.queryByTestId('admin-data-table-filter')).toBeNull()
+    expect(screen.getAllByTestId(/^admin-data-table-row-/)).toHaveLength(3)
+  })
+
   it('renders empty message when no rows', () => {
     render(
       <AdminDataTable

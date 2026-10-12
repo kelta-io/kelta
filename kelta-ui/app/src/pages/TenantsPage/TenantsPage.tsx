@@ -3,18 +3,30 @@
  *
  * Platform admin page for managing tenants. Provides CRUD operations,
  * status management (suspend/activate), and displays tenant metadata.
+ * Built on the shared AdminCrud building block (create/edit only — tenants
+ * are suspended, never deleted, from this page).
  *
  * Requirements:
  * - A13: Tenant Administration UI
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useState, useCallback, useMemo } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
 import type { CreateTenantRequest, UpdateTenantRequest } from '@kelta/sdk'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { useToast, ConfirmDialog } from '../../components'
 import { cn } from '@/lib/utils'
+import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
+import {
+  AdminCrudPage,
+  CrudFormDialog,
+  CrudNumberField,
+  CrudSelectField,
+  CrudTextField,
+  useAdminCrud,
+} from '../../components/AdminCrud'
 import { BootstrapTokenDialog } from './BootstrapTokenDialog'
 
 /**
@@ -81,27 +93,6 @@ function parseLimits(limitsJson?: string): GovernorLimitsData {
 }
 
 /**
- * Form data for creating/editing a tenant
- */
-interface TenantFormData {
-  slug: string
-  name: string
-  edition: string
-  limits: GovernorLimitsData
-  adminEmail: string
-}
-
-/**
- * Form validation errors
- */
-interface FormErrors {
-  slug?: string
-  name?: string
-  edition?: string
-  adminEmail?: string
-}
-
-/**
  * Props for TenantsPage component
  */
 export interface TenantsPageProps {
@@ -110,38 +101,57 @@ export interface TenantsPageProps {
 
 const VALID_EDITIONS = ['FREE', 'PROFESSIONAL', 'ENTERPRISE', 'UNLIMITED']
 
+const EDITION_OPTIONS = VALID_EDITIONS.map((edition) => ({ value: edition, label: edition }))
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/
 
-function validateForm(data: TenantFormData, isEditing: boolean): FormErrors {
-  const errors: FormErrors = {}
-
-  if (!isEditing) {
-    if (!data.slug.trim()) {
-      errors.slug = 'Tenant slug is required'
-    } else if (data.slug.length > 50) {
-      errors.slug = 'Slug must be 50 characters or less'
-    } else if (!/^[a-z][a-z0-9-]*$/.test(data.slug)) {
-      errors.slug =
-        'Slug must be lowercase, start with a letter, and contain only letters, numbers, and hyphens'
-    }
-  }
-
-  if (!data.name.trim()) {
-    errors.name = 'Tenant name is required'
-  } else if (data.name.length > 100) {
-    errors.name = 'Name must be 100 characters or less'
-  }
-
-  if (!VALID_EDITIONS.includes(data.edition)) {
-    errors.edition = 'Invalid edition'
-  }
-
-  if (!isEditing && data.adminEmail.trim() && !EMAIL_PATTERN.test(data.adminEmail.trim())) {
-    errors.adminEmail = 'Enter a valid email address'
-  }
-
-  return errors
+/**
+ * Slug and admin email are only entered (and validated) on create; an edit
+ * accepts whatever the tenant already has.
+ */
+function buildTenantSchema(isEditing: boolean) {
+  return z.object({
+    slug: z.string().superRefine((value, ctx) => {
+      if (isEditing) return
+      if (!value.trim()) {
+        ctx.addIssue({ code: 'custom', message: 'Tenant slug is required' })
+      } else if (value.length > 50) {
+        ctx.addIssue({ code: 'custom', message: 'Slug must be 50 characters or less' })
+      } else if (!/^[a-z][a-z0-9-]*$/.test(value)) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'Slug must be lowercase, start with a letter, and contain only letters, numbers, and hyphens',
+        })
+      }
+    }),
+    name: z.string().superRefine((value, ctx) => {
+      if (!value.trim()) {
+        ctx.addIssue({ code: 'custom', message: 'Tenant name is required' })
+      } else if (value.length > 100) {
+        ctx.addIssue({ code: 'custom', message: 'Name must be 100 characters or less' })
+      }
+    }),
+    edition: z.string().refine((value) => VALID_EDITIONS.includes(value), 'Invalid edition'),
+    adminEmail: z
+      .string()
+      .refine(
+        (value) => isEditing || !value.trim() || EMAIL_PATTERN.test(value.trim()),
+        'Enter a valid email address'
+      ),
+    limits: z.object({
+      apiCallsPerDay: z.number(),
+      storageGb: z.number(),
+      maxUsers: z.number(),
+      maxCollections: z.number(),
+      maxFieldsPerCollection: z.number(),
+      maxWorkflows: z.number(),
+      maxReports: z.number(),
+    }),
+  })
 }
+
+type TenantFormData = z.infer<ReturnType<typeof buildTenantSchema>>
 
 /** Limit field descriptor for rendering */
 interface LimitField {
@@ -161,296 +171,10 @@ const LIMIT_FIELDS: LimitField[] = [
   { key: 'maxReports', label: 'Max Reports', min: 0, max: 10_000 },
 ]
 
-/**
- * TenantForm Component — Modal form for creating and editing tenants.
- */
-interface TenantFormProps {
-  tenant?: Tenant
-  onSubmit: (data: TenantFormData) => void
-  onCancel: () => void
-  isSubmitting: boolean
-}
-
-function TenantForm({
-  tenant,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: TenantFormProps): React.ReactElement {
-  const isEditing = !!tenant
-  const [formData, setFormData] = useState<TenantFormData>({
-    slug: tenant?.slug ?? '',
-    name: tenant?.name ?? '',
-    edition: tenant?.edition ?? 'PROFESSIONAL',
-    limits: parseLimits(tenant?.limits),
-    adminEmail: '',
-  })
-  const [errors, setErrors] = useState<FormErrors>({})
-  const [touched, setTouched] = useState<Record<string, boolean>>({})
-  const nameInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    nameInputRef.current?.focus()
-  }, [])
-
-  const handleChange = useCallback(
-    (field: 'slug' | 'name' | 'edition' | 'adminEmail', value: string) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-      if (errors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: undefined }))
-      }
-    },
-    [errors]
-  )
-
-  const handleLimitChange = useCallback((key: keyof GovernorLimitsData, value: string) => {
-    const numValue = value === '' ? 0 : parseInt(value, 10)
-    if (!isNaN(numValue)) {
-      setFormData((prev) => ({
-        ...prev,
-        limits: { ...prev.limits, [key]: numValue },
-      }))
-    }
-  }, [])
-
-  const handleBlur = useCallback(
-    (field: 'slug' | 'name' | 'edition' | 'adminEmail') => {
-      setTouched((prev) => ({ ...prev, [field]: true }))
-      const validationErrors = validateForm(formData, isEditing)
-      if (validationErrors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: validationErrors[field] }))
-      }
-    },
-    [formData, isEditing]
-  )
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const validationErrors = validateForm(formData, isEditing)
-      setErrors(validationErrors)
-      setTouched({ slug: true, name: true, edition: true, adminEmail: true })
-      if (Object.keys(validationErrors).length === 0) {
-        onSubmit(formData)
-      }
-    },
-    [formData, onSubmit, isEditing]
-  )
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel()
-      }
-    },
-    [onCancel]
-  )
-
-  const title = isEditing ? 'Edit Tenant' : 'Create Tenant'
-
-  return (
-    <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={handleKeyDown}
-      data-testid="tenant-form-overlay"
-      role="presentation"
-    >
-      <div
-        className="w-full max-w-[600px] max-h-[90vh] overflow-y-auto rounded-lg bg-card shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tenant-form-title"
-        data-testid="tenant-form-modal"
-      >
-        <div className="flex items-center justify-between border-b border-border p-6">
-          <h2 id="tenant-form-title" className="m-0 text-lg font-semibold text-foreground">
-            {title}
-          </h2>
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={onCancel}
-            aria-label="Close"
-            data-testid="tenant-form-close"
-          >
-            &times;
-          </button>
-        </div>
-        <div className="p-6">
-          <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-            {!isEditing && (
-              <div className="flex flex-col gap-1">
-                <label htmlFor="tenant-slug" className="text-sm font-medium text-foreground">
-                  Slug
-                  <span className="ml-0.5 text-destructive" aria-hidden="true">
-                    *
-                  </span>
-                </label>
-                <input
-                  id="tenant-slug"
-                  type="text"
-                  className={cn(
-                    'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-                    touched.slug && errors.slug ? 'border-destructive' : 'border-border'
-                  )}
-                  value={formData.slug}
-                  onChange={(e) => handleChange('slug', e.target.value)}
-                  onBlur={() => handleBlur('slug')}
-                  placeholder="e.g., acme-corp"
-                  aria-required="true"
-                  aria-invalid={touched.slug && !!errors.slug}
-                  disabled={isSubmitting}
-                  data-testid="tenant-slug-input"
-                />
-                {touched.slug && errors.slug && (
-                  <span className="mt-1 block text-xs text-destructive" role="alert">
-                    {errors.slug}
-                  </span>
-                )}
-              </div>
-            )}
-
-            <div className="flex flex-col gap-1">
-              <label htmlFor="tenant-name" className="text-sm font-medium text-foreground">
-                Name
-                <span className="ml-0.5 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                ref={nameInputRef}
-                id="tenant-name"
-                type="text"
-                className={cn(
-                  'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-                  touched.name && errors.name ? 'border-destructive' : 'border-border'
-                )}
-                value={formData.name}
-                onChange={(e) => handleChange('name', e.target.value)}
-                onBlur={() => handleBlur('name')}
-                placeholder="e.g., Acme Corporation"
-                aria-required="true"
-                aria-invalid={touched.name && !!errors.name}
-                disabled={isSubmitting}
-                data-testid="tenant-name-input"
-              />
-              {touched.name && errors.name && (
-                <span className="mt-1 block text-xs text-destructive" role="alert">
-                  {errors.name}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label htmlFor="tenant-edition" className="text-sm font-medium text-foreground">
-                Edition
-              </label>
-              <select
-                id="tenant-edition"
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                value={formData.edition}
-                onChange={(e) => handleChange('edition', e.target.value)}
-                disabled={isSubmitting}
-                data-testid="tenant-edition-select"
-              >
-                {VALID_EDITIONS.map((edition) => (
-                  <option key={edition} value={edition}>
-                    {edition}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {!isEditing && (
-              <div className="flex flex-col gap-1">
-                <label htmlFor="tenant-admin-email" className="text-sm font-medium text-foreground">
-                  Admin email
-                </label>
-                <input
-                  id="tenant-admin-email"
-                  type="email"
-                  className={cn(
-                    'w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-                    touched.adminEmail && errors.adminEmail ? 'border-destructive' : 'border-border'
-                  )}
-                  value={formData.adminEmail}
-                  onChange={(e) => handleChange('adminEmail', e.target.value)}
-                  onBlur={() => handleBlur('adminEmail')}
-                  placeholder="owner@example.com"
-                  aria-invalid={touched.adminEmail && !!errors.adminEmail}
-                  aria-describedby="tenant-admin-email-hint"
-                  disabled={isSubmitting}
-                  data-testid="tenant-admin-email-input"
-                />
-                <span id="tenant-admin-email-hint" className="text-xs text-muted-foreground">
-                  The tenant admin has no password until claimed. Enter an email to send the invite
-                  now, or invite later from this page.
-                </span>
-                {touched.adminEmail && errors.adminEmail && (
-                  <span className="mt-1 block text-xs text-destructive" role="alert">
-                    {errors.adminEmail}
-                  </span>
-                )}
-              </div>
-            )}
-
-            <fieldset
-              className="m-0 rounded-md border border-border p-4"
-              data-testid="governor-limits-section"
-            >
-              <legend className="px-1 text-sm font-semibold text-foreground">
-                Governor Limits
-              </legend>
-              <div className="grid grid-cols-2 gap-4">
-                {LIMIT_FIELDS.map((field) => (
-                  <div key={field.key} className="flex flex-col gap-1">
-                    <label
-                      htmlFor={`limit-${field.key}`}
-                      className="text-xs font-medium text-muted-foreground"
-                    >
-                      {field.label}
-                    </label>
-                    <input
-                      id={`limit-${field.key}`}
-                      type="number"
-                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                      value={formData.limits[field.key]}
-                      onChange={(e) => handleLimitChange(field.key, e.target.value)}
-                      min={field.min}
-                      max={field.max}
-                      disabled={isSubmitting}
-                      data-testid={`limit-${field.key}-input`}
-                    />
-                  </div>
-                ))}
-              </div>
-            </fieldset>
-
-            <div className="mt-4 flex justify-end gap-2 border-t border-border pt-4">
-              <button
-                type="button"
-                className="rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
-                onClick={onCancel}
-                disabled={isSubmitting}
-                data-testid="tenant-form-cancel"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                disabled={isSubmitting}
-                data-testid="tenant-form-submit"
-              >
-                {isSubmitting ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  )
+/** An empty limit input means 0; anything that is not a number is ignored. */
+function parseLimitInput(raw: string): number | null {
+  const value = raw === '' ? 0 : parseInt(raw, 10)
+  return Number.isNaN(value) ? null : value
 }
 
 /**
@@ -476,6 +200,9 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
   )
 }
 
+const ACTION_BUTTON =
+  'rounded border border-border px-2 py-1 text-xs font-medium text-primary hover:border-primary hover:bg-muted'
+
 /**
  * TenantsPage Component
  *
@@ -487,8 +214,6 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
   const { keltaClient } = useApi()
   const { showToast } = useToast()
 
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingTenant, setEditingTenant] = useState<Tenant | undefined>(undefined)
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false)
   const [activateDialogOpen, setActivateDialogOpen] = useState(false)
   const [targetTenant, setTargetTenant] = useState<Tenant | null>(null)
@@ -509,9 +234,10 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
 
   const tenants = (tenantsPage?.content ?? []) as Tenant[]
 
-  // Create mutation
-  const createMutation = useMutation({
-    mutationFn: (data: TenantFormData) =>
+  // Create / update — tenants are never deleted from this page.
+  const crud = useAdminCrud<Tenant, TenantFormData>({
+    queryKey: ['tenants'],
+    create: (data) =>
       keltaClient.admin.tenants.create({
         slug: data.slug,
         name: data.name,
@@ -519,33 +245,25 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
         limits: data.limits,
         ...(data.adminEmail.trim() ? { adminEmail: data.adminEmail.trim() } : {}),
       } as CreateTenantRequest),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tenants'] })
-      showToast('Tenant created successfully.', 'success')
-      handleCloseForm()
-    },
-    onError: (error: Error) => {
-      showToast(error.message || 'Failed to create tenant.', 'error')
-    },
-  })
-
-  // Update mutation
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: TenantFormData }) =>
-      keltaClient.admin.tenants.update(id, {
+    update: (tenant, data) =>
+      keltaClient.admin.tenants.update(tenant.id, {
         name: data.name,
         edition: data.edition,
         limits: data.limits,
       } as UpdateTenantRequest),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tenants'] })
-      showToast('Tenant updated successfully.', 'success')
-      handleCloseForm()
-    },
-    onError: (error: Error) => {
-      showToast(error.message || 'Failed to update tenant.', 'error')
+    messages: {
+      created: 'Tenant created successfully.',
+      updated: 'Tenant updated successfully.',
+      deleted: '',
+      error: 'Failed to save tenant.',
+      createError: 'Failed to create tenant.',
+      updateError: 'Failed to update tenant.',
     },
   })
+
+  const editing = crud.editing
+  const isEditing = !!editing
+  const schema = useMemo(() => buildTenantSchema(isEditing), [isEditing])
 
   // Suspend mutation
   const suspendMutation = useMutation({
@@ -609,32 +327,6 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
     [inviteTenant, inviteEmail, inviteMutation]
   )
 
-  const handleCreate = useCallback(() => {
-    setEditingTenant(undefined)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleEdit = useCallback((tenant: Tenant) => {
-    setEditingTenant(tenant)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleCloseForm = useCallback(() => {
-    setIsFormOpen(false)
-    setEditingTenant(undefined)
-  }, [])
-
-  const handleFormSubmit = useCallback(
-    (data: TenantFormData) => {
-      if (editingTenant) {
-        updateMutation.mutate({ id: editingTenant.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editingTenant, createMutation, updateMutation]
-  )
-
   const handleSuspendClick = useCallback((tenant: Tenant) => {
     setTargetTenant(tenant)
     setSuspendDialogOpen(true)
@@ -657,199 +349,186 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
     }
   }, [targetTenant, activateMutation])
 
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <div className="flex min-h-[400px] items-center justify-center">
-          <LoadingSpinner size="large" label="Loading tenants..." />
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <ErrorMessage
-          error={error instanceof Error ? error : new Error('Failed to load tenants.')}
-          onRetry={() => refetch()}
-        />
-      </div>
-    )
-  }
-
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const columns = useMemo<AdminColumn<Tenant>[]>(
+    () => [
+      { id: 'slug', header: 'Slug', cellClassName: 'font-medium font-mono text-foreground' },
+      { id: 'name', header: 'Name', cellClassName: 'text-foreground' },
+      { id: 'edition', header: 'Edition', cellClassName: 'text-foreground' },
+      { id: 'status', header: 'Status', cell: (tenant) => <StatusBadge status={tenant.status} /> },
+      {
+        id: 'createdAt',
+        header: 'Created',
+        cell: (tenant) =>
+          formatDate(new Date(tenant.createdAt), {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          }),
+        cellClassName: 'whitespace-nowrap text-muted-foreground',
+      },
+    ],
+    [formatDate]
+  )
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-      <header className="flex items-center justify-between">
-        <h1 className="m-0 text-2xl font-semibold text-foreground">Tenants</h1>
+    <AdminCrudPage
+      testId={testId}
+      title="Tenants"
+      actions={
         <button
           type="button"
           className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          onClick={handleCreate}
+          onClick={crud.openCreate}
           aria-label="Create Tenant"
           data-testid="create-tenant-button"
         >
           Create Tenant
         </button>
-      </header>
-
-      {tenants.length === 0 ? (
-        <div
-          className="rounded-lg border border-border bg-card p-16 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          <p>No tenants found.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table
-            className="w-full border-collapse text-sm"
-            role="grid"
-            aria-label="Tenants"
-            data-testid="tenants-table"
-          >
-            <thead>
-              <tr role="row" className="bg-muted">
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+      }
+      isLoading={isLoading}
+      error={error}
+      onRetry={() => refetch()}
+      isEmpty={tenants.length === 0}
+      emptyMessage="No tenants found."
+      list={
+        <AdminDataTable
+          tableId="tenants"
+          testId="tenants-table"
+          ariaLabel="Tenants"
+          actionsHeader="Actions"
+          columns={columns}
+          rows={tenants}
+          rowKey={(tenant) => tenant.id}
+          rowTestId={(_, index) => `tenant-row-${index}`}
+          renderActions={(tenant, index) => (
+            <div className="flex justify-end gap-2 whitespace-nowrap">
+              <button
+                type="button"
+                className={ACTION_BUTTON}
+                onClick={() => crud.openEdit(tenant)}
+                aria-label={`Edit ${tenant.name}`}
+                data-testid={`edit-button-${index}`}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className={ACTION_BUTTON}
+                onClick={() => handleInviteClick(tenant)}
+                aria-label={`Invite admin for ${tenant.name}`}
+                data-testid={`invite-admin-button-${index}`}
+              >
+                Invite admin
+              </button>
+              <button
+                type="button"
+                className={ACTION_BUTTON}
+                onClick={() => setBootstrapTenant(tenant)}
+                aria-label={`Bootstrap token for ${tenant.name}`}
+                data-testid={`bootstrap-token-button-${index}`}
+              >
+                Bootstrap token
+              </button>
+              {tenant.status === 'ACTIVE' ? (
+                <button
+                  type="button"
+                  className="rounded border border-border px-2 py-1 text-xs font-medium text-destructive hover:border-destructive hover:bg-destructive/10"
+                  onClick={() => handleSuspendClick(tenant)}
+                  aria-label={`Suspend ${tenant.name}`}
+                  data-testid={`suspend-button-${index}`}
                 >
-                  Slug
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                  Suspend
+                </button>
+              ) : tenant.status === 'SUSPENDED' ? (
+                <button
+                  type="button"
+                  className="rounded border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-600 hover:border-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:border-emerald-400 dark:hover:bg-emerald-950"
+                  onClick={() => handleActivateClick(tenant)}
+                  aria-label={`Activate ${tenant.name}`}
+                  data-testid={`activate-button-${index}`}
                 >
-                  Name
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Edition
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Status
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Created
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {tenants.map((tenant: Tenant, index: number) => (
-                <tr
-                  key={tenant.id}
-                  role="row"
-                  className="border-b border-border transition-colors last:border-b-0 hover:bg-muted/50"
-                  data-testid={`tenant-row-${index}`}
-                >
-                  <td role="gridcell" className="px-4 py-3 font-medium font-mono text-foreground">
-                    {tenant.slug}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-foreground">
-                    {tenant.name}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-foreground">
-                    {tenant.edition}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3">
-                    <StatusBadge status={tenant.status} />
-                  </td>
-                  <td role="gridcell" className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                    {formatDate(new Date(tenant.createdAt), {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                  </td>
-                  <td role="gridcell" className="w-[1%] whitespace-nowrap px-4 py-3">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="rounded border border-border px-2 py-1 text-xs font-medium text-primary hover:border-primary hover:bg-muted"
-                        onClick={() => handleEdit(tenant)}
-                        aria-label={`Edit ${tenant.name}`}
-                        data-testid={`edit-button-${index}`}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded border border-border px-2 py-1 text-xs font-medium text-primary hover:border-primary hover:bg-muted"
-                        onClick={() => handleInviteClick(tenant)}
-                        aria-label={`Invite admin for ${tenant.name}`}
-                        data-testid={`invite-admin-button-${index}`}
-                      >
-                        Invite admin
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded border border-border px-2 py-1 text-xs font-medium text-primary hover:border-primary hover:bg-muted"
-                        onClick={() => setBootstrapTenant(tenant)}
-                        aria-label={`Bootstrap token for ${tenant.name}`}
-                        data-testid={`bootstrap-token-button-${index}`}
-                      >
-                        Bootstrap token
-                      </button>
-                      {tenant.status === 'ACTIVE' ? (
-                        <button
-                          type="button"
-                          className="rounded border border-border px-2 py-1 text-xs font-medium text-destructive hover:border-destructive hover:bg-destructive/10"
-                          onClick={() => handleSuspendClick(tenant)}
-                          aria-label={`Suspend ${tenant.name}`}
-                          data-testid={`suspend-button-${index}`}
-                        >
-                          Suspend
-                        </button>
-                      ) : tenant.status === 'SUSPENDED' ? (
-                        <button
-                          type="button"
-                          className="rounded border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-600 hover:border-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:border-emerald-400 dark:hover:bg-emerald-950"
-                          onClick={() => handleActivateClick(tenant)}
-                          aria-label={`Activate ${tenant.name}`}
-                          data-testid={`activate-button-${index}`}
-                        >
-                          Activate
-                        </button>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {isFormOpen && (
-        <TenantForm
-          tenant={editingTenant}
-          onSubmit={handleFormSubmit}
-          onCancel={handleCloseForm}
-          isSubmitting={isSubmitting}
+                  Activate
+                </button>
+              ) : null}
+            </div>
+          )}
         />
-      )}
+      }
+    >
+      <CrudFormDialog<TenantFormData>
+        open={crud.isFormOpen}
+        onClose={crud.closeForm}
+        title={isEditing ? 'Edit Tenant' : 'Create Tenant'}
+        schema={schema}
+        defaultValues={{
+          slug: editing?.slug ?? '',
+          name: editing?.name ?? '',
+          edition: editing?.edition ?? 'PROFESSIONAL',
+          limits: parseLimits(editing?.limits),
+          adminEmail: '',
+        }}
+        onSubmit={crud.submit}
+        isSubmitting={crud.isSaving}
+        testIdPrefix="tenant"
+        className="sm:max-w-[600px]"
+      >
+        {!isEditing && (
+          <CrudTextField<TenantFormData>
+            name="slug"
+            id="tenant-slug"
+            label="Slug"
+            required
+            placeholder="e.g., acme-corp"
+            testId="tenant-slug-input"
+          />
+        )}
+        <CrudTextField<TenantFormData>
+          name="name"
+          id="tenant-name"
+          label="Name"
+          required
+          placeholder="e.g., Acme Corporation"
+          testId="tenant-name-input"
+        />
+        <CrudSelectField<TenantFormData>
+          name="edition"
+          id="tenant-edition"
+          label="Edition"
+          options={EDITION_OPTIONS}
+          testId="tenant-edition-select"
+        />
+        {!isEditing && (
+          <CrudTextField<TenantFormData>
+            name="adminEmail"
+            id="tenant-admin-email"
+            label="Admin email"
+            type="email"
+            placeholder="owner@example.com"
+            hint="The tenant admin has no password until claimed. Enter an email to send the invite now, or invite later from this page."
+            testId="tenant-admin-email-input"
+          />
+        )}
+        <fieldset
+          className="m-0 rounded-md border border-border p-4"
+          data-testid="governor-limits-section"
+        >
+          <legend className="px-1 text-sm font-semibold text-foreground">Governor Limits</legend>
+          <div className="grid grid-cols-2 gap-4">
+            {LIMIT_FIELDS.map((field) => (
+              <CrudNumberField<TenantFormData>
+                key={field.key}
+                name={`limits.${field.key}`}
+                id={`limit-${field.key}`}
+                label={field.label}
+                min={field.min}
+                max={field.max}
+                parse={parseLimitInput}
+                testId={`limit-${field.key}-input`}
+              />
+            ))}
+          </div>
+        </fieldset>
+      </CrudFormDialog>
 
       {inviteTenant && (
         <div
@@ -938,7 +617,7 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
           setTargetTenant(null)
         }}
       />
-    </div>
+    </AdminCrudPage>
   )
 }
 

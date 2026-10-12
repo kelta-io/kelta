@@ -88,6 +88,11 @@ export interface AdminDataTableProps<T> {
   rowTestId?: (row: T, index: number) => string
   /** Header label for the actions column. Defaults to `Actions`. */
   actionsHeader?: string
+  /**
+   * Show the in-grid Filters toggle. Defaults to true; turn it off when the
+   * page already filters server-side (the grid only sees the current page).
+   */
+  filterable?: boolean
 }
 
 export function AdminDataTable<T>({
@@ -104,6 +109,7 @@ export function AdminDataTable<T>({
   ariaLabel,
   rowTestId,
   actionsHeader = 'Actions',
+  filterable = true,
 }: AdminDataTableProps<T>): React.ReactElement {
   const [hidden, setHidden] = useState<Set<string>>(() => loadHiddenColumns(tableId))
   const [sort, setSort] = useState<AdminSortState | null>(null)
@@ -170,17 +176,19 @@ export function AdminDataTable<T>({
   return (
     <div className={cn('flex flex-col gap-2', className)} data-testid={testId}>
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          className={cn(
-            'inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted',
-            showFilter && 'bg-muted'
-          )}
-          onClick={() => setShowFilter((v) => !v)}
-          data-testid="admin-data-table-filter-toggle"
-        >
-          {hasAnyFilter ? 'Filters (active)' : 'Filters'}
-        </button>
+        {filterable && (
+          <button
+            type="button"
+            className={cn(
+              'inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted',
+              showFilter && 'bg-muted'
+            )}
+            onClick={() => setShowFilter((v) => !v)}
+            data-testid="admin-data-table-filter-toggle"
+          >
+            {hasAnyFilter ? 'Filters (active)' : 'Filters'}
+          </button>
+        )}
         <div className="ml-auto">
           <ColumnPicker
             tableId={tableId}
@@ -191,7 +199,7 @@ export function AdminDataTable<T>({
         </div>
       </div>
 
-      {showFilter && (
+      {filterable && showFilter && (
         <div
           className="rounded-md border border-border bg-muted/30 p-3"
           data-testid="admin-data-table-filter"
