@@ -601,6 +601,12 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **`useRecordMutation`'s `onSuccess` fires for every mutation** incl. inline-edit PATCHes —
   operation-specific side effects (navigate after delete, announcements) go in the specific
   handler via `mutateAsync().then(...)`.
+- **Two toast systems.** `components/Toast` (`useToast().showToast`, `ToastProvider`) and `sonner`
+  (`toast(...)` — the record list core, saved views, quick actions, the profile dialog) both render
+  in `App`. `sonner`'s viewport (`components/ui/sonner.tsx` `<Toaster />`) was not mounted until
+  2026-10-12, so every `sonner` toast before then showed nothing; a test wrapper without it still
+  shows nothing (assert on a `vi.mock('sonner')` spy or the live-region announcement). Converging
+  on one system is an open follow-up.
 
 ### CI, deploy and test infrastructure
 

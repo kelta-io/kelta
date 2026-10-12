@@ -77,4 +77,14 @@ describe('ListViewToolbar', () => {
     render(<ListViewToolbar {...defaultProps} selectedCount={0} onMassEdit={vi.fn()} />)
     expect(screen.queryByTestId('mass-edit-button')).toBeNull()
   })
+
+  it('leaves the title and New to the page header with showHeading={false}, keeping the actions', () => {
+    render(<ListViewToolbar {...defaultProps} selectedCount={2} showHeading={false} />)
+
+    expect(screen.queryByRole('heading')).toBeNull()
+    expect(screen.queryByText('(142)')).toBeNull()
+    expect(screen.queryByTestId('new-record-button')).toBeNull()
+    expect(screen.getByRole('button', { name: /Actions/ })).toBeInTheDocument()
+    expect(screen.getByText('2 records selected')).toBeInTheDocument()
+  })
 })

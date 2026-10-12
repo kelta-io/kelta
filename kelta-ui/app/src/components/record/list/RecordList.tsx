@@ -12,14 +12,15 @@
  * caller (`features`), never by `variant`; the variant only selects the `ListShell` frame and
  * the record stack its links stay in. Navigation targets come from the caller's `routes`
  * (`recordRoutes`), and variant chrome — breadcrumb, header, extra controls, a filter editor,
- * content below the table — is passed as slots, so the end-user `ObjectListPage` is a thin
- * wrapper over it.
+ * content below the table — is passed as slots (a caller whose header shows the title and New
+ * passes `toolbarHeading={false}`), so both `ObjectListPage` (end-user) and `ResourceListPage`
+ * (admin) are thin wrappers over it.
  *
  * The body is keyed on the collection: when the route switches collection (the same route
  * element is reused), selection, the applied view, the column override, density, grouping, the
  * renderer and open dialogs start fresh, and the new collection's default view applies.
  *
- * Record-stack convergence P9: moved from `ObjectListPage`. See
+ * Record-stack convergence P9: moved from `ObjectListPage`; P10: the admin list joined. See
  * `.claude/docs/conventions.md` → Component reuse.
  */
 import React from 'react'
@@ -49,8 +50,10 @@ import { MassEditDialog } from '@/components/RelatedList/MassEditDialog'
 import { KanbanBoard } from '@/components/KanbanBoard'
 import { CalendarMonthView } from '@/components/CalendarMonthView'
 import { GalleryGrid } from '@/components/GalleryGrid'
+import { SummaryStatsBar } from '@/components/SummaryStatsBar/SummaryStatsBar'
 import { usePicklistDisplayMap, usePicklistOptions } from '@/hooks/usePicklistOptions'
 import type { RecordRoutes } from '@/utils/recordRoutes'
+import { ListFilterBuilder } from './ListFilterBuilder'
 import { ListViewControls } from './ListViewControls'
 import { CALENDAR_FETCH_LIMIT } from './listViewState'
 import type { ListUrlStateMode } from './useListParams'
@@ -98,11 +101,16 @@ export interface RecordListProps {
   breadcrumb?: RecordListChromeSlot
   /** Header block above the toolbar. */
   header?: RecordListChromeSlot
+  /**
+   * Show the collection title and New in the list toolbar (default true). Pass false when the
+   * `header` slot renders them (it can read `model.permissions.canCreate` / `model.goToNew`).
+   */
+  toolbarHeading?: boolean
   /** Extra controls at the end of the view-controls row. */
   toolbarExtras?: RecordListChromeSlot
   /**
-   * A filter editor above the filter chips — e.g. a builder writing `model.setFilters`; the
-   * applied conditions are `model.params.filters`.
+   * A filter editor above the filter chips, writing `model.setFilters` (the applied conditions
+   * are `model.params.filters`). Replaces the built-in builder of `features.filterBuilder`.
    */
   filterEditor?: RecordListChromeSlot
   /** Content below the table + pagination. */
@@ -125,6 +133,7 @@ function RecordListBody({
   permissionBackPath,
   breadcrumb,
   header,
+  toolbarHeading = true,
   toolbarExtras,
   filterEditor,
   belowTable,
@@ -235,7 +244,7 @@ function RecordListBody({
         records={records}
         imageField={model.galleryImageField}
         titleField={model.titleField}
-        cardFields={model.visibleFields}
+        cardFields={model.visibleRecordFields}
         onCardClick={model.goToDetail}
         tenantSlug={tenantSlug}
         lookupDisplayMap={model.lookupDisplayMap}
@@ -295,6 +304,7 @@ function RecordListBody({
             onMassEdit={model.canMassEdit ? () => model.setMassEditOpen(true) : undefined}
             canCreate={permissions.canCreate}
             canDelete={permissions.canDelete}
+            showHeading={toolbarHeading}
             quickActionsSlot={
               on.quickActions ? (
                 <QuickActionsMenu
@@ -310,7 +320,11 @@ function RecordListBody({
       }
       filters={
         <>
-          {renderSlot(filterEditor, ctx)}
+          {filterEditor !== undefined ? (
+            renderSlot(filterEditor, ctx)
+          ) : on.filterBuilder ? (
+            <ListFilterBuilder model={model} />
+          ) : null}
           <FilterBar
             filters={model.params.filters}
             onRemoveFilter={model.removeFilter}
@@ -325,6 +339,16 @@ function RecordListBody({
                 {recordsError.message || 'Failed to load records.'}
               </AlertDescription>
             </Alert>
+          )}
+          {on.summaryStats && !model.recordsLoading && !recordsError && records.length > 0 && (
+            <SummaryStatsBar
+              totalCount={total}
+              filteredCount={records.length}
+              filters={model.params.filters}
+              visibleFields={model.visibleRecordFields}
+              records={records}
+              onClearFilters={model.clearFilters}
+            />
           )}
         </>
       }

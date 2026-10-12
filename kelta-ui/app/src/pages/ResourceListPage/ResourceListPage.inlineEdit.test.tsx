@@ -1,9 +1,12 @@
 /**
- * Inline cell edit on the admin list — optimistic concurrency (record-stack convergence P5).
+ * Inline cell edit on the admin list — optimistic concurrency (record-stack convergence P5),
+ * through the real data layer. Since P10 the admin list is the `RecordList` core with inline edit
+ * always on for a viewer who can edit (no toggle); the core's own suite is
+ * `components/record/list/RecordList.inlineEdit.test.tsx`.
  *
  * List rows carry no ETag, so a cell edit checks the row's `updatedAt` against the stored record
  * (fresh GET) and PATCHes with that GET's ETag as If-Match. A conflict reverts the cell (the
- * editor closes on the refetched list) with an error toast; nothing is written up front.
+ * editor closes on the refetched list) and says why; nothing is written up front.
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -17,7 +20,12 @@ import {
   resetMockAxios,
   createAxiosError,
 } from '../../test/testUtils'
+import { LiveRegionProvider } from '../../components/LiveRegion'
 import { ResourceListPage } from './ResourceListPage'
+
+vi.mock('@/context/CollectionStoreContext', () => ({
+  useCollectionStore: () => ({ getCollectionByName: () => undefined, collections: [] }),
+}))
 
 const LOADED_AT = '2026-10-01T10:00:00Z'
 
@@ -26,6 +34,15 @@ let stored: { name: string; updatedAt: string; etag: string }
 
 function setupHandlers() {
   mockAxios.get.mockImplementation((url: string) => {
+    if (url === '/api/me/permissions') {
+      return Promise.resolve({
+        data: {
+          systemPermissions: { MANAGE_DATA: true },
+          objectPermissions: {},
+          fieldPermissions: {},
+        },
+      })
+    }
     if (url === '/api/collections') {
       return Promise.resolve({
         data: { content: [], totalElements: 0, totalPages: 0, size: 1000, number: 0 },
@@ -86,9 +103,11 @@ function renderList() {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/resources/users']}>
         <AuthWrapper>
-          <Routes>
-            <Route path="/resources/:collection" element={<ResourceListPage />} />
-          </Routes>
+          <LiveRegionProvider>
+            <Routes>
+              <Route path="/resources/:collection" element={<ResourceListPage />} />
+            </Routes>
+          </LiveRegionProvider>
         </AuthWrapper>
       </MemoryRouter>
     </QueryClientProvider>
@@ -96,7 +115,6 @@ function renderList() {
 }
 
 async function editName(value: string) {
-  fireEvent.click(await screen.findByTestId('inline-edit-toggle'))
   fireEvent.click(await screen.findByTestId('inline-field-name'))
   const input = screen.getByRole('textbox')
   fireEvent.change(input, { target: { value } })
@@ -120,6 +138,13 @@ describe('ResourceListPage — inline cell edit concurrency', () => {
   afterEach(() => {
     cleanupAuthMocks()
     vi.clearAllMocks()
+  })
+
+  it('offers the cell editor without a toggle', async () => {
+    renderList()
+
+    expect(await screen.findByTestId('inline-field-name')).toBeInTheDocument()
+    expect(screen.queryByTestId('inline-edit-toggle')).toBeNull()
   })
 
   it("PATCHes the cell with the record's fresh ETag as If-Match", async () => {

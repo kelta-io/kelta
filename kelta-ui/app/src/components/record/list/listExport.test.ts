@@ -18,6 +18,12 @@ describe('escapeCSVValue', () => {
 
   it('serializes objects as JSON (quoted, since JSON has quotes)', () => {
     expect(escapeCSVValue({ a: 1 })).toBe('"{""a"":1}"')
+    expect(escapeCSVValue([1, 2])).toBe('"[1,2]"')
+  })
+
+  it('writes booleans as text and quotes a value with several special characters once', () => {
+    expect(escapeCSVValue(false)).toBe('false')
+    expect(escapeCSVValue('a, "b"\nc')).toBe('"a, ""b""\nc"')
   })
 })
 
@@ -31,6 +37,19 @@ describe('recordsToCsv', () => {
       [{ name: 'title', displayName: 'Title' }, { name: 'amount' }]
     )
     expect(csv).toBe('Title,amount\nFirst,3\n"Second, too",')
+  })
+
+  it('writes only the header for no records, and the record id when the id column is visible', () => {
+    expect(recordsToCsv([], [{ name: 'title', displayName: 'Title' }])).toBe('Title')
+    expect(
+      recordsToCsv(
+        [{ id: 'r-1', title: 'First' }],
+        [
+          { name: 'id', displayName: 'ID' },
+          { name: 'title', displayName: 'Title' },
+        ]
+      )
+    ).toBe('ID,Title\nr-1,First')
   })
 })
 

@@ -21,7 +21,9 @@ import {
  *
  * One collection per run carries a representative field set (string, number, boolean,
  * date, picklist, lookup, master-detail); each step seeds its own records through the
- * API and asserts what was persisted through the API, not only what the UI shows.
+ * API and asserts what was persisted through the API, not only what the UI shows. Since P10
+ * both lists are the same `RecordList` core, so the list steps (filter builder, view switcher,
+ * inline cell edit) run unchanged against both.
  */
 
 const TENANT = process.env.E2E_TENANT_SLUG || "default";
@@ -360,6 +362,61 @@ test.describe("Record parity (admin vs end-user)", () => {
         await expect(page).toHaveURL(ui.newUrlPattern(schema.records));
         await ui.waitForForm();
         await expect(ui.field(F.title.name)).toBeVisible();
+      });
+
+      test("the filter builder ANDs its conditions and keeps them in the URL", async ({ page }) => {
+        // Both lists offer the same AND-only builder (record-stack convergence P10); its `>`
+        // maps onto the list's `greater_than` and the applied conditions live in `filter=`.
+        const tag = uniqueTitle(variant, "filter");
+        const small = `${tag} small`;
+        const large = `${tag} large`;
+        await seedRecord(small, 5);
+        await seedRecord(large, 500);
+
+        await ui.gotoList(schema.records);
+        await ui.applyFilters([
+          { field: F.title.displayName, operator: "contains", value: tag },
+          { field: F.amount.displayName, operator: ">", value: "100" },
+        ]);
+
+        await expect(ui.rowWithText(large)).toBeVisible({ timeout: 15_000 });
+        await expect(ui.rowWithText(small)).toHaveCount(0);
+        await expect(page).toHaveURL(/[?&]filter=/);
+        const filter = JSON.parse(new URL(page.url()).searchParams.get("filter") ?? "[]");
+        expect(filter.map((f: { field: string; operator: string }) => [f.field, f.operator])).toEqual([
+          [F.title.name, "contains"],
+          [F.amount.name, "greater_than"],
+        ]);
+      });
+
+      test("the view switcher shows the records as a board", async () => {
+        const title = uniqueTitle(variant, "board");
+        const record = await factory.createRecord(schema.records, {
+          [F.title.name]: title,
+          [F.priority.name]: "High",
+        });
+
+        await ui.gotoListWhere(schema.records, F.title.name, title);
+        await expect(ui.rowWithText(title)).toBeVisible({ timeout: 15_000 });
+        await ui.switchView("kanban");
+
+        await expect(ui.kanbanBoard).toBeVisible();
+        await expect(ui.kanbanCard("High", record.id)).toContainText(title);
+      });
+
+      test("an inline cell edit persists", async () => {
+        const title = uniqueTitle(variant, "inline");
+        const id = await seedRecord(title, 1);
+
+        await ui.gotoListWhere(schema.records, F.title.name, title);
+        await expect(ui.rowWithText(title)).toBeVisible({ timeout: 15_000 });
+        await ui.editCell(title, F.amount.name, "64");
+
+        await expect
+          .poll(async () =>
+            Number((await factory.getRecord(schema.records, id)).attributes[F.amount.name]),
+          )
+          .toBe(64);
       });
 
       test("delete removes the record and returns to the list", async ({ page }) => {

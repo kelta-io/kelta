@@ -32,9 +32,9 @@ function escapeRegExp(text: string): string {
  * Selectors are each stack's existing ones — no test ids were added for this. What the two
  * stacks share is used directly: both create/edit pages render the shared `RecordForm` core
  * (`form-fields`, `save-button`, `cancel-button`, controls with `id="field-<name>"`, errors
- * `field-error-<name>`), and both lists render the shared ObjectDataTable
- * (`data-testid="data-table"`). Everything else (list toolbar, detail page) is mapped per
- * variant below.
+ * `field-error-<name>`), and both lists are the shared `RecordList` core (the ObjectDataTable
+ * `data-testid="data-table"`, the filter builder, the view-type switcher, inline cell edit).
+ * Everything else (the list's New button, the detail page) is mapped per variant below.
  */
 export class RecordVariant extends BasePage {
   constructor(
@@ -104,6 +104,26 @@ export class RecordVariant extends BasePage {
     await this.waitForLoadingComplete();
   }
 
+  /**
+   * The list opened on a deep-linked filter — the shared list URL format (`filter=` JSON array of
+   * `{ id, field, operator, value }`) both stacks read, so a step sees just its own records.
+   */
+  async gotoListWhere(
+    collection: string,
+    field: string,
+    value: string,
+  ): Promise<void> {
+    const filter = JSON.stringify([
+      { id: "f1", field, operator: "equals", value },
+    ]);
+    await this.page.goto(
+      this.tenantUrl(
+        `${this.collectionPath(collection)}?filter=${encodeURIComponent(filter)}`,
+      ),
+    );
+    await this.waitForLoadingComplete();
+  }
+
   /** "New" on the list toolbar. */
   get newButton(): Locator {
     return this.kind === "admin"
@@ -131,6 +151,64 @@ export class RecordVariant extends BasePage {
   /** The list row whose cells contain `text` (e.g. a record's unique title). */
   rowWithText(text: string): Locator {
     return this.rows.filter({ hasText: text });
+  }
+
+  /**
+   * Apply conditions through the list's filter builder (both stacks: `RecordListFeatures`
+   * `filterBuilder`). `field` is the field's display name, `operator` the builder's label
+   * (`equals`, `contains`, `>`, `<=`, …). The builder ANDs its conditions.
+   */
+  async applyFilters(
+    clauses: Array<{ field: string; operator: string; value: string }>,
+  ): Promise<void> {
+    await this.testId("filter-toggle").click();
+    const panel = this.testId("list-filter-builder");
+    await panel.waitFor({ state: "visible" });
+    for (const [i, clause] of clauses.entries()) {
+      await panel.getByTestId("list-filter-add").click();
+      await panel.getByTestId(`list-filter-field-${i}`).click();
+      await this.page
+        .getByRole("option", { name: clause.field, exact: true })
+        .click();
+      await panel.getByTestId(`list-filter-op-${i}`).click();
+      await this.page
+        .getByRole("option", { name: clause.operator, exact: true })
+        .click();
+      await panel.getByTestId(`list-filter-value-${i}`).fill(clause.value);
+    }
+    await panel.getByTestId("list-filter-apply").click();
+  }
+
+  /** Switch the list's renderer through the view-type menu. */
+  async switchView(
+    type: "table" | "kanban" | "calendar" | "gallery",
+  ): Promise<void> {
+    await this.testId("view-type-trigger").click();
+    await this.testId(`view-type-${type}`).click();
+  }
+
+  get kanbanBoard(): Locator {
+    return this.testId("kanban-board");
+  }
+
+  /** A record's card in a kanban lane (`lane` = the lane's picklist value). */
+  kanbanCard(lane: string, recordId: string): Locator {
+    return this.testId(`kanban-lane-${lane}`).getByTestId(
+      `kanban-card-${recordId}`,
+    );
+  }
+
+  /**
+   * Edit one cell in place: the row's hover pencil for `field`, a new value, Enter. Inline edit
+   * is always on for a viewer who can edit, in both stacks.
+   */
+  async editCell(rowText: string, field: string, value: string): Promise<void> {
+    const row = this.rowWithText(rowText).first();
+    await row.hover();
+    await row.getByTestId(`inline-field-${field}`).click();
+    const input = row.getByRole("spinbutton").or(row.getByRole("textbox"));
+    await input.fill(value);
+    await input.press("Enter");
   }
 
   /**

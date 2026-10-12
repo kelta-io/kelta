@@ -1,13 +1,8 @@
 /**
  * ResourceListPage Module
  *
- * Exports the ResourceListPage component and related types.
+ * Exports the admin record list page (a wrapper over the shared `RecordList` core).
  */
 
 export { ResourceListPage } from './ResourceListPage'
-export type {
-  ResourceListPageProps,
-  Resource,
-  FieldDefinition,
-  FilterCondition,
-} from './ResourceListPage'
+export type { ResourceListPageProps } from './ResourceListPage'

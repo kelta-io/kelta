@@ -1,10 +1,10 @@
 /**
- * Admin record list on the shared record-list data layer (record-stack convergence P8).
- *
- * ResourceListPage reads through the same hooks as the end-user ObjectListPage —
- * `useCollectionSchema`, `useCollectionRecords` (`['collection-records', …]`), `useRecordMutation`
- * and the observed `useCollectionPermissions` — and resets its list state when the route moves to
- * another collection without remounting.
+ * Admin record list on the shared record-list data layer (record-stack convergence P8), end to
+ * end through the real hooks with only the HTTP layer mocked. Since P10 the page is a wrapper
+ * over the `RecordList` core, so this also checks the wrapper's wiring against real responses:
+ * the `['collection-records', …]` cache entry, URL-as-state, the reset on another collection,
+ * bulk delete through `useRecordMutation`, permissions landing late, and lookup labels from the
+ * JSON:API `include`.
  */
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -19,9 +19,30 @@ import {
   createAxiosError,
 } from '../../test/testUtils'
 import { MY_PERMISSIONS_QUERY_KEY } from '../../hooks/useSystemPermissions'
+import { LiveRegionProvider } from '../../components/LiveRegion'
 import { ResourceListPage } from './ResourceListPage'
 
-function schemaResponse(name: string, displayName: string) {
+const toastError = vi.fn()
+vi.mock('sonner', () => ({
+  toast: Object.assign(vi.fn(), { success: vi.fn(), error: (m: string) => toastError(m) }),
+}))
+
+/** The lookup target the collection store knows: labelled by its `title` display field. */
+vi.mock('@/context/CollectionStoreContext', () => ({
+  useCollectionStore: () => ({
+    getCollectionByName: (name: string) =>
+      name === 'accounts'
+        ? {
+            name: 'accounts',
+            displayFieldName: 'title',
+            fields: [{ name: 'title', type: 'string' }],
+          }
+        : undefined,
+    collections: [],
+  }),
+}))
+
+function schemaResponse(name: string, displayName: string, extraFields: object[] = []) {
   return {
     data: { type: 'collections', id: `col-${name}`, attributes: { name, displayName } },
     included: [
@@ -30,36 +51,72 @@ function schemaResponse(name: string, displayName: string) {
         id: `${name}-f1`,
         attributes: { name: 'name', displayName: 'Name', type: 'string', required: false },
       },
+      ...extraFields,
     ],
   }
 }
 
-function recordsResponse(collection: string, rows: Array<{ id: string; name: string }>) {
+/** `users.account` — a lookup to `accounts`. */
+const ACCOUNT_LOOKUP = {
+  type: 'fields',
+  id: 'users-f2',
+  attributes: {
+    name: 'account',
+    displayName: 'Account',
+    type: 'lookup',
+    required: false,
+    referenceTarget: 'accounts',
+  },
+}
+
+function recordsResponse(
+  collection: string,
+  rows: Array<{ id: string; name: string; account?: string }>,
+  included?: object[]
+) {
   return {
-    data: rows.map((row) => ({ type: collection, id: row.id, attributes: { name: row.name } })),
+    data: rows.map((row) => ({
+      type: collection,
+      id: row.id,
+      attributes: { name: row.name, ...(row.account ? { account: row.account } : {}) },
+    })),
+    ...(included ? { included } : {}),
     metadata: { totalCount: rows.length, currentPage: 1, pageSize: 25 },
   }
 }
 
 function setupHandlers() {
   mockAxios.get.mockImplementation((url: string) => {
+    if (url === '/api/me/permissions') {
+      return Promise.resolve({
+        data: {
+          systemPermissions: { MANAGE_DATA: true },
+          objectPermissions: {},
+          fieldPermissions: {},
+        },
+      })
+    }
     if (url === '/api/collections') {
       return Promise.resolve({
         data: { content: [], totalElements: 0, totalPages: 0, size: 1000, number: 0 },
       })
     }
     if (url.startsWith('/api/collections/users')) {
-      return Promise.resolve({ data: schemaResponse('users', 'Users') })
+      return Promise.resolve({ data: schemaResponse('users', 'Users', [ACCOUNT_LOOKUP]) })
     }
     if (url.startsWith('/api/collections/accounts')) {
       return Promise.resolve({ data: schemaResponse('accounts', 'Accounts') })
     }
     if (url.startsWith('/api/users?')) {
       return Promise.resolve({
-        data: recordsResponse('users', [
-          { id: 'r1', name: 'John Doe' },
-          { id: 'r2', name: 'Jane Smith' },
-        ]),
+        data: recordsResponse(
+          'users',
+          [
+            { id: 'r1', name: 'John Doe', account: 'a1' },
+            { id: 'r2', name: 'Jane Smith' },
+          ],
+          [{ type: 'accounts', id: 'a1', attributes: { title: 'Acme Corp' } }]
+        ),
       })
     }
     if (url.startsWith('/api/accounts?')) {
@@ -76,12 +133,14 @@ function renderList(initialEntry = '/resources/users') {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <AuthWrapper>
-          <Link to="/resources/accounts" data-testid="go-accounts">
-            Accounts
-          </Link>
-          <Routes>
-            <Route path="/resources/:collection" element={<ResourceListPage />} />
-          </Routes>
+          <LiveRegionProvider>
+            <Link to="/resources/accounts" data-testid="go-accounts">
+              Accounts
+            </Link>
+            <Routes>
+              <Route path="/resources/:collection" element={<ResourceListPage />} />
+            </Routes>
+          </LiveRegionProvider>
         </AuthWrapper>
       </MemoryRouter>
     </QueryClientProvider>
@@ -110,6 +169,7 @@ describe('ResourceListPage — shared record-list data layer', () => {
   afterEach(() => {
     cleanupAuthMocks()
     vi.clearAllMocks()
+    localStorage.clear()
   })
 
   it("reads records through the end-user list's collection-records cache entry", async () => {
@@ -122,7 +182,48 @@ describe('ResourceListPage — shared record-list data layer', () => {
     expect(queryClient.getQueryCache().findAll({ queryKey: ['resources'] })).toHaveLength(0)
   })
 
-  it('seeds sort, page and page size from the shared list URL format', async () => {
+  it('caches the full shared schema shape (trackHistory, displayFieldName)', async () => {
+    // A narrower page-local schema under this shared key once hid the record History tab
+    // (trackHistory) and display-field titles on every page read after this one.
+    const fallback = mockAxios.get.getMockImplementation()!
+    mockAxios.get.mockImplementation((url: string) =>
+      url.startsWith('/api/collections/users')
+        ? Promise.resolve({
+            data: {
+              data: {
+                type: 'collections',
+                id: 'col-users',
+                attributes: {
+                  name: 'users',
+                  displayName: 'Users',
+                  trackHistory: true,
+                  displayFieldId: 'users-f1',
+                },
+              },
+              included: schemaResponse('users', 'Users').included,
+            },
+          })
+        : fallback(url)
+    )
+    const { queryClient } = renderList()
+
+    await waitFor(() =>
+      expect(queryClient.getQueryData(['collection-schema', 'users'])).toMatchObject({
+        name: 'users',
+        trackHistory: true,
+        displayFieldName: 'name',
+      })
+    )
+  })
+
+  it('labels a lookup column from the JSON:API include, by the target display field', async () => {
+    renderList()
+    expect(await screen.findByText('Acme Corp')).toBeInTheDocument()
+
+    expect(recordRequests('users')[0].get('include')).toBe('account')
+  })
+
+  it('reads sort, page and page size from the shared list URL format', async () => {
     renderList('/resources/users?sort=-name&page=2&pageSize=50')
 
     await waitFor(() => expect(recordRequests('users').length).toBeGreaterThan(0))
@@ -138,7 +239,7 @@ describe('ResourceListPage — shared record-list data layer', () => {
 
     await waitFor(() => expect(recordRequests('users').length).toBeGreaterThan(0))
     expect(recordRequests('users')[0].get('filter[name][eq]')).toBe('John')
-    expect(screen.getByTestId('filter-count')).toHaveTextContent('1')
+    expect(await screen.findByTestId('filter-count')).toHaveTextContent('1')
 
     // Same route element, new :collection param — no remount from the router.
     fireEvent.click(screen.getByTestId('go-accounts'))
@@ -161,18 +262,18 @@ describe('ResourceListPage — shared record-list data layer', () => {
     const before = recordRequests('users').length
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
-    fireEvent.click(await screen.findByTestId('bulk-delete-button'))
     fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete 1 records' }))
 
     await waitFor(() => expect(mockAxios.post).toHaveBeenCalled())
     const [url, body] = mockAxios.post.mock.calls[0]
     expect(url).toBe('/api/users/bulk-delete')
     expect(body).toEqual({ ids: ['r1'] })
     await waitFor(() => expect(recordRequests('users').length).toBeGreaterThan(before))
-    await waitFor(() => expect(screen.queryByTestId('bulk-actions')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('1 record selected')).not.toBeInTheDocument())
   })
 
-  it('keeps the selection and shows the error when a bulk delete fails', async () => {
+  it('keeps the selection and toasts the reason when a bulk delete fails', async () => {
     mockAxios.post.mockRejectedValueOnce(
       createAxiosError(403, {
         errors: [{ status: '403', title: 'Forbidden', detail: 'Not allowed to delete' }],
@@ -182,12 +283,14 @@ describe('ResourceListPage — shared record-list data layer', () => {
     await screen.findByText('John Doe')
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
-    fireEvent.click(await screen.findByTestId('bulk-delete-button'))
     fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete 1 records' }))
 
     await waitFor(() => expect(mockAxios.post).toHaveBeenCalled())
-    expect(await screen.findByText('Not allowed to delete')).toBeInTheDocument()
-    expect(screen.getByTestId('bulk-actions')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith('Delete failed: Not allowed to delete')
+    )
+    expect(screen.getByText('1 record selected')).toBeInTheDocument()
   })
 
   it('re-renders when the permissions land after the list rendered', async () => {

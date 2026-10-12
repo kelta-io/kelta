@@ -27,7 +27,10 @@ import type { RecordListChromeContext } from '@/components/record/list/RecordLis
 import type { RecordListFeatures } from '@/components/record/list/useRecordListModel'
 import { recordRoutes } from '@/utils/recordRoutes'
 
-/** Everything the end-user list offers (module-level so the core sees a stable object). */
+/**
+ * The end-user list's feature set (module-level so the core sees a stable object). The id column
+ * and the summary stats bar are admin chrome.
+ */
 const ENDUSER_LIST_FEATURES: RecordListFeatures = {
   savedViews: true,
   sharedViews: true,
@@ -40,6 +43,9 @@ const ENDUSER_LIST_FEATURES: RecordListFeatures = {
   export: true,
   quickActions: true,
   inlineEdit: true,
+  filterBuilder: true,
+  idColumn: false,
+  summaryStats: false,
 }
 
 export function ObjectListPage(): React.ReactElement {

@@ -14,8 +14,8 @@
  * (`undefined`) rather than checked at render time.
  *
  * Lookup labels: the visible reference columns are requested with `?include=<field names>` and
- * labelled from the included resources by `resolveLookupDisplayField` (the target's display
- * field → `name` → first string field → id). See `.claude/docs/architecture.md` → Record list.
+ * labelled from the included resources by `buildLookupLabels` — `resolveLookupDisplayField`: the
+ * target's display field → `name` → first string field → id. See `.claude/docs/architecture.md` → Record list.
  *
  * Moved out of `ObjectListPage` (record-stack convergence P9).
  */
@@ -37,8 +37,7 @@ import { useSystemPermissions } from '@/hooks/useSystemPermissions'
 import { usePicklistDisplayMaps, type PicklistDisplayMaps } from '@/hooks/usePicklistOptions'
 import { isStaleWriteError } from '@/services/apiClient'
 import { runBulkUpdate } from '@/utils/bulkUpdate'
-import { buildIncludedDisplayMap } from '@/utils/jsonapi'
-import { resolveLookupDisplayField } from '@/utils/lookupDisplayField'
+import { buildLookupLabels } from '@/utils/lookupDisplayField'
 import { resolveRowIfMatch } from '@/utils/rowVersion'
 import type { RecordRoutes } from '@/utils/recordRoutes'
 import type { QuickActionExecutionContext } from '@/types/quickActions'
@@ -47,6 +46,7 @@ import { downloadFile, exportFileName, recordsToCsv } from './listExport'
 import {
   CALENDAR_FETCH_LIMIT,
   DEFAULT_PAGE_SIZE,
+  RECORD_ID_COLUMN,
   accessibleListFields,
   massEditableFields as pickMassEditableFields,
   nextSortParam,
@@ -86,6 +86,12 @@ export interface RecordListFeatures {
   quickActions: boolean
   /** In-place cell edit, always on for a viewer who can edit. */
   inlineEdit: boolean
+  /** The filter builder panel (AND-only, see `listFilterMapping.ts`) and its toggle. */
+  filterBuilder: boolean
+  /** The record id as a choosable column, shown by default (`RECORD_ID_COLUMN`). */
+  idColumn: boolean
+  /** Count / filter summary / numeric sums of the loaded page above the table. */
+  summaryStats: boolean
 }
 
 export const NO_LIST_FEATURES: RecordListFeatures = {
@@ -100,6 +106,9 @@ export const NO_LIST_FEATURES: RecordListFeatures = {
   export: false,
   quickActions: false,
   inlineEdit: false,
+  filterBuilder: false,
+  idColumn: false,
+  summaryStats: false,
 }
 
 export interface UseRecordListModelOptions {
@@ -124,10 +133,14 @@ export interface RecordListModel {
   collectionLabel: string
   /** All schema fields. */
   fields: FieldDefinition[]
-  /** Non-audit, FLS-visible fields (column chooser, group-by picker, alt-view pickers). */
+  /** Non-audit, FLS-visible fields (filter builder, group-by picker, alt-view pickers). */
   accessibleFields: FieldDefinition[]
+  /** What the column chooser offers: `accessibleFields`, led by the id column when it is on. */
+  columnFields: FieldDefinition[]
   /** The table's columns, in order. */
   visibleFields: FieldDefinition[]
+  /** The visible columns that are record fields (no id column) — alt-view card bodies. */
+  visibleRecordFields: FieldDefinition[]
   permissions: ObjectPermissions
   /** Schema or permissions still loading — the shell shows its spinner. */
   isLoading: boolean
@@ -184,6 +197,10 @@ export interface RecordListModel {
 
   quickActionContext: QuickActionExecutionContext
 
+  /** Filter builder panel state. */
+  filterBuilderOpen: boolean
+  setFilterBuilderOpen: (open: boolean) => void
+
   /** Dialog state. */
   deleteTarget: CollectionRecord | null
   requestDelete: (record: CollectionRecord) => void
@@ -227,6 +244,7 @@ export function useRecordListModel({
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [massEditOpen, setMassEditOpen] = useState(false)
+  const [filterBuilderOpen, setFilterBuilderOpen] = useState(false)
 
   const {
     schema,
@@ -258,9 +276,17 @@ export function useRecordListModel({
     () => accessibleListFields(fields, isFieldVisible),
     [fields, isFieldVisible]
   )
+  const columnFields = useMemo(
+    () => (features.idColumn ? [RECORD_ID_COLUMN, ...accessibleFields] : accessibleFields),
+    [features.idColumn, accessibleFields]
+  )
   const visibleFields = useMemo(
-    () => resolveVisibleFields(accessibleFields, columnOverride, activeView?.visibleColumns),
-    [accessibleFields, columnOverride, activeView]
+    () => resolveVisibleFields(columnFields, columnOverride, activeView?.visibleColumns),
+    [columnFields, columnOverride, activeView]
+  )
+  const visibleRecordFields = useMemo(
+    () => visibleFields.filter((f) => f !== RECORD_ID_COLUMN),
+    [visibleFields]
   )
 
   // Alt-view field resolution: explicit typeConfig wins, else the first accessible field of the
@@ -279,8 +305,8 @@ export function useRecordListModel({
   )
   const titleField = resolveTitleField(typeConfig, schema?.displayFieldName)
   const kanbanCardFields = useMemo(
-    () => resolveKanbanCardFields(accessibleFields, visibleFields, titleField, typeConfig),
-    [accessibleFields, visibleFields, titleField, typeConfig]
+    () => resolveKanbanCardFields(accessibleFields, visibleRecordFields, titleField, typeConfig),
+    [accessibleFields, visibleRecordFields, titleField, typeConfig]
   )
 
   // Table columns + the filter bar render authored labels for every picklist field.
@@ -330,17 +356,10 @@ export function useRecordListModel({
   })
 
   // Lookup labels from the included resources, labelled by the target's display field.
-  const lookupDisplayMap = useMemo(() => {
-    if (!rawResponse || referenceFields.length === 0) return undefined
-    const map: LookupDisplayMap = {}
-    for (const field of referenceFields) {
-      const target = field.referenceTarget!
-      const displayField = resolveLookupDisplayField(collectionStore.getCollectionByName(target))
-      const fieldMap = buildIncludedDisplayMap(rawResponse, target, displayField)
-      if (Object.keys(fieldMap).length > 0) map[field.name] = fieldMap
-    }
-    return Object.keys(map).length > 0 ? map : undefined
-  }, [rawResponse, referenceFields, collectionStore])
+  const lookupDisplayMap = useMemo(
+    () => buildLookupLabels(rawResponse, referenceFields, collectionStore.getCollectionByName),
+    [rawResponse, referenceFields, collectionStore]
+  )
 
   // Screen-reader announcement when a load finishes.
   const prevRecordsLoadingRef = useRef(recordsLoading)
@@ -361,12 +380,32 @@ export function useRecordListModel({
 
   const clearSelection = useCallback(() => setSelectedIds(new Set()), [])
 
-  const afterDeleteSuccess = useCallback(() => {
-    setDeleteTarget(null)
-    setBulkDeleteOpen(false)
-    setSelectedIds(new Set())
-    announce('Record deleted successfully')
-  }, [announce])
+  const afterDeleteSuccess = useCallback(
+    (count: number) => {
+      setDeleteTarget(null)
+      setBulkDeleteOpen(false)
+      setSelectedIds(new Set())
+      const message =
+        count === 1
+          ? t('listDelete.deleted', 'Record deleted')
+          : t('listDelete.bulkDeleted', { count })
+      toast.success(message)
+      announce(message)
+    },
+    [announce, t]
+  )
+
+  // A failed delete keeps its dialog open and says why.
+  const afterDeleteFailure = useCallback(
+    (error: unknown) => {
+      const message = t('listDelete.failed', {
+        message: error instanceof Error && error.message ? error.message : t('errors.generic'),
+      })
+      toast.error(message)
+      announce(message, 'assertive')
+    },
+    [announce, t]
+  )
 
   // In-place cell edit. Optimistic concurrency (P5): the row's version is checked against the
   // stored record and the write carries its ETag as If-Match. A conflict reverts the cell — the
@@ -533,23 +572,18 @@ export function useRecordListModel({
     if (!deleteTarget) return
     mutations.remove
       .mutateAsync(deleteTarget.id)
-      .then(afterDeleteSuccess)
-      .catch(() => {
-        // Error state is surfaced by the mutation; keep the dialog open.
-      })
-  }, [deleteTarget, mutations.remove, afterDeleteSuccess])
+      .then(() => afterDeleteSuccess(1), afterDeleteFailure)
+  }, [deleteTarget, mutations.remove, afterDeleteSuccess, afterDeleteFailure])
 
   const requestBulkDelete = useCallback(() => {
     if (selectedIds.size > 0) setBulkDeleteOpen(true)
   }, [selectedIds])
   const confirmBulkDelete = useCallback(() => {
+    const ids = Array.from(selectedIds)
     mutations.bulkDelete
-      .mutateAsync(Array.from(selectedIds))
-      .then(afterDeleteSuccess)
-      .catch(() => {
-        // Error state is surfaced by the mutation; keep the dialog open.
-      })
-  }, [mutations.bulkDelete, selectedIds, afterDeleteSuccess])
+      .mutateAsync(ids)
+      .then(() => afterDeleteSuccess(ids.length), afterDeleteFailure)
+  }, [mutations.bulkDelete, selectedIds, afterDeleteSuccess, afterDeleteFailure])
 
   // Export the loaded rows — the selection when there is one.
   const exportRows = useCallback(
@@ -589,7 +623,9 @@ export function useRecordListModel({
     collectionLabel,
     fields,
     accessibleFields,
+    columnFields,
     visibleFields,
+    visibleRecordFields,
     permissions,
     isLoading: schemaLoading || permissionsLoading,
     schemaError: schemaError ?? null,
@@ -629,6 +665,8 @@ export function useRecordListModel({
     exportCsv,
     exportJson,
     quickActionContext,
+    filterBuilderOpen,
+    setFilterBuilderOpen,
     deleteTarget,
     requestDelete,
     cancelDelete,

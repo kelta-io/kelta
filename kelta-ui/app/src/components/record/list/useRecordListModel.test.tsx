@@ -61,6 +61,17 @@ const STORE: Record<string, unknown> = {
 const recordsCalls: UseCollectionRecordsOptions[] = []
 let canEdit = true
 let manageData = true
+const removeRecord = vi.fn()
+const bulkDelete = vi.fn()
+const toastSuccess = vi.fn()
+const toastError = vi.fn()
+
+vi.mock('sonner', () => ({
+  toast: Object.assign(vi.fn(), {
+    success: (m: string) => toastSuccess(m),
+    error: (m: string) => toastError(m),
+  }),
+}))
 
 vi.mock('@/context/ApiContext', () => ({
   useApi: () => ({
@@ -116,8 +127,8 @@ vi.mock('@/hooks/usePicklistOptions', () => ({
 vi.mock('@/hooks/useRecordMutation', () => ({
   useRecordMutation: () => ({
     patch: { mutateAsync: vi.fn(), isPending: false },
-    remove: { mutateAsync: vi.fn(), isPending: false },
-    bulkDelete: { mutateAsync: vi.fn(), isPending: false },
+    remove: { mutateAsync: removeRecord, isPending: false },
+    bulkDelete: { mutateAsync: bulkDelete, isPending: false },
   }),
 }))
 
@@ -155,6 +166,58 @@ describe('useRecordListModel', () => {
     canEdit = true
     manageData = true
     localStorage.clear()
+    removeRecord.mockReset().mockResolvedValue(undefined)
+    bulkDelete.mockReset().mockResolvedValue(undefined)
+    toastSuccess.mockReset()
+    toastError.mockReset()
+  })
+
+  it('leads the column chooser and the default columns with the id column, only with idColumn', () => {
+    const off = renderModel({}).result.current.model
+    expect(off.columnFields.map((f) => f.name)).toEqual([
+      'title',
+      'status',
+      'due',
+      'owner',
+      'account',
+    ])
+    expect(off.visibleFields.map((f) => f.name)).not.toContain('id')
+
+    const on = renderModel({ idColumn: true }).result.current.model
+    expect(on.columnFields.map((f) => f.name)[0]).toBe('id')
+    expect(on.visibleFields.map((f) => f.name)).toEqual([
+      'id',
+      'title',
+      'status',
+      'due',
+      'owner',
+      'account',
+    ])
+    // card bodies and the mass-edit / filter targets never include it
+    expect(on.visibleRecordFields.map((f) => f.name)).not.toContain('id')
+    expect(on.accessibleFields.map((f) => f.name)).not.toContain('id')
+    expect(on.massEditFields.map((f) => f.name)).not.toContain('id')
+  })
+
+  it('toasts and announces a delete, and keeps the selection when a bulk delete fails', async () => {
+    const { result } = renderModel({})
+
+    act(() => result.current.model.requestDelete({ id: 'r-1' }))
+    act(() => result.current.model.confirmDelete())
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Record deleted'))
+    expect(removeRecord).toHaveBeenCalledWith('r-1')
+    expect(result.current.model.deleteTarget).toBeNull()
+
+    bulkDelete.mockRejectedValueOnce(new Error('Not allowed'))
+    act(() => result.current.model.setSelectedIds(new Set(['r-1', 'r-2'])))
+    act(() => result.current.model.confirmBulkDelete())
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('Delete failed: Not allowed'))
+    expect(bulkDelete).toHaveBeenCalledWith(['r-1', 'r-2'])
+    expect(result.current.model.selectedIds.size).toBe(2)
+
+    act(() => result.current.model.confirmBulkDelete())
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('2 records deleted'))
+    expect(result.current.model.selectedIds.size).toBe(0)
   })
 
   it('includes the visible lookup columns by field name and labels them by the target display field', () => {

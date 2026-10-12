@@ -1,6 +1,6 @@
 /**
- * The record list's view-controls row: view selector, column chooser, density, group-by,
- * the renderer switcher and each renderer's field picker. Every control is shown only when its
+ * The record list's view-controls row: view selector, filter-builder toggle, column chooser,
+ * density, group-by, the renderer switcher and each renderer's field picker. Every control is shown only when its
  * feature is on (`RecordListFeatures`); the row renders nothing when none is.
  *
  * Part of the record list core (`RecordList`), moved out of `ObjectListPage` (P9).
@@ -9,6 +9,7 @@ import React from 'react'
 import {
   CalendarDays,
   ChevronDown,
+  Filter,
   Layers,
   LayoutGrid,
   Rows3,
@@ -52,11 +53,12 @@ export function ListViewControls({
   extras,
 }: ListViewControlsProps): React.ReactElement | null {
   const { t } = useI18n()
-  const { features, view, accessibleFields, visibleFields, fields } = model
+  const { features, view, accessibleFields, columnFields, visibleFields, fields } = model
   const { density, groupBy, viewType, typeConfig, changeTypeConfig } = view
 
   const anyControl =
     features.savedViews ||
+    features.filterBuilder ||
     features.columnChooser ||
     features.density ||
     features.groupBy ||
@@ -80,9 +82,29 @@ export function ListViewControls({
           onSetDefault={view.setDefaultView}
         />
       )}
+      {features.filterBuilder && (
+        <Button
+          variant={model.filterBuilderOpen ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => model.setFilterBuilderOpen(!model.filterBuilderOpen)}
+          aria-expanded={model.filterBuilderOpen}
+          data-testid="filter-toggle"
+        >
+          <Filter className="mr-1.5 h-4 w-4" aria-hidden />
+          {t('listFilter.toggle', 'Filter')}
+          {model.params.filters.length > 0 && (
+            <span
+              className="ml-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground"
+              data-testid="filter-count"
+            >
+              {model.params.filters.length}
+            </span>
+          )}
+        </Button>
+      )}
       {features.columnChooser && (
         <ColumnChooser
-          fields={accessibleFields.map((f) => ({ name: f.name, displayName: f.displayName }))}
+          fields={columnFields.map((f) => ({ name: f.name, displayName: f.displayName }))}
           visibleColumns={visibleFields.map((f) => f.name)}
           onChange={view.setColumnOverride}
         />

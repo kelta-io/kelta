@@ -1,9 +1,9 @@
 /**
  * ListViewToolbar Component
  *
- * Toolbar for the ObjectListPage with:
- * - Collection title
- * - "New" button to create records
+ * Toolbar for the record list (`RecordList`) with:
+ * - Collection title and "New" button (unless `showHeading` is false — the caller's header owns
+ *   them)
  * - Actions dropdown (bulk delete, export CSV/JSON)
  * - Bulk selection indicator bar
  */
@@ -11,6 +11,7 @@
 import React from 'react'
 import { Plus, Download, Upload, Trash2, ChevronDown, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,6 +50,11 @@ export interface ListViewToolbarProps {
   canDelete?: boolean
   /** Optional slot for rendering quick actions (e.g., QuickActionsMenu) */
   quickActionsSlot?: React.ReactNode
+  /**
+   * Render the collection title and the New button (default true). False when the page's own
+   * header already shows them; the actions stay.
+   */
+  showHeading?: boolean
 }
 
 export function ListViewToolbar({
@@ -65,19 +71,22 @@ export function ListViewToolbar({
   canCreate = true,
   canDelete = true,
   quickActionsSlot,
+  showHeading = true,
 }: ListViewToolbarProps): React.ReactElement {
   return (
     <div className="space-y-2">
       {/* Main toolbar row */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-[26px] font-bold tracking-[-0.01em] text-foreground">
-          {collectionLabel}
-          {totalCount > 0 && (
-            <span className="ml-2 font-mono text-sm font-normal tabular-nums text-muted-foreground">
-              ({totalCount.toLocaleString()})
-            </span>
-          )}
-        </h1>
+      <div className={cn('flex items-center', showHeading ? 'justify-between' : 'justify-end')}>
+        {showHeading && (
+          <h1 className="text-[26px] font-bold tracking-[-0.01em] text-foreground">
+            {collectionLabel}
+            {totalCount > 0 && (
+              <span className="ml-2 font-mono text-sm font-normal tabular-nums text-muted-foreground">
+                ({totalCount.toLocaleString()})
+              </span>
+            )}
+          </h1>
+        )}
 
         <div className="flex items-center gap-2">
           {/* Quick Actions slot (rendered when configured) */}
@@ -126,7 +135,7 @@ export function ListViewToolbar({
           </DropdownMenu>
 
           {/* New record button (hidden if user lacks create permission) */}
-          {canCreate && (
+          {showHeading && canCreate && (
             <Button
               size="sm"
               onClick={onNew}
