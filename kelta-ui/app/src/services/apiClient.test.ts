@@ -446,3 +446,43 @@ describe('ApiClient error handling', () => {
     })
   })
 })
+
+describe('parseAxiosError', () => {
+  it('returns an ApiError unchanged, keeping its field errors', async () => {
+    const { parseAxiosError } = await import('./apiClient')
+    const original = new ApiError(400, 'Validation Error', [
+      { field: 'title', message: 'Field is required', code: 'nullable' },
+    ])
+
+    const parsed = parseAxiosError(original)
+
+    expect(parsed).toBe(original)
+    expect(parsed.fieldErrors).toEqual([
+      { field: 'title', message: 'Field is required', code: 'nullable' },
+    ])
+  })
+
+  it('keeps JSON:API field errors through a client call and a second parse', async () => {
+    resetMockAxios()
+    mockAxios.post.mockRejectedValueOnce(
+      createAxiosError(400, {
+        errors: [
+          {
+            status: '400',
+            code: 'nullable',
+            title: 'Validation Error',
+            detail: 'Field is required',
+            source: { pointer: '/data/attributes/title' },
+          },
+        ],
+      })
+    )
+    const { parseAxiosError } = await import('./apiClient')
+    const client = new ApiClient(mockAxios as never)
+
+    const thrown = await client.post('/api/things', {}).catch((e: unknown) => e)
+    const reparsed = parseAxiosError(thrown)
+
+    expect(reparsed.fieldErrors.map((e) => e.field)).toEqual(['title'])
+  })
+})
