@@ -202,6 +202,14 @@ public final class KeltaStack {
             .withEnv("SMTP_STARTTLS",              "false")
             .withEnv("SCHEDULER_ENABLED",          "false")
             .withEnv("SPRING_FLYWAY_ENABLED",      "true")   // disabled by default (K8s PreSync Job); re-enable for the test harness
+            // Media fields only ever presign (a local HMAC) — no object store runs in the harness,
+            // so an unreachable endpoint is enough for MediaFieldScenarioTest.
+            .withEnv("KELTA_MEDIA_ENABLED",        "true")
+            .withEnv("KELTA_MEDIA_ENDPOINT",       "http://media-store.invalid:3900")
+            .withEnv("KELTA_MEDIA_PUBLIC_ENDPOINT", "http://media-store.invalid:3900")
+            .withEnv("KELTA_MEDIA_BUCKET",         "harness-media")
+            .withEnv("KELTA_MEDIA_ACCESS_KEY",     "harness-access-key")
+            .withEnv("KELTA_MEDIA_SECRET_KEY",     "harness-secret-key")
             .withExposedPorts(8080)
             .withLogConsumer(new org.testcontainers.containers.output.Slf4jLogConsumer(
                     org.slf4j.LoggerFactory.getLogger("kelta-worker-container")))

@@ -227,6 +227,30 @@ export const MASKABLE_FIELD_TYPES: readonly FieldType[] = [
 export type MaskingType = 'NONE' | 'FULL' | 'LAST4' | 'EMAIL' | 'CUSTOM'
 
 /**
+ * Field types that can be media fields (`fieldTypeConfig.media`): the field holds the storage
+ * key of an object uploaded through `POST /api/{collection}/upload-url`. Mirrors the backend
+ * `MediaFieldConfig.ELIGIBLE_TYPES` (STRING/TEXT; the editor offers STRING as `string`).
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export const MEDIA_FIELD_TYPES: readonly FieldType[] = ['string']
+
+const BYTES_PER_MB = 1024 * 1024
+
+/** Form defaults for the media section, read from a stored `fieldTypeConfig.media`. */
+function mediaFormValues(parsedConfig: Record<string, unknown>) {
+  const media = parsedConfig.media as Record<string, unknown> | undefined
+  const types = media?.contentTypes
+  const max = media?.maxFileSize
+  return {
+    mediaEnabled: media?.enabled === true,
+    mediaContentTypes: Array.isArray(types)
+      ? types.filter((v) => typeof v === 'string').join(', ')
+      : '',
+    mediaMaxFileSizeMb: typeof max === 'number' && max > 0 ? String(max / BYTES_PER_MB) : '',
+  }
+}
+
+/**
  * Validation rule types available for each field type
  */
 // eslint-disable-next-line react-refresh/only-export-components
@@ -329,6 +353,13 @@ export const fieldEditorSchema = z
     maskingType: z.enum(['NONE', 'FULL', 'LAST4', 'EMAIL', 'CUSTOM']).optional(),
     maskingChar: z.string().max(1).optional().or(z.literal('')),
     maskingCustomPattern: z.string().max(64).optional().or(z.literal('')),
+    mediaEnabled: z.boolean().optional(),
+    mediaContentTypes: z.string().max(500).optional().or(z.literal('')),
+    mediaMaxFileSizeMb: z
+      .string()
+      .regex(/^(\d+(\.\d+)?)?$/, 'validation.mediaMaxFileSizeInvalid')
+      .optional()
+      .or(z.literal('')),
     description: z.string().max(500, 'validation.descriptionTooLong').optional().or(z.literal('')),
     trackHistory: z.boolean(),
     searchable: z.boolean(),
@@ -541,6 +572,7 @@ export function FieldEditor({
       maskingCustomPattern:
         ((parsedConfig.masking as Record<string, unknown> | undefined)?.customPattern as string) ??
         '',
+      ...mediaFormValues(parsedConfig),
       description: field?.description ?? '',
       trackHistory: field?.trackHistory ?? false,
       searchable: field?.searchable ?? false,
@@ -580,6 +612,8 @@ export function FieldEditor({
   const watchedRollupFn = watch('rollupFunction')
   const watchedMaskingType = watch('maskingType')
   const isMaskable = MASKABLE_FIELD_TYPES.includes(watchedType)
+  const watchedMediaEnabled = watch('mediaEnabled')
+  const isMediaEligible = MEDIA_FIELD_TYPES.includes(watchedType)
 
   // Get available validation rules for current field type
   const availableValidationRules = useMemo(() => {
@@ -683,6 +717,7 @@ export function FieldEditor({
         maskingCustomPattern:
           ((parsedConfig.masking as Record<string, unknown> | undefined)
             ?.customPattern as string) ?? '',
+        ...mediaFormValues(parsedConfig),
         description: field.description ?? '',
         trackHistory: field.trackHistory ?? false,
         searchable: field.searchable ?? false,
@@ -793,6 +828,21 @@ export function FieldEditor({
           masking.customPattern = data.maskingCustomPattern
         }
         fieldTypeConfig = { ...(fieldTypeConfig ?? {}), masking }
+      }
+
+      // Media field — the stored value is an upload's storage key. Unchecked clears the config.
+      if (MEDIA_FIELD_TYPES.includes(data.type) && data.mediaEnabled) {
+        const media: Record<string, unknown> = { enabled: true }
+        const contentTypes = (data.mediaContentTypes ?? '')
+          .split(',')
+          .map((v) => v.trim())
+          .filter((v) => v.length > 0)
+        if (contentTypes.length > 0) media.contentTypes = contentTypes
+        const maxMb = Number(data.mediaMaxFileSizeMb)
+        if (data.mediaMaxFileSizeMb && maxMb > 0) {
+          media.maxFileSize = Math.round(maxMb * BYTES_PER_MB)
+        }
+        fieldTypeConfig = { ...(fieldTypeConfig ?? {}), media }
       }
 
       const needsReferenceTarget =
@@ -1317,6 +1367,101 @@ export function FieldEditor({
                 )}
               </span>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Media field config (fields that hold an uploaded object's storage key) */}
+      {isMediaEligible && (
+        <div
+          className="flex flex-col gap-3 p-4 bg-secondary border border-border rounded-md"
+          data-testid="media-config"
+        >
+          <h4 className="m-0 text-base font-medium text-foreground">
+            {t('fieldEditor.media.title', 'Media uploads')}
+          </h4>
+          <p className="m-0 text-xs text-muted-foreground">
+            {t(
+              'fieldEditor.media.help',
+              'Callers who may create records can upload a file straight to media storage; the field stores its key. Anyone who can read the record can load the file at /api/{collection}/download/{key}.'
+            )}
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="field-media-enabled"
+              type="checkbox"
+              className="w-[1.125rem] h-[1.125rem] accent-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSubmitting}
+              data-testid="field-media-enabled-checkbox"
+              {...register('mediaEnabled')}
+            />
+            <label htmlFor="field-media-enabled" className="text-sm text-foreground cursor-pointer">
+              {t('fieldEditor.media.enabled', 'Store media uploads in this field')}
+            </label>
+          </div>
+          {watchedMediaEnabled && (
+            <>
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="field-media-content-types"
+                  className="flex items-center gap-1 text-sm font-medium text-foreground"
+                >
+                  {t('fieldEditor.media.contentTypes', 'Accepted content types')}
+                  <span className="text-xs font-normal text-muted-foreground ml-1">
+                    ({t('common.optional')})
+                  </span>
+                </label>
+                <input
+                  id="field-media-content-types"
+                  type="text"
+                  className={inputClasses}
+                  placeholder="image/"
+                  disabled={isSubmitting}
+                  data-testid="field-media-content-types-input"
+                  {...register('mediaContentTypes')}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {t(
+                    'fieldEditor.media.contentTypesHelp',
+                    'Comma-separated. An entry ending in / matches by prefix (image/); others match exactly. Defaults to images. SVG must be listed exactly.'
+                  )}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="field-media-max-size"
+                  className="flex items-center gap-1 text-sm font-medium text-foreground"
+                >
+                  {t('fieldEditor.media.maxFileSize', 'Maximum file size (MB)')}
+                  <span className="text-xs font-normal text-muted-foreground ml-1">
+                    ({t('common.optional')})
+                  </span>
+                </label>
+                <input
+                  id="field-media-max-size"
+                  type="text"
+                  inputMode="decimal"
+                  className={inputClasses}
+                  disabled={isSubmitting}
+                  data-testid="field-media-max-size-input"
+                  {...register('mediaMaxFileSizeMb')}
+                />
+                {errors.mediaMaxFileSizeMb && (
+                  <span className="text-xs text-destructive" role="alert">
+                    {t(
+                      'fieldEditor.media.maxFileSizeInvalid',
+                      'Enter a size in megabytes, e.g. 10 or 2.5'
+                    )}
+                  </span>
+                )}
+                <span className="text-xs text-muted-foreground">
+                  {t(
+                    'fieldEditor.media.maxFileSizeHelp',
+                    'Can only lower the platform limit, never raise it.'
+                  )}
+                </span>
+              </div>
+            </>
           )}
         </div>
       )}

@@ -405,6 +405,22 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
   unused files but still ~300 unused exports, ~300 unused exported types, ~100 default+named
   duplicate exports and a few unlisted deps, so wiring it in would fail every build. Clear those
   (or scope knip to `--include files,dependencies`) before adding it to `ci.yml`.
+- **Media fields — accepted v1 limits** (`MediaUploadController`; revisit before media carries
+  anything but public images):
+  - Declared `fileSize` is advisory — the presigned PUT signs `Content-Type`, not
+    `Content-Length`; the media bucket needs its own quota/lifecycle policy.
+  - No storage accounting or cleanup: media is outside the `file_attachment` governor sum, and
+    objects outlive record deletes, value changes and abandoned uploads (never served — a
+    download needs a referencing record — but they cost space).
+  - Every download is a query per media field until a match, plus a record-level Cerbos decision;
+    mark media fields `indexed` (redirect cached 60 s).
+  - Keys embed the collection name and the download checks it, so renaming a collection orphans
+    its existing media URLs.
+  - The upload response (`media-upload-urls`) passes through `CerbosRecordAuthorizationAdvice`
+    (`create`) and `CerbosFieldSecurityAdvice`; a profile denied `create` collection-wide gets
+    `data: null`, not 403. The worker-side checks are the backstop behind the gateway route authz.
+  - Deploy coupling: a collection's downloads 404 until its field is media-enabled, and the bucket
+    is configured only via `KELTA_MEDIA_*` — set both before rolling the worker.
 
 ## Fragile Areas
 

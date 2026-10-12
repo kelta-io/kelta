@@ -185,19 +185,23 @@ kelta:
       access-key: ${KELTA_S3_ACCESS_KEY:}
       secret-key: ${KELTA_S3_SECRET_KEY:}
       presigned-url-expiry-minutes: ${KELTA_S3_URL_EXPIRY_MINUTES:15}
-    spotopened-media:
-      # spotopened's own Garage bucket, isolated from the shared kelta-attachments
-      # one above -- see SpotopenedMediaStorageService's javadoc for why this is a
-      # separate @Value-bound service rather than a second S3ConfigProperties bean.
-      enabled: ${KELTA_SPOTOPENED_MEDIA_ENABLED:false}
-      endpoint: ${KELTA_SPOTOPENED_MEDIA_ENDPOINT:http://localhost:3900}
-      public-endpoint: ${KELTA_SPOTOPENED_MEDIA_PUBLIC_ENDPOINT:https://s3.rzware.com}
-      region: ${KELTA_SPOTOPENED_MEDIA_REGION:garage}
-      bucket: ${KELTA_SPOTOPENED_MEDIA_BUCKET:spotopened-media}
-      access-key: ${KELTA_SPOTOPENED_MEDIA_ACCESS_KEY:}
-      secret-key: ${KELTA_SPOTOPENED_MEDIA_SECRET_KEY:}
-      max-file-size: ${KELTA_SPOTOPENED_MEDIA_MAX_FILE_SIZE:15728640}
-      presigned-url-expiry-minutes: ${KELTA_SPOTOPENED_MEDIA_URL_EXPIRY_MINUTES:15}
+    media:
+      # The media bucket behind media fields (fieldTypeConfig.media — MediaUploadController):
+      # objects uploaded straight from a browser and served by presigned GET. Kept apart from
+      # the attachments bucket above; see MediaStorageService's javadoc for why it is a separate
+      # @Value-bound service. Endpoint, region and credentials default to the attachments
+      # store's, so a deployment whose media bucket lives on the same store sets only
+      # KELTA_MEDIA_ENABLED and KELTA_MEDIA_BUCKET.
+      enabled: ${KELTA_MEDIA_ENABLED:false}
+      endpoint: ${KELTA_MEDIA_ENDPOINT:${kelta.storage.s3.endpoint:}}
+      public-endpoint: ${KELTA_MEDIA_PUBLIC_ENDPOINT:${kelta.storage.s3.public-endpoint:}}
+      region: ${KELTA_MEDIA_REGION:${kelta.storage.s3.region:garage}}
+      bucket: ${KELTA_MEDIA_BUCKET:kelta-media}
+      access-key: ${KELTA_MEDIA_ACCESS_KEY:${kelta.storage.s3.access-key:}}
+      secret-key: ${KELTA_MEDIA_SECRET_KEY:${kelta.storage.s3.secret-key:}}
+      # Platform ceiling per object (bytes); a field's fieldTypeConfig.media.maxFileSize can only lower it.
+      max-file-size: ${KELTA_MEDIA_MAX_FILE_SIZE:15728640}
+      presigned-url-expiry-minutes: ${KELTA_MEDIA_URL_EXPIRY_MINUTES:15}
   nats:
     url: ${NATS_URL:nats://localhost:4222}
     connection-name: kelta-worker

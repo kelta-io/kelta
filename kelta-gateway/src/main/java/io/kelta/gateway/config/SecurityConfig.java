@@ -60,7 +60,7 @@ public class SecurityConfig {
                     "Wildcard '*' is not permitted with allowCredentials=true.");
         }
         // Comma-separated so several product frontends (e.g. app.kelta.io +
-        // app.spotopened.com) can each call the gateway from the browser. Each
+        // app.example.com) can each call the gateway from the browser. Each
         // trimmed entry is a Spring allowedOriginPattern.
         List<String> originPatterns = Arrays.stream(corsAllowedOriginPattern.split(","))
                 .map(String::trim)

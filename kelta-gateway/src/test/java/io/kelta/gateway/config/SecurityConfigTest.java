@@ -38,14 +38,14 @@ class SecurityConfigTest {
     @DisplayName("a comma-separated list allows several frontends (trimmed, blanks dropped)")
     void multipleOrigins() {
         List<String> patterns = corsFor(withOriginPattern(
-                "https://app.kelta.io, https://app.spotopened.com , ")).getAllowedOriginPatterns();
-        assertThat(patterns).containsExactly("https://app.kelta.io", "https://app.spotopened.com");
+                "https://app.kelta.io, https://app.example.com , ")).getAllowedOriginPatterns();
+        assertThat(patterns).containsExactly("https://app.kelta.io", "https://app.example.com");
     }
 
     @Test
     @DisplayName("credentials are allowed and the origin is a pattern (never a wildcard '*')")
     void credentialsAllowed() {
-        CorsConfiguration cfg = corsFor(withOriginPattern("https://app.spotopened.com"));
+        CorsConfiguration cfg = corsFor(withOriginPattern("https://app.example.com"));
         assertThat(cfg.getAllowCredentials()).isTrue();
         assertThat(cfg.getAllowedOrigins()).isNull(); // uses allowedOriginPatterns, never allowedOrigins
     }

@@ -549,4 +549,71 @@ class CerbosRecordAuthorizationAdviceTest {
             assertThat(counts(result, "metadata")).containsEntry("totalCount", 7L).containsEntry("totalPages", 4);
         }
     }
+
+    @Nested
+    @DisplayName("isRecordReadable (single-record decision for handlers that return no record)")
+    class IsRecordReadable {
+
+        private jakarta.servlet.http.HttpServletRequest servletRequest() {
+            return createRequest("/api/photos/download/k").getServletRequest();
+        }
+
+        @Test
+        @DisplayName("record-variant rules: checks the record with its field values as attributes")
+        void recordVariantChecksRecord() {
+            var request = servletRequest();
+            when(authzService.checkRecordAccess(eq("user@example.com"), eq("profile-1"), eq("tenant-1"),
+                    eq("photos"), eq("rec-1"), eq(Map.of("storageKey", "t/photos/u/a.jpg")), eq("read")))
+                    .thenReturn(true);
+
+            assertThat(advice.isRecordReadable(request, "photos",
+                    Map.of("id", "rec-1", "storageKey", "t/photos/u/a.jpg"))).isTrue();
+        }
+
+        @Test
+        @DisplayName("a denied record is unreadable unless a manual share widens it")
+        void deniedUnlessShared() {
+            var request = servletRequest();
+            when(authzService.checkRecordAccess(any(), any(), any(), any(), any(), any(), eq("read")))
+                    .thenReturn(false);
+            when(recordShareAccessService.widen(any(), eq("photos"), eq(Set.of("rec-1")), eq("read")))
+                    .thenReturn(Set.of());
+            assertThat(advice.isRecordReadable(request, "photos", Map.of("id", "rec-1"))).isFalse();
+
+            when(recordShareAccessService.widen(any(), eq("photos"), eq(Set.of("rec-1")), eq("read")))
+                    .thenReturn(Set.of("rec-1"));
+            assertThat(advice.isRecordReadable(request, "photos", Map.of("id", "rec-1"))).isTrue();
+        }
+
+        @Test
+        @DisplayName("record-invariant policy: one collection-wide check decides")
+        void collectionWide() {
+            var request = servletRequest();
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("photos"), eq("read")))
+                    .thenReturn(true);
+
+            assertThat(advice.isRecordReadable(request, "photos", Map.of("id", "rec-1"))).isTrue();
+            verify(authzService, never()).checkRecordAccess(any(), any(), any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a record without an id is never readable (fail closed)")
+        void noIdFailsClosed() {
+            assertThat(advice.isRecordReadable(servletRequest(), "photos", Map.of("title", "x"))).isFalse();
+        }
+
+        @Test
+        @DisplayName("no Cerbos identity, or permissions disabled: allowed, as the advice leaves such bodies alone")
+        void noIdentityOrDisabled() {
+            MockHttpServletRequest anonymous = new MockHttpServletRequest("GET", "/api/photos/download/k");
+            when(permissionResolver.hasIdentity(anonymous)).thenReturn(false);
+            assertThat(advice.isRecordReadable(anonymous, "photos", Map.of("id", "rec-1"))).isTrue();
+
+            CerbosRecordAuthorizationAdvice disabled = new CerbosRecordAuthorizationAdvice(
+                    authzService, permissionResolver, recordShareAccessService, recordRuleIndex, false);
+            assertThat(disabled.isRecordReadable(servletRequest(), "photos", Map.of("id", "rec-1"))).isTrue();
+            verifyNoInteractions(authzService);
+        }
+    }
 }

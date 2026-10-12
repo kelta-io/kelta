@@ -15,6 +15,8 @@
 
 Boots a full mini-stack (Postgres, Redis, NATS, Cerbos, worker, auth, gateway) via Testcontainers and runs `*ScenarioTest.java` against it under the `integration-tests` profile.
 
+No object store runs in the stack. The worker has media storage enabled (`KELTA_MEDIA_*` in `KeltaStack`) against an unreachable endpoint, which is enough because media endpoints only presign (a local HMAC); `MediaFieldScenarioTest` asserts on the redirect's `Location` with a client that does not follow redirects.
+
 **Standalone `*IT.java`** also run under that profile without the full stack. `CerbosGeneratedPolicyIT` starts only a Cerbos container (sqlite in-memory + admin API, pinned to the production image), pushes the worker's golden generated policies (`kelta-worker/src/test/resources/cerbos/golden/`, kept in sync with `CerbosPolicyGenerator` by `CerbosPolicyGeneratorTest.GoldenFixtureTests`) and asserts an allow/deny matrix — the pattern for "a real PDP must accept and evaluate what we generate", since the KeltaStack Cerbos is allow-all. Run one with `mvn verify -f kelta-test-harness/pom.xml -Pintegration-tests -Dit.test=CerbosGeneratedPolicyIT`.
 
 **Service-module Testcontainers tests** (`*IntegrationTest` in kelta-worker, kelta-ai, kelta-auth and
