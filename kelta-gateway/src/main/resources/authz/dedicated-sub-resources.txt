@@ -1,0 +1,82 @@
+# Dedicated sub-resource endpoints: worker controller mappings of the child-resource shape
+#   /api/<parent>/{var}/<literal>  or  /api/<parent>/{var}/<literal>/<literal|{var}>
+# that a dedicated controller serves instead of DynamicCollectionRouter's generic
+# {parentName}/{parentId}/{childName}[/{childId}] handlers. Spring ranks the literal segment
+# above the router's {childName} variable, so the trailing segment names an operation, not a
+# child collection: RouteAuthorizationFilter keeps the parent route's own decision for these
+# requests even when a tenant has a collection named like that segment.
+#
+# Format: one "METHOD /api/..." per line ("*" = any method); "{x}" matches exactly one path
+# segment; '#' starts a comment. Kept in step with the worker's controllers by
+# kelta-worker DedicatedSubResourcesDriftTest, which fails on a missing or stale line.
+GET /api/api-specs/{id}/details
+GET /api/api-specs/{id}/operations
+GET /api/api-specs/{id}/raw
+GET /api/api-specs/{specId}/operations/{opId}
+POST /api/approvals/{instanceId}/approve
+POST /api/approvals/{instanceId}/recall
+POST /api/approvals/{instanceId}/reject
+POST /api/attachments/{id}/finalize
+POST /api/bulk-jobs/{id}/abort
+GET /api/bulk-jobs/{id}/results
+GET /api/bulk-jobs/{id}/results/download
+POST /api/collections/{collectionName}/duplicates
+POST /api/collections/{collectionName}/import/csv
+POST /api/collections/{collectionName}/merge
+GET /api/collections/{name}/schema
+GET /api/connected-apps/{appId}/audit
+GET /api/connected-apps/{appId}/tokens
+POST /api/connected-apps/{appId}/tokens
+DELETE /api/connected-apps/{appId}/tokens/{tokenId}
+POST /api/credentials/{id}/oauth/authorize-url
+POST /api/credentials/{id}/test
+POST /api/dashboards/{dashboardId}/data
+POST /api/dashboards/{dashboardId}/validate
+GET /api/dashboards/{name}/tree
+PUT /api/dashboards/{name}/tree
+POST /api/data-exports/{id}/cancel
+GET /api/data-exports/{id}/download
+POST /api/environments/{envId}/archive
+GET /api/environments/{envId}/diff
+POST /api/environments/{envId}/refresh
+GET /api/environments/{envId}/snapshots
+POST /api/environments/{envId}/snapshots
+POST /api/environments/{envId}/test
+POST /api/flows/{flowId}/execute
+GET /api/flows/{flowId}/flow-executions
+POST /api/flows/{flowId}/publish
+GET /api/flows/{flowId}/runs
+GET /api/flows/{flowId}/schedule
+GET /api/flows/{flowId}/versions
+GET /api/flows/{flowId}/versions/{versionNumber}
+GET /api/flows/{flowId}/webhook-url
+POST /api/migrations/{runId}/rollback
+GET /api/modules/{moduleId}/actions
+POST /api/modules/{moduleId}/disable
+POST /api/modules/{moduleId}/enable
+GET /api/modules/{moduleId}/health
+GET /api/modules/{moduleId}/provisioned-resources
+GET /api/modules/{moduleId}/ui-bundle.js
+DELETE /api/modules/{moduleId}/x/{p1}
+GET /api/modules/{moduleId}/x/{p1}
+PATCH /api/modules/{moduleId}/x/{p1}
+POST /api/modules/{moduleId}/x/{p1}
+PUT /api/modules/{moduleId}/x/{p1}
+GET /api/page-layouts/{layoutId}/tree
+PUT /api/page-layouts/{layoutId}/tree
+GET /api/pages/{slug}/render
+POST /api/promotions/{promotionId}/approve
+POST /api/promotions/{promotionId}/execute
+GET /api/promotions/{promotionId}/items
+POST /api/promotions/{promotionId}/rollback
+POST /api/reports/{reportId}/execute
+GET /api/reports/{reportId}/export
+POST /api/scheduled-jobs/{id}/execute
+POST /api/scheduled-jobs/{id}/pause
+POST /api/scheduled-jobs/{id}/resume
+POST /api/scripts/{id}/execute
+POST /api/tenants/{id}/admin-invite
+POST /api/tenants/{id}/bootstrap-token
+GET /api/ui-menus/{name}/tree
+PUT /api/ui-menus/{name}/tree
+GET /api/watches/{id}/alerts

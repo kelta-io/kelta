@@ -511,11 +511,12 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **Any state the gateway loads only at startup needs a retry.** `RouteInitializer` retries the
   `/internal/bootstrap` fetch with backoff; without it a gateway that started before the worker
   served static routes only for hours.
-- **`RouteAuthorizationFilter.DEDICATED_SUB_RESOURCES` mirrors worker controllers.** A path with
-  three or four segments after `/api` under a collection route is treated as a child resource and
-  404s when its third segment names no collection of the caller's tenant; a dedicated controller
-  mapped at that depth on a non-`static-` collection (attachments finalize, credentials test/OAuth,
-  api-spec details/raw/operations) must be listed there, method included.
+- **`kelta-gateway/.../authz/dedicated-sub-resources.txt` mirrors worker controllers.** A path with
+  three or four segments after `/api` under a collection route whose third segment names a
+  collection of the caller's tenant is authorized as a child resource; a dedicated controller
+  mapped at that depth must be listed in the file (method included) to keep the parent's check.
+  `DedicatedSubResourcesDriftTest` (worker) fails on a missing or stale line; the file is a native
+  resource registered by `DedicatedSubResources.Hints` — a new resource file needs the same.
 - **Error bodies are built from `JsonApiError.toMap()`**, never the bean — on native images the
   bean serializes as `{"errors":[{}]}` (worker `GlobalExceptionHandler`, gateway `GlobalErrorHandler`).
 

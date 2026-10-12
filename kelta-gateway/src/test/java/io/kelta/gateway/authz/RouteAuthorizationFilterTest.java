@@ -1086,19 +1086,44 @@ class RouteAuthorizationFilterTest {
         }
 
         @Test
-        @DisplayName("A child segment naming only another tenant's collection is 404, never authorized against it")
-        void otherTenantsCollectionIsNotFound() {
+        @DisplayName("A child segment naming only another tenant's collection gets the parent decision, never that collection's")
+        void otherTenantsCollectionGetsParentDecision() {
             grant("accounts-uuid", "read");
 
-            assertStatus(run(MockServerHttpRequest.get("/api/accounts/a1/invoices").build()), HttpStatus.NOT_FOUND);
+            assertForwarded(run(MockServerHttpRequest.get("/api/accounts/a1/invoices").build()));
+            verify(cerbosService).checkObjectPermission(principal, "accounts-uuid", "read");
             verify(cerbosService, never()).checkObjectPermission(any(), eq("invoices-uuid"), any());
         }
 
         @Test
-        @DisplayName("A child segment that is no collection at all is 404")
-        void unknownChildIsNotFound() {
-            assertStatus(run(MockServerHttpRequest.delete("/api/accounts/a1/nothing-here/x").build()),
-                    HttpStatus.NOT_FOUND);
+        @DisplayName("Another tenant's same-named collection does not lift a parent denial")
+        void otherTenantsCollectionDoesNotLiftParentDenial() {
+            grant("invoices-uuid", "read");
+
+            assertStatus(run(MockServerHttpRequest.get("/api/accounts/a1/invoices").build()), HttpStatus.FORBIDDEN);
+            verify(cerbosService, never()).checkObjectPermission(any(), eq("invoices-uuid"), any());
+        }
+
+        @Test
+        @DisplayName("A child segment that is no collection at all gets the parent route's decision for the method")
+        void unknownChildGetsParentDecision() {
+            grant("accounts-uuid", "delete");
+
+            assertForwarded(run(MockServerHttpRequest.delete("/api/accounts/a1/nothing-here/x").build()));
+            verify(cerbosService).checkObjectPermission(principal, "accounts-uuid", "delete");
+            verify(cerbosService, never()).checkObjectPermission(principal, "accounts-uuid", "read");
+        }
+
+        @Test
+        @DisplayName("Without the parent's action an unknown child segment is refused")
+        void unknownChildWithoutParentActionIsForbidden() {
+            grant("accounts-uuid", "read");
+
+            MockServerWebExchange exchange = run(MockServerHttpRequest.delete("/api/accounts/a1/nothing-here/x").build());
+
+            assertStatus(exchange, HttpStatus.FORBIDDEN);
+            assertThat(exchange.getResponse().getBodyAsString().block())
+                    .contains("Insufficient permissions for delete on accounts");
         }
 
         @Test
@@ -1152,11 +1177,56 @@ class RouteAuthorizationFilterTest {
         }
 
         @Test
+        @DisplayName("A dedicated sub-path keeps the parent decision even when the tenant has a same-named collection")
+        void dedicatedSubResourceWinsOverSameNamedCollection() {
+            registry.addRoute(new RouteDefinition("finalize-uuid", "/api/finalize/**", "http://worker:80",
+                    "finalize", null, 0, "tenant-1"));
+            grant("attachments-uuid", "create");
+
+            assertForwarded(run(MockServerHttpRequest.post("/api/attachments/a1/finalize").build()));
+            verify(cerbosService, never()).checkObjectPermission(any(), eq("finalize-uuid"), any());
+        }
+
+        @Test
         @DisplayName("The dedicated-path match is method-specific: GET on the same path is a child request")
         void dedicatedMatchIsMethodSpecific() {
+            registry.addRoute(new RouteDefinition("finalize-uuid", "/api/finalize/**", "http://worker:80",
+                    "finalize", null, 0, "tenant-1"));
             grant("attachments-uuid", "read");
 
-            assertStatus(run(MockServerHttpRequest.get("/api/attachments/a1/finalize").build()), HttpStatus.NOT_FOUND);
+            assertStatus(run(MockServerHttpRequest.get("/api/attachments/a1/finalize").build()), HttpStatus.FORBIDDEN);
+            verify(cerbosService).checkObjectPermission(principal, "finalize-uuid", "read");
+        }
+
+        /**
+         * Dedicated worker endpoints under parents whose gateway route is a collection route (the
+         * system collection's bootstrap route rather than the {@code static-} one), with a tenant
+         * collection named like the trailing segment: each keeps the parent's decision for its
+         * method and is never authorized against that collection.
+         */
+        @ParameterizedTest(name = "{0} {1}")
+        @CsvSource({
+                "GET, /api/page-layouts/l1/tree, page-layouts, tree, read",
+                "PUT, /api/page-layouts/l1/tree, page-layouts, tree, edit",
+                "GET, /api/dashboards/sales/tree, dashboards, tree, read",
+                "PUT, /api/dashboards/sales/tree, dashboards, tree, edit",
+                "POST, /api/dashboards/d1/data, dashboards, data, create",
+                "POST, /api/dashboards/d1/validate, dashboards, validate, create",
+                "POST, /api/collections/accounts/duplicates, collections, duplicates, create",
+                "POST, /api/collections/accounts/merge, collections, merge, create"
+        })
+        @DisplayName("Dedicated endpoints keep the parent decision over a same-named tenant collection")
+        void dedicatedEndpointsKeepParentDecision(String method, String path, String parent, String segment,
+                                                  String action) {
+            registry.addRoute(new RouteDefinition(parent + "-uuid", "/api/" + parent + "/**", "http://worker:80",
+                    parent, null, 0, "tenant-1"));
+            registry.addRoute(new RouteDefinition(segment + "-uuid", "/api/" + segment + "/**", "http://worker:80",
+                    segment, null, 0, "tenant-1"));
+            grant(parent + "-uuid", action);
+
+            assertForwarded(run(MockServerHttpRequest.method(HttpMethod.valueOf(method), path).build()));
+            verify(cerbosService).checkObjectPermission(principal, parent + "-uuid", action);
+            verify(cerbosService, never()).checkObjectPermission(any(), eq(segment + "-uuid"), any());
         }
 
         @Test

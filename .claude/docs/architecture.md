@@ -367,12 +367,15 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   record advice to filter (`integrations.md` → Media fields). Literal segments beat the router's
   variables at equal depth, but test the mapping with the router stand-in registered.
   **Exception — three or four segments after `/api`:** that is the child-resource shape (next
-  bullet), which the gateway authorizes against the child named by the third segment and answers
-  404 when the caller's tenant has no such collection. A dedicated controller at that depth on a
-  collection without a `static-` route (`POST /api/attachments/{id}/finalize`,
-  `POST /api/credentials/{id}/test`, `GET /api/api-specs/{id}/details`, …) must be listed in
-  `RouteAuthorizationFilter.DEDICATED_SUB_RESOURCES` (method + path pattern) so it keeps the
-  parent route's own check.
+  bullet), which the gateway authorizes against the child named by the third segment whenever
+  that segment names a collection of the caller's tenant. Every dedicated controller mapping
+  `/api/<literal>/{var}/<literal>[/<literal|{var}>]` (`GET /api/dashboards/{name}/tree`,
+  `POST /api/attachments/{id}/finalize`, …) is listed, method included, in
+  `kelta-gateway/src/main/resources/authz/dedicated-sub-resources.txt` and keeps the parent
+  route's own check even if a tenant names a collection like its last segment (Spring routes the
+  request to the literal mapping, never to the router's `{childName}`). The worker's
+  `DedicatedSubResourcesDriftTest` scans every `@RequestMapping`-family handler on its classpath
+  and fails on a missing or stale line — add the line it prints.
 - **Child-resource paths** (`/api/{parent}/{parentId}/{child}` list/create,
   `/api/{parent}/{parentId}/{child}/{childId}` get/update/delete — `DynamicCollectionRouter`'s
   sub-resource handlers, which read and write the **child** collection's records): when the
@@ -384,8 +387,12 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   that is itself a `static-` route that route's rule. The child segment is read the way the worker
   matches it (percent-decoded, path parameters dropped) and resolved with
   `RouteRegistry.findTenantVisibleByPath` — the caller's own collection, a `static-` route or a
-  system collection, **never another tenant's** same-named collection. No match → 404 (the worker
-  resolves the child in the caller's tenant and would 404 too). A narrowed allow (the own-tenant
+  system collection, **never another tenant's** same-named collection. No match → the parent
+  route's own decision for the method (the behaviour before child paths were recognized): the
+  segment is then a dedicated endpoint's operation or a child the gateway's route table does not
+  know yet, and the worker's own authorization of the router's generic child handlers covers that
+  route-table lag. A dedicated endpoint (`authz/dedicated-sub-resources.txt`, above) keeps the
+  parent's decision even when the segment does name a collection. A narrowed allow (the own-tenant
   view of `/api/tenants`) counts as a denial for a child, since the forwarded request is not the
   narrowed one. Worker side, `CerbosRecordAuthorizationAdvice` and `CerbosFieldWriteSecurityAdvice`
   take the collection from the matched handler's `childName` path variable (`ApiPaths.collectionName`),

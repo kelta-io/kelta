@@ -16,10 +16,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.server.PathContainer;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -33,7 +35,6 @@ import tools.jackson.databind.node.ObjectNode;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -49,8 +50,10 @@ import java.util.regex.Pattern;
  *   <li>API_ACCESS system permission via Cerbos</li>
  *   <li>Object-level CRUD permissions via Cerbos (read/create/edit/delete on collection)</li>
  *   <li>For a child-resource path {@code /api/{parent}/{parentId}/{child}[/{childId}]} under a
- *       collection route: {@code read} on the parent and the child collection's own decision
- *       for the HTTP method (see {@code authorizeChildPath})</li>
+ *       collection route whose child segment names a collection the caller's tenant can address:
+ *       {@code read} on the parent and the child collection's own decision for the HTTP method
+ *       (see {@code authorizeChildPath}). A child segment that names none, or a dedicated
+ *       endpoint listed in {@link DedicatedSubResources}, keeps the parent route's decision.</li>
  * </ul>
  *
  * <p>System permission overrides (VIEW_ALL_DATA, MODIFY_ALL_DATA) are encoded
@@ -60,6 +63,7 @@ import java.util.regex.Pattern;
  * {@code X-User-Profile-Id}, {@code X-User-Email}, {@code X-Cerbos-Scope}.
  */
 @Component
+@ImportRuntimeHints(DedicatedSubResources.Hints.class)
 public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
 
     private static final Logger log = LoggerFactory.getLogger(RouteAuthorizationFilter.class);
@@ -70,29 +74,14 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
     private static final Pattern TENANT_ID_FILTER = Pattern.compile("(?i)^filter\\[\\s*id\\s*\\](\\[[^\\]]*\\])?$");
 
     /**
-     * Literal sub-paths under a collection route that the worker serves with a dedicated controller
-     * rather than the generic child-resource handlers. At the same depth a literal segment outranks
-     * {@code DynamicCollectionRouter}'s {@code {childName}} variable, so the trailing segment of
-     * these paths names an operation, not a child collection, and the request keeps the parent
-     * route's own decision. Mirror any new controller mapping of the form
-     * {@code /api/<collection>/{id}/<literal>[/...]} (three or four segments, on a collection that
-     * has no {@code static-} route) here, or the gateway answers it 404 as an unknown child.
+     * Worker endpoints of the child-resource shape served by a dedicated controller rather than the
+     * generic child handlers ({@code GET /api/dashboards/{name}/tree}, …): their trailing segment
+     * names an operation, so they keep the parent route's own decision even when a tenant has a
+     * collection named like that segment. Loaded from {@value DedicatedSubResources#RESOURCE};
+     * the worker's {@code DedicatedSubResourcesDriftTest} keeps that file in step with its
+     * controllers.
      */
-    private static final List<DedicatedSubResource> DEDICATED_SUB_RESOURCES = List.of(
-            // ApiSpecController
-            new DedicatedSubResource(HttpMethod.GET,
-                    Pattern.compile("^/api/api-specs/[^/]+/(details|raw|operations)$")),
-            new DedicatedSubResource(HttpMethod.GET,
-                    Pattern.compile("^/api/api-specs/[^/]+/operations/[^/]+$")),
-            // CredentialController
-            new DedicatedSubResource(HttpMethod.POST, Pattern.compile("^/api/credentials/[^/]+/test$")),
-            new DedicatedSubResource(HttpMethod.POST,
-                    Pattern.compile("^/api/credentials/[^/]+/oauth/authorize-url$")),
-            new DedicatedSubResource(HttpMethod.POST, Pattern.compile("^/api/credentials/oauth/complete$")),
-            // AttachmentUploadController
-            new DedicatedSubResource(HttpMethod.POST, Pattern.compile("^/api/attachments/[^/]+/finalize$")));
-
-    private record DedicatedSubResource(HttpMethod method, Pattern path) {}
+    private static final DedicatedSubResources DEDICATED_SUB_RESOURCES = DedicatedSubResources.loadDefault();
 
     /** Outcome of authorizing one route for one method. */
     private sealed interface Decision permits Allow, Deny, NotFound {}
@@ -216,9 +205,10 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
 
                     // 3. A child-resource path under a collection route acts on the child
                     // collection, so it is authorized against the child as well as the parent.
-                    Optional<ChildResourcePath> child =
-                            ChildResourcePath.parse(exchange.getRequest().getPath().pathWithinApplication());
-                    if (child.isPresent() && !isStaticRoute(route.get()) && !isDedicatedSubResource(method, path)) {
+                    PathContainer requestPath = exchange.getRequest().getPath().pathWithinApplication();
+                    Optional<ChildResourcePath> child = ChildResourcePath.parse(requestPath);
+                    if (child.isPresent() && !isStaticRoute(route.get())
+                            && !DEDICATED_SUB_RESOURCES.matches(method, requestPath)) {
                         return authorizeChildPath(exchange, chain, principal, route.get(), child.get(), method);
                     }
 
@@ -239,10 +229,12 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
      *       route, that route's own rule) governs the operation.</li>
      * </ul>
      * The child segment is resolved among the collections the caller's tenant can address
-     * ({@link RouteRegistry#findTenantVisibleByPath}). When it names none, the worker cannot serve
-     * the path as a child resource for this tenant either (it resolves the child in the caller's
-     * tenant and answers 404), so the gateway answers the same 404 itself rather than let a
-     * request it cannot authorize reach the worker.
+     * ({@link RouteRegistry#findTenantVisibleByPath}) — never another tenant's same-named
+     * collection. When it names none, the request gets the parent route's own decision for its
+     * method, exactly as before child paths were recognized: the segment is then an operation
+     * of a dedicated endpoint, or a child the gateway's route table does not know (yet). The
+     * worker authorizes its generic child handlers itself, which covers a child collection
+     * created after the gateway's last route refresh.
      */
     private Mono<Void> authorizeChildPath(ServerWebExchange exchange,
                                           GatewayFilterChain chain,
@@ -255,9 +247,10 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                 ? routeRegistry.findTenantVisibleByPath(childPath, TenantResolutionFilter.getTenantId(exchange))
                 : Optional.empty();
         if (childRoute.isEmpty()) {
-            log.debug("Child segment '{}' under '{}' names no collection of the caller's tenant",
-                    child.childName(), parentRoute.getCollectionName());
-            return apply(exchange, chain, principal, new NotFound(parentRoute.getCollectionName()));
+            log.debug("Child segment '{}' under '{}' names no collection of the caller's tenant; "
+                    + "keeping the parent route's decision", child.childName(), parentRoute.getCollectionName());
+            return decide(exchange, principal, exchange.getRequest().getPath().value(), method, parentRoute)
+                    .flatMap(decision -> apply(exchange, chain, principal, decision));
         }
 
         return decide(exchange, principal, exchange.getRequest().getPath().value(), HttpMethod.GET, parentRoute)
@@ -448,14 +441,6 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
         return route.getId() != null && route.getId().startsWith("static-");
     }
 
-    private static boolean isDedicatedSubResource(HttpMethod method, String path) {
-        for (DedicatedSubResource dedicated : DEDICATED_SUB_RESOURCES) {
-            if (dedicated.method().equals(method) && dedicated.path().matcher(path).matches()) {
-                return true;
-            }
-        }
-        return false;
-    }
     /**
      * Forwards the request to the worker with identity headers for fine-grained checks.
      */
