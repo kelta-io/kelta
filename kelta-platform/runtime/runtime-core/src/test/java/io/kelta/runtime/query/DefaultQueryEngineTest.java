@@ -1844,6 +1844,40 @@ class DefaultQueryEngineTest {
         }
 
         @Test
+        @DisplayName("the update event is built after the hooks: a consumed input is gone, hook updates are in")
+        void updateEventReflectsHookOutput() {
+            BeforeSaveHookRegistry hooks = new BeforeSaveHookRegistry();
+            hooks.register(new BeforeSaveHook() {
+                @Override public String getCollectionName() { return "vault"; }
+                @Override public BeforeSaveResult beforeUpdate(String id, Map<String, Object> record,
+                                                               Map<String, Object> previous, String tenantId) {
+                    // A write-only input: encrypted into the server-only field, plaintext removed.
+                    Object plaintext = record.remove("secret");
+                    return BeforeSaveResult.withFieldUpdates(Map.of(
+                            "secretEnc", "cipher-of-" + plaintext, "name", "normalized"));
+                }
+            });
+            DefaultQueryEngine hooked = new DefaultQueryEngine(storageAdapter, validationEngine,
+                null, null, null, null, null, publisher, hooks);
+            when(storageAdapter.getById(vault, "r1")).thenReturn(Optional.of(stored("r1")));
+            ArgumentCaptor<Map<String, Object>> patch = ArgumentCaptor.forClass(Map.class);
+            when(storageAdapter.update(eq(vault), eq("r1"), patch.capture()))
+                .thenReturn(Optional.of(stored("r1")));
+
+            Map<String, Object> input = new HashMap<>();
+            input.put("name", "m");
+            input.put("secret", "plaintext-value");
+            hooked.update(vault, "r1", input).orElseThrow();
+
+            assertFalse(patch.getValue().containsKey("secret"));
+            RecordChangedPayload payload = publishedPayload();
+            assertFalse(payload.getData().containsKey("secret"), "consumed input must not reach the event");
+            assertFalse(payload.getData().containsValue("plaintext-value"));
+            assertFalse(payload.getData().containsKey("secretEnc"));
+            assertEquals("normalized", payload.getData().get("name"), "hook updates reach the event");
+        }
+
+        @Test
         @DisplayName("the delete event carries no server-only value")
         void deleteEventOmitsServerOnlyValue() {
             when(storageAdapter.getById(vault, "r1")).thenReturn(Optional.of(stored("r1")));

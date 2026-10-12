@@ -263,6 +263,14 @@ public final class KeltaStack {
 
     // ── Accessors ────────────────────────────────────────────────────────────
 
+    /**
+     * The AES-256 key every service container shares ({@code KELTA_ENCRYPTION_KEY}), for scenarios
+     * that prove a stored ciphertext decrypts the way kelta-auth would decrypt it.
+     */
+    public static String encryptionKey() {
+        return ENCRYPTION_KEY;
+    }
+
     public static String workerBaseUrl() {
         return "http://" + WORKER.getHost() + ":" + WORKER.getMappedPort(8080);
     }

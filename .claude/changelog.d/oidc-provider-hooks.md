@@ -1,0 +1,1 @@
+- 2026-10-12 fix(worker): Register `OidcProviderSecretHook` and `OidcDiscoveryHook` so an OIDC provider's client secret is stored encrypted (it was silently dropped) and discovery runs on save behind a new `OutboundUrlGuard`; build the `record.updated` payload after the before-save hooks and keep request bodies out of router debug logs (oidc-provider-hooks)

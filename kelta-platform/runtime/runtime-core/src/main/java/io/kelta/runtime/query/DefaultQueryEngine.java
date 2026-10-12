@@ -424,6 +424,12 @@ public class DefaultQueryEngine implements QueryEngine {
         // Evaluate before-update hooks (module-provided lifecycle hooks)
         evaluateBeforeUpdateHooks(definition, id, recordData, previousData);
 
+        // The event describes what was written, so it is merged from the patch AFTER the hooks:
+        // a hook's field updates are in it, and an input a hook consumed (a plaintext secret it
+        // encrypted and removed) is not. mergedData above predates the hooks.
+        Map<String, Object> writtenData = new HashMap<>(previousData);
+        writtenData.putAll(recordData);
+
         // Persist via storage adapter
         Optional<Map<String, Object>> updated = storageAdapter.update(definition, id, recordData);
 
@@ -438,9 +444,9 @@ public class DefaultQueryEngine implements QueryEngine {
 
             // Publish record change event — without server-only values in either snapshot
             publishRecordEvent(EventFactory.createRecordEvent("record.updated",
-                    extractTenantId(mergedData), extractUserId(mergedData),
+                    extractTenantId(writtenData), extractUserId(writtenData),
                     RecordChangedPayload.updated(definition.name(), id,
-                            definition.withoutServerOnlyFields(mergedData),
+                            definition.withoutServerOnlyFields(writtenData),
                             definition.withoutServerOnlyFields(previousData), changedFields)
                             .withContainsMaskedFields(definition.hasMaskingConfiguredFields())
                             .withOwnerScoped(definition.isOwnerScoped())));

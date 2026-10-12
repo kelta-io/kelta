@@ -5,41 +5,45 @@ import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.stereotype.Component;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Encrypts the OIDC provider client secret before it is persisted.
+ * Stores an OIDC provider's client secret encrypted, and never in plaintext.
  *
- * <p>The UI sends a plaintext {@code clientSecret} field. This hook:
+ * <p>Callers (the admin UI, the API) send the secret as a write-only {@code clientSecret}
+ * attribute. It is not a field of {@code oidc-providers}; this hook consumes it:
  * <ol>
- *   <li>Encrypts it into {@code clientSecretEnc} using AES-256-GCM</li>
- *   <li>Removes the plaintext from the record so it is never stored</li>
+ *   <li>a non-blank value is encrypted (AES-256-GCM, {@link EncryptionService}) into
+ *       {@code clientSecretEnc};</li>
+ *   <li>the plaintext is removed from the record in every case, before any later hook, the
+ *       storage adapter or the {@code record.changed} event can see it;</li>
+ *   <li>an absent or blank value leaves the stored secret unchanged — the admin form sends an
+ *       empty value on edit to mean "keep the current secret".</li>
  * </ol>
  *
  * <p>{@code clientSecretEnc} is a server-only field ({@code FieldDefinition.serverOnly}): the
- * query engine never returns it and ignores a caller-supplied value, so this hook is the only
- * writer. The encrypted value is only decrypted internally (read from the column directly) when
- * kelta-auth needs to perform token exchange with the external IdP.
+ * query engine never returns it and drops a caller-supplied value before the hooks run, so this
+ * hook is its only writer through the API. kelta-auth reads the column over the worker's internal
+ * bootstrap endpoint and decrypts it to authenticate to the external identity provider.
  *
- * <p><b>Not registered.</b> Before-save hooks are registered by being Spring beans
- * ({@code BeforeSaveHookRegistrar}), and this class is deliberately not one. It used to be a
- * {@code @Component} (gated on {@code kelta.encryption.key}) at a time when hooks were registered
- * by hand, and nothing ever registered it, so it has never run. Making it a bean again is a
- * behaviour change to make on purpose, with tests, and must update
- * {@code BeforeSaveHookWiringTest}.
+ * <p>If no encryption key is configured, a save that carries a secret is refused rather than
+ * silently storing nothing.
  */
+@Component
 public class OidcProviderSecretHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(OidcProviderSecretHook.class);
-    private static final String COLLECTION = "oidc-providers";
-    private static final String CLIENT_SECRET_FIELD = "clientSecret";
-    private static final String CLIENT_SECRET_ENC_FIELD = "clientSecretEnc";
 
-    private final EncryptionService encryptionService;
+    static final String COLLECTION = "oidc-providers";
+    static final String CLIENT_SECRET_FIELD = "clientSecret";
+    static final String CLIENT_SECRET_ENC_FIELD = "clientSecretEnc";
 
-    public OidcProviderSecretHook(EncryptionService encryptionService) {
+    private final ObjectProvider<EncryptionService> encryptionService;
+
+    public OidcProviderSecretHook(ObjectProvider<EncryptionService> encryptionService) {
         this.encryptionService = encryptionService;
     }
 
@@ -48,9 +52,10 @@ public class OidcProviderSecretHook implements BeforeSaveHook {
         return COLLECTION;
     }
 
+    /** First on the collection: the plaintext must be gone before any other hook sees the record. */
     @Override
     public int getOrder() {
-        return -100; // Run early, before audit hooks
+        return -100;
     }
 
     @Override
@@ -65,29 +70,28 @@ public class OidcProviderSecretHook implements BeforeSaveHook {
     }
 
     private BeforeSaveResult encryptSecret(Map<String, Object> record) {
-        Object clientSecret = record.get(CLIENT_SECRET_FIELD);
-        if (clientSecret == null) {
+        // Removed unconditionally: whatever happens next, the plaintext never travels further.
+        Object submitted = record.remove(CLIENT_SECRET_FIELD);
+        if (submitted == null) {
             return BeforeSaveResult.ok();
         }
-
-        String secretValue = clientSecret.toString();
-        if (secretValue.isBlank()) {
-            return BeforeSaveResult.ok();
+        if (!(submitted instanceof String secret)) {
+            return BeforeSaveResult.error(CLIENT_SECRET_FIELD, "Client secret must be a string.");
+        }
+        // Surrounding whitespace is never part of a client secret; it is a paste artefact.
+        String value = secret.strip();
+        if (value.isEmpty()) {
+            return BeforeSaveResult.ok(); // keep the stored secret
         }
 
-        // Don't re-encrypt already encrypted values
-        if (EncryptionService.isEncrypted(secretValue)) {
-            return BeforeSaveResult.ok();
+        EncryptionService encryption = encryptionService.getIfAvailable();
+        if (encryption == null) {
+            log.warn("Refusing to store an OIDC client secret: no encryption key is configured");
+            return BeforeSaveResult.error(CLIENT_SECRET_FIELD,
+                    "The client secret cannot be stored because encryption is not configured on this server.");
         }
 
-        log.debug("Encrypting client secret for OIDC provider");
-        String encrypted = encryptionService.encrypt(secretValue);
-
-        Map<String, Object> updates = new HashMap<>();
-        updates.put(CLIENT_SECRET_ENC_FIELD, encrypted);
-        // Remove plaintext so it never reaches the storage adapter
-        record.remove(CLIENT_SECRET_FIELD);
-
-        return BeforeSaveResult.withFieldUpdates(updates);
+        log.debug("Encrypting the client secret for an OIDC provider");
+        return BeforeSaveResult.withFieldUpdates(Map.of(CLIENT_SECRET_ENC_FIELD, encryption.encrypt(value)));
     }
 }

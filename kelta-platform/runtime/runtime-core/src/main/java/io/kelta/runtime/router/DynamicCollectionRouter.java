@@ -17,6 +17,7 @@ import io.kelta.runtime.router.SubResourceAuthorizer.Access;
 import io.kelta.runtime.router.SubResourceAuthorizer.Decision;
 import io.kelta.runtime.router.SubResourceAuthorizer.Operation;
 import io.kelta.runtime.router.jsonapi.JsonApiRecordSerializer;
+import io.kelta.runtime.router.jsonapi.JsonApiRequestBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.servlet.http.HttpServletRequest;
@@ -337,7 +338,10 @@ public class DynamicCollectionRouter {
             @RequestBody Map<String, Object> requestBody,
             HttpServletRequest request) {
 
-        logger.debug("Create request for collection '{}' with data: {}", collectionName, requestBody);
+        if (logger.isDebugEnabled()) {
+            logger.debug("Create request for collection '{}' with attributes: {}", collectionName,
+                    attributeNames(requestBody));
+        }
 
         return inRequestTenantScope(request, () -> {
             CollectionDefinition definition = collections.resolve(collectionName, request);
@@ -386,6 +390,18 @@ public class DynamicCollectionRouter {
     }
 
     /**
+     * The attribute names of a write body, for debug logging. Names only, never values: a body can
+     * carry write-only secrets (e.g. a client secret that a before-save hook encrypts).
+     */
+    private static Object attributeNames(Map<String, Object> requestBody) {
+        try {
+            return new java.util.TreeSet<>(JsonApiRequestBody.attributes(requestBody).keySet());
+        } catch (RuntimeException e) {
+            return "(unreadable body)";
+        }
+    }
+
+    /**
      * Performs the update operation (PUT and PATCH are the same partial merge).
      */
     private ResponseEntity<Map<String, Object>> performUpdate(
@@ -394,7 +410,10 @@ public class DynamicCollectionRouter {
             Map<String, Object> requestBody,
             HttpServletRequest request) {
 
-        logger.debug("Update request for collection '{}', id '{}' with data: {}", collectionName, id, requestBody);
+        if (logger.isDebugEnabled()) {
+            logger.debug("Update request for collection '{}', id '{}' with attributes: {}", collectionName, id,
+                    attributeNames(requestBody));
+        }
 
         return inRequestTenantScope(request, () -> {
             CollectionDefinition definition = collections.resolve(collectionName, request);

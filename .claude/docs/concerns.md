@@ -297,6 +297,13 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
   the key and ends the auth session. Not done: server-side revoke on logout (public client has no
   client auth to `/oauth2/revoke`), refresh-token family revocation on reuse, DPoP binding.
 
+### Outbound requests to tenant-supplied URLs
+
+`OutboundUrlGuard` (worker) refuses non-public targets (loopback, RFC 1918, link-local/metadata,
+CGNAT, ULA, embedded-in-IPv6 forms) unless `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` lists them; the
+guarded fetch follows no redirects, has deadlines and caps the body. New code that fetches a
+tenant- or admin-supplied URL from inside the cluster should go through it.
+
 ### Data masking — v2 contexts (accepted)
 
 Masking is enforced on JSON:API (`CerbosFieldSecurityAdvice` strip → mask), filter/sort probes
@@ -390,15 +397,6 @@ Two parallel slices adding system collections now usually touch different sectio
 only collide on the `all()` list.
 
 **Other:**
-- **Two `oidc-providers` hooks have never run.** `OidcDiscoveryHook` (fills endpoints from
-  `.well-known/openid-configuration`) and `OidcProviderSecretHook` (encrypts a submitted
-  `clientSecret` into the server-only `clientSecretEnc`) were `@Component`s while hooks were
-  registered by hand in `FlowConfig`, and nothing registered them. Hooks are now registered by
-  being beans (`BeforeSaveHookRegistrar`), so both were made plain classes to keep behaviour
-  unchanged. Consequence today: discovery does not run on save, and the API cannot set
-  `clientSecretEnc` — the admin UI's required client secret is silently dropped, so a
-  confidential-client SSO provider has no stored secret. Enabling them is a deliberate change: annotate, add to
-  `BeforeSaveHookWiringTest`, and test the OIDC provider flow end to end.
 - **Email templates have two lookup axes** — `EmailRepository.findTemplateByKey` (`template_key`,
   V133 `user.*` seeds) and `findTemplateByName` (`name`, V141 seeds). Both fall back
   tenant → `'system'`, so the "wrong" axis still works but may land on a different seed row.
@@ -765,6 +763,7 @@ One line each; full write-ups are in git history.
 - #1472 — `protobufjs` RCE and `maplibre-gl` XSS criticals cleared.
 - 2026-09-09 — `TenantContext.runAsPlatform`/`callAsPlatform` silently returned zero rows; removed.
 - 2026-10-11 — `TenantContext.set`/`setSlug`/`clear` were silent no-ops under a bound `ScopedValue` and leaked on pooled threads; removed, callers use `run/callWithTenant[IfUnbound]`.
+- 2026-10-12 (oidc-provider-hooks) — `OidcProviderSecretHook` and `OidcDiscoveryHook` had never been registered, so the admin form's client secret was silently dropped (no OIDC provider could federate) and discovery never ran; both are beans now, the `record.updated` payload is built after the hooks (a write-only input a hook consumes no longer reaches it), and router debug logs carry attribute names only.
 - 2026-10-11 (V208) — encrypted/hashed secret columns were serialized like ordinary attributes (ciphertext/hashes, permission-gated); `FieldDefinition.serverOnly` (above), setup-audit values scrubbed, unused `CredentialResponseMasker` deleted.
 - 2026-07-05 — `POST /api/operations` skipped per-collection authorization; `checkCollectionAccess` added.
 - PLT-330 (2026-10-04) — any token (and, via the public path, anyone) could list every tenant; gateway narrowing (#1603/#1604) + self-scoped storage predicate.
