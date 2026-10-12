@@ -8,6 +8,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Set;
@@ -25,6 +26,7 @@ import java.util.Set;
  *
  * @since 1.0.0
  */
+@Component
 public class AuditBeforeSaveHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(AuditBeforeSaveHook.class);

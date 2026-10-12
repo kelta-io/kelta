@@ -4,6 +4,7 @@ import io.kelta.runtime.model.OwnerScope;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
 import java.util.List;
@@ -30,6 +31,7 @@ import java.util.Set;
  * <p>Updates are validated only when they touch an ownership attribute, against the stored
  * settings overlaid with the patch.
  */
+@Component
 public class CollectionOwnershipValidationHook implements BeforeSaveHook {
 
     static final String INVALID_OWNER_SCOPE = "INVALID_OWNER_SCOPE";
@@ -56,6 +58,15 @@ public class CollectionOwnershipValidationHook implements BeforeSaveHook {
     @Override
     public String getCollectionName() {
         return "collections";
+    }
+
+    /**
+     * Directly after the schema module's {@code CollectionLifecycleHook} (default order 0).
+     * Hooks are Spring-discovered, so no two hooks on one collection may share an order.
+     */
+    @Override
+    public int getOrder() {
+        return 1;
     }
 
     @Override

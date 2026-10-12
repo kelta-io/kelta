@@ -8,6 +8,7 @@ import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
@@ -23,6 +24,7 @@ import java.util.Map;
  * {@code name} the rule name (best-effort, for logging/debugging),
  * and {@code changeType} the operation.
  */
+@Component
 public class LayoutRuleRefreshHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(LayoutRuleRefreshHook.class);

@@ -9,6 +9,7 @@ import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -29,6 +30,7 @@ import java.util.Map;
  * conversation's {@code last_message_at} via direct JDBC (deliberately not
  * QueryEngine: the bump must not recurse through hooks or spam record.changed).
  */
+@Component
 public class ChatMessageHook implements BeforeSaveHook {
 
     static final String SUBJECT_PREFIX = "kelta.chat.message.";

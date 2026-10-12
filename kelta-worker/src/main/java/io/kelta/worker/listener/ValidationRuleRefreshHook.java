@@ -9,6 +9,7 @@ import io.kelta.runtime.workflow.BeforeSaveHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ import java.util.Map;
  *
  * @since 1.0.0
  */
+@Component
 public class ValidationRuleRefreshHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(ValidationRuleRefreshHook.class);

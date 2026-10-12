@@ -6,6 +6,7 @@ import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,6 +30,7 @@ import java.util.Map;
  *
  * @since 1.0.0
  */
+@Component
 public class FlowDefinitionValidationHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(FlowDefinitionValidationHook.class);

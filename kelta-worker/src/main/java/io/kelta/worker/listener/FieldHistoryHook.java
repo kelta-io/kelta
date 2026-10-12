@@ -12,6 +12,7 @@ import io.kelta.worker.repository.FieldHistoryRepository.Change;
 import io.kelta.worker.service.CollectionLifecycleManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
@@ -32,6 +33,7 @@ import java.util.Objects;
  * history-write failure is logged, never propagated (it must not break the underlying CRUD). Runs
  * late ({@code order = 900}) so validation/veto hooks decide first; RLS scopes writes to the tenant.
  */
+@Component
 public class FieldHistoryHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(FieldHistoryHook.class);

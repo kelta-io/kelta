@@ -10,6 +10,8 @@ import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -41,6 +43,8 @@ import java.util.stream.Collectors;
  * the user only edited the description), {@code dataEnc} is left untouched and
  * {@code metadata} is recomputed from whatever metadata fields are present.
  */
+@Component
+@ConditionalOnProperty(name = "kelta.encryption.key")
 public class CredentialEncryptionHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(CredentialEncryptionHook.class);

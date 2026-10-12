@@ -10,6 +10,8 @@ import io.kelta.worker.service.UserInviteService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 import java.util.*;
 
@@ -36,6 +38,7 @@ import java.util.*;
  *
  * @since 1.0.0
  */
+@Component
 public class TenantProvisioningHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(TenantProvisioningHook.class);
@@ -77,6 +80,7 @@ public class TenantProvisioningHook implements BeforeSaveHook {
     private final ThreadLocal<PendingAdminEmail> pendingAdminEmail = new ThreadLocal<>();
 
     public TenantProvisioningHook(JdbcTemplate jdbcTemplate,
+                                   @Value("${kelta.auth.issuer-uri:https://auth.kelta.io}")
                                    String authIssuerUri,
                                    CerbosPolicySyncService cerbosPolicySyncService,
                                    UserInviteService userInviteService) {

@@ -9,6 +9,7 @@ import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -38,6 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * the per-tenant OTLP registry's TTL approach). The empty result is cached too, so writes to
  * collections without scripts don't re-query.
  */
+@Component
 public class RecordScriptHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(RecordScriptHook.class);
@@ -59,7 +61,7 @@ public class RecordScriptHook implements BeforeSaveHook {
 
     @Override
     public int getOrder() {
-        // After formula compute (250) and built-in/custom validation, before the audit hook (1000).
+        // After formula compute (251) and built-in/custom validation, before the audit hook (1000).
         return 300;
     }
 

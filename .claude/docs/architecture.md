@@ -492,8 +492,8 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     is never served from `SystemCollectionCache` (`DynamicCollectionRouter.cacheable`): its key is
     tenant + query, with no caller, so one member's cached listing would answer the next member's
     identical query.
-  - **Writes** are guarded by `OwnerScopeGuardHook` (wildcard `BeforeSaveHook`, order −100,
-    `FlowConfig`): create stamps the owner (different supplied owner → 400 `OWNER_MISMATCH`);
+  - **Writes** are guarded by `OwnerScopeGuardHook` (wildcard `BeforeSaveHook`, order −99,
+    a `@Component`): create stamps the owner (different supplied owner → 400 `OWNER_MISMATCH`);
     update/delete of a row whose stored owner is not the caller → **404**; owner field immutable
     (400 `OWNER_IMMUTABLE`). `CollectionOwnershipValidationHook` (on `collections`) rejects an
     invalid `ownerField`/`ownerScope` with 400, and rejects setting ownership on a system
@@ -1525,7 +1525,7 @@ and from the `record.changed` payloads (`data` and `previousData`), so includes,
 flows, MCP, realtime and webhooks inherit it; it rejects a server-only field as a filter, sort or
 aggregation key with 400 (a predicate over a value the engine never returns would disclose it);
 and it drops a caller-supplied value on create/update before the before-save hooks run, so only a
-hook (e.g. `CredentialEncryptionHook`, `OidcProviderSecretHook`) can set one — hooks themselves
+hook (e.g. `CredentialEncryptionHook`) can set one — hooks themselves
 receive the full record. Defence in depth: `DynamicCollectionRouter.toJsonApiResourceObject` skips
 them, `CollectionSchemaController` and `OpenApiGenerator` leave them out of the API shape, and
 `SearchIndexService`, `FieldHistoryHook`, `RecordVersionHook` and `AuditBeforeSaveHook` exclude them.

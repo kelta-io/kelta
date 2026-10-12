@@ -7,6 +7,7 @@ import io.kelta.worker.service.TenantQuotaResolver;
 import io.kelta.worker.service.TenantTierQuotas;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
@@ -20,6 +21,7 @@ import java.util.Map;
  * from {@link TenantTierQuotas} with customer-specific overrides from
  * {@code tenant.limits}.
  */
+@Component
 public class CollectionQuotaEnforcementHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(CollectionQuotaEnforcementHook.class);

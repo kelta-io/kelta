@@ -2,6 +2,7 @@ package io.kelta.worker.service;
 
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
+import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,6 +18,7 @@ import java.util.Map;
  *
  * @since 1.0.0
  */
+@Component
 public class DashboardComponentConfigHook implements BeforeSaveHook {
 
     private final DashboardComponentValidator validator;

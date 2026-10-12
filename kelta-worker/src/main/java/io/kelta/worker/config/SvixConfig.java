@@ -1,7 +1,6 @@
 package io.kelta.worker.config;
 
 import tools.jackson.databind.ObjectMapper;
-import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import io.kelta.worker.listener.RecordWebhookPublisher;
 import io.kelta.worker.listener.SvixTenantLifecycleHook;
 import io.kelta.worker.listener.SvixWebhookPublisher;
@@ -72,13 +71,10 @@ public class SvixConfig {
         return new SvixTenantService(svixRestClient);
     }
 
+    /** Registered with the hook registry by {@link BeforeSaveHookRegistrar}, like every hook bean. */
     @Bean
-    public SvixTenantLifecycleHook svixTenantLifecycleHook(
-            BeforeSaveHookRegistry hookRegistry,
-            SvixTenantService svixTenantService) {
-        SvixTenantLifecycleHook hook = new SvixTenantLifecycleHook(svixTenantService);
-        hookRegistry.register(hook);
-        return hook;
+    public SvixTenantLifecycleHook svixTenantLifecycleHook(SvixTenantService svixTenantService) {
+        return new SvixTenantLifecycleHook(svixTenantService);
     }
 
     @Bean

@@ -32,9 +32,13 @@ public class SvixTenantLifecycleHook implements BeforeSaveHook {
         return "tenants";
     }
 
+    /**
+     * After the tenant config publishers (200, 201), before Superset (300). Hooks are
+     * Spring-discovered, so no two hooks on one collection may share an order.
+     */
     @Override
     public int getOrder() {
-        return 200;
+        return 202;
     }
 
     @Override

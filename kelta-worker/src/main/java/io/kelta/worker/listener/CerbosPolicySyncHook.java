@@ -4,6 +4,7 @@ import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.worker.service.CerbosPolicySyncCoalescer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
@@ -15,6 +16,7 @@ import java.util.Map;
  * + serialized per tenant), so a bulk profile operation collapses to one sync
  * instead of one per record.
  */
+@Component
 public class CerbosPolicySyncHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(CerbosPolicySyncHook.class);

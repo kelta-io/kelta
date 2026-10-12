@@ -10,6 +10,7 @@ import io.kelta.runtime.workflow.HookConflictException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -41,6 +42,7 @@ import java.util.Set;
  * existing default's id in {@code meta.existingId} — this hook never writes
  * a sibling row to unset the old default; that is a client-driven PATCH.
  */
+@Component
 public class ListViewConfigHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(ListViewConfigHook.class);

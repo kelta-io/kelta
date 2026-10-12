@@ -6,6 +6,7 @@ import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -20,6 +21,7 @@ import java.util.Objects;
  * {@link io.kelta.worker.service.email.SmtpEmailProvider} sender cache so the
  * next outbound mail picks up the new host / credentials / from-overrides.
  */
+@Component
 public class TenantEmailConfigEventPublisher implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(TenantEmailConfigEventPublisher.class);

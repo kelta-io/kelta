@@ -5,6 +5,7 @@ import io.kelta.runtime.workflow.BeforeSaveResult;
 import io.kelta.worker.service.ParticipantShareSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.Map;
@@ -17,6 +18,7 @@ import java.util.Map;
  * every share-widened surface. Emails/slot verification live in
  * {@code AppointmentService} — the hook stays cheap and side-effect-minimal.
  */
+@Component
 public class AppointmentHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(AppointmentHook.class);

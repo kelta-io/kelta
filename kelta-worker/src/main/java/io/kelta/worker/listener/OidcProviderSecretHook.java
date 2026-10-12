@@ -5,8 +5,6 @@ import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -24,9 +22,14 @@ import java.util.Map;
  * query engine never returns it and ignores a caller-supplied value, so this hook is the only
  * writer. The encrypted value is only decrypted internally (read from the column directly) when
  * kelta-auth needs to perform token exchange with the external IdP.
+ *
+ * <p><b>Not registered.</b> Before-save hooks are registered by being Spring beans
+ * ({@code BeforeSaveHookRegistrar}), and this class is deliberately not one. It used to be a
+ * {@code @Component} (gated on {@code kelta.encryption.key}) at a time when hooks were registered
+ * by hand, and nothing ever registered it, so it has never run. Making it a bean again is a
+ * behaviour change to make on purpose, with tests, and must update
+ * {@code BeforeSaveHookWiringTest}.
  */
-@Component
-@ConditionalOnProperty(name = "kelta.encryption.key")
 public class OidcProviderSecretHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(OidcProviderSecretHook.class);

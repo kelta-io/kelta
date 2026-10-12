@@ -45,7 +45,8 @@ Then run the **Definition of Done** check (in Task Workflow) before declaring do
    only. Any change to configuration data (collections, fields, layouts, flows,
    features, domains, credentials) MUST be broadcast via NATS JetStream so every pod
    refreshes. Pattern:
-   - Add a `BeforeSaveHook` for the system collection (in `kelta-worker/.../listener/`).
+   - Add a `BeforeSaveHook` `@Component` for the system collection (in `kelta-worker/.../listener/`);
+     being a bean is what registers it (`playbooks.md` → Add a BeforeSaveHook).
    - In `afterCreate`/`afterUpdate`/`afterDelete`, publish via `PlatformEventPublisher`
      to a `kelta.config.<resource>.changed.<id>` subject.
    - All pods consume it (registered in `NatsSubscriptionConfig`) and refresh local state.
@@ -211,6 +212,9 @@ Each maps to a real mistake an agent has made here. Violating one usually compil
 - ❌ Assume `/api/admin/**` is Cerbos-protected per-resource → it gets only `API_ACCESS`; enforce specific permissions in-controller (`architecture.md` → Authorizing a new endpoint).
 - ❌ Register a flow `ActionHandler` as `@Component` → ✅ wire it in the module's `onStartup()` (`playbooks.md`). The `@Component` Javadoc is wrong.
 - ❌ Hand-write MCP `server.addTool(...)` → ✅ implement the `AdminTool`/`UserTool` marker; `McpServerConfig` auto-registers.
+- ❌ Wire a platform `BeforeSaveHook` as a `@Bean` + `hookRegistry.register(hook)` → ✅ annotate it `@Component` with a
+  per-collection-unique `getOrder()`; `BeforeSaveHookRegistrar` registers every hook bean, so a manual call registers it
+  twice. Add it to `BeforeSaveHookWiringTest` (`playbooks.md` → Add a BeforeSaveHook).
 - ❌ Map a worker endpoint as `/**` under `/api` → `DynamicCollectionRouter`'s all-variable
   4-segment `@GetMapping` wins (Spring ranks catch-alls **last**) and answers 404 as a record
   read; POST stops at 3 segments so it still works, which reads as a method-specific bug in

@@ -7,6 +7,7 @@ import io.kelta.worker.util.CronExpressions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -38,6 +39,7 @@ import java.util.Optional;
  *
  * @since 1.0.0
  */
+@Component
 public class FlowScheduleSyncHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(FlowScheduleSyncHook.class);

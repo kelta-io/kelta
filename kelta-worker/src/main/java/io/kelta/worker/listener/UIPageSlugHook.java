@@ -5,6 +5,7 @@ import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 import java.util.Locale;
 import java.util.Map;
@@ -21,6 +22,7 @@ import java.util.Map;
  *
  * <p>An explicitly-supplied non-blank slug is left untouched.
  */
+@Component("uiPageSlugHook")
 public class UIPageSlugHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(UIPageSlugHook.class);
