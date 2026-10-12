@@ -1,0 +1,37 @@
+{
+  "status" : 200,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : {
+      "attributes" : {
+        "name" : "accounts",
+        "systemCollection" : false,
+        "tenantId" : "tenant-a"
+      },
+      "id" : "col-a",
+      "type" : "collections"
+    },
+    "included" : [ {
+      "attributes" : {
+        "collectionId" : "col-a",
+        "name" : "name",
+        "tenantId" : "tenant-a"
+      },
+      "id" : "f-a",
+      "type" : "fields"
+    } ]
+  },
+  "calls" : [ {
+    "collection" : "collections",
+    "id" : "col-a",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "fields",
+    "op" : "executeQuery",
+    "query" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=1000], sorting=[], fields=[], filters=[FilterCondition[fieldName=collectionId, operator=IN, value=[col-a]], FilterCondition[fieldName=tenantId, operator=IN, value=[tenant-a, 00000000-0000-0000-0000-000000000001]]]]",
+    "tenant" : "tenant-a"
+  } ]
+}

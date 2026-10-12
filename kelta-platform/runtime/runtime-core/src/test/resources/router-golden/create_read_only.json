@@ -1,0 +1,14 @@
+{
+  "status" : 403,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "detail" : "Collection 'audit-logs' is read-only",
+      "status" : "403",
+      "title" : "Forbidden"
+    } ]
+  },
+  "calls" : [ ]
+}

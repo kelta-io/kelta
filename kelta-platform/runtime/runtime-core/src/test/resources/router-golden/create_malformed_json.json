@@ -1,0 +1,19 @@
+{
+  "status" : 400,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "INVALID_PAYLOAD",
+      "detail" : "Request body is missing or could not be parsed as JSON",
+      "meta" : {
+        "path" : "/api/accounts",
+        "requestId" : "<requestId>"
+      },
+      "status" : "400",
+      "title" : "Bad Request"
+    } ]
+  },
+  "calls" : [ ]
+}

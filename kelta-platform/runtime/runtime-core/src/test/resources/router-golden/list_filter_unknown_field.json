@@ -1,0 +1,26 @@
+{
+  "status" : 400,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "INVALID_QUERY",
+      "detail" : "Unknown field 'nope'",
+      "meta" : {
+        "requestId" : "<requestId>"
+      },
+      "source" : {
+        "pointer" : "/data/attributes/nope"
+      },
+      "status" : "400",
+      "title" : "Bad Request"
+    } ]
+  },
+  "calls" : [ {
+    "collection" : "accounts",
+    "op" : "executeQuery",
+    "query" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=20], sorting=[], fields=[], filters=[FilterCondition[fieldName=nope, operator=EQ, value=x]]]",
+    "tenant" : "tenant-a"
+  } ]
+}

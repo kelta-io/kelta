@@ -1,0 +1,49 @@
+{
+  "status" : 200,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : [ {
+      "attributes" : {
+        "name" : "Main",
+        "tenantId" : "tenant-a",
+        "updatedAt" : "2026-01-01T00:00:00Z"
+      },
+      "id" : "menu-1",
+      "type" : "ui-menus"
+    }, {
+      "attributes" : {
+        "name" : "Admin",
+        "tenantId" : "tenant-a",
+        "updatedAt" : "2026-01-01T00:00:00Z"
+      },
+      "id" : "menu-2",
+      "type" : "ui-menus"
+    } ],
+    "links" : {
+      "next" : null,
+      "prev" : null,
+      "self" : "/api/ui-menus?page[number]=1&page[size]=20"
+    },
+    "meta" : {
+      "currentPage" : 1,
+      "pageSize" : 20,
+      "totalCount" : 2,
+      "totalPages" : 1
+    },
+    "metadata" : {
+      "currentPage" : 1,
+      "pageSize" : 20,
+      "totalCount" : 2,
+      "totalPages" : 1
+    }
+  },
+  "calls" : [ {
+    "collection" : "ui-menus",
+    "hit" : true,
+    "op" : "cache.getListResponse",
+    "queryHash" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=20], sorting=[], fields=[], filters=[FilterCondition[fieldName=tenantId, operator=EQ, value=tenant-a]]]",
+    "tenant" : "tenant-a"
+  } ]
+}

@@ -216,7 +216,7 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
     /**
      * Takes the dropped rows out of the list's pagination counts, so the response does not report
      * rows the caller may not read ({@code data: []} with {@code totalCount: 3} confirms they
-     * exist). Same page-local arithmetic as {@code DynamicCollectionRouter.restrictSharedSystemRows}.
+     * exist). Same page-local arithmetic as the router's {@code RecordTenantScope.restrictSharedSystemRows}.
      * The router emits {@code meta} and the legacy {@code metadata} as one shared map; they stay
      * one shared (adjusted) map here.
      */

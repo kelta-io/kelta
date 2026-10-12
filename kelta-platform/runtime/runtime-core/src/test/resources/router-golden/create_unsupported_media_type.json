@@ -1,0 +1,19 @@
+{
+  "status" : 415,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "UNSUPPORTED_MEDIA_TYPE",
+      "detail" : "Content-Type 'text/plain' is not supported",
+      "meta" : {
+        "path" : "/api/accounts",
+        "requestId" : "<requestId>"
+      },
+      "status" : "415",
+      "title" : "Unsupported Media Type"
+    } ]
+  },
+  "calls" : [ ]
+}

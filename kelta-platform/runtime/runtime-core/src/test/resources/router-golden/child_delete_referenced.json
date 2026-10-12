@@ -1,0 +1,24 @@
+{
+  "status" : 409,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "REFERENCED_RECORD",
+      "detail" : "Record 'con-1' in collection 'contacts' is still referenced by other records and cannot be deleted",
+      "meta" : {
+        "path" : "/api/accounts/acc-1/contacts/con-1",
+        "requestId" : "<requestId>"
+      },
+      "status" : "409",
+      "title" : "Conflict"
+    } ]
+  },
+  "calls" : [ {
+    "collection" : "contacts",
+    "id" : "con-1",
+    "op" : "delete",
+    "tenant" : "tenant-a"
+  } ]
+}

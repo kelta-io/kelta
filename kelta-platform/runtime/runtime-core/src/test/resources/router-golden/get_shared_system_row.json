@@ -1,0 +1,34 @@
+{
+  "status" : 200,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : {
+      "attributes" : {
+        "name" : "users",
+        "systemCollection" : true,
+        "tenantId" : "00000000-0000-0000-0000-000000000001"
+      },
+      "id" : "col-sys",
+      "type" : "collections"
+    }
+  },
+  "calls" : [ {
+    "collection" : "collections",
+    "hit" : false,
+    "id" : "col-sys",
+    "op" : "cache.getByIdResponse",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "collections",
+    "id" : "col-sys",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "collections",
+    "id" : "col-sys",
+    "op" : "cache.putByIdResponse",
+    "tenant" : "tenant-a"
+  } ]
+}

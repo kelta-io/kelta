@@ -1,0 +1,16 @@
+{
+  "status" : 404,
+  "headers" : { },
+  "body" : null,
+  "calls" : [ {
+    "collection" : "accounts",
+    "id" : "acc-999",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "accounts",
+    "op" : "executeQuery",
+    "query" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=1], sorting=[], fields=[], filters=[FilterCondition[fieldName=slug, operator=EQ, value=acc-999]]]",
+    "tenant" : "tenant-a"
+  } ]
+}

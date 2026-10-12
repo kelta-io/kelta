@@ -1,0 +1,52 @@
+{
+  "status" : 200,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : [ {
+      "attributes" : {
+        "createdAt" : "2026-01-01T00:00:00Z",
+        "createdBy" : "user-2",
+        "name" : "Gamma",
+        "region" : "reg-2",
+        "slug" : "gamma",
+        "updatedAt" : "2026-01-01T00:00:00Z",
+        "updatedBy" : "user-2"
+      },
+      "id" : "acc-3",
+      "relationships" : {
+        "region" : {
+          "data" : {
+            "id" : "reg-2",
+            "type" : "regions"
+          }
+        }
+      },
+      "type" : "accounts"
+    } ],
+    "links" : {
+      "next" : null,
+      "prev" : "/api/accounts?page[number]=1&page[size]=2",
+      "self" : "/api/accounts?page[number]=2&page[size]=2"
+    },
+    "meta" : {
+      "currentPage" : 2,
+      "pageSize" : 2,
+      "totalCount" : 3,
+      "totalPages" : 2
+    },
+    "metadata" : {
+      "currentPage" : 2,
+      "pageSize" : 2,
+      "totalCount" : 3,
+      "totalPages" : 2
+    }
+  },
+  "calls" : [ {
+    "collection" : "accounts",
+    "op" : "executeQuery",
+    "query" : "QueryRequest[pagination=Pagination[pageNumber=2, pageSize=2], sorting=[], fields=[], filters=[]]",
+    "tenant" : "tenant-a"
+  } ]
+}

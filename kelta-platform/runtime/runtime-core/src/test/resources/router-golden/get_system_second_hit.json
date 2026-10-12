@@ -1,0 +1,24 @@
+{
+  "status" : 200,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : {
+      "attributes" : {
+        "name" : "Main",
+        "tenantId" : "tenant-a",
+        "updatedAt" : "2026-01-01T00:00:00Z"
+      },
+      "id" : "menu-1",
+      "type" : "ui-menus"
+    }
+  },
+  "calls" : [ {
+    "collection" : "ui-menus",
+    "hit" : true,
+    "id" : "menu-1",
+    "op" : "cache.getByIdResponse",
+    "tenant" : "tenant-a"
+  } ]
+}

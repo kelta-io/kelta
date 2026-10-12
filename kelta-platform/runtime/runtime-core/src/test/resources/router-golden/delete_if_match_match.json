@@ -1,0 +1,16 @@
+{
+  "status" : 204,
+  "headers" : { },
+  "body" : null,
+  "calls" : [ {
+    "collection" : "accounts",
+    "id" : "acc-3",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "accounts",
+    "id" : "acc-3",
+    "op" : "delete",
+    "tenant" : "tenant-a"
+  } ]
+}

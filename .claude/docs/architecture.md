@@ -315,7 +315,7 @@ Every decision cache key (gateway system/object, worker field/record-access) app
 
 **Per-record capture:** the `captureGeo` collection flag (clone of `trackHistory`; rides the
 existing `kelta.config.collection.changed` broadcast) makes HTTP record writes stamp
-`createdGeo`/`updatedGeo` JSONB system columns (`DynamicCollectionRouter.stampGeo`; FLS-exempt
+`createdGeo`/`updatedGeo` JSONB system columns (`RecordWritePipeline.stampGeo`; FLS-exempt
 like `createdBy`; excluded from record-version diffs). New user tables get the columns in base
 DDL; flipping the flag on an existing collection triggers an idempotent
 `ADD COLUMN IF NOT EXISTS` in `SchemaMigrationEngine.migrateSchema` on every pod's refresh.
@@ -971,6 +971,25 @@ for it, not just a `ScopedValue`.
   services via direct JDBC, so no write path ever evicts their entries; the router serves them
   uncached (previously each pod served stale per-pod version/history lists until the TTL —
   Activity vs History tab count mismatch, flapping across refreshes).
+  The router class itself only owns the HTTP surface (mappings, tenant binding, read paths +
+  their caching); the rest sits beside it in `runtime-core/.../router/`, all package-private
+  and logging under the router's logger category:
+  - `RecordWritePipeline` — the **one** write path for create / PUT / PATCH / delete on both
+    top-level and sub-resource routes, in a fixed order: read-only 403 → body → storage data
+    (+ parent ref on a child create) → `createdBy`/`updatedBy` (`UserIdResolver`) → geo stamp →
+    `tenantId` (create) or `If-Match` (top-level update/delete only) → `QueryEngine` write
+    (hooks, validation, record-changed event) → same-pod cache eviction → response. Per-route
+    differences are fields on its `WriteTarget` record, not branches.
+  - `JsonApiIncludeResolver` — `?include=` (see "Read-side include resolution" below);
+    `RecordTenantScope` — the router's `X-Tenant-ID` second layer for tenant-scoped system
+    collections (`injectTenantFilter`, `visibleToTenant`, shared-row narrowing, `injectTenantId`);
+    `CollectionResolver` — registry + on-demand lookup; `RecordETag` — the optimistic-lock token.
+  - `router/jsonapi/` — pure document shaping: `JsonApiRequestBody` (write-body reading) and
+    `JsonApiRecordSerializer` (resource objects, single/list documents, the read-only 403).
+  Behaviour is pinned by `DynamicCollectionRouterGoldenTest` (status, headers, body and the
+  ordered collaborator-call log per case; goldens in `runtime-core/src/test/resources/router-golden/`,
+  regenerate with `-Drouter.golden.update=true` and review the diff) and the mapping surface by
+  `DynamicCollectionRouterRequestMappingTest`.
 - **Tenant scoping for tenant-scoped system collections** is enforced **once, at
   `PhysicalTableStorageAdapter.query()`** (also `aggregate()`/`semanticSearch()`), not per
   caller: with a tenant bound, the adapter ANDs `tenant_id = <caller>` — or
@@ -1398,24 +1417,24 @@ can even reach login). A fetch error never negative-caches a valid slug; the nex
 7. DynamicCollectionRouter matches collection
 8. QueryEngine executes with pagination/filtering
 9. PhysicalTableStorageAdapter queries PostgreSQL
-10. JSON:API response formatted via JsonApiResponseBuilder
+10. JSON:API response formatted via `router.jsonapi.JsonApiRecordSerializer` (not `runtime-jsonapi`'s `JsonApiResponseBuilder` — see `concerns.md`)
 
 **Write-response relationships contract** — POST/PATCH responses on
 `/api/{collection}` (and the `/api/{parent}/{parentId}/{child}` sub-resource
 variants) always echo the caller's JSON:API `relationships` block back in the
-response document. `DynamicCollectionRouter#toJsonApiResourceObject` builds
+response document. `JsonApiRecordSerializer#resourceObject` builds
 relationships from REFERENCE/LOOKUP/MASTER_DETAIL field metadata, and
-`mergeRequestRelationships` then fills in any caller-supplied relationship
+`JsonApiRecordSerializer#mergeRequestRelationships` (called by `RecordWritePipeline`) then fills in any caller-supplied relationship
 names that don't map to a REFERENCE-typed field. Field-derived entries take
 precedence; request-supplied entries fill the gaps. This keeps a stable
 "follow-up by id" shape for `create_record` / `update_record` callers so they
 don't need a second GET to discover related-record IDs.
 
 **Read shape: reference ids are in both `attributes` and `relationships`.**
-`toJsonApiResourceObject` writes every LOOKUP/MASTER_DETAIL field's raw id to
+`JsonApiRecordSerializer.resourceObject` writes every LOOKUP/MASTER_DETAIL field's raw id to
 `attributes.<field>` *as well as* `relationships.<field>.data.id`, in list
 responses, single-resource responses and `included[]` alike. A write already
-accepts the same id via either shape (`extractAttributes`/`extractRelationships`
+accepts the same id via either shape (`JsonApiRequestBody.attributes`/`relationshipFieldValues`
 merge, relationships-precedence, into the same field), so this makes a read
 consistent with what a write accepts: a client that PATCHes `attributes` back
 unchanged after a GET no longer sees the reference field go "missing". CLI
@@ -1424,7 +1443,7 @@ relationship name once it has seen that key in `attributes`, so `kelta <collecti
 list` output is unaffected — see `flattenResource`.
 
 **Read-side include resolution** — `GET /api/{collection}[/{id}]?include=<name>`
-on `DynamicCollectionRouter#resolveIncludes` follows three resolution paths
+on `JsonApiIncludeResolver#resolve` (runtime-core `router`) follows three resolution paths
 per include name, in order: (1) collection-name has-many — the named
 collection has an FK pointing to the primary; (2) collection-name belongs-to —
 the primary has FK(s) pointing to the named collection (covers `created_by` /
@@ -1526,7 +1545,7 @@ flows, MCP, realtime and webhooks inherit it; it rejects a server-only field as 
 aggregation key with 400 (a predicate over a value the engine never returns would disclose it);
 and it drops a caller-supplied value on create/update before the before-save hooks run, so only a
 hook (e.g. `CredentialEncryptionHook`) can set one — hooks themselves
-receive the full record. Defence in depth: `DynamicCollectionRouter.toJsonApiResourceObject` skips
+receive the full record. Defence in depth: `JsonApiRecordSerializer.resourceObject` (the router's serializer) skips
 them, `CollectionSchemaController` and `OpenApiGenerator` leave them out of the API shape, and
 `SearchIndexService`, `FieldHistoryHook`, `RecordVersionHook` and `AuditBeforeSaveHook` exclude them.
 Code that needs the value (credential resolution, OIDC token exchange, connected-app/OAuth token
@@ -1580,7 +1599,7 @@ against `MAX_HTTP_PAGE_SIZE` (200) — separate from `MAX_PAGE_SIZE` (1000),
 the absolute constructor ceiling that internal services (report execution,
 data export, include resolution) build `Pagination` records against
 directly. When the caller's `page[size]` exceeds the cap,
-`DynamicCollectionRouter.toJsonApiListResponse` echoes the modification as
+`JsonApiRecordSerializer.listDocument` echoes the modification as
 `meta.requestedPageSize=<caller value>` and `meta.pageSizeClamped=true`
 so clients can detect the clamp without inferring it from `data.length`
 vs. `meta.pageSize` — preventing the "200 + populated `totalCount` +
@@ -1623,7 +1642,7 @@ per-tool change.
 `SchemaMigrationEngine.createDeprecateColumnMigration` only marks a deleted
 field's column with a `DEPRECATED` comment; it never `ALTER TABLE ... DROP
 COLUMN`. `PhysicalTableStorageAdapter` then keeps returning the stale column
-via `SELECT *`. `DynamicCollectionRouter.toJsonApiResourceObject` is the gate
+via `SELECT *`. `JsonApiRecordSerializer.resourceObject` is the gate
 that keeps the public payload in sync with the live field set: a key only
 reaches `data.attributes` if it has a live `FieldDefinition`, is one of the
 framework-metadata keys (`createdAt`, `updatedAt`, `createdBy`, `updatedBy`,

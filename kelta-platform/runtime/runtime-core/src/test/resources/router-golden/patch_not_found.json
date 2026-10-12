@@ -1,0 +1,20 @@
+{
+  "status" : 404,
+  "headers" : { },
+  "body" : null,
+  "calls" : [ {
+    "identifier" : "alice@example.com",
+    "op" : "userIdResolver.resolve",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "accounts",
+    "data" : {
+      "name" : "Ghost",
+      "updatedBy" : "11111111-1111-1111-1111-111111111111",
+      "updatedGeo" : null
+    },
+    "id" : "acc-404",
+    "op" : "update",
+    "tenant" : "tenant-a"
+  } ]
+}
