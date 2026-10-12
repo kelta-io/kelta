@@ -145,4 +145,33 @@ class CollectionLifecycleHookTest {
             assertFalse(result.hasFieldUpdates());
         }
     }
+
+    @Nested
+    @DisplayName("beforeUpdate")
+    class BeforeUpdate {
+
+        private final Map<String, Object> stored = Map.of("name", "tasks", "displayName", "Tasks");
+
+        @Test
+        @DisplayName("Should reject a change of name")
+        void shouldRejectRename() {
+            BeforeSaveResult result = hook.beforeUpdate("c1", new HashMap<>(Map.of("name", "jobs")), stored, "t1");
+            assertFalse(result.isSuccess());
+            assertEquals("name", result.getErrors().get(0).field());
+        }
+
+        @Test
+        @DisplayName("Should allow the unchanged name to be sent back")
+        void shouldAllowSameName() {
+            assertTrue(hook.beforeUpdate("c1", new HashMap<>(Map.of("name", " tasks ", "displayName", "Jobs")),
+                    stored, "t1").isSuccess());
+        }
+
+        @Test
+        @DisplayName("Should allow updates that do not touch the name")
+        void shouldAllowOtherUpdates() {
+            assertTrue(hook.beforeUpdate("c1", new HashMap<>(Map.of("displayName", "Jobs")), stored, "t1")
+                    .isSuccess());
+        }
+    }
 }

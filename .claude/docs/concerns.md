@@ -349,6 +349,16 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 
 ## Tech Debt
 
+**No collection rename.** A collection's `name` is the physical table name, its `/api/<name>`
+path and gateway route, and the value of lookup `reference_target`, menu paths and search-index
+rows; nothing migrates them, so `CollectionLifecycleHook` rejects a name change (2026-10-12).
+Renaming one today is a manual operation: in one transaction update `collection.name`/`path`,
+`ALTER TABLE … RENAME` in the tenant schema, rename its `fk_<table>_*` constraints (or the next
+reconcile adds duplicates — `buildBoundedIdentifier` names them after the table), update
+`field.reference_target`, `ui_menu_item.path` and `search_index.collection_name`; then restart the
+worker and gateway, since direct SQL skips the `collection.changed` broadcast. A real rename
+feature would do this and publish the event.
+
 **Feature flags that look dead but are not (2026-07-02 audit) — do not inline:**
 - `kelta.scheduler.enabled`, `kelta.bulk.processor.enabled` are `false` in
   `application-migrate.yml` so the PreSync migrate pod starts no background workers and exits.
