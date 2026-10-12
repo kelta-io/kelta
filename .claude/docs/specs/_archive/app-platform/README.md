@@ -1,7 +1,7 @@
 # App Platform (App-UX Phase 3) — Parent Spec
 
 > **Status:** parent planning spec. Phase 3 of the app-UX roadmap (Phase 1
-> `specs/app-surfacing/` and Phase 2 `specs/app-data-entry/` are complete). Each slice
+> `specs/_archive/app-surfacing/` and Phase 2 `specs/_archive/app-data-entry/` are complete). Each slice
 > below gets a child spec in this directory before (or with) its implementation PR.
 > Child specs extend, never contradict, this parent.
 >

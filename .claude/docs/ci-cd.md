@@ -305,7 +305,7 @@ printed inline (it carries the Flyway run). `down -v` and the runner image remov
 
 - `build-runner-image.yml` — builds the self-hosted CI runner image.
 - `dora-metrics.yml` — see above.
-- `.github/workflows/README.md` and `scripts/ci/README.md` — runner + shared CI DB
+- `scripts/ci/README.md` — runner + shared CI DB
   (`kelta-ci-db`, schema-isolated per run) notes. `checkout-db.sh` claims the schema;
   `release-db.sh` drops it **and** the run's `app_<schema>` role — `KeltaStack` provisions a
   per-run `NOBYPASSRLS` application role (`KeltaStack.provisionApplicationRole`) that

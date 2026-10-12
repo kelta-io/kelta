@@ -202,7 +202,7 @@ starts at V163 — not applicable here.)
   follow-up.
 - `.claude/docs/architecture.md` — Authorizing-an-endpoint section: approvals actor
   identity = gateway-stamped `X-User-Id` → `UserIdResolver` → UUID; body identity inert.
-- `.claude/docs/specs/app-surfacing/README.md` — slice 2 marked shipped; correct the parent's
+- `.claude/docs/specs/_archive/app-surfacing/README.md` — slice 2 marked shipped; correct the parent's
   approvals contract snippet (bodies no longer carry identity).
 - Memory `project_app_ux_roadmap.md` — tick slice 2.
 

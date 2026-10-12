@@ -1,0 +1,1 @@
+- 2026-10-11 docs(agent-docs): Cut status.md to one row per capability (history snapshot in docs/_archive/), condense concerns.md to open risks + a resolved archive, archive shipped specs under specs/_archive/, and drop stale artifacts (docs-diet)

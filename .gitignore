@@ -73,6 +73,6 @@ docker/auth/dev-jwk.json
 
 
 # Local-only operator scripts and overrides — never committed.
-# AUTOPILOT.md §3b: .local files are where host-specific config and credentials
-# accumulate, and this repo is public.
+# .local files are where host-specific config and credentials accumulate, and this
+# repo is public.
 *.local

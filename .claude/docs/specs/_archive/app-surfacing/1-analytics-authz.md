@@ -186,7 +186,7 @@ slice 3's spec (post-deploy, per parent).
   row (in-controller `requireAnalyticsAccess`, either-permission semantics).
 - `.claude/docs/conventions.md` — one line: `VIEW_ANALYTICS` = run/consume analytics,
   `MANAGE_REPORTS` = author/admin (and implies view).
-- `.claude/docs/specs/app-surfacing/README.md` — mark slice 1 shipped in the slice table.
+- `.claude/docs/specs/_archive/app-surfacing/README.md` — mark slice 1 shipped in the slice table.
 - Memory `project_app_ux_roadmap.md` — tick slice 1.
 
 ## 8. Risks & open questions

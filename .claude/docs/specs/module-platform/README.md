@@ -21,7 +21,7 @@
 
 This parent defines the cross-cutting architecture once. Child specs each cover one PR-sized slice
 with acceptance criteria, exact contracts, DB migrations (or "none"), file-by-file changes, and a
-test plan — per the child-spec template in `specs/app-surfacing/README.md` (sections 1–8; sections
+test plan — per the child-spec template in `specs/_archive/app-surfacing/README.md` (sections 1–8; sections
 that don't apply state "N/A — reason"). Read this parent first; every child references it.
 
 ---
