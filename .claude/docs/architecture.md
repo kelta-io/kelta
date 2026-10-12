@@ -1230,7 +1230,7 @@ instead of a dead-end 403.
 
 ### Component layering — admin app vs. plugin library
 
-`kelta-ui/app/src/components/` and `kelta-web/packages/components/src/` have grown overlapping families of components (data tables, filter builders, field renderers, forms). The rule (see `conventions.md` → Component reuse): **reuse the unified `@kelta/components` variant or extend it — never fork a new app-side variant.** This protects the public `@kelta/components` plugin API. Consult `conventions.md` before adding a new shared list/form/filter component on either side.
+`kelta-ui/app/src/components/` and `kelta-web/packages/components/src/` have grown overlapping families of components (data tables, filter builders, field renderers, forms). The rule (see `conventions.md` → Component reuse, decided 2026-10-12): **the canonical variants live in `kelta-ui/app`** (`AdminDataTable`, `ObjectDataTable`/`ListShell`, `FilterBuilder`, `fieldControl`, `RelatedList`, `RecordShell`) — reuse or extend them, never fork another. `@kelta/components`' `DataTable`/`FilterBuilder` are deprecated; a component moves into the library only when a plugin or module needs it, and then only one copy exists. Consult `conventions.md` before adding a new shared list/form/filter component on either side.
 
 ### Record detail path — one `RecordShell` for both stacks (unified record)
 

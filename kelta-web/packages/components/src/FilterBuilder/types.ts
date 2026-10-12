@@ -2,6 +2,9 @@ import type { FieldDefinition, FilterExpression } from '@kelta/sdk';
 
 /**
  * Props for FilterBuilder component
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major release of
+ * @kelta/components. The Kelta UI uses its own filter builder. Copy it into your app if you depend on it.
  */
 export interface FilterBuilderProps {
   /**

@@ -9,7 +9,7 @@ order: 20
 front end on the same primitives. Peer dependency: `@kelta/sdk` (and React 19).
 
 > **Deprecated.** Exports the Kelta apps no longer use are marked `@deprecated` and are scheduled for removal
-> in the next major release: `ResourceDetail` (and its registry), `PageLayout`,
+> in the next major release: `DataTable`, `FilterBuilder`, `ResourceDetail` (and its registry), `PageLayout`,
 > `TwoColumnLayout`, `ThreeColumnLayout`, `LayoutRenderer`, the `useResource` / `useResourceList` /
 > `useDiscovery` hooks, and the public re-exports of `parseVisibilityRule`, `evaluateVisibilityRule`,
 > `RuleEngine`, `downstreamRules` and `InteractiveMap` (use `isVisible`, `useLayoutRules` and `AddressMap`).
@@ -35,9 +35,9 @@ function Invoices() {
 |---|---|
 | Context | `KeltaProvider`, `useKeltaClient`, `useCurrentUser` |
 | Hooks | `useResource`, `useResourceList`, `useDiscovery` (all deprecated) |
-| Data | `DataTable` (`ColumnDefinition`) |
+| Data | `DataTable` (`ColumnDefinition`) (deprecated) |
 | Forms and detail | `ResourceForm` (+ `setComponentRegistry`/`getComponentRegistry` for custom field renderers), `ResourceDetail` (+ its own registry) (deprecated) |
-| Filtering | `FilterBuilder` |
+| Filtering | `FilterBuilder` (deprecated) |
 | Navigation and layout | `Navigation`; `PageLayout`, `TwoColumnLayout`, `ThreeColumnLayout` (deprecated) |
 | Layout rendering | `LayoutRenderer` (deprecated); visibility rules `isVisible` (`parseVisibilityRule`, `evaluateVisibilityRule` deprecated); client rules `useLayoutRules`, `topologicalSort` (`RuleEngine`, `downstreamRules` deprecated) |
 | Record-detail blocks | `RecordHeader`, `FieldSection`, `AddressMap`, `InteractiveMap` (deprecated), `StatStrip`, `ScoreCard`, `TagsCard`, `MetadataCard` |

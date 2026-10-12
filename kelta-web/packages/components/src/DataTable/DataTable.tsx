@@ -28,6 +28,9 @@ import type { DataTableProps, ColumnDefinition } from './types';
  *   onRowClick={(row) => console.log('Clicked:', row)}
  * />
  * ```
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major release of
+ * @kelta/components. The Kelta UI's lists use its own `AdminDataTable` / `ObjectDataTable`. Copy it into your app if you depend on it.
  */
 export function DataTable<T = unknown>({
   resourceName,

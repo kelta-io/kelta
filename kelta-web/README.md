@@ -47,10 +47,10 @@ Reusable React component library for building Kelta UIs.
 - `useDiscovery()` -- Discover available resources (deprecated)
 
 **Components:**
-- `DataTable<T>` -- Data grid with sorting, filtering, pagination, row selection
+- `DataTable<T>` -- Data grid with sorting, filtering, pagination, row selection (deprecated)
 - `ResourceForm` -- Auto-generated forms with validation and custom field renderers
 - `ResourceDetail` -- Record detail display with field renderer registry (deprecated)
-- `FilterBuilder` -- Dynamic filter UI
+- `FilterBuilder` -- Dynamic filter UI (deprecated)
 - `Navigation` -- Menu/navigation component
 - `PageLayout`, `TwoColumnLayout`, `ThreeColumnLayout` -- Responsive layouts (deprecated)
 - `LayoutRenderer` -- Dynamic layout rendering from config (deprecated)

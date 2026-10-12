@@ -222,7 +222,7 @@ Each maps to a real mistake an agent has made here. Violating one usually compil
   mapping test — testing the controller alone cannot see it (`concerns.md` → Fragile Areas).
 - ❌ Add `/api/<new-segment>/**` without a gateway static route → 404. Register in `RouteConfigService.registerStaticRoutes()`.
 - ❌ Reuse or skip a Flyway version → check the migration dir for the head number first.
-- ❌ Fork a new shared table/filter/form component → ✅ reuse/extend `@kelta/components`.
+- ❌ Fork a new shared table/filter/form component → ✅ reuse/extend the canonical one in `kelta-ui/app` (`AdminDataTable`, `ObjectDataTable`/`ListShell`, `FilterBuilder`, `fieldControl`, `RecordShell` — `conventions.md` → Component reuse); `@kelta/components`' `DataTable`/`FilterBuilder` are deprecated.
 - ❌ Read a flow input as `$.<key>` → ✅ `$.input.<key>` (manual/MCP/HTTP double-wraps).
 - ❌ Reintroduce Kafka → messaging is NATS JetStream only.
 - ❌ Add a new `kelta.*` NATS subject without a JetStream stream in `JetStreamInitializer` **and** a native `reflect-config.json` entry for its payload in worker+gateway → ✅ else the publish no-acks (`CancellationException`, event dropped) or the payload serializes `{}` on the native image (`concerns.md` → Dependency Risks).
