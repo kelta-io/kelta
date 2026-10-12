@@ -11,7 +11,7 @@
  * and always on submit, matching the hand-rolled forms it replaces.
  *
  * Test ids derive from `testIdPrefix`: `<p>-form-modal`, `<p>-form-close`,
- * `<p>-form-cancel`, `<p>-form-submit`.
+ * `<p>-form-cancel`, `<p>-form-submit` (`submitTestId` overrides the last).
  */
 
 import React, { useRef } from 'react'
@@ -46,6 +46,8 @@ export interface CrudFormDialogProps<TValues extends FieldValues> {
   isSubmitting?: boolean
   /** Prefix for the dialog's test ids, e.g. `profile` → `profile-form-modal`. */
   testIdPrefix: string
+  /** Overrides the submit button's `<p>-form-submit` test id (for pages with an older id). */
+  submitTestId?: string
   submitLabel?: string
   submittingLabel?: string
   cancelLabel?: string
@@ -80,6 +82,7 @@ function CrudFormDialogBody<TValues extends FieldValues>({
   onSubmit,
   isSubmitting = false,
   testIdPrefix,
+  submitTestId,
   submitLabel,
   submittingLabel,
   cancelLabel,
@@ -147,7 +150,7 @@ function CrudFormDialogBody<TValues extends FieldValues>({
               <Button
                 type="submit"
                 disabled={isSubmitting}
-                data-testid={`${testIdPrefix}-form-submit`}
+                data-testid={submitTestId ?? `${testIdPrefix}-form-submit`}
               >
                 {isSubmitting
                   ? (submittingLabel ?? t('common.saving'))

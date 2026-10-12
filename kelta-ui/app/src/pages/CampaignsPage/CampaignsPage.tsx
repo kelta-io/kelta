@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
 import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
@@ -9,31 +10,41 @@ import type {
   CampaignStats,
   EmailSuppression,
 } from '@kelta/sdk'
-import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { AdminDataTable, type AdminColumn } from '@/components/AdminDataTable'
+import {
+  AdminCrudPage,
+  CrudFormDialog,
+  CrudSelectField,
+  CrudTextField,
+  useAdminCrud,
+} from '../../components/AdminCrud'
 
 type Campaign = SdkCampaign
 
-interface CampaignFormData {
-  name: string
-  description: string
-  subject: string
-  bodyHtml: string
-  targetCollection: string
-  recipientEmailField: string
-  fromName: string
-  fromAddress: string
-  scheduledAt: string
-}
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-interface FormErrors {
-  name?: string
-  subject?: string
-  targetCollection?: string
-  recipientEmailField?: string
-  fromAddress?: string
-}
+const campaignSchema = z.object({
+  name: z
+    .string()
+    .refine((v) => v.trim().length > 0, 'Name is required')
+    .refine((v) => v.length <= 100, 'Name must be 100 characters or fewer'),
+  description: z.string(),
+  subject: z
+    .string()
+    .refine((v) => v.trim().length > 0, 'Subject is required')
+    .refine((v) => v.length <= 200, 'Subject must be 200 characters or fewer'),
+  bodyHtml: z.string(),
+  targetCollection: z.string().refine((v) => v.trim().length > 0, 'Target collection is required'),
+  recipientEmailField: z
+    .string()
+    .refine((v) => v.trim().length > 0, 'Recipient email field is required'),
+  fromName: z.string(),
+  fromAddress: z.string().refine((v) => !v || EMAIL_PATTERN.test(v), 'Enter a valid email address'),
+  scheduledAt: z.string(),
+})
+
+type CampaignFormData = z.infer<typeof campaignSchema>
 
 interface CollectionOption {
   id: string
@@ -48,47 +59,8 @@ export interface CampaignsPageProps {
 /** Statuses in which a campaign can still be edited. */
 const EDITABLE_STATUSES = new Set(['DRAFT', 'SCHEDULED'])
 
-function validateForm(data: CampaignFormData): FormErrors {
-  const errors: FormErrors = {}
-  if (!data.name.trim()) {
-    errors.name = 'Name is required'
-  } else if (data.name.length > 100) {
-    errors.name = 'Name must be 100 characters or fewer'
-  }
-  if (!data.subject.trim()) {
-    errors.subject = 'Subject is required'
-  } else if (data.subject.length > 200) {
-    errors.subject = 'Subject must be 200 characters or fewer'
-  }
-  if (!data.targetCollection.trim()) {
-    errors.targetCollection = 'Target collection is required'
-  }
-  if (!data.recipientEmailField.trim()) {
-    errors.recipientEmailField = 'Recipient email field is required'
-  }
-  if (data.fromAddress && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.fromAddress)) {
-    errors.fromAddress = 'Enter a valid email address'
-  }
-  return errors
-}
-
-interface CampaignFormProps {
-  campaign?: Campaign
-  collections: CollectionOption[]
-  onSubmit: (data: CampaignFormData) => void
-  onCancel: () => void
-  isSubmitting: boolean
-}
-
-function CampaignForm({
-  campaign,
-  collections,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: CampaignFormProps): React.ReactElement {
-  const isEditing = !!campaign
-  const [formData, setFormData] = useState<CampaignFormData>({
+function toFormData(campaign?: Campaign): CampaignFormData {
+  return {
     name: campaign?.name ?? '',
     description: campaign?.description ?? '',
     subject: campaign?.subject ?? '',
@@ -98,347 +70,21 @@ function CampaignForm({
     fromName: campaign?.fromName ?? '',
     fromAddress: campaign?.fromAddress ?? '',
     scheduledAt: campaign?.scheduledAt ? campaign.scheduledAt.slice(0, 16) : '',
-  })
-  const [errors, setErrors] = useState<FormErrors>({})
-  const [touched, setTouched] = useState<Record<string, boolean>>({})
+  }
+}
 
-  const nameInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    nameInputRef.current?.focus()
-  }, [])
-
-  const handleChange = useCallback(
-    <K extends keyof CampaignFormData>(field: K, value: CampaignFormData[K]) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-      if (errors[field as keyof FormErrors]) {
-        setErrors((prev) => ({ ...prev, [field]: undefined }))
-      }
-    },
-    [errors]
-  )
-
-  const handleBlur = useCallback(
-    (field: keyof FormErrors) => {
-      setTouched((prev) => ({ ...prev, [field]: true }))
-      const validationErrors = validateForm(formData)
-      if (validationErrors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: validationErrors[field] }))
-      }
-    },
-    [formData]
-  )
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const validationErrors = validateForm(formData)
-      setErrors(validationErrors)
-      setTouched({
-        name: true,
-        subject: true,
-        targetCollection: true,
-        recipientEmailField: true,
-        fromAddress: true,
-      })
-      if (Object.keys(validationErrors).length === 0) {
-        onSubmit(formData)
-      }
-    },
-    [formData, onSubmit]
-  )
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel()
-      }
-    },
-    [onCancel]
-  )
-
-  const inputClass = (invalid: boolean): string =>
-    cn(
-      'rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors',
-      'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-      'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-      invalid && 'border-destructive'
-    )
-
-  const title = isEditing ? 'Edit Campaign' : 'New Campaign'
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={handleKeyDown}
-      data-testid="campaign-form-overlay"
-      role="presentation"
-    >
-      <div
-        className="flex max-h-[90vh] w-full max-w-[720px] flex-col overflow-hidden rounded-lg bg-background shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="campaign-form-title"
-        data-testid="campaign-form-modal"
-      >
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h2 id="campaign-form-title" className="text-lg font-semibold text-foreground">
-            {title}
-          </h2>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onCancel}
-              disabled={isSubmitting}
-              data-testid="campaign-form-cancel"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              form="campaign-form"
-              disabled={isSubmitting}
-              data-testid="campaign-form-submit"
-            >
-              {isSubmitting ? 'Saving…' : 'Save'}
-            </Button>
-          </div>
-        </div>
-
-        <div className="overflow-y-auto">
-          <form
-            id="campaign-form"
-            className="flex flex-col gap-4 p-6"
-            onSubmit={handleSubmit}
-            noValidate
-          >
-            <div className="flex flex-col gap-2">
-              <label htmlFor="campaign-name" className="text-sm font-medium text-foreground">
-                Name
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                ref={nameInputRef}
-                id="campaign-name"
-                type="text"
-                className={inputClass(!!(touched.name && errors.name))}
-                value={formData.name}
-                onChange={(e) => handleChange('name', e.target.value)}
-                onBlur={() => handleBlur('name')}
-                placeholder="Enter campaign name"
-                aria-required="true"
-                aria-invalid={touched.name && !!errors.name}
-                disabled={isSubmitting}
-                data-testid="campaign-name-input"
-              />
-              {touched.name && errors.name && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.name}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="campaign-description" className="text-sm font-medium text-foreground">
-                Description
-              </label>
-              <textarea
-                id="campaign-description"
-                className={cn(inputClass(false), 'min-h-[60px] resize-y font-[inherit]')}
-                value={formData.description}
-                onChange={(e) => handleChange('description', e.target.value)}
-                placeholder="Enter description (optional)"
-                disabled={isSubmitting}
-                rows={2}
-                data-testid="campaign-description-input"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="campaign-subject" className="text-sm font-medium text-foreground">
-                Subject
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                id="campaign-subject"
-                type="text"
-                className={inputClass(!!(touched.subject && errors.subject))}
-                value={formData.subject}
-                onChange={(e) => handleChange('subject', e.target.value)}
-                onBlur={() => handleBlur('subject')}
-                placeholder="Enter email subject"
-                aria-required="true"
-                aria-invalid={touched.subject && !!errors.subject}
-                disabled={isSubmitting}
-                data-testid="campaign-subject-input"
-              />
-              {touched.subject && errors.subject && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.subject}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="campaign-body" className="text-sm font-medium text-foreground">
-                Body
-              </label>
-              <textarea
-                id="campaign-body"
-                className={cn(inputClass(false), 'min-h-[120px] resize-y font-[inherit]')}
-                value={formData.bodyHtml}
-                onChange={(e) => handleChange('bodyHtml', e.target.value)}
-                placeholder="Compose your email body (HTML supported)"
-                disabled={isSubmitting}
-                rows={5}
-                data-testid="campaign-body-input"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-2">
-                <label
-                  htmlFor="campaign-target-collection"
-                  className="text-sm font-medium text-foreground"
-                >
-                  Target collection
-                  <span className="ml-1 text-destructive" aria-hidden="true">
-                    *
-                  </span>
-                </label>
-                <select
-                  id="campaign-target-collection"
-                  className={inputClass(!!(touched.targetCollection && errors.targetCollection))}
-                  value={formData.targetCollection}
-                  onChange={(e) => handleChange('targetCollection', e.target.value)}
-                  onBlur={() => handleBlur('targetCollection')}
-                  aria-required="true"
-                  aria-invalid={touched.targetCollection && !!errors.targetCollection}
-                  disabled={isSubmitting}
-                  data-testid="campaign-target-collection-input"
-                >
-                  <option value="">— Select —</option>
-                  {collections.map((c) => (
-                    <option key={c.id} value={c.name}>
-                      {c.displayName}
-                    </option>
-                  ))}
-                </select>
-                {touched.targetCollection && errors.targetCollection && (
-                  <span className="text-xs text-destructive" role="alert">
-                    {errors.targetCollection}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label
-                  htmlFor="campaign-recipient-field"
-                  className="text-sm font-medium text-foreground"
-                >
-                  Recipient email field
-                  <span className="ml-1 text-destructive" aria-hidden="true">
-                    *
-                  </span>
-                </label>
-                <input
-                  id="campaign-recipient-field"
-                  type="text"
-                  className={inputClass(
-                    !!(touched.recipientEmailField && errors.recipientEmailField)
-                  )}
-                  value={formData.recipientEmailField}
-                  onChange={(e) => handleChange('recipientEmailField', e.target.value)}
-                  onBlur={() => handleBlur('recipientEmailField')}
-                  placeholder="e.g. email"
-                  aria-required="true"
-                  aria-invalid={touched.recipientEmailField && !!errors.recipientEmailField}
-                  disabled={isSubmitting}
-                  data-testid="campaign-recipient-field-input"
-                />
-                {touched.recipientEmailField && errors.recipientEmailField && (
-                  <span className="text-xs text-destructive" role="alert">
-                    {errors.recipientEmailField}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-2">
-                <label htmlFor="campaign-from-name" className="text-sm font-medium text-foreground">
-                  From name
-                </label>
-                <input
-                  id="campaign-from-name"
-                  type="text"
-                  className={inputClass(false)}
-                  value={formData.fromName}
-                  onChange={(e) => handleChange('fromName', e.target.value)}
-                  placeholder="e.g. Acme Team"
-                  disabled={isSubmitting}
-                  data-testid="campaign-from-name-input"
-                />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label
-                  htmlFor="campaign-from-address"
-                  className="text-sm font-medium text-foreground"
-                >
-                  From address
-                </label>
-                <input
-                  id="campaign-from-address"
-                  type="email"
-                  className={inputClass(!!(touched.fromAddress && errors.fromAddress))}
-                  value={formData.fromAddress}
-                  onChange={(e) => handleChange('fromAddress', e.target.value)}
-                  onBlur={() => handleBlur('fromAddress')}
-                  placeholder="e.g. hello@acme.com"
-                  aria-invalid={touched.fromAddress && !!errors.fromAddress}
-                  disabled={isSubmitting}
-                  data-testid="campaign-from-address-input"
-                />
-                {touched.fromAddress && errors.fromAddress && (
-                  <span className="text-xs text-destructive" role="alert">
-                    {errors.fromAddress}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="campaign-scheduled-at"
-                className="text-sm font-medium text-foreground"
-              >
-                Schedule for (optional)
-              </label>
-              <input
-                id="campaign-scheduled-at"
-                type="datetime-local"
-                className={inputClass(false)}
-                value={formData.scheduledAt}
-                onChange={(e) => handleChange('scheduledAt', e.target.value)}
-                disabled={isSubmitting}
-                data-testid="campaign-scheduled-at-input"
-              />
-              <span className="text-[11px] text-muted-foreground">
-                Leave empty to keep the campaign as a draft.
-              </span>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  )
+function buildRequest(data: CampaignFormData): CreateCampaignRequest {
+  return {
+    name: data.name,
+    description: data.description || undefined,
+    subject: data.subject,
+    bodyHtml: data.bodyHtml || undefined,
+    targetCollection: data.targetCollection,
+    recipientEmailField: data.recipientEmailField,
+    fromName: data.fromName || undefined,
+    fromAddress: data.fromAddress || undefined,
+    scheduledAt: data.scheduledAt ? new Date(data.scheduledAt).toISOString() : undefined,
+  }
 }
 
 interface StatsModalProps {
@@ -642,10 +288,6 @@ export function CampaignsPage({
   const { keltaClient } = useApi()
   const { showToast } = useToast()
 
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingCampaign, setEditingCampaign] = useState<Campaign | undefined>(undefined)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [campaignToDelete, setCampaignToDelete] = useState<Campaign | null>(null)
   const [statsCampaign, setStatsCampaign] = useState<Campaign | null>(null)
 
   const {
@@ -697,6 +339,11 @@ export function CampaignsPage({
     }))
   }, [collectionsData])
 
+  const targetCollectionOptions = useMemo(
+    () => collections.map((c) => ({ value: c.name, label: c.displayName })),
+    [collections]
+  )
+
   const campaignList: Campaign[] = campaigns ?? []
   const suppressionList: EmailSuppression[] = suppressionsData ?? []
 
@@ -704,53 +351,17 @@ export function CampaignsPage({
     queryClient.invalidateQueries({ queryKey: ['campaigns'] })
   }, [queryClient])
 
-  const buildRequest = (data: CampaignFormData): CreateCampaignRequest => ({
-    name: data.name,
-    description: data.description || undefined,
-    subject: data.subject,
-    bodyHtml: data.bodyHtml || undefined,
-    targetCollection: data.targetCollection,
-    recipientEmailField: data.recipientEmailField,
-    fromName: data.fromName || undefined,
-    fromAddress: data.fromAddress || undefined,
-    scheduledAt: data.scheduledAt ? new Date(data.scheduledAt).toISOString() : undefined,
-  })
-
-  const handleCloseForm = useCallback(() => {
-    setIsFormOpen(false)
-    setEditingCampaign(undefined)
-  }, [])
-
-  const createMutation = useMutation({
-    mutationFn: (data: CampaignFormData) => keltaClient.admin.campaigns.create(buildRequest(data)),
-    onSuccess: () => {
-      invalidateCampaigns()
-      showToast('Campaign created successfully', 'success')
-      handleCloseForm()
+  const crud = useAdminCrud<Campaign, CampaignFormData>({
+    queryKey: ['campaigns'],
+    create: (data) => keltaClient.admin.campaigns.create(buildRequest(data)),
+    update: (campaign, data) => keltaClient.admin.campaigns.update(campaign.id, buildRequest(data)),
+    remove: (campaign) => keltaClient.admin.campaigns.delete(campaign.id),
+    messages: {
+      created: 'Campaign created successfully',
+      updated: 'Campaign updated successfully',
+      deleted: 'Campaign deleted successfully',
+      error: 'An error occurred',
     },
-    onError: (err: Error) => showToast(err.message || 'An error occurred', 'error'),
-  })
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: CampaignFormData }) =>
-      keltaClient.admin.campaigns.update(id, buildRequest(data)),
-    onSuccess: () => {
-      invalidateCampaigns()
-      showToast('Campaign updated successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => showToast(err.message || 'An error occurred', 'error'),
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => keltaClient.admin.campaigns.delete(id),
-    onSuccess: () => {
-      invalidateCampaigns()
-      showToast('Campaign deleted successfully', 'success')
-      setDeleteDialogOpen(false)
-      setCampaignToDelete(null)
-    },
-    onError: (err: Error) => showToast(err.message || 'An error occurred', 'error'),
   })
 
   const sendMutation = useMutation({
@@ -807,27 +418,6 @@ export function CampaignsPage({
     onError: (err: Error) => showToast(err.message || 'An error occurred', 'error'),
   })
 
-  const handleCreate = useCallback(() => {
-    setEditingCampaign(undefined)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleEdit = useCallback((campaign: Campaign) => {
-    setEditingCampaign(campaign)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleFormSubmit = useCallback(
-    (data: CampaignFormData) => {
-      if (editingCampaign) {
-        updateMutation.mutate({ id: editingCampaign.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editingCampaign, createMutation, updateMutation]
-  )
-
   const handleSchedule = useCallback(
     (campaign: Campaign) => {
       const input = window.prompt(
@@ -852,213 +442,177 @@ export function CampaignsPage({
     [testMutation]
   )
 
-  const handleDeleteConfirm = useCallback(() => {
-    if (campaignToDelete) {
-      deleteMutation.mutate(campaignToDelete.id)
-    }
-  }, [campaignToDelete, deleteMutation])
+  const columns = useMemo<AdminColumn<Campaign>[]>(
+    () => [
+      { id: 'name', header: 'Name', accessor: (r) => r.name },
+      {
+        id: 'targetCollection',
+        header: 'Target',
+        accessor: (r) => r.targetCollection,
+      },
+      {
+        id: 'status',
+        header: 'Status',
+        accessor: (r) => r.status,
+        cell: (r) => (
+          <span className="inline-block rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
+            {r.status}
+          </span>
+        ),
+      },
+      {
+        id: 'sent',
+        header: 'Sent',
+        accessor: (r) => r.sentCount ?? 0,
+        cell: (r) => String(r.sentCount ?? 0),
+      },
+      {
+        id: 'opens',
+        header: 'Opens',
+        accessor: (r) => r.openCount ?? 0,
+        cell: (r) => String(r.openCount ?? 0),
+      },
+      {
+        id: 'clicks',
+        header: 'Clicks',
+        accessor: (r) => r.clickCount ?? 0,
+        cell: (r) => String(r.clickCount ?? 0),
+      },
+      {
+        id: 'scheduledAt',
+        header: 'Scheduled',
+        accessor: (r) => r.scheduledAt ?? '',
+        cell: (r) =>
+          r.scheduledAt
+            ? formatDate(new Date(r.scheduledAt), {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : '-',
+      },
+    ],
+    [formatDate]
+  )
 
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <div className="flex min-h-[400px] items-center justify-center">
-          <LoadingSpinner size="large" label="Loading campaigns..." />
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <ErrorMessage
-          error={error instanceof Error ? error : new Error('An error occurred')}
-          onRetry={() => refetch()}
-        />
-      </div>
-    )
-  }
-
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
   const isSuppressionMutating =
     addSuppressionMutation.isPending || removeSuppressionMutation.isPending
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-8 p-6 lg:p-8" data-testid={testId}>
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Campaigns</h1>
+    <AdminCrudPage
+      testId={testId}
+      title="Campaigns"
+      actions={
         <Button
           type="button"
-          onClick={handleCreate}
+          onClick={crud.openCreate}
           aria-label="New Campaign"
           data-testid="add-campaign-button"
         >
           New Campaign
         </Button>
-      </header>
-
-      {campaignList.length === 0 ? (
-        <div
-          className="rounded-lg border border-border bg-card py-16 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          <p>No campaigns found.</p>
-        </div>
-      ) : (
-        <div
-          className="overflow-x-auto rounded-lg border border-border bg-card"
-          role="grid"
-          aria-label="Campaigns"
-          data-testid="campaigns-table"
-        >
-          <AdminDataTable
-            tableId="campaigns"
-            rows={campaignList}
-            rowKey={(c) => c.id}
-            columns={
-              [
-                { id: 'name', header: 'Name', accessor: (r) => r.name },
-                {
-                  id: 'targetCollection',
-                  header: 'Target',
-                  accessor: (r) => r.targetCollection,
-                },
-                {
-                  id: 'status',
-                  header: 'Status',
-                  accessor: (r) => r.status,
-                  cell: (r) => (
-                    <span className="inline-block rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
-                      {r.status}
-                    </span>
-                  ),
-                },
-                {
-                  id: 'sent',
-                  header: 'Sent',
-                  accessor: (r) => r.sentCount ?? 0,
-                  cell: (r) => String(r.sentCount ?? 0),
-                },
-                {
-                  id: 'opens',
-                  header: 'Opens',
-                  accessor: (r) => r.openCount ?? 0,
-                  cell: (r) => String(r.openCount ?? 0),
-                },
-                {
-                  id: 'clicks',
-                  header: 'Clicks',
-                  accessor: (r) => r.clickCount ?? 0,
-                  cell: (r) => String(r.clickCount ?? 0),
-                },
-                {
-                  id: 'scheduledAt',
-                  header: 'Scheduled',
-                  accessor: (r) => r.scheduledAt ?? '',
-                  cell: (r) =>
-                    r.scheduledAt
-                      ? formatDate(new Date(r.scheduledAt), {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })
-                      : '-',
-                },
-              ] as AdminColumn<Campaign>[]
-            }
-            renderActions={(campaign) => {
-              const index = campaignList.indexOf(campaign)
-              const editable = EDITABLE_STATUSES.has(campaign.status)
-              const cancellable = campaign.status === 'SCHEDULED' || campaign.status === 'QUEUED'
-              return (
-                <div className="flex flex-wrap justify-end gap-2">
+      }
+      isLoading={isLoading}
+      error={error}
+      onRetry={() => refetch()}
+      isEmpty={campaignList.length === 0}
+      emptyMessage="No campaigns found."
+      list={
+        <AdminDataTable
+          tableId="campaigns"
+          testId="campaigns-table"
+          ariaLabel="Campaigns"
+          rows={campaignList}
+          rowKey={(c) => c.id}
+          columns={columns}
+          renderActions={(campaign, index) => {
+            const editable = EDITABLE_STATUSES.has(campaign.status)
+            const cancellable = campaign.status === 'SCHEDULED' || campaign.status === 'QUEUED'
+            return (
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => sendMutation.mutate(campaign.id)}
+                  aria-label={`Send ${campaign.name}`}
+                  data-testid={`send-button-${index}`}
+                >
+                  Send now
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleSchedule(campaign)}
+                  aria-label={`Schedule ${campaign.name}`}
+                  data-testid={`schedule-button-${index}`}
+                >
+                  Schedule
+                </Button>
+                {cancellable && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => sendMutation.mutate(campaign.id)}
-                    aria-label={`Send ${campaign.name}`}
-                    data-testid={`send-button-${index}`}
+                    onClick={() => cancelMutation.mutate(campaign.id)}
+                    aria-label={`Cancel ${campaign.name}`}
+                    data-testid={`cancel-button-${index}`}
                   >
-                    Send now
+                    Cancel
                   </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStatsCampaign(campaign)}
+                  aria-label={`View stats for ${campaign.name}`}
+                  data-testid={`stats-button-${index}`}
+                >
+                  Stats
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleTest(campaign)}
+                  aria-label={`Send test for ${campaign.name}`}
+                  data-testid={`test-button-${index}`}
+                >
+                  Send test
+                </Button>
+                {editable && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => handleSchedule(campaign)}
-                    aria-label={`Schedule ${campaign.name}`}
-                    data-testid={`schedule-button-${index}`}
+                    onClick={() => crud.openEdit(campaign)}
+                    aria-label={`Edit ${campaign.name}`}
+                    data-testid={`edit-button-${index}`}
                   >
-                    Schedule
+                    Edit
                   </Button>
-                  {cancellable && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => cancelMutation.mutate(campaign.id)}
-                      aria-label={`Cancel ${campaign.name}`}
-                      data-testid={`cancel-button-${index}`}
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setStatsCampaign(campaign)}
-                    aria-label={`View stats for ${campaign.name}`}
-                    data-testid={`stats-button-${index}`}
-                  >
-                    Stats
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleTest(campaign)}
-                    aria-label={`Send test for ${campaign.name}`}
-                    data-testid={`test-button-${index}`}
-                  >
-                    Send test
-                  </Button>
-                  {editable && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEdit(campaign)}
-                      aria-label={`Edit ${campaign.name}`}
-                      data-testid={`edit-button-${index}`}
-                    >
-                      Edit
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="border-destructive/30 text-destructive hover:bg-destructive/10"
-                    onClick={() => {
-                      setCampaignToDelete(campaign)
-                      setDeleteDialogOpen(true)
-                    }}
-                    aria-label={`Delete ${campaign.name}`}
-                    data-testid={`delete-button-${index}`}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              )
-            }}
-          />
-        </div>
-      )}
-
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                  onClick={() => crud.requestDelete(campaign)}
+                  aria-label={`Delete ${campaign.name}`}
+                  data-testid={`delete-button-${index}`}
+                >
+                  Delete
+                </Button>
+              </div>
+            )
+          }}
+        />
+      }
+    >
       <SuppressionsSection
         suppressions={suppressionList}
         isLoading={suppressionsLoading}
@@ -1068,15 +622,97 @@ export function CampaignsPage({
         isMutating={isSuppressionMutating}
       />
 
-      {isFormOpen && (
-        <CampaignForm
-          campaign={editingCampaign}
-          collections={collections}
-          onSubmit={handleFormSubmit}
-          onCancel={handleCloseForm}
-          isSubmitting={isSubmitting}
+      <CrudFormDialog<CampaignFormData>
+        open={crud.isFormOpen}
+        onClose={crud.closeForm}
+        title={crud.editing ? 'Edit Campaign' : 'New Campaign'}
+        schema={campaignSchema}
+        defaultValues={toFormData(crud.editing)}
+        onSubmit={crud.submit}
+        isSubmitting={crud.isSaving}
+        testIdPrefix="campaign"
+        submittingLabel="Saving…"
+        className="sm:max-w-[720px]"
+      >
+        <CrudTextField<CampaignFormData>
+          name="name"
+          id="campaign-name"
+          label="Name"
+          required
+          placeholder="Enter campaign name"
+          testId="campaign-name-input"
         />
-      )}
+        <CrudTextField<CampaignFormData>
+          name="description"
+          id="campaign-description"
+          label="Description"
+          multiline
+          rows={2}
+          placeholder="Enter description (optional)"
+          testId="campaign-description-input"
+        />
+        <CrudTextField<CampaignFormData>
+          name="subject"
+          id="campaign-subject"
+          label="Subject"
+          required
+          placeholder="Enter email subject"
+          testId="campaign-subject-input"
+        />
+        <CrudTextField<CampaignFormData>
+          name="bodyHtml"
+          id="campaign-body"
+          label="Body"
+          multiline
+          rows={5}
+          placeholder="Compose your email body (HTML supported)"
+          testId="campaign-body-input"
+        />
+        <div className="grid grid-cols-2 gap-4">
+          <CrudSelectField<CampaignFormData>
+            name="targetCollection"
+            id="campaign-target-collection"
+            label="Target collection"
+            required
+            placeholder="— Select —"
+            options={targetCollectionOptions}
+            testId="campaign-target-collection-input"
+          />
+          <CrudTextField<CampaignFormData>
+            name="recipientEmailField"
+            id="campaign-recipient-field"
+            label="Recipient email field"
+            required
+            placeholder="e.g. email"
+            testId="campaign-recipient-field-input"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <CrudTextField<CampaignFormData>
+            name="fromName"
+            id="campaign-from-name"
+            label="From name"
+            placeholder="e.g. Acme Team"
+            testId="campaign-from-name-input"
+          />
+          <CrudTextField<CampaignFormData>
+            name="fromAddress"
+            id="campaign-from-address"
+            label="From address"
+            type="email"
+            placeholder="e.g. hello@acme.com"
+            testId="campaign-from-address-input"
+          />
+        </div>
+        <CrudTextField<CampaignFormData>
+          name="scheduledAt"
+          id="campaign-scheduled-at"
+          label="Schedule for (optional)"
+          type="datetime-local"
+          hint="Leave empty to keep the campaign as a draft."
+          testId="campaign-scheduled-at-input"
+        />
+      </CrudFormDialog>
 
       {statsCampaign && (
         <StatsModal
@@ -1089,19 +725,16 @@ export function CampaignsPage({
       )}
 
       <ConfirmDialog
-        open={deleteDialogOpen}
+        open={crud.deleteTarget !== null}
         title="Delete Campaign"
         message="Are you sure you want to delete this campaign? This action cannot be undone."
         confirmLabel="Delete"
         cancelLabel="Cancel"
-        onConfirm={handleDeleteConfirm}
-        onCancel={() => {
-          setDeleteDialogOpen(false)
-          setCampaignToDelete(null)
-        }}
+        onConfirm={crud.confirmDelete}
+        onCancel={crud.cancelDelete}
         variant="danger"
       />
-    </div>
+    </AdminCrudPage>
   )
 }
 

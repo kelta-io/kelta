@@ -54,6 +54,21 @@ describe('AdminDataTable', () => {
     expect(screen.getByText('BRAVO')).toBeInTheDocument()
   })
 
+  it('passes the displayed index to cell renderers', async () => {
+    const cols: AdminColumn<Row>[] = [
+      {
+        id: 'name',
+        header: 'Name',
+        cell: (r, index) => <span data-testid={`name-cell-${index}`}>{r.name}</span>,
+      },
+    ]
+    render(<AdminDataTable tableId="t3b" columns={cols} rows={rows} rowKey={(r) => r.id} />)
+    expect(screen.getByTestId('name-cell-0')).toHaveTextContent('Bravo')
+    await userEvent.click(screen.getByTestId('admin-data-table-sort-name'))
+    expect(screen.getByTestId('name-cell-0')).toHaveTextContent('Alpha')
+    expect(screen.getByTestId('name-cell-2')).toHaveTextContent('Charlie')
+  })
+
   it('renders actions slot', () => {
     render(
       <AdminDataTable

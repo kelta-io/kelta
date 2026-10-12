@@ -1,19 +1,14 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import {
-  useToast,
-  ConfirmDialog,
-  LoadingSpinner,
-  ErrorMessage,
-  ExecutionLogModal,
-} from '../../components'
+import { ConfirmDialog, ExecutionLogModal } from '../../components'
 import type { LogColumn } from '../../components'
 import type { CreateEmailTemplateRequest, EmailTemplate as SdkEmailTemplate } from '@kelta/sdk'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { AdminDataTable, type AdminColumn } from '@/components/AdminDataTable'
+import { AdminCrudPage, useAdminCrud } from '../../components/AdminCrud'
 import { Plus } from 'lucide-react'
 import { FieldExpressionPicker, type StaticNamespace } from '../../components/FieldExpressionPicker'
 import { RichTextEditor, type RichTextEditorHandle } from '../../components/RichTextEditor'
@@ -675,22 +670,16 @@ function EmailTemplateForm({
 export function EmailTemplatesPage({
   testId = 'email-templates-page',
 }: EmailTemplatesPageProps): React.ReactElement {
-  const queryClient = useQueryClient()
   const { formatDate } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | undefined>(undefined)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [templateToDelete, setTemplateToDelete] = useState<EmailTemplate | null>(null)
   const [logsItemId, setLogsItemId] = useState<string | null>(null)
-  const [_logsItemName, setLogsItemName] = useState('')
+  const [logsItemName, setLogsItemName] = useState('')
 
   const {
     data: allEmailLogs,
-    isLoading: _logsLoading,
-    error: _logsError,
+    isLoading: logsLoading,
+    error: logsError,
   } = useQuery({
     queryKey: ['email-template-logs', logsItemId],
     queryFn: () => keltaClient.admin.emailTemplates.listLogs(),
@@ -700,7 +689,6 @@ export function EmailTemplatesPage({
   const filteredLogs = ((allEmailLogs ?? []) as EmailLog[]).filter(
     (log: EmailLog) => log.templateId === logsItemId
   )
-  void filteredLogs
 
   const logColumns: LogColumn<EmailLog>[] = [
     { key: 'status', header: 'Status' },
@@ -723,7 +711,6 @@ export function EmailTemplatesPage({
           : '-',
     },
   ]
-  void logColumns
 
   const {
     data: templates,
@@ -757,268 +744,176 @@ export function EmailTemplatesPage({
 
   const templateList: EmailTemplate[] = templates ?? []
 
-  const createMutation = useMutation({
-    mutationFn: (data: EmailTemplateFormData) =>
+  const crud = useAdminCrud<EmailTemplate, EmailTemplateFormData>({
+    queryKey: ['email-templates'],
+    create: (data) =>
       keltaClient.admin.emailTemplates.create(
         '',
         '',
         data as unknown as CreateEmailTemplateRequest
       ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['email-templates'] })
-      showToast('Email template created successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: EmailTemplateFormData }) =>
+    update: (template, data) =>
       keltaClient.admin.emailTemplates.update(
-        id,
+        template.id,
         data as unknown as Partial<CreateEmailTemplateRequest>
       ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['email-templates'] })
-      showToast('Email template updated successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => keltaClient.admin.emailTemplates.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['email-templates'] })
-      showToast('Email template deleted successfully', 'success')
-      setDeleteDialogOpen(false)
-      setTemplateToDelete(null)
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
+    remove: (template) => keltaClient.admin.emailTemplates.delete(template.id),
+    messages: {
+      created: 'Email template created successfully',
+      updated: 'Email template updated successfully',
+      deleted: 'Email template deleted successfully',
+      error: 'An error occurred',
     },
   })
 
-  const handleCreate = useCallback(() => {
-    setEditingTemplate(undefined)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleEdit = useCallback((template: EmailTemplate) => {
-    setEditingTemplate(template)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleCloseForm = useCallback(() => {
-    setIsFormOpen(false)
-    setEditingTemplate(undefined)
-  }, [])
-
-  const handleFormSubmit = useCallback(
-    (data: EmailTemplateFormData) => {
-      if (editingTemplate) {
-        updateMutation.mutate({ id: editingTemplate.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editingTemplate, createMutation, updateMutation]
+  const columns = useMemo<AdminColumn<EmailTemplate>[]>(
+    () => [
+      { id: 'name', header: 'Name', accessor: (r) => r.name },
+      { id: 'subject', header: 'Subject', accessor: (r) => r.subject },
+      {
+        id: 'folder',
+        header: 'Folder',
+        accessor: (r) => r.folder ?? '',
+        cell: (r) => r.folder || '-',
+      },
+      {
+        id: 'active',
+        header: 'Active',
+        accessor: (r) => r.active,
+        cell: (r) => (
+          <span
+            className={cn(
+              'inline-block rounded-full px-3 py-1 text-xs font-semibold',
+              r.active
+                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                : 'bg-muted text-muted-foreground'
+            )}
+          >
+            {r.active ? 'Yes' : 'No'}
+          </span>
+        ),
+      },
+      {
+        id: 'createdAt',
+        header: 'Created',
+        accessor: (r) => r.createdAt,
+        cell: (r) =>
+          formatDate(new Date(r.createdAt), {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          }),
+      },
+    ],
+    [formatDate]
   )
 
-  const handleDeleteClick = useCallback((template: EmailTemplate) => {
-    setTemplateToDelete(template)
-    setDeleteDialogOpen(true)
-  }, [])
-
-  const handleDeleteConfirm = useCallback(() => {
-    if (templateToDelete) {
-      deleteMutation.mutate(templateToDelete.id)
-    }
-  }, [templateToDelete, deleteMutation])
-
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteDialogOpen(false)
-    setTemplateToDelete(null)
-  }, [])
-
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <div className="flex min-h-[400px] items-center justify-center">
-          <LoadingSpinner size="large" label="Loading email templates..." />
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <ErrorMessage
-          error={error instanceof Error ? error : new Error('An error occurred')}
-          onRetry={() => refetch()}
-        />
-      </div>
-    )
-  }
-
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
-
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Email templates</h1>
+    <AdminCrudPage
+      testId={testId}
+      title="Email templates"
+      actions={
         <Button
           type="button"
-          onClick={handleCreate}
+          onClick={crud.openCreate}
           aria-label="Create Email Template"
           data-testid="add-email-template-button"
         >
           Create Email Template
         </Button>
-      </header>
-
-      {templateList.length === 0 ? (
-        <div
-          className="rounded-lg border border-border bg-card py-16 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          <p>No email templates found.</p>
-        </div>
-      ) : (
-        <div
-          className="overflow-x-auto rounded-lg border border-border bg-card"
-          role="grid"
-          aria-label="Email Templates"
-          data-testid="email-templates-table"
-        >
-          <AdminDataTable
-            tableId="email-templates"
-            rows={templateList}
-            rowKey={(t) => t.id}
-            columns={
-              [
-                { id: 'name', header: 'Name', accessor: (r) => r.name },
-                { id: 'subject', header: 'Subject', accessor: (r) => r.subject },
-                {
-                  id: 'folder',
-                  header: 'Folder',
-                  accessor: (r) => r.folder ?? '',
-                  cell: (r) => r.folder || '-',
-                },
-                {
-                  id: 'active',
-                  header: 'Active',
-                  accessor: (r) => r.active,
-                  cell: (r) => (
-                    <span
-                      className={cn(
-                        'inline-block rounded-full px-3 py-1 text-xs font-semibold',
-                        r.active
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : 'bg-muted text-muted-foreground'
-                      )}
-                    >
-                      {r.active ? 'Yes' : 'No'}
-                    </span>
-                  ),
-                },
-                {
-                  id: 'createdAt',
-                  header: 'Created',
-                  accessor: (r) => r.createdAt,
-                  cell: (r) =>
-                    formatDate(new Date(r.createdAt), {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                    }),
-                },
-              ] as AdminColumn<EmailTemplate>[]
-            }
-            renderActions={(template) => {
-              const index = templateList.indexOf(template)
-              return (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setLogsItemId(template.id)
-                      setLogsItemName(template.name)
-                    }}
-                    aria-label={`View logs for ${template.name}`}
-                    data-testid={`logs-button-${index}`}
-                  >
-                    Logs
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleEdit(template)}
-                    aria-label={`Edit ${template.name}`}
-                    data-testid={`edit-button-${index}`}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="border-destructive/30 text-destructive hover:bg-destructive/10"
-                    onClick={() => handleDeleteClick(template)}
-                    aria-label={`Delete ${template.name}`}
-                    data-testid={`delete-button-${index}`}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              )
-            }}
-          />
-        </div>
-      )}
-
+      }
+      isLoading={isLoading}
+      error={error}
+      onRetry={() => refetch()}
+      isEmpty={templateList.length === 0}
+      emptyMessage="No email templates found."
+      list={
+        <AdminDataTable
+          tableId="email-templates"
+          testId="email-templates-table"
+          ariaLabel="Email Templates"
+          rows={templateList}
+          rowKey={(t) => t.id}
+          rowTestId={(_, index) => `email-template-row-${index}`}
+          columns={columns}
+          renderActions={(template, index) => (
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setLogsItemId(template.id)
+                  setLogsItemName(template.name)
+                }}
+                aria-label={`View logs for ${template.name}`}
+                data-testid={`logs-button-${index}`}
+              >
+                Logs
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => crud.openEdit(template)}
+                aria-label={`Edit ${template.name}`}
+                data-testid={`edit-button-${index}`}
+              >
+                Edit
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={() => crud.requestDelete(template)}
+                aria-label={`Delete ${template.name}`}
+                data-testid={`delete-button-${index}`}
+              >
+                Delete
+              </Button>
+            </div>
+          )}
+        />
+      }
+    >
       {logsItemId && (
         <ExecutionLogModal<EmailLog>
           title="Email Logs"
-          subtitle={_logsItemName}
+          subtitle={logsItemName}
           columns={logColumns}
           data={filteredLogs}
-          isLoading={_logsLoading}
-          error={_logsError instanceof Error ? _logsError : null}
+          isLoading={logsLoading}
+          error={logsError instanceof Error ? logsError : null}
           onClose={() => setLogsItemId(null)}
           emptyMessage="No email logs found."
         />
       )}
 
-      {isFormOpen && (
+      {/* The template editor is a full-screen builder (rich-text body, merge-tag
+          picker, live preview), so it keeps its own layout rather than
+          CrudFormDialog; state and mutations still come from useAdminCrud. */}
+      {crud.isFormOpen && (
         <EmailTemplateForm
-          template={editingTemplate}
+          template={crud.editing}
           collections={collections}
-          onSubmit={handleFormSubmit}
-          onCancel={handleCloseForm}
-          isSubmitting={isSubmitting}
+          onSubmit={crud.submit}
+          onCancel={crud.closeForm}
+          isSubmitting={crud.isSaving}
         />
       )}
 
       <ConfirmDialog
-        open={deleteDialogOpen}
+        open={crud.deleteTarget !== null}
         title="Delete Email Template"
         message="Are you sure you want to delete this email template? This action cannot be undone."
         confirmLabel="Delete"
         cancelLabel="Cancel"
-        onConfirm={handleDeleteConfirm}
-        onCancel={handleDeleteCancel}
+        onConfirm={crud.confirmDelete}
+        onCancel={crud.cancelDelete}
         variant="danger"
       />
-    </div>
+    </AdminCrudPage>
   )
 }
 

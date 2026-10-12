@@ -1,15 +1,19 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import {
-  useToast,
-  ConfirmDialog,
-  LoadingSpinner,
-  ErrorMessage,
-  ExecutionLogModal,
-} from '../../components'
+import { ConfirmDialog, ExecutionLogModal } from '../../components'
 import type { LogColumn } from '../../components'
+import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
+import {
+  AdminCrudPage,
+  CrudCheckboxField,
+  CrudFormDialog,
+  CrudSelectField,
+  CrudTextField,
+  useAdminCrud,
+} from '../../components/AdminCrud'
 import type { CreateScriptRequest } from '@kelta/sdk'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -30,16 +34,36 @@ interface Script {
   updatedAt: string
 }
 
-interface ScriptFormData {
-  name: string
-  description: string
-  scriptType: string
-  language: string
-  sourceCode: string
-  active: boolean
+const scriptSchema = z.object({
+  name: z
+    .string()
+    .refine((v) => v.trim().length > 0, 'Name is required')
+    .refine((v) => v.length <= 100, 'Name must be 100 characters or fewer'),
+  description: z.string().max(500, 'Description must be 500 characters or fewer'),
+  scriptType: z.string(),
+  language: z.string(),
+  sourceCode: z.string().refine((v) => v.trim().length > 0, 'Source code is required'),
+  active: z.boolean(),
   /** System permission required to execute the script; empty string = no extra gate. */
-  requiredPermission: string
-}
+  requiredPermission: z.string(),
+})
+
+type ScriptFormData = z.infer<typeof scriptSchema>
+
+const SCRIPT_TYPE_OPTIONS = [
+  { value: 'BEFORE_TRIGGER', label: 'Before Trigger' },
+  { value: 'AFTER_TRIGGER', label: 'After Trigger' },
+  { value: 'SCHEDULED', label: 'Scheduled' },
+  { value: 'API_ENDPOINT', label: 'API Endpoint' },
+  { value: 'VALIDATION', label: 'Validation' },
+  { value: 'EVENT_HANDLER', label: 'Event Handler' },
+  { value: 'EMAIL_HANDLER', label: 'Email Handler' },
+]
+
+const REQUIRED_PERMISSION_OPTIONS = SYSTEM_PERMISSIONS.map((perm) => ({
+  value: perm.name,
+  label: perm.label,
+}))
 
 /** Resolves a system-permission name to its display label ('—' when unset). */
 function permissionLabel(name: string | null | undefined): string {
@@ -47,12 +71,6 @@ function permissionLabel(name: string | null | undefined): string {
     return '—'
   }
   return SYSTEM_PERMISSIONS.find((perm) => perm.name === name)?.label ?? name
-}
-
-interface FormErrors {
-  name?: string
-  description?: string
-  sourceCode?: string
 }
 
 interface ScriptExecutionLog {
@@ -75,335 +93,12 @@ export interface ScriptsPageProps {
   testId?: string
 }
 
-function validateForm(data: ScriptFormData): FormErrors {
-  const errors: FormErrors = {}
-  if (!data.name.trim()) {
-    errors.name = 'Name is required'
-  } else if (data.name.length > 100) {
-    errors.name = 'Name must be 100 characters or fewer'
-  }
-  if (data.description && data.description.length > 500) {
-    errors.description = 'Description must be 500 characters or fewer'
-  }
-  if (!data.sourceCode.trim()) {
-    errors.sourceCode = 'Source code is required'
-  }
-  return errors
-}
-
-interface ScriptFormProps {
-  script?: Script
-  onSubmit: (data: ScriptFormData) => void
-  onCancel: () => void
-  isSubmitting: boolean
-}
-
-function ScriptForm({
-  script,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: ScriptFormProps): React.ReactElement {
-  const isEditing = !!script
-  const [formData, setFormData] = useState<ScriptFormData>({
-    name: script?.name ?? '',
-    description: script?.description ?? '',
-    scriptType: script?.scriptType ?? 'BEFORE_TRIGGER',
-    language: script?.language ?? 'javascript',
-    sourceCode: script?.sourceCode ?? '',
-    active: script?.active ?? true,
-    requiredPermission: script?.requiredPermission ?? '',
-  })
-  const [errors, setErrors] = useState<FormErrors>({})
-  const [touched, setTouched] = useState<Record<string, boolean>>({})
-  const nameInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    nameInputRef.current?.focus()
-  }, [])
-
-  const handleChange = useCallback(
-    (field: keyof ScriptFormData, value: string | boolean) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-      if (errors[field as keyof FormErrors]) {
-        setErrors((prev) => ({ ...prev, [field]: undefined }))
-      }
-    },
-    [errors]
-  )
-
-  const handleBlur = useCallback(
-    (field: keyof FormErrors) => {
-      setTouched((prev) => ({ ...prev, [field]: true }))
-      const validationErrors = validateForm(formData)
-      if (validationErrors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: validationErrors[field] }))
-      }
-    },
-    [formData]
-  )
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const validationErrors = validateForm(formData)
-      setErrors(validationErrors)
-      setTouched({ name: true, description: true, sourceCode: true })
-      if (Object.keys(validationErrors).length === 0) {
-        onSubmit(formData)
-      }
-    },
-    [formData, onSubmit]
-  )
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel()
-      }
-    },
-    [onCancel]
-  )
-
-  const title = isEditing ? 'Edit Script' : 'Create Script'
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={handleKeyDown}
-      data-testid="script-form-overlay"
-      role="presentation"
-    >
-      <div
-        className="w-full max-w-[600px] max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="script-form-title"
-        data-testid="script-form-modal"
-      >
-        <div className="flex items-center justify-between border-b border-border p-6">
-          <h2 id="script-form-title" className="text-lg font-semibold text-foreground">
-            {title}
-          </h2>
-          <button
-            type="button"
-            className="rounded p-2 text-2xl leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            onClick={onCancel}
-            aria-label="Close"
-            data-testid="script-form-close"
-          >
-            &times;
-          </button>
-        </div>
-        <div className="p-6">
-          <form className="flex flex-col gap-5" onSubmit={handleSubmit} noValidate>
-            <div className="flex flex-col gap-2">
-              <label htmlFor="script-name" className="text-sm font-medium text-foreground">
-                Name
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                ref={nameInputRef}
-                id="script-name"
-                type="text"
-                className={cn(
-                  'rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.name && errors.name && 'border-destructive'
-                )}
-                value={formData.name}
-                onChange={(e) => handleChange('name', e.target.value)}
-                onBlur={() => handleBlur('name')}
-                placeholder="Enter script name"
-                aria-required="true"
-                aria-invalid={touched.name && !!errors.name}
-                disabled={isSubmitting}
-                data-testid="script-name-input"
-              />
-              {touched.name && errors.name && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.name}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="script-description" className="text-sm font-medium text-foreground">
-                Description
-              </label>
-              <textarea
-                id="script-description"
-                className={cn(
-                  'min-h-[80px] resize-y rounded-md border border-border bg-background px-3 py-2.5 font-[inherit] text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.description && errors.description && 'border-destructive'
-                )}
-                value={formData.description}
-                onChange={(e) => handleChange('description', e.target.value)}
-                onBlur={() => handleBlur('description')}
-                placeholder="Enter script description"
-                disabled={isSubmitting}
-                rows={3}
-                data-testid="script-description-input"
-              />
-              {touched.description && errors.description && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.description}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="script-type" className="text-sm font-medium text-foreground">
-                Script Type
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <select
-                id="script-type"
-                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                value={formData.scriptType}
-                onChange={(e) => handleChange('scriptType', e.target.value)}
-                disabled={isSubmitting}
-                data-testid="script-type-input"
-              >
-                <option value="BEFORE_TRIGGER">Before Trigger</option>
-                <option value="AFTER_TRIGGER">After Trigger</option>
-                <option value="SCHEDULED">Scheduled</option>
-                <option value="API_ENDPOINT">API Endpoint</option>
-                <option value="VALIDATION">Validation</option>
-                <option value="EVENT_HANDLER">Event Handler</option>
-                <option value="EMAIL_HANDLER">Email Handler</option>
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="script-language" className="text-sm font-medium text-foreground">
-                Language
-              </label>
-              <input
-                id="script-language"
-                type="text"
-                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                value={formData.language}
-                onChange={(e) => handleChange('language', e.target.value)}
-                placeholder="Enter language"
-                disabled={isSubmitting}
-                data-testid="script-language-input"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="script-required-permission"
-                className="text-sm font-medium text-foreground"
-              >
-                Required permission to execute
-              </label>
-              <select
-                id="script-required-permission"
-                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                value={formData.requiredPermission}
-                onChange={(e) => handleChange('requiredPermission', e.target.value)}
-                disabled={isSubmitting}
-                data-testid="script-required-permission-input"
-              >
-                <option value="">None — any API user</option>
-                {SYSTEM_PERMISSIONS.map((perm) => (
-                  <option key={perm.name} value={perm.name}>
-                    {perm.label}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-muted-foreground">
-                When set, executing this script via the API requires the selected system permission.
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="script-source-code" className="text-sm font-medium text-foreground">
-                Source Code
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <textarea
-                id="script-source-code"
-                className={cn(
-                  'min-h-[80px] resize-y rounded-md border border-border bg-background px-3 py-2.5 font-[inherit] text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.sourceCode && errors.sourceCode && 'border-destructive'
-                )}
-                value={formData.sourceCode}
-                onChange={(e) => handleChange('sourceCode', e.target.value)}
-                onBlur={() => handleBlur('sourceCode')}
-                placeholder="Enter source code"
-                disabled={isSubmitting}
-                rows={10}
-                data-testid="script-source-code-input"
-              />
-              {touched.sourceCode && errors.sourceCode && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.sourceCode}
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                id="script-active"
-                type="checkbox"
-                className="h-4 w-4 accent-primary"
-                checked={formData.active}
-                onChange={(e) => handleChange('active', e.target.checked)}
-                disabled={isSubmitting}
-                data-testid="script-active-input"
-              />
-              <label htmlFor="script-active" className="text-sm font-medium text-foreground">
-                Active
-              </label>
-            </div>
-
-            <div className="mt-2 flex justify-end gap-3 border-t border-border pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onCancel}
-                disabled={isSubmitting}
-                data-testid="script-form-cancel"
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isSubmitting} data-testid="script-form-submit">
-                {isSubmitting ? 'Saving...' : 'Save'}
-              </Button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export function ScriptsPage({ testId = 'scripts-page' }: ScriptsPageProps): React.ReactElement {
-  const queryClient = useQueryClient()
   const { formatDate } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingScript, setEditingScript] = useState<Script | undefined>(undefined)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [scriptToDelete, setScriptToDelete] = useState<Script | null>(null)
   const [logsItemId, setLogsItemId] = useState<string | null>(null)
-  const [_logsItemName, setLogsItemName] = useState('')
+  const [logsItemName, setLogsItemName] = useState('')
 
   const {
     data: logs,
@@ -454,7 +149,6 @@ export function ScriptsPage({ testId = 'scripts-page' }: ScriptsPageProps): Reac
           : '-',
     },
   ]
-  void logColumns
 
   const {
     data: scripts,
@@ -468,296 +162,152 @@ export function ScriptsPage({ testId = 'scripts-page' }: ScriptsPageProps): Reac
 
   const scriptList: Script[] = (scripts ?? []) as unknown as Script[]
 
-  const createMutation = useMutation({
-    mutationFn: (data: ScriptFormData) =>
+  const crud = useAdminCrud<Script, ScriptFormData>({
+    queryKey: ['scripts'],
+    create: (data) =>
       keltaClient.admin.scripts.create('', '', data as unknown as CreateScriptRequest),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scripts'] })
-      showToast('Script created successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: ScriptFormData }) =>
-      keltaClient.admin.scripts.update(id, data as unknown as Partial<CreateScriptRequest>),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scripts'] })
-      showToast('Script updated successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
+    update: (script, data) =>
+      keltaClient.admin.scripts.update(script.id, data as unknown as Partial<CreateScriptRequest>),
+    remove: (script) => keltaClient.admin.scripts.delete(script.id),
+    messages: {
+      created: 'Script created successfully',
+      updated: 'Script updated successfully',
+      deleted: 'Script deleted successfully',
+      error: 'An error occurred',
     },
   })
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => keltaClient.admin.scripts.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scripts'] })
-      showToast('Script deleted successfully', 'success')
-      setDeleteDialogOpen(false)
-      setScriptToDelete(null)
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const handleCreate = useCallback(() => {
-    setEditingScript(undefined)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleEdit = useCallback((script: Script) => {
-    setEditingScript(script)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleCloseForm = useCallback(() => {
-    setIsFormOpen(false)
-    setEditingScript(undefined)
-  }, [])
-
-  const handleFormSubmit = useCallback(
-    (data: ScriptFormData) => {
-      if (editingScript) {
-        updateMutation.mutate({ id: editingScript.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editingScript, createMutation, updateMutation]
+  const columns = useMemo<AdminColumn<Script>[]>(
+    () => [
+      { id: 'name', header: 'Name', cellClassName: 'text-foreground' },
+      {
+        id: 'scriptType',
+        header: 'Script Type',
+        cell: (script) => (
+          <span className="inline-block rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
+            {script.scriptType}
+          </span>
+        ),
+      },
+      { id: 'language', header: 'Language', cellClassName: 'text-foreground' },
+      { id: 'version', header: 'Version', cellClassName: 'text-foreground' },
+      {
+        id: 'active',
+        header: 'Active',
+        cell: (script) => (
+          <span
+            className={cn(
+              'inline-block rounded-full px-3 py-1 text-xs font-semibold',
+              script.active
+                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                : 'bg-muted text-muted-foreground'
+            )}
+          >
+            {script.active ? 'Yes' : 'No'}
+          </span>
+        ),
+      },
+      {
+        id: 'requiredPermission',
+        header: 'Run Permission',
+        accessor: (script) => permissionLabel(script.requiredPermission),
+        cell: (script, index) => (
+          <span data-testid={`required-permission-cell-${index}`}>
+            {permissionLabel(script.requiredPermission)}
+          </span>
+        ),
+        cellClassName: 'text-foreground',
+      },
+      {
+        id: 'createdAt',
+        header: 'Created',
+        cell: (script) =>
+          formatDate(new Date(script.createdAt), {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          }),
+        cellClassName: 'text-foreground',
+      },
+    ],
+    [formatDate]
   )
 
-  const handleDeleteClick = useCallback((script: Script) => {
-    setScriptToDelete(script)
-    setDeleteDialogOpen(true)
-  }, [])
-
-  const handleDeleteConfirm = useCallback(() => {
-    if (scriptToDelete) {
-      deleteMutation.mutate(scriptToDelete.id)
-    }
-  }, [scriptToDelete, deleteMutation])
-
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteDialogOpen(false)
-    setScriptToDelete(null)
-  }, [])
-
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <div className="flex min-h-[400px] items-center justify-center">
-          <LoadingSpinner size="large" label="Loading scripts..." />
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <ErrorMessage
-          error={error instanceof Error ? error : new Error('An error occurred')}
-          onRetry={() => refetch()}
-        />
-      </div>
-    )
-  }
-
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const editing = crud.editing
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Scripts</h1>
+    <AdminCrudPage
+      testId={testId}
+      title="Scripts"
+      actions={
         <Button
           type="button"
-          onClick={handleCreate}
+          onClick={crud.openCreate}
           aria-label="Create Script"
           data-testid="add-script-button"
         >
           Create Script
         </Button>
-      </header>
-
-      {scriptList.length === 0 ? (
-        <div
-          className="rounded-lg border border-border bg-card py-16 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          <p>No scripts found.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table
-            className="w-full border-collapse"
-            role="grid"
-            aria-label="Scripts"
-            data-testid="scripts-table"
-          >
-            <thead>
-              <tr role="row" className="bg-muted">
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Name
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Script Type
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Language
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Version
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Active
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Run Permission
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Created
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {scriptList.map((script, index) => (
-                <tr
-                  key={script.id}
-                  role="row"
-                  className="border-b border-border transition-colors last:border-b-0 hover:bg-muted/50"
-                  data-testid={`script-row-${index}`}
-                >
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    {script.name}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    <span className="inline-block rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
-                      {script.scriptType}
-                    </span>
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    {script.language}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    {script.version}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    <span
-                      className={cn(
-                        'inline-block rounded-full px-3 py-1 text-xs font-semibold',
-                        script.active
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : 'bg-muted text-muted-foreground'
-                      )}
-                    >
-                      {script.active ? 'Yes' : 'No'}
-                    </span>
-                  </td>
-                  <td
-                    role="gridcell"
-                    className="px-4 py-3 text-sm text-foreground"
-                    data-testid={`required-permission-cell-${index}`}
-                  >
-                    {permissionLabel(script.requiredPermission)}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    {formatDate(new Date(script.createdAt), {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-right text-sm">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setLogsItemId(script.id)
-                          setLogsItemName(script.name)
-                        }}
-                        aria-label={`View logs for ${script.name}`}
-                        data-testid={`logs-button-${index}`}
-                      >
-                        Logs
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEdit(script)}
-                        aria-label={`Edit ${script.name}`}
-                        data-testid={`edit-button-${index}`}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="border-destructive/30 text-destructive hover:bg-destructive/10"
-                        onClick={() => handleDeleteClick(script)}
-                        aria-label={`Delete ${script.name}`}
-                        data-testid={`delete-button-${index}`}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
+      }
+      isLoading={isLoading}
+      error={error}
+      onRetry={() => refetch()}
+      isEmpty={scriptList.length === 0}
+      emptyMessage="No scripts found."
+      list={
+        <AdminDataTable
+          tableId="scripts"
+          testId="scripts-table"
+          ariaLabel="Scripts"
+          columns={columns}
+          rows={scriptList}
+          rowKey={(script) => script.id}
+          rowTestId={(_, index) => `script-row-${index}`}
+          renderActions={(script, index) => (
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setLogsItemId(script.id)
+                  setLogsItemName(script.name)
+                }}
+                aria-label={`View logs for ${script.name}`}
+                data-testid={`logs-button-${index}`}
+              >
+                Logs
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => crud.openEdit(script)}
+                aria-label={`Edit ${script.name}`}
+                data-testid={`edit-button-${index}`}
+              >
+                Edit
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={() => crud.requestDelete(script)}
+                aria-label={`Delete ${script.name}`}
+                data-testid={`delete-button-${index}`}
+              >
+                Delete
+              </Button>
+            </div>
+          )}
+        />
+      }
+    >
       {logsItemId && (
         <ExecutionLogModal<ScriptExecutionLog>
           title="Script Execution Logs"
-          subtitle={_logsItemName}
+          subtitle={logsItemName}
           columns={logColumns}
           data={(logs ?? []) as unknown as ScriptExecutionLog[]}
           isLoading={logsLoading}
@@ -767,26 +317,94 @@ export function ScriptsPage({ testId = 'scripts-page' }: ScriptsPageProps): Reac
         />
       )}
 
-      {isFormOpen && (
-        <ScriptForm
-          script={editingScript}
-          onSubmit={handleFormSubmit}
-          onCancel={handleCloseForm}
-          isSubmitting={isSubmitting}
+      <CrudFormDialog<ScriptFormData>
+        open={crud.isFormOpen}
+        onClose={crud.closeForm}
+        title={editing ? 'Edit Script' : 'Create Script'}
+        schema={scriptSchema}
+        defaultValues={{
+          name: editing?.name ?? '',
+          description: editing?.description ?? '',
+          scriptType: editing?.scriptType ?? 'BEFORE_TRIGGER',
+          language: editing?.language ?? 'javascript',
+          sourceCode: editing?.sourceCode ?? '',
+          active: editing?.active ?? true,
+          requiredPermission: editing?.requiredPermission ?? '',
+        }}
+        onSubmit={crud.submit}
+        isSubmitting={crud.isSaving}
+        testIdPrefix="script"
+        className="sm:max-w-[600px]"
+      >
+        <CrudTextField<ScriptFormData>
+          name="name"
+          id="script-name"
+          label="Name"
+          required
+          placeholder="Enter script name"
+          testId="script-name-input"
         />
-      )}
+        <CrudTextField<ScriptFormData>
+          name="description"
+          id="script-description"
+          label="Description"
+          multiline
+          placeholder="Enter script description"
+          testId="script-description-input"
+        />
+        <CrudSelectField<ScriptFormData>
+          name="scriptType"
+          id="script-type"
+          label="Script Type"
+          required
+          options={SCRIPT_TYPE_OPTIONS}
+          testId="script-type-input"
+        />
+        <CrudTextField<ScriptFormData>
+          name="language"
+          id="script-language"
+          label="Language"
+          placeholder="Enter language"
+          testId="script-language-input"
+        />
+        <CrudSelectField<ScriptFormData>
+          name="requiredPermission"
+          id="script-required-permission"
+          label="Required permission to execute"
+          placeholder="None — any API user"
+          options={REQUIRED_PERMISSION_OPTIONS}
+          hint="When set, executing this script via the API requires the selected system permission."
+          testId="script-required-permission-input"
+        />
+        <CrudTextField<ScriptFormData>
+          name="sourceCode"
+          id="script-source-code"
+          label="Source Code"
+          required
+          multiline
+          rows={10}
+          placeholder="Enter source code"
+          testId="script-source-code-input"
+        />
+        <CrudCheckboxField<ScriptFormData>
+          name="active"
+          id="script-active"
+          label="Active"
+          testId="script-active-input"
+        />
+      </CrudFormDialog>
 
       <ConfirmDialog
-        open={deleteDialogOpen}
+        open={crud.deleteTarget !== null}
         title="Delete Script"
         message="Are you sure you want to delete this script? This action cannot be undone."
         confirmLabel="Delete"
         cancelLabel="Cancel"
-        onConfirm={handleDeleteConfirm}
-        onCancel={handleDeleteCancel}
+        onConfirm={crud.confirmDelete}
+        onCancel={crud.cancelDelete}
         variant="danger"
       />
-    </div>
+    </AdminCrudPage>
   )
 }
 

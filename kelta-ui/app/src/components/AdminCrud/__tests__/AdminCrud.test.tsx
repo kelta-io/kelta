@@ -282,6 +282,40 @@ describe('AdminCrud', () => {
   })
 })
 
+describe('CrudFormDialog submitTestId', () => {
+  const noteSchema = z.object({ note: z.string() })
+  type NoteValues = z.infer<typeof noteSchema>
+
+  it('overrides only the submit test id and still submits', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <I18nProvider>
+        <CrudFormDialog<NoteValues>
+          open
+          onClose={() => undefined}
+          title="Note"
+          schema={noteSchema}
+          defaultValues={{ note: '' }}
+          onSubmit={onSubmit}
+          testIdPrefix="note"
+          submitTestId="legacy-note-submit"
+        >
+          <CrudTextField<NoteValues> name="note" id="note" label="Note" testId="note-input" />
+        </CrudFormDialog>
+      </I18nProvider>
+    )
+
+    expect(await screen.findByTestId('note-form-modal')).toBeInTheDocument()
+    expect(screen.getByTestId('note-form-cancel')).toBeInTheDocument()
+    expect(screen.queryByTestId('note-form-submit')).not.toBeInTheDocument()
+
+    await user.type(screen.getByTestId('note-input'), 'hi')
+    await user.click(screen.getByTestId('legacy-note-submit'))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ note: 'hi' }, expect.anything()))
+  })
+})
+
 describe('AdminCrudPage', () => {
   const base = {
     testId: 'things-page',

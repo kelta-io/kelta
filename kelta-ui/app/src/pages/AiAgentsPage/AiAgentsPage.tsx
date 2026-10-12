@@ -1,7 +1,16 @@
-import React, { useState, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useMemo, useState } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { z } from 'zod'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { useToast, ConfirmDialog } from '../../components'
+import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
+import {
+  AdminCrudPage,
+  CrudCheckboxField,
+  CrudFormDialog,
+  CrudTextField,
+  useAdminCrud,
+} from '../../components/AdminCrud'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
@@ -43,21 +52,21 @@ interface AgentRunResult {
   maxIterationsReached: boolean
 }
 
-interface AgentFormData {
-  name: string
-  description: string
-  systemPrompt: string
-  model: string
-  maxTokens: string
-  allowedTools: string
-  monthlyTokenBudget: string
-  enabled: boolean
-}
+const agentSchema = z.object({
+  name: z
+    .string()
+    .refine((v) => v.trim().length > 0, 'Name is required')
+    .refine((v) => v.trim().length <= 255, 'Name must be at most 255 characters'),
+  description: z.string(),
+  systemPrompt: z.string().refine((v) => v.trim().length > 0, 'System prompt is required'),
+  model: z.string(),
+  maxTokens: z.string(),
+  allowedTools: z.string(),
+  monthlyTokenBudget: z.string(),
+  enabled: z.boolean(),
+})
 
-interface FormErrors {
-  name?: string
-  systemPrompt?: string
-}
+type AgentFormData = z.infer<typeof agentSchema>
 
 function toFormData(agent?: AgentDefinition): AgentFormData {
   return {
@@ -89,210 +98,8 @@ function toRequestBody(data: AgentFormData): Record<string, unknown> {
   }
 }
 
-function validate(data: AgentFormData): FormErrors {
-  const errors: FormErrors = {}
-  if (!data.name.trim()) {
-    errors.name = 'Name is required'
-  } else if (data.name.trim().length > 255) {
-    errors.name = 'Name must be at most 255 characters'
-  }
-  if (!data.systemPrompt.trim()) {
-    errors.systemPrompt = 'System prompt is required'
-  }
-  return errors
-}
-
 const inputClass =
   'w-full rounded-md border border-border bg-background px-3 py-2.5 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20'
-
-function AgentForm({
-  agent,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: {
-  agent?: AgentDefinition
-  onSubmit: (data: AgentFormData) => void
-  onCancel: () => void
-  isSubmitting: boolean
-}): React.ReactElement {
-  const [formData, setFormData] = useState<AgentFormData>(() => toFormData(agent))
-  const [errors, setErrors] = useState<FormErrors>({})
-
-  const handleChange = useCallback(
-    (field: keyof AgentFormData, value: string | boolean) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-      if (field in errors) {
-        setErrors((prev) => ({ ...prev, [field]: undefined }))
-      }
-    },
-    [errors]
-  )
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const found = validate(formData)
-      if (Object.keys(found).length > 0) {
-        setErrors(found)
-        return
-      }
-      onSubmit(formData)
-    },
-    [formData, onSubmit]
-  )
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div
-        className="max-h-[90vh] w-full max-w-[640px] overflow-y-auto rounded-lg bg-background shadow-xl"
-        data-testid="agent-form-modal"
-      >
-        <div className="flex items-center justify-between border-b border-border p-6">
-          <h2 className="text-lg font-semibold">{agent ? 'Edit Agent' : 'New Agent'}</h2>
-          <button
-            type="button"
-            onClick={onCancel}
-            aria-label="Close"
-            className="text-muted-foreground"
-          >
-            ×
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-4 p-6">
-          <div>
-            <label htmlFor="af-name" className="mb-1 block text-sm font-medium">
-              Name
-            </label>
-            <input
-              id="af-name"
-              data-testid="agent-name-input"
-              className={cn(inputClass, errors.name && 'border-destructive')}
-              value={formData.name}
-              onChange={(e) => handleChange('name', e.target.value)}
-            />
-            {errors.name && (
-              <span className="text-xs text-destructive" role="alert">
-                {errors.name}
-              </span>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="af-description" className="mb-1 block text-sm font-medium">
-              Description
-            </label>
-            <input
-              id="af-description"
-              className={inputClass}
-              value={formData.description}
-              onChange={(e) => handleChange('description', e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="af-system-prompt" className="mb-1 block text-sm font-medium">
-              System Prompt
-            </label>
-            <textarea
-              id="af-system-prompt"
-              data-testid="agent-system-prompt-input"
-              className={cn(
-                inputClass,
-                'min-h-[120px] resize-y',
-                errors.systemPrompt && 'border-destructive'
-              )}
-              value={formData.systemPrompt}
-              onChange={(e) => handleChange('systemPrompt', e.target.value)}
-            />
-            {errors.systemPrompt && (
-              <span className="text-xs text-destructive" role="alert">
-                {errors.systemPrompt}
-              </span>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="af-tools" className="mb-1 block text-sm font-medium">
-              Allowed tools
-            </label>
-            <input
-              id="af-tools"
-              data-testid="agent-tools-input"
-              className={inputClass}
-              placeholder="comma-separated, e.g. search, get_record"
-              value={formData.allowedTools}
-              onChange={(e) => handleChange('allowedTools', e.target.value)}
-            />
-            <span className="text-xs text-muted-foreground">
-              The agent may call only these tools. Leave blank for a text-only agent.
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div>
-              <label htmlFor="af-model" className="mb-1 block text-sm font-medium">
-                Model
-              </label>
-              <input
-                id="af-model"
-                className={inputClass}
-                placeholder="default"
-                value={formData.model}
-                onChange={(e) => handleChange('model', e.target.value)}
-              />
-            </div>
-            <div>
-              <label htmlFor="af-max-tokens" className="mb-1 block text-sm font-medium">
-                Max tokens
-              </label>
-              <input
-                id="af-max-tokens"
-                type="number"
-                className={inputClass}
-                placeholder="default"
-                value={formData.maxTokens}
-                onChange={(e) => handleChange('maxTokens', e.target.value)}
-              />
-            </div>
-            <div>
-              <label htmlFor="af-budget" className="mb-1 block text-sm font-medium">
-                Monthly budget
-              </label>
-              <input
-                id="af-budget"
-                type="number"
-                className={inputClass}
-                placeholder="tenant quota"
-                value={formData.monthlyTokenBudget}
-                onChange={(e) => handleChange('monthlyTokenBudget', e.target.value)}
-              />
-            </div>
-          </div>
-
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              data-testid="agent-enabled-input"
-              checked={formData.enabled}
-              onChange={(e) => handleChange('enabled', e.target.checked)}
-            />
-            Enabled
-          </label>
-
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Button type="button" variant="outline" onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button type="submit" data-testid="agent-form-submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving…' : 'Save'}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
 
 function RunPanel({
   agent,
@@ -383,14 +190,8 @@ function RunPanel({
 }
 
 export function AiAgentsPage({ testId = 'ai-agents-page' }: AiAgentsPageProps): React.ReactElement {
-  const queryClient = useQueryClient()
   const { apiClient } = useApi()
-  const { showToast } = useToast()
-
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editing, setEditing] = useState<AgentDefinition | undefined>()
   const [runningAgent, setRunningAgent] = useState<AgentDefinition | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<AgentDefinition | null>(null)
 
   const {
     data: agents,
@@ -401,207 +202,188 @@ export function AiAgentsPage({ testId = 'ai-agents-page' }: AiAgentsPageProps): 
     queryKey: ['ai-agents'],
     queryFn: () => apiClient.get<AgentDefinition[]>('/api/ai/agents'),
   })
-
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['ai-agents'] })
-
-  const createMutation = useMutation({
-    mutationFn: (data: AgentFormData) => apiClient.post('/api/ai/agents', toRequestBody(data)),
-    onSuccess: () => {
-      invalidate()
-      showToast('Agent created', 'success')
-      setIsFormOpen(false)
-    },
-    onError: (err: Error) => showToast(err.message || 'Failed to create agent', 'error'),
-  })
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: AgentFormData }) =>
-      apiClient.put(`/api/ai/agents/${id}`, toRequestBody(data)),
-    onSuccess: () => {
-      invalidate()
-      showToast('Agent updated', 'success')
-      setIsFormOpen(false)
-    },
-    onError: (err: Error) => showToast(err.message || 'Failed to update agent', 'error'),
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => apiClient.delete(`/api/ai/agents/${id}`),
-    onSuccess: () => {
-      invalidate()
-      showToast('Agent deleted', 'success')
-      setDeleteTarget(null)
-    },
-    onError: (err: Error) => showToast(err.message || 'Failed to delete agent', 'error'),
-  })
-
-  const handleSubmit = useCallback(
-    (data: AgentFormData) => {
-      if (editing) {
-        updateMutation.mutate({ id: editing.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editing, createMutation, updateMutation]
-  )
-
-  if (isLoading) {
-    return <LoadingSpinner size="large" />
-  }
-  if (error) {
-    return <ErrorMessage error={error as Error} onRetry={() => refetch()} />
-  }
-
   const list = agents ?? []
 
+  const crud = useAdminCrud<AgentDefinition, AgentFormData>({
+    queryKey: ['ai-agents'],
+    create: (data) => apiClient.post('/api/ai/agents', toRequestBody(data)),
+    update: (agent, data) => apiClient.put(`/api/ai/agents/${agent.id}`, toRequestBody(data)),
+    remove: (agent) => apiClient.delete(`/api/ai/agents/${agent.id}`),
+    messages: {
+      created: 'Agent created',
+      updated: 'Agent updated',
+      deleted: 'Agent deleted',
+      error: 'An error occurred',
+      createError: 'Failed to create agent',
+      updateError: 'Failed to update agent',
+      deleteError: 'Failed to delete agent',
+    },
+  })
+
+  const columns = useMemo<AdminColumn<AgentDefinition>[]>(
+    () => [
+      { id: 'name', header: 'Name', cellClassName: 'font-medium text-foreground' },
+      {
+        id: 'model',
+        header: 'Model',
+        cell: (agent) => agent.model ?? 'default',
+        cellClassName: 'text-muted-foreground',
+      },
+      {
+        id: 'allowedTools',
+        header: 'Tools',
+        accessor: (agent) => agent.allowedTools.length,
+        cellClassName: 'text-muted-foreground',
+      },
+      {
+        id: 'enabled',
+        header: 'Status',
+        cell: (agent) => (
+          <span
+            className={cn(
+              'rounded-full px-2 py-0.5 text-xs',
+              agent.enabled ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+            )}
+          >
+            {agent.enabled ? 'Enabled' : 'Disabled'}
+          </span>
+        ),
+      },
+    ],
+    []
+  )
+
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">AI Agents</h1>
-          <p className="text-sm text-muted-foreground">
-            Governed assistants with a fixed prompt, an allowed tool subset, and token budgets.
-          </p>
-        </div>
-        <Button
-          data-testid="new-agent-button"
-          onClick={() => {
-            setEditing(undefined)
-            setIsFormOpen(true)
-          }}
-        >
+    <AdminCrudPage
+      testId={testId}
+      title="AI Agents"
+      description="Governed assistants with a fixed prompt, an allowed tool subset, and token budgets."
+      actions={
+        <Button data-testid="new-agent-button" onClick={crud.openCreate}>
           New Agent
         </Button>
-      </header>
-
-      {list.length === 0 ? (
-        <div className="rounded-lg border border-border bg-card py-16 text-center text-muted-foreground">
-          No agents yet. Create one to get started.
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table role="grid" className="w-full border-collapse" aria-label="AI Agents">
-            <thead>
-              <tr role="row" className="bg-muted">
-                <th
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold"
-                >
-                  Name
-                </th>
-                <th
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold"
-                >
-                  Model
-                </th>
-                <th
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold"
-                >
-                  Tools
-                </th>
-                <th
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold"
-                >
-                  Status
-                </th>
-                <th
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-right text-xs font-semibold"
-                >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((agent) => (
-                <tr
-                  key={agent.id}
-                  role="row"
-                  className="border-b border-border last:border-b-0 hover:bg-muted/50"
-                >
-                  <td role="gridcell" className="px-4 py-3 text-sm font-medium">
-                    {agent.name}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-muted-foreground">
-                    {agent.model ?? 'default'}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-muted-foreground">
-                    {agent.allowedTools.length}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm">
-                    <span
-                      className={cn(
-                        'rounded-full px-2 py-0.5 text-xs',
-                        agent.enabled
-                          ? 'bg-primary/10 text-primary'
-                          : 'bg-muted text-muted-foreground'
-                      )}
-                    >
-                      {agent.enabled ? 'Enabled' : 'Disabled'}
-                    </span>
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid={`run-agent-button-${agent.id}`}
-                        onClick={() => setRunningAgent(agent)}
-                      >
-                        Run
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid={`edit-button-${agent.id}`}
-                        onClick={() => {
-                          setEditing(agent)
-                          setIsFormOpen(true)
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid={`delete-button-${agent.id}`}
-                        onClick={() => setDeleteTarget(agent)}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {isFormOpen && (
-        <AgentForm
-          agent={editing}
-          onSubmit={handleSubmit}
-          onCancel={() => setIsFormOpen(false)}
-          isSubmitting={createMutation.isPending || updateMutation.isPending}
+      }
+      isLoading={isLoading}
+      error={error}
+      onRetry={() => refetch()}
+      isEmpty={list.length === 0}
+      emptyMessage="No agents yet. Create one to get started."
+      list={
+        <AdminDataTable
+          tableId="ai-agents"
+          testId="ai-agents-table"
+          ariaLabel="AI Agents"
+          columns={columns}
+          rows={list}
+          rowKey={(agent) => agent.id}
+          renderActions={(agent) => (
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid={`run-agent-button-${agent.id}`}
+                onClick={() => setRunningAgent(agent)}
+              >
+                Run
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid={`edit-button-${agent.id}`}
+                onClick={() => crud.openEdit(agent)}
+              >
+                Edit
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid={`delete-button-${agent.id}`}
+                onClick={() => crud.requestDelete(agent)}
+              >
+                Delete
+              </Button>
+            </div>
+          )}
         />
-      )}
+      }
+    >
+      <CrudFormDialog<AgentFormData>
+        open={crud.isFormOpen}
+        onClose={crud.closeForm}
+        title={crud.editing ? 'Edit Agent' : 'New Agent'}
+        schema={agentSchema}
+        defaultValues={toFormData(crud.editing)}
+        onSubmit={crud.submit}
+        isSubmitting={crud.isSaving}
+        testIdPrefix="agent"
+        className="sm:max-w-[640px]"
+      >
+        <CrudTextField<AgentFormData>
+          name="name"
+          id="af-name"
+          label="Name"
+          required
+          testId="agent-name-input"
+        />
+        <CrudTextField<AgentFormData> name="description" id="af-description" label="Description" />
+        <CrudTextField<AgentFormData>
+          name="systemPrompt"
+          id="af-system-prompt"
+          label="System Prompt"
+          required
+          multiline
+          rows={5}
+          testId="agent-system-prompt-input"
+        />
+        <CrudTextField<AgentFormData>
+          name="allowedTools"
+          id="af-tools"
+          label="Allowed tools"
+          placeholder="comma-separated, e.g. search, get_record"
+          hint="The agent may call only these tools. Leave blank for a text-only agent."
+          testId="agent-tools-input"
+        />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <CrudTextField<AgentFormData>
+            name="model"
+            id="af-model"
+            label="Model"
+            placeholder="default"
+          />
+          <CrudTextField<AgentFormData>
+            name="maxTokens"
+            id="af-max-tokens"
+            label="Max tokens"
+            type="number"
+            placeholder="default"
+          />
+          <CrudTextField<AgentFormData>
+            name="monthlyTokenBudget"
+            id="af-budget"
+            label="Monthly budget"
+            type="number"
+            placeholder="tenant quota"
+          />
+        </div>
+        <CrudCheckboxField<AgentFormData>
+          name="enabled"
+          id="af-enabled"
+          label="Enabled"
+          testId="agent-enabled-input"
+        />
+      </CrudFormDialog>
 
       {runningAgent && <RunPanel agent={runningAgent} onClose={() => setRunningAgent(null)} />}
 
       <ConfirmDialog
-        open={deleteTarget !== null}
+        open={crud.deleteTarget !== null}
         title="Delete agent"
-        message={`Delete “${deleteTarget?.name}”? This cannot be undone.`}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
-        onCancel={() => setDeleteTarget(null)}
+        message={`Delete “${crud.deleteTarget?.name}”? This cannot be undone.`}
+        onConfirm={crud.confirmDelete}
+        onCancel={crud.cancelDelete}
         variant="danger"
       />
-    </div>
+    </AdminCrudPage>
   )
 }
 
