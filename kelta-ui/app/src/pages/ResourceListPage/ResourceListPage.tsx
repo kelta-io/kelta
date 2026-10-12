@@ -20,9 +20,10 @@ import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
 import { useApi } from '../../context/ApiContext'
 import { ApiClient } from '../../services/apiClient'
-import { unwrapCollection, unwrapResource, extractIncluded } from '../../utils/jsonapi'
-import { normalizeFieldType } from '../../utils/normalizeFieldType'
-import type { FieldDefinition } from '../../hooks/useCollectionSchema'
+import { unwrapCollection } from '../../utils/jsonapi'
+// The shared fetcher: the `['collection-schema', name]` cache entry must hold the full schema
+// shape (incl. displayFieldName, trackHistory) every other reader expects.
+import { fetchCollectionSchema, type FieldDefinition } from '../../hooks/useCollectionSchema'
 import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { useSavedViews } from '../../hooks/useSavedViews'
 import { useLookupDisplayMap } from '../../hooks/useLookupDisplayMap'
@@ -224,46 +225,6 @@ function generateFilterId(): string {
 }
 
 // API functions using apiClient
-async function fetchCollectionSchema(
-  apiClient: ApiClient,
-  collectionName: string
-): Promise<CollectionSchema> {
-  // Fetch the collection record with included field definitions in a single request.
-  // Uses raw get() to preserve the full JSON:API response including `included` array.
-  const response = await apiClient.get(
-    `/api/collections/${encodeURIComponent(collectionName)}?include=fields`
-  )
-
-  // Extract the collection record from the response envelope
-  const collection = unwrapResource<Record<string, unknown>>(response)
-
-  // Extract included field records from the JSON:API `included` array
-  const fieldRecords = extractIncluded<Record<string, unknown>>(response, 'fields')
-
-  // Sort by fieldOrder and filter to active fields, then normalize types.
-  // Spread all properties to preserve validation rules, constraints, etc.
-  const fields: FieldDefinition[] = fieldRecords
-    .filter((f) => f.active !== false)
-    .sort((a, b) => {
-      const orderA = typeof a.fieldOrder === 'number' ? a.fieldOrder : 999
-      const orderB = typeof b.fieldOrder === 'number' ? b.fieldOrder : 999
-      return orderA - orderB
-    })
-    .map((f) => ({
-      ...(f as unknown as FieldDefinition),
-      type: normalizeFieldType(f.type as string),
-      required: !!f.required,
-      displayName: (f.displayName as string) || undefined,
-      referenceTarget: (f.referenceTarget as string) || undefined,
-    }))
-
-  return {
-    id: collection.id as string,
-    name: collection.name as string,
-    displayName: (collection.displayName as string) || (collection.name as string),
-    fields,
-  }
-}
 
 interface FetchResourcesParams {
   collectionName: string

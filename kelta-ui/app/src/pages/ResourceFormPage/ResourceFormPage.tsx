@@ -28,9 +28,12 @@ import { LayoutFormSections } from '../../components/LayoutFormSections/LayoutFo
 import type { LayoutFormFieldDefinition } from '../../components/LayoutFormSections/LayoutFormSections'
 import { useLayoutRules } from '@kelta/components'
 import { dtosToLayoutRules } from '../../utils/layoutRules'
-import { unwrapResource, extractIncluded, wrapResource } from '../../utils/jsonapi'
-import { normalizeFieldType } from '../../utils/normalizeFieldType'
-import type { FieldDefinition as SchemaFieldDefinition } from '../../hooks/useCollectionSchema'
+import { unwrapResource, wrapResource } from '../../utils/jsonapi'
+import {
+  fetchCollectionSchema as fetchSharedCollectionSchema,
+  type CollectionSchema as SharedCollectionSchema,
+  type FieldDefinition as SchemaFieldDefinition,
+} from '../../hooks/useCollectionSchema'
 import { ApiError } from '../../services/apiClient'
 import type { ApiClient } from '../../services/apiClient'
 
@@ -58,13 +61,8 @@ export interface ValidationRule {
 /**
  * Collection schema interface
  */
-export interface CollectionSchema {
-  id: string
-  name: string
-  displayName: string
+export interface CollectionSchema extends Omit<SharedCollectionSchema, 'fields'> {
   description?: string
-  displayFieldId?: string
-  displayFieldName?: string
   fields: FieldDefinition[]
 }
 
@@ -108,57 +106,17 @@ interface PicklistValueDto {
 }
 
 // API functions using apiClient
-async function fetchCollectionSchema(
+
+/**
+ * The collection schema through the shared fetcher — the same shape every other reader of the
+ * `['collection-schema', name]` cache entry expects (a page-local copy here once cached a
+ * narrower schema without `trackHistory`, hiding the record History tab elsewhere).
+ */
+function fetchCollectionSchema(
   apiClient: ApiClient,
   collectionName: string
 ): Promise<CollectionSchema> {
-  // Fetch the collection record with included field definitions in a single request.
-  const response = await apiClient.get(
-    `/api/collections/${encodeURIComponent(collectionName)}?include=fields`
-  )
-
-  // Extract the collection record from the response envelope
-  const collection = unwrapResource<Record<string, unknown>>(response)
-
-  // Extract included field records from the JSON:API `included` array
-  const fieldRecords = extractIncluded<Record<string, unknown>>(response, 'fields')
-
-  // Resolve displayFieldName from the displayFieldId relationship
-  let displayFieldName: string | undefined
-  if (collection.displayFieldId) {
-    const displayField = fieldRecords.find((f) => f.id === collection.displayFieldId)
-    if (displayField) {
-      displayFieldName = displayField.name as string
-    }
-  }
-
-  // Sort by fieldOrder and filter to active fields, then normalize types.
-  // Spread all properties to preserve validation rules, constraints, etc.
-  const fields: FieldDefinition[] = fieldRecords
-    .filter((f) => f.active !== false)
-    .sort((a, b) => {
-      const orderA = typeof a.fieldOrder === 'number' ? a.fieldOrder : 999
-      const orderB = typeof b.fieldOrder === 'number' ? b.fieldOrder : 999
-      return orderA - orderB
-    })
-    .map((f) => ({
-      ...(f as unknown as FieldDefinition),
-      type: normalizeFieldType(f.type as string),
-      required: !!f.required,
-      displayName: (f.displayName as string) || undefined,
-      referenceTarget: (f.referenceTarget as string) || undefined,
-      referenceCollectionId: (f.referenceCollectionId as string) || undefined,
-    }))
-
-  return {
-    id: collection.id as string,
-    name: collection.name as string,
-    displayName: (collection.displayName as string) || (collection.name as string),
-    description: (collection.description as string) || undefined,
-    displayFieldId: (collection.displayFieldId as string) || undefined,
-    displayFieldName,
-    fields,
-  }
+  return fetchSharedCollectionSchema(apiClient, collectionName)
 }
 
 async function fetchResource(
@@ -355,7 +313,13 @@ export function ResourceFormPage({
   // We use the field's fieldTypeConfig.globalPicklistId to resolve values,
   // falling back to the field-level picklist values endpoint.
   const { data: picklistValuesMap } = useQuery({
-    queryKey: ['picklist-values-for-form', collectionName, picklistFields.map((f) => f.id)],
+    // Own key: the end-user form caches `{ value, label }` objects under
+    // 'picklist-values-for-form'; this page stores plain value strings.
+    queryKey: [
+      'picklist-values-for-resource-form',
+      collectionName,
+      picklistFields.map((f) => f.id),
+    ],
     queryFn: async () => {
       const map: Record<string, string[]> = {}
       await Promise.all(
