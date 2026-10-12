@@ -202,7 +202,7 @@ class CompositeUniqueConstraintServiceTest {
             DuplicateKeyException ex = new DuplicateKeyException(
                     "ERROR: duplicate key value violates unique constraint \"uniq_availability_title_provider_region\"\n  Detail: ...");
             assertEquals("uniq_availability_title_provider_region",
-                    PhysicalTableStorageAdapter.extractCompositeConstraintName(ex));
+                    StorageConstraintErrors.extractCompositeConstraintName(ex));
         }
 
         @Test
@@ -210,14 +210,14 @@ class CompositeUniqueConstraintServiceTest {
         void returnsNullForNonKelta() {
             DuplicateKeyException ex = new DuplicateKeyException(
                     "ERROR: duplicate key value violates unique constraint \"pk_availability\"");
-            assertNull(PhysicalTableStorageAdapter.extractCompositeConstraintName(ex));
+            assertNull(StorageConstraintErrors.extractCompositeConstraintName(ex));
         }
 
         @Test
         @DisplayName("returns null when message has no constraint name")
         void returnsNullForNoConstraintName() {
             DuplicateKeyException ex = new DuplicateKeyException("no info here");
-            assertNull(PhysicalTableStorageAdapter.extractCompositeConstraintName(ex));
+            assertNull(StorageConstraintErrors.extractCompositeConstraintName(ex));
         }
     }
 

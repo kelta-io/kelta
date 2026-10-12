@@ -76,7 +76,7 @@ class PhysicalTableStorageAdapterSemanticSearchTest {
     @Test
     @DisplayName("builds an HNSW cosine index DDL for a VECTOR column")
     void buildsHnswIndexDdl() {
-        String ddl = PhysicalTableStorageAdapter.buildHnswIndexStatement(
+        String ddl = SqlIdentifiers.buildHnswIndexStatement(
                 "hnsw_docs_embedding", "public.docs", "embedding");
         assertThat(ddl).isEqualTo(
                 "CREATE INDEX IF NOT EXISTS hnsw_docs_embedding ON public.docs"
@@ -86,13 +86,13 @@ class PhysicalTableStorageAdapterSemanticSearchTest {
     @Test
     @DisplayName("casts placeholders: ?::vector for VECTOR, ?::jsonb for JSON/ARRAY, ? otherwise")
     void castPlaceholders() {
-        assertThat(PhysicalTableStorageAdapter.castPlaceholder(io.kelta.runtime.model.FieldType.VECTOR))
+        assertThat(SqlIdentifiers.castPlaceholder(io.kelta.runtime.model.FieldType.VECTOR))
                 .isEqualTo("?::vector");
-        assertThat(PhysicalTableStorageAdapter.castPlaceholder(io.kelta.runtime.model.FieldType.JSON))
+        assertThat(SqlIdentifiers.castPlaceholder(io.kelta.runtime.model.FieldType.JSON))
                 .isEqualTo("?::jsonb");
-        assertThat(PhysicalTableStorageAdapter.castPlaceholder(io.kelta.runtime.model.FieldType.ARRAY))
+        assertThat(SqlIdentifiers.castPlaceholder(io.kelta.runtime.model.FieldType.ARRAY))
                 .isEqualTo("?::jsonb");
-        assertThat(PhysicalTableStorageAdapter.castPlaceholder(io.kelta.runtime.model.FieldType.STRING))
+        assertThat(SqlIdentifiers.castPlaceholder(io.kelta.runtime.model.FieldType.STRING))
                 .isEqualTo("?");
     }
 }

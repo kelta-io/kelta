@@ -147,7 +147,7 @@ class PhysicalTableStorageAdapterConcurrentDdlTest {
     })
     @DisplayName("isConcurrentDdlDuplicate classifies by SQLSTATE and catalog index")
     void classification(String sqlState, String message, boolean expected) {
-        assertThat(PhysicalTableStorageAdapter.isConcurrentDdlDuplicate(pgError(sqlState, message)))
+        assertThat(StorageConstraintErrors.isConcurrentDdlDuplicate(pgError(sqlState, message)))
                 .isEqualTo(expected);
     }
 }

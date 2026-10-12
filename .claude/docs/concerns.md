@@ -364,7 +364,7 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 
 | File | Lines | Proposed fix |
 |------|------:|--------------|
-| `PhysicalTableStorageAdapter.java` (runtime-core) | 2,423 | Extract SQL builder / DDL classes; separate concerns |
+| `PhysicalTableStorageAdapter.java` (runtime-core) | 1,081 | Split 2026-10-12 (was 2,423) into package-private `SqlIdentifiers`, `SqlQueryBuilder`, `TenantScopePolicy`, `StorageConstraintErrors`, `CollectionTableDdl`; what remains is CRUD orchestration + row mapping/value conversion |
 | `CollectionDetailPage.tsx` (kelta-ui) | 2,208 | Split tabs into their own components |
 | `FieldEditor.tsx` (kelta-ui) | 1,988 | Split per-type config sections |
 | `PageBuilderPage.tsx` (kelta-ui) | 1,474 | Extract page-list table, config modal, editor shell |
@@ -725,7 +725,7 @@ its own change with a full compose run.
   are verified only by `CerbosGeneratedPolicyIT` against generated goldens or on a live stack.
 - `SchemaMigrationEngine.migrateSchema` (non-destructive deprecate branch) is lightly covered; the
   destructive path has unit tests + `SchemaMigrationScenarioTest`.
-- SQL filter operator mappings in `PhysicalTableStorageAdapter` have no dedicated tests.
+- SQL filter operator mappings (`SqlQueryBuilder`, runtime-core) have no dedicated tests.
 - `FederatedUserMapper` — happy path only; group→profile permutations not covered.
 - Password reset — unit-tested; no end-to-end DB → email → link → new password test.
 - `CreateValidationRuleTool` (kelta-mcp) has no test; every MCP tool should assert its on-the-wire

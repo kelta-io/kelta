@@ -13,7 +13,7 @@ import io.kelta.runtime.query.InvalidQueryException;
  * surfaces {@link #getSqlState()} in the error {@code meta}. Anything else — a dropped
  * connection, a deadlock, a syntax error in SQL this adapter generated itself
  * — stays a plain {@link StorageException} (500): see
- * {@code PhysicalTableStorageAdapter.classifyDataAccessException}.
+ * {@code StorageConstraintErrors.classifyDataAccessException}.
  *
  * @since 1.0.0
  */

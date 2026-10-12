@@ -418,7 +418,7 @@ public class SchemaMigrationEngine {
 
     /** {@code uniq_<table>_<column>}, hyphen-safe and bounded to Postgres's 63-char limit. */
     private String uniqueConstraintName(String tableName, String columnName) {
-        String name = "uniq_" + PhysicalTableStorageAdapter.identifierPart(tableName) + "_" + columnName;
+        String name = "uniq_" + SqlIdentifiers.identifierPart(tableName) + "_" + columnName;
         return name.length() > 63 ? name.substring(0, 63) : name;
     }
     
@@ -822,7 +822,7 @@ public class SchemaMigrationEngine {
         if (definition.systemCollection()) {
             return field.name();
         }
-        return PhysicalTableStorageAdapter.toSnakeCase(field.name());
+        return SqlIdentifiers.toSnakeCase(field.name());
     }
 
     private String sanitizeIdentifier(String identifier) {
@@ -837,14 +837,14 @@ public class SchemaMigrationEngine {
 
     /**
      * Sanitizes and double-quotes a column name for use as a column <em>reference</em> in DDL.
-     * Mirrors {@link PhysicalTableStorageAdapter#quoteIdentifier} — without it, an
+     * Mirrors {@link SqlIdentifiers#quoteIdentifier} — without it, an
      * {@code ALTER TABLE … ADD COLUMN user …} is a syntax error, so a collection that
      * initialized fine would fail to reconcile the moment such a field is added.
      * Constraint/index <em>names</em> and values compared against catalog strings keep using
      * {@link #sanitizeIdentifier}.
      */
     private String quoteIdentifier(String identifier) {
-        return PhysicalTableStorageAdapter.quoteIdentifier(identifier);
+        return SqlIdentifiers.quoteIdentifier(identifier);
     }
     
     /**

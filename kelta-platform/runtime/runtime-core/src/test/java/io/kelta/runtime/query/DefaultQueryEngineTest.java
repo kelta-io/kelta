@@ -1629,7 +1629,7 @@ class DefaultQueryEngineTest {
         @Test
         @DisplayName("Should compute formula value on a sparse fields[] read that omits its (non-existent) column")
         void shouldComputeFormulaValueOnSparseFieldsetQuery() {
-            // Mirrors what PhysicalTableStorageAdapter#buildSelectClause now returns for
+            // Mirrors what SqlQueryBuilder#buildSelectClause now returns for
             // fields[]=amount,quantity,total: "total" is a FORMULA field with no physical
             // column, so the storage layer's row never carries it. This is a QueryEngine-level
             // test, not a storage one — it pins that computeVirtualFields (unconditional over

@@ -1185,12 +1185,12 @@ class PhysicalTableStorageAdapterTest {
         @DisplayName("identifierPart maps hyphens to underscores and stays strict otherwise")
         void identifierPartMapsHyphens() {
             assertEquals("program_translations",
-                    PhysicalTableStorageAdapter.identifierPart("program-translations"));
-            assertEquals("plain", PhysicalTableStorageAdapter.identifierPart("plain"));
+                    SqlIdentifiers.identifierPart("program-translations"));
+            assertEquals("plain", SqlIdentifiers.identifierPart("plain"));
             assertThrows(IllegalArgumentException.class,
-                    () -> PhysicalTableStorageAdapter.identifierPart("bad;name"));
+                    () -> SqlIdentifiers.identifierPart("bad;name"));
             assertThrows(IllegalArgumentException.class,
-                    () -> PhysicalTableStorageAdapter.identifierPart("  "));
+                    () -> SqlIdentifiers.identifierPart("  "));
         }
 
         @Test
@@ -1243,7 +1243,7 @@ class PhysicalTableStorageAdapterTest {
         @Test
         @DisplayName("parses a composite key detail into its column list")
         void parsesCompositeColumns() {
-            List<String> columns = PhysicalTableStorageAdapter.extractViolatedColumns(
+            List<String> columns = StorageConstraintErrors.extractViolatedColumns(
                 pgStyle("Key (country, slug)=(25c26833, erasmus-plus) already exists."));
             assertEquals(List.of("country", "slug"), columns);
         }
@@ -1251,7 +1251,7 @@ class PhysicalTableStorageAdapterTest {
         @Test
         @DisplayName("parses a single-column key detail")
         void parsesSingleColumn() {
-            List<String> columns = PhysicalTableStorageAdapter.extractViolatedColumns(
+            List<String> columns = StorageConstraintErrors.extractViolatedColumns(
                 pgStyle("Key (slug)=(erasmus-plus) already exists."));
             assertEquals(List.of("slug"), columns);
         }
@@ -1259,7 +1259,7 @@ class PhysicalTableStorageAdapterTest {
         @Test
         @DisplayName("unquotes quoted column identifiers")
         void unquotesQuotedColumns() {
-            List<String> columns = PhysicalTableStorageAdapter.extractViolatedColumns(
+            List<String> columns = StorageConstraintErrors.extractViolatedColumns(
                 pgStyle("Key (\"userId\", \"tenantId\")=(u1, t1) already exists."));
             assertEquals(List.of("userId", "tenantId"), columns);
         }
@@ -1271,7 +1271,7 @@ class PhysicalTableStorageAdapterTest {
                 new org.springframework.dao.DuplicateKeyException("duplicate key",
                     new java.sql.SQLException("Unique index or primary key violation: "
                         + "\"PUBLIC.CONSTRAINT_INDEX_4 ON PUBLIC.T(SLUG) VALUES ('x')\""));
-            assertTrue(PhysicalTableStorageAdapter.extractViolatedColumns(h2Style).isEmpty());
+            assertTrue(StorageConstraintErrors.extractViolatedColumns(h2Style).isEmpty());
         }
     }
 
@@ -1318,12 +1318,12 @@ class PhysicalTableStorageAdapterTest {
         @Test
         @DisplayName("detection walks the cause chain and matches only SQL state 23503")
         void detectionMatrix() {
-            assertTrue(PhysicalTableStorageAdapter.isForeignKeyViolation(
+            assertTrue(StorageConstraintErrors.isForeignKeyViolation(
                     new RuntimeException(new RuntimeException(
                             new java.sql.SQLException("fk", "23503")))));
-            assertFalse(PhysicalTableStorageAdapter.isForeignKeyViolation(
+            assertFalse(StorageConstraintErrors.isForeignKeyViolation(
                     new java.sql.SQLException("unique", "23505")));
-            assertFalse(PhysicalTableStorageAdapter.isForeignKeyViolation(
+            assertFalse(StorageConstraintErrors.isForeignKeyViolation(
                     new RuntimeException("no sql cause")));
         }
     }
