@@ -7,6 +7,7 @@ import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.net.InetAddress;
 import java.net.Inet6Address;
@@ -29,6 +30,7 @@ import java.util.Objects;
  *
  * <p>Mirrors {@link TenantEmailConfigEventPublisher}.
  */
+@Component
 public class TenantIpAllowlistConfigEventPublisher implements BeforeSaveHook {
 
     private static final Logger log =
@@ -47,7 +49,9 @@ public class TenantIpAllowlistConfigEventPublisher implements BeforeSaveHook {
     }
 
     @Override public String getCollectionName() { return "tenants"; }
-    @Override public int getOrder() { return 200; }   // run after provisioning/audit hooks
+    // Run after provisioning/audit hooks, directly after TenantEmailConfigEventPublisher (200):
+    // hooks are Spring-discovered, so no two hooks on one collection may share an order.
+    @Override public int getOrder() { return 201; }
 
     @Override
     public BeforeSaveResult beforeCreate(Map<String, Object> record, String tenantId) {

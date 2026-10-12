@@ -104,10 +104,13 @@ stops the rollout. Two rules follow:
 
 ## When Adding a BeforeSaveHook
 
-1. Create a class in `listener/` implementing `BeforeSaveHook`
-2. Return the target system collection name from `getCollectionName()`
+1. Create a class in `listener/` implementing `BeforeSaveHook`, annotated **`@Component`**, with exactly **one** constructor (constructor injection; Jackson 3 `tools.jackson.databind.ObjectMapper`). Being a bean *is* the registration: `config/BeforeSaveHookRegistrar` (a `BeanPostProcessor`) registers every `BeforeSaveHook` bean with the `BeforeSaveHookRegistry` as it is created. Never call `hookRegistry.register(...)` yourself — that registers it twice. One class serving several collections (constructor takes the collection name) is a `@Bean` per collection in `config/MultiCollectionHookConfig` instead.
+2. Return the target system collection name from `getCollectionName()`, and give it a `getOrder()` that **no other hook on that collection uses** (incl. the schema module's lifecycle hooks at 0 and the wildcard `*` hooks). Bean discovery order is unspecified, so a tie would run in an arbitrary order.
 3. In `afterCreate` / `afterUpdate` / `afterDelete`, publish via `PlatformEventPublisher` to a `kelta.config.*` subject
 4. If other pods need to react, register a handler in `NatsSubscriptionConfig`
+5. Add the hook to the expected lists in `config/BeforeSaveHookWiringTest` — it pins the exact set and per-collection order of registered hooks, and fails on a tie or a double registration.
+
+A presence-gated hook (secret/integration configured) uses `@ConditionalOnProperty` only on a property declared in `application.yml` (native images freeze conditions at build time — root CLAUDE.md Pitfalls). Never put a runtime `if` on registration.
 
 **Reference**: `CollectionConfigEventPublisher.java`, `ValidationRuleRefreshHook.java`
 
@@ -115,7 +118,7 @@ stops the rollout. Two rules follow:
 
 1. Declare it in `runtime-core/.../model/system/SystemCollectionDefinitions.java` — add a `<name>()` factory via the `systemBuilder(name, displayName, tableName)` helper, then add it to `all()`.
 2. The worker does **NOT** create system tables (Flyway owns them) — ship `src/main/resources/db/migration/V<n>__create_<table>.sql` **and** add the table to the RLS-enable migration (V77-style, table names hardcoded).
-3. Register a `<Name>RefreshHook` `@Bean` in `config/FlowConfig.java` via `hookRegistry.register(hook)` that publishes `kelta.config.collection.changed.<id>` (reuse `CollectionConfigEventPublisher.SUBJECT_PREFIX`).
+3. Add a `<Name>RefreshHook` `@Component` in `listener/` (see **When Adding a BeforeSaveHook**) that publishes `kelta.config.collection.changed.<id>` (reuse `CollectionConfigEventPublisher.SUBJECT_PREFIX`).
 4. A field that stores a secret, ciphertext or a credential hash is declared `.withServerOnly(true)` (never serialized, never filterable, only a before-save hook may set it), read for real use over JDBC, and added to `SystemCollectionDefinitionsTest.secretMaterialIsServerOnly`. See `.claude/docs/architecture.md` → Server-only fields.
 
 **Reference**: `ValidationRuleRefreshHook.java`. Full recipe: `.claude/docs/playbooks.md` → "Add a system collection".

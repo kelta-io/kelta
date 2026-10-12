@@ -1,0 +1,1 @@
+- 2026-10-12 refactor(worker): Platform BeforeSaveHooks are Spring beans registered by `BeforeSaveHookRegistrar` instead of 53 hand-wired `@Bean` + `register()` pairs (49 of them in `FlowConfig`, 852 → 261 lines); same hooks, same per-collection order, pinned by `BeforeSaveHookWiringTest` (flowconfig-hook-discovery)

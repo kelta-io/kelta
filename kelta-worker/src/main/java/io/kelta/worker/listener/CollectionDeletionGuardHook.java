@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -49,6 +50,7 @@ import java.util.stream.Collectors;
  *
  * @since 1.0.0
  */
+@Component
 public class CollectionDeletionGuardHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(CollectionDeletionGuardHook.class);

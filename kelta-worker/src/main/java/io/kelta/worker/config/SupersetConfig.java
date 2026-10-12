@@ -1,7 +1,6 @@
 package io.kelta.worker.config;
 
 import tools.jackson.databind.ObjectMapper;
-import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import io.kelta.worker.listener.SupersetCollectionSyncListener;
 import io.kelta.worker.listener.SupersetTenantLifecycleHook;
 import io.kelta.worker.service.SupersetApiClient;
@@ -88,13 +87,11 @@ public class SupersetConfig {
         return new SupersetCollectionSyncListener(datasetService, objectMapper);
     }
 
+    /** Registered with the hook registry by {@link BeforeSaveHookRegistrar}, like every hook bean. */
     @Bean
     public SupersetTenantLifecycleHook supersetTenantLifecycleHook(
-            BeforeSaveHookRegistry hookRegistry,
             SupersetTenantService supersetTenantService) {
-        SupersetTenantLifecycleHook hook = new SupersetTenantLifecycleHook(supersetTenantService);
-        hookRegistry.register(hook);
-        return hook;
+        return new SupersetTenantLifecycleHook(supersetTenantService);
     }
 
     /**

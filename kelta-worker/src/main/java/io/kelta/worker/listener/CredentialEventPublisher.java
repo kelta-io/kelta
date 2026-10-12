@@ -8,6 +8,7 @@ import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
@@ -15,6 +16,7 @@ import java.util.Map;
  * Broadcasts {@code kelta.config.credential.changed.<id>} after credential
  * create/update/delete so all worker pods can invalidate their resolver caches.
  */
+@Component
 public class CredentialEventPublisher implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(CredentialEventPublisher.class);

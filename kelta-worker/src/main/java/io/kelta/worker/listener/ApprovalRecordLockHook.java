@@ -7,6 +7,7 @@ import io.kelta.worker.repository.ApprovalRepository;
 import io.kelta.runtime.context.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Set;
@@ -24,6 +25,7 @@ import java.util.Set;
  *
  * @since 1.0.0
  */
+@Component
 public class ApprovalRecordLockHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(ApprovalRecordLockHook.class);

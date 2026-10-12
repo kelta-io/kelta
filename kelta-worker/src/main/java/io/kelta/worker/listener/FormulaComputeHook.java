@@ -12,6 +12,7 @@ import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -56,6 +57,7 @@ import java.util.TreeSet;
  *
  * @since 1.0.0
  */
+@Component
 public class FormulaComputeHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(FormulaComputeHook.class);
@@ -83,9 +85,14 @@ public class FormulaComputeHook implements BeforeSaveHook {
         return BeforeSaveHookRegistry.WILDCARD;
     }
 
+    /**
+     * Directly after {@code RecordTombstoneHook} (250). Hooks are Spring-discovered and discovery
+     * order is unspecified, so no two hooks on one collection may share an order — see
+     * {@code BeforeSaveHookWiringTest}.
+     */
     @Override
     public int getOrder() {
-        return 250;
+        return 251;
     }
 
     @Override

@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
@@ -38,6 +39,7 @@ import java.util.Optional;
  *
  * <p>Wildcard, order −100, so a denied write does no earlier side work. Collections without ownership return immediately after one registry read.
  */
+@Component
 public class OwnerScopeGuardHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(OwnerScopeGuardHook.class);
@@ -58,9 +60,14 @@ public class OwnerScopeGuardHook implements BeforeSaveHook {
         return "*";
     }
 
+    /**
+     * Directly after {@code IdentityCollectionGuardHook} (-100). Hooks are Spring-discovered and
+     * discovery order is unspecified, so no two hooks on one collection may share an order —
+     * see {@code BeforeSaveHookWiringTest}.
+     */
     @Override
     public int getOrder() {
-        return -100;
+        return -99;
     }
 
     /** A write the guard applies to: the owner-scoped collection and the scoped caller. */

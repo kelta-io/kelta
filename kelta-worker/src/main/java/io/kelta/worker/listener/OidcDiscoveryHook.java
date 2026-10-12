@@ -6,7 +6,6 @@ import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.util.HashMap;
@@ -20,8 +19,13 @@ import java.util.Map;
  * when they are not explicitly set as overrides.
  *
  * <p>Sets {@code discoveryStatus} to "discovered", "manual", or "error" based on the result.
+ *
+ * <p><b>Not registered.</b> Before-save hooks are registered by being Spring beans
+ * ({@code BeforeSaveHookRegistrar}), and this class is deliberately not one. It used to be a
+ * {@code @Component} at a time when hooks were registered by hand, and nothing ever registered
+ * it, so it has never run. Making it a bean again is a behaviour change to make on purpose, with
+ * tests, and must update {@code BeforeSaveHookWiringTest}.
  */
-@Component
 public class OidcDiscoveryHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(OidcDiscoveryHook.class);

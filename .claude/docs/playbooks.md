@@ -13,6 +13,7 @@ Index: [Flow action handler](#1-add-a-flow-action-handler) ·
 [Admin UI page](#3-add-an-admin-ui-page) ·
 [MCP tool](#4-add-an-mcp-tool) ·
 [System collection](#5-add-a-system-collection) ·
+[BeforeSaveHook](#5a-add-a-beforesavehook) ·
 [Field type](#6-add-a-field-type) ·
 [External portal: member's own profile](#9-let-an-external-portal-edit-the-signed-in-members-own-profile) ·
 [Member-owned collection](#10-make-a-collection-member-owned)
@@ -143,7 +144,7 @@ Platform-managed metadata (not a user collection) — e.g. `feature_announcement
 2. **Create the table** (the worker does **NOT** auto-create system tables — Flyway owns them):
    - Ship `kelta-worker/src/main/resources/db/migration/V<next>__create_<table>.sql` (check the dir for the head number; currently V142 → V143).
    - Add the table to the RLS-enable migration set (the V77-style migration hardcodes table names) so RLS applies.
-3. **Multi-pod refresh**: register a `<Name>RefreshHook` as a `@Bean` in `kelta-worker/.../config/FlowConfig.java` via `hookRegistry.register(hook)`. The hook implements `BeforeSaveHook`, and in `afterCreate/Update/Delete` publishes via `PlatformEventPublisher` to `kelta.config.collection.changed.<id>` (reuse `CollectionConfigEventPublisher.SUBJECT_PREFIX`, build a `CollectionChangedPayload` via `EventFactory`). All pods consume it via `NatsSubscriptionConfig` → `CollectionLifecycleManager` refreshes the `CollectionRegistry`. See [Critical Rule 1](../../CLAUDE.md).
+3. **Multi-pod refresh**: add a `<Name>RefreshHook` in `kelta-worker/.../listener/` annotated `@Component` — that is the whole registration (see **Add a BeforeSaveHook** below). The hook implements `BeforeSaveHook`, and in `afterCreate/Update/Delete` publishes via `PlatformEventPublisher` to `kelta.config.collection.changed.<id>` (reuse `CollectionConfigEventPublisher.SUBJECT_PREFIX`, build a `CollectionChangedPayload` via `EventFactory`). All pods consume it via `NatsSubscriptionConfig` → `CollectionLifecycleManager` refreshes the `CollectionRegistry`. See [Critical Rule 1](../../CLAUDE.md).
    - Reference impl: `listener/ValidationRuleRefreshHook.java`, `listener/CollectionConfigEventPublisher.java`.
    - ⚠️ The reference `ValidationRuleRefreshHook.afterDelete` is a **no-op** (the `collectionId` isn't available on delete). If your collection needs delete to refresh other pods, handle it explicitly rather than copying the no-op.
 4. **Secret material**: a field holding a secret, ciphertext or a credential hash is declared `.withServerOnly(true)` — the query engine never returns it, refuses it as a filter/sort/aggregate key and ignores a caller-supplied value, so set it from a before-save hook and read it over JDBC where the platform needs it. Add it to `SystemCollectionDefinitionsTest.secretMaterialIsServerOnly`. See [`architecture.md`](architecture.md) → Server-only fields.
@@ -153,6 +154,38 @@ Platform-managed metadata (not a user collection) — e.g. `feature_announcement
 > **This recipe is for platform-owned metadata only.** A collection that belongs to one tenant's
 > installed module is declared in that module's `kelta-module.json` instead — see recipe 5b. It
 > needs no code in this repo, no Flyway migration, and no redeploy.
+
+---
+
+## 5a. Add a BeforeSaveHook
+
+A platform (global) hook on a system or wildcard collection — validation, defaults, a
+config-change NATS broadcast (Critical Rule 1). A hook that belongs to one tenant's module is
+returned from that module's `getBeforeSaveHooks()` instead (recipe 5b).
+
+1. **Write the class** in `kelta-worker/.../listener/` implementing `BeforeSaveHook`, annotated
+   `@Component`, with **exactly one constructor** (a `@Component` with two and no `@Autowired`
+   fails worker boot while unit tests and CI stay green). Inject Jackson 3
+   `tools.jackson.databind.ObjectMapper`, never `com.fasterxml…` (compiles, then crashes boot).
+2. **That is the registration.** `config/BeforeSaveHookRegistrar` is a `BeanPostProcessor` that
+   registers every `BeforeSaveHook` bean with the `BeforeSaveHookRegistry` as it is created — do
+   not call `hookRegistry.register(...)` (it would register twice), and do not add it to
+   `FlowConfig`. One class serving several collections (it takes the collection name) is one
+   `@Bean` per collection in `config/MultiCollectionHookConfig`.
+3. **Pick a unique `getOrder()`** for the collection. The registry sorts each collection's hooks
+   by order, collection-specific hooks before wildcard (`*`) ones; ties keep registration order,
+   and bean discovery order is unspecified — so no two hooks on one collection may share an order
+   (count the schema module's `*LifecycleHook`s, default order 0, on `collections`/`fields`/
+   `profiles`/`tenants`/`users`).
+4. **Presence-gated?** (only when a secret/integration is configured) `@ConditionalOnProperty` on
+   a property declared in `application.yml` as `${ENV_VAR:default}` — native images freeze
+   conditions at build time. Never gate registration with a runtime `if`.
+5. **Pin it**: add the hook, in execution order, to the expected lists in
+   `kelta-worker/src/test/java/io/kelta/worker/config/BeforeSaveHookWiringTest.java` (it boots
+   the real wiring and fails on a dropped/added/duplicated hook, a changed order, or an order tie).
+
+**Tests**: the hook's own unit test + the wiring-test entry.
+**Reference**: `listener/CollectionConfigEventPublisher.java`, `listener/ValidationRuleRefreshHook.java`.
 
 ---
 
@@ -342,8 +375,8 @@ the event.
 1. **Payload + subject** (worker): a payload class in `runtime-events` carrying **ids/state
    only — never content**; publish from a `BeforeSaveHook` `afterCreate/afterUpdate` via
    `PlatformEventPublisher` to `kelta.<domain>.<kind>.<tenantId>.<scopeId>`
-   (reference: `listener/ChatMessageHook.java`). Register the hook as a `@Bean` in
-   `FlowConfig` via `hookRegistry.register(hook)`. Add the subject to the CLAUDE.md
+   (reference: `listener/ChatMessageHook.java`). Annotate the hook `@Component` — it is
+   registered by being a bean (see **Add a BeforeSaveHook**). Add the subject to the CLAUDE.md
    Messaging table.
 2. **Membership check** (worker): an `/internal/<domain>/...` endpoint answering "may this
    user join this scope?" (reference: `controller/InternalChatController.java` — tenant as
@@ -470,7 +503,7 @@ collection.
      reports, dashboards), `aggregate`, semantic search and `getById` — a foreign id is a 404 and
      `totalCount` is correct. Under `ALL`, rows shared with the caller via `record_share`
      (directly or through a group) stay visible.
-   - Writes: `OwnerScopeGuardHook` (wildcard, order −100, registered in `FlowConfig`) stamps the
+   - Writes: `OwnerScopeGuardHook` (wildcard `@Component`, order −99, right after `IdentityCollectionGuardHook`) stamps the
      owner on create (a different client-supplied owner → 400 `OWNER_MISMATCH`), 404s a foreign
      update/delete, and makes the owner field immutable (400 `OWNER_IMMUTABLE`).
    - Realtime: `kelta.record.changed` carries `ownerScoped=true`; `RealtimeBridge` strips `data`

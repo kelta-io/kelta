@@ -10,6 +10,7 @@ import io.kelta.worker.repository.RecordVersionRepository;
 import io.kelta.worker.service.CollectionLifecycleManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
 import java.util.List;
@@ -37,6 +38,7 @@ import java.util.Set;
  * CRUD). Runs late ({@code order = 910}, after {@link FieldHistoryHook}) so validation/veto
  * hooks decide first; RLS scopes writes to the tenant.
  */
+@Component
 public class RecordVersionHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(RecordVersionHook.class);

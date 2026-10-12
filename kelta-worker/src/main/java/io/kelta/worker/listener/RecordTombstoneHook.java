@@ -6,6 +6,7 @@ import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.worker.repository.RecordTombstoneRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 /**
  * Wildcard after-delete hook that records a tombstone whenever a user-collection record is deleted,
@@ -15,6 +16,7 @@ import org.slf4j.LoggerFactory;
  * <p>Best-effort: a tombstone-write failure is logged, never propagated (it must not break the
  * delete). Runs at order 250 (after attachment cascade cleanup at 200).
  */
+@Component
 public class RecordTombstoneHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(RecordTombstoneHook.class);

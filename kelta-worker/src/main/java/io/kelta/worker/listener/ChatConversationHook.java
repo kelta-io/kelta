@@ -7,6 +7,7 @@ import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
@@ -17,6 +18,7 @@ import java.util.Map;
  * gateway can notify joined sockets and NATS-triggered automations can react
  * without polling.
  */
+@Component
 public class ChatConversationHook implements BeforeSaveHook {
 
     static final String SUBJECT_PREFIX = "kelta.chat.conversation.";

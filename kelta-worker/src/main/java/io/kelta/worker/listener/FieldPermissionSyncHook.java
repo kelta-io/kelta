@@ -4,6 +4,7 @@ import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.worker.service.CerbosPolicySyncCoalescer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
@@ -26,6 +27,7 @@ import java.util.Map;
  * serialized sync per tenant, avoiding both N redundant full policy
  * regenerations and the race where a stale concurrent sync drops a just-saved deny.
  */
+@Component
 public class FieldPermissionSyncHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(FieldPermissionSyncHook.class);

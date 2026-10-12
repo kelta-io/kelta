@@ -7,6 +7,7 @@ import io.kelta.worker.service.TenantTierQuotas;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
@@ -17,6 +18,7 @@ import java.util.Map;
  * <p>Counts existing fields with the same {@code tenant_id} and
  * {@code collection_id} to scope the cap per-collection rather than per-tenant.
  */
+@Component
 public class FieldQuotaEnforcementHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(FieldQuotaEnforcementHook.class);

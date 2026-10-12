@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Set;
@@ -40,6 +41,7 @@ import java.util.Set;
  * request-context writes with no identity headers (SCIM and other internal callers — the gateway
  * always stamps identity on authenticated {@code /api} traffic) are admitted unchanged.
  */
+@Component
 public class IdentityCollectionGuardHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(IdentityCollectionGuardHook.class);

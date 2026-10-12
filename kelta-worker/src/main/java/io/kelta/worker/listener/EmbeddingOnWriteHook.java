@@ -10,6 +10,7 @@ import io.kelta.runtime.workflow.BeforeSaveResult;
 import io.kelta.worker.service.FieldMaskingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -42,6 +43,7 @@ import java.util.Map;
  *
  * @since 1.0.0
  */
+@Component
 public class EmbeddingOnWriteHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddingOnWriteHook.class);

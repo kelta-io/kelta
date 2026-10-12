@@ -8,6 +8,7 @@ import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
@@ -18,6 +19,7 @@ import java.util.Map;
  *
  * <p>Subject: {@code kelta.config.page.changed.<pageId>}. Mirrors {@link PageLayoutConfigEventPublisher}.
  */
+@Component("uiPageConfigEventPublisher")
 public class UIPageConfigEventPublisher implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(UIPageConfigEventPublisher.class);

@@ -7,6 +7,7 @@ import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -17,6 +18,7 @@ import java.util.Map;
  * keep any (currently the {@link io.kelta.worker.service.api.JdbcApiSpecStore}
  * is stateless, but PR 4's CALL_API handler may add a parsed-spec cache).
  */
+@Component
 public class ApiSpecConfigHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(ApiSpecConfigHook.class);

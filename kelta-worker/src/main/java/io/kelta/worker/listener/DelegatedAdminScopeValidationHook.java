@@ -6,6 +6,7 @@ import io.kelta.worker.repository.DelegatedAdminScopeRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -21,6 +22,7 @@ import java.util.Set;
  * deduplicated, size-capped). {@code DelegatedAdminService} re-checks the privileged filter at
  * request time, so this hook is the first of two gates, not the only one.
  */
+@Component
 public class DelegatedAdminScopeValidationHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(DelegatedAdminScopeValidationHook.class);

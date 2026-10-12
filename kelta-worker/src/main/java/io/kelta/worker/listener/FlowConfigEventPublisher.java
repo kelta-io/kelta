@@ -8,6 +8,7 @@ import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
@@ -24,6 +25,7 @@ import java.util.Map;
  * by tenant — every flow change for a tenant invalidates the same cache
  * entry, so per-flow subjects would just create extra messages.
  */
+@Component
 public class FlowConfigEventPublisher implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(FlowConfigEventPublisher.class);

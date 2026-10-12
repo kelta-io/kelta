@@ -5,6 +5,7 @@ import io.kelta.runtime.workflow.BeforeSaveResult;
 import io.kelta.worker.repository.EmailRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,7 @@ import java.util.regex.Pattern;
  *
  * @since 1.0.0
  */
+@Component
 public class MailboxTemplateGuardHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(MailboxTemplateGuardHook.class);

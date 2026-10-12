@@ -375,6 +375,15 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 | `SchemaMigrationEngine.java` (runtime-core) | 1,106 | Split non-destructive vs destructive paths |
 
 **Other:**
+- **Two `oidc-providers` hooks have never run.** `OidcDiscoveryHook` (fills endpoints from
+  `.well-known/openid-configuration`) and `OidcProviderSecretHook` (encrypts a submitted
+  `clientSecret` into the server-only `clientSecretEnc`) were `@Component`s while hooks were
+  registered by hand in `FlowConfig`, and nothing registered them. Hooks are now registered by
+  being beans (`BeforeSaveHookRegistrar`), so both were made plain classes to keep behaviour
+  unchanged. Consequence today: discovery does not run on save, and the API cannot set
+  `clientSecretEnc` — the admin UI's required client secret is silently dropped, so a
+  confidential-client SSO provider has no stored secret. Enabling them is a deliberate change: annotate, add to
+  `BeforeSaveHookWiringTest`, and test the OIDC provider flow end to end.
 - **Email templates have two lookup axes** — `EmailRepository.findTemplateByKey` (`template_key`,
   V133 `user.*` seeds) and `findTemplateByName` (`name`, V141 seeds). Both fall back
   tenant → `'system'`, so the "wrong" axis still works but may land on a different seed row.
