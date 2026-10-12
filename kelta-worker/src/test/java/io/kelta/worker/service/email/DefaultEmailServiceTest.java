@@ -5,6 +5,7 @@ import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.worker.repository.EmailRepository;
 import io.kelta.worker.repository.EmailRepository.TenantEmailConfigRow;
 import io.kelta.worker.service.credential.CredentialResolver;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -244,30 +245,24 @@ class DefaultEmailServiceTest {
 
         @Test
         @DisplayName("Should return mapped template when found")
+        @WithTenant("t1")
         void shouldReturnTemplateWhenFound() {
-            io.kelta.runtime.context.TenantContext.set("t1");
-            try {
-                when(emailRepository.findTemplateByTenantAndId("t1", "tpl-1"))
-                        .thenReturn(Optional.of(Map.of(
-                                "subject", "Welcome",
-                                "body_html", "<p>Hello</p>"
-                        )));
+            when(emailRepository.findTemplateByTenantAndId("t1", "tpl-1"))
+                    .thenReturn(Optional.of(Map.of(
+                            "subject", "Welcome",
+                            "body_html", "<p>Hello</p>"
+                    )));
 
-                Optional<EmailService.EmailTemplate> result = service.getTemplate("tpl-1");
+            Optional<EmailService.EmailTemplate> result = service.getTemplate("tpl-1");
 
-                assertThat(result).isPresent();
-                assertThat(result.get().subject()).isEqualTo("Welcome");
-                assertThat(result.get().bodyHtml()).isEqualTo("<p>Hello</p>");
-            } finally {
-                io.kelta.runtime.context.TenantContext.clear();
-            }
+            assertThat(result).isPresent();
+            assertThat(result.get().subject()).isEqualTo("Welcome");
+            assertThat(result.get().bodyHtml()).isEqualTo("<p>Hello</p>");
         }
 
         @Test
         @DisplayName("Should return empty when no tenant context")
         void shouldReturnEmptyWithoutTenantContext() {
-            io.kelta.runtime.context.TenantContext.clear();
-
             Optional<EmailService.EmailTemplate> result = service.getTemplate("tpl-1");
 
             assertThat(result).isEmpty();

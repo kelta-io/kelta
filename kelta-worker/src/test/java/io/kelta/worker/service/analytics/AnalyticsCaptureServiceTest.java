@@ -1,10 +1,9 @@
 package io.kelta.worker.service.analytics;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.AnalyticsEventRepository;
 import io.kelta.worker.repository.AnalyticsEventRepository.AnalyticsEvent;
 import io.kelta.worker.service.analytics.AnalyticsCaptureService.IncomingEvent;
-import org.junit.jupiter.api.AfterEach;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 @DisplayName("AnalyticsCaptureService")
+@WithTenant("tenant-1")
 class AnalyticsCaptureServiceTest {
 
     private AnalyticsEventRepository repository;
@@ -34,12 +34,6 @@ class AnalyticsCaptureServiceTest {
         org.mockito.Mockito.lenient().when(userIdResolver.resolve(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
         service = new AnalyticsCaptureService(repository, new ObjectMapper(), userIdResolver);
-        TenantContext.set("tenant-1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @SuppressWarnings("unchecked")
@@ -138,8 +132,8 @@ class AnalyticsCaptureServiceTest {
 
     @Test
     @DisplayName("skips capture entirely when no tenant is bound")
+    @WithTenant(none = true)
     void skipsWithoutTenant() {
-        TenantContext.clear();
         int accepted = service.capture(
                 List.of(new IncomingEvent("PAGE_VIEW", null, null, null, "/x", null, null, null, null, null)),
                 "user-1");

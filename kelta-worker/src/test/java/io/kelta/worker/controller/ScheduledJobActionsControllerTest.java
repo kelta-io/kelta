@@ -1,7 +1,7 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.ScheduledJobRepository;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.*;
 
 import java.util.Map;
@@ -11,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 @DisplayName("ScheduledJobActionsController")
+@WithTenant("t1")
 class ScheduledJobActionsControllerTest {
 
     private ScheduledJobRepository repository;
@@ -20,12 +21,6 @@ class ScheduledJobActionsControllerTest {
     void setUp() {
         repository = mock(ScheduledJobRepository.class);
         controller = new ScheduledJobActionsController(repository);
-        TenantContext.set("t1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Nested

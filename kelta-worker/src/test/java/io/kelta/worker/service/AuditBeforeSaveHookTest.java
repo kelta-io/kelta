@@ -66,6 +66,27 @@ class AuditBeforeSaveHookTest {
     }
 
     @Test
+    @DisplayName("Should keep server-only fields out of the audit trail on create and update")
+    void shouldOmitServerOnlyFields() {
+        Map<String, Object> data = Map.of(
+                "name", "corp-idp", "id", "idp-1", "createdBy", "user-1",
+                "clientSecretEnc", "enc:v1:ciphertext");
+
+        hook.afterCreate("oidc-providers", data, "tenant-1");
+        hook.afterUpdate("oidc-providers", "idp-1", data, Map.of(), "tenant-1");
+
+        org.mockito.ArgumentCaptor<String> json = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(auditService, times(2)).log(
+                eq("tenant-1"), eq("user-1"), anyString(), eq("OIDC"),
+                eq("oidc-provider"), eq("idp-1"), any(), isNull(), json.capture());
+        for (String written : json.getAllValues()) {
+            assertTrue(written.contains("corp-idp"), written);
+            assertFalse(written.contains("clientSecretEnc"), written);
+            assertFalse(written.contains("ciphertext"), written);
+        }
+    }
+
+    @Test
     @DisplayName("Should audit delete on setup collection")
     void shouldAuditDeleteOnSetupCollection() {
         hook.afterDelete("profiles", "prof-789", "tenant-1");

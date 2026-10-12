@@ -1707,4 +1707,151 @@ class DefaultQueryEngineTest {
         }
     }
 
+    @Nested
+    @DisplayName("Server-only field Tests")
+    class ServerOnlyFieldTests {
+
+        private CollectionDefinition vault;
+        private RecordEventPublisher publisher;
+        private DefaultQueryEngine engine;
+
+        @BeforeEach
+        void setUp() {
+            vault = new CollectionDefinitionBuilder()
+                .name("vault")
+                .displayName("Vault")
+                .addField(FieldDefinition.string("name"))
+                .addField(FieldDefinition.text("secretEnc").withServerOnly(true))
+                .build();
+            publisher = mock(RecordEventPublisher.class);
+            engine = new DefaultQueryEngine(storageAdapter, validationEngine, null, null, null, null,
+                    null, publisher);
+            when(validationEngine.validate(any(), any(), any()))
+                .thenReturn(ValidationResult.success());
+            when(validationEngine.validate(any(), any(), any(), any()))
+                .thenReturn(ValidationResult.success());
+        }
+
+        private Map<String, Object> stored(String id) {
+            Map<String, Object> row = new HashMap<>();
+            row.put("id", id);
+            row.put("name", "n");
+            row.put("secretEnc", "cipher");
+            return row;
+        }
+
+        @SuppressWarnings("unchecked")
+        private RecordChangedPayload publishedPayload() {
+            ArgumentCaptor<PlatformEvent<RecordChangedPayload>> captor =
+                ArgumentCaptor.forClass(PlatformEvent.class);
+            verify(publisher).publish(captor.capture());
+            return captor.getValue().getPayload();
+        }
+
+        @Test
+        @DisplayName("query results never carry a server-only field, even when requested")
+        void queryStripsServerOnlyFields() {
+            QueryRequest request = new QueryRequest(Pagination.defaults(), List.of(),
+                List.of("name", "secretEnc"), List.of());
+            when(storageAdapter.query(vault, request)).thenReturn(
+                QueryResult.of(new ArrayList<>(List.of(stored("r1"))), 1, request.pagination()));
+
+            QueryResult result = engine.executeQuery(vault, request);
+
+            assertEquals("n", result.data().get(0).get("name"));
+            assertFalse(result.data().get(0).containsKey("secretEnc"));
+        }
+
+        @Test
+        @DisplayName("getById never carries a server-only field")
+        void getByIdStripsServerOnlyFields() {
+            when(storageAdapter.getById(vault, "r1")).thenReturn(Optional.of(stored("r1")));
+
+            Map<String, Object> record = engine.getById(vault, "r1").orElseThrow();
+
+            assertFalse(record.containsKey("secretEnc"));
+        }
+
+        @Test
+        @DisplayName("a server-only field is refused as a filter, sort or aggregation key")
+        void serverOnlyFieldIsNotQueryable() {
+            QueryRequest filter = new QueryRequest(Pagination.defaults(), List.of(), List.of(),
+                List.of(new FilterCondition("secretEnc", FilterOperator.STARTS, "ci")));
+            QueryRequest sort = new QueryRequest(Pagination.defaults(),
+                List.of(new SortField("secretEnc", SortDirection.ASC)), List.of(), List.of());
+
+            assertEquals("secretEnc", assertThrows(InvalidQueryException.class,
+                () -> engine.executeQuery(vault, filter)).getFieldName());
+            assertEquals("secretEnc", assertThrows(InvalidQueryException.class,
+                () -> engine.executeQuery(vault, sort)).getFieldName());
+            assertThrows(InvalidQueryException.class, () -> engine.aggregate(vault, List.of(),
+                List.of(new AggregationSpec("MAX", "secretEnc", "m"))));
+            verify(storageAdapter, never()).query(any(), any());
+            verify(storageAdapter, never()).aggregate(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("create drops a caller-supplied value, lets a hook set it, and hides it on the way out")
+        void createKeepsServerOnlyValueServerSide() {
+            BeforeSaveHookRegistry hooks = new BeforeSaveHookRegistry();
+            AtomicReference<Map<String, Object>> afterCreateSaw = new AtomicReference<>();
+            hooks.register(new BeforeSaveHook() {
+                @Override public String getCollectionName() { return "vault"; }
+                @Override public BeforeSaveResult beforeCreate(Map<String, Object> record, String tenantId) {
+                    assertFalse(record.containsKey("secretEnc"), "caller value must not reach hooks");
+                    return BeforeSaveResult.withFieldUpdates(Map.of("secretEnc", "hook-cipher"));
+                }
+                @Override public void afterCreate(Map<String, Object> record, String tenantId) {
+                    afterCreateSaw.set(new HashMap<>(record));
+                }
+            });
+            DefaultQueryEngine hooked = new DefaultQueryEngine(storageAdapter, validationEngine,
+                null, null, null, null, null, publisher, hooks);
+            ArgumentCaptor<Map<String, Object>> persisted = ArgumentCaptor.forClass(Map.class);
+            when(storageAdapter.create(eq(vault), persisted.capture()))
+                .thenAnswer(invocation -> new HashMap<>(invocation.getArgument(1)));
+
+            Map<String, Object> input = new HashMap<>();
+            input.put("name", "n");
+            input.put("secretEnc", "caller-cipher");
+            Map<String, Object> result = hooked.create(vault, input);
+
+            assertEquals("hook-cipher", persisted.getValue().get("secretEnc"));
+            assertEquals("hook-cipher", afterCreateSaw.get().get("secretEnc"),
+                "after-create hooks see the full record");
+            assertFalse(result.containsKey("secretEnc"));
+            assertFalse(publishedPayload().getData().containsKey("secretEnc"));
+        }
+
+        @Test
+        @DisplayName("update drops a caller-supplied value and keeps it out of the response and event")
+        void updateKeepsServerOnlyValueServerSide() {
+            when(storageAdapter.getById(vault, "r1")).thenReturn(Optional.of(stored("r1")));
+            ArgumentCaptor<Map<String, Object>> patch = ArgumentCaptor.forClass(Map.class);
+            when(storageAdapter.update(eq(vault), eq("r1"), patch.capture()))
+                .thenReturn(Optional.of(stored("r1")));
+
+            Map<String, Object> input = new HashMap<>();
+            input.put("name", "m");
+            input.put("secretEnc", "caller-cipher");
+            Map<String, Object> result = engine.update(vault, "r1", input).orElseThrow();
+
+            assertFalse(patch.getValue().containsKey("secretEnc"));
+            assertFalse(result.containsKey("secretEnc"));
+            RecordChangedPayload payload = publishedPayload();
+            assertFalse(payload.getData().containsKey("secretEnc"));
+            assertFalse(payload.getPreviousData().containsKey("secretEnc"));
+        }
+
+        @Test
+        @DisplayName("the delete event carries no server-only value")
+        void deleteEventOmitsServerOnlyValue() {
+            when(storageAdapter.getById(vault, "r1")).thenReturn(Optional.of(stored("r1")));
+            when(storageAdapter.delete(vault, "r1")).thenReturn(true);
+
+            assertTrue(engine.delete(vault, "r1"));
+
+            assertFalse(publishedPayload().getData().containsKey("secretEnc"));
+        }
+    }
 }

@@ -1,6 +1,6 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -17,6 +17,7 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("MfaAdminController Tests")
+@WithTenant("tenant-1")
 class MfaAdminControllerTest {
 
     @Mock private JdbcTemplate jdbcTemplate;
@@ -26,12 +27,6 @@ class MfaAdminControllerTest {
     @BeforeEach
     void setUp() {
         controller = new MfaAdminController(jdbcTemplate);
-        TenantContext.set("tenant-1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Nested

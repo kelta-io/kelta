@@ -2080,8 +2080,8 @@ public final class SystemCollectionDefinitions {
                 .withColumnName("client_id").withUnique(true)
                 .withDescription("OAuth client identifier."))
             .addField(FieldDefinition.requiredString("clientSecretHash", 200)
-                .withColumnName("client_secret_hash").withImmutable(true)
-                .withDescription("Hash of the client secret; the secret itself is shown once at creation."))
+                .withColumnName("client_secret_hash").withImmutable(true).withServerOnly(true)
+                .withDescription("Hash of the client secret; server-only, never returned."))
             .addField(FieldDefinition.json("redirectUris").withColumnName("redirect_uris")
                 .withDescription("JSON array of permitted OAuth redirect URIs."))
             .addField(FieldDefinition.json("scopes")
@@ -2119,12 +2119,13 @@ public final class SystemCollectionDefinitions {
                 .withColumnName("provider_template")
                 .withDescription("Provider preset that shapes the credential's fields."))
             // dataEnc holds AES-256-GCM ciphertext. The CredentialEncryptionHook
-            // populates it from plaintext input fields; direct API edits to it
-            // are blocked by withImmutable so the only way to change secret
-            // material is through the hook path.
+            // populates it from plaintext input fields. It is server-only: the
+            // query engine never returns it and drops a caller-supplied value, so
+            // the hook path is the only way to set secret material, and the
+            // credential services read the column directly to decrypt it.
             .addField(FieldDefinition.text("dataEnc")
-                .withColumnName("data_enc").withImmutable(true)
-                .withDescription("Encrypted credential material; never returned in plaintext."))
+                .withColumnName("data_enc").withImmutable(true).withServerOnly(true)
+                .withDescription("Encrypted credential material; server-only, never returned."))
             .addField(FieldDefinition.json("metadata")
                 .withDescription("Non-secret JSON metadata about the credential."))
             .addField(FieldDefinition.datetime("lastTestAt").withColumnName("last_test_at")
@@ -2146,9 +2147,11 @@ public final class SystemCollectionDefinitions {
                 .withColumnName("credential_id")
                 .withDescription("Credential these tokens belong to."))
             .addField(FieldDefinition.text("accessTokenEnc").withColumnName("access_token_enc")
-                .withDescription("Encrypted OAuth access token."))
+                .withServerOnly(true)
+                .withDescription("Encrypted OAuth access token; server-only, never returned."))
             .addField(FieldDefinition.text("refreshTokenEnc").withColumnName("refresh_token_enc")
-                .withDescription("Encrypted OAuth refresh token."))
+                .withServerOnly(true)
+                .withDescription("Encrypted OAuth refresh token; server-only, never returned."))
             .addField(FieldDefinition.string("tokenType", 40).withColumnName("token_type")
                 .withDescription("OAuth token type, normally Bearer."))
             .addField(FieldDefinition.datetime("expiresAt").withColumnName("expires_at")
@@ -2269,8 +2272,8 @@ public final class SystemCollectionDefinitions {
             .addField(FieldDefinition.string("clientId", 200).withColumnName("client_id")
                 .withDescription("OAuth client identifier."))
             .addField(FieldDefinition.string("clientSecretEnc")
-                .withColumnName("client_secret_enc")
-                .withDescription("Encrypted OAuth client secret."))
+                .withColumnName("client_secret_enc").withServerOnly(true)
+                .withDescription("Encrypted OAuth client secret; server-only, never returned."))
             .addField(FieldDefinition.string("audience", 200)
                 .withDescription("Expected audience claim on tokens from this provider."))
             // OIDC Discovery endpoint overrides (auto-discovered from issuer when NULL)
@@ -3243,8 +3246,8 @@ public final class SystemCollectionDefinitions {
                 "Connected App").withColumnName("connected_app_id")
                 .withDescription("Connected app this token was issued to."))
             .addField(FieldDefinition.requiredString("tokenHash", 200)
-                .withColumnName("token_hash")
-                .withDescription("Hash of the issued token; the token itself is shown once."))
+                .withColumnName("token_hash").withServerOnly(true)
+                .withDescription("Hash of the issued token; server-only, never returned."))
             .addField(FieldDefinition.requiredJson("scopes")
                 .withDescription("Space-separated OAuth scopes."))
             .addField(FieldDefinition.datetime("issuedAt")

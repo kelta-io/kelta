@@ -1,7 +1,7 @@
 package io.kelta.worker.service;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.ApprovalRepository;
+import io.kelta.worker.util.WithTenant;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.*;
@@ -16,6 +16,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @DisplayName("ApprovalService")
+@WithTenant("t1")
 class ApprovalServiceTest {
 
     private ApprovalRepository approvalRepository;
@@ -29,12 +30,6 @@ class ApprovalServiceTest {
         jdbcTemplate = mock(JdbcTemplate.class);
         objectMapper = JsonMapper.builder().build();
         service = new ApprovalService(approvalRepository, jdbcTemplate, objectMapper);
-        TenantContext.set("t1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Nested
@@ -141,9 +136,8 @@ class ApprovalServiceTest {
 
         @Test
         @DisplayName("Should fail without tenant context")
+        @WithTenant(none = true)
         void shouldFailWithoutTenant() {
-            TenantContext.clear();
-
             var result = service.submitForApproval("col-1", "rec-1", "user-1", null);
 
             assertThat(result.success()).isFalse();

@@ -1,11 +1,11 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.RemotePromotionClient;
 import io.kelta.worker.service.SandboxEnvironmentService;
 import io.kelta.worker.service.SandboxProvisioningService;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.*;
 import org.springframework.http.HttpStatus;
@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @DisplayName("EnvironmentController")
+@WithTenant("t1")
 class EnvironmentControllerTest {
 
     private SandboxEnvironmentService environmentService;
@@ -39,12 +40,6 @@ class EnvironmentControllerTest {
         request = mock(HttpServletRequest.class);
         controller = new EnvironmentController(environmentService, provisioningService,
                 remotePromotionClient, permissionResolver, bootstrapRepository);
-        TenantContext.set("t1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private void grantPermission() {
@@ -82,9 +77,8 @@ class EnvironmentControllerTest {
 
     @Test
     @DisplayName("400s without a tenant context")
+    @WithTenant(none = true)
     void rejectsNoTenant() {
-        TenantContext.clear();
-
         assertThatThrownBy(() -> controller.listEnvironments(request))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting(e -> ((ResponseStatusException) e).getStatusCode())

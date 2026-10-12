@@ -1,6 +1,5 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.FilterCondition;
@@ -15,8 +14,8 @@ import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.UserInviteService;
 import io.kelta.worker.service.delegated.DelegatedAdminService;
 import io.kelta.worker.service.delegated.DelegatedAdminService.EffectiveDelegatedScope;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -50,6 +49,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("DelegatedUserAdminController Tests")
+@WithTenant("tenant-1")
 class DelegatedUserAdminControllerTest {
 
     private static final String CALLER_EMAIL = "delegate@t.io";
@@ -73,13 +73,7 @@ class DelegatedUserAdminControllerTest {
     void setUp() {
         controller = new DelegatedUserAdminController(delegatedAdminService, scopeRepository,
                 queryEngine, collectionRegistry, permissionResolver, userInviteService, jdbcTemplate);
-        TenantContext.set(TENANT);
         lenient().when(collectionRegistry.get("users")).thenReturn(usersDef);
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     // ------------------------------------------------------------- fixtures

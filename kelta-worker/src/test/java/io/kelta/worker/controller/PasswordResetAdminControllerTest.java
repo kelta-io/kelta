@@ -1,8 +1,8 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,6 +22,7 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("PasswordResetAdminController Tests")
+@WithTenant("tenant-1")
 class PasswordResetAdminControllerTest {
 
     @Mock private JdbcTemplate jdbcTemplate;
@@ -34,12 +35,6 @@ class PasswordResetAdminControllerTest {
     @BeforeEach
     void setUp() {
         controller = new PasswordResetAdminController(jdbcTemplate, permissionResolver, bootstrapRepository);
-        TenantContext.set("tenant-1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private void grantManageUsers() {
@@ -77,9 +72,9 @@ class PasswordResetAdminControllerTest {
         }
 
         @Test
+        @WithTenant(none = true)
         void shouldReturn400WhenNoTenantContext() {
             grantManageUsers();
-            TenantContext.clear();
 
             var response = controller.resetPassword(request, "user-1");
 

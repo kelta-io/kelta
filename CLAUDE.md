@@ -190,6 +190,9 @@ Check the relevant `pom.xml` / `package.json` for exact current versions before 
   **Data masking** rides the same advice (strip → mask): `MASKED` visibility denies the
   `unmask` + `write` Cerbos actions; mask shape lives in `fieldTypeConfig.masking`;
   masked records carry `meta.maskedFields`. See `architecture.md` → Data masking.
+  **Server-only fields** (`FieldDefinition.withServerOnly(true)` — encrypted secrets, credential
+  hashes) are a separate, non-per-viewer guarantee enforced in `DefaultQueryEngine`: never
+  serialized, never filterable, only a before-save hook may set one. See `architecture.md`.
 - **Flow inputs:** read as `$.input.<key>` against the state envelope; manual/MCP/HTTP
   invocation double-wraps (`{ "input": { ... } }`). See `integrations.md` → Flows.
 - **Pagination:** HTTP page size clamps at `MAX_HTTP_PAGE_SIZE = 200`; internal at
@@ -220,6 +223,8 @@ Each maps to a real mistake an agent has made here. Violating one usually compil
 - ❌ Reintroduce Kafka → messaging is NATS JetStream only.
 - ❌ Add a new `kelta.*` NATS subject without a JetStream stream in `JetStreamInitializer` **and** a native `reflect-config.json` entry for its payload in worker+gateway → ✅ else the publish no-acks (`CancellationException`, event dropped) or the payload serializes `{}` on the native image (`concerns.md` → Dependency Risks).
 - ❌ Gate a bean on `@ConditionalOnProperty` and supply that property only as a deployment env var → ✅ declare it in `application.yml` as `${ENV_VAR:default}`. Native images (worker/gateway/auth) freeze condition evaluation at **build** time, so the bean is never registered and the env var arrives too late — silently. This is what left all three services exporting zero traces (`concerns.md` → Dependency Risks).
+- ❌ Store a secret, ciphertext or credential hash in a plain field → ✅ `.withServerOnly(true)` and read it over JDBC where needed; plain fields are served by every generic read path (`architecture.md` → Server-only fields).
+- ❌ Bind a tenant with a ThreadLocal setter → ✅ `TenantContext.set`/`setSlug`/`clear` no longer exist; use `runWithTenant`/`callWithTenant` (or `…IfUnbound` for shared request+background code), and `@WithTenant` in worker tests.
 - ❌ Leave docs stale → update them in the same PR (Rule 6).
 
 ---

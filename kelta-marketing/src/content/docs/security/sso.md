@@ -14,7 +14,7 @@ Create a record in the `oidc-providers` system collection (Setup → Administrat
 
 | Attribute | Meaning |
 |---|---|
-| `name`, `issuer`, `clientId`, `clientSecretEnc` | The provider and the client you registered there. |
+| `name`, `issuer`, `clientId`, `clientSecret` | The provider and the client you registered there. `clientSecret` is write-only: it is encrypted on save and never returned by the API. |
 | `discoveryStatus`, `jwksUri`, `authorizationUri`, `tokenUri`, `userinfoUri`, `endSessionUri` | Filled from `/.well-known/openid-configuration`; override if the provider is non-standard. |
 | `audience` | Expected `aud` claim. |
 | `emailClaim`, `usernameClaim`, `nameClaim` | Which claims populate the Kelta user (defaults: `email`, `preferred_username`, `name`). |

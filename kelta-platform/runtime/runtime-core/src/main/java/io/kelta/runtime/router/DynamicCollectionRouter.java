@@ -169,8 +169,7 @@ public class DynamicCollectionRouter {
 
         logger.debug("List request for collection '{}' with params: {}", collectionName, params);
 
-        setTenantContext(request);
-        try {
+        return inRequestTenantScope(request, () -> {
             CollectionDefinition definition = resolveCollection(collectionName, request);
             if (definition == null) {
                 logger.debug("Collection '{}' not found", collectionName);
@@ -221,9 +220,7 @@ public class DynamicCollectionRouter {
             }
 
             return ResponseEntity.ok(response);
-        } finally {
-            TenantContext.clear();
-        }
+        });
     }
 
     /**
@@ -242,8 +239,7 @@ public class DynamicCollectionRouter {
 
         logger.debug("Get request for collection '{}', id '{}'", collectionName, id);
 
-        setTenantContext(request);
-        try {
+        return inRequestTenantScope(request, () -> {
             CollectionDefinition definition = resolveCollection(collectionName, request);
             if (definition == null) {
                 logger.debug("Collection '{}' not found", collectionName);
@@ -307,9 +303,7 @@ public class DynamicCollectionRouter {
                 ok.header(HttpHeaders.ETAG, etag);
             }
             return ok.body(response);
-        } finally {
-            TenantContext.clear();
-        }
+        });
     }
 
     /**
@@ -363,8 +357,7 @@ public class DynamicCollectionRouter {
 
         logger.debug("Create request for collection '{}' with data: {}", collectionName, requestBody);
 
-        setTenantContext(request);
-        try {
+        return inRequestTenantScope(request, () -> {
             CollectionDefinition definition = resolveCollection(collectionName, request);
             if (definition == null) {
                 logger.debug("Collection '{}' not found", collectionName);
@@ -407,9 +400,7 @@ public class DynamicCollectionRouter {
             Map<String, Object> response = toJsonApiResponse(created, collectionName, definition);
             mergeRequestRelationships(response, extractRawRelationships(requestBody));
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
-        } finally {
-            TenantContext.clear();
-        }
+        });
     }
 
     /**
@@ -465,8 +456,7 @@ public class DynamicCollectionRouter {
 
         logger.debug("Update request for collection '{}', id '{}' with data: {}", collectionName, id, requestBody);
 
-        setTenantContext(request);
-        try {
+        return inRequestTenantScope(request, () -> {
             CollectionDefinition definition = resolveCollection(collectionName, request);
             if (definition == null) {
                 logger.debug("Collection '{}' not found", collectionName);
@@ -513,9 +503,7 @@ public class DynamicCollectionRouter {
                         return ResponseEntity.ok(response);
                     })
                     .orElse(ResponseEntity.notFound().build());
-        } finally {
-            TenantContext.clear();
-        }
+        });
     }
 
     /**
@@ -533,8 +521,7 @@ public class DynamicCollectionRouter {
 
         logger.debug("Delete request for collection '{}', id '{}'", collectionName, id);
 
-        setTenantContext(request);
-        try {
+        return inRequestTenantScope(request, () -> {
             CollectionDefinition definition = resolveCollection(collectionName, request);
             if (definition == null) {
                 logger.debug("Collection '{}' not found", collectionName);
@@ -558,9 +545,7 @@ public class DynamicCollectionRouter {
 
             return deleted ? ResponseEntity.noContent().build()
                            : ResponseEntity.notFound().build();
-        } finally {
-            TenantContext.clear();
-        }
+        });
     }
 
     // ==================== Sub-Resource Endpoints ====================
@@ -589,8 +574,7 @@ public class DynamicCollectionRouter {
         logger.debug("List children request: parent='{}', parentId='{}', child='{}'",
                 parentName, parentId, childName);
 
-        setTenantContext(request);
-        try {
+        return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = resolveSubResource(parentName, childName, request);
             if (relation == null) {
                 return ResponseEntity.notFound().build();
@@ -611,9 +595,7 @@ public class DynamicCollectionRouter {
 
             return ResponseEntity.ok(toJsonApiListResponse(
                     result, childName, relation.childDef(), request.getRequestURI(), params));
-        } finally {
-            TenantContext.clear();
-        }
+        });
     }
 
     /**
@@ -637,8 +619,7 @@ public class DynamicCollectionRouter {
         logger.debug("Get child request: parent='{}', parentId='{}', child='{}', childId='{}'",
                 parentName, parentId, childName, childId);
 
-        setTenantContext(request);
-        try {
+        return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = resolveSubResource(parentName, childName, request);
             if (relation == null) {
                 return ResponseEntity.notFound().build();
@@ -647,9 +628,7 @@ public class DynamicCollectionRouter {
             Optional<Map<String, Object>> record = queryEngine.getById(relation.childDef(), childId);
             return record.map(r -> ResponseEntity.ok(toJsonApiResponse(r, childName, relation.childDef())))
                          .orElse(ResponseEntity.notFound().build());
-        } finally {
-            TenantContext.clear();
-        }
+        });
     }
 
     /**
@@ -675,8 +654,7 @@ public class DynamicCollectionRouter {
         logger.debug("Create child request: parent='{}', parentId='{}', child='{}'",
                 parentName, parentId, childName);
 
-        setTenantContext(request);
-        try {
+        return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = resolveSubResource(parentName, childName, request);
             if (relation == null) {
                 return ResponseEntity.notFound().build();
@@ -714,9 +692,7 @@ public class DynamicCollectionRouter {
             Map<String, Object> response = toJsonApiResponse(created, childName, relation.childDef());
             mergeRequestRelationships(response, extractRawRelationships(requestBody));
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
-        } finally {
-            TenantContext.clear();
-        }
+        });
     }
 
     /**
@@ -777,8 +753,7 @@ public class DynamicCollectionRouter {
         logger.debug("Update child request: parent='{}', parentId='{}', child='{}', childId='{}'",
                 parentName, parentId, childName, childId);
 
-        setTenantContext(request);
-        try {
+        return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = resolveSubResource(parentName, childName, request);
             if (relation == null) {
                 return ResponseEntity.notFound().build();
@@ -814,9 +789,7 @@ public class DynamicCollectionRouter {
                         return ResponseEntity.ok(response);
                     })
                     .orElse(ResponseEntity.notFound().build());
-        } finally {
-            TenantContext.clear();
-        }
+        });
     }
 
     /**
@@ -840,8 +813,7 @@ public class DynamicCollectionRouter {
         logger.debug("Delete child request: parent='{}', parentId='{}', child='{}', childId='{}'",
                 parentName, parentId, childName, childId);
 
-        setTenantContext(request);
-        try {
+        return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = resolveSubResource(parentName, childName, request);
             if (relation == null) {
                 return ResponseEntity.notFound().build();
@@ -859,9 +831,7 @@ public class DynamicCollectionRouter {
 
             return deleted ? ResponseEntity.noContent().build()
                            : ResponseEntity.notFound().build();
-        } finally {
-            TenantContext.clear();
-        }
+        });
     }
 
     /**
@@ -1094,13 +1064,17 @@ public class DynamicCollectionRouter {
     }
 
     /**
-     * Sets the tenant context (ID and slug) from the request headers.
+     * Runs a handler body with the request's tenant (ID and slug) in {@link TenantContext}.
+     *
+     * <p>In the worker the scope is already bound by {@code TenantContextFilter} from these same
+     * headers, and an outer binding wins, so this only binds what nothing upstream bound — the
+     * precedence the removed ThreadLocal setters had, kept for callers (and tests) that drive the
+     * router without that filter.
      */
-    private void setTenantContext(HttpServletRequest request) {
-        String tenantId = request.getHeader("X-Tenant-ID");
-        String tenantSlug = request.getHeader("X-Tenant-Slug");
-        TenantContext.set(tenantId);
-        TenantContext.setSlug(tenantSlug);
+    private <T> T inRequestTenantScope(HttpServletRequest request,
+                                       ScopedValue.CallableOp<T, RuntimeException> body) {
+        return TenantContext.callWithTenantIfUnbound(
+                request.getHeader("X-Tenant-ID"), request.getHeader("X-Tenant-Slug"), body);
     }
 
     private void injectTenantId(Map<String, Object> data, CollectionDefinition definition,
@@ -1327,6 +1301,10 @@ public class DynamicCollectionRouter {
 
             // Use field schema to detect relationship fields
             FieldDefinition fieldDef = definition.getField(key);
+            if (fieldDef != null && fieldDef.serverOnly()) {
+                // The query engine already strips these; never serialize one that slipped in.
+                continue;
+            }
             if (fieldDef != null && fieldDef.type().isRelationship()
                     && fieldDef.referenceConfig() != null) {
                 String relType = fieldDef.referenceConfig().targetCollection();

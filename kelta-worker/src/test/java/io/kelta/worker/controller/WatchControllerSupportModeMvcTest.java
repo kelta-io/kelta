@@ -3,7 +3,6 @@ package io.kelta.worker.controller;
 import tools.jackson.databind.ObjectMapper;
 import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.CallerContext.UserType;
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.DefaultQueryEngine;
@@ -25,7 +24,7 @@ import io.kelta.worker.repository.WatchTarget;
 import io.kelta.worker.repository.WatchTargetRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.entitlement.EntitlementService;
-import org.junit.jupiter.api.AfterEach;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -73,6 +72,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * view delegated to the real {@link DynamicCollectionRouter}.
  */
 @DisplayName("WatchController — support mode with the real owner guard")
+@WithTenant("t1")
 class WatchControllerSupportModeMvcTest {
 
     private static final String TENANT = "t1";
@@ -125,12 +125,6 @@ class WatchControllerSupportModeMvcTest {
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .addFilters(new CallerContextFilter(userIdResolver, bootstrapRepository))
                 .build();
-        TenantContext.set(TENANT);
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     /** Rows keyed by id; {@code query} reports the bound caller so read bypasses are visible. */

@@ -1,6 +1,5 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.service.SearchIndexService;
 import io.kelta.worker.service.analytics.AnalyticsCaptureService;
 import org.slf4j.Logger;
@@ -67,39 +66,36 @@ public class SearchController {
 
         int effectiveLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
 
-        TenantContext.set(tenantId);
+        // TenantContextFilter has already bound the tenant from this same X-Tenant-ID header,
+        // so the search below runs RLS-scoped to it without any binding here.
+        List<Map<String, Object>> results = searchIndexService.search(
+                tenantId, q.trim(), effectiveLimit);
+
+        List<Map<String, Object>> data = results.stream().map(row -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", row.get("record_id"));
+            item.put("type", row.get("collection_name"));
+            item.put("collectionName", row.get("collection_name"));
+            item.put("collectionId", row.get("collection_id"));
+            item.put("displayValue", row.get("display_value"));
+            item.put("rank", row.get("rank"));
+            return item;
+        }).toList();
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("data", data);
+        response.put("meta", Map.of("total", data.size()));
+
+        // Capture the query for the demand-mining corpus (consumer-alerting slice 8).
+        // Best-effort: an empty result set is the highest-value signal (unmet demand), and a
+        // capture failure must never affect the search response.
         try {
-            List<Map<String, Object>> results = searchIndexService.search(
-                    tenantId, q.trim(), effectiveLimit);
-
-            List<Map<String, Object>> data = results.stream().map(row -> {
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("id", row.get("record_id"));
-                item.put("type", row.get("collection_name"));
-                item.put("collectionName", row.get("collection_name"));
-                item.put("collectionId", row.get("collection_id"));
-                item.put("displayValue", row.get("display_value"));
-                item.put("rank", row.get("rank"));
-                return item;
-            }).toList();
-
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("data", data);
-            response.put("meta", Map.of("total", data.size()));
-
-            // Capture the query for the demand-mining corpus (consumer-alerting slice 8).
-            // Best-effort: an empty result set is the highest-value signal (unmet demand), and a
-            // capture failure must never affect the search response.
-            try {
-                analyticsCaptureService.captureSearch(q.trim(), data.isEmpty(), null, memberId);
-            } catch (RuntimeException captureError) {
-                log.debug("search analytics capture failed: {}", captureError.toString());
-            }
-
-            return ResponseEntity.ok(response);
-        } finally {
-            TenantContext.clear();
+            analyticsCaptureService.captureSearch(q.trim(), data.isEmpty(), null, memberId);
+        } catch (RuntimeException captureError) {
+            log.debug("search analytics capture failed: {}", captureError.toString());
         }
+
+        return ResponseEntity.ok(response);
     }
 
     private Map<String, Object> emptyResponse() {

@@ -1,9 +1,9 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.worker.service.ApprovalService;
 import io.kelta.worker.service.ApprovalService.ApprovalActionResult;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @DisplayName("ApprovalController")
+@WithTenant("t1")
 class ApprovalControllerTest {
 
     /** UUID the mocked resolver returns for the gateway-stamped identifier. */
@@ -37,12 +38,6 @@ class ApprovalControllerTest {
         when(userIdResolver.resolve(anyString(), any()))
                 .thenAnswer(inv -> "user-1".equals(inv.getArgument(0)) ? USER_UUID : inv.getArgument(0));
         controller = new ApprovalController(approvalService, userIdResolver);
-        TenantContext.set("t1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Nested
@@ -141,9 +136,8 @@ class ApprovalControllerTest {
 
         @Test
         @DisplayName("Should return 400 without tenant context")
+        @WithTenant(none = true)
         void shouldReturn400WithoutTenant() {
-            TenantContext.clear();
-
             var body = new HashMap<String, Object>();
             body.put("collectionId", "col-1");
             body.put("recordId", "rec-1");

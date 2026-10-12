@@ -58,44 +58,42 @@ public class SubmitForApprovalActionHandler implements ActionHandler {
                 processId = (String) config.get("processId");
             }
 
-            // Ensure tenant context is set (flows may execute asynchronously)
-            String previousTenant = TenantContext.get();
-            if (previousTenant == null && context.tenantId() != null) {
-                TenantContext.set(context.tenantId());
+            // Flows may execute asynchronously with no tenant bound: bind the flow's tenant for
+            // the approval call in that case, and leave an existing binding untouched otherwise.
+            String configuredProcessId = processId;
+            if (TenantContext.get() == null && context.tenantId() != null) {
+                return TenantContext.callWithTenant(context.tenantId(),
+                        () -> submit(context, configuredProcessId));
             }
-
-            try {
-                ApprovalActionResult result = approvalService.submitForApproval(
-                        context.collectionId(),
-                        context.recordId(),
-                        context.userId(),
-                        processId
-                );
-
-                if (!result.success()) {
-                    log.warn("SUBMIT_FOR_APPROVAL failed for record {}: {}",
-                            context.recordId(), result.message());
-                    return ActionResult.failure(result.message());
-                }
-
-                log.info("SUBMIT_FOR_APPROVAL succeeded: instanceId={}, recordId={}",
-                        result.instanceId(), context.recordId());
-
-                return ActionResult.success(Map.of(
-                        "instanceId", result.instanceId(),
-                        "status", result.status(),
-                        "message", result.message()
-                ));
-            } finally {
-                // Restore previous tenant context if we set it
-                if (previousTenant == null && context.tenantId() != null) {
-                    TenantContext.clear();
-                }
-            }
+            return submit(context, configuredProcessId);
         } catch (Exception e) {
             log.error("SUBMIT_FOR_APPROVAL action failed: {}", e.getMessage(), e);
             return ActionResult.failure(e);
         }
+    }
+
+    private ActionResult submit(ActionContext context, String processId) {
+        ApprovalActionResult result = approvalService.submitForApproval(
+                context.collectionId(),
+                context.recordId(),
+                context.userId(),
+                processId
+        );
+
+        if (!result.success()) {
+            log.warn("SUBMIT_FOR_APPROVAL failed for record {}: {}",
+                    context.recordId(), result.message());
+            return ActionResult.failure(result.message());
+        }
+
+        log.info("SUBMIT_FOR_APPROVAL succeeded: instanceId={}, recordId={}",
+                result.instanceId(), context.recordId());
+
+        return ActionResult.success(Map.of(
+                "instanceId", result.instanceId(),
+                "status", result.status(),
+                "message", result.message()
+        ));
     }
 
     @Override

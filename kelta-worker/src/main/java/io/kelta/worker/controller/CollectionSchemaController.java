@@ -90,6 +90,9 @@ public class CollectionSchemaController {
 
         List<Map<String, Object>> fields = new ArrayList<>();
         for (FieldDefinition field : definition.fields()) {
+            if (field.serverOnly()) {
+                continue; // never read or written through the API, so not part of its shape
+            }
             fields.add(describe(field));
         }
         body.put("fields", fields);

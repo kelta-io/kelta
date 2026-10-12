@@ -1,10 +1,10 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.SecurityAuditLogger;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,6 +27,7 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("AdminPersonalAccessTokenController Tests")
+@WithTenant("tenant-1")
 class AdminPersonalAccessTokenControllerTest {
 
     @Mock private JdbcTemplate jdbcTemplate;
@@ -45,12 +46,6 @@ class AdminPersonalAccessTokenControllerTest {
                 new PersonalAccessTokenController(jdbcTemplate, redisTemplate, userIdResolver);
         controller = new AdminPersonalAccessTokenController(
                 permissionResolver, bootstrapRepository, personalAccessTokenController);
-        TenantContext.set("tenant-1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private void grantManageUsers() {

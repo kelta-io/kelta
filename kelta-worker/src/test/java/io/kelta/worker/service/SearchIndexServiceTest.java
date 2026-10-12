@@ -92,6 +92,28 @@ class SearchIndexServiceTest {
         }
 
         @Test
+        @DisplayName("should exclude server-only fields from search content even when marked searchable")
+        void shouldExcludeServerOnlyFields() {
+            when(lifecycleManager.getSearchableFieldNames("vault"))
+                    .thenReturn(Set.of("secretEnc", "label"));
+            when(lifecycleManager.getDisplayFieldName("vault")).thenReturn("secretEnc");
+            when(collectionRegistry.get("vault")).thenReturn(
+                    new io.kelta.runtime.model.CollectionDefinitionBuilder()
+                            .name("vault")
+                            .fields(java.util.List.of(
+                                    io.kelta.runtime.model.FieldDefinition.string("label"),
+                                    io.kelta.runtime.model.FieldDefinition.text("secretEnc")
+                                            .withServerOnly(true)))
+                            .build());
+
+            Map<String, Object> data = Map.of("label", "prod key", "secretEnc", "enc:v1:abc");
+
+            assertThat(service.buildSearchContent("vault", data))
+                    .contains("prod key").doesNotContain("enc:v1:abc");
+            assertThat(service.extractDisplayValue("vault", data)).isNotEqualTo("enc:v1:abc");
+        }
+
+        @Test
         @DisplayName("should use fallback display fields when no display field configured")
         void shouldUseFallbackDisplayFields() {
             when(lifecycleManager.getSearchableFieldNames("products"))

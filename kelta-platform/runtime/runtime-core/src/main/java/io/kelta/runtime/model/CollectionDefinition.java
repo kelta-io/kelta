@@ -308,6 +308,74 @@ public record CollectionDefinition(
                 && f.fieldTypeConfig().get("masking") instanceof java.util.Map<?, ?> cfg
                 && !cfg.isEmpty());
     }
+
+    /**
+     * Names of the fields declared {@link FieldDefinition#serverOnly() server-only} — values the
+     * platform keeps for itself and never serializes out of the worker.
+     *
+     * @return the server-only field names; empty for almost every collection
+     */
+    public Set<String> serverOnlyFieldNames() {
+        Set<String> names = new java.util.LinkedHashSet<>();
+        for (FieldDefinition field : fields) {
+            if (field.serverOnly()) {
+                names.add(field.name());
+            }
+        }
+        return names.isEmpty() ? Set.of() : java.util.Collections.unmodifiableSet(names);
+    }
+
+    /**
+     * Returns {@code true} if {@code fieldName} is a server-only field of this collection.
+     *
+     * @param fieldName the field name
+     * @return whether the field is server-only
+     */
+    public boolean isServerOnlyField(String fieldName) {
+        if (fieldName == null) {
+            return false;
+        }
+        for (FieldDefinition field : fields) {
+            if (field.serverOnly() && field.name().equals(fieldName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Removes this collection's server-only fields from {@code record} in place and returns it,
+     * so a record can be handed to anything that serializes it. {@code null} passes through.
+     *
+     * @param record a record map keyed by field name; must be mutable when the collection has
+     *               server-only fields
+     * @return the same map, without server-only keys
+     */
+    public Map<String, Object> stripServerOnlyFields(Map<String, Object> record) {
+        if (record == null) {
+            return null;
+        }
+        for (FieldDefinition field : fields) {
+            if (field.serverOnly()) {
+                record.remove(field.name());
+            }
+        }
+        return record;
+    }
+
+    /**
+     * Returns a copy of {@code record} without this collection's server-only fields, leaving the
+     * input untouched. {@code null} passes through.
+     *
+     * @param record a record map keyed by field name
+     * @return a mutable copy without server-only keys
+     */
+    public Map<String, Object> withoutServerOnlyFields(Map<String, Object> record) {
+        if (record == null) {
+            return null;
+        }
+        return stripServerOnlyFields(new java.util.LinkedHashMap<>(record));
+    }
     
     /**
      * Creates a new collection definition with an incremented version.

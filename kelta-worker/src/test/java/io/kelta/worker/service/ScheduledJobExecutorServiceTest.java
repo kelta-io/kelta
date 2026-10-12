@@ -66,11 +66,6 @@ class ScheduledJobExecutorServiceTest {
                 tenantSlugResolver, provider);
     }
 
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
-    }
-
     @Nested
     @DisplayName("executeAll — FLOW jobs")
     class FlowJobs {

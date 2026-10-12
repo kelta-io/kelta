@@ -1,6 +1,5 @@
 package io.kelta.worker.service;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
@@ -42,11 +41,6 @@ class DataExportServiceTest {
                 exportRepository, queryEngine, collectionRegistry,
                 jdbcTemplate, objectMapper, Optional.empty(), eventPublisher,
                 mock(RecordMaskingService.class));
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Test

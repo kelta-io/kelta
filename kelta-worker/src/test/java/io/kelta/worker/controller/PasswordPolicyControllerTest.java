@@ -1,7 +1,7 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.PasswordPolicyRepository;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -13,6 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 @DisplayName("PasswordPolicyController")
+@WithTenant("t1")
 class PasswordPolicyControllerTest {
 
     private PasswordPolicyRepository repository;
@@ -24,12 +25,6 @@ class PasswordPolicyControllerTest {
         repository = mock(PasswordPolicyRepository.class);
         jdbcTemplate = mock(JdbcTemplate.class);
         controller = new PasswordPolicyController(repository, jdbcTemplate);
-        TenantContext.set("t1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Nested

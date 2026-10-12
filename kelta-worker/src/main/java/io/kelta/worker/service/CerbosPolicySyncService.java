@@ -90,60 +90,66 @@ public class CerbosPolicySyncService {
      * Syncs all Cerbos policies for a tenant.
      */
     public void syncTenant(String tenantId) {
-        TenantContext.set(tenantId);
-        try {
-            log.info("Syncing Cerbos policies for tenant {}", tenantId);
-
-            List<CerbosPolicyGenerator.ProfileData> profiles = loadProfilesForTenant(tenantId);
-            if (profiles.isEmpty()) {
-                log.info("No profiles found for tenant {} — skipping Cerbos policy sync", tenantId);
-                return;
-            }
-            List<Map<String, Object>> activeCollections = bootstrapRepository.findActiveCollections();
-            List<String> collectionIds = activeCollections.stream()
-                    .map(row -> (String) row.get("id"))
-                    .filter(Objects::nonNull)
-                    .toList();
-            // id -> API name, so the record policy CEL can key on the collection name the
-            // worker record advice passes (the collection policy stays UUID-keyed for the
-            // gateway). See generateRecordPolicy.
-            Map<String, String> collectionIdToName = new LinkedHashMap<>();
-            for (Map<String, Object> row : activeCollections) {
-                String id = (String) row.get("id");
-                String name = (String) row.get("name");
-                if (id != null && name != null) {
-                    collectionIdToName.put(id, name);
-                }
-            }
-            List<CerbosPolicyGenerator.CustomRule> customRules = loadCustomRulesForTenant(tenantId);
-
-            // Generate policies
-            Map<String, Object> derivedRoles = policyGenerator.generateDerivedRoles(tenantId, profiles);
-            Map<String, Object> systemPolicy = policyGenerator.generateSystemFeaturePolicy(tenantId, profiles);
-            Map<String, Object> collectionPolicy = policyGenerator.generateCollectionPolicy(tenantId, profiles, collectionIds);
-            Map<String, Object> fieldPolicy = policyGenerator.generateFieldPolicy(tenantId, profiles);
-            Map<String, Object> recordPolicy = policyGenerator.generateRecordPolicy(
-                    tenantId, profiles, collectionIds, customRules, collectionIdToName);
-
-            // Push to Cerbos Admin API
-            pushPolicy(derivedRoles);
-            pushPolicy(systemPolicy);
-            pushPolicy(collectionPolicy);
-            pushPolicy(fieldPolicy);
-            pushPolicy(recordPolicy);
-
-            log.info("Cerbos policies synced for tenant {} ({} profiles, {} collections)",
-                    tenantId, profiles.size(), collectionIds.size());
-
-            // Evict cached permissions — profile permissions may have changed
-            cacheManager.evictAllPermissions();
-
-            publishPolicyChangedEvent(tenantId);
-        } catch (Exception e) {
-            log.error("Failed to sync Cerbos policies for tenant {}: {}", tenantId, e.getMessage(), e);
-        } finally {
-            TenantContext.clear();
+        if (tenantId == null || tenantId.isBlank()) {
+            // Never bind an empty tenant: that is the RLS bypass setting.
+            log.warn("Skipping Cerbos policy sync: no tenant id");
+            return;
         }
+        // Every caller hands in the tenant to act for; on a request path that is the tenant
+        // already bound, and on the coalescer / startup paths nothing is bound yet.
+        TenantContext.runWithTenant(tenantId, () -> {
+            try {
+                log.info("Syncing Cerbos policies for tenant {}", tenantId);
+
+                List<CerbosPolicyGenerator.ProfileData> profiles = loadProfilesForTenant(tenantId);
+                if (profiles.isEmpty()) {
+                    log.info("No profiles found for tenant {} — skipping Cerbos policy sync", tenantId);
+                    return;
+                }
+                List<Map<String, Object>> activeCollections = bootstrapRepository.findActiveCollections();
+                List<String> collectionIds = activeCollections.stream()
+                        .map(row -> (String) row.get("id"))
+                        .filter(Objects::nonNull)
+                        .toList();
+                // id -> API name, so the record policy CEL can key on the collection name the
+                // worker record advice passes (the collection policy stays UUID-keyed for the
+                // gateway). See generateRecordPolicy.
+                Map<String, String> collectionIdToName = new LinkedHashMap<>();
+                for (Map<String, Object> row : activeCollections) {
+                    String id = (String) row.get("id");
+                    String name = (String) row.get("name");
+                    if (id != null && name != null) {
+                        collectionIdToName.put(id, name);
+                    }
+                }
+                List<CerbosPolicyGenerator.CustomRule> customRules = loadCustomRulesForTenant(tenantId);
+
+                // Generate policies
+                Map<String, Object> derivedRoles = policyGenerator.generateDerivedRoles(tenantId, profiles);
+                Map<String, Object> systemPolicy = policyGenerator.generateSystemFeaturePolicy(tenantId, profiles);
+                Map<String, Object> collectionPolicy = policyGenerator.generateCollectionPolicy(tenantId, profiles, collectionIds);
+                Map<String, Object> fieldPolicy = policyGenerator.generateFieldPolicy(tenantId, profiles);
+                Map<String, Object> recordPolicy = policyGenerator.generateRecordPolicy(
+                        tenantId, profiles, collectionIds, customRules, collectionIdToName);
+
+                // Push to Cerbos Admin API
+                pushPolicy(derivedRoles);
+                pushPolicy(systemPolicy);
+                pushPolicy(collectionPolicy);
+                pushPolicy(fieldPolicy);
+                pushPolicy(recordPolicy);
+
+                log.info("Cerbos policies synced for tenant {} ({} profiles, {} collections)",
+                        tenantId, profiles.size(), collectionIds.size());
+
+                // Evict cached permissions — profile permissions may have changed
+                cacheManager.evictAllPermissions();
+
+                publishPolicyChangedEvent(tenantId);
+            } catch (Exception e) {
+                log.error("Failed to sync Cerbos policies for tenant {}: {}", tenantId, e.getMessage(), e);
+            }
+        });
     }
 
     /**

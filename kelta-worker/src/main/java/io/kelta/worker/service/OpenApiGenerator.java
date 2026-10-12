@@ -250,6 +250,9 @@ public class OpenApiGenerator {
         var attributes = new LinkedHashMap<String, Object>();
         var required = new ArrayList<String>();
         for (FieldDefinition field : col.fields()) {
+            if (field.serverOnly()) {
+                continue; // server-only: a caller-supplied value is ignored
+            }
             attributes.put(field.name(), mapFieldType(field));
             if (!field.nullable() && field.defaultValue() == null) {
                 required.add(field.name());
@@ -286,6 +289,9 @@ public class OpenApiGenerator {
         var attributes = new LinkedHashMap<String, Object>();
         var relationships = new LinkedHashMap<String, Object>();
         for (FieldDefinition field : col.fields()) {
+            if (field.serverOnly()) {
+                continue; // server-only: never serialized
+            }
             if (field.referenceConfig() != null) {
                 relationships.put(field.name(), relationshipSchema(field));
             } else {

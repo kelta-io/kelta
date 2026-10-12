@@ -1,12 +1,12 @@
 package io.kelta.runtime.context;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -43,22 +43,15 @@ class TenantAwareDataSourceTest {
         when(conn.createStatement()).thenReturn(stmt);
         when(conn.isClosed()).thenReturn(false);
         tenantDataSource = new TenantAwareDataSource(delegate);
-        TenantContext.clear();
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Test
     @DisplayName("tenant-scoped connection uses SET LOCAL inside a transaction and commits on close")
     void tenantScopedUsesSetLocalAndCommitsOnClose() throws Exception {
-        TenantContext.set("tenant-abc");
         // Autocommit on borrow, then off once we begin the transaction (read twice).
         when(conn.getAutoCommit()).thenReturn(true, false);
 
-        Connection borrowed = tenantDataSource.getConnection();
+        Connection borrowed = borrowAs("tenant-abc");
 
         // Began a transaction and issued the transaction-local set — NOT a session SET.
         verify(conn).setAutoCommit(false);
@@ -76,10 +69,9 @@ class TenantAwareDataSourceTest {
     @Test
     @DisplayName("connection already inside a transaction only issues SET LOCAL")
     void existingTransactionOnlySetsLocal() throws Exception {
-        TenantContext.set("tenant-xyz");
         when(conn.getAutoCommit()).thenReturn(false); // already in a Spring-managed transaction
 
-        Connection borrowed = tenantDataSource.getConnection();
+        Connection borrowed = borrowAs("tenant-xyz");
 
         verify(stmt).execute("SET LOCAL app.current_tenant_id = 'tenant-xyz'");
         // We must not toggle autocommit or take over commit/close from the owning transaction.
@@ -91,7 +83,6 @@ class TenantAwareDataSourceTest {
     @Test
     @DisplayName("no tenant in context keeps the legacy session SET '' (admin/bypass path unchanged)")
     void noTenantUsesSessionSet() throws Exception {
-        TenantContext.clear();
         when(conn.getAutoCommit()).thenReturn(true);
 
         Connection borrowed = tenantDataSource.getConnection();
@@ -105,10 +96,9 @@ class TenantAwareDataSourceTest {
     @Test
     @DisplayName("when the owning transaction commits, close does not commit again")
     void ownerCommitPreventsDoubleCommit() throws Exception {
-        TenantContext.set("tenant-abc");
         when(conn.getAutoCommit()).thenReturn(true, false);
 
-        Connection borrowed = tenantDataSource.getConnection();
+        Connection borrowed = borrowAs("tenant-abc");
         borrowed.commit(); // owner (e.g. Spring) commits the transaction
         borrowed.close();
 
@@ -120,10 +110,9 @@ class TenantAwareDataSourceTest {
     @Test
     @DisplayName("when the owning transaction rolls back, close restores autocommit without committing")
     void ownerRollbackPreventsCommit() throws Exception {
-        TenantContext.set("tenant-abc");
         when(conn.getAutoCommit()).thenReturn(true, false);
 
-        Connection borrowed = tenantDataSource.getConnection();
+        Connection borrowed = borrowAs("tenant-abc");
         borrowed.rollback();
         borrowed.close();
 
@@ -136,11 +125,10 @@ class TenantAwareDataSourceTest {
     @Test
     @DisplayName("commit failure on close rolls back and still restores autocommit")
     void commitFailureRollsBack() throws Exception {
-        TenantContext.set("tenant-abc");
         when(conn.getAutoCommit()).thenReturn(true, false);
         org.mockito.Mockito.doThrow(new java.sql.SQLException("commit boom")).when(conn).commit();
 
-        Connection borrowed = tenantDataSource.getConnection();
+        Connection borrowed = borrowAs("tenant-abc");
         borrowed.close();
 
         verify(conn).rollback();
@@ -151,11 +139,16 @@ class TenantAwareDataSourceTest {
     @Test
     @DisplayName("tenant id with a quote is escaped in the SET LOCAL statement")
     void tenantIdIsEscaped() throws Exception {
-        TenantContext.set("ten'ant");
         when(conn.getAutoCommit()).thenReturn(true, false);
 
-        tenantDataSource.getConnection();
+        borrowAs("ten'ant");
 
         verify(stmt).execute("SET LOCAL app.current_tenant_id = 'ten''ant'");
+    }
+
+    /** Borrows a connection the way a caller inside a tenant scope would. */
+    private Connection borrowAs(String tenantId) throws SQLException {
+        return ScopedValue.where(TenantContext.CURRENT_TENANT, tenantId)
+                .call(() -> tenantDataSource.getConnection());
     }
 }

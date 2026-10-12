@@ -1,15 +1,14 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.CallerContext;
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.service.CerbosAuthorizationService;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.CollectionLifecycleManager;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,6 +36,7 @@ import static org.mockito.Mockito.when;
  * on this static route, so the controller enforces it).
  */
 @DisplayName("AtomicOperationsController")
+@WithTenant("tenant-1")
 class AtomicOperationsControllerTest {
 
     private AtomicOperationsController controller;
@@ -57,17 +57,11 @@ class AtomicOperationsControllerTest {
         request = mock(HttpServletRequest.class);
         controller = new AtomicOperationsController(queryEngine, registry, lifecycleManager,
                 authzService, permissionResolver, 100);
-        TenantContext.set("tenant-1");
 
         // Default: an authenticated caller with identity headers present.
         when(permissionResolver.getEmail(request)).thenReturn("u@x.io");
         when(permissionResolver.getProfileId(request)).thenReturn("profile-1");
         when(permissionResolver.getTenantId(request)).thenReturn("tenant-1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Test

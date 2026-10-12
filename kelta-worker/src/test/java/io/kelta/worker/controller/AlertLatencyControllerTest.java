@@ -1,12 +1,11 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.AlertDeliveryRepository;
 import io.kelta.worker.repository.AlertDeliveryRepository.DeliveryLatencyRow;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @DisplayName("AlertLatencyController")
+@WithTenant("t1")
 class AlertLatencyControllerTest {
 
     private static final String TENANT = "t1";
@@ -55,12 +55,6 @@ class AlertLatencyControllerTest {
         bootstrapRepository = mock(BootstrapRepository.class);
         controller = new AlertLatencyController(deliveryRepository, permissionResolver,
                 bootstrapRepository);
-        TenantContext.set(TENANT);
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private HttpServletRequest request(String userType, boolean manageData) {

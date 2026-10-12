@@ -1505,6 +1505,27 @@ field's masking config toggles. Still deferred to v2: **dashboards** (shared
 Superset widget cache is not per-viewer) and the system-tier contexts above —
 see `concerns.md`.
 
+**Server-only fields** — a field declared `FieldDefinition.serverOnly` (`.withServerOnly(true)`)
+holds material the platform keeps for itself (encrypted secrets, secret/token hashes) and is never
+serialized, for any caller, regardless of profile. Unlike FLS and masking it is not per-viewer and
+is not enforced by an advice: `DefaultQueryEngine` removes server-only keys from every
+`executeQuery`/`getById` result (sparse `fields[]` included), from the `create`/`update` return value
+and from the `record.changed` payloads (`data` and `previousData`), so includes, exports, reports,
+flows, MCP, realtime and webhooks inherit it; it rejects a server-only field as a filter, sort or
+aggregation key with 400 (a predicate over a value the engine never returns would disclose it);
+and it drops a caller-supplied value on create/update before the before-save hooks run, so only a
+hook (e.g. `CredentialEncryptionHook`, `OidcProviderSecretHook`) can set one — hooks themselves
+receive the full record. Defence in depth: `DynamicCollectionRouter.toJsonApiResourceObject` skips
+them, `CollectionSchemaController` and `OpenApiGenerator` leave them out of the API shape, and
+`SearchIndexService`, `FieldHistoryHook`, `RecordVersionHook` and `AuditBeforeSaveHook` exclude them.
+Code that needs the value (credential resolution, OIDC token exchange, connected-app/OAuth token
+lookup) reads the column over JDBC (`CredentialRepository`, `CredentialOAuthTokenRepository`,
+`BootstrapRepository`), never through the query engine. Declared fields: `credentials.dataEnc`,
+`credential-oauth-tokens.accessTokenEnc`/`refreshTokenEnc`, `oidc-providers.clientSecretEnc`,
+`connected-apps.clientSecretHash`, `connected-app-tokens.tokenHash` (pinned by
+`SystemCollectionDefinitionsTest`). The flag is declared in code; tenant-authored fields cannot set
+it yet.
+
 **Field history** — value changes to fields with `trackHistory=true` are captured
 by `FieldHistoryHook` (worker `listener/`, wildcard `BeforeSaveHook`, order 900):
 `afterCreate`/`afterUpdate` diff old vs new, `beforeDelete` re-reads the record for

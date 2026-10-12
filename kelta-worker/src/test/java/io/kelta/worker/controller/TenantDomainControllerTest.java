@@ -1,12 +1,12 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.events.RecordEventPublisher;
 import io.kelta.worker.cache.WorkerCacheManager;
 import io.kelta.worker.listener.CustomDomainEventPublisher;
 import io.kelta.worker.service.DomainOwnershipVerifier;
 import io.kelta.worker.service.LoggingCustomDomainProvisioner;
+import io.kelta.worker.util.WithTenant;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,6 +24,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("TenantDomainController Tests")
+@WithTenant("tenant-1")
 class TenantDomainControllerTest {
 
     @Mock private JdbcTemplate jdbcTemplate;
@@ -41,12 +42,6 @@ class TenantDomainControllerTest {
                 .thenAnswer(inv -> "_kelta-verify." + inv.getArgument(0));
         controller = new TenantDomainController(jdbcTemplate, cacheManager, recordEventPublisher,
                 domainEventPublisher, new LoggingCustomDomainProvisioner(), ownershipVerifier);
-        TenantContext.set("tenant-1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Test

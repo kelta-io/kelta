@@ -1,8 +1,8 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -23,6 +23,7 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("PersonalAccessTokenController Tests")
+@WithTenant("tenant-1")
 class PersonalAccessTokenControllerTest {
 
     @Mock private JdbcTemplate jdbcTemplate;
@@ -35,14 +36,8 @@ class PersonalAccessTokenControllerTest {
     @BeforeEach
     void setUp() {
         controller = new PersonalAccessTokenController(jdbcTemplate, redisTemplate, userIdResolver);
-        TenantContext.set("tenant-1");
         // Default: resolve email to UUID
         lenient().when(userIdResolver.resolve(eq("user-1"), eq("tenant-1"))).thenReturn("user-1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Nested
@@ -67,9 +62,8 @@ class PersonalAccessTokenControllerTest {
         }
 
         @Test
+        @WithTenant(none = true)
         void shouldReturn400WhenNoTenantContext() {
-            TenantContext.clear();
-
             var response = controller.listTokens("user-1");
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);

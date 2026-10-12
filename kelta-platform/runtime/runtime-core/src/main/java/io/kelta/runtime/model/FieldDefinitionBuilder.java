@@ -36,6 +36,7 @@ public class FieldDefinitionBuilder {
     private Map<String, Object> fieldTypeConfig;
     private String columnName;
     private String description;
+    private boolean serverOnly = false;
 
     /**
      * Creates a new field definition builder.
@@ -176,6 +177,17 @@ public class FieldDefinitionBuilder {
     }
 
     /**
+     * Marks the field server-only: kept by the platform and never serialized out of the worker.
+     *
+     * @param serverOnly whether the field is server-only
+     * @return this builder for method chaining
+     */
+    public FieldDefinitionBuilder serverOnly(boolean serverOnly) {
+        this.serverOnly = serverOnly;
+        return this;
+    }
+
+    /**
      * Builds the field definition.
      * 
      * @return the constructed field definition
@@ -202,7 +214,8 @@ public class FieldDefinitionBuilder {
             fieldTypeConfig,
             columnName,
             false,
-            description
+            description,
+            serverOnly
         );
     }
     

@@ -133,6 +133,7 @@ public class FieldHistoryHook implements BeforeSaveHook {
         }
         List<String> trackedFields = definition.fields().stream()
                 .filter(FieldDefinition::trackHistory)
+                .filter(field -> !field.serverOnly()) // a server-only value never enters history
                 .map(FieldDefinition::name)
                 .toList();
         if (trackedFields.isEmpty()) {

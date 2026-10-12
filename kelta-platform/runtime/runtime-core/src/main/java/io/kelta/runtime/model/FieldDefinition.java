@@ -25,6 +25,13 @@ import java.util.Objects;
  * @param description One-line, human-readable explanation of what the field holds. Surfaced by
  *                    {@code GET /api/collections/{name}/schema} and the generated OpenAPI document,
  *                    so an API client can learn a field's meaning without reading platform source.
+ * @param serverOnly Whether the field is server-only (default: false). A server-only field holds
+ *                   material the platform keeps for itself — encrypted secrets, token or secret
+ *                   hashes — and is never serialized out of the worker: the query engine removes
+ *                   it from every record it returns and from record-change events, rejects it as
+ *                   a filter, sort or aggregation field, and ignores a caller-supplied value on
+ *                   create/update (hooks may still set it). Platform code that needs the value
+ *                   reads the column directly.
  *
  * @since 1.0.0
  */
@@ -41,7 +48,8 @@ public record FieldDefinition(
     Map<String, Object> fieldTypeConfig,
     String columnName,
     boolean trackHistory,
-    String description
+    String description,
+    boolean serverOnly
 ) {
     /**
      * Compact constructor with validation and defensive copying.
@@ -57,6 +65,21 @@ public record FieldDefinition(
         enumValues = enumValues != null ? List.copyOf(enumValues) : null;
         // Defensive copy for fieldTypeConfig
         fieldTypeConfig = fieldTypeConfig != null ? Map.copyOf(fieldTypeConfig) : null;
+    }
+
+    /**
+     * Backward-compatible constructor without the serverOnly parameter.
+     * Delegates to the canonical constructor with serverOnly = false.
+     */
+    public FieldDefinition(
+            String name, FieldType type, boolean nullable, boolean immutable,
+            boolean unique, Object defaultValue, ValidationRules validationRules,
+            List<String> enumValues, ReferenceConfig referenceConfig,
+            Map<String, Object> fieldTypeConfig, String columnName, boolean trackHistory,
+            String description) {
+        this(name, type, nullable, immutable, unique, defaultValue,
+             validationRules, enumValues, referenceConfig, fieldTypeConfig, columnName,
+             trackHistory, description, false);
     }
 
     /**
@@ -251,7 +274,7 @@ public record FieldDefinition(
     public FieldDefinition withColumnName(String columnName) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
     }
 
     /**
@@ -363,7 +386,7 @@ public record FieldDefinition(
     public FieldDefinition withNullable(boolean nullable) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
     }
 
     /**
@@ -375,7 +398,7 @@ public record FieldDefinition(
     public FieldDefinition withUnique(boolean unique) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
     }
 
     /**
@@ -387,7 +410,7 @@ public record FieldDefinition(
     public FieldDefinition withDefault(Object defaultValue) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
     }
 
     /**
@@ -399,7 +422,7 @@ public record FieldDefinition(
     public FieldDefinition withValidation(ValidationRules validationRules) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
     }
 
     /**
@@ -411,7 +434,7 @@ public record FieldDefinition(
     public FieldDefinition withImmutable(boolean immutable) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
     }
 
     /**
@@ -423,7 +446,7 @@ public record FieldDefinition(
     public FieldDefinition withEnumValues(java.util.List<String> enumValues) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
     }
 
     /**
@@ -435,7 +458,7 @@ public record FieldDefinition(
     public FieldDefinition withReferenceConfig(ReferenceConfig referenceConfig) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
     }
 
     /**
@@ -447,7 +470,7 @@ public record FieldDefinition(
     public FieldDefinition withTrackHistory(boolean trackHistory) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
     }
 
     /**
@@ -459,6 +482,18 @@ public record FieldDefinition(
     public FieldDefinition withDescription(String description) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+    }
+
+    /**
+     * Returns a copy of this field with the serverOnly flag changed.
+     *
+     * @param serverOnly whether the field is kept server-side and never serialized
+     * @return a new field definition with the specified serverOnly flag
+     */
+    public FieldDefinition withServerOnly(boolean serverOnly) {
+        return new FieldDefinition(name, type, nullable, immutable, unique,
+                defaultValue, validationRules, enumValues, referenceConfig,
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
     }
 }

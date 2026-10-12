@@ -1,10 +1,10 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.PackageImportService;
 import io.kelta.worker.service.PackageService;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.*;
 import org.springframework.http.HttpStatus;
@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @DisplayName("PackageController")
+@WithTenant("t1")
 class PackageControllerTest {
 
     private PackageService packageService;
@@ -42,13 +43,7 @@ class PackageControllerTest {
         request = mock(HttpServletRequest.class);
         controller = new PackageController(packageService, objectMapper,
                 permissionResolver, bootstrapRepository);
-        TenantContext.set("t1");
         grantPermission();
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private void grantPermission() {
@@ -130,8 +125,8 @@ class PackageControllerTest {
 
         @Test
         @DisplayName("Should return 400 when no tenant context")
+        @WithTenant(none = true)
         void shouldReturn400WhenNoTenant() {
-            TenantContext.clear();
             var response = controller.getHistory(request);
             assertThat(response.getStatusCode().value()).isEqualTo(400);
         }

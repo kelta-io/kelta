@@ -1,7 +1,6 @@
 package io.kelta.worker.controller;
 
 import tools.jackson.databind.ObjectMapper;
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.Pagination;
@@ -16,7 +15,7 @@ import io.kelta.worker.repository.WatchRepository;
 import io.kelta.worker.repository.WatchTargetRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.entitlement.EntitlementService;
-import org.junit.jupiter.api.AfterEach;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,6 +57,7 @@ class WatchRelatedListMvcTest {
 
     @Test
     @DisplayName("GET /api/watches?filter[memberId][eq]={userId} renders that user's watches for an admin")
+    @WithTenant("t1")
     void relatedListRendersWatchesForAUser() throws Exception {
         WatchRepository watchRepository = mock(WatchRepository.class);
         WatchTargetRepository targetRepository = mock(WatchTargetRepository.class);
@@ -87,20 +87,15 @@ class WatchRelatedListMvcTest {
                 registry, entitlements, userIdResolver, permissionResolver, bootstrapRepository,
                 new ObjectMapper(), dynamicCollectionRouter, "");
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
-        TenantContext.set(TENANT);
-        try {
-            mvc.perform(get("/api/watches")
-                            .header("X-Tenant-ID", TENANT)
-                            .header("X-User-Id", STAFF)
-                            .header("X-User-Type", "INTERNAL")
-                            .param("filter[memberId][eq]", USER_ID)
-                            .param("page[size]", "5"))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.length()").value(1))
-                    .andExpect(jsonPath("$.data[0].id").value("w1"));
-        } finally {
-            TenantContext.clear();
-        }
+        mvc.perform(get("/api/watches")
+                        .header("X-Tenant-ID", TENANT)
+                        .header("X-User-Id", STAFF)
+                        .header("X-User-Type", "INTERNAL")
+                        .param("filter[memberId][eq]", USER_ID)
+                        .param("page[size]", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].id").value("w1"));
 
         ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
         verify(queryEngine).executeQuery(any(), captor.capture());

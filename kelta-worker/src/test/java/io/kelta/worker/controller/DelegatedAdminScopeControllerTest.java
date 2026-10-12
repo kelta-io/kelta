@@ -1,14 +1,13 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -38,6 +37,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("DelegatedAdminScopeController Tests")
+@WithTenant("tenant-1")
 class DelegatedAdminScopeControllerTest {
 
     private static final String COLLECTION = "delegated-admin-scopes";
@@ -62,12 +62,6 @@ class DelegatedAdminScopeControllerTest {
     void setUp() {
         controller = new DelegatedAdminScopeController(
                 queryEngine, collectionRegistry, permissionResolver, bootstrapRepository);
-        TenantContext.set("tenant-1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private void grantManageDelegatedAdmins() {
