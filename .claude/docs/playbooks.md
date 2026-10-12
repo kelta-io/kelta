@@ -210,7 +210,7 @@ classloader; bundling them puts a second copy of the runtime model in the JAR an
 platform type fails).
 
 1. **Implement `KeltaModule`** (`runtime-core/.../workflow/module/KeltaModule.java`) with a public
-   no-arg constructor — `RuntimeModuleManager.loadFromJar` instantiates it reflectively. Build
+   no-arg constructor — `ModuleLoader.loadFromJar` instantiates it reflectively. Build
    handlers in `onStartup(ModuleContext)`, not the constructor: the context does not exist yet at
    construction. `context.getExtension(CredentialResolverPort.class)` is how a module reaches the
    credential vault — the only supported way to hold a secret.
