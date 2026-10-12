@@ -16,12 +16,12 @@ Tenant scoping is enforced once, in `PhysicalTableStorageAdapter.query()` (PLT-2
 scoped without knowing it. `aggregate()`, `semanticSearch()` and the `COUNT(*)` behind
 `totalCount` get the same predicate. Self-scoped `tenants` gets `id = <bound tenant>` on every
 read path including `getById` (PLT-330). `DynamicCollectionRouter` keeps its own injection as a
-second layer; both read the shared-rows list from `SystemCollectionTenancy`.
+second layer (`RecordTenantScope`); both read the shared-rows list from `SystemCollectionTenancy`.
 
 **Still open:**
 - **By-id and write paths remain router-only** for `tenant_id`-scoped system collections:
-  `getById`, `update` and `delete` take no tenant predicate, so `visibleToTenant` (`GET /:id`)
-  and `injectTenantId` (writes) are the only application-layer check. A direct caller can load a
+  `getById`, `update` and `delete` take no tenant predicate, so `RecordTenantScope.visibleToTenant` (`GET /:id`)
+  and `RecordTenantScope.injectTenantId` (creates) are the only application-layer check. A direct caller can load a
   single foreign system record by guessing its id. Closing it needs a pass over the
   cross-tenant write paths (provisioning, promotion, the create read-back) that legitimately
   touch another tenant.
@@ -367,7 +367,6 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 |------|------:|--------------|
 | `PhysicalTableStorageAdapter.java` (runtime-core) | 2,423 | Extract SQL builder / DDL classes; separate concerns |
 | `CollectionDetailPage.tsx` (kelta-ui) | 2,208 | Split tabs into their own components |
-| `DynamicCollectionRouter.java` (runtime-core) | 2,043 | Extract RouteResolutionHandler, InclusionHandler, FieldMapperHandler |
 | `FieldEditor.tsx` (kelta-ui) | 1,988 | Split per-type config sections |
 | `PageBuilderPage.tsx` (kelta-ui) | 1,474 | Extract page-list table, config modal, editor shell |
 | `RuntimeModuleManager.java` (kelta-worker) | 1,300 | Split JAR loading / registration / lifecycle |
@@ -449,6 +448,29 @@ when the issuer differs from production. Guard: `e2e-tests/tests/auth/real-sign-
 classpath; wiring it with `same-site: strict` would break the cross-site local sign-in hop, and
 multi-replica kelta-auth has no shared sessions today. The harness uses `http://kelta-auth:8080`
 consistently.
+
+### `DynamicCollectionRouter` internals (split 2026-10-12)
+
+The router was 2,021 lines with the write pipeline copied into create/update/patch and each
+sub-resource variant; it is now 763 lines of HTTP surface plus package-private collaborators
+(`RecordWritePipeline`, `JsonApiIncludeResolver`, `RecordTenantScope`, `CollectionResolver`,
+`RecordETag`) and the pure `router/jsonapi` serializers — see `architecture.md` → Worker Layers.
+- **Change behaviour only with a golden diff.** `DynamicCollectionRouterGoldenTest` pins 91 cases
+  (status, headers, body and the ordered storage/cache/user-resolver call log), and
+  `DynamicCollectionRouterRequestMappingTest` pins every mapping attribute and public signature
+  (worker controllers call the handlers directly; the advices depend on the return types). A
+  refactor leaves `router-golden/*.json` untouched.
+- **Still duplicates `runtime-jsonapi`.** `JsonApiRecordSerializer` is not built on
+  `JsonApiResponseBuilder`/`ResourceObject`: the library cannot produce the router's documents
+  (no relationships, no server-only/orphan-column filtering, no `meta`+`metadata`+`links` list
+  envelope, `LinkedHashMap` documents, a `code` on errors), and the router's output was kept
+  rather than bent to fit. Only `PaginationLinks` is shared. Converging means extending the library
+  to this shape, then deleting the router copy.
+- **Known divergences pinned as-is** (each fix is a deliberate golden update): the read-only `403`
+  body has no `code` or `meta.requestId` (`conventions.md` requires `code` on every 4xx); a cached
+  system-collection get-by-id omits the `ETag` header the uncached path sends; the sub-resource
+  update/delete routes do not apply `If-Match`, and `GET /{parent}/{parentId}/{child}/{childId}`
+  sends no `ETag`.
 
 ### `DynamicCollectionRouter` shadows any `/**` mapping under `/api` (GET only)
 

@@ -1,0 +1,11 @@
+{
+  "status" : 204,
+  "headers" : { },
+  "body" : null,
+  "calls" : [ {
+    "collection" : "contacts",
+    "id" : "con-2",
+    "op" : "delete",
+    "tenant" : "tenant-a"
+  } ]
+}

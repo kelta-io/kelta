@@ -1,0 +1,17 @@
+{
+  "status" : 404,
+  "headers" : { },
+  "body" : null,
+  "calls" : [ {
+    "collection" : "ui-menus",
+    "hit" : false,
+    "id" : "menu-b",
+    "op" : "cache.getByIdResponse",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "ui-menus",
+    "id" : "menu-b",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  } ]
+}

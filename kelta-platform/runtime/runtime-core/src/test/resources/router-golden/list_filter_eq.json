@@ -1,0 +1,54 @@
+{
+  "status" : 200,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : [ {
+      "attributes" : {
+        "amount" : 100.5,
+        "amount_currency_code" : "USD",
+        "createdAt" : "2026-01-01T00:00:00Z",
+        "createdBy" : "user-1",
+        "name" : "Acme",
+        "region" : "reg-1",
+        "slug" : "acme",
+        "updatedAt" : "2026-01-01T00:00:00Z",
+        "updatedBy" : "user-2"
+      },
+      "id" : "acc-1",
+      "relationships" : {
+        "region" : {
+          "data" : {
+            "id" : "reg-1",
+            "type" : "regions"
+          }
+        }
+      },
+      "type" : "accounts"
+    } ],
+    "links" : {
+      "next" : null,
+      "prev" : null,
+      "self" : "/api/accounts?filter%5Bname%5D%5Beq%5D=Acme&page[number]=1&page[size]=20"
+    },
+    "meta" : {
+      "currentPage" : 1,
+      "pageSize" : 20,
+      "totalCount" : 1,
+      "totalPages" : 1
+    },
+    "metadata" : {
+      "currentPage" : 1,
+      "pageSize" : 20,
+      "totalCount" : 1,
+      "totalPages" : 1
+    }
+  },
+  "calls" : [ {
+    "collection" : "accounts",
+    "op" : "executeQuery",
+    "query" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=20], sorting=[], fields=[], filters=[FilterCondition[fieldName=name, operator=EQ, value=Acme]]]",
+    "tenant" : "tenant-a"
+  } ]
+}

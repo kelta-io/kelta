@@ -1,0 +1,37 @@
+{
+  "status" : 400,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "pattern",
+      "detail" : "Value is not allowed",
+      "meta" : {
+        "requestId" : "<requestId>"
+      },
+      "source" : {
+        "pointer" : "/data/attributes/name"
+      },
+      "status" : "400",
+      "title" : "Validation Error"
+    } ]
+  },
+  "calls" : [ {
+    "identifier" : "alice@example.com",
+    "op" : "userIdResolver.resolve",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "accounts",
+    "data" : {
+      "createdBy" : "11111111-1111-1111-1111-111111111111",
+      "createdGeo" : null,
+      "name" : "INVALID",
+      "slug" : "bad",
+      "updatedBy" : "11111111-1111-1111-1111-111111111111",
+      "updatedGeo" : null
+    },
+    "op" : "create",
+    "tenant" : "tenant-a"
+  } ]
+}

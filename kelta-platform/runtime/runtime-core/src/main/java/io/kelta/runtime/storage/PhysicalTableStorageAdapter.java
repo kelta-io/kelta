@@ -737,7 +737,7 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         List<Object> params = new ArrayList<>();
         params.add(id);
         // Only self-scoped collections are narrowed here: for tenant_id-scoped ones get-by-id
-        // stays router-side (DynamicCollectionRouter.visibleToTenant), but nothing downstream
+        // stays router-side (the router's RecordTenantScope.visibleToTenant), but nothing downstream
         // could narrow a tenants row and a foreign id must read as absent.
         if (SystemCollectionTenancy.isSelfScoped(definition)) {
             TenantScope scope = tenantScope(definition, tableRef);

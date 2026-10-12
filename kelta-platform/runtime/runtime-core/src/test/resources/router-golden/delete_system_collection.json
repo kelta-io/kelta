@@ -1,0 +1,15 @@
+{
+  "status" : 204,
+  "headers" : { },
+  "body" : null,
+  "calls" : [ {
+    "collection" : "ui-menus",
+    "id" : "menu-2",
+    "op" : "delete",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "ui-menus",
+    "op" : "cache.evict",
+    "tenant" : "tenant-a"
+  } ]
+}

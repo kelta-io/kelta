@@ -1,0 +1,11 @@
+{
+  "status" : 404,
+  "headers" : { },
+  "body" : null,
+  "calls" : [ {
+    "collection" : "accounts",
+    "id" : "00000000-0000-0000-0000-000000000999",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  } ]
+}

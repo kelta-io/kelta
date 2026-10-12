@@ -1,0 +1,110 @@
+{
+  "status" : 200,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : [ {
+      "attributes" : {
+        "amount" : 100.5,
+        "amount_currency_code" : "USD",
+        "createdAt" : "2026-01-01T00:00:00Z",
+        "createdBy" : "user-1",
+        "name" : "Acme",
+        "region" : "reg-1",
+        "slug" : "acme",
+        "updatedAt" : "2026-01-01T00:00:00Z",
+        "updatedBy" : "user-2"
+      },
+      "id" : "acc-1",
+      "relationships" : {
+        "region" : {
+          "data" : {
+            "id" : "reg-1",
+            "type" : "regions"
+          }
+        }
+      },
+      "type" : "accounts"
+    }, {
+      "attributes" : {
+        "amount" : null,
+        "createdAt" : "2026-01-01T00:00:00Z",
+        "createdBy" : "user-1",
+        "name" : "Beta",
+        "region" : null,
+        "slug" : "beta",
+        "updatedAt" : "2026-01-03T00:00:00Z",
+        "updatedBy" : "user-1"
+      },
+      "id" : "acc-2",
+      "relationships" : {
+        "region" : {
+          "data" : null
+        }
+      },
+      "type" : "accounts"
+    }, {
+      "attributes" : {
+        "createdAt" : "2026-01-01T00:00:00Z",
+        "createdBy" : "user-2",
+        "name" : "Gamma",
+        "region" : "reg-2",
+        "slug" : "gamma",
+        "updatedAt" : "2026-01-01T00:00:00Z",
+        "updatedBy" : "user-2"
+      },
+      "id" : "acc-3",
+      "relationships" : {
+        "region" : {
+          "data" : {
+            "id" : "reg-2",
+            "type" : "regions"
+          }
+        }
+      },
+      "type" : "accounts"
+    } ],
+    "included" : [ {
+      "attributes" : {
+        "email" : "a@x.test"
+      },
+      "id" : "user-1",
+      "type" : "users"
+    }, {
+      "attributes" : {
+        "email" : "b@x.test"
+      },
+      "id" : "user-2",
+      "type" : "users"
+    } ],
+    "links" : {
+      "next" : null,
+      "prev" : null,
+      "self" : "/api/accounts?include=users&page[number]=1&page[size]=20"
+    },
+    "meta" : {
+      "currentPage" : 1,
+      "pageSize" : 20,
+      "totalCount" : 3,
+      "totalPages" : 1
+    },
+    "metadata" : {
+      "currentPage" : 1,
+      "pageSize" : 20,
+      "totalCount" : 3,
+      "totalPages" : 1
+    }
+  },
+  "calls" : [ {
+    "collection" : "accounts",
+    "op" : "executeQuery",
+    "query" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=20], sorting=[], fields=[], filters=[]]",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "users",
+    "op" : "executeQuery",
+    "query" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=1000], sorting=[], fields=[], filters=[FilterCondition[fieldName=id, operator=IN, value=[user-1, user-2]]]]",
+    "tenant" : "tenant-a"
+  } ]
+}

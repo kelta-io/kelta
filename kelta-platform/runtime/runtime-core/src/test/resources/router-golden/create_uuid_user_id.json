@@ -1,0 +1,35 @@
+{
+  "status" : 201,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : {
+      "attributes" : {
+        "createdAt" : "2026-02-01T00:00:00Z",
+        "createdBy" : "22222222-2222-2222-2222-222222222222",
+        "createdGeo" : null,
+        "name" : "Zed",
+        "slug" : "zed",
+        "updatedAt" : "2026-02-01T00:00:00Z",
+        "updatedBy" : "22222222-2222-2222-2222-222222222222",
+        "updatedGeo" : null
+      },
+      "id" : "accounts-new-1",
+      "type" : "accounts"
+    }
+  },
+  "calls" : [ {
+    "collection" : "accounts",
+    "data" : {
+      "createdBy" : "22222222-2222-2222-2222-222222222222",
+      "createdGeo" : null,
+      "name" : "Zed",
+      "slug" : "zed",
+      "updatedBy" : "22222222-2222-2222-2222-222222222222",
+      "updatedGeo" : null
+    },
+    "op" : "create",
+    "tenant" : "tenant-a"
+  } ]
+}

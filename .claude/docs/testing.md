@@ -114,6 +114,18 @@ class GatewayMetricsTest {
   request. MockMvc runs on the test thread, so controllers see it. Elsewhere, wrap the call in
   `TenantContext.runWithTenant`/`callWithTenant`, or `ScopedValue.where(TenantContext.CURRENT_TENANT,
   id).call(...)` when the code under test throws a checked exception (`TenantAwareDataSourceTest`).
+- **Characterization (golden) tests before refactoring a fragile class** — `DynamicCollectionRouterGoldenTest`
+  drives every handler through MockMvc against a recording in-memory `QueryEngine` /
+  `SystemCollectionCache` / `UserIdResolver` and writes one JSON file per case
+  (`runtime-core/src/test/resources/router-golden/`): status, `ETag`/`Location`/`Content-Type`,
+  the body, and the **ordered call log** (what reached storage, with the bound `TenantContext`; cache
+  get/put/evict; user-id resolution) — so reordered side effects fail even when the body is
+  identical. Body object keys are compared sorted: `Map.of(...)` iteration order is randomized per
+  JVM, so a byte-exact compare is flaky (array order is kept). Only `requestId` is normalized.
+  Record with `-Drouter.golden.update=true` on the **unmodified** code, refactor, then the files
+  must not change; an intentional behaviour change is a reviewed golden diff. Pair it with a
+  reflective mapping test (`DynamicCollectionRouterRequestMappingTest`) when handler signatures or
+  Spring mapping ranking are part of the contract.
 - MockWebServer for HTTP service mocks
 - MockServerHttpRequest/Exchange for gateway filter tests
 - Immutable test data: `List.of(...)` for constants

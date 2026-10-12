@@ -1,0 +1,38 @@
+{
+  "status" : 200,
+  "headers" : {
+    "ETag" : "\"MjAyNi0wMS0wMVQwMDowMDowMFo\"",
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : {
+      "attributes" : {
+        "amount" : 100.5,
+        "amount_currency_code" : "USD",
+        "createdAt" : "2026-01-01T00:00:00Z",
+        "createdBy" : "user-1",
+        "name" : "Acme",
+        "region" : "reg-1",
+        "slug" : "acme",
+        "updatedAt" : "2026-01-01T00:00:00Z",
+        "updatedBy" : "user-2"
+      },
+      "id" : "acc-1",
+      "relationships" : {
+        "region" : {
+          "data" : {
+            "id" : "reg-1",
+            "type" : "regions"
+          }
+        }
+      },
+      "type" : "accounts"
+    }
+  },
+  "calls" : [ {
+    "collection" : "accounts",
+    "id" : "acc-1",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  } ]
+}

@@ -1,0 +1,19 @@
+{
+  "status" : 405,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "METHOD_NOT_ALLOWED",
+      "detail" : "Method POST is not supported for this endpoint",
+      "meta" : {
+        "path" : "/api/accounts/acc-1/contacts/con-1",
+        "requestId" : "<requestId>"
+      },
+      "status" : "405",
+      "title" : "Method Not Allowed"
+    } ]
+  },
+  "calls" : [ ]
+}

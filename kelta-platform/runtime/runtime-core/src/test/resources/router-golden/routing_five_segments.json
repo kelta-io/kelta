@@ -1,0 +1,19 @@
+{
+  "status" : 404,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "NOT_FOUND",
+      "detail" : "No handler for GET /api/a/b/c/d/e",
+      "meta" : {
+        "path" : "/api/a/b/c/d/e",
+        "requestId" : "<requestId>"
+      },
+      "status" : "404",
+      "title" : "Not Found"
+    } ]
+  },
+  "calls" : [ ]
+}

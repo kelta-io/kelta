@@ -336,7 +336,7 @@ Paginated list responses carry pagination state under both `meta` (the JSON:API 
 - URLs are **relative** paths — they reuse the request URI so cached system-collection responses remain reusable across hosts and behind load balancers.
 - Non-pagination query parameters (`filter[…]`, `sort`, `fields`, `include`) are preserved verbatim in the generated links; only `page[number]` and `page[size]` are rewritten.
 
-Link generation lives in `io.kelta.jsonapi.PaginationLinks.build(...)`; the dynamic collection router calls it from `toJsonApiListResponse(...)`.
+Link generation lives in `io.kelta.jsonapi.PaginationLinks.build(...)`; the dynamic collection router calls it from `JsonApiRecordSerializer.listDocument(...)` (runtime-core `router.jsonapi`).
 
 ### MCP tools
 
@@ -358,9 +358,9 @@ A LOOKUP/MASTER_DETAIL field's raw id is present in **both** places on every rea
 }
 ```
 
-`DynamicCollectionRouter#toJsonApiResourceObject` (`runtime-core`) is the single place
-this is built. Writes already accept the id via either shape — `extractAttributes` /
-`extractRelationships` merge into the same field, relationships taking precedence on
+`JsonApiRecordSerializer#resourceObject` (`runtime-core`, `router.jsonapi`) is the single place
+this is built. Writes already accept the id via either shape — `JsonApiRequestBody.attributes` /
+`relationshipFieldValues` merge into the same field, relationships taking precedence on
 conflict — so a client that reads a resource and PATCHes `attributes` straight back
 sees no diff and no spurious field-history row. `CerbosFieldSecurityAdvice` strips a
 denied LOOKUP/MASTER_DETAIL field from both places, not just `relationships` (an
@@ -550,7 +550,7 @@ rather than reinventing the create-vs-update decision:
 2. A match → a fresh single-resource `GET` by id (not the filtered list result), diffed
    against `attributes` — relationship-typed fields (`LOOKUP`/`MASTER_DETAIL`) are folded in
    from `relationships.<field>.data.id` before comparing, though in practice
-   `DynamicCollectionRouter.toJsonApiResourceObject` already echoes them into `attributes`
+   `JsonApiRecordSerializer.resourceObject` already echoes them into `attributes`
    too. No differing key → `{"action":"unchanged","id":...}`. Otherwise `PATCH` only the
    differing keys and report `{"action":"updated","id":...,"changed":[...]}`.
 

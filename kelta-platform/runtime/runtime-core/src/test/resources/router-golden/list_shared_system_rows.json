@@ -1,0 +1,59 @@
+{
+  "status" : 200,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : [ {
+      "attributes" : {
+        "name" : "users",
+        "systemCollection" : true,
+        "tenantId" : "00000000-0000-0000-0000-000000000001"
+      },
+      "id" : "col-sys",
+      "type" : "collections"
+    }, {
+      "attributes" : {
+        "name" : "accounts",
+        "systemCollection" : false,
+        "tenantId" : "tenant-a"
+      },
+      "id" : "col-a",
+      "type" : "collections"
+    } ],
+    "links" : {
+      "next" : null,
+      "prev" : null,
+      "self" : "/api/collections?page[number]=1&page[size]=20"
+    },
+    "meta" : {
+      "currentPage" : 1,
+      "pageSize" : 20,
+      "totalCount" : 2,
+      "totalPages" : 1
+    },
+    "metadata" : {
+      "currentPage" : 1,
+      "pageSize" : 20,
+      "totalCount" : 2,
+      "totalPages" : 1
+    }
+  },
+  "calls" : [ {
+    "collection" : "collections",
+    "hit" : false,
+    "op" : "cache.getListResponse",
+    "queryHash" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=20], sorting=[], fields=[], filters=[FilterCondition[fieldName=tenantId, operator=IN, value=[tenant-a, 00000000-0000-0000-0000-000000000001]]]]",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "collections",
+    "op" : "executeQuery",
+    "query" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=20], sorting=[], fields=[], filters=[FilterCondition[fieldName=tenantId, operator=IN, value=[tenant-a, 00000000-0000-0000-0000-000000000001]]]]",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "collections",
+    "op" : "cache.putListResponse",
+    "queryHash" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=20], sorting=[], fields=[], filters=[FilterCondition[fieldName=tenantId, operator=IN, value=[tenant-a, 00000000-0000-0000-0000-000000000001]]]]",
+    "tenant" : "tenant-a"
+  } ]
+}
