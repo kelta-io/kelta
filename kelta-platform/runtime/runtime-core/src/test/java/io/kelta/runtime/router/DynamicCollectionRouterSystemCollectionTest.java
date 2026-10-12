@@ -156,7 +156,7 @@ class DynamicCollectionRouterSystemCollectionTest {
         @Test
         @DisplayName("Should scope 'fields' list to caller tenant plus SYSTEM_TENANT_ID, like 'collections'")
         void list_scopesFieldsToTenantAndSystem() throws Exception {
-            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            CollectionDefinition def = io.kelta.runtime.model.system.CoreSystemCollections.fields();
             when(registry.get("fields")).thenReturn(def);
 
             QueryResult emptyResult = QueryResult.empty(Pagination.defaults());
@@ -184,7 +184,7 @@ class DynamicCollectionRouterSystemCollectionTest {
         @Test
         @DisplayName("Should exclude a non-system collection row owned by the platform tenant from another tenant's list")
         void list_excludesStrayNonSystemCollectionOwnedByPlatformTenant() throws Exception {
-            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();
+            CollectionDefinition def = io.kelta.runtime.model.system.CoreSystemCollections.collections();
             when(registry.get("collections")).thenReturn(def);
 
             String systemTenantId = io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID;
@@ -228,8 +228,8 @@ class DynamicCollectionRouterSystemCollectionTest {
             // The harness/e2e "default" tenant IS the platform tenant: a custom collection created
             // there has tenantId = SYSTEM_TENANT_ID and systemCollection = false. It is the caller's
             // own row, not a shared system row, and must not be narrowed away.
-            CollectionDefinition collectionsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();
-            CollectionDefinition fieldsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            CollectionDefinition collectionsDef = io.kelta.runtime.model.system.CoreSystemCollections.collections();
+            CollectionDefinition fieldsDef = io.kelta.runtime.model.system.CoreSystemCollections.fields();
             when(registry.get("collections")).thenReturn(collectionsDef);
             when(registry.get("fields")).thenReturn(fieldsDef);
 
@@ -264,7 +264,7 @@ class DynamicCollectionRouterSystemCollectionTest {
         @Test
         @DisplayName("Should leave an unbound (no X-Tenant-ID) collections list unfiltered, like injectTenantFilter/visibleToTenant")
         void list_leavesUnboundReadUnfiltered() throws Exception {
-            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();
+            CollectionDefinition def = io.kelta.runtime.model.system.CoreSystemCollections.collections();
             when(registry.get("collections")).thenReturn(def);
 
             String systemTenantId = io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID;
@@ -286,8 +286,8 @@ class DynamicCollectionRouterSystemCollectionTest {
         @Test
         @DisplayName("Should exclude fields of a stray platform-tenant custom collection from another tenant's list")
         void list_excludesFieldsOfStrayPlatformTenantCollection() throws Exception {
-            CollectionDefinition fieldsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
-            CollectionDefinition collectionsDef = io.kelta.runtime.model.system.SystemCollectionDefinitions.collections();
+            CollectionDefinition fieldsDef = io.kelta.runtime.model.system.CoreSystemCollections.fields();
+            CollectionDefinition collectionsDef = io.kelta.runtime.model.system.CoreSystemCollections.collections();
             when(registry.get("fields")).thenReturn(fieldsDef);
             when(registry.get("collections")).thenReturn(collectionsDef);
 
@@ -402,7 +402,7 @@ class DynamicCollectionRouterSystemCollectionTest {
         @Test
         @DisplayName("Should 404 another tenant's 'fields' row even when the engine returns it (RLS no-op)")
         void get_hidesOtherTenantsRow() throws Exception {
-            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            CollectionDefinition def = io.kelta.runtime.model.system.CoreSystemCollections.fields();
             when(registry.get("fields")).thenReturn(def);
             when(queryEngine.getById(def, FIELD_ID)).thenReturn(Optional.of(fieldRow("tenant-other")));
 
@@ -414,7 +414,7 @@ class DynamicCollectionRouterSystemCollectionTest {
         @Test
         @DisplayName("Should serve the caller's own 'fields' row")
         void get_servesOwnRow() throws Exception {
-            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            CollectionDefinition def = io.kelta.runtime.model.system.CoreSystemCollections.fields();
             when(registry.get("fields")).thenReturn(def);
             when(queryEngine.getById(def, FIELD_ID)).thenReturn(Optional.of(fieldRow("tenant-123")));
 
@@ -427,7 +427,7 @@ class DynamicCollectionRouterSystemCollectionTest {
         @Test
         @DisplayName("Should serve SYSTEM_TENANT_ID 'fields' rows to every tenant, like 'collections'")
         void get_servesSystemRow() throws Exception {
-            CollectionDefinition def = io.kelta.runtime.model.system.SystemCollectionDefinitions.fields();
+            CollectionDefinition def = io.kelta.runtime.model.system.CoreSystemCollections.fields();
             when(registry.get("fields")).thenReturn(def);
             when(queryEngine.getById(def, FIELD_ID)).thenReturn(Optional.of(
                     fieldRow(io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID)));

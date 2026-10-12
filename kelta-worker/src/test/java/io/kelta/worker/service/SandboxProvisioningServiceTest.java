@@ -2,7 +2,7 @@ package io.kelta.worker.service;
 
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.PlatformEventPublisher;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.CoreSystemCollections;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.repository.EnvironmentRepository;
@@ -54,7 +54,7 @@ class SandboxProvisioningServiceTest {
         jdbcTemplate = mock(JdbcTemplate.class);
 
         when(environmentRepository.getJdbcTemplate()).thenReturn(jdbcTemplate);
-        when(collectionRegistry.get("tenants")).thenReturn(SystemCollectionDefinitions.tenants());
+        when(collectionRegistry.get("tenants")).thenReturn(CoreSystemCollections.tenants());
 
         service = new SandboxProvisioningService(environmentRepository, environmentService,
                 packageService, packageImportService, queryEngine, collectionRegistry, eventPublisher,

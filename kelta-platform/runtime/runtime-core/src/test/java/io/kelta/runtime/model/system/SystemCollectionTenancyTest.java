@@ -18,7 +18,7 @@ class SystemCollectionTenancyTest {
     @Test
     @DisplayName("tenants is self-scoped: each row is a tenant, keyed by its own id")
     void tenantsIsSelfScoped() {
-        assertTrue(SystemCollectionTenancy.isSelfScoped(SystemCollectionDefinitions.tenants()));
+        assertTrue(SystemCollectionTenancy.isSelfScoped(CoreSystemCollections.tenants()));
     }
 
     @Test
@@ -48,6 +48,6 @@ class SystemCollectionTenancyTest {
     @Test
     @DisplayName("self-scoped and tenant_id-scoped are disjoint")
     void selfScopedIsNotTenantScoped() {
-        assertFalse(SystemCollectionTenancy.isTenantScoped(SystemCollectionDefinitions.tenants()));
+        assertFalse(SystemCollectionTenancy.isTenantScoped(CoreSystemCollections.tenants()));
     }
 }

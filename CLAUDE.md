@@ -133,7 +133,7 @@ visual system.
 
 | Term | Meaning |
 |------|---------|
-| **Collection** | Runtime-defined table (object). **User collection** = tenant business data. **System collection** = platform metadata (collections, fields, flows, profiles…) declared in `SystemCollectionDefinitions`. |
+| **Collection** | Runtime-defined table (object). **User collection** = tenant business data. **System collection** = platform metadata (collections, fields, flows, profiles…) declared in the per-area `<Area>SystemCollections` classes in `runtime-core/.../model/system/`, registered (in order) by `SystemCollectionDefinitions.all()`. |
 | **Field / FieldType** | A column on a collection; the `FieldType` enum defines the kinds. |
 | **Record** | A row in a collection, served as JSON:API. |
 | **Flow / action handler** | A state-machine automation (Step-Functions style); an action handler is a Task node's executable unit. |

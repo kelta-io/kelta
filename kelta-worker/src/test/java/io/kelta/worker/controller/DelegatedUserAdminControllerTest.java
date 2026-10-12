@@ -1,7 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.model.CollectionDefinition;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.CoreSystemCollections;
 import io.kelta.runtime.query.FilterCondition;
 import io.kelta.runtime.query.FilterOperator;
 import io.kelta.runtime.query.Pagination;
@@ -65,7 +65,7 @@ class DelegatedUserAdminControllerTest {
     @Mock private JdbcTemplate jdbcTemplate;
     @Mock private HttpServletRequest request;
 
-    private final CollectionDefinition usersDef = SystemCollectionDefinitions.users();
+    private final CollectionDefinition usersDef = CoreSystemCollections.users();
 
     private DelegatedUserAdminController controller;
 

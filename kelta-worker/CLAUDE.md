@@ -113,7 +113,7 @@ stops the rollout. Two rules follow:
 
 ## When Adding a System Collection
 
-1. Declare it in `runtime-core/.../model/system/SystemCollectionDefinitions.java` — add a `<name>()` factory via the `systemBuilder(name, displayName, tableName)` helper, then add it to `all()`.
+1. Declare it in `runtime-core/.../model/system/` — add a `<name>()` factory to the matching `<Area>SystemCollections` section class via the `systemBuilder(name, displayName, tableName)` helper (`SystemCollectionBuilders`), add it to `SystemCollectionDefinitions.all()`, and update the pinned hash in `SystemCollectionDefinitionsSplitTest` (see `.claude/docs/playbooks.md` §5).
 2. The worker does **NOT** create system tables (Flyway owns them) — ship `src/main/resources/db/migration/V<n>__create_<table>.sql` **and** add the table to the RLS-enable migration (V77-style, table names hardcoded).
 3. Register a `<Name>RefreshHook` `@Bean` in `config/FlowConfig.java` via `hookRegistry.register(hook)` that publishes `kelta.config.collection.changed.<id>` (reuse `CollectionConfigEventPublisher.SUBJECT_PREFIX`).
 4. A field that stores a secret, ciphertext or a credential hash is declared `.withServerOnly(true)` (never serialized, never filterable, only a before-save hook may set it), read for real use over JDBC, and added to `SystemCollectionDefinitionsTest.secretMaterialIsServerOnly`. See `.claude/docs/architecture.md` → Server-only fields.
@@ -130,7 +130,7 @@ stops the rollout. Two rules follow:
 | NATS event listener | `listener/CollectionSchemaListener.java` |
 | NATS subscription wiring | `config/NatsSubscriptionConfig.java` |
 | JDBC repository | `repository/ApprovalRepository.java` |
-| Owner-scoped writes (don't write a per-collection owner-guard hook — declare `ownerField`/`ownerScope`/`ownerScopeReads` on the collection: `SystemCollectionDefinitions.watches()` for a system collection, collection metadata via the API for a tenant one; the wildcard guard enforces it) | `listener/OwnerScopeGuardHook.java` |
+| Owner-scoped writes (don't write a per-collection owner-guard hook — declare `ownerField`/`ownerScope`/`ownerScopeReads` on the collection: `ConsumerAlertingSystemCollections.watches()` for a system collection, collection metadata via the API for a tenant one; the wildcard guard enforces it) | `listener/OwnerScopeGuardHook.java` |
 | Support staff acting on a member's owner-scoped rows (re-bind `CallerContext` to the member for the write, add the `viewAll` bypass for a tenant-wide read) | `controller/SupportPermissions.java` (`writeAs`/`readAll`) |
 | Service with event publishing | `service/CollectionLifecycleManager.java` |
 | Unit test | `scim/service/ScimUserServiceTest.java` |

@@ -22,10 +22,10 @@ class SystemCollectionOwnershipTest {
 
     static Stream<Arguments> ownedSystemCollections() {
         return Stream.of(
-                Arguments.of(SystemCollectionDefinitions.watches(), "memberId", true),
-                Arguments.of(SystemCollectionDefinitions.wins(), "memberId", true),
-                Arguments.of(SystemCollectionDefinitions.userUiPreferences(), "userId", true),
-                Arguments.of(SystemCollectionDefinitions.notes(), "createdBy", false));
+                Arguments.of(ConsumerAlertingSystemCollections.watches(), "memberId", true),
+                Arguments.of(ConsumerAlertingSystemCollections.wins(), "memberId", true),
+                Arguments.of(UiSystemCollections.userUiPreferences(), "userId", true),
+                Arguments.of(CollaborationSystemCollections.notes(), "createdBy", false));
     }
 
     @ParameterizedTest(name = "{0}")

@@ -226,7 +226,7 @@ class SystemCollectionSeederTest {
             when(jdbcTemplate.queryForList(contains("SELECT id"), anyString(), anyString()))
                     .thenReturn(List.of());
 
-            var definition = SystemCollectionDefinitions.tenants();
+            var definition = CoreSystemCollections.tenants();
 
             // When
             var result = seeder.seedCollection(definition);
@@ -256,7 +256,7 @@ class SystemCollectionSeederTest {
             when(jdbcTemplate.queryForList(contains("SELECT id"), anyString(), anyString()))
                     .thenReturn(List.of());
 
-            var definition = SystemCollectionDefinitions.profiles();
+            var definition = CoreSystemCollections.profiles();
             // profiles has 3 fields: name, description, isSystem
 
             // When
@@ -286,7 +286,7 @@ class SystemCollectionSeederTest {
                     .thenReturn(List.of(row));
 
             // And all fields already exist
-            var definition = SystemCollectionDefinitions.profiles();
+            var definition = CoreSystemCollections.profiles();
             List<String> existingFieldNames = definition.fields().stream()
                     .map(f -> f.name())
                     .toList();
@@ -315,7 +315,7 @@ class SystemCollectionSeederTest {
                     .thenReturn(List.of(row));
 
             // Only first field exists, rest are missing
-            var definition = SystemCollectionDefinitions.profiles();
+            var definition = CoreSystemCollections.profiles();
             when(jdbcTemplate.queryForList(contains("SELECT name"), eq(String.class), eq("coll-456")))
                     .thenReturn(List.of(definition.fields().get(0).name()));
 
@@ -342,7 +342,7 @@ class SystemCollectionSeederTest {
                     .thenReturn(List.of(row));
 
             // All fields exist
-            var definition = SystemCollectionDefinitions.profiles();
+            var definition = CoreSystemCollections.profiles();
             List<String> existingFieldNames = definition.fields().stream()
                     .map(f -> f.name())
                     .toList();
@@ -366,7 +366,7 @@ class SystemCollectionSeederTest {
                     .thenReturn(List.of(row));
 
             // All fields exist
-            var definition = SystemCollectionDefinitions.profiles();
+            var definition = CoreSystemCollections.profiles();
             List<String> existingFieldNames = definition.fields().stream()
                     .map(f -> f.name())
                     .toList();
@@ -420,7 +420,7 @@ class SystemCollectionSeederTest {
                     .thenReturn(List.of());
 
             // Users collection has a lookup field "profileId" -> "profiles"
-            var definition = SystemCollectionDefinitions.users();
+            var definition = CoreSystemCollections.users();
 
             // When
             seeder.seedCollection(definition);
@@ -455,7 +455,7 @@ class SystemCollectionSeederTest {
                     .thenReturn(List.of());
 
             // Users collection has firstName -> first_name column mapping
-            var definition = SystemCollectionDefinitions.users();
+            var definition = CoreSystemCollections.users();
 
             // When
             seeder.seedCollection(definition);
@@ -484,7 +484,7 @@ class SystemCollectionSeederTest {
                     .thenReturn(List.of());
 
             // Tenants collection has edition defaulting to "PROFESSIONAL"
-            var definition = SystemCollectionDefinitions.tenants();
+            var definition = CoreSystemCollections.tenants();
 
             // When
             seeder.seedCollection(definition);
@@ -512,7 +512,7 @@ class SystemCollectionSeederTest {
                     .thenReturn(List.of());
 
             // Tenants collection has edition with enum values
-            var definition = SystemCollectionDefinitions.tenants();
+            var definition = CoreSystemCollections.tenants();
 
             // When
             seeder.seedCollection(definition);

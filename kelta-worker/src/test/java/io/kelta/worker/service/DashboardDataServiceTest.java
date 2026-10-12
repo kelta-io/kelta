@@ -2,7 +2,7 @@ package io.kelta.worker.service;
 
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.ReportSystemCollections;
 import io.kelta.runtime.query.*;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.cache.WorkerCacheManager;
@@ -58,7 +58,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldExecuteMetricWidgetWithCount() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("accounts")).thenReturn(collDef);
 
         QueryResult queryResult = QueryResult.of(
@@ -79,7 +79,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldExecuteMetricWidgetWithSum() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("opportunities")).thenReturn(collDef);
 
         List<Map<String, Object>> data = List.of(
@@ -100,7 +100,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldThrowWhenAggregateFieldMissingForNonCount() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("accounts")).thenReturn(collDef);
 
         Map<String, Object> component = buildComponent("comp-3", "metric",
@@ -116,7 +116,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldExecuteChartWidgetWithGrouping() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("cases")).thenReturn(collDef);
 
         List<Map<String, Object>> data = List.of(
@@ -150,7 +150,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldThrowWhenGroupByFieldMissing() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("cases")).thenReturn(collDef);
 
         Map<String, Object> component = buildComponent("comp-5", "chart",
@@ -162,7 +162,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldLimitChartGroupsToMaxGroups() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("items")).thenReturn(collDef);
 
         // Generate 30 distinct groups
@@ -550,7 +550,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldRejectUnknownAggregateOverAtExecution() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("cases")).thenReturn(collDef);
 
         Map<String, Object> component = buildComponent("comp-gs-bad", "chart",
@@ -578,7 +578,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldExecuteTableWidgetWithPagination() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("contacts")).thenReturn(collDef);
 
         List<Map<String, Object>> data = List.of(
@@ -608,7 +608,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldExecuteRecentWidgetSortedByCreatedAtDesc() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("activities")).thenReturn(collDef);
 
         List<Map<String, Object>> data = List.of(
@@ -631,7 +631,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldClampRecentRecordsLimit() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("activities")).thenReturn(collDef);
 
         QueryResult queryResult = QueryResult.of(List.of(), 0L, new Pagination(1, 100));
@@ -755,7 +755,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldExecuteMultipleWidgets() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("accounts")).thenReturn(collDef);
 
         QueryResult queryResult = QueryResult.of(
@@ -804,7 +804,7 @@ class DashboardDataServiceTest {
         // The collection is resolved before the cache read (so masking config can be
         // checked), but a hit still short-circuits before any query. Cache entries only
         // ever exist for non-masking collections, so serving one without a Cerbos check is safe.
-        when(collectionRegistry.get("accounts")).thenReturn(SystemCollectionDefinitions.dashboards());
+        when(collectionRegistry.get("accounts")).thenReturn(ReportSystemCollections.dashboards());
         Map<String, Object> cachedData = Map.of(
             "type", "metric",
             "data", Map.of("value", 42L));
@@ -823,7 +823,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldCacheResultAfterExecution() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("accounts")).thenReturn(collDef);
 
         QueryResult queryResult = QueryResult.of(
@@ -909,7 +909,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldThrowForUnsupportedWidgetType() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("accounts")).thenReturn(collDef);
 
         Map<String, Object> component = buildComponent("comp-bad", "unknown_type",
@@ -1046,7 +1046,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldResolveCollectionByName() {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("accounts")).thenReturn(collDef);
 
         CollectionDefinition resolved = service.resolveTargetCollection(null,
@@ -1056,7 +1056,7 @@ class DashboardDataServiceTest {
 
     @Test
     void shouldResolveCollectionFromReport() {
-        CollectionDefinition reportsDef = SystemCollectionDefinitions.reports();
+        CollectionDefinition reportsDef = ReportSystemCollections.reports();
         when(collectionRegistry.get("reports")).thenReturn(reportsDef);
 
         Map<String, Object> report = new HashMap<>();
@@ -1064,7 +1064,7 @@ class DashboardDataServiceTest {
         when(queryEngine.getById(eq(reportsDef), eq("rpt-1")))
             .thenReturn(Optional.of(report));
 
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(jdbcTemplate.queryForList(anyString(), eq("col-123")))
             .thenReturn(List.of(Map.of("name", "accounts")));
         when(collectionRegistry.get("accounts")).thenReturn(collDef);
@@ -1092,7 +1092,7 @@ class DashboardDataServiceTest {
 
     /** Stubs the collection to have a masking-configured "ssn" field masked for the given principal. */
     private CollectionDefinition withMaskedSsn(boolean maskedForViewer) {
-        CollectionDefinition collDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition collDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("people")).thenReturn(collDef);
         FieldMaskingService.MaskingConfig cfg = new FieldMaskingService.MaskingConfig(
             FieldMaskingService.MaskType.FULL, '*', null);

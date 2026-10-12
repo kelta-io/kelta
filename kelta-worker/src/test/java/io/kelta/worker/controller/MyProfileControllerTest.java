@@ -3,7 +3,7 @@ package io.kelta.worker.controller;
 import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.CallerContext.UserType;
 import io.kelta.runtime.model.CollectionDefinition;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.CoreSystemCollections;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.router.GlobalExceptionHandler;
@@ -73,7 +73,7 @@ class MyProfileControllerTest {
         }
     }
 
-    private final CollectionDefinition usersDef = SystemCollectionDefinitions.users();
+    private final CollectionDefinition usersDef = CoreSystemCollections.users();
     private QueryEngine queryEngine;
     private MockMvc mvc;
 

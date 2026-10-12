@@ -139,7 +139,7 @@ Expose a platform operation to MCP clients (kelta-admin or kelta-user toolset).
 
 Platform-managed metadata (not a user collection) — e.g. `feature_announcements`.
 
-1. **Declare it**: in `runtime-core/.../model/system/SystemCollectionDefinitions.java`, add a `<name>()` factory using the private `systemBuilder(name, displayName, tableName)` helper (it injects audit fields + `systemCollection(true)` + the physical table), then add `definitions.add(<name>())` to `all()`.
+1. **Declare it**: in `runtime-core/.../model/system/`, add a `public static CollectionDefinition <name>()` factory to the section class it belongs to (`CoreSystemCollections`, `UiSystemCollections`, `AutomationSystemCollections`, `IntegrationSystemCollections`, `AuditLogSystemCollections`, … — one per area; create a new `<Area>SystemCollections` only for a genuinely new area). Build it with `systemBuilder(name, displayName, tableName)` (or `readOnlySystemBuilder` for an API-read-only table), statically imported from the package-private `SystemCollectionBuilders` — it injects audit fields + `systemCollection(true)` + the physical table. Then add `definitions.add(<Section>SystemCollections.<name>())` to `SystemCollectionDefinitions.all()` (the registry entry point).
 2. **Create the table** (the worker does **NOT** auto-create system tables — Flyway owns them):
    - Ship `kelta-worker/src/main/resources/db/migration/V<next>__create_<table>.sql` (check the dir for the head number; currently V142 → V143).
    - Add the table to the RLS-enable migration set (the V77-style migration hardcodes table names) so RLS applies.
@@ -148,7 +148,7 @@ Platform-managed metadata (not a user collection) — e.g. `feature_announcement
    - ⚠️ The reference `ValidationRuleRefreshHook.afterDelete` is a **no-op** (the `collectionId` isn't available on delete). If your collection needs delete to refresh other pods, handle it explicitly rather than copying the no-op.
 4. **Secret material**: a field holding a secret, ciphertext or a credential hash is declared `.withServerOnly(true)` — the query engine never returns it, refuses it as a filter/sort/aggregate key and ignores a caller-supplied value, so set it from a before-save hook and read it over JDBC where the platform needs it. Add it to `SystemCollectionDefinitionsTest.secretMaterialIsServerOnly`. See [`architecture.md`](architecture.md) → Server-only fields.
 **Tests**: registry/refresh unit test + migration applied against a non-empty DB.
-**Docs**: [`status.md`](status.md); [`concerns.md`](concerns.md) notes `SystemCollectionDefinitions.java` is already 1,400+ lines — keep additions minimal.
+**Docs**: [`status.md`](status.md). Keep each section class focused — if one grows past ~500 lines, split the area rather than letting a new single-file hotspot form.
 
 > **This recipe is for platform-owned metadata only.** A collection that belongs to one tenant's
 > installed module is declared in that module's `kelta-module.json` instead — see recipe 5b. It

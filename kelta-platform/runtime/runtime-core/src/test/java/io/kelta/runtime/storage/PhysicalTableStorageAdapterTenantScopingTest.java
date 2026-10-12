@@ -8,6 +8,7 @@ import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.CollectionDefinitionBuilder;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.StorageConfig;
+import io.kelta.runtime.model.system.CoreSystemCollections;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.AggregationSpec;
 import io.kelta.runtime.query.FilterCondition;
@@ -288,7 +289,7 @@ class PhysicalTableStorageAdapterTenantScopingTest {
     private static final String OTHER_TENANT = "22222222-2222-2222-2222-222222222222";
 
     private static CollectionDefinition tenants() {
-        return SystemCollectionDefinitions.tenants();
+        return CoreSystemCollections.tenants();
     }
 
     @Test

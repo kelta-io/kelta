@@ -1,7 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.model.CollectionDefinition;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.PermissionSystemCollections;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.repository.BootstrapRepository;
@@ -54,7 +54,7 @@ class DelegatedAdminScopeControllerTest {
      * Single shared instance — {@code CollectionDefinitionBuilder.build()} stamps
      * {@code Instant.now()}, so two factory calls are not value-equal.
      */
-    private final CollectionDefinition definition = SystemCollectionDefinitions.delegatedAdminScopes();
+    private final CollectionDefinition definition = PermissionSystemCollections.delegatedAdminScopes();
 
     private DelegatedAdminScopeController controller;
 

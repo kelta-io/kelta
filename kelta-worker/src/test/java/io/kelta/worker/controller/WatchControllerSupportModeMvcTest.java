@@ -4,7 +4,7 @@ import tools.jackson.databind.ObjectMapper;
 import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.CallerContext.UserType;
 import io.kelta.runtime.model.CollectionDefinition;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.ConsumerAlertingSystemCollections;
 import io.kelta.runtime.query.DefaultQueryEngine;
 import io.kelta.runtime.query.Pagination;
 import io.kelta.runtime.query.QueryEngine;
@@ -108,7 +108,7 @@ class WatchControllerSupportModeMvcTest {
         when(permissionResolver.getProfileId(any())).thenAnswer(i ->
                 ((jakarta.servlet.http.HttpServletRequest) i.getArgument(0)).getHeader("X-User-Profile-Id"));
 
-        watches = SystemCollectionDefinitions.watches();
+        watches = ConsumerAlertingSystemCollections.watches();
         CollectionRegistry registry = mock(CollectionRegistry.class);
         when(registry.get(WatchController.COLLECTION)).thenReturn(watches);
 
