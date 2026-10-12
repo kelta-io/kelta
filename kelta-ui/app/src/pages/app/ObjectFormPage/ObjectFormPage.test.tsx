@@ -4,7 +4,8 @@
  * Drives the real `RecordForm` / `useRecordFormModel` / `useRecordFormState`
  * through the route, stubbing only the data edges, and pins what the wrapper
  * owns: the `/app/o/...` navigation targets after save, on cancel and from the
- * permission gate; the create-mode prefill from query params; and the
+ * permission gate; the create-mode prefill from query params; clone mode
+ * (`?clone=<id>` → the core's `cloneFromId`, record-stack convergence P7); and the
  * end-user breadcrumb. It also pins the core behaviour the end-user form gained
  * from the admin form (record-stack convergence P3): client validation rules,
  * blur rules, schema defaults, clear-to-null on update, per-field validation,
@@ -347,6 +348,44 @@ describe('ObjectFormPage (create)', () => {
     expect(notes).toHaveValue('quiet')
     fireEvent.blur(notes)
     expect(notes).toHaveValue('QUIET')
+  })
+})
+
+describe('ObjectFormPage (clone, ?clone=<id>)', () => {
+  beforeEach(() => {
+    // The clone source, served by the (mocked) single-record fetch.
+    record = { id: 'src-1', name: 'Ada', notes: 'hi', createdAt: '2026-01-01T00:00:00Z' }
+  })
+
+  it("seeds a new record from the source's values under the Clone title", () => {
+    renderAt('/acme/app/o/accounts/new?clone=src-1')
+    expect(screen.getByRole('heading', { name: 'Clone Accounts' })).toBeInTheDocument()
+    expect(screen.getByText('Clone')).toBeInTheDocument()
+    expect(screen.getByTestId('field-name')).toHaveValue('Ada')
+    expect(screen.getByTestId('field-notes')).toHaveValue('hi')
+  })
+
+  it('creates a new record (no clone param, no source id) and lands on it', () => {
+    renderAt('/acme/app/o/accounts/new?clone=src-1')
+    fireEvent.change(screen.getByTestId('field-name'), { target: { value: 'Ada (copy)' } })
+    fireEvent.click(screen.getByTestId('save-button'))
+    expect(createMutate).toHaveBeenCalledWith({ name: 'Ada (copy)', notes: 'hi' })
+    expect(updateMutate).not.toHaveBeenCalled()
+    act(() => mutationOptions.onSuccess?.({ id: 'new-1' }))
+    expect(screen.getByTestId('location').textContent).toBe('/acme/app/o/accounts/new-1')
+  })
+
+  it('lets a query-param prefill win over the cloned value', () => {
+    renderAt('/acme/app/o/accounts/new?clone=src-1&notes=Override')
+    expect(screen.getByTestId('field-name')).toHaveValue('Ada')
+    expect(screen.getByTestId('field-notes')).toHaveValue('Override')
+  })
+
+  it('is ignored on edit', () => {
+    record = { id: 'r1', name: 'Grace' }
+    renderAt('/acme/app/o/accounts/r1/edit?clone=src-1')
+    expect(screen.getByRole('heading', { name: 'Edit Accounts' })).toBeInTheDocument()
+    expect(screen.getByTestId('field-name')).toHaveValue('Grace')
   })
 })
 

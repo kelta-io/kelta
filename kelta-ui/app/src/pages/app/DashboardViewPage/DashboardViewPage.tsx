@@ -17,6 +17,7 @@ import {
   type WidgetPayload,
 } from '../../../hooks/useDashboardData'
 import { buildListUrl } from '../ObjectListPage/listUrlState'
+import { recordRoutes } from '@/utils/recordRoutes'
 import { WidgetFrame } from './widgets/WidgetFrame'
 import { MetricWidget } from './widgets/MetricWidget'
 import { ChartWidget } from './widgets/ChartWidget'
@@ -110,7 +111,10 @@ export function DashboardViewPage() {
             payload={payload}
             onRowClick={
               collectionName
-                ? (recordId) => navigate(`/${tenantSlug}/app/o/${collectionName}/${recordId}`)
+                ? (recordId) =>
+                    navigate(
+                      recordRoutes('enduser', tenantSlug ?? '').detail(collectionName, recordId)
+                    )
                 : undefined
             }
           />

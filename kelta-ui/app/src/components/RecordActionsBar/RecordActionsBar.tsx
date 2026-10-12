@@ -17,6 +17,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Star, ChevronDown } from 'lucide-react'
 import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
+import { useRecordRoutes } from '../../context/RecordStackContext'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -84,11 +85,12 @@ export function RecordActionsBar({
   const navigate = useNavigate()
   const { t } = useI18n()
   const { showToast } = useToast()
+  const routes = useRecordRoutes(getTenantSlug())
 
-  // Clone action
+  // Clone action — the create form of the record stack this bar renders in, seeded from it
   const handleClone = useCallback(() => {
-    navigate(`/${getTenantSlug()}/resources/${collectionName}/new?clone=${recordId}`)
-  }, [navigate, collectionName, recordId])
+    navigate(routes.clone(collectionName, recordId))
+  }, [navigate, routes, collectionName, recordId])
 
   // Submit for approval mutation
   const submitApprovalMutation = useMutation({

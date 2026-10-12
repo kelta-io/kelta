@@ -29,6 +29,8 @@ import { EmptyValue } from '@/components/kelta'
 import { cn } from '@/lib/utils'
 import { componentRegistry } from '@/services/componentRegistry'
 import { PluginErrorBoundary } from '@/components/PluginErrorBoundary'
+import { useRecordStack } from '@/context/RecordStackContext'
+import { recordRoutes } from '@/utils/recordRoutes'
 import type { FieldType } from '@/hooks/useCollectionSchema'
 
 export interface FieldRendererProps {
@@ -212,6 +214,10 @@ export function FieldRenderer({
   truncate = true,
   picklistDisplayMap,
 }: FieldRendererProps): React.ReactElement {
+  // Lookup links stay in the record stack this value renders in (admin `/resources`
+  // or end-user `/app/o`).
+  const recordStack = useRecordStack()
+
   // Null/undefined values
   if (value === null || value === undefined) {
     return <EmptyValue className={className} aria-label={`${displayName || fieldName}: empty`} />
@@ -405,7 +411,7 @@ export function FieldRenderer({
       if (tenantSlug && targetCollection) {
         return (
           <Link
-            to={`/${tenantSlug}/app/o/${targetCollection}/${String(value)}`}
+            to={recordRoutes(recordStack, tenantSlug).detail(targetCollection, String(value))}
             className={cn('text-primary hover:underline', className)}
             onClick={(e) => e.stopPropagation()}
           >

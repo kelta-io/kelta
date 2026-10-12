@@ -11,6 +11,8 @@ import { Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useI18n } from '../../context/I18nContext'
 import { useAuth } from '../../context/AuthContext'
+import { getTenantSlug } from '../../context/TenantContext'
+import { recordRoutes } from '../../utils/recordRoutes'
 import { useRecentRecords } from '../../hooks/useRecentRecords'
 import { formatRelativeTime } from '../../utils/formatRelativeTime'
 
@@ -140,7 +142,13 @@ export function RecentItemsDropdown({
                       'last:border-b-0'
                     )}
                     onClick={() =>
-                      handleNavigate(`/resources/${record.collectionName}/${record.id}`)
+                      // Rendered in the admin header, so recent records open in the admin stack.
+                      handleNavigate(
+                        recordRoutes('admin', getTenantSlug()).detail(
+                          record.collectionName,
+                          record.id
+                        )
+                      )
                     }
                     role="menuitem"
                   >

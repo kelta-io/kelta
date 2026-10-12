@@ -33,6 +33,8 @@ import {
 import { useApi } from '@/context/ApiContext'
 import { useQuickActions } from '@/hooks/useQuickActions'
 import { useScriptExecution } from '@/hooks/useScriptExecution'
+import { useRecordStack } from '@/context/RecordStackContext'
+import { recordRoutes } from '@/utils/recordRoutes'
 import { componentRegistry, type QuickActionComponentProps } from '@/services/componentRegistry'
 import { UpdateFieldValueDialog } from './UpdateFieldValueDialog'
 import type {
@@ -92,6 +94,7 @@ export function QuickActionsMenu({
     context,
   })
   const { execute, isPending } = useScriptExecution()
+  const recordStack = useRecordStack()
   const [customAction, setCustomAction] = useState<{
     Component: React.ComponentType<QuickActionComponentProps>
     props?: Record<string, unknown>
@@ -107,7 +110,6 @@ export function QuickActionsMenu({
         switch (action.config.type) {
           case 'create_related': {
             const config = action.config as CreateRelatedConfig
-            const basePath = `/${executionContext.tenantSlug}/app`
             const params = new URLSearchParams()
             if (executionContext.recordId) {
               params.set(config.lookupField, executionContext.recordId)
@@ -117,8 +119,12 @@ export function QuickActionsMenu({
                 params.set(key, String(value))
               }
             }
-            const query = params.toString()
-            navigate(`${basePath}/o/${config.targetCollection}/new${query ? `?${query}` : ''}`)
+            navigate(
+              recordRoutes(recordStack, executionContext.tenantSlug).new(
+                config.targetCollection,
+                params
+              )
+            )
             break
           }
 
@@ -212,7 +218,7 @@ export function QuickActionsMenu({
         toast.error(message)
       }
     },
-    [executionContext, execute, navigate, onActionComplete, apiClient]
+    [executionContext, execute, navigate, onActionComplete, apiClient, recordStack]
   )
 
   // Don't render anything if there are no actions and we're done loading

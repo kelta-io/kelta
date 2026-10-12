@@ -20,12 +20,14 @@
 import React from 'react'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { cn } from '@/lib/utils'
+import { RecordStackProvider } from '@/context/RecordStackContext'
 
 export type RecordShellVariant = 'enduser' | 'admin'
 
 export interface RecordShellProps {
-  /** Which stack renders this shell. Drives no layout itself — the slots do —
-   *  but is exposed for variant-conditional styling/telemetry and future use. */
+  /** Which stack renders this shell. Drives no layout itself — the slots do — but it
+   *  provides the record stack (`RecordStackProvider`) to everything rendered inside, so
+   *  shared components' record links stay in this stack, and is exposed as `data-variant`. */
   variant: RecordShellVariant
   /** Render only the loading state. Takes precedence over everything. */
   isLoading?: boolean
@@ -88,38 +90,42 @@ export function RecordShell({
 
   if (statusSlot) {
     return (
-      <div data-testid={`${testId}-status`} data-variant={variant}>
-        {statusSlot}
-      </div>
+      <RecordStackProvider variant={variant}>
+        <div data-testid={`${testId}-status`} data-variant={variant}>
+          {statusSlot}
+        </div>
+      </RecordStackProvider>
     )
   }
 
   return (
-    <div className={cn('space-y-4', className)} data-testid={testId} data-variant={variant}>
-      {breadcrumb}
-      {header}
-      <div
-        className={cn(
-          // gap-4 matches the pre-convergence end-user grid so the record-detail
-          // visual-regression baseline stays pixel-stable (admin is single-column).
-          'grid grid-cols-1 gap-4',
-          !sectionNav && rail && 'lg:grid-cols-[minmax(0,1fr)_340px]',
-          sectionNav && rail && 'lg:grid-cols-[280px_minmax(0,1fr)_340px]',
-          sectionNav && !rail && 'lg:grid-cols-[280px_minmax(0,1fr)]'
-        )}
-      >
-        {sectionNav && (
-          <div className="hidden self-start lg:block" data-testid={`${testId}-section-nav`}>
-            {sectionNav}
-          </div>
-        )}
-        <div className="min-w-0">{body}</div>
-        {rail && <aside className="space-y-4">{rail}</aside>}
+    <RecordStackProvider variant={variant}>
+      <div className={cn('space-y-4', className)} data-testid={testId} data-variant={variant}>
+        {breadcrumb}
+        {header}
+        <div
+          className={cn(
+            // gap-4 matches the pre-convergence end-user grid so the record-detail
+            // visual-regression baseline stays pixel-stable (admin is single-column).
+            'grid grid-cols-1 gap-4',
+            !sectionNav && rail && 'lg:grid-cols-[minmax(0,1fr)_340px]',
+            sectionNav && rail && 'lg:grid-cols-[280px_minmax(0,1fr)_340px]',
+            sectionNav && !rail && 'lg:grid-cols-[280px_minmax(0,1fr)]'
+          )}
+        >
+          {sectionNav && (
+            <div className="hidden self-start lg:block" data-testid={`${testId}-section-nav`}>
+              {sectionNav}
+            </div>
+          )}
+          <div className="min-w-0">{body}</div>
+          {rail && <aside className="space-y-4">{rail}</aside>}
+        </div>
+        {tabBar && <div className="space-y-4">{tabBar}</div>}
+        {belowTabs}
+        {dialogs}
       </div>
-      {tabBar && <div className="space-y-4">{tabBar}</div>}
-      {belowTabs}
-      {dialogs}
-    </div>
+    </RecordStackProvider>
   )
 }
 

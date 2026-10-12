@@ -54,6 +54,7 @@ import { useToast } from '@/components'
 import { buildIncludedDisplayMap, extractIncluded } from '@/utils/jsonapi'
 import { runBulkUpdate } from '@/utils/bulkUpdate'
 import { useCollectionStore } from '@/context/CollectionStoreContext'
+import { useRecordRoutes } from '@/context/RecordStackContext'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { CollectionRecord } from '@/hooks/useCollectionRecords'
 
@@ -280,7 +281,8 @@ export function RelatedList({
   onChanged,
 }: RelatedListProps): React.ReactElement {
   const navigate = useNavigate()
-  const basePath = `/${tenantSlug}/app`
+  // Record links stay in the stack this list renders in (admin `/resources` or end-user `/app/o`).
+  const routes = useRecordRoutes(tenantSlug)
   const collectionStore = useCollectionStore()
   const { showToast } = useToast()
   const { apiClient } = useApi()
@@ -525,7 +527,7 @@ export function RelatedList({
 
   // Handle row click → navigate to record detail
   const handleRowClick = (record: CollectionRecord) => {
-    navigate(`${basePath}/o/${collectionName}/${record.id}`)
+    navigate(routes.detail(collectionName, record.id))
   }
 
   // Handle "+ New" → inline create row when editable, else navigate to the full
@@ -537,7 +539,7 @@ export function RelatedList({
     }
     const params = new URLSearchParams()
     params.set(foreignKeyField, parentRecordId)
-    navigate(`${basePath}/o/${collectionName}/new?${params.toString()}`)
+    navigate(routes.new(collectionName, params))
   }
 
   const commitEdit = async (recordId: string, fieldName: string, value: unknown): Promise<void> => {
@@ -569,16 +571,19 @@ export function RelatedList({
           {total > limit && (
             <Button variant="ghost" size="sm" className="h-7 text-xs" asChild>
               <Link
-                to={`${basePath}/o/${collectionName}?filter=${encodeURIComponent(
-                  JSON.stringify([
-                    {
-                      id: 'parent',
-                      field: foreignKeyField,
-                      operator: 'equals',
-                      value: parentRecordId,
-                    },
-                  ])
-                )}`}
+                to={routes.list(
+                  collectionName,
+                  new URLSearchParams({
+                    filter: JSON.stringify([
+                      {
+                        id: 'parent',
+                        field: foreignKeyField,
+                        operator: 'equals',
+                        value: parentRecordId,
+                      },
+                    ]),
+                  })
+                )}
               >
                 View All
                 <ExternalLink className="ml-1 h-3 w-3" />

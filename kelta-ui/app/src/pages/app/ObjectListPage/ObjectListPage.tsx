@@ -66,6 +66,7 @@ import { useApi } from '@/context/ApiContext'
 import { getFieldControl } from '@/components/fieldControl'
 import { runBulkUpdate } from '@/utils/bulkUpdate'
 import { resolveRowIfMatch } from '@/utils/rowVersion'
+import { recordRoutes } from '@/utils/recordRoutes'
 import { isStaleWriteError } from '@/services/apiClient'
 import { MassEditDialog } from '@/components/RelatedList/MassEditDialog'
 import { buildIncludedDisplayMap } from '@/utils/jsonapi'
@@ -151,6 +152,7 @@ export function ObjectListPage(): React.ReactElement {
   const collectionStore = useCollectionStore()
   const { t } = useI18n()
   const basePath = `/${tenantSlug}/app`
+  const routes = useMemo(() => recordRoutes('enduser', tenantSlug ?? ''), [tenantSlug])
 
   // Parse list state from URL params (deep linking support)
   const { page, pageSize, sort, sorts, filters, viewId } = useMemo(
@@ -491,9 +493,9 @@ export function ObjectListPage(): React.ReactElement {
   // Alt views navigate on card/chip click (same route as a table row).
   const handleRecordNavigate = useCallback(
     (record: CollectionRecord) => {
-      navigate(`${basePath}/o/${collectionName}/${record.id}`)
+      navigate(routes.detail(collectionName ?? '', record.id))
     },
-    [navigate, basePath, collectionName]
+    [navigate, routes, collectionName]
   )
 
   /**
@@ -791,14 +793,14 @@ export function ObjectListPage(): React.ReactElement {
 
   // Navigation handlers
   const handleNew = useCallback(() => {
-    navigate(`${basePath}/o/${collectionName}/new`)
-  }, [navigate, basePath, collectionName])
+    navigate(routes.new(collectionName ?? ''))
+  }, [navigate, routes, collectionName])
 
   const handleEdit = useCallback(
     (record: CollectionRecord) => {
-      navigate(`${basePath}/o/${collectionName}/${record.id}/edit`)
+      navigate(routes.edit(collectionName ?? '', record.id))
     },
-    [navigate, basePath, collectionName]
+    [navigate, routes, collectionName]
   )
 
   // Delete handlers

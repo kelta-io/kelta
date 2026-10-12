@@ -92,6 +92,7 @@ import { useRecordContext } from '@/hooks/useRecordContext'
 import { usePicklistDisplayMaps } from '@/hooks/usePicklistOptions'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { QuickActionExecutionContext } from '@/types/quickActions'
+import { recordRoutes } from '@/utils/recordRoutes'
 
 /**
  * Represents a relationship where another collection has a field
@@ -272,6 +273,7 @@ export function ObjectDetailPage(): React.ReactElement {
   const { t } = useI18n()
   const collectionStore = useCollectionStore()
   const basePath = `/${tenantSlug}/app`
+  const routes = useMemo(() => recordRoutes('enduser', tenantSlug ?? ''), [tenantSlug])
 
   // Delete confirmation state
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -572,9 +574,9 @@ export function ObjectDetailPage(): React.ReactElement {
         lookupDisplayMap?.['created_by']?.[userId] ??
         lookupDisplayMap?.['updated_by']?.[userId]
       if (!name) return null
-      return { name, linkTo: `${basePath}/o/users/${userId}` }
+      return { name, linkTo: routes.detail('users', userId) }
     },
-    [lookupDisplayMap, basePath]
+    [lookupDisplayMap, routes]
   )
 
   // Tab-bar related lists: prefer layout configuration; otherwise synthesize
@@ -597,8 +599,8 @@ export function ObjectDetailPage(): React.ReactElement {
 
   // Handlers
   const handleEdit = useCallback(() => {
-    navigate(`${basePath}/o/${collectionName}/${recordId}/edit`)
-  }, [navigate, basePath, collectionName, recordId])
+    if (collectionName && recordId) navigate(routes.edit(collectionName, recordId))
+  }, [navigate, routes, collectionName, recordId])
 
   const handleDelete = useCallback(() => {
     setShowDeleteDialog(true)
@@ -611,18 +613,18 @@ export function ObjectDetailPage(): React.ReactElement {
         .then(() => {
           setShowDeleteDialog(false)
           announce('Record deleted successfully')
-          navigate(`${basePath}/o/${collectionName}`)
+          navigate(routes.list(collectionName ?? ''))
         })
         .catch(() => {
           // Error state is surfaced by the mutation; keep the dialog open.
         })
     }
-  }, [recordId, mutations.remove, announce, navigate, basePath, collectionName])
+  }, [recordId, mutations.remove, announce, navigate, routes, collectionName])
 
+  // Clone: the end-user create form seeded from this record (`?clone=<id>` → `cloneFromId`).
   const handleClone = useCallback(() => {
-    // Navigate to the new form — clone will be handled by pre-populating from URL
-    navigate(`${basePath}/o/${collectionName}/new`)
-  }, [navigate, basePath, collectionName])
+    if (collectionName && recordId) navigate(routes.clone(collectionName, recordId))
+  }, [navigate, routes, collectionName, recordId])
 
   // Quick action execution context
   const quickActionContext = useMemo<QuickActionExecutionContext>(
@@ -725,7 +727,7 @@ export function ObjectDetailPage(): React.ReactElement {
     <InsufficientPrivileges
       action="view"
       resource={`this ${collectionLabel} record`}
-      backPath={`${basePath}/o/${collectionName}`}
+      backPath={routes.list(collectionName ?? '')}
     />
   ) : loadOutcome === 'error' ? (
     <div className="space-y-4 p-6">
@@ -736,7 +738,7 @@ export function ObjectDetailPage(): React.ReactElement {
           {schemaError?.message || recordError?.message || 'Failed to load record.'}
         </AlertDescription>
       </Alert>
-      <Button variant="outline" onClick={() => navigate(`${basePath}/o/${collectionName}`)}>
+      <Button variant="outline" onClick={() => navigate(routes.list(collectionName ?? ''))}>
         Back to list
       </Button>
     </div>
@@ -783,7 +785,7 @@ export function ObjectDetailPage(): React.ReactElement {
             <Crumb
               trail={[
                 { label: 'Home', to: `${basePath}/home` },
-                { label: collectionLabel, to: `${basePath}/o/${collectionName}` },
+                { label: collectionLabel, to: routes.list(collectionName ?? '') },
                 { label: recordTitle },
               ]}
             />

@@ -36,6 +36,7 @@ import { RecordSectionNav } from '../../components/record/RecordSectionNav'
 import { resolveSectionNavItems } from '../../components/LayoutFieldSections/sectionNavItems'
 import { useCollectionSchema } from '../../hooks/useCollectionSchema'
 import { unwrapResource } from '../../utils/jsonapi'
+import { recordRoutes } from '../../utils/recordRoutes'
 import type { ApiClient } from '../../services/apiClient'
 import type { FieldDefinition } from '../../hooks/useCollectionSchema'
 
@@ -181,6 +182,11 @@ function ShareForm({ onSubmit, onCancel, isSubmitting }: ShareFormProps): React.
       </div>
     </div>
   )
+}
+
+/** Record URLs of the admin stack (`/resources/...`) for the current tenant. */
+function adminRoutes() {
+  return recordRoutes('admin', getTenantSlug())
 }
 
 /**
@@ -332,7 +338,7 @@ export function ResourceDetailPage({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
       showToast(t('success.deleted', { item: t('resources.record') }), 'success')
-      navigate(`/${getTenantSlug()}/resources/${collectionName}`)
+      navigate(adminRoutes().list(collectionName))
     },
     onError: (error: Error) => {
       showToast(error.message || t('errors.generic'), 'error')
@@ -523,12 +529,12 @@ export function ResourceDetailPage({
 
   // Handle back navigation
   const handleBack = useCallback(() => {
-    navigate(`/${getTenantSlug()}/resources/${collectionName}`)
+    navigate(adminRoutes().list(collectionName))
   }, [navigate, collectionName])
 
   // Handle edit action
   const handleEdit = useCallback(() => {
-    navigate(`/${getTenantSlug()}/resources/${collectionName}/${resourceId}/edit`)
+    navigate(adminRoutes().edit(collectionName, resourceId))
   }, [navigate, collectionName, resourceId])
 
   // Handle delete action - open confirmation dialog
@@ -621,7 +627,7 @@ export function ResourceDetailPage({
             <span className="font-mono">
               {targetCollection ? (
                 <Link
-                  to={`/${getTenantSlug()}/resources/${targetCollection}/${recordId}`}
+                  to={adminRoutes().detail(targetCollection, recordId)}
                   className="text-primary no-underline transition-colors duration-200 hover:text-primary/80 hover:underline focus:rounded focus:outline-2 focus:outline-offset-2 focus:outline-ring motion-reduce:transition-none"
                 >
                   {displayLabel}
@@ -760,7 +766,7 @@ export function ResourceDetailPage({
             /
           </span>
           <Link
-            to={`/${getTenantSlug()}/resources/${collectionName}`}
+            to={adminRoutes().list(collectionName)}
             className="text-primary no-underline transition-colors duration-200 hover:text-primary/80 hover:underline focus:rounded focus:outline-2 focus:outline-offset-2 focus:outline-ring motion-reduce:transition-none"
           >
             {schema.displayName}

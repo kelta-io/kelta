@@ -42,6 +42,7 @@ import { usePlugins } from '@/context/PluginContext'
 import { useI18n } from '@/context/I18nContext'
 import { InsufficientPrivileges } from '@/components/InsufficientPrivileges'
 import { RecordConflictDialog } from '@/components/record/RecordConflictDialog'
+import { RecordStackProvider } from '@/context/RecordStackContext'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { PageLayoutDto } from '@/hooks/usePageLayout'
 import type { RecordType } from '@/types/collections'
@@ -76,7 +77,8 @@ function renderSlot(slot: ChromeSlot | undefined, ctx: RecordFormChromeContext):
 }
 
 export interface RecordFormProps {
-  /** Which stack renders this form. Exposed as `data-variant`; the slots drive the chrome. */
+  /** Which stack renders this form. Exposed as `data-variant` and provided as the record
+   *  stack (`RecordStackProvider`) to the form body; the slots drive the chrome. */
   variant?: RecordFormVariant
   /** Collection API name. */
   collectionName: string
@@ -456,32 +458,34 @@ export function RecordForm({
   }
 
   return (
-    <RecordFormBody
-      key={formKey}
-      variant={variant}
-      isNew={isNew}
-      isClone={isClone}
-      initialData={initialData}
-      fields={fields}
-      collectionName={collectionName}
-      collectionLabel={collectionLabel}
-      recordId={recordId}
-      routes={routes}
-      onCancel={handleCancel}
-      breadcrumb={breadcrumb}
-      banner={banner}
-      headerExtras={headerExtras}
-      showFieldTypeHints={showFieldTypeHints}
-      testId={testId}
-      isFieldEditable={isFieldEditable}
-      layout={layout}
-      recordTypes={recordTypes}
-      selectedRecordTypeId={selectedRecordTypeId}
-      onRecordTypeChange={setSelectedRecordTypeId}
-      validationRules={validationRules}
-      etag={etag}
-      onReload={reload}
-    />
+    <RecordStackProvider variant={variant}>
+      <RecordFormBody
+        key={formKey}
+        variant={variant}
+        isNew={isNew}
+        isClone={isClone}
+        initialData={initialData}
+        fields={fields}
+        collectionName={collectionName}
+        collectionLabel={collectionLabel}
+        recordId={recordId}
+        routes={routes}
+        onCancel={handleCancel}
+        breadcrumb={breadcrumb}
+        banner={banner}
+        headerExtras={headerExtras}
+        showFieldTypeHints={showFieldTypeHints}
+        testId={testId}
+        isFieldEditable={isFieldEditable}
+        layout={layout}
+        recordTypes={recordTypes}
+        selectedRecordTypeId={selectedRecordTypeId}
+        onRecordTypeChange={setSelectedRecordTypeId}
+        validationRules={validationRules}
+        etag={etag}
+        onReload={reload}
+      />
+    </RecordStackProvider>
   )
 }
 

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { ListShell } from './ListShell'
+import { useRecordStack } from '@/context/RecordStackContext'
+
+function StackProbe() {
+  return <span data-testid="stack">{useRecordStack()}</span>
+}
 
 describe('ListShell', () => {
   it('renders only the loading state when isLoading', () => {
@@ -94,5 +99,11 @@ describe('ListShell', () => {
     )
     const shell = screen.getByTestId('resource-list-page')
     expect(shell).toHaveClass('extra-class')
+  })
+
+  // Record-stack convergence P7: shared components inside the shell link within its stack.
+  it.each(['admin', 'enduser'] as const)('provides the %s record stack to its slots', (variant) => {
+    render(<ListShell variant={variant} table={<StackProbe />} />)
+    expect(screen.getByTestId('stack')).toHaveTextContent(variant)
   })
 })

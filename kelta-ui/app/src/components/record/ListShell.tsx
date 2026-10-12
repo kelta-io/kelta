@@ -22,6 +22,7 @@
 import React from 'react'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { cn } from '@/lib/utils'
+import { RecordStackProvider } from '@/context/RecordStackContext'
 
 export type ListShellVariant = 'enduser' | 'admin'
 
@@ -32,8 +33,9 @@ const FRAME_CLASSES: Record<ListShellVariant, string> = {
 }
 
 export interface ListShellProps {
-  /** Which stack renders this shell. Selects the frame spacing classes and is
-   *  exposed as `data-variant` for variant-conditional styling/telemetry. */
+  /** Which stack renders this shell. Selects the frame spacing classes, provides the
+   *  record stack (`RecordStackProvider`) so shared components' record links stay in this
+   *  stack, and is exposed as `data-variant` for variant-conditional styling/telemetry. */
   variant: ListShellVariant
   /** Render only the loading state. Takes precedence over everything. */
   isLoading?: boolean
@@ -91,27 +93,31 @@ export function ListShell({
 
   if (statusSlot) {
     return (
-      <div data-testid={`${testId}-status`} data-variant={variant}>
-        {statusSlot}
-      </div>
+      <RecordStackProvider variant={variant}>
+        <div data-testid={`${testId}-status`} data-variant={variant}>
+          {statusSlot}
+        </div>
+      </RecordStackProvider>
     )
   }
 
   return (
-    <div
-      className={cn(FRAME_CLASSES[variant], className)}
-      data-testid={testId}
-      data-variant={variant}
-    >
-      {breadcrumb}
-      {header}
-      {toolbar}
-      {filters}
-      {table}
-      {pagination}
-      {belowTable}
-      {dialogs}
-    </div>
+    <RecordStackProvider variant={variant}>
+      <div
+        className={cn(FRAME_CLASSES[variant], className)}
+        data-testid={testId}
+        data-variant={variant}
+      >
+        {breadcrumb}
+        {header}
+        {toolbar}
+        {filters}
+        {table}
+        {pagination}
+        {belowTable}
+        {dialogs}
+      </div>
+    </RecordStackProvider>
   )
 }
 

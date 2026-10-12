@@ -92,7 +92,11 @@ test.describe("Record parity (admin vs end-user)", () => {
     // Lookup / master-detail targets, each with a `name` field (their display label).
     const accounts = await factory.createCollection({ displayName: "Parity Accounts" });
     const accountsName = accounts.attributes.name as string;
-    await factory.addField(accounts.id, { name: "name", displayName: "Name", type: "string" });
+    const accountNameField = await factory.addField(accounts.id, {
+      name: "name",
+      displayName: "Name",
+      type: "string",
+    });
 
     const parents = await factory.createCollection({ displayName: "Parity Parents" });
     const parentsName = parents.attributes.name as string;
@@ -105,7 +109,7 @@ test.describe("Record parity (admin vs end-user)", () => {
     await factory.addField(records.id, { ...F.isActive, type: "boolean" });
     await factory.addField(records.id, { ...F.startDate, type: "date" });
     const priority = await factory.addField(records.id, { ...F.priority, type: "picklist" });
-    await factory.addField(records.id, {
+    const accountRef = await factory.addField(records.id, {
       ...F.account,
       type: "lookup",
       referenceTarget: accountsName,
@@ -132,6 +136,23 @@ test.describe("Record parity (admin vs end-user)", () => {
         isActive: true,
       });
     }
+
+    // The account detail page lists the account's records (a layout related list through
+    // the lookup), showing each record's master-detail Parent as a link — so one page
+    // carries both a related-record row and a lookup link to keep inside the stack.
+    // Only the accounts collection gets a layout: the records' own detail steps assert the
+    // no-layout field body.
+    const { layoutId } = await factory.createDetailLayout(accounts.id, [
+      { heading: "Account", fields: [{ fieldId: accountNameField.id }] },
+    ]);
+    await factory.createResource("layout-related-lists", {
+      layoutId,
+      relatedCollectionId: records.id,
+      relationshipFieldId: accountRef.id,
+      displayColumns: [F.title.name, F.parent.name],
+      sortOrder: 0,
+      rowLimit: 5,
+    });
 
     const accountName = `Parity Account ${Date.now()}`;
     const account = await factory.createRecord(accountsName, { name: accountName });
@@ -362,6 +383,35 @@ test.describe("Record parity (admin vs end-user)", () => {
             }
           })
           .toBe("gone");
+      });
+
+      test("related-list rows and lookup links stay in this stack", async ({ page }) => {
+        // The shared RelatedList / FieldRenderer once linked into the end-user app from
+        // every stack (record-stack convergence P7): both must stay in the stack they render in.
+        const title = uniqueTitle(variant, "related");
+        const record = await factory.createRecord(schema.records, {
+          [F.title.name]: title,
+          [F.account.name]: schema.account.id,
+          [F.parent.name]: schema.parent.id,
+        });
+
+        await ui.gotoDetail(schema.accounts, schema.account.id);
+        await ui.relatedListTab(schema.records).click({ timeout: 30_000 });
+        const row = page.getByRole("row").filter({ hasText: title });
+        await expect(row).toBeVisible({ timeout: 15_000 });
+
+        // The row's master-detail Parent cell links to the parent record in this stack.
+        await expect(row.locator(`a[href$="/${schema.parent.id}"]`)).toHaveAttribute(
+          "href",
+          ui.recordPath(schema.parents, schema.parent.id),
+        );
+
+        // Opening the row lands on the related record's detail page in this stack.
+        await row.getByText(title, { exact: true }).click();
+        await expect(page).toHaveURL(ui.detailUrlPattern(schema.records), {
+          timeout: 15_000,
+        });
+        expect(ui.recordIdFromUrl(schema.records)).toBe(record.id);
       });
 
       test("a concurrent edit (409) prompts instead of overwriting", async ({ page }) => {

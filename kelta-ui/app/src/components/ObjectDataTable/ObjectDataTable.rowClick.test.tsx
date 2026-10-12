@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { ObjectDataTable } from './ObjectDataTable'
+import { RecordStackProvider } from '@/context/RecordStackContext'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { CollectionRecord } from '@/hooks/useCollectionRecords'
 
@@ -16,7 +17,10 @@ function LocationProbe() {
   return <div data-testid="location">{location.pathname}</div>
 }
 
-function renderTable(props: Partial<React.ComponentProps<typeof ObjectDataTable>> = {}) {
+function renderTable(
+  props: Partial<React.ComponentProps<typeof ObjectDataTable>> = {},
+  wrap: (table: React.ReactElement) => React.ReactElement = (table) => table
+) {
   return render(
     <MemoryRouter initialEntries={['/acme/resources/accounts']}>
       <Routes>
@@ -24,15 +28,17 @@ function renderTable(props: Partial<React.ComponentProps<typeof ObjectDataTable>
           path="/:tenantSlug/resources/accounts"
           element={
             <>
-              <ObjectDataTable
-                records={records}
-                fields={fields}
-                onSortChange={vi.fn()}
-                selectedIds={new Set()}
-                onSelectionChange={vi.fn()}
-                collectionName="accounts"
-                {...props}
-              />
+              {wrap(
+                <ObjectDataTable
+                  records={records}
+                  fields={fields}
+                  onSortChange={vi.fn()}
+                  selectedIds={new Set()}
+                  onSelectionChange={vi.fn()}
+                  collectionName="accounts"
+                  {...props}
+                />
+              )}
               <LocationProbe />
             </>
           }
@@ -57,5 +63,11 @@ describe('ObjectDataTable row activation', () => {
     renderTable()
     fireEvent.click(screen.getByText('Acme'))
     expect(screen.getByTestId('location').textContent).toBe('/acme/app/o/accounts/r1')
+  })
+
+  it('routes to the admin record when rendered in the admin record stack', () => {
+    renderTable({}, (table) => <RecordStackProvider variant="admin">{table}</RecordStackProvider>)
+    fireEvent.click(screen.getByText('Acme'))
+    expect(screen.getByTestId('location').textContent).toBe('/acme/resources/accounts/r1')
   })
 })

@@ -56,6 +56,11 @@ export class RecordVariant extends BasePage {
       : `/app/o/${collection}`;
   }
 
+  /** A record's detail path in this stack, tenant slug included (an `href` as rendered). */
+  recordPath(collection: string, recordId: string): string {
+    return this.tenantUrl(`${this.collectionPath(collection)}/${recordId}`);
+  }
+
   private collectionUrlPrefix(collection: string): string {
     return escapeRegExp(`/${this.tenantSlug}${this.collectionPath(collection)}`);
   }
@@ -290,6 +295,14 @@ export class RecordVariant extends BasePage {
       .filter({ hasText: new RegExp(`^\\s*${escapeRegExp(field.displayName)}\\s*$`) })
       .first()
       .locator("xpath=following-sibling::dd[1]");
+  }
+
+  /**
+   * A related list's tab on the detail page (the shared DetailTabBar, both stacks), keyed by
+   * the related collection's name.
+   */
+  relatedListTab(relatedCollection: string): Locator {
+    return this.testId(`detail-tab-${relatedCollection}`);
   }
 
   get editButton(): Locator {

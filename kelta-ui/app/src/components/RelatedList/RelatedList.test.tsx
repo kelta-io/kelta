@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RelatedList } from './RelatedList'
+import { RecordStackProvider } from '@/context/RecordStackContext'
+import type { RecordStackVariant } from '@/utils/recordRoutes'
 
 // Mock API context
 const mockGet = vi.fn()
@@ -813,6 +815,102 @@ describe('RelatedList', () => {
         expect(screen.getByTestId('mass-edit-error').textContent).toContain('is required')
       )
       expect(mockPost).not.toHaveBeenCalled()
+    })
+  })
+
+  // Record-stack convergence P7: the related list renders on both the admin and the
+  // end-user detail page, so its links must stay in the stack it renders in.
+  describe('record links stay in the rendering stack', () => {
+    function LocationProbe() {
+      const location = useLocation()
+      return <div data-testid="location">{location.pathname + location.search}</div>
+    }
+
+    function renderIn(variant: RecordStackVariant | 'none', props: { editable?: boolean } = {}) {
+      mockGet.mockResolvedValueOnce({
+        data: {
+          id: 'col-1',
+          type: 'collections',
+          attributes: { name: 'contacts', displayName: 'Contacts' },
+        },
+        included: [
+          {
+            id: 'f-0',
+            type: 'fields',
+            attributes: { name: 'name', displayName: 'name', type: 'STRING', active: true },
+          },
+        ],
+      })
+      mockGet.mockResolvedValue({
+        data: [
+          { id: 'rec-1', accountId: 'rec-123', name: 'Ada' },
+          { id: 'rec-2', accountId: 'rec-123', name: 'Grace' },
+        ],
+        metadata: { totalCount: 2, currentPage: 1, pageSize: 1, totalPages: 2 },
+      })
+      const list = (
+        <>
+          <RelatedList
+            collectionName="contacts"
+            foreignKeyField="accountId"
+            parentRecordId="rec-123"
+            tenantSlug="test-tenant"
+            displayColumns={['name']}
+            limit={1}
+            {...props}
+          />
+          <LocationProbe />
+        </>
+      )
+      render(
+        <TestWrapper>
+          {variant === 'none' ? (
+            list
+          ) : (
+            <RecordStackProvider variant={variant}>{list}</RecordStackProvider>
+          )}
+        </TestWrapper>
+      )
+    }
+
+    const VIEW_ALL_FILTER = JSON.stringify([
+      { id: 'parent', field: 'accountId', operator: 'equals', value: 'rec-123' },
+    ])
+
+    it.each([
+      ['admin', '/test-tenant/resources/contacts'],
+      ['enduser', '/test-tenant/app/o/contacts'],
+      ['none', '/test-tenant/app/o/contacts'],
+    ] as const)('under %s, a row opens %s/<id>', async (variant, base) => {
+      renderIn(variant)
+      await waitFor(() => expect(screen.getByText('Ada')).toBeDefined())
+      fireEvent.click(screen.getByText('Ada'))
+      expect(screen.getByTestId('location').textContent).toBe(`${base}/rec-1`)
+    })
+
+    it.each([
+      ['admin', '/test-tenant/resources/contacts'],
+      ['enduser', '/test-tenant/app/o/contacts'],
+    ] as const)(
+      'under %s, "View All" links to %s filtered by the parent',
+      async (variant, base) => {
+        renderIn(variant)
+        const viewAll = await screen.findByRole('link', { name: /View All/ })
+        const href = viewAll.getAttribute('href') ?? ''
+        expect(href.startsWith(`${base}?filter=`)).toBe(true)
+        const filter = new URL(href, 'http://x').searchParams.get('filter')
+        expect(filter).toBe(VIEW_ALL_FILTER)
+      }
+    )
+
+    it.each([
+      ['admin', '/test-tenant/resources/contacts/new?accountId=rec-123'],
+      ['enduser', '/test-tenant/app/o/contacts/new?accountId=rec-123'],
+    ] as const)('under %s, "New" opens %s', async (variant, expected) => {
+      renderIn(variant)
+      await waitFor(() => expect(screen.getByTestId('related-list-new')).toBeDefined())
+      fireEvent.click(screen.getByTestId('related-list-new'))
+      expect(screen.getByTestId('location').textContent).toBe(expected)
     })
   })
 })

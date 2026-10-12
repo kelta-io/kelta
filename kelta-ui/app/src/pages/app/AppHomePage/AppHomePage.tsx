@@ -28,6 +28,7 @@ import { resolveHomePageSlug } from './homePage'
 import { parseResourcePath } from '@/shells/EndUserShell/navTabs'
 import type { MenuConfig, MenuItemConfig } from '@/types/config'
 import { formatRelativeTime } from '@/utils/formatRelativeTime'
+import { recordRoutes } from '@/utils/recordRoutes'
 
 /**
  * Extract collection tabs from menu config for quick actions.
@@ -65,6 +66,7 @@ export function AppHomePage(): React.ReactElement {
   const { config } = useConfig()
 
   const basePath = `/${tenantSlug}/app`
+  const routes = recordRoutes('enduser', tenantSlug ?? '')
 
   // Determine greeting based on time of day
   const hour = new Date().getHours()
@@ -120,7 +122,7 @@ export function AppHomePage(): React.ReactElement {
                   key={tab.collectionName}
                   variant="outline"
                   size="sm"
-                  onClick={() => navigate(`${basePath}/o/${tab.collectionName}/new`)}
+                  onClick={() => navigate(routes.new(tab.collectionName))}
                 >
                   <Plus className="mr-1.5 h-3.5 w-3.5" />
                   New {tab.label}
@@ -163,7 +165,7 @@ export function AppHomePage(): React.ReactElement {
                 {recentItems.slice(0, 8).map((item) => (
                   <button
                     key={`${item.collectionName}-${item.id}`}
-                    onClick={() => navigate(`${basePath}/o/${item.collectionName}/${item.id}`)}
+                    onClick={() => navigate(routes.detail(item.collectionName, item.id))}
                     className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
                   >
                     <span className="flex-1 truncate font-medium text-foreground">
@@ -209,9 +211,9 @@ export function AppHomePage(): React.ReactElement {
                     key={fav.key}
                     onClick={() => {
                       if (fav.type === 'record' && fav.recordId) {
-                        navigate(`${basePath}/o/${fav.collectionName}/${fav.recordId}`)
+                        navigate(routes.detail(fav.collectionName, fav.recordId))
                       } else {
-                        navigate(`${basePath}/o/${fav.collectionName}`)
+                        navigate(routes.list(fav.collectionName))
                       }
                     }}
                     className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
@@ -247,7 +249,7 @@ export function AppHomePage(): React.ReactElement {
                   key={tab.collectionName}
                   variant="outline"
                   className="h-auto justify-start px-3 py-3"
-                  onClick={() => navigate(`${basePath}/o/${tab.collectionName}`)}
+                  onClick={() => navigate(routes.list(tab.collectionName))}
                 >
                   <div className="flex flex-col items-start gap-0.5">
                     <span className="text-sm font-medium">{tab.label}</span>

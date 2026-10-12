@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
@@ -22,6 +22,8 @@ import { useApi } from '../../context/ApiContext'
 import { ApiClient, isStaleWriteError } from '../../services/apiClient'
 import { unwrapCollection } from '../../utils/jsonapi'
 import { resolveRowIfMatch } from '../../utils/rowVersion'
+import { recordRoutes } from '../../utils/recordRoutes'
+import { parseFilters } from '../app/ObjectListPage/listUrlState'
 // The shared fetcher: the `['collection-schema', name]` cache entry must hold the full schema
 // shape (incl. displayFieldName, trackHistory) every other reader expects.
 import { fetchCollectionSchema, type FieldDefinition } from '../../hooks/useCollectionSchema'
@@ -318,9 +320,15 @@ export function ResourceListPage({
   // Sort state
   const [sort, setSort] = useState<SortState | undefined>(undefined)
 
-  // Filter state - Requirement 11.3, 11.4
-  const [filters, setFilters] = useState<FilterCondition[]>([])
-  const [pendingFilters, setPendingFilters] = useState<FilterCondition[]>([])
+  // Filter state - Requirement 11.3, 11.4. Seeded from a `?filter=` deep link in the shared
+  // list URL format (`listUrlState`) — e.g. a related list's "View All" on the admin detail page.
+  const [searchParams] = useSearchParams()
+  const [filters, setFilters] = useState<FilterCondition[]>(() =>
+    parseFilters(searchParams.get('filter'))
+  )
+  const [pendingFilters, setPendingFilters] = useState<FilterCondition[]>(() =>
+    parseFilters(searchParams.get('filter'))
+  )
   const [showFilters, setShowFilters] = useState(false)
 
   // Column visibility state - Requirement 11.5 (column selection)
@@ -539,19 +547,19 @@ export function ResourceListPage({
 
   // Navigation handlers
   const handleCreate = useCallback(() => {
-    navigate(`/${getTenantSlug()}/resources/${collectionName}/new`)
+    navigate(recordRoutes('admin', getTenantSlug()).new(collectionName || ''))
   }, [navigate, collectionName])
 
   const handleView = useCallback(
     (resource: Resource) => {
-      navigate(`/${getTenantSlug()}/resources/${collectionName}/${resource.id}`)
+      navigate(recordRoutes('admin', getTenantSlug()).detail(collectionName || '', resource.id))
     },
     [navigate, collectionName]
   )
 
   const handleEdit = useCallback(
     (resource: Resource) => {
-      navigate(`/${getTenantSlug()}/resources/${collectionName}/${resource.id}/edit`)
+      navigate(recordRoutes('admin', getTenantSlug()).edit(collectionName || '', resource.id))
     },
     [navigate, collectionName]
   )

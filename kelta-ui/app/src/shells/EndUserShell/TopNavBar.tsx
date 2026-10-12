@@ -40,6 +40,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { useSystemPermissions } from '@/hooks/useSystemPermissions'
 import { UserMenu } from '@/components/UserMenu'
 import type { User } from '@/types/auth'
+import { recordRoutes } from '@/utils/recordRoutes'
 
 /**
  * Navigation tab definition — represents a collection list or a custom page in the top nav.
@@ -144,10 +145,10 @@ export function TopNavBar({
         case 'chat':
           return `${basePath}/chat`
         default:
-          return `${basePath}/o/${tab.target}${tab.query ? `?${tab.query}` : ''}`
+          return recordRoutes('enduser', tenantSlug ?? '').list(tab.target, tab.query)
       }
     },
-    [basePath]
+    [basePath, tenantSlug]
   )
 
   const handleTabClick = useCallback(
