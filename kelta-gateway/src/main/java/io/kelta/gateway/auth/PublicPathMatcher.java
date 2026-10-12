@@ -22,7 +22,10 @@ import java.util.List;
  * </ul>
  *
  * <p>Both are configured as comma-separated lists of path prefixes in application.yml
- * under {@code kelta.gateway.security}.
+ * under {@code kelta.gateway.security}. A prefix matches whole path segments only:
+ * {@code /api/track} covers {@code /api/track} and {@code /api/track/open}, never
+ * {@code /api/tracking}, so a collection whose name merely starts with a prefix stays behind
+ * authentication.
  *
  * <p>A {@code public-paths} prefix that is also listed in {@code anonymous-only-public-paths}
  * is public only to a request <em>without</em> an {@code Authorization} header. A request that
@@ -68,7 +71,7 @@ public class PublicPathMatcher {
 
         // Unauthenticated paths allow all HTTP methods (e.g., OTEL trace export via POST)
         for (String prefix : unauthenticatedPaths) {
-            if (path.startsWith(prefix)) {
+            if (matches(path, prefix)) {
                 return true;
             }
         }
@@ -80,7 +83,7 @@ public class PublicPathMatcher {
         }
 
         for (String prefix : publicPaths) {
-            if (path.startsWith(prefix)) {
+            if (matches(path, prefix)) {
                 return !(isAnonymousOnly(path)
                         && exchange.getRequest().getHeaders().getFirst("Authorization") != null);
             }
@@ -101,7 +104,7 @@ public class PublicPathMatcher {
             return false;
         }
         for (String prefix : publicPaths) {
-            if (path.startsWith(prefix)) {
+            if (matches(path, prefix)) {
                 return true;
             }
         }
@@ -110,10 +113,22 @@ public class PublicPathMatcher {
 
     private boolean isAnonymousOnly(String path) {
         for (String prefix : anonymousOnlyPublicPaths) {
-            if (path.startsWith(prefix)) {
+            if (matches(path, prefix)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** True when {@code path} is {@code prefix} itself or lies below it, segment by segment. */
+    public static boolean matches(String path, String prefix) {
+        if (prefix == null || prefix.isBlank()) {
+            return false;
+        }
+        String p = prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
+        if (p.isEmpty()) {
+            return false;
+        }
+        return path.equals(p) || path.startsWith(p + "/");
     }
 }

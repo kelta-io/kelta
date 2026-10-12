@@ -1,5 +1,6 @@
 package io.kelta.gateway.filter;
 
+import io.kelta.gateway.auth.PublicPathMatcher;
 import io.kelta.gateway.cache.GatewayCacheManager;
 import io.kelta.gateway.error.ResponseHelpers;
 import io.kelta.gateway.metrics.GatewayMetrics;
@@ -220,7 +221,7 @@ public class TenantSlugExtractionFilter implements WebFilter, Ordered {
 
     private boolean isPlatformPath(String path) {
         for (String prefix : platformPaths) {
-            if (path.startsWith(prefix)) {
+            if (PublicPathMatcher.matches(path, prefix)) {
                 return true;
             }
         }
