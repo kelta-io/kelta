@@ -1,7 +1,9 @@
 /**
  * RecordForm — the one create/edit form for a record.
  *
- * Schema-driven: renders a control per field (`FormField`), grouped by the
+ * Schema-driven: renders a row per field (`FormFieldRow` — label, the
+ * `components/fieldControl` registry's edit control or a plugin renderer, help
+ * text, error), grouped by the
  * resolved page layout's sections (`LayoutFormSections`) or, without a layout,
  * a flat two-column grid. Handles create and edit, record-type selection,
  * picklist/lookup options, client layout rules, field permissions, server
@@ -16,7 +18,8 @@
  * Record-stack convergence P2: moved from `ObjectFormPage`; P3 added the admin
  * form's correctness features (client validation rules, blur rules, schema
  * defaults, clear-to-null, per-field validation with linked a11y errors, create
- * → new record's detail page, i18n). See `.claude/docs/conventions.md` →
+ * → new record's detail page, i18n); P4 rendered fields through the
+ * fieldControl registry. See `.claude/docs/conventions.md` →
  * Component reuse.
  */
 
@@ -37,7 +40,7 @@ import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { PageLayoutDto } from '@/hooks/usePageLayout'
 import type { RecordType } from '@/types/collections'
 import type { CollectionValidationRule } from '@kelta/sdk'
-import { FormField } from './FormField'
+import { FormFieldRow } from './FormFieldRow'
 import { useRecordFormModel } from './useRecordFormModel'
 import { useRecordFormState } from './useRecordFormState'
 
@@ -230,8 +233,9 @@ function RecordFormBody({
             renderField={(field: LayoutFormFieldDefinition) => {
               const fieldIsEditable = !isFieldEditable || isFieldEditable(field.name)
               const layoutReadOnly = !!field.readOnly
+              // Help text is rendered by LayoutFormSections (layout override → description).
               return (
-                <FormField
+                <FormFieldRow
                   key={field.name}
                   field={field as FieldDefinition}
                   value={formData[field.name]}
@@ -260,12 +264,13 @@ function RecordFormBody({
                 {displayFields.map((field) => {
                   const fieldIsEditable = !isFieldEditable || isFieldEditable(field.name)
                   return (
-                    <FormField
+                    <FormFieldRow
                       key={field.name}
                       field={field}
                       value={formData[field.name]}
                       onChange={fieldIsEditable ? handleFieldChange : () => {}}
                       readOnly={!fieldIsEditable}
+                      helpText={field.description}
                       onBlur={handleFieldBlur}
                       error={formErrors[field.name]}
                       pluginRenderer={getFieldRenderer(field.type)}

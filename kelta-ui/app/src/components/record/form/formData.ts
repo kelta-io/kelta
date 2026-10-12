@@ -39,6 +39,10 @@ function toFormValue(field: FieldDefinition, value: unknown): unknown {
  * `queryDefaults` (e.g. `?order_ref=<id>` from a related list) win over both.
  * Formats date/datetime values for HTML input compatibility and JSON values
  * as pretty-printed text for the textarea editor.
+ *
+ * `encrypted` fields are WRITE-ONLY: the stored (or masked) value is never loaded into the
+ * form, and no default/prefill is applied — the field starts empty and is only sent when the
+ * user types a new value (see `buildSaveAttributes`).
  */
 export function computeInitialFormData(
   isNew: boolean,
@@ -49,6 +53,10 @@ export function computeInitialFormData(
   if (!isNew && record) {
     const data: Record<string, unknown> = { ...record }
     for (const field of fields) {
+      if (field.type === 'encrypted') {
+        delete data[field.name]
+        continue
+      }
       const value = data[field.name]
       if (value == null) continue
       if (field.type === 'boolean') continue
@@ -58,6 +66,7 @@ export function computeInitialFormData(
   }
   const defaults: Record<string, unknown> = {}
   for (const field of fields) {
+    if (field.type === 'encrypted') continue
     if (field.type === 'boolean') {
       defaults[field.name] = false
     }
@@ -67,7 +76,7 @@ export function computeInitialFormData(
   }
   // Apply query parameter defaults (e.g. ?order_ref=<id> from related list)
   if (queryDefaults) {
-    const fieldNames = new Set(fields.map((f) => f.name))
+    const fieldNames = new Set(fields.filter((f) => f.type !== 'encrypted').map((f) => f.name))
     for (const [key, value] of Object.entries(queryDefaults)) {
       if (fieldNames.has(key)) {
         defaults[key] = value
@@ -94,7 +103,8 @@ export interface BuildSaveAttributesOptions {
  * error so the raw string never overwrites structured data.
  *
  * Empty values (`undefined` / `''`) are omitted, except on update for a field that was
- * non-empty when the form loaded: that is a deliberate clear, sent as `null`.
+ * non-empty when the form loaded: that is a deliberate clear, sent as `null`. A blank
+ * `encrypted` field is always omitted (write-only: blank means "keep the stored secret").
  */
 export function buildSaveAttributes(
   editableFields: FieldDefinition[],
@@ -107,7 +117,7 @@ export function buildSaveAttributes(
   for (const field of editableFields) {
     const value = formData[field.name]
     if (value === undefined || value === '' || (field.type === 'json' && isBlankText(value))) {
-      if (initialData && !isEmptyFormValue(initialData[field.name])) {
+      if (field.type !== 'encrypted' && initialData && !isEmptyFormValue(initialData[field.name])) {
         attributes[field.name] = null
       }
       continue

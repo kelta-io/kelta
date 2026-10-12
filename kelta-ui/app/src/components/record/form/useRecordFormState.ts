@@ -191,7 +191,7 @@ export function useRecordFormState({
   const handleSave = useCallback(() => {
     // Per-field client validation (required, format, configured constraints) on
     // the fields the user can edit. Advisory — the worker re-validates.
-    const fieldErrors = validateFormValues(editableFields, formData, t)
+    const fieldErrors = validateFormValues(editableFields, formData, t, { isUpdate: !isNew })
     if (Object.keys(fieldErrors).length > 0) {
       setFormErrors((prev) => ({ ...prev, ...fieldErrors }))
       showToast(t('errors.validation'), 'error')

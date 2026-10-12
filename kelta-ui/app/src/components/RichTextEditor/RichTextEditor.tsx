@@ -36,6 +36,16 @@ export interface RichTextEditorProps {
   /** Whether the Insert-Field toolbar button is disabled. */
   insertFieldDisabled?: boolean
   testId?: string
+  /** Id for the editable content element (so a `<label htmlFor>` can target it). */
+  id?: string
+  /** Accessible name for the editable content element. */
+  'aria-label'?: string
+  /** Marks the editable content invalid (e.g. a record-form field error). */
+  'aria-invalid'?: boolean
+  /** Id of the element describing the editable content (e.g. its field-error alert). */
+  'aria-describedby'?: string
+  /** Marks the editable content as required. */
+  'aria-required'?: boolean
 }
 
 export interface RichTextEditorHandle {
@@ -65,9 +75,26 @@ export const RichTextEditor = React.forwardRef<RichTextEditorHandle, RichTextEdi
       onInsertFieldClick,
       insertFieldDisabled,
       testId = 'rich-text-editor',
+      id,
+      'aria-label': ariaLabel,
+      'aria-invalid': ariaInvalid,
+      'aria-describedby': ariaDescribedBy,
+      'aria-required': ariaRequired,
     },
     ref
   ) {
+    // Optional a11y/id attributes for the contenteditable — only the ones supplied are set, so
+    // existing callers (email templates, page builder) render exactly as before.
+    const contentA11y: Record<string, string> = {}
+    if (id) contentA11y.id = id
+    if (ariaLabel) contentA11y['aria-label'] = ariaLabel
+    if (ariaInvalid !== undefined) contentA11y['aria-invalid'] = String(ariaInvalid)
+    if (ariaDescribedBy) contentA11y['aria-describedby'] = ariaDescribedBy
+    if (ariaRequired) contentA11y['aria-required'] = 'true'
+    if (id || ariaLabel) {
+      contentA11y.role = 'textbox'
+      contentA11y['aria-multiline'] = 'true'
+    }
     const [showHtmlSource, setShowHtmlSource] = useState(false)
     const lastEmittedRef = useRef<string>('')
 
@@ -94,6 +121,7 @@ export const RichTextEditor = React.forwardRef<RichTextEditorHandle, RichTextEdi
           class:
             'tiptap prose prose-sm dark:prose-invert max-w-none px-4 py-3 min-h-[300px] focus:outline-none',
           'data-testid': `${testId}-content`,
+          ...contentA11y,
         },
       },
       onUpdate: ({ editor: ed }) => {

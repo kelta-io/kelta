@@ -1,6 +1,6 @@
 /**
  * Field-name / field-type sets shared by the record form core (`RecordForm`,
- * `FormField`, `useRecordFormModel`, `useRecordFormState`). Kept in their own
+ * `FormFieldRow`, `useRecordFormModel`, `useRecordFormState`). Kept in their own
  * module so the component files only export components (react-refresh).
  */
 import type { FieldType } from '@/hooks/useCollectionSchema'

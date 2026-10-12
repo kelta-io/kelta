@@ -258,6 +258,104 @@ describe('Edit', () => {
   })
 })
 
+describe('Edit — record-form contract (FieldEditProps id/testId/aria/placeholder)', () => {
+  const edit = (type: FieldType, props: Record<string, unknown> = {}) =>
+    render(
+      React.createElement(getFieldControl(type).Edit, {
+        type,
+        value: '',
+        ctx: ctx(),
+        onChange: vi.fn(),
+        ...props,
+      })
+    )
+
+  it('puts id, data-testid and the error a11y attributes on a simple input', () => {
+    edit('string', {
+      id: 'field-f',
+      testId: 'field-f',
+      placeholder: 'Type here',
+      'aria-invalid': true,
+      'aria-describedby': 'field-f-error',
+      ctx: ctx({ required: true }),
+    })
+    const input = screen.getByTestId('field-f')
+    expect(input).toHaveAttribute('id', 'field-f')
+    expect(input).toHaveAttribute('placeholder', 'Type here')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(input).toHaveAttribute('aria-describedby', 'field-f-error')
+    expect(input).toHaveAttribute('aria-required', 'true')
+  })
+
+  it('omits the a11y attributes when not supplied (inline consumers unchanged)', () => {
+    edit('string')
+    const input = screen.getByRole('textbox')
+    expect(input).not.toHaveAttribute('aria-describedby')
+    expect(input).not.toHaveAttribute('aria-required')
+    expect(input).not.toHaveAttribute('data-testid')
+  })
+
+  it('NumberEdit emits a number, "" when cleared, and steps currency in hundredths', () => {
+    const onChange = vi.fn()
+    // Controlled with a fixed value: each change event is measured against `5`.
+    edit('currency', { onChange, testId: 'n', value: 5 })
+    const input = screen.getByTestId('n')
+    expect(input).toHaveAttribute('step', '0.01')
+    fireEvent.change(input, { target: { value: '9.99' } })
+    expect(onChange).toHaveBeenLastCalledWith(9.99)
+    fireEvent.change(input, { target: { value: '' } })
+    expect(onChange).toHaveBeenLastCalledWith('')
+  })
+
+  it('PicklistEdit labels its empty option with the placeholder', () => {
+    edit('picklist', { placeholder: 'Select...', ctx: ctx({ enumValues: ['a'] }) })
+    expect(screen.getByRole('option', { name: 'Select...' })).toHaveValue('')
+  })
+
+  it('MultiPicklistEdit carries testId on its root and the error a11y on its trigger', () => {
+    edit('multi_picklist', {
+      id: 'field-f',
+      testId: 'field-f',
+      value: [],
+      'aria-invalid': true,
+      'aria-describedby': 'field-f-error',
+      ctx: ctx({ enumValues: ['a'] }),
+    })
+    expect(screen.getByTestId('field-f')).toBeInTheDocument()
+    const trigger = document.getElementById('field-f')!
+    expect(trigger).toHaveAttribute('aria-describedby', 'field-f-error')
+  })
+
+  it('ReferenceEdit keeps its default field-<name>-lookup test id unless testId is given', () => {
+    const { unmount } = edit('lookup', { ctx: ctx({ referenceOptions: [] }) })
+    expect(screen.getByTestId('field-f-lookup')).toBeInTheDocument()
+    unmount()
+    edit('lookup', { testId: 'field-f', ctx: ctx({ referenceOptions: [] }) })
+    expect(screen.getByTestId('field-f')).toBeInTheDocument()
+    expect(screen.queryByTestId('field-f-lookup')).toBeNull()
+  })
+
+  it('EncryptedEdit is write-only: never shows the passed value, emits what is typed', () => {
+    const onChange = vi.fn()
+    edit('encrypted', { value: 'stored-secret', onChange, testId: 'secret' })
+    const input = screen.getByTestId('secret') as HTMLInputElement
+    expect(input.type).toBe('password')
+    expect(input.value).toBe('')
+    fireEvent.change(input, { target: { value: 'typed' } })
+    expect(onChange).toHaveBeenCalledWith('typed')
+  })
+
+  it('EncryptedEdit honours readOnly', () => {
+    edit('encrypted', { testId: 'secret', ctx: ctx({ readOnly: true }) })
+    expect(screen.getByTestId('secret')).toBeDisabled()
+  })
+
+  it('JsonEdit defaults its placeholder to {}', () => {
+    edit('json', { testId: 'j' })
+    expect(screen.getByTestId('j')).toHaveAttribute('placeholder', '{}')
+  })
+})
+
 describe('InlineEdit', () => {
   it('commits the coerced value on Enter', () => {
     const onCommit = vi.fn()

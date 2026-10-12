@@ -9,7 +9,7 @@
  * from the admin form (record-stack convergence P3): client validation rules,
  * blur rules, schema defaults, clear-to-null on update, per-field validation,
  * create → the new record's detail page, and the edit-mode record type.
- * (`FormField` itself is covered in `components/record/form/FormField.test.tsx`.)
+ * (`FormFieldRow` itself is covered in `components/record/form/FormFieldRow.test.tsx`.)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -262,7 +262,15 @@ describe('ObjectFormPage (create)', () => {
         )
       )
     )
-    // Let the rules query settle into the engine before saving.
+    // Wait for the rules request itself to resolve, then flush the render that hands the rules
+    // to the engine. A single act() tick raced the query under parallel test load, and Save then
+    // ran without the rule.
+    const rulesCall = getList.mock.calls.findIndex(([url]) =>
+      String(url).includes('/api/validation-rules')
+    )
+    await act(async () => {
+      await getList.mock.results[rulesCall].value
+    })
     await act(async () => {})
 
     fireEvent.click(screen.getByTestId('save-button'))

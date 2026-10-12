@@ -33,7 +33,7 @@ export interface FieldControlContext {
   referenceOptions?: LookupOption[]
   /** Layout/schema read-only override — renders View or a disabled Edit. */
   readOnly?: boolean
-  /** Layout/schema required override — drives `validate`. */
+  /** Layout/schema required override — drives `validate` and the controls' required a11y state. */
   required?: boolean
 }
 
@@ -56,6 +56,18 @@ export interface FieldEditProps {
   error?: string
   /** Input element id. */
   id?: string
+  /**
+   * `data-testid` for the control. Simple inputs carry it on the `<input>`/`<select>`/`<textarea>`;
+   * composite controls (lookup, multi-picklist, rich text) on their root. Omitted = each control's
+   * own default (none, or `field-<name>-lookup` / `field-<name>-richtext`).
+   */
+  testId?: string
+  /** Placeholder text (picklist / lookup / multi-picklist: the empty option's label). */
+  placeholder?: string
+  /** Marks the control invalid (a11y) — the record form sets it when the field has an error. */
+  'aria-invalid'?: boolean
+  /** Id of the element describing the control — the record form's `field-error-<name>` alert. */
+  'aria-describedby'?: string
 }
 
 export interface FieldInlineProps extends FieldEditProps {

@@ -31,7 +31,7 @@ function escapeRegExp(text: string): string {
  *
  * Selectors are each stack's existing ones — no test ids were added for this. What the two
  * stacks share is used directly: form controls carry `id="field-<name>"` in both
- * (`<input>`, `<select>`, the native/Radix checkbox, and the LookupSelect trigger button),
+ * (`<input>`, `<select>`, the native checkbox, and the LookupSelect trigger button),
  * and both lists render the shared ObjectDataTable (`data-testid="data-table"`). Everything
  * else is mapped per variant below.
  */
@@ -167,8 +167,9 @@ export class RecordVariant extends BasePage {
   }
 
   /**
-   * The control for a field: `<input>`, `<select>`, checkbox (native on admin, Radix
-   * `role="checkbox"` on end-user) or the LookupSelect trigger button — all `id="field-<name>"`.
+   * The control for a field: `<input>`, `<select>`, native checkbox (both stacks — the end-user
+   * form renders the fieldControl registry's) or the LookupSelect trigger button — all
+   * `id="field-<name>"`.
    */
   field(name: string): Locator {
     return this.form.locator(`[id="field-${name}"]`);
