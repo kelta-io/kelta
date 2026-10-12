@@ -113,6 +113,40 @@ describe('CrudSelectField', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toEqual({ kind: 'a', note: '' })
   })
+
+  it('shows the stored value when its options arrive after the dialog opened', () => {
+    const form = (options: { value: string; label: string }[]) => (
+      <I18nProvider>
+        <CrudFormDialog<Values>
+          open
+          onClose={() => {}}
+          title="Form"
+          schema={schema}
+          defaultValues={{ kind: 'b', note: '' }}
+          onSubmit={vi.fn()}
+          testIdPrefix="f"
+        >
+          <CrudSelectField<Values>
+            name="kind"
+            id="f-kind"
+            label="Kind"
+            placeholder="Pick one"
+            options={options}
+            testId="f-kind-input"
+          />
+        </CrudFormDialog>
+      </I18nProvider>
+    )
+    const { rerender } = render(form([]))
+    rerender(
+      form([
+        { value: 'a', label: 'Alpha' },
+        { value: 'b', label: 'Beta' },
+      ])
+    )
+
+    expect(screen.getByTestId('f-kind-input')).toHaveValue('b')
+  })
 })
 
 describe('CrudTextField hint', () => {
