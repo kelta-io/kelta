@@ -6,7 +6,7 @@
 
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { z } from 'zod'
@@ -231,6 +231,24 @@ describe('AdminCrud', () => {
     await user.click(screen.getByText('new thing'))
     await user.click(await screen.findByTestId('thing-form-close'))
     await waitFor(() => expect(screen.queryByTestId('thing-form-modal')).not.toBeInTheDocument())
+    expect(api.create).not.toHaveBeenCalled()
+  })
+
+  it('cancelling does not blur the field being edited, so no validation runs first', async () => {
+    const user = userEvent.setup()
+    renderHarness(api)
+    await user.click(screen.getByText('new thing'))
+    const name = await screen.findByTestId('thing-name-input')
+    await waitFor(() => expect(name).toHaveFocus())
+
+    // mousedown is cancelled, so focus (and blur validation) never leaves the field
+    expect(fireEvent.mouseDown(screen.getByTestId('thing-form-cancel'))).toBe(false)
+    expect(fireEvent.mouseDown(screen.getByTestId('thing-form-close'))).toBe(false)
+    expect(name).toHaveFocus()
+
+    await user.click(screen.getByTestId('thing-form-cancel'))
+    await waitFor(() => expect(screen.queryByTestId('thing-form-modal')).not.toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(api.create).not.toHaveBeenCalled()
   })
 

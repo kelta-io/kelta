@@ -54,6 +54,15 @@ export interface CrudFormDialogProps<TValues extends FieldValues> {
   children: React.ReactNode
 }
 
+/**
+ * Pressing Cancel or the close button must not take focus from the field being edited: the blur
+ * would run on-blur validation, and the error lines it inserts move the button out from under the
+ * pointer before mouseup, so the click is lost (and errors flash on a form being abandoned).
+ */
+function keepFieldFocus(e: React.MouseEvent): void {
+  e.preventDefault()
+}
+
 export function CrudFormDialog<TValues extends FieldValues>(
   props: CrudFormDialogProps<TValues>
 ): React.ReactElement {
@@ -123,6 +132,7 @@ function CrudFormDialogBody<TValues extends FieldValues>({
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
             aria-label={t('common.close')}
             disabled={isSubmitting}
+            onMouseDown={keepFieldFocus}
             data-testid={`${testIdPrefix}-form-close`}
           >
             <X size={16} />
@@ -139,6 +149,7 @@ function CrudFormDialogBody<TValues extends FieldValues>({
                 type="button"
                 variant="outline"
                 onClick={onClose}
+                onMouseDown={keepFieldFocus}
                 disabled={isSubmitting}
                 data-testid={`${testIdPrefix}-form-cancel`}
               >
