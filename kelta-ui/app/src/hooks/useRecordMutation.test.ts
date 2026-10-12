@@ -1,6 +1,7 @@
 /**
  * useRecordMutation offline wiring (Rec 2B-2). While offline, writes queue to the
  * outbox via engine.queue instead of hitting the network; online is unchanged.
+ * Also: a write invalidates both record stacks' caches (end-user and admin).
  */
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -95,5 +96,36 @@ describe('useRecordMutation — offline queueing', () => {
 
     expect(apiClient.post).toHaveBeenCalledTimes(1)
     await waitFor(async () => expect(await store.listOutbox()).toHaveLength(0))
+  })
+})
+
+describe('useRecordMutation — cache invalidation', () => {
+  it("invalidates both stacks' list and record caches for the collection after a write", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity, staleTime: Infinity } },
+    })
+    const keys = [
+      ['collection-records', 'orders', { page: 1 }],
+      ['record', 'orders', 's1'],
+      ['resources', 'orders', 0, 25],
+      ['resource', 'orders', 's1'],
+      ['resource', 'customers', 'c1'], // another collection — untouched
+    ]
+    for (const key of keys) qc.setQueryData(key, { cached: true })
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      React.createElement(QueryClientProvider, { client: qc }, children)
+
+    const { result } = renderHook(() => useRecordMutation({ collectionName: 'orders' }), {
+      wrapper,
+    })
+    await result.current.update.mutateAsync({ id: 's1', data: { name: 'Y' } })
+
+    await waitFor(() =>
+      expect(qc.getQueryState(['resource', 'orders', 's1'])?.isInvalidated).toBe(true)
+    )
+    for (const key of keys.slice(0, 4)) {
+      expect(qc.getQueryState(key)?.isInvalidated).toBe(true)
+    }
+    expect(qc.getQueryState(['resource', 'customers', 'c1'])?.isInvalidated).toBe(false)
   })
 })

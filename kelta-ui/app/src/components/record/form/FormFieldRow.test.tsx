@@ -372,3 +372,51 @@ describe('FormFieldRow plugin field renderer', () => {
     consoleError.mockRestore()
   })
 })
+
+describe('FormFieldRow type hint (admin chrome)', () => {
+  it("shows the field type's name under the label when asked", () => {
+    render(<FormFieldRow field={nameField} value="" onChange={vi.fn()} showTypeHint />)
+    expect(screen.getByTestId('field-type-name')).toHaveTextContent('String')
+  })
+
+  it('shows no type hint by default', () => {
+    render(<FormFieldRow field={nameField} value="" onChange={vi.fn()} />)
+    expect(screen.queryByTestId('field-type-name')).toBeNull()
+  })
+})
+
+describe('FormFieldRow plugin renderer metadata', () => {
+  it('describes the field to the renderer', () => {
+    let metadata: Record<string, unknown> | undefined
+    function Capture(props: FieldRendererProps) {
+      metadata = props.metadata
+      return null
+    }
+    const lookup: FieldDefinition = {
+      id: 'f-owner',
+      name: 'owner',
+      displayName: 'Owner',
+      type: 'lookup',
+      required: true,
+      referenceTarget: 'accounts',
+    }
+    render(
+      <FormFieldRow
+        field={lookup}
+        value=""
+        onChange={vi.fn()}
+        error="Required"
+        pluginRenderer={Capture}
+      />
+    )
+    expect(metadata).toEqual({
+      fieldId: 'field-owner',
+      type: 'lookup',
+      fieldType: 'lookup',
+      required: true,
+      displayName: 'Owner',
+      referenceTarget: 'accounts',
+      errorId: 'field-owner-error',
+    })
+  })
+})

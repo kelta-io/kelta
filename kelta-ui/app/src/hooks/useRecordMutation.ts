@@ -2,8 +2,8 @@
  * useRecordMutation Hook
  *
  * Provides create, update, patch, and delete mutations for collection records.
- * All mutations use JSON:API request wrapping and invalidate the collection
- * records cache on success.
+ * All mutations use JSON:API request wrapping and invalidate the collection's
+ * record caches (end-user and admin stacks) on success.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -81,9 +81,15 @@ export function useRecordMutation(options: UseRecordMutationOptions): UseRecordM
   /** True when an offline replica is mounted and connectivity is down. */
   const isOffline = (): boolean => !!offline && offline.online === false
 
+  // Both record stacks show the same records, so a write refreshes both stacks' caches: the
+  // end-user list/detail (`collection-records` / `record`) and the admin list/detail
+  // (`resources` / `resource`) — the app's 5-minute staleTime would otherwise serve the
+  // pre-save record on the page a save lands on.
   const invalidateRecords = () => {
     queryClient.invalidateQueries({ queryKey: ['collection-records', collectionName] })
     queryClient.invalidateQueries({ queryKey: ['record', collectionName] })
+    queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
+    queryClient.invalidateQueries({ queryKey: ['resource', collectionName] })
   }
 
   /** Convert raw Axios errors into structured ApiError with field-level details. */

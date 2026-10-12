@@ -1,18 +1,21 @@
 /**
- * ResourceFormPage Tests
+ * ResourceFormPage — the admin wrapper over the shared `RecordForm` core.
  *
- * Tests for the ResourceFormPage component including:
- * - Form generation from collection schema
- * - Create and edit modes
- * - Field type rendering
- * - Form validation
- * - Form submission
- * - Custom field renderer integration
+ * Integration-style: the real wrapper, `RecordForm`, `useRecordFormModel`,
+ * `useRecordFormState` and the data hooks (`useCollectionSchema`, `useRecord`,
+ * `useRecordMutation`, …) run against the mocked axios instance, so these tests pin the
+ * request/response contract end to end. Only the page layout is stubbed (no layout →
+ * the flat field grid).
  *
- * Requirements:
- * - 11.6: Resource browser allows creating new resources
- * - 11.9: Resource browser allows editing existing resources
- * - 12.4: Use custom field renderers when registered, fall back to defaults
+ * What the wrapper owns: the `/resources/...` navigation targets, clone mode
+ * (`?clone=<id>` → the core's `cloneFromId`, plus the "cloning from" notice), the admin
+ * breadcrumb, the record id under the title, and field type hints. Everything else is the
+ * core's behaviour as the admin page exercises it (record-stack convergence P6):
+ * fields, validation, save, server errors, plugin field renderers, the record-load error,
+ * cache invalidation of the admin detail/list, and optimistic concurrency (If-Match + the
+ * conflict prompt). The per-field control DOM is covered in
+ * `components/record/form/FormFieldRow.test.tsx`; the end-user wrapper in
+ * `pages/app/ObjectFormPage/ObjectFormPage.test.tsx`.
  */
 
 import React from 'react'
@@ -29,17 +32,12 @@ import {
   createAxiosError,
 } from '../../test/testUtils'
 import { ResourceFormPage } from './ResourceFormPage'
-import type { CollectionSchema, Resource } from './ResourceFormPage'
 import { PluginProvider } from '../../context/PluginContext'
 import type { Plugin, FieldRendererProps } from '../../types/plugin'
 
-// Mock usePageLayout to return no layout (fallback to flat form)
+// No page layout configured → the flat field grid
 vi.mock('../../hooks/usePageLayout', () => ({
   usePageLayout: () => ({ layout: null, isLoading: false, error: null }),
-}))
-
-vi.mock('../../components/LayoutFormSections/LayoutFormSections', () => ({
-  LayoutFormSections: () => <div data-testid="layout-form-sections">Layout Form</div>,
 }))
 
 // Mock navigate
@@ -52,8 +50,28 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
+interface TestField {
+  id: string
+  name: string
+  displayName: string
+  type: string
+  required: boolean
+  order: number
+  referenceCollectionId?: string
+  constraints?: Record<string, unknown>
+}
+
+interface TestSchema {
+  id: string
+  name: string
+  displayName: string
+  fields: TestField[]
+}
+
+type TestRecord = Record<string, unknown> & { id: string }
+
 // Test data
-const mockSchema: CollectionSchema = {
+const mockSchema: TestSchema = {
   id: 'col-1',
   name: 'users',
   displayName: 'Users',
@@ -73,7 +91,7 @@ const mockSchema: CollectionSchema = {
       type: 'string',
       required: true,
       order: 2,
-      validation: [{ type: 'email' }],
+      constraints: { email: true },
     },
     {
       id: 'field-3',
@@ -82,10 +100,7 @@ const mockSchema: CollectionSchema = {
       type: 'number',
       required: false,
       order: 3,
-      validation: [
-        { type: 'min', value: 0 },
-        { type: 'max', value: 150 },
-      ],
+      constraints: { min: 0, max: 150 },
     },
     {
       id: 'field-4',
@@ -132,52 +147,43 @@ const mockSchema: CollectionSchema = {
 }
 
 /**
- * Convert a CollectionSchema into a JSON:API response with included field records.
- * This matches the format returned by /api/collections/{name}?include=fields
+ * Convert a test schema into the JSON:API response of /api/collections/{name}?include=fields.
  */
-function toJsonApiWithFields(schema: CollectionSchema) {
+function toJsonApiWithFields(schema: TestSchema) {
   return {
     data: {
       type: 'collections',
       id: schema.id,
-      attributes: {
-        name: schema.name,
-        displayName: schema.displayName,
-        description: schema.description,
-      },
+      attributes: { name: schema.name, displayName: schema.displayName },
     },
-    included: ((schema.fields || []) as unknown as Record<string, unknown>[]).map(
-      (f: Record<string, unknown>, i: number) => {
-        // Spread ALL field properties into attributes to preserve validation, order, etc.
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { id: _id, referenceCollectionId: _ref, ...rest } = f as Record<string, unknown>
-        return {
-          type: 'fields',
-          id: f.id,
-          attributes: {
-            ...rest,
-            type: (f.type as string).toUpperCase(),
-            required: f.required ?? false,
-            fieldOrder: (f as Record<string, unknown>).order ?? i + 1,
-            active: true,
-          },
-          relationships: {
-            collectionId: { data: { type: 'collections', id: schema.id } },
-            ...(f.referenceCollectionId
-              ? {
-                  referenceCollectionId: {
-                    data: { type: 'collections', id: f.referenceCollectionId },
-                  },
-                }
-              : {}),
-          },
-        }
+    included: schema.fields.map((f) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { id: _id, referenceCollectionId: _ref, order, ...rest } = f
+      return {
+        type: 'fields',
+        id: f.id,
+        attributes: {
+          ...rest,
+          type: f.type.toUpperCase(),
+          fieldOrder: order,
+          active: true,
+        },
+        relationships: {
+          collectionId: { data: { type: 'collections', id: schema.id } },
+          ...(f.referenceCollectionId
+            ? {
+                referenceCollectionId: {
+                  data: { type: 'collections', id: f.referenceCollectionId },
+                },
+              }
+            : {}),
+        },
       }
-    ),
+    }),
   }
 }
 
-const mockResource: Resource = {
+const mockResource: TestRecord = {
   id: 'res-123',
   name: 'John Doe',
   email: 'john@example.com',
@@ -191,19 +197,44 @@ const mockResource: Resource = {
   updatedAt: '2024-01-15T10:30:00Z',
 }
 
-// Helper to create query client
-function createQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        gcTime: 0,
-      },
-    },
+/** What the API serves: the schema and records by id (with their ETag). */
+let schemaServed: TestSchema
+let recordsServed: Record<string, { resource: TestRecord; etag?: string }>
+
+function serveApi() {
+  mockAxios.get.mockImplementation((url: string) => {
+    if (url.includes('/api/collections/') && url.includes('include=fields')) {
+      return Promise.resolve({ data: toJsonApiWithFields(schemaServed) })
+    }
+    const match = url.match(/^\/api\/[^/?]+\/([^/?]+)$/)
+    const served = match ? recordsServed[match[1]] : undefined
+    if (served && !url.startsWith('/api/collections')) {
+      return Promise.resolve({
+        data: served.resource,
+        headers: served.etag ? { etag: served.etag } : {},
+      })
+    }
+    return Promise.reject(createAxiosError(404))
   })
 }
 
-// Helper to render with providers
+/** The signed-in user's permissions, as the app shell's `/api/me/permissions` fetch caches them. */
+let myPermissions: {
+  systemPermissions: Record<string, boolean>
+  objectPermissions: Record<string, Record<string, boolean>>
+  fieldPermissions: Record<string, Record<string, string>>
+}
+
+function seedPermissions(queryClient: QueryClient): QueryClient {
+  queryClient.setQueryDefaults(['my-permissions'], { gcTime: Infinity })
+  queryClient.setQueryData(['my-permissions'], myPermissions)
+  return queryClient
+}
+
+function createQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+}
+
 function renderWithProviders(
   ui: React.ReactElement,
   {
@@ -214,7 +245,7 @@ function renderWithProviders(
 ) {
   return {
     ...render(
-      <QueryClientProvider client={queryClient}>
+      <QueryClientProvider client={seedPermissions(queryClient)}>
         <AuthWrapper>
           <PluginProvider plugins={plugins}>
             <MemoryRouter initialEntries={[route]}>
@@ -231,363 +262,270 @@ function renderWithProviders(
   }
 }
 
+async function waitForForm() {
+  await waitFor(() => expect(screen.getByTestId('form-fields')).toBeInTheDocument())
+}
+
+/** The JSON:API body of the n-th call to an axios write method. */
+function bodyOf(method: 'post' | 'put', callIndex = 0) {
+  return (mockAxios[method].mock.calls[callIndex] as unknown[])[1] as {
+    data: { type: string; id?: string; attributes: Record<string, unknown> }
+  }
+}
+
+let cleanupAuthMocks: () => void
+
+beforeEach(() => {
+  cleanupAuthMocks = setupAuthMocks()
+  resetMockAxios()
+  mockNavigate.mockReset()
+  schemaServed = mockSchema
+  recordsServed = { 'res-123': { resource: mockResource, etag: '"v1"' } }
+  myPermissions = { systemPermissions: {}, objectPermissions: {}, fieldPermissions: {} }
+  serveApi()
+})
+
+afterEach(() => {
+  cleanupAuthMocks()
+  vi.clearAllMocks()
+})
+
 describe('ResourceFormPage', () => {
-  let cleanupAuthMocks: () => void
-
-  beforeEach(() => {
-    cleanupAuthMocks = setupAuthMocks()
-    resetMockAxios()
-    mockNavigate.mockReset()
-  })
-
-  afterEach(() => {
-    cleanupAuthMocks()
-    vi.clearAllMocks()
-  })
-
-  describe('Loading State', () => {
-    it('should display loading spinner while fetching schema', () => {
+  describe('Loading and error states', () => {
+    it('shows a loading indicator while the schema loads', () => {
       mockAxios.get.mockImplementation(() => new Promise(() => {})) // Never resolves
 
       renderWithProviders(<ResourceFormPage />)
 
-      expect(screen.getByTestId('loading-spinner')).toBeInTheDocument()
+      expect(screen.getByTestId('record-form-loading')).toBeInTheDocument()
     })
-  })
 
-  describe('Error State', () => {
-    it('should display error message when schema fetch fails', async () => {
+    it('shows an error when the schema fetch fails', async () => {
       mockAxios.get.mockRejectedValue(createAxiosError(500))
 
       renderWithProviders(<ResourceFormPage />)
 
-      await waitFor(() => {
-        expect(screen.getByTestId('error-message')).toBeInTheDocument()
-      })
+      expect(await screen.findByTestId('record-form-error')).toBeInTheDocument()
     })
 
-    it('should display error message when resource fetch fails in edit mode', async () => {
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        // Resource fetch fails
-        return Promise.reject(createAxiosError(404))
-      })
+    it('shows an error, not an empty form, when the record to edit fails to load', async () => {
+      recordsServed = {}
 
-      renderWithProviders(<ResourceFormPage />, {
-        route: '/resources/users/res-123/edit',
-      })
+      renderWithProviders(<ResourceFormPage />, { route: '/resources/users/res-123/edit' })
 
-      await waitFor(() => {
-        expect(screen.getByTestId('error-message')).toBeInTheDocument()
-      })
+      expect(await screen.findByTestId('record-form-error')).toHaveTextContent(
+        /could not be loaded/i
+      )
+      expect(screen.queryByTestId('form-fields')).not.toBeInTheDocument()
+    })
+
+    it('gates create on the collection create permission, linking back to the admin list', async () => {
+      myPermissions.objectPermissions.users = {
+        canCreate: false,
+        canRead: true,
+        canEdit: true,
+        canDelete: true,
+      }
+
+      renderWithProviders(<ResourceFormPage />)
+
+      expect(await screen.findByText(/insufficient privileges/i)).toBeInTheDocument()
+      expect(screen.queryByTestId('form-fields')).not.toBeInTheDocument()
+    })
+
+    it('shows a read-only field as disabled and leaves it out of the save', async () => {
+      const user = userEvent.setup()
+      myPermissions.fieldPermissions.users = { email: 'READ_ONLY', age: 'HIDDEN' }
+      mockAxios.put.mockResolvedValueOnce({ data: mockResource })
+
+      renderWithProviders(<ResourceFormPage />, { route: '/resources/users/res-123/edit' })
+      await waitForForm()
+
+      expect(screen.getByTestId('field-email')).toBeDisabled()
+      expect(screen.queryByTestId('field-age')).not.toBeInTheDocument()
+      await user.click(screen.getByTestId('save-button'))
+      await waitFor(() => expect(mockAxios.put).toHaveBeenCalled())
+      expect(bodyOf('put').data.attributes).not.toHaveProperty('email')
+      expect(bodyOf('put').data.attributes).not.toHaveProperty('age')
     })
   })
 
-  describe('Create Mode', () => {
-    beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-    })
-
-    it('should render form with all fields from schema', async () => {
+  describe('Create mode', () => {
+    it('renders a control for every schema field', async () => {
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Check all fields are rendered
-      expect(screen.getByTestId('field-name')).toBeInTheDocument()
-      expect(screen.getByTestId('field-email')).toBeInTheDocument()
-      expect(screen.getByTestId('field-age')).toBeInTheDocument()
-      expect(screen.getByTestId('field-active')).toBeInTheDocument()
-      expect(screen.getByTestId('field-birthDate')).toBeInTheDocument()
-      expect(screen.getByTestId('field-lastLogin')).toBeInTheDocument()
-      expect(screen.getByTestId('field-metadata')).toBeInTheDocument()
-      expect(screen.getByTestId('field-organizationId')).toBeInTheDocument()
+      for (const name of [
+        'name',
+        'email',
+        'age',
+        'active',
+        'birthDate',
+        'lastLogin',
+        'metadata',
+        'organizationId',
+      ]) {
+        expect(screen.getByTestId(`field-${name}`)).toBeInTheDocument()
+      }
     })
 
-    it('should display page title for create mode', async () => {
+    it('titles the page with the collection and renders the admin breadcrumb', async () => {
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('page-title')).toHaveTextContent(/create record/i)
-      })
+      expect(screen.getByTestId('page-title')).toHaveTextContent('New Users')
+      const breadcrumb = screen.getByRole('navigation', { name: /breadcrumb/i })
+      expect(breadcrumb).toHaveTextContent('Create Record')
+      expect(screen.getByRole('link', { name: 'Resource Browser' })).toHaveAttribute(
+        'href',
+        '/default/resources'
+      )
+      expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute(
+        'href',
+        '/default/resources/users'
+      )
+      expect(screen.queryByTestId('resource-id')).not.toBeInTheDocument()
     })
 
-    it('should render correct input types for each field type', async () => {
+    it('renders the input type for each field type', async () => {
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // String field - text input
-      const nameInput = screen.getByTestId('field-name')
-      expect(nameInput).toHaveAttribute('type', 'text')
-
-      // Number field - number input
-      const ageInput = screen.getByTestId('field-age')
-      expect(ageInput).toHaveAttribute('type', 'number')
-
-      // Boolean field - checkbox
-      const activeInput = screen.getByTestId('field-active')
-      expect(activeInput).toHaveAttribute('type', 'checkbox')
-
-      // Date field - date input
-      const birthDateInput = screen.getByTestId('field-birthDate')
-      expect(birthDateInput).toHaveAttribute('type', 'date')
-
-      // Datetime field - datetime-local input
-      const lastLoginInput = screen.getByTestId('field-lastLogin')
-      expect(lastLoginInput).toHaveAttribute('type', 'datetime-local')
-
-      // JSON field - textarea
-      const metadataInput = screen.getByTestId('field-metadata')
-      expect(metadataInput.tagName.toLowerCase()).toBe('textarea')
-
-      // Reference field - text input
-      const orgInput = screen.getByTestId('field-organizationId')
-      expect(orgInput).toHaveAttribute('type', 'text')
+      expect(screen.getByTestId('field-name')).toHaveAttribute('type', 'text')
+      expect(screen.getByTestId('field-age')).toHaveAttribute('type', 'number')
+      expect(screen.getByTestId('field-active')).toHaveAttribute('type', 'checkbox')
+      expect(screen.getByTestId('field-birthDate')).toHaveAttribute('type', 'date')
+      expect(screen.getByTestId('field-lastLogin')).toHaveAttribute('type', 'datetime-local')
+      expect(screen.getByTestId('field-metadata').tagName.toLowerCase()).toBe('textarea')
     })
 
-    it('should mark required fields with asterisk', async () => {
+    it("shows each field's type under its label", async () => {
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Find labels for required fields
-      const nameLabel = screen.getByText('Full Name')
-      const emailLabel = screen.getByText('Email Address')
-
-      // Check for required indicator
-      expect(nameLabel.parentElement).toHaveTextContent('*')
-      expect(emailLabel.parentElement).toHaveTextContent('*')
+      expect(screen.getByTestId('field-type-name')).toHaveTextContent('String')
+      expect(screen.getByTestId('field-type-age')).toHaveTextContent('Number')
     })
 
-    it('should show validation error for required fields when submitting empty form', async () => {
+    it('marks required fields with an asterisk', async () => {
+      renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
+
+      expect(screen.getByText('Full Name').parentElement).toHaveTextContent('*')
+      expect(screen.getByText('Email Address').parentElement).toHaveTextContent('*')
+    })
+
+    it('shows required-field errors when saving an empty form, and saves nothing', async () => {
       const user = userEvent.setup()
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
+      await user.click(screen.getByTestId('save-button'))
 
-      // Submit empty form
-      const submitButton = screen.getByTestId('submit-button')
-      await user.click(submitButton)
-
-      // Check for validation errors
-      await waitFor(() => {
-        expect(screen.getByTestId('error-name')).toBeInTheDocument()
-        expect(screen.getByTestId('error-email')).toBeInTheDocument()
-      })
+      expect(await screen.findByTestId('field-error-name')).toBeInTheDocument()
+      expect(screen.getByTestId('field-error-email')).toBeInTheDocument()
+      expect(mockAxios.post).not.toHaveBeenCalled()
     })
 
-    it('should validate email format', async () => {
+    it("validates a field's email constraint", async () => {
       const user = userEvent.setup()
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
+      await user.type(screen.getByTestId('field-name'), 'John Doe')
+      await user.type(screen.getByTestId('field-email'), 'invalid-email')
+      await user.click(screen.getByTestId('save-button'))
 
-      // Fill in name
-      const nameInput = screen.getByTestId('field-name')
-      await user.type(nameInput, 'John Doe')
-
-      // Fill in invalid email
-      const emailInput = screen.getByTestId('field-email')
-      await user.type(emailInput, 'invalid-email')
-
-      // Submit form
-      const submitButton = screen.getByTestId('submit-button')
-      await user.click(submitButton)
-
-      // Check for email validation error
-      await waitFor(() => {
-        expect(screen.getByTestId('error-email')).toBeInTheDocument()
-      })
+      expect(await screen.findByTestId('field-error-email')).toBeInTheDocument()
+      expect(mockAxios.post).not.toHaveBeenCalled()
     })
 
-    it('should validate JSON format', async () => {
+    it('validates JSON fields', async () => {
       const user = userEvent.setup()
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Fill required fields
       await user.type(screen.getByTestId('field-name'), 'John Doe')
       await user.type(screen.getByTestId('field-email'), 'john@example.com')
+      await user.type(screen.getByTestId('field-metadata'), 'invalid json')
+      await user.click(screen.getByTestId('save-button'))
 
-      // Fill in invalid JSON
-      const metadataInput = screen.getByTestId('field-metadata')
-      await user.type(metadataInput, 'invalid json')
-
-      // Submit form
-      const submitButton = screen.getByTestId('submit-button')
-      await user.click(submitButton)
-
-      // Check for JSON validation error
-      await waitFor(() => {
-        expect(screen.getByTestId('error-metadata')).toBeInTheDocument()
-      })
+      expect(await screen.findByTestId('field-error-metadata')).toBeInTheDocument()
+      expect(mockAxios.post).not.toHaveBeenCalled()
     })
 
-    it('should submit form with valid data', async () => {
+    it("POSTs the record, confirms, and lands on the new record's admin detail page", async () => {
       const user = userEvent.setup()
-
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
       mockAxios.post.mockResolvedValueOnce({
         data: { id: 'new-res-123', name: 'John Doe', email: 'john@example.com' },
       })
-
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Fill in required fields
       await user.type(screen.getByTestId('field-name'), 'John Doe')
       await user.type(screen.getByTestId('field-email'), 'john@example.com')
+      await user.type(screen.getByTestId('field-metadata'), '{{"role": "admin"}')
+      await user.click(screen.getByTestId('save-button'))
 
-      // Submit form
-      const submitButton = screen.getByTestId('submit-button')
-      await user.click(submitButton)
-
-      // Verify API was called
-      await waitFor(() => {
-        const postCalls = mockAxios.post.mock.calls.filter((call: unknown[]) =>
-          (call[0] as string).includes('/api/users')
-        )
-        expect(postCalls.length).toBeGreaterThan(0)
-      })
-    })
-
-    it('should navigate to resource detail after successful create', async () => {
-      const user = userEvent.setup()
-
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-      mockAxios.post.mockResolvedValueOnce({
-        data: { id: 'new-res-123', name: 'John Doe', email: 'john@example.com' },
-      })
-
-      renderWithProviders(<ResourceFormPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Fill in required fields
-      await user.type(screen.getByTestId('field-name'), 'John Doe')
-      await user.type(screen.getByTestId('field-email'), 'john@example.com')
-
-      // Submit form
-      await user.click(screen.getByTestId('submit-button'))
-
-      // Verify navigation
-      await waitFor(() => {
+      await waitFor(() =>
         expect(mockNavigate).toHaveBeenCalledWith('/default/resources/users/new-res-123')
+      )
+      expect(mockAxios.post.mock.calls[0][0]).toBe('/api/users')
+      const body = bodyOf('post')
+      expect(body.data.type).toBe('users')
+      expect(body.data.id).toBeUndefined()
+      expect(body.data.attributes).toEqual({
+        name: 'John Doe',
+        email: 'john@example.com',
+        active: false,
+        metadata: { role: 'admin' },
       })
+      expect(await screen.findByText('Record created successfully.')).toBeInTheDocument()
     })
 
-    it('should navigate back to list on cancel', async () => {
+    it('cancel returns to the admin list', async () => {
       const user = userEvent.setup()
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
+      await user.click(screen.getByTestId('cancel-button'))
 
-      // Click cancel
-      const cancelButton = screen.getByTestId('cancel-button')
-      await user.click(cancelButton)
-
-      // Verify navigation
       expect(mockNavigate).toHaveBeenCalledWith('/default/resources/users')
     })
   })
 
-  describe('Edit Mode', () => {
-    beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        if (url.includes('/users/res-123') && !url.includes('/api/collections')) {
-          return Promise.resolve({ data: mockResource })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
+  describe('Edit mode', () => {
+    const editRoute = '/resources/users/res-123/edit'
+
+    it('titles the page for edit and shows the record id', async () => {
+      renderWithProviders(<ResourceFormPage />, { route: editRoute })
+      await waitForForm()
+
+      expect(screen.getByTestId('page-title')).toHaveTextContent('Edit Users')
+      expect(screen.getByRole('navigation', { name: /breadcrumb/i })).toHaveTextContent(
+        'Edit Record'
+      )
+      expect(screen.getByTestId('resource-id')).toHaveTextContent('res-123')
     })
 
-    it('should display page title for edit mode', async () => {
-      renderWithProviders(<ResourceFormPage />, {
-        route: '/resources/users/res-123/edit',
-      })
+    it('pre-populates the form with the record', async () => {
+      renderWithProviders(<ResourceFormPage />, { route: editRoute })
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('page-title')).toHaveTextContent(/edit record/i)
-      })
-    })
-
-    it('should display resource ID in edit mode', async () => {
-      renderWithProviders(<ResourceFormPage />, {
-        route: '/resources/users/res-123/edit',
-      })
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-id')).toHaveTextContent('res-123')
-      })
-    })
-
-    it('should pre-populate form with existing resource data', async () => {
-      renderWithProviders(<ResourceFormPage />, {
-        route: '/resources/users/res-123/edit',
-      })
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Check pre-populated values
       expect(screen.getByTestId('field-name')).toHaveValue('John Doe')
       expect(screen.getByTestId('field-email')).toHaveValue('john@example.com')
       expect(screen.getByTestId('field-age')).toHaveValue(30)
       expect(screen.getByTestId('field-active')).toBeChecked()
       expect(screen.getByTestId('field-birthDate')).toHaveValue('1993-05-15')
-      expect(screen.getByTestId('field-organizationId')).toHaveValue('org-456')
+      expect(screen.getByTestId('field-lastLogin')).toHaveValue('2024-01-15T10:30')
+      expect(screen.getByTestId('field-metadata')).toHaveValue(
+        JSON.stringify({ role: 'admin' }, null, 2)
+      )
     })
 
-    it('pre-populates when the detail page already cached the record', async () => {
-      // ResourceDetailPage caches { resource, etag } under the same key; opening Edit from it
-      // must read that entry as the record, not render a blank form.
+    it('loads the record even when the admin detail page has cached it', async () => {
+      // ResourceDetailPage caches a `{ resource, etag }` envelope under ['resource', …]; the form
+      // reads the record through its own query, so that envelope is never taken for the record.
       const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false, gcTime: 60_000, staleTime: 60_000 } },
       })
@@ -595,365 +533,257 @@ describe('ResourceFormPage', () => {
         resource: mockResource,
         etag: '"v1"',
       })
-      renderWithProviders(<ResourceFormPage />, {
-        route: '/resources/users/res-123/edit',
-        queryClient,
-      })
+      renderWithProviders(<ResourceFormPage />, { route: editRoute, queryClient })
 
       await waitFor(() => expect(screen.getByTestId('field-name')).toHaveValue('John Doe'))
       expect(screen.getByTestId('field-email')).toHaveValue('john@example.com')
     })
 
-    it('should submit form with PATCH method in edit mode', async () => {
+    it('saves the changed record and returns to its admin detail page', async () => {
       const user = userEvent.setup()
+      mockAxios.put.mockResolvedValueOnce({ data: { ...mockResource, name: 'Jane Doe' } })
+      renderWithProviders(<ResourceFormPage />, { route: editRoute })
+      await waitForForm()
 
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        if (url.includes('/users/res-123') && !url.includes('/api/collections')) {
-          return Promise.resolve({ data: mockResource })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-      mockAxios.patch.mockResolvedValueOnce({
-        data: { ...mockResource, name: 'Jane Doe' },
-      })
-
-      renderWithProviders(<ResourceFormPage />, {
-        route: '/resources/users/res-123/edit',
-      })
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Modify a field
       const nameInput = screen.getByTestId('field-name')
       await user.clear(nameInput)
       await user.type(nameInput, 'Jane Doe')
+      await user.click(screen.getByTestId('save-button'))
 
-      // Submit form
-      await user.click(screen.getByTestId('submit-button'))
-
-      // Verify API was called with PATCH
-      await waitFor(() => {
-        const patchCalls = mockAxios.patch.mock.calls.filter((call: unknown[]) =>
-          (call[0] as string).includes('/api/users/res-123')
-        )
-        expect(patchCalls.length).toBeGreaterThan(0)
-      })
-    })
-
-    it('should navigate to resource detail after successful update', async () => {
-      const user = userEvent.setup()
-
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        if (url.includes('/users/res-123') && !url.includes('/api/collections')) {
-          return Promise.resolve({ data: mockResource })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-      mockAxios.patch.mockResolvedValueOnce({
-        data: mockResource,
-      })
-
-      renderWithProviders(<ResourceFormPage />, {
-        route: '/resources/users/res-123/edit',
-      })
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Submit form
-      await user.click(screen.getByTestId('submit-button'))
-
-      // Verify navigation
-      await waitFor(() => {
+      await waitFor(() =>
         expect(mockNavigate).toHaveBeenCalledWith('/default/resources/users/res-123')
-      })
+      )
+      expect(mockAxios.put.mock.calls[0][0]).toBe('/api/users/res-123')
+      const body = bodyOf('put')
+      expect(body.data.id).toBe('res-123')
+      expect(body.data.attributes.name).toBe('Jane Doe')
+      // A lookup / master-detail id goes out as an attribute — the worker accepts either shape.
+      expect(body.data.attributes.organizationId).toBe('org-456')
+      expect(await screen.findByText('Record updated successfully.')).toBeInTheDocument()
     })
 
-    it('should navigate back to detail on cancel in edit mode', async () => {
+    it('sends null for an optional field the user cleared', async () => {
       const user = userEvent.setup()
-      renderWithProviders(<ResourceFormPage />, {
-        route: '/resources/users/res-123/edit',
-      })
+      mockAxios.put.mockResolvedValueOnce({ data: mockResource })
+      renderWithProviders(<ResourceFormPage />, { route: editRoute })
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
+      await user.clear(screen.getByTestId('field-age'))
+      await user.click(screen.getByTestId('save-button'))
 
-      // Click cancel
+      await waitFor(() => expect(mockAxios.put).toHaveBeenCalled())
+      expect(bodyOf('put').data.attributes.age).toBeNull()
+    })
+
+    it("invalidates the admin detail and list caches so they don't show the pre-save record", async () => {
+      const user = userEvent.setup()
+      mockAxios.put.mockResolvedValueOnce({ data: mockResource })
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false, gcTime: 60_000, staleTime: 60_000 } },
+      })
+      queryClient.setQueryData(['resource', 'users', 'res-123'], { resource: mockResource })
+      queryClient.setQueryData(['resources', 'users', 0, 25, null, []], { content: [] })
+      renderWithProviders(<ResourceFormPage />, { route: editRoute, queryClient })
+      await waitForForm()
+
+      await user.click(screen.getByTestId('save-button'))
+
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalled())
+      expect(queryClient.getQueryState(['resource', 'users', 'res-123'])?.isInvalidated).toBe(true)
+      expect(
+        queryClient.getQueryState(['resources', 'users', 0, 25, null, []])?.isInvalidated
+      ).toBe(true)
+    })
+
+    it('cancel returns to the admin detail page', async () => {
+      const user = userEvent.setup()
+      renderWithProviders(<ResourceFormPage />, { route: editRoute })
+      await waitForForm()
+
       await user.click(screen.getByTestId('cancel-button'))
 
-      // Verify navigation to detail page
       expect(mockNavigate).toHaveBeenCalledWith('/default/resources/users/res-123')
     })
   })
 
-  describe('Field Type Handling', () => {
-    beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        return Promise.reject(createAxiosError(404))
+  describe('Clone mode (?clone=<id>)', () => {
+    const cloneRoute = '/resources/users/new?clone=res-123'
+
+    it("seeds a new record from the source's values, without its id or audit fields", async () => {
+      const user = userEvent.setup()
+      mockAxios.post.mockResolvedValueOnce({ data: { id: 'copy-1', name: 'John Doe' } })
+      renderWithProviders(<ResourceFormPage />, { route: cloneRoute })
+      await waitForForm()
+
+      expect(screen.getByTestId('field-name')).toHaveValue('John Doe')
+      expect(screen.getByTestId('field-email')).toHaveValue('john@example.com')
+      expect(screen.getByTestId('field-age')).toHaveValue(30)
+      expect(screen.getByTestId('field-birthDate')).toHaveValue('1993-05-15')
+
+      await user.click(screen.getByTestId('save-button'))
+
+      await waitFor(() =>
+        expect(mockNavigate).toHaveBeenCalledWith('/default/resources/users/copy-1')
+      )
+      // A create: POST to the collection, no record id, no If-Match, no audit fields.
+      expect(mockAxios.put).not.toHaveBeenCalled()
+      expect(mockAxios.post.mock.calls[0]).toHaveLength(2)
+      const body = bodyOf('post')
+      expect(body.data.id).toBeUndefined()
+      expect(body.data.attributes).toMatchObject({
+        name: 'John Doe',
+        email: 'john@example.com',
+        age: 30,
+        organizationId: 'org-456',
       })
+      expect(body.data.attributes).not.toHaveProperty('createdAt')
+      expect(body.data.attributes).not.toHaveProperty('updatedAt')
     })
 
-    it('should handle boolean field toggle', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceFormPage />)
+    it('titles the page as a clone and links to the source record', async () => {
+      renderWithProviders(<ResourceFormPage />, { route: cloneRoute })
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      const activeCheckbox = screen.getByTestId('field-active')
-      expect(activeCheckbox).not.toBeChecked()
-
-      await user.click(activeCheckbox)
-      expect(activeCheckbox).toBeChecked()
-
-      await user.click(activeCheckbox)
-      expect(activeCheckbox).not.toBeChecked()
+      expect(screen.getByTestId('page-title')).toHaveTextContent('Clone Users')
+      const banner = screen.getByTestId('clone-banner')
+      expect(banner).toHaveTextContent('res-123')
+      expect(screen.getByRole('link', { name: 'View source' })).toHaveAttribute(
+        'href',
+        '/default/resources/users/res-123'
+      )
     })
 
-    it('should handle number field input', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceFormPage />)
+    it('shows an error when the source record cannot be loaded', async () => {
+      recordsServed = {}
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
+      renderWithProviders(<ResourceFormPage />, { route: cloneRoute })
 
-      const ageInput = screen.getByTestId('field-age')
-      await user.type(ageInput, '25')
-      expect(ageInput).toHaveValue(25)
+      expect(await screen.findByTestId('record-form-error')).toBeInTheDocument()
     })
 
-    it('should handle date field input', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceFormPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
+    it('is ignored on edit', async () => {
+      recordsServed['other'] = { resource: { ...mockResource, id: 'other', name: 'Other' } }
+      renderWithProviders(<ResourceFormPage />, {
+        route: '/resources/users/res-123/edit?clone=other',
       })
+      await waitForForm()
 
-      const dateInput = screen.getByTestId('field-birthDate')
-      await user.type(dateInput, '2000-01-15')
-      expect(dateInput).toHaveValue('2000-01-15')
+      expect(screen.getByTestId('field-name')).toHaveValue('John Doe')
+      expect(screen.getByTestId('page-title')).toHaveTextContent('Edit Users')
+      expect(screen.queryByTestId('clone-banner')).not.toBeInTheDocument()
     })
   })
 
-  describe('Validation Rules', () => {
-    beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-    })
-
-    it('should validate min value for number fields', async () => {
+  describe('Field input', () => {
+    it('toggles a boolean field', async () => {
       const user = userEvent.setup()
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
+      const activeCheckbox = screen.getByTestId('field-active')
+      expect(activeCheckbox).not.toBeChecked()
+      await user.click(activeCheckbox)
+      expect(activeCheckbox).toBeChecked()
+      await user.click(activeCheckbox)
+      expect(activeCheckbox).not.toBeChecked()
+    })
 
-      // Fill required fields
+    it('accepts number and date input', async () => {
+      const user = userEvent.setup()
+      renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
+
+      await user.type(screen.getByTestId('field-age'), '25')
+      expect(screen.getByTestId('field-age')).toHaveValue(25)
+      await user.type(screen.getByTestId('field-birthDate'), '2000-01-15')
+      expect(screen.getByTestId('field-birthDate')).toHaveValue('2000-01-15')
+    })
+  })
+
+  describe('Field constraints', () => {
+    async function saveWithAge(age: string) {
+      const user = userEvent.setup()
+      renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
       await user.type(screen.getByTestId('field-name'), 'John Doe')
       await user.type(screen.getByTestId('field-email'), 'john@example.com')
+      await user.type(screen.getByTestId('field-age'), age)
+      await user.click(screen.getByTestId('save-button'))
+    }
 
-      // Enter negative age (min is 0)
-      const ageInput = screen.getByTestId('field-age')
-      await user.type(ageInput, '-5')
-
-      // Submit form
-      await user.click(screen.getByTestId('submit-button'))
-
-      // Check for validation error
-      await waitFor(() => {
-        expect(screen.getByTestId('error-age')).toBeInTheDocument()
-      })
+    it('enforces a number minimum', async () => {
+      await saveWithAge('-5')
+      expect(await screen.findByTestId('field-error-age')).toBeInTheDocument()
+      expect(mockAxios.post).not.toHaveBeenCalled()
     })
 
-    it('should validate max value for number fields', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceFormPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Fill required fields
-      await user.type(screen.getByTestId('field-name'), 'John Doe')
-      await user.type(screen.getByTestId('field-email'), 'john@example.com')
-
-      // Enter age over max (max is 150)
-      const ageInput = screen.getByTestId('field-age')
-      await user.type(ageInput, '200')
-
-      // Submit form
-      await user.click(screen.getByTestId('submit-button'))
-
-      // Check for validation error
-      await waitFor(() => {
-        expect(screen.getByTestId('error-age')).toBeInTheDocument()
-      })
+    it('enforces a number maximum', async () => {
+      await saveWithAge('200')
+      expect(await screen.findByTestId('field-error-age')).toBeInTheDocument()
+      expect(mockAxios.post).not.toHaveBeenCalled()
     })
 
-    it('should clear validation error when field is corrected', async () => {
+    it('clears a field error once the field is corrected', async () => {
       const user = userEvent.setup()
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
+      await user.click(screen.getByTestId('save-button'))
+      expect(await screen.findByTestId('field-error-name')).toBeInTheDocument()
 
-      // Submit empty form to trigger validation
-      await user.click(screen.getByTestId('submit-button'))
-
-      // Check error is shown
-      await waitFor(() => {
-        expect(screen.getByTestId('error-name')).toBeInTheDocument()
-      })
-
-      // Fill in the field
       await user.type(screen.getByTestId('field-name'), 'John Doe')
-
-      // Error should be cleared
-      expect(screen.queryByTestId('error-name')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('field-error-name')).not.toBeInTheDocument()
     })
   })
 
   describe('Accessibility', () => {
-    beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-    })
-
-    it('should have proper labels for all form fields', async () => {
+    it('labels every field control', async () => {
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Check that inputs have associated labels
       expect(screen.getByLabelText(/full name/i)).toBeInTheDocument()
       expect(screen.getByLabelText(/email address/i)).toBeInTheDocument()
-      expect(screen.getByLabelText(/age/i)).toBeInTheDocument()
+      expect(screen.getByLabelText(/^age/i)).toBeInTheDocument()
       expect(screen.getByLabelText(/is active/i)).toBeInTheDocument()
     })
 
-    it('should have aria-invalid on fields with errors', async () => {
+    it('marks invalid fields and links them to their error', async () => {
       const user = userEvent.setup()
       renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
+      await user.click(screen.getByTestId('save-button'))
 
-      // Submit empty form
-      await user.click(screen.getByTestId('submit-button'))
-
-      // Check aria-invalid
-      await waitFor(() => {
+      await waitFor(() =>
         expect(screen.getByTestId('field-name')).toHaveAttribute('aria-invalid', 'true')
-        expect(screen.getByTestId('field-email')).toHaveAttribute('aria-invalid', 'true')
-      })
-    })
-
-    it('should have aria-describedby linking to error messages', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceFormPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Submit empty form
-      await user.click(screen.getByTestId('submit-button'))
-
-      // Check aria-describedby
-      await waitFor(() => {
-        const nameInput = screen.getByTestId('field-name')
-        expect(nameInput).toHaveAttribute('aria-describedby', 'field-name-error')
-      })
-    })
-
-    it('should have breadcrumb navigation', async () => {
-      renderWithProviders(<ResourceFormPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      const breadcrumb = screen.getByRole('navigation', { name: /breadcrumb/i })
-      expect(breadcrumb).toBeInTheDocument()
+      )
+      expect(screen.getByTestId('field-email')).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByTestId('field-name')).toHaveAttribute(
+        'aria-describedby',
+        'field-name-error'
+      )
+      expect(screen.getByTestId('field-error-name')).toHaveAttribute('role', 'alert')
     })
   })
 
-  describe('Empty Schema', () => {
-    it('should display empty state when schema has no fields', async () => {
-      const emptySchema = { ...mockSchema, fields: [] }
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(emptySchema) })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-
-      renderWithProviders(<ResourceFormPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('no-fields')).toBeInTheDocument()
-      })
+  describe('Empty schema', () => {
+    beforeEach(() => {
+      schemaServed = { ...mockSchema, fields: [] }
     })
 
-    it('should disable submit button when schema has no fields', async () => {
-      const emptySchema = { ...mockSchema, fields: [] }
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(emptySchema) })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-
+    it('shows the no-fields state', async () => {
       renderWithProviders(<ResourceFormPage />)
+      expect(await screen.findByTestId('no-fields')).toBeInTheDocument()
+    })
 
-      await waitFor(() => {
-        expect(screen.getByTestId('submit-button')).toBeDisabled()
-      })
+    it('disables Save', async () => {
+      renderWithProviders(<ResourceFormPage />)
+      await waitForForm()
+      expect(screen.getByTestId('save-button')).toBeDisabled()
     })
   })
 
-  describe('Custom Field Renderer Integration', () => {
-    /**
-     * Requirement 12.4: Use custom field renderers when registered, fall back to defaults
-     */
-
-    // Custom renderer component for testing
+  describe('Plugin field renderers', () => {
     const CustomStringRenderer: React.FC<FieldRendererProps> = ({
       name,
       value,
@@ -974,7 +804,6 @@ describe('ResourceFormPage', () => {
       </div>
     )
 
-    // Custom renderer for a custom field type
     const CustomRichTextRenderer: React.FC<FieldRendererProps> = ({ name, value, onChange }) => (
       <div data-testid={`rich-text-renderer-${name}`}>
         <textarea
@@ -987,90 +816,36 @@ describe('ResourceFormPage', () => {
       </div>
     )
 
-    beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        // Collection schema with included fields (JSON:API format)
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-    })
+    function pluginWith(fieldRenderers: Plugin['fieldRenderers']): Plugin {
+      return { id: 'test-plugin', name: 'Test Plugin', version: '1.0.0', fieldRenderers }
+    }
 
-    it('should use custom renderer when registered for a field type', async () => {
-      const customPlugin: Plugin = {
-        id: 'test-plugin',
-        name: 'Test Plugin',
-        version: '1.0.0',
-        fieldRenderers: {
-          string: CustomStringRenderer,
-        },
-      }
-
+    it('uses a registered renderer for its type and the built-in control for other types', async () => {
       renderWithProviders(<ResourceFormPage />, {
-        plugins: [customPlugin],
+        plugins: [pluginWith({ string: CustomStringRenderer })],
       })
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Custom renderer should be used for string fields
-      expect(screen.getByTestId('custom-renderer-name')).toBeInTheDocument()
       expect(screen.getByTestId('custom-string-renderer-name')).toBeInTheDocument()
       expect(screen.getByTestId('custom-input-name')).toBeInTheDocument()
+      // number is not registered → the built-in control
+      expect(screen.getByTestId('field-age')).toHaveAttribute('type', 'number')
+      expect(screen.queryByTestId('custom-string-renderer-age')).not.toBeInTheDocument()
     })
 
-    it('should fall back to default renderer for unregistered types', async () => {
-      const customPlugin: Plugin = {
-        id: 'test-plugin',
-        name: 'Test Plugin',
-        version: '1.0.0',
-        fieldRenderers: {
-          string: CustomStringRenderer,
-        },
-      }
+    it('uses the built-in controls when no plugin is registered', async () => {
+      renderWithProviders(<ResourceFormPage />, { plugins: [] })
+      await waitForForm()
 
-      renderWithProviders(<ResourceFormPage />, {
-        plugins: [customPlugin],
-      })
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Custom renderer for string fields
-      expect(screen.getByTestId('custom-renderer-name')).toBeInTheDocument()
-
-      // Default renderer for number fields (not registered)
-      const ageInput = screen.getByTestId('field-age')
-      expect(ageInput).toHaveAttribute('type', 'number')
-      expect(screen.queryByTestId('custom-renderer-age')).not.toBeInTheDocument()
-    })
-
-    it('should use default renderers when no plugins are registered', async () => {
-      renderWithProviders(<ResourceFormPage />, {
-        plugins: [],
-      })
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // All fields should use default renderers
       expect(screen.getByTestId('field-name')).toHaveAttribute('type', 'text')
       expect(screen.getByTestId('field-age')).toHaveAttribute('type', 'number')
       expect(screen.getByTestId('field-active')).toHaveAttribute('type', 'checkbox')
-
-      // No custom renderer wrappers
-      expect(screen.queryByTestId('custom-renderer-name')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('custom-string-renderer-name')).not.toBeInTheDocument()
     })
 
-    it('should pass correct props to custom renderer', async () => {
+    it('passes the field name, value, onChange and metadata to the renderer', async () => {
       const capturedPropsMap: Map<string, FieldRendererProps> = new Map()
-
       const PropsCapturingRenderer: React.FC<FieldRendererProps> = (props) => {
-        // Capture props for each field
         capturedPropsMap.set(props.name, { ...props })
         return (
           <input
@@ -1081,138 +856,65 @@ describe('ResourceFormPage', () => {
         )
       }
 
-      const customPlugin: Plugin = {
-        id: 'test-plugin',
-        name: 'Test Plugin',
-        version: '1.0.0',
-        fieldRenderers: {
-          string: PropsCapturingRenderer,
-        },
-      }
-
       renderWithProviders(<ResourceFormPage />, {
-        plugins: [customPlugin],
+        plugins: [pluginWith({ string: PropsCapturingRenderer })],
       })
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Verify props passed to custom renderer for 'name' field
       const nameProps = capturedPropsMap.get('name')
-      expect(nameProps).toBeDefined()
       expect(nameProps?.name).toBe('name')
-      expect(nameProps?.value).toBe('')
+      expect(nameProps?.value).toBeUndefined()
       expect(typeof nameProps?.onChange).toBe('function')
-      expect(nameProps?.metadata).toBeDefined()
-      expect(nameProps?.metadata?.type).toBe('string')
-      expect(nameProps?.metadata?.required).toBe(true)
-
-      // Verify props passed to custom renderer for 'email' field
-      const emailProps = capturedPropsMap.get('email')
-      expect(emailProps).toBeDefined()
-      expect(emailProps?.name).toBe('email')
-      expect(emailProps?.metadata?.required).toBe(true)
+      expect(nameProps?.metadata).toMatchObject({
+        fieldId: 'field-name',
+        type: 'string',
+        fieldType: 'string',
+        required: true,
+        displayName: 'Full Name',
+      })
+      expect(capturedPropsMap.get('email')?.metadata?.required).toBe(true)
     })
 
-    it('should handle value changes from custom renderer', async () => {
+    it("saves the renderer's values", async () => {
       const user = userEvent.setup()
-
-      const customPlugin: Plugin = {
-        id: 'test-plugin',
-        name: 'Test Plugin',
-        version: '1.0.0',
-        fieldRenderers: {
-          string: CustomStringRenderer,
-        },
-      }
-
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-      mockAxios.post.mockResolvedValueOnce({
-        data: { id: 'new-res-123', name: 'Test Name', email: 'test@example.com' },
-      })
-
+      mockAxios.post.mockResolvedValueOnce({ data: { id: 'new-res-123' } })
       renderWithProviders(<ResourceFormPage />, {
-        plugins: [customPlugin],
+        plugins: [pluginWith({ string: CustomStringRenderer })],
       })
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
+      await user.type(screen.getByTestId('custom-input-name'), 'Test Name')
+      await user.type(screen.getByTestId('custom-input-email'), 'test@example.com')
+      await user.click(screen.getByTestId('save-button'))
 
-      // Type in custom renderer input
-      const customNameInput = screen.getByTestId('custom-input-name')
-      await user.type(customNameInput, 'Test Name')
-
-      // Type in custom email input
-      const customEmailInput = screen.getByTestId('custom-input-email')
-      await user.type(customEmailInput, 'test@example.com')
-
-      // Submit form
-      await user.click(screen.getByTestId('submit-button'))
-
-      // Verify API was called with the values from custom renderer
-      await waitFor(() => {
-        expect(mockAxios.post).toHaveBeenCalledWith('/api/users', expect.anything())
-      })
-
-      // Verify the body contains the values in JSON:API format
-      const postCall = mockAxios.post.mock.calls.find((call: unknown[]) =>
-        (call[0] as string).includes('/api/users')
-      ) as [string, unknown] | undefined
-      expect(postCall).toBeDefined()
-      if (postCall) {
-        const body = postCall[1] as { data: { type: string; attributes: Record<string, unknown> } }
-        expect(body.data.type).toBe('users')
-        expect(body.data.attributes.name).toBe('Test Name')
-        expect(body.data.attributes.email).toBe('test@example.com')
-      }
+      await waitFor(() => expect(mockAxios.post).toHaveBeenCalled())
+      const body = bodyOf('post')
+      expect(body.data.type).toBe('users')
+      expect(body.data.attributes.name).toBe('Test Name')
+      expect(body.data.attributes.email).toBe('test@example.com')
     })
 
-    it('should display validation errors with custom renderer', async () => {
+    it('shows field errors under a renderer', async () => {
       const user = userEvent.setup()
-
-      const customPlugin: Plugin = {
-        id: 'test-plugin',
-        name: 'Test Plugin',
-        version: '1.0.0',
-        fieldRenderers: {
-          string: CustomStringRenderer,
-        },
-      }
-
       renderWithProviders(<ResourceFormPage />, {
-        plugins: [customPlugin],
+        plugins: [pluginWith({ string: CustomStringRenderer })],
       })
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
+      await user.click(screen.getByTestId('save-button'))
 
-      // Submit empty form to trigger validation
-      await user.click(screen.getByTestId('submit-button'))
-
-      // Validation errors should still be displayed
-      await waitFor(() => {
-        expect(screen.getByTestId('error-name')).toBeInTheDocument()
-        expect(screen.getByTestId('error-email')).toBeInTheDocument()
-      })
+      expect(await screen.findByTestId('field-error-name')).toBeInTheDocument()
+      expect(screen.getByTestId('field-error-email')).toBeInTheDocument()
     })
 
-    it('should support multiple custom renderers for different field types', async () => {
-      // Schema with a custom field type
-      const schemaWithCustomType: CollectionSchema = {
-        id: 'col-1',
+    it('supports renderers for several field types at once', async () => {
+      schemaServed = {
+        id: 'col-2',
         name: 'articles',
         displayName: 'Articles',
         fields: [
           {
-            id: 'field-1',
+            id: 'f-1',
             name: 'title',
             displayName: 'Title',
             type: 'string',
@@ -1220,46 +922,22 @@ describe('ResourceFormPage', () => {
             order: 1,
           },
           {
-            id: 'field-2',
+            id: 'f-2',
             name: 'content',
             displayName: 'Content',
-            type: 'json', // Using json type for rich text
+            type: 'json',
             required: false,
             order: 2,
           },
         ],
       }
-
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url.includes('/api/collections/') && url.includes('include=fields')) {
-          return Promise.resolve({ data: toJsonApiWithFields(schemaWithCustomType) })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-
-      const customPlugin: Plugin = {
-        id: 'test-plugin',
-        name: 'Test Plugin',
-        version: '1.0.0',
-        fieldRenderers: {
-          string: CustomStringRenderer,
-          json: CustomRichTextRenderer,
-        },
-      }
-
       renderWithProviders(<ResourceFormPage />, {
         route: '/resources/articles/new',
-        plugins: [customPlugin],
+        plugins: [pluginWith({ string: CustomStringRenderer, json: CustomRichTextRenderer })],
       })
+      await waitForForm()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-form')).toBeInTheDocument()
-      })
-
-      // Custom string renderer for title
       expect(screen.getByTestId('custom-string-renderer-title')).toBeInTheDocument()
-
-      // Custom rich text renderer for content
       expect(screen.getByTestId('rich-text-renderer-content')).toBeInTheDocument()
       expect(screen.getByTestId('rich-text-toolbar')).toBeInTheDocument()
     })
@@ -1267,10 +945,6 @@ describe('ResourceFormPage', () => {
 })
 
 describe('ResourceFormPage — optimistic concurrency (If-Match)', () => {
-  let cleanupAuthMocks: () => void
-  /** What the record GET serves (body + ETag header); a test swaps it to simulate a reload. */
-  let served: { resource: Resource; etag: string }
-
   const STALE_WRITE_BODY = {
     errors: [
       {
@@ -1283,46 +957,25 @@ describe('ResourceFormPage — optimistic concurrency (If-Match)', () => {
     ],
   }
 
-  beforeEach(() => {
-    cleanupAuthMocks = setupAuthMocks()
-    resetMockAxios()
-    mockNavigate.mockReset()
-    served = { resource: mockResource, etag: '"v1"' }
-    mockAxios.get.mockImplementation((url: string) => {
-      if (url.includes('/api/collections/') && url.includes('include=fields')) {
-        return Promise.resolve({ data: toJsonApiWithFields(mockSchema) })
-      }
-      if (url.includes('/users/res-123') && !url.includes('/api/collections')) {
-        return Promise.resolve({ data: served.resource, headers: { etag: served.etag } })
-      }
-      return Promise.reject(createAxiosError(404))
-    })
-  })
-
-  afterEach(() => {
-    cleanupAuthMocks()
-    vi.clearAllMocks()
-  })
-
   async function openEditForm() {
     renderWithProviders(<ResourceFormPage />, { route: '/resources/users/res-123/edit' })
     await waitFor(() => expect(screen.getByTestId('field-name')).toHaveValue('John Doe'))
   }
 
-  function patchHeaders(callIndex = 0): unknown {
-    return (mockAxios.patch.mock.calls[callIndex] as unknown[])[2]
+  function putHeaders(callIndex = 0): unknown {
+    return (mockAxios.put.mock.calls[callIndex] as unknown[])[2]
   }
 
   it("sends the loaded record's ETag as If-Match on update", async () => {
     const user = userEvent.setup()
-    mockAxios.patch.mockResolvedValueOnce({ data: mockResource })
+    mockAxios.put.mockResolvedValueOnce({ data: mockResource })
     await openEditForm()
 
-    await user.click(screen.getByTestId('submit-button'))
+    await user.click(screen.getByTestId('save-button'))
 
-    await waitFor(() => expect(mockAxios.patch).toHaveBeenCalled())
-    expect(mockAxios.patch.mock.calls[0][0]).toBe('/api/users/res-123')
-    expect(patchHeaders()).toEqual({ headers: { 'If-Match': '"v1"' } })
+    await waitFor(() => expect(mockAxios.put).toHaveBeenCalled())
+    expect(mockAxios.put.mock.calls[0][0]).toBe('/api/users/res-123')
+    expect(putHeaders()).toEqual({ headers: { 'If-Match': '"v1"' } })
     await waitFor(() =>
       expect(mockNavigate).toHaveBeenCalledWith('/default/resources/users/res-123')
     )
@@ -1330,13 +983,13 @@ describe('ResourceFormPage — optimistic concurrency (If-Match)', () => {
 
   it('on a stale write keeps the edits, shows the conflict prompt and does not navigate', async () => {
     const user = userEvent.setup()
-    mockAxios.patch.mockRejectedValueOnce(createAxiosError(409, STALE_WRITE_BODY))
+    mockAxios.put.mockRejectedValueOnce(createAxiosError(409, STALE_WRITE_BODY))
     await openEditForm()
 
     const nameInput = screen.getByTestId('field-name')
     await user.clear(nameInput)
     await user.type(nameInput, 'Mine')
-    await user.click(screen.getByTestId('submit-button'))
+    await user.click(screen.getByTestId('save-button'))
 
     expect(await screen.findByTestId('record-conflict-dialog')).toBeInTheDocument()
     expect(screen.getByText('This record was changed')).toBeInTheDocument()
@@ -1347,12 +1000,12 @@ describe('ResourceFormPage — optimistic concurrency (If-Match)', () => {
     await user.click(screen.getByTestId('record-conflict-keep-editing'))
     await waitFor(() => expect(screen.queryByTestId('record-conflict-dialog')).toBeNull())
     expect(screen.getByTestId('field-name')).toHaveValue('Mine')
-    expect(screen.getByTestId('submit-button')).toBeEnabled()
+    expect(screen.getByTestId('save-button')).toBeEnabled()
   })
 
   it('Reload refetches the record, resets the form to it and saves with the new ETag', async () => {
     const user = userEvent.setup()
-    mockAxios.patch
+    mockAxios.put
       .mockRejectedValueOnce(createAxiosError(409, STALE_WRITE_BODY))
       .mockResolvedValueOnce({ data: mockResource })
     await openEditForm()
@@ -1360,23 +1013,23 @@ describe('ResourceFormPage — optimistic concurrency (If-Match)', () => {
     const nameInput = screen.getByTestId('field-name')
     await user.clear(nameInput)
     await user.type(nameInput, 'Mine')
-    await user.click(screen.getByTestId('submit-button'))
+    await user.click(screen.getByTestId('save-button'))
     expect(await screen.findByTestId('record-conflict-dialog')).toBeInTheDocument()
 
-    served = { resource: { ...mockResource, name: 'Theirs' }, etag: '"v2"' }
+    recordsServed['res-123'] = { resource: { ...mockResource, name: 'Theirs' }, etag: '"v2"' }
     await user.click(screen.getByTestId('record-conflict-reload'))
 
     await waitFor(() => expect(screen.queryByTestId('record-conflict-dialog')).toBeNull())
     await waitFor(() => expect(screen.getByTestId('field-name')).toHaveValue('Theirs'))
 
-    await user.click(screen.getByTestId('submit-button'))
-    await waitFor(() => expect(mockAxios.patch).toHaveBeenCalledTimes(2))
-    expect(patchHeaders(1)).toEqual({ headers: { 'If-Match': '"v2"' } })
+    await user.click(screen.getByTestId('save-button'))
+    await waitFor(() => expect(mockAxios.put).toHaveBeenCalledTimes(2))
+    expect(putHeaders(1)).toEqual({ headers: { 'If-Match': '"v2"' } })
   })
 
   it('shows a non-stale 409 (unique violation) as a field error, not the conflict prompt', async () => {
     const user = userEvent.setup()
-    mockAxios.patch.mockRejectedValueOnce(
+    mockAxios.put.mockRejectedValueOnce(
       createAxiosError(409, {
         errors: [
           {
@@ -1391,10 +1044,10 @@ describe('ResourceFormPage — optimistic concurrency (If-Match)', () => {
     )
     await openEditForm()
 
-    await user.click(screen.getByTestId('submit-button'))
+    await user.click(screen.getByTestId('save-button'))
 
     await waitFor(() =>
-      expect(screen.getByTestId('error-email')).toHaveTextContent('Email must be unique')
+      expect(screen.getByTestId('field-error-email')).toHaveTextContent('Email must be unique')
     )
     expect(screen.queryByTestId('record-conflict-dialog')).toBeNull()
   })

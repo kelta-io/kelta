@@ -10,7 +10,8 @@
  * blur rules, schema defaults, clear-to-null on update, per-field validation,
  * create → the new record's detail page, and the edit-mode record type — and the
  * optimistic-concurrency contract (P5): If-Match on update, the conflict prompt on a
- * stale write, and Reload.
+ * stale write, and Reload — and what the admin convergence (P6) added to the core: the success
+ * toast, the record-load error, Save disabled with no fields, and no admin-only chrome here.
  * (`FormFieldRow` itself is covered in `components/record/form/FormFieldRow.test.tsx`.)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -190,6 +191,26 @@ describe('ObjectFormPage (create)', () => {
     expect(createMutate).toHaveBeenCalledWith({ name: 'Ada' })
     act(() => mutationOptions.onSuccess?.({ id: 'new-1' }))
     expect(screen.getByTestId('location').textContent).toBe('/acme/app/o/accounts/new-1')
+  })
+
+  it('confirms a successful create with a toast', () => {
+    renderAt('/acme/app/o/accounts/new')
+    fireEvent.change(screen.getByTestId('field-name'), { target: { value: 'Ada' } })
+    fireEvent.click(screen.getByTestId('save-button'))
+    act(() => mutationOptions.onSuccess?.({ id: 'new-1' }))
+    expect(showToast).toHaveBeenCalledWith('Record created successfully.', 'success')
+  })
+
+  it('shows no field type hints (admin chrome)', () => {
+    renderAt('/acme/app/o/accounts/new')
+    expect(screen.queryByTestId('field-type-name')).toBeNull()
+  })
+
+  it('disables Save on a collection without form fields', () => {
+    fields = []
+    renderAt('/acme/app/o/accounts/new')
+    expect(screen.getByTestId('no-fields')).toBeInTheDocument()
+    expect(screen.getByTestId('save-button')).toBeDisabled()
   })
 
   it('falls back to the collection list when the create response has no id', () => {
@@ -393,6 +414,22 @@ describe('ObjectFormPage (edit)', () => {
       id: 'r1',
       data: { name: 'Ada', notes: 'hi', recordTypeId: 'rt-2' },
     })
+  })
+
+  it('confirms a successful update with a toast', () => {
+    renderAt('/acme/app/o/accounts/r1/edit')
+    fireEvent.click(screen.getByTestId('save-button'))
+    act(() => mutationOptions.onSuccess?.({ id: 'r1' }))
+    expect(showToast).toHaveBeenCalledWith('Record updated successfully.', 'success')
+  })
+
+  it('shows an error, not an empty form, when the record cannot be loaded', () => {
+    record = undefined
+    renderAt('/acme/app/o/accounts/r1/edit')
+    expect(screen.getByTestId('record-form-error')).toHaveTextContent(/could not be loaded/i)
+    expect(screen.queryByTestId('save-button')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }))
+    expect(screen.getByTestId('location').textContent).toBe('/acme/app/o/accounts/r1')
   })
 
   it('cancel returns to the record detail page', () => {

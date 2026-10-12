@@ -1,9 +1,10 @@
 /**
  * Pure form-state helpers for the record form (`RecordForm`): initial form data from a record
- * (or schema defaults for a new one) and the reverse mapping back to a JSON:API
- * attributes payload on save.
+ * (or schema defaults for a new one, or a clone source's values) and the reverse mapping back
+ * to a JSON:API attributes payload on save.
  */
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
+import { SYSTEM_FIELDS } from './formFieldTypes'
 import { isEmptyFormValue } from './validation'
 
 /**
@@ -84,6 +85,43 @@ export function computeInitialFormData(
     }
   }
   return defaults
+}
+
+/**
+ * Initial form data for a NEW record cloned from `source` (create mode with a clone source).
+ *
+ * Copies the source's values for the collection's schema fields only — formatted for the
+ * controls as on edit — and nothing else: no `id`, no system/audit fields, no relationship
+ * metadata. `encrypted` fields are never copied (write-only), and neither is a field the
+ * server MASKED on the source (`__maskedFields`), whose value is a placeholder, not data.
+ * `queryDefaults` (create-mode prefill) apply last and win, as on a plain create.
+ */
+export function computeCloneFormData(
+  source: Record<string, unknown>,
+  fields: FieldDefinition[],
+  queryDefaults?: Record<string, unknown>
+): Record<string, unknown> {
+  const masked = new Set(
+    Array.isArray(source.__maskedFields) ? (source.__maskedFields as unknown[]).map(String) : []
+  )
+  const loaded = computeInitialFormData(false, source, fields)
+  const data: Record<string, unknown> = {}
+  for (const field of fields) {
+    if (field.type === 'encrypted' || masked.has(field.name) || SYSTEM_FIELDS.has(field.name)) {
+      continue
+    }
+    if (field.name in loaded) {
+      data[field.name] = loaded[field.name]
+    }
+  }
+  if (queryDefaults) {
+    for (const field of fields) {
+      if (field.type !== 'encrypted' && field.name in queryDefaults) {
+        data[field.name] = queryDefaults[field.name]
+      }
+    }
+  }
+  return data
 }
 
 export interface BuildSaveAttributesOptions {

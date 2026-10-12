@@ -7,7 +7,8 @@
  * refetches the record and re-initialises the form (discarding the edits); "Keep editing" closes
  * the prompt so the user can copy their changes first.
  *
- * Used by the shared `RecordForm` core (end-user `/app/o` form) and the admin `ResourceFormPage`.
+ * Used by the shared `RecordForm` core, which both the end-user (`ObjectFormPage`) and the admin
+ * (`ResourceFormPage`) create/edit pages wrap.
  */
 
 import React from 'react'

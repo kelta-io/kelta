@@ -11,9 +11,10 @@
  *
  * Data comes from `useRecordFormModel`; form state from `useRecordFormState`
  * inside a body keyed on the model's `formKey`. Variant-specific chrome (the
- * breadcrumb, extra header actions) and every navigation target are supplied
- * by the caller, so the end-user (`/app/o`) `ObjectFormPage` — and, in a later
- * slice, the admin `ResourceFormPage` — are thin `variant` wrappers over it.
+ * breadcrumb, a banner under the title, extra header actions, field type hints)
+ * and every navigation target are supplied by the caller, so the end-user
+ * (`/app/o`) `ObjectFormPage` and the admin (`/resources`) `ResourceFormPage`
+ * are thin `variant` wrappers over it.
  *
  * Record-stack convergence P2: moved from `ObjectFormPage`; P3 added the admin
  * form's correctness features (client validation rules, blur rules, schema
@@ -21,7 +22,10 @@
  * → new record's detail page, i18n); P4 rendered fields through the
  * fieldControl registry; P5 sent the record's ETag as `If-Match` on update and
  * shows `RecordConflictDialog` on a concurrent edit (edits kept until the user
- * reloads). See `.claude/docs/conventions.md` → Component reuse.
+ * reloads). P6 converged the admin form onto it: clone (`cloneFromId` — a create
+ * seeded from an existing record), the record-load error state, the success
+ * toast, the empty-schema disabled Save, and the `banner` / `showFieldTypeHints`
+ * chrome. See `.claude/docs/conventions.md` → Component reuse.
  */
 
 import React, { useCallback, useState } from 'react'
@@ -60,6 +64,15 @@ export interface RecordFormRoutes {
 export interface RecordFormChromeContext {
   collectionLabel: string
   isNew: boolean
+  /** A create seeded from `cloneFromId`. */
+  isClone: boolean
+}
+
+/** Chrome rendered from the loaded form context (breadcrumb, banner). */
+type ChromeSlot = React.ReactNode | ((ctx: RecordFormChromeContext) => React.ReactNode)
+
+function renderSlot(slot: ChromeSlot | undefined, ctx: RecordFormChromeContext): React.ReactNode {
+  return typeof slot === 'function' ? slot(ctx) : slot
 }
 
 export interface RecordFormProps {
@@ -74,12 +87,21 @@ export interface RecordFormProps {
   /** Initial values for a NEW record (only keys naming a schema field apply). */
   prefill?: Record<string, unknown>
   /**
+   * Create mode only: seed the new record from this existing record's values (minus system,
+   * encrypted and masked fields; `prefill` still wins). The title becomes "Clone …".
+   */
+  cloneFromId?: string
+  /**
    * Breadcrumb row above the header. A function receives the loaded collection
    * label + mode, since the caller cannot know the label before the schema loads.
    */
-  breadcrumb?: React.ReactNode | ((ctx: RecordFormChromeContext) => React.ReactNode)
+  breadcrumb?: ChromeSlot
+  /** Content under the title row (e.g. the record id, a "cloning from" notice). */
+  banner?: ChromeSlot
   /** Extra header actions, rendered before Cancel/Save. */
   headerExtras?: React.ReactNode
+  /** Show each field's type name under its label. */
+  showFieldTypeHints?: boolean
   /** `data-testid` for the form root. */
   testId?: string
 }
@@ -87,6 +109,7 @@ export interface RecordFormProps {
 interface RecordFormBodyProps {
   variant: RecordFormVariant
   isNew: boolean
+  isClone: boolean
   initialData: Record<string, unknown>
   fields: FieldDefinition[]
   collectionName: string
@@ -94,8 +117,10 @@ interface RecordFormBodyProps {
   recordId?: string
   routes: RecordFormRoutes
   onCancel: () => void
-  breadcrumb?: RecordFormProps['breadcrumb']
+  breadcrumb?: ChromeSlot
+  banner?: ChromeSlot
   headerExtras?: React.ReactNode
+  showFieldTypeHints: boolean
   testId?: string
   /** Check if a field is editable (VISIBLE vs READ_ONLY from field permissions) */
   isFieldEditable?: (fieldName: string) => boolean
@@ -123,6 +148,7 @@ interface RecordFormBodyProps {
 function RecordFormBody({
   variant,
   isNew,
+  isClone,
   initialData,
   fields,
   collectionName,
@@ -131,7 +157,9 @@ function RecordFormBody({
   routes,
   onCancel,
   breadcrumb,
+  banner,
   headerExtras,
+  showFieldTypeHints,
   testId,
   isFieldEditable,
   layout,
@@ -180,18 +208,28 @@ function RecordFormBody({
     }
   }, [onReload])
 
-  const pageTitle = isNew
-    ? t('recordForm.newTitle', { collection: collectionLabel })
-    : t('recordForm.editTitle', { collection: collectionLabel })
+  const pageTitle = isClone
+    ? t('recordForm.cloneTitle', { collection: collectionLabel })
+    : isNew
+      ? t('recordForm.newTitle', { collection: collectionLabel })
+      : t('recordForm.editTitle', { collection: collectionLabel })
+  const chromeContext: RecordFormChromeContext = { collectionLabel, isNew, isClone }
+  // Nothing to save on a collection without a single form field.
+  const nothingToSave = displayFields.length === 0
 
   return (
     <div className="space-y-4 p-6" data-testid={testId} data-variant={variant}>
       {/* Breadcrumb */}
-      {typeof breadcrumb === 'function' ? breadcrumb({ collectionLabel, isNew }) : breadcrumb}
+      {renderSlot(breadcrumb, chromeContext)}
 
       {/* Form header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">{pageTitle}</h1>
+        <h1
+          className="text-xl font-semibold tracking-tight text-foreground"
+          data-testid="page-title"
+        >
+          {pageTitle}
+        </h1>
         <div className="flex items-center gap-2">
           {headerExtras}
           <Button
@@ -204,7 +242,12 @@ function RecordFormBody({
             <X className="mr-1.5 h-3.5 w-3.5" />
             {t('common.cancel')}
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={isSaving} data-testid="save-button">
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={isSaving || nothingToSave}
+            data-testid="save-button"
+          >
             {isSaving ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
             ) : (
@@ -214,6 +257,8 @@ function RecordFormBody({
           </Button>
         </div>
       </div>
+
+      {renderSlot(banner, chromeContext)}
 
       <Separator />
 
@@ -273,6 +318,7 @@ function RecordFormBody({
                   onBlur={handleFieldBlur}
                   error={formErrors[field.name]}
                   pluginRenderer={getFieldRenderer(field.type)}
+                  showTypeHint={showFieldTypeHints}
                 />
               )
             }}
@@ -287,7 +333,9 @@ function RecordFormBody({
           </CardHeader>
           <CardContent>
             {displayFields.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t('recordForm.noEditableFields')}</p>
+              <p className="text-sm text-muted-foreground" data-testid="no-fields">
+                {t('recordForm.noEditableFields')}
+              </p>
             ) : (
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                 {displayFields.map((field) => {
@@ -303,6 +351,7 @@ function RecordFormBody({
                       onBlur={handleFieldBlur}
                       error={formErrors[field.name]}
                       pluginRenderer={getFieldRenderer(field.type)}
+                      showTypeHint={showFieldTypeHints}
                     />
                   )
                 })}
@@ -321,14 +370,19 @@ export function RecordForm({
   recordId,
   routes,
   prefill,
+  cloneFromId,
   breadcrumb,
+  banner,
   headerExtras,
+  showFieldTypeHints = false,
   testId,
 }: RecordFormProps): React.ReactElement {
   const navigate = useNavigate()
   const { t } = useI18n()
   const {
     isNew,
+    isClone,
+    recordError,
     isLoading,
     schemaError,
     permissions,
@@ -344,7 +398,7 @@ export function RecordForm({
     formKey,
     etag,
     reload,
-  } = useRecordFormModel({ collectionName, recordId, prefill })
+  } = useRecordFormModel({ collectionName, recordId, prefill, cloneFromId })
 
   // Handle cancel (also used by the error state)
   const handleCancel = useCallback(() => {
@@ -358,7 +412,12 @@ export function RecordForm({
   // Loading state
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center p-12">
+      <div
+        className="flex items-center justify-center p-12"
+        data-testid="record-form-loading"
+        role="status"
+        aria-label={t('common.loading')}
+      >
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     )
@@ -376,15 +435,17 @@ export function RecordForm({
     )
   }
 
-  // Error state
-  if (schemaError) {
+  // Error state: the schema, or the record being edited / cloned, could not be loaded
+  if (schemaError || recordError) {
     return (
-      <div className="space-y-4 p-6">
+      <div className="space-y-4 p-6" data-testid="record-form-error">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>{t('common.error')}</AlertTitle>
           <AlertDescription>
-            {schemaError.message || t('recordForm.schemaLoadError')}
+            {schemaError
+              ? schemaError.message || t('recordForm.schemaLoadError')
+              : t('recordForm.recordLoadError')}
           </AlertDescription>
         </Alert>
         <Button variant="outline" onClick={handleCancel}>
@@ -399,6 +460,7 @@ export function RecordForm({
       key={formKey}
       variant={variant}
       isNew={isNew}
+      isClone={isClone}
       initialData={initialData}
       fields={fields}
       collectionName={collectionName}
@@ -407,7 +469,9 @@ export function RecordForm({
       routes={routes}
       onCancel={handleCancel}
       breadcrumb={breadcrumb}
+      banner={banner}
       headerExtras={headerExtras}
+      showFieldTypeHints={showFieldTypeHints}
       testId={testId}
       isFieldEditable={isFieldEditable}
       layout={layout}

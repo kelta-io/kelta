@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildSaveAttributes, computeInitialFormData } from './formData'
+import { buildSaveAttributes, computeCloneFormData, computeInitialFormData } from './formData'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 
 function field(over: Partial<FieldDefinition> = {}): FieldDefinition {
@@ -193,5 +193,72 @@ describe('encrypted fields are write-only', () => {
       )
       expect(attributes).toEqual({})
     }
+  })
+})
+
+describe('computeCloneFormData (create from an existing record)', () => {
+  const fields = [
+    field({ name: 'name' }),
+    field({ name: 'day', type: 'date' }),
+    field({ name: 'config', type: 'json' }),
+    field({ name: 'secret', type: 'encrypted' }),
+    field({ name: 'ssn' }),
+    field({ name: 'owner', type: 'master_detail' }),
+  ]
+  const source = {
+    id: 'src-1',
+    name: 'Original',
+    day: '2026-07-18T00:00:00Z',
+    config: { a: 1 },
+    secret: '********',
+    ssn: '***-**-1234',
+    owner: 'acct-1',
+    _rel_owner: { type: 'accounts', id: 'acct-1' },
+    __maskedFields: ['ssn'],
+    recordTypeId: 'rt-1',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedBy: 'user-1',
+  }
+
+  it("copies the source's schema-field values, formatted for the controls", () => {
+    const data = computeCloneFormData(source, fields)
+    expect(data).toEqual({
+      name: 'Original',
+      day: '2026-07-18',
+      config: JSON.stringify({ a: 1 }, null, 2),
+      owner: 'acct-1',
+    })
+  })
+
+  it('drops the id, audit fields and relationship / masking metadata', () => {
+    const data = computeCloneFormData(source, fields)
+    for (const key of [
+      'id',
+      'createdAt',
+      'updatedBy',
+      '_rel_owner',
+      '__maskedFields',
+      'recordTypeId',
+    ]) {
+      expect(data).not.toHaveProperty(key)
+    }
+  })
+
+  it('never copies an encrypted field or a field the server masked', () => {
+    const data = computeCloneFormData(source, fields)
+    expect(data).not.toHaveProperty('secret')
+    expect(data).not.toHaveProperty('ssn')
+  })
+
+  it('lets a create-mode prefill win over the copied values', () => {
+    const data = computeCloneFormData(source, fields, { name: 'Prefilled', secret: 'x', bogus: 1 })
+    expect(data.name).toBe('Prefilled')
+    expect(data).not.toHaveProperty('secret')
+    expect(data).not.toHaveProperty('bogus')
+  })
+
+  it('skips a schema field the source has no value for', () => {
+    const data = computeCloneFormData({ id: 'src-2', name: 'Only name' }, fields)
+    expect(data).toEqual({ name: 'Only name' })
   })
 })

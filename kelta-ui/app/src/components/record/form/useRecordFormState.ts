@@ -7,8 +7,8 @@
  * and save (per-field client validation → layout-rule `onBeforeSave` gate →
  * JSON parse → `useRecordMutation` create/update, an emptied field sent as
  * `null` on update → server field errors mapped back onto fields). On success
- * it navigates via the caller's `routes` — create to the NEW record's detail
- * page, edit back to the record's detail page.
+ * it confirms with a toast and navigates via the caller's `routes` — create to
+ * the NEW record's detail page, edit back to the record's detail page.
  *
  * Must run in a component keyed on `useRecordFormModel().formKey`: the
  * `useState` initializer reads `initialData` once, on mount.
@@ -147,6 +147,10 @@ export function useRecordFormState({
   const mutations = useRecordMutation({
     collectionName,
     onSuccess: (saved) => {
+      showToast(
+        t(isNew ? 'success.created' : 'success.updated', { item: t('resources.record') }),
+        'success'
+      )
       if (isNew) {
         // Land on the new record; fall back to the list if the API returned no id.
         navigate(saved?.id ? routes.detail(String(saved.id)) : routes.list)
