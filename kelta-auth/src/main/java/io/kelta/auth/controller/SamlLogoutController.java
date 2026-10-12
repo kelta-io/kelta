@@ -3,7 +3,6 @@ package io.kelta.auth.controller;
 import io.kelta.auth.config.AuthProperties;
 import io.kelta.auth.federation.SamlLogoutSupport;
 import io.kelta.auth.model.SamlLogoutInfo;
-import io.kelta.crypto.EncryptionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
@@ -16,7 +15,6 @@ import org.springframework.security.saml2.provider.service.registration.Saml2Mes
 import org.springframework.security.saml2.provider.service.web.authentication.logout.HttpSessionLogoutRequestRepository;
 import org.springframework.security.saml2.provider.service.web.authentication.logout.Saml2LogoutRequestRepository;
 import org.springframework.security.saml2.provider.service.web.authentication.logout.Saml2LogoutRequestResolver;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.util.HtmlUtils;
@@ -47,9 +45,12 @@ import java.util.Map;
  *
  * <p>The endpoint is {@code permitAll} on the SAML chain: an expired session must
  * still complete logout (fall through to the OIDC end-session), not bounce to /login.
+ *
+ * <p>It is registered unconditionally ({@link io.kelta.auth.config.FederationConfig}):
+ * the UI sends every sign-out here, so it must exist even when SAML or encryption is
+ * unavailable — then the resolver yields nothing and every request passes through.
  */
 @Controller
-@ConditionalOnBean(EncryptionService.class)
 public class SamlLogoutController {
 
     private static final Logger log = LoggerFactory.getLogger(SamlLogoutController.class);

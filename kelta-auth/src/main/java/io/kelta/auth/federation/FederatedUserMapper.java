@@ -10,8 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.saml2.provider.service.authentication.Saml2AuthenticatedPrincipal;
-import io.kelta.crypto.EncryptionService;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -36,7 +34,6 @@ import java.util.*;
  * as {@code PENDING_ACTIVATION} and an admin must assign a profile manually.
  */
 @Service
-@ConditionalOnBean(EncryptionService.class)
 public class FederatedUserMapper {
 
     private static final Logger log = LoggerFactory.getLogger(FederatedUserMapper.class);

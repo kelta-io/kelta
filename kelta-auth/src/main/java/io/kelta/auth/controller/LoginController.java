@@ -37,7 +37,8 @@ public class LoginController {
                            ObjectProvider<RelyingPartyRegistrationRepository> relyingPartyRepoProvider) {
         this.clientRegistrationRepository = clientRegistrationRepository;
         this.domainResolver = domainResolver;
-        // Present only when SAML federation is wired (FederatedUserMapper available).
+        // Always registered (FederationConfig); a DynamicRelyingPartyRegistrationRepository
+        // only when OpenSAML initialized, which is what shows the SAML buttons below.
         this.relyingPartyRegistrationRepository = relyingPartyRepoProvider.getIfAvailable();
     }
 

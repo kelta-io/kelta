@@ -31,6 +31,8 @@ public class AuthRuntimeHints implements RuntimeHintsRegistrar {
         registerJdkPolymorphicTypes(hints);
         registerSerialization(hints);
         registerResources(hints);
+        // SAML federation (FederationConfig) initializes OpenSAML at startup.
+        new OpenSamlRuntimeHints().registerHints(hints, classLoader);
     }
 
     private void registerKeltaModels(RuntimeHints hints) {

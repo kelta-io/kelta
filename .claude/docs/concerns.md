@@ -641,6 +641,20 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   the bean (all tracing was dead for months). Check
   `<service>/target/spring-aot/main/sources/**/…__BeanFactoryRegistrations.java` after
   `mvn spring-boot:process-aot`; `TracingExportPropertiesTest` guards the OTLP endpoint.
+- **Never put `@ConditionalOnBean`/`@ConditionalOnMissingBean` on a bean that an
+  auto-configuration supplies, from user configuration or a component.** Auto-configurations
+  (e.g. runtime-core's `EncryptionAutoConfiguration` → `EncryptionService`) are processed after
+  user configuration and component scan, so the condition always sees no bean. Nor gate on
+  runtime-only state (a key, a secret) in a native service: conditions are frozen at build time.
+  Register the bean unconditionally and decide at run time with `ObjectProvider.getIfAvailable()`
+  (`kelta-auth` `FederationConfig`; `FederationWiringTest` uses `AutoConfigurations.of(...)`, which
+  reproduces the real order).
+- **kelta-auth initializes OpenSAML at startup, and CI's e2e stack runs the JVM auth image.**
+  OpenSAML ships no native hints; `OpenSamlRuntimeHints` derives them at AOT time from OpenSAML's
+  own initializer/config files (+ Santuario algorithm packages). If one is still missing,
+  `OpenSamlStatus` disables SAML with an ERROR log (`OpenSAML failed to initialize`) instead of
+  failing the context — password login, OIDC and sign-out keep working. Check that log line after
+  a deploy that bumps spring-security or OpenSAML; nothing in CI exercises SAML on native.
 - **Build-time static initializers capture the build host's state, incl. `System.nanoTime()`.**
   Shaded Netty in grpc-netty-shaded was initialized at build time, so Netty time went negative on
   nodes that booted after the build node → every timer fired immediately → Cerbos
@@ -784,6 +798,7 @@ One line each; full write-ups are in git history.
 - Older: Superset SQL injection hardening; gateway actuator requires JWT except health/info; `/internal/**` JWT auth (flag-gated); schema-name sanitization in `SchemaLifecycleModule`.
 
 **Bugs**
+- 2026-10-12 — kelta-auth never registered identity federation: OIDC brokering, SAML login/Single Logout and the `/logout/saml2/initiate` sign-out initiator (so every UI sign-out hit a 404) were gated on `@ConditionalOnBean(EncryptionService.class)`, evaluated before the auto-configuration that defines the bean. Now registered unconditionally (`FederationConfig`); encryption and OpenSAML are checked at run time.
 - 2026-10-11 — portal magic-link sign-in never reached the end-user app: `PortalLoginController.verify` stored the tenant UUID in the session while `TenantContextFilter` compares the `/oauth2/authorize` redirect slug, so it read as a tenant switch and cleared the new session (back to the password form). Now stores the slug; found by un-gating `e2e-tests/tests/auth/portal-login.spec.ts`.
 - `RouteRegistry.AUTHORITATIVE_STATIC_PATHS` — member-controller static routes were overwritten by their collection's generic route (portal 403s).
 - V181/V182 + `CollectionDeletionGuardHook` — collections became undeletable once used; cascade, S3 purge, `?force=true` guard, physical table drop.

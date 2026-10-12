@@ -66,6 +66,20 @@ one conditional `UPDATE`, only the replica that changed the row logs. Tests:
 plain surefire here and skip without Docker.
 
 ### Identity Brokering (SSO)
+- `config/FederationConfig` — owns every federation bean (OIDC client registrations, SAML
+  relying parties, the SAML chain, the SLO resolver). **All registered unconditionally**;
+  availability is decided at run time, never with `@ConditionalOnBean`/`@ConditionalOnProperty`
+  (`EncryptionService` is auto-configured, so a `@ConditionalOnBean` on it is always false, and
+  this service is a native image). `FederationWiringTest` reproduces the real auto-config order.
+- OIDC needs `EncryptionService` (`KELTA_ENCRYPTION_KEY`) to decrypt client secrets. Without it
+  `clientRegistrationRepository` refuses every lookup, the login page shows no OIDC buttons and
+  `oauth2Login` is not enabled.
+- SAML stores no secrets and does not need the key. It needs OpenSAML to initialize
+  (`federation/OpenSamlStatus`, probed once at startup). If that fails, SAML is disabled with an
+  ERROR log and the service still starts. Native hints: `aot/OpenSamlRuntimeHints`.
+- `/logout/saml2/initiate` (`SamlLogoutController`) always exists and is `permitAll`: the UI sends
+  every sign-out there. Without a SAML session it redirects to the same-origin
+  `post_logout_redirect_uri` (else `/login?logout`).
 - `DynamicClientRegistrationRepository` — loads OIDC provider configs from worker at runtime
 - `FederatedLoginSuccessHandler` — handles successful external IdP login
 - `FederatedUserMapper` — maps external identity to Kelta user
