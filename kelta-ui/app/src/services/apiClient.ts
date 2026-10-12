@@ -77,6 +77,11 @@ export class ApiError extends Error {
  * 2. Legacy format: { message, error, errors: [{ field, message, code }] }
  */
 export function parseAxiosError(error: unknown): ApiError {
+  // Already parsed (the ApiClient methods throw ApiError): keep it, field errors included.
+  // Rebuilding it here dropped `fieldErrors`, so forms lost every per-field server message.
+  if (error instanceof ApiError) {
+    return error
+  }
   if (axios.isAxiosError(error) && error.response) {
     const { status, data } = error.response
     let serverMessage = error.response.statusText || 'Request failed'
