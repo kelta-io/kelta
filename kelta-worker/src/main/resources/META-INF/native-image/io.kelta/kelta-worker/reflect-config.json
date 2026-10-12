@@ -120,12 +120,6 @@
     "allDeclaredFields": true
   },
   {
-    "name": "io.kelta.runtime.event.BillingEntitlementChangedPayload",
-    "allDeclaredConstructors": true,
-    "allDeclaredMethods": true,
-    "allDeclaredFields": true
-  },
-  {
     "name": "java.util.Locale",
     "methods": [
       { "name": "getDefault", "parameterTypes": [] },

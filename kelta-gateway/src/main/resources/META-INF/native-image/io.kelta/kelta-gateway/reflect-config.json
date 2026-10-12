@@ -150,12 +150,6 @@
     "allDeclaredFields": true
   },
   {
-    "name": "io.kelta.runtime.event.BillingEntitlementChangedPayload",
-    "allDeclaredConstructors": true,
-    "allDeclaredMethods": true,
-    "allDeclaredFields": true
-  },
-  {
     "name": "io.kelta.runtime.event.FlowChangedPayload",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,

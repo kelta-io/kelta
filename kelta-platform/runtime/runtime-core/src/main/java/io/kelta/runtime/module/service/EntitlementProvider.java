@@ -5,8 +5,9 @@ package io.kelta.runtime.module.service;
  * platform code can stop depending on a compiled-in billing service.
  *
  * <p>Published by a module through {@code KeltaModule.getServices()} and resolved per call from
- * {@link ModuleServiceRegistry}. When no installed module publishes one, callers keep whatever
- * compiled-in behaviour they already had, so the port's existence changes nothing on its own.
+ * {@link ModuleServiceRegistry}. It is the platform's only source of entitlements: when no
+ * installed module publishes one, the platform resolves {@link MemberEntitlements#EMPTY} for every
+ * member, and each caller applies its own default for an absent key.
  *
  * <p><b>The caller binds the tenant.</b> {@code tenantId} is passed explicitly and the platform
  * establishes {@code TenantContext} (id <i>and</i> slug) around the call, because an implementation

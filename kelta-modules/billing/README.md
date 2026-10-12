@@ -20,10 +20,11 @@ ship functionality Kelta never anticipated. Read it alongside
 | Per-member quotas | `MemberEntitlementQuotaHook`, a wildcard `BeforeSaveHook` driven by `billing_entitlement_rules` |
 | Billing Plans widget | `static/ui-bundle.js`, served by `GET /api/modules/kelta-billing/ui-bundle.js` |
 
-## Deliberate differences from the compiled-in implementation
+## Deliberate differences from the former compiled-in implementation
 
-These are not oversights. Each is a platform constraint a module cannot escape, and each changes
-behaviour in a way an operator should know about.
+The worker carried a compiled-in copy of billing until 2026-10-11; this module is now the **only**
+billing path. These are not oversights. Each is a platform constraint a module cannot escape, and
+each changed behaviour in a way an operator should know about.
 
 | Compiled-in | This module | Why |
 |---|---|---|
@@ -77,7 +78,7 @@ the JAR and every cast to a platform type would fail.
   internals. Money is never computed here: amounts, proration, tax, dunning, and retries all stay
   with Stripe, and these collections hold ids and coarse state only.
 
-## Known limitations (versus the compiled-in implementation this replaces)
+## Known limitations (versus the compiled-in implementation this replaced)
 
 These are real gaps, not oversights — record them before relying on this in production:
 
@@ -87,11 +88,9 @@ These are real gaps, not oversights — record them before relying on this in pr
   this relies on convergence instead: a pass is granted once per checkout session, and a
   subscription is upserted by its Stripe id. Replaying converges; it does not duplicate. A partial
   failure mid-event can still leave one write applied and another not.
-- **Live verification is owed.** Nothing here has run against real Stripe keys or a live tenant.
-  The compiled-in billing code must stay in place until it has. The runbook for that is
-  [`VERIFICATION.md`](VERIFICATION.md) — note especially that a signature failure installs **inert
-  stub handlers while still reporting ACTIVE**, so "installed and ACTIVE" is not evidence of
-  anything.
+- **Verify each install.** The prod rollout is recorded in [`VERIFICATION.md`](VERIFICATION.md);
+  run its checks on any new tenant. "Installed and ACTIVE" is not evidence on its own — read the
+  health endpoint and confirm the `EntitlementProvider` service registered on every pod.
 - The behavioural differences in the table above are permanent given the module boundary — decide
   they are acceptable for your tenant before cutting over, particularly the **`appliesTo=PORTAL`
   quota rules being skipped**, which silently enforces nothing where the compiled-in version
@@ -100,16 +99,18 @@ These are real gaps, not oversights — record them before relying on this in pr
 ## Entitlements are published to the platform
 
 The module implements the platform port `io.kelta.runtime.module.service.EntitlementProvider` and
-publishes it from `getServices()`. That is what lets compiled-in platform code — availability alert
-fanout, watch limits, the quota hook — resolve entitlements from this module instead of the
-worker's own billing service, on tenants where it is installed.
+publishes it from `getServices()`. It is the platform's **only** source of entitlements: platform
+code that gates on them (availability alert fanout, watch limits) asks the worker's
+`ModuleEntitlementService`, which asks this module. On a tenant without the module every member
+resolves `MemberEntitlements.EMPTY` — watches uncapped, push/email ungated, SMS never sent.
 
 The platform binds `TenantContext` (id **and** slug) around the call, because `EntitlementResolver`
 reads through the query engine and the tenant's schema comes from the slug; a module has no way to
-look one up. If the slug cannot be resolved, the platform refuses the module path and answers from
-its compiled-in service rather than reading the public schema.
+look one up. If the slug cannot be resolved, the platform refuses the module path and resolves no
+entitlements rather than reading the public schema.
 
-Answers are **not cached** platform-side: a module cannot consume the NATS invalidation that keeps
-the compiled-in cache honest, and a stale entitlement is worse than a slower lookup. A provider that
-throws or returns null falls back to the compiled-in service — entitlements gate alert delivery, so
-a broken module must neither take that path down nor silently widen access.
+Answers are **not cached** platform-side: a module cannot consume a NATS invalidation, so nothing
+could evict a cached answer when a webhook on another pod changed a subscription, and a stale
+entitlement is worse than a slower lookup. A provider that throws or returns null resolves no
+entitlements (`EMPTY`) — entitlements gate alert delivery, so a broken module must neither take that
+path down nor grant more than a tenant with no billing at all.

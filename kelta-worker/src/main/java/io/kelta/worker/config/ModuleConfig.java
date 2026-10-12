@@ -89,7 +89,8 @@ public class ModuleConfig {
     /**
      * Holds services published by runtime modules for platform code to call -- the direction
      * {@code ModuleContext} does not cover. Always defined: with no module publishing anything it
-     * simply resolves empty and every caller keeps its compiled-in behaviour.
+     * simply resolves empty and every caller takes its no-module default (for entitlements:
+     * none -- see {@code ModuleEntitlementService}).
      */
     @Bean
     public ModuleServiceRegistry moduleServiceRegistry() {

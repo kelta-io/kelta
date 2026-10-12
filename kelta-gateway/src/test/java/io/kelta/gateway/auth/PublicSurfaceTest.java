@@ -121,7 +121,8 @@ class PublicSurfaceTest {
             // to be open, and anything open here is scrapeable.
             for (String path : List.of(
                     "/api/watches", "/api/watch-targets", "/api/alerts",
-                    "/api/billing/plans", "/api/billing/me", "/api/billing/checkout-sessions",
+                    "/api/modules/kelta-billing/x/plans", "/api/modules/kelta-billing/x/me",
+                    "/api/modules/kelta-billing/x/checkout-sessions",
                     "/api/collections", "/api/records", "/api/analytics", "/api/reports",
                     "/api/dashboards", "/api/users", "/api/files", "/api/devices",
                     "/api/operations", "/api/metadata", "/api/packages")) {
@@ -137,10 +138,13 @@ class PublicSurfaceTest {
         @Test
         @DisplayName("a public prefix does not open its siblings")
         void prefixDoesNotLeakToSiblings() {
-            // Billing no longer has an unauthenticated path of its own: the processor webhook
-            // goes to the module route below, and /api/billing must stay authenticated.
+            // Billing has no unauthenticated path of its own: the processor webhook goes to the
+            // module webhook route below. The retired compiled-in /api/billing prefix must not
+            // have come back open.
             assertThat(isPublic("/api/billing/webhooks/stripe/t1", HttpMethod.POST)).isFalse();
             assertThat(isPublic("/api/billing", HttpMethod.GET)).isFalse();
+            // Module member routes (billing's checkout, portal, me) stay authenticated.
+            assertThat(isPublic("/api/modules/kelta-billing/x/me", HttpMethod.GET)).isFalse();
             // Modules: the webhook dispatch path is open, module administration is not.
             assertThat(isPublic("/api/modules/webhooks/t1/m1", HttpMethod.POST)).isTrue();
             assertThat(isPublic("/api/modules", HttpMethod.GET)).isFalse();

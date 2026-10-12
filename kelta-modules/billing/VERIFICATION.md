@@ -1,7 +1,9 @@
 # Live verification runbook — billing module
 
 Verifies the billing module end-to-end against **real Stripe test-mode keys** on the live
-`<tenant-slug>` tenant. Until this passes, the compiled-in `kelta-worker` billing stays in place.
+`<tenant-slug>` tenant. *(This runbook gated removing the compiled-in `kelta-worker` billing; that
+copy is now gone (2026-10-11), so this module is the only billing path and a tenant without it has
+no entitlements.)*
 
 **Steps marked 🔑 require you to handle secrets and must not be delegated to an agent.**
 

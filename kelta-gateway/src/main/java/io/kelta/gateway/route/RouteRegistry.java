@@ -42,7 +42,7 @@ public class RouteRegistry {
      * being loaded after the static routes, would overwrite the static override in
      * {@link #routes} (keyed by path) and force per-resource collection Cerbos. A
      * portal member holds no collection role, so that check denies with 403 and the
-     * member can never reach their own watches/wins/devices/billing (the dedicated
+     * member can never reach their own watches/wins/devices (the dedicated
      * controller they were meant to hit).
      *
      * <p>These paths are therefore authoritative: only a {@code static-} route may
@@ -56,7 +56,7 @@ public class RouteRegistry {
      * routes below drop the dynamic route outright.
      */
     private static final Set<String> AUTHORITATIVE_STATIC_PATHS = Set.of(
-            "/api/watches/**", "/api/wins/**", "/api/devices/**", "/api/billing/**",
+            "/api/watches/**", "/api/wins/**", "/api/devices/**",
             // Platform-owned prefixes served by their own controllers, not by collection CRUD.
             // ConfigEventListener builds a dynamic route "/api/<collectionName>/**" for every
             // collection and this registry replaces by path, so without these entries a tenant

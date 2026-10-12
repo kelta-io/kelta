@@ -16,7 +16,7 @@ import io.kelta.worker.repository.WatchRepository;
 import io.kelta.worker.repository.WatchTarget;
 import io.kelta.worker.repository.WatchTargetRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
-import io.kelta.worker.service.billing.EntitlementService;
+import io.kelta.worker.service.entitlement.EntitlementService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

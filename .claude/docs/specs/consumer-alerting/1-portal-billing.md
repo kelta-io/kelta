@@ -3,6 +3,13 @@
 > Child of `specs/consumer-alerting/README.md`. Two PRs: **1A core + webhook**, **1B portal
 > surface + enforcement**. Both **security-typed → NO auto-merge**.
 
+> **Superseded (2026-10-11).** Everything this slice built into the worker has since been removed:
+> billing runs only as the `kelta-billing` runtime module (`kelta-modules/billing`), per
+> module-platform slice 8. The worker's `EntitlementService` is now `ModuleEntitlementService`
+> (module provider, else `MemberEntitlements.EMPTY`); the `kelta.billing.*` subject, the
+> `KELTA_BILLING` stream and the `billing.subscription` trigger bridge are retired;
+> `billing_webhook_event` was dropped in V207. Read this spec as history.
+
 > **1B landed.** Delivered: `StripeApiClient` (+ `StripeFormBody`, `StripeApiException`),
 > `ReturnUrlValidator`, `BillingCheckoutService`, `BillingController`,
 > `MemberEntitlementQuotaHook` + `BillingEntitlementRuleCache` +

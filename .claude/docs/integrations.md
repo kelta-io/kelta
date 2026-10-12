@@ -351,6 +351,14 @@ records a FAILED delivery.
 
 ## Stripe (portal billing — consumer-alerting slice 1)
 
+> **Billing is the `kelta-billing` runtime module only** (`kelta-modules/billing`, see its
+> README). The worker's compiled-in copy was removed on 2026-10-11 (module-platform slice 8).
+> The module keeps its data in its own collections (`billing_plans`, `billing_customers`,
+> `billing_subscriptions`, `billing_passes`, `billing_entitlement_rules`); the V178
+> `billing_*` platform tables and `billing-*` system collections are inert leftovers awaiting a
+> drop. Platform code reads entitlements through `ModuleEntitlementService`: the tenant's module
+> `EntitlementProvider`, else `MemberEntitlements.EMPTY` (see **Entitlements** below).
+
 A tenant sells plans to its **PORTAL** members. Stripe owns money, tax, invoicing, and
 dunning; the platform mirrors ids and coarse state and resolves entitlements from them.
 Nothing here computes an amount.
@@ -379,10 +387,12 @@ tenant's `webhookSecret` to verify against, and a passing HMAC is what proves th
 belongs to that tenant. An unknown tenant and a bad signature both answer a bare 401, so an
 unauthenticated caller cannot enumerate which tenants have billing configured.
 
-Idempotency is a claim row in `billing_webhook_event` keyed by the processor's event id, and
-**the claim shares a transaction with the mutation** — if processing throws, the claim rolls
-back with it and the retry genuinely re-runs. Answers 200 for duplicates and for event types
-the platform ignores, so the processor stops retrying them.
+Idempotency **converges** rather than claims: a module writes through `QueryEngine` with no
+transaction of its own, so a pass is granted once per checkout session and a subscription is
+upserted by its Stripe id — a redelivery converges instead of duplicating. (The removed
+compiled-in webhook claimed each event id in `billing_webhook_event` inside the mutation's
+transaction; that table was dropped in V207.) Answers 200 for duplicates and for event types
+the module ignores, so the processor stops retrying them.
 
 | Event | Action |
 |---|---|
@@ -390,8 +400,7 @@ the platform ignores, so the processor stops retrying them.
 | `checkout.session.completed` (mode=subscription) | upsert customer only — the subscription arrives on its own event |
 | `customer.subscription.created` / `.updated` | upsert `billing_subscription`; plan resolved via the price id |
 | `customer.subscription.deleted` | mark canceled — the member drops to the DEFAULT plan on next resolve |
-| `invoice.paid` / `invoice.payment_failed` | flow-trigger bridge only |
-| anything else | claimed, then ignored |
+| anything else | ignored |
 
 **Member resolution** for an event, in order: `client_reference_id` → `metadata.userId`
 (stamped on both the session and `subscription_data`) → the stored `billing_customer`
@@ -402,14 +411,22 @@ base plan is the member's subscription plan while its status is `active`, `trial
 `past_due` (grace while the card is retried), otherwise the tenant's DEFAULT plan; every live
 pass then merges on top — numbers SUM, booleans OR, arrays union — so a pass can add a
 capability but never revoke one. Pass expiry is judged when entitlements are read, not by the
-sweep, so a member is never over-entitled by a sweep that has not run yet.
+`billing:expire-passes` action (scheduled by a tenant flow — a module has no scheduler), so a
+member is never over-entitled by a sweep that has not run yet.
 
-**Events out.** `kelta.billing.entitlement.changed.<tenantId>.<userId>` (KELTA_BILLING
-stream, broadcast) invalidates the entitlement cache on every pod; a payload with no
-`userId` means the whole tenant, which is what a plan edit publishes. Subscription changes
-are additionally bridged onto `kelta.trigger.<tenantId>.billing.subscription`, so tenants
-build welcome / dunning-nudge / win-back automations as flow configuration — flows read
-`$.input.payload.*`.
+Platform callers (`WatchController`, `AlertDispatchService`) ask the worker's
+`ModuleEntitlementService`, which binds `TenantContext` (id **and** slug) and calls the tenant's
+module `EntitlementProvider`, uncached. **No module installed ⇒ `MemberEntitlements.EMPTY`** —
+the same answer a tenant without billing always got: watches uncapped, push/email ungated, SMS
+never sent (billable channels need an affirmative entitlement). A module that throws, returns
+null, or cannot be called safely (unresolvable slug) also resolves `EMPTY`, never anything wider.
+
+**Events out: none.** The `kelta.billing.entitlement.changed.*` subject, its `KELTA_BILLING`
+stream and the `kelta.trigger.<tenantId>.billing.subscription` flow bridge belonged to the
+removed compiled-in implementation (they fed its entitlement cache); a module cannot publish
+to NATS and caches nothing, so all three are retired. A tenant that wants billing automations
+reacts to record changes on the module's collections (e.g. a record-triggered flow on
+`billing_subscriptions`).
 
 **Outbound calls** (`StripeApiClient`): create customer, create checkout session, create
 billing-portal session. Idempotency keys are chosen per operation, and the distinction
@@ -430,16 +447,18 @@ credential's `allowedReturnOrigins` — origin equality, not prefix, because a p
 accepts `https://app.example.com.evil.test`. An empty allowlist denies everything, so a tenant
 that has not configured origins cannot redirect anywhere rather than anywhere at all.
 
-**Quota enforcement.** `billing-entitlement-rules` rows say "records in collection X are capped
-by entitlement key Y", and a wildcard before-save hook enforces them, so capping a new
-collection is configuration rather than code. A rule's optional `countFilter` narrows what
+**Quota enforcement.** The module's `billing_entitlement_rules` rows say "records in collection
+X are capped by entitlement key Y", and the module's wildcard before-save hook enforces them, so
+capping a new collection is configuration rather than code. It **skips `appliesTo=PORTAL`
+rules** (a module cannot read the caller's user type) — use `appliesTo=ALL`. Rows in the legacy
+`billing-entitlement-rules` system collection enforce nothing. A rule's optional `countFilter` narrows what
 counts (e.g. only ACTIVE rows); its field names are validated against the collection definition
 and its values bound as parameters. At the limit the create is rejected with **HTTP 400**
 (JSON:API code `beforeSaveHook`) carrying an upgrade-oriented message. Enforcement **fails
 open** — a billing glitch must not block a tenant's data entry.
 
 **Dashboard prerequisites** (nothing here provisions them): Products and Prices, with each
-price id recorded on a `billing-plans` row; Stripe Tax if the tenant charges tax; the Billing
+price id recorded on a `billing_plans` row; Stripe Tax if the tenant charges tax; the Billing
 Portal configured; retry/dunning settings; and a webhook endpoint pointed at the URL above
 with its signing secret stored in the credential. Local testing:
 `stripe listen --forward-to localhost:<gw>/api/modules/webhooks/<tenantId>/kelta-billing`.

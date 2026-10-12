@@ -1,0 +1,14 @@
+-- Module-platform slice 8 (billing removal): the runtime billing module
+-- (kelta-modules/billing) is the only billing path. Its Stripe webhook converges by
+-- natural key through the query engine and never used this table; the compiled-in
+-- webhook controller that claimed event ids here is gone, so nothing reads or writes it.
+--
+-- Nothing depends on it: no foreign key references it, and the RLS policies V200
+-- attached to it (tenant_isolation, admin_bypass) are dropped with the table.
+--
+-- The other V178 billing tables (billing_plan, billing_customer, billing_subscription,
+-- billing_pass, billing_entitlement_rule) are deliberately NOT dropped here: they still
+-- back the billing-* system collection definitions in runtime-core and hold data an
+-- operator may need to migrate into the module's own collections. Dropping them is a
+-- later, soaked step.
+DROP TABLE IF EXISTS billing_webhook_event;

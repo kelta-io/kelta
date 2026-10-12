@@ -70,12 +70,6 @@ public class JetStreamInitializer {
             ensureStream(jsm, "KELTA_CHAT",
                     List.of("kelta.chat.message.>", "kelta.chat.conversation.>"),
                     Duration.ofHours(24));
-            // Portal billing: kelta.billing.entitlement.changed.<tenantId>.<userId>
-            // — broadcast entitlement-cache invalidation. Its own stream because an
-            // existing stream's subject list cannot be extended (add-if-absent).
-            ensureStream(jsm, "KELTA_BILLING",
-                    List.of("kelta.billing.>"),
-                    Duration.ofHours(24));
             // Availability observations from external pollers (consumer-alerting
             // slice 4): kelta.availability.event.<tenantId>.<source>. Deliberately
             // NOT on kelta.trigger.> — this is the alert hot path with a

@@ -19,6 +19,9 @@ io.kelta.worker/
   scim/            ← SCIM 2.0 protocol (controller, model, service, filter)
   service/         ← Business logic (45+ services)
     email/         ← Email providers (SMTP, templates)
+    entitlement/   ← EntitlementService → the tenant's module EntitlementProvider; no module ⇒
+                     MemberEntitlements.EMPTY. Billing is NOT compiled in — it is the
+                     kelta-modules/billing runtime module (there is no service/billing/)
     push/          ← Push notification providers (FCM, APNs)
     sms/           ← SMS providers
 ```
