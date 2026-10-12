@@ -1,0 +1,28 @@
+{
+  "status" : 200,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : {
+      "attributes" : {
+        "collectionId" : "col-sys",
+        "name" : "email",
+        "tenantId" : "00000000-0000-0000-0000-000000000001"
+      },
+      "id" : "f-sys",
+      "type" : "fields"
+    }
+  },
+  "calls" : [ {
+    "collection" : "fields",
+    "id" : "f-sys",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "collections",
+    "op" : "executeQuery",
+    "query" : "QueryRequest[pagination=Pagination[pageNumber=1, pageSize=1000], sorting=[], fields=[id], filters=[FilterCondition[fieldName=tenantId, operator=EQ, value=00000000-0000-0000-0000-000000000001], FilterCondition[fieldName=systemCollection, operator=EQ, value=true]]]",
+    "tenant" : "tenant-a"
+  } ]
+}

@@ -1,0 +1,1 @@
+- 2026-10-12 fix(runtime-core): Sub-resource routes serve, update and delete a child only under the parent it references and apply top-level tenant visibility; get-by-id applies the shared-system-row restriction to `collections`/`fields` (router-child-scope)

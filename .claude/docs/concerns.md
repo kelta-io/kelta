@@ -20,7 +20,7 @@ second layer (`RecordTenantScope`); both read the shared-rows list from `SystemC
 
 **Still open:**
 - **By-id and write paths remain router-only** for `tenant_id`-scoped system collections:
-  `getById`, `update` and `delete` take no tenant predicate, so `RecordTenantScope.visibleToTenant` (`GET /:id`)
+  `getById`, `update` and `delete` take no tenant predicate, so `RecordTenantScope.visibleToTenant` (`GET /:id` and the sub-resource routes)
   and `RecordTenantScope.injectTenantId` (creates) are the only application-layer check. A direct caller can load a
   single foreign system record by guessing its id. Closing it needs a pass over the
   cross-tenant write paths (provisioning, promotion, the create read-back) that legitimately
@@ -455,7 +455,7 @@ The router was 2,021 lines with the write pipeline copied into create/update/pat
 sub-resource variant; it is now 763 lines of HTTP surface plus package-private collaborators
 (`RecordWritePipeline`, `JsonApiIncludeResolver`, `RecordTenantScope`, `CollectionResolver`,
 `RecordETag`) and the pure `router/jsonapi` serializers — see `architecture.md` → Worker Layers.
-- **Change behaviour only with a golden diff.** `DynamicCollectionRouterGoldenTest` pins 91 cases
+- **Change behaviour only with a golden diff.** `DynamicCollectionRouterGoldenTest` pins 106 cases
   (status, headers, body and the ordered storage/cache/user-resolver call log), and
   `DynamicCollectionRouterRequestMappingTest` pins every mapping attribute and public signature
   (worker controllers call the handlers directly; the advices depend on the return types). A
@@ -729,6 +729,7 @@ its own change with a full compose run.
 One line each; full write-ups are in git history.
 
 **Security**
+- 2026-10-12 — child-resource routes verify parent ownership and apply top-level tenant visibility; get-by-id applies the shared-system-row restriction (`RecordTenantScope.findChild`/`visibleToTenant`).
 - PLT-260 (2026-09-17) — direct `queryEngine` callers read system collections across tenants; scoping moved into `PhysicalTableStorageAdapter.query()`.
 - PLT-354 (2026-10-05) — anonymous no-tenant reads returned several tenants' rows; now `WHERE FALSE` (`refusesAnonymousRead`).
 - 2026-09-17 — gateway routes keyed by path alone let same-named collections shadow each other's authorization; now keyed by (path, tenant).

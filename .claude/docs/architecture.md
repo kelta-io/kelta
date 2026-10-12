@@ -975,14 +975,19 @@ for it, not just a `ScopedValue`.
   their caching); the rest sits beside it in `runtime-core/.../router/`, all package-private
   and logging under the router's logger category:
   - `RecordWritePipeline` — the **one** write path for create / PUT / PATCH / delete on both
-    top-level and sub-resource routes, in a fixed order: read-only 403 → body → storage data
+    top-level and sub-resource routes, in a fixed order: read-only 403 → (sub-resource
+    update/delete) the child must load through `RecordTenantScope.findChild` or 404 with nothing
+    written → body → storage data
     (+ parent ref on a child create) → `createdBy`/`updatedBy` (`UserIdResolver`) → geo stamp →
     `tenantId` (create) or `If-Match` (top-level update/delete only) → `QueryEngine` write
     (hooks, validation, record-changed event) → same-pod cache eviction → response. Per-route
     differences are fields on its `WriteTarget` record, not branches.
   - `JsonApiIncludeResolver` — `?include=` (see "Read-side include resolution" below);
     `RecordTenantScope` — the router's `X-Tenant-ID` second layer for tenant-scoped system
-    collections (`injectTenantFilter`, `visibleToTenant`, shared-row narrowing, `injectTenantId`);
+    collections (`injectTenantFilter`, `visibleToTenant`, shared-row narrowing, `injectTenantId`)
+    and the sub-resource check `findChild` (exists + `visibleToTenant` + the child's reference to
+    the parent equals the URL's `{parentId}` — the predicate `listChildren` filters on; any miss
+    is a 404 on get, PUT/PATCH and delete);
     `CollectionResolver` — registry + on-demand lookup; `RecordETag` — the optimistic-lock token.
   - `router/jsonapi/` — pure document shaping: `JsonApiRequestBody` (write-body reading) and
     `JsonApiRecordSerializer` (resource objects, single/list documents, the read-only 403).
@@ -1029,14 +1034,15 @@ for it, not just a `ScopedValue`.
   production (PLT-262). `restrictSharedSystemRows`/`filterSharedSystemRows` narrow the router's
   already-fetched list result afterward instead — a `collections` row must have
   `systemCollection=true`, a `fields` row's `collectionId` must resolve to one — applied at all
-  three list call sites (`list`, `listChildren`, `queryChildRecords` for `?include=`). The
+  three list call sites (`list`, `listChildren`, `queryChildRecords` for `?include=`) — and
+  `visibleToTenant` applies the same rule to a single row, so get-by-id (including the display-field
+  lookup) and the sub-resource routes 404 such a row before it is served or cached under the
+  caller's `X-Tenant-ID` (a `fields` row costs one extra `collections` query, only when it is a
+  platform-tenant row read by another tenant). The
   narrowing is skipped when the caller **is** the platform tenant (`X-Tenant-ID ==
   SYSTEM_TENANT_ID`) — there every SYSTEM_TENANT_ID row is the caller's own, and the e2e /
   test-harness "default" tenant is exactly that tenant (its custom collections' fields vanished
   from `GET /api/fields`, timing out every `waitForField`).
-  `visibleToTenant` (get-by-id) is intentionally unchanged: it only ever gates on
-  `sharesSystemRows` + owner == SYSTEM_TENANT_ID, so a stray row is reachable by guessed ID —
-  a narrower, accepted gap left for a future pass.
 - **Services**: `kelta-worker/src/main/java/io/kelta/service/` — Business logic (CollectionLifecycleManager, CerbosAuthorizationService, SearchIndexService, S3StorageService)
 - **Listeners**: `kelta-worker/src/main/java/io/kelta/listener/` — NATS subscribers (CollectionSchemaListener, SearchIndexListener, CerbosCacheInvalidationListener, SvixWebhookPublisher)
 - **Data**: `kelta-worker/src/main/java/io/kelta/repository/` — JdbcTemplate + JPA repositories

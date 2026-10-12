@@ -29,6 +29,9 @@ import java.util.regex.Pattern;
  * {@code DynamicCollectionRouterGoldenTest} pin, so do not reorder:
  * <ol>
  *   <li>read-only collection → {@code 403} (JSON:API error body for create/update, empty for delete);</li>
+ *   <li>sub-resource update/delete only: the child must exist, be visible to the caller's tenant and
+ *       reference the URL's parent ({@link RecordTenantScope#findChild}) — else {@code 404} with
+ *       nothing written;</li>
  *   <li>storage data = body attributes + relationship ids (+ the parent reference on a child create);</li>
  *   <li>audit stamp from {@code X-User-Id}, resolved to a platform-user UUID
  *       ({@code createdBy}+{@code updatedBy} on create, {@code updatedBy} on update);</li>
@@ -128,6 +131,9 @@ final class RecordWritePipeline {
         if (definition.readOnly()) {
             return readOnly(target);
         }
+        if (!childInScope(target, id, request)) {
+            return ResponseEntity.notFound().build();
+        }
 
         Map<String, Object> data = storageData(requestBody);
 
@@ -166,6 +172,9 @@ final class RecordWritePipeline {
         if (definition.readOnly()) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
+        if (!childInScope(target, id, request)) {
+            return ResponseEntity.notFound().build();
+        }
 
         if (target.optimisticLocking()) {
             // Optimistic locking: reject a stale If-Match before deleting (slice 5).
@@ -181,6 +190,19 @@ final class RecordWritePipeline {
 
         return deleted ? ResponseEntity.noContent().build()
                        : ResponseEntity.notFound().build();
+    }
+
+    /**
+     * On a sub-resource route, whether the record being updated or deleted is one the route may
+     * touch: it exists, the caller's tenant may see it, and it references the URL's parent — the
+     * same rule the sub-resource get applies. Always true on a top-level route.
+     */
+    private boolean childInScope(WriteTarget target, String id, HttpServletRequest request) {
+        if (target.parentRefField() == null) {
+            return true;
+        }
+        return tenantScope.findChild(target.definition(), target.parentRefField(), target.parentId(), id, request)
+                .isPresent();
     }
 
     private static ResponseEntity<Map<String, Object>> readOnly(WriteTarget target) {

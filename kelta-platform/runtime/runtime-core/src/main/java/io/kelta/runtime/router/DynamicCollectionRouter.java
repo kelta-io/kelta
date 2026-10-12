@@ -270,7 +270,8 @@ public class DynamicCollectionRouter {
             // Another tenant's row must read as absent, not as a 403 existence oracle. RLS
             // is the real boundary; this mirrors injectTenantFilter for get-by-id so the
             // answer is the same wherever RLS is a no-op (superuser DB roles: local
-            // docker-compose, the test harness).
+            // docker-compose, the test harness). It also applies the shared-system-row rule
+            // the list path applies, before anything is cached under the caller's tenant.
             if (record.isEmpty() || !tenantScope.visibleToTenant(record.get(), definition, request)) {
                 return ResponseEntity.notFound().build();
             }
@@ -488,7 +489,9 @@ public class DynamicCollectionRouter {
                 return ResponseEntity.notFound().build();
             }
 
-            Optional<Map<String, Object>> record = queryEngine.getById(relation.childDef(), childId);
+            // Absent, not visible to the caller's tenant, or under another parent: all read as 404.
+            Optional<Map<String, Object>> record = tenantScope.findChild(
+                    relation.childDef(), relation.parentRefFieldName(), parentId, childId, request);
             return record.map(r -> ResponseEntity.ok(
                             JsonApiRecordSerializer.document(r, childName, relation.childDef())))
                          .orElse(ResponseEntity.notFound().build());

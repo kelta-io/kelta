@@ -424,16 +424,63 @@ class DynamicCollectionRouterSystemCollectionTest {
                     .andExpect(jsonPath("$.data.id").value(FIELD_ID));
         }
 
+        /** Registers {@code collections} with {@code c-1} as the platform's only genuine system collection. */
+        private void platformSystemCollections() {
+            CollectionDefinition collectionsDef = io.kelta.runtime.model.system.CoreSystemCollections.collections();
+            when(registry.get("collections")).thenReturn(collectionsDef);
+            Map<String, Object> systemCollection = new HashMap<>();
+            systemCollection.put("id", "c-1");
+            when(queryEngine.executeQuery(eq(collectionsDef), any(QueryRequest.class)))
+                    .thenReturn(QueryResult.of(List.of(systemCollection), 1, Pagination.defaults()));
+        }
+
         @Test
-        @DisplayName("Should serve SYSTEM_TENANT_ID 'fields' rows to every tenant, like 'collections'")
+        @DisplayName("Should serve SYSTEM_TENANT_ID 'fields' rows of a system collection to every tenant, like 'collections'")
         void get_servesSystemRow() throws Exception {
             CollectionDefinition def = io.kelta.runtime.model.system.CoreSystemCollections.fields();
             when(registry.get("fields")).thenReturn(def);
+            platformSystemCollections();
             when(queryEngine.getById(def, FIELD_ID)).thenReturn(Optional.of(
                     fieldRow(io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID)));
 
             mockMvc.perform(get("/api/fields/" + FIELD_ID)
                             .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("Should 404 a SYSTEM_TENANT_ID 'fields' row whose collection is not a system collection")
+        void get_hidesPlatformRowOfNonSystemCollection() throws Exception {
+            CollectionDefinition def = io.kelta.runtime.model.system.CoreSystemCollections.fields();
+            when(registry.get("fields")).thenReturn(def);
+            platformSystemCollections();
+            Map<String, Object> row = fieldRow(io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID);
+            row.put("collectionId", "c-custom");
+            when(queryEngine.getById(def, FIELD_ID)).thenReturn(Optional.of(row));
+
+            mockMvc.perform(get("/api/fields/" + FIELD_ID)
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("Should 404 a SYSTEM_TENANT_ID 'collections' row that is not a system collection")
+        void get_hidesPlatformNonSystemCollectionRow() throws Exception {
+            CollectionDefinition def = io.kelta.runtime.model.system.CoreSystemCollections.collections();
+            when(registry.get("collections")).thenReturn(def);
+            Map<String, Object> row = new HashMap<>();
+            row.put("id", "c-custom");
+            row.put("name", "platform-custom");
+            row.put("tenantId", io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID);
+            row.put("systemCollection", false);
+            when(queryEngine.getById(def, "c-custom")).thenReturn(Optional.of(row));
+
+            mockMvc.perform(get("/api/collections/c-custom")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
+            // ...while the platform tenant itself still reads its own row.
+            mockMvc.perform(get("/api/collections/c-custom")
+                            .header("X-Tenant-ID", io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID))
                     .andExpect(status().isOk());
         }
 

@@ -1,0 +1,17 @@
+{
+  "status" : 404,
+  "headers" : { },
+  "body" : null,
+  "calls" : [ {
+    "collection" : "collections",
+    "hit" : false,
+    "id" : "col-plat",
+    "op" : "cache.getByIdResponse",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "collections",
+    "id" : "col-plat",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  } ]
+}

@@ -142,6 +142,16 @@ class DynamicCollectionRouterSubResourceTest {
         return objectMapper.writeValueAsString(body);
     }
 
+    /** Stubs the stored child record the sub-resource routes load before reading or writing it. */
+    private void storedChild(String id, String parentId, String tenantId) {
+        Map<String, Object> stored = new HashMap<>();
+        stored.put("id", id);
+        stored.put("name", "Existing");
+        stored.put("workflowRuleId", parentId);
+        stored.put("tenantId", tenantId);
+        when(queryEngine.getById(any(CollectionDefinition.class), eq(id))).thenReturn(Optional.of(stored));
+    }
+
     private void registerParentAndChild() {
         when(registry.get("workflow-rules")).thenReturn(buildParentCollection());
         when(registry.get("workflow-actions")).thenReturn(buildChildCollection());
@@ -354,6 +364,39 @@ class DynamicCollectionRouterSubResourceTest {
             mockMvc.perform(get("/api/workflow-rules/rule-1/workflow-actions/nonexistent"))
                     .andExpect(status().isNotFound());
         }
+
+        @Test
+        @DisplayName("Should return 404 when the child references a different parent")
+        void getChild_returns404_whenUnderAnotherParent() throws Exception {
+            registerParentAndChild();
+            storedChild("action-1", "rule-2", "tenant-123");
+
+            mockMvc.perform(get("/api/workflow-rules/rule-1/workflow-actions/action-1")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("Should return 404 when the child belongs to another tenant")
+        void getChild_returns404_whenOtherTenant() throws Exception {
+            registerParentAndChild();
+            storedChild("action-1", "rule-1", "tenant-456");
+
+            mockMvc.perform(get("/api/workflow-rules/rule-1/workflow-actions/action-1")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("Should match a UUID parent id case-insensitively")
+        void getChild_matchesUuidParentIgnoringCase() throws Exception {
+            registerParentAndChild();
+            storedChild("action-1", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "tenant-123");
+
+            mockMvc.perform(get("/api/workflow-rules/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/workflow-actions/action-1")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk());
+        }
     }
 
     // ==================== Create Child Tests ====================
@@ -423,6 +466,7 @@ class DynamicCollectionRouterSubResourceTest {
         @DisplayName("Should update child record via PUT")
         void updateChild_viaPut() throws Exception {
             registerParentAndChild();
+            storedChild("action-1", "rule-1", "tenant-123");
 
             Map<String, Object> updatedRecord = new HashMap<>();
             updatedRecord.put("id", "action-1");
@@ -453,6 +497,7 @@ class DynamicCollectionRouterSubResourceTest {
         @DisplayName("Should update child record via PATCH")
         void updateChild_viaPatch() throws Exception {
             registerParentAndChild();
+            storedChild("action-1", "rule-1", "tenant-123");
 
             Map<String, Object> updatedRecord = new HashMap<>();
             updatedRecord.put("id", "action-1");
@@ -487,6 +532,40 @@ class DynamicCollectionRouterSubResourceTest {
         }
 
         @Test
+        @DisplayName("Should return 404 and write nothing when the child references a different parent")
+        void updateChild_returns404_whenUnderAnotherParent() throws Exception {
+            registerParentAndChild();
+            storedChild("action-1", "rule-2", "tenant-123");
+
+            String body = jsonApiBody(Map.of("name", "Moved"));
+
+            mockMvc.perform(patch("/api/workflow-rules/rule-1/workflow-actions/action-1")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
+
+            verify(queryEngine, never()).update(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should return 404 and write nothing when the child belongs to another tenant")
+        void updateChild_returns404_whenOtherTenant() throws Exception {
+            registerParentAndChild();
+            storedChild("action-1", "rule-1", "tenant-456");
+
+            String body = jsonApiBody(Map.of("name", "Renamed"));
+
+            mockMvc.perform(put("/api/workflow-rules/rule-1/workflow-actions/action-1")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body)
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
+
+            verify(queryEngine, never()).update(any(), any(), any());
+        }
+
+        @Test
         @DisplayName("Should return 403 for read-only child collection update")
         void updateChild_returns403_forReadOnly() throws Exception {
             when(registry.get("workflow-rules")).thenReturn(buildParentCollection());
@@ -513,6 +592,7 @@ class DynamicCollectionRouterSubResourceTest {
         @DisplayName("Should delete child record")
         void deleteChild_success() throws Exception {
             registerParentAndChild();
+            storedChild("action-1", "rule-1", null);
 
             when(queryEngine.delete(any(CollectionDefinition.class), eq("action-1")))
                     .thenReturn(true);
@@ -533,6 +613,19 @@ class DynamicCollectionRouterSubResourceTest {
 
             mockMvc.perform(delete("/api/workflow-rules/rule-1/workflow-actions/nonexistent"))
                     .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("Should return 404 and delete nothing when the child references a different parent")
+        void deleteChild_returns404_whenUnderAnotherParent() throws Exception {
+            registerParentAndChild();
+            storedChild("action-1", "rule-2", "tenant-123");
+
+            mockMvc.perform(delete("/api/workflow-rules/rule-1/workflow-actions/action-1")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isNotFound());
+
+            verify(queryEngine, never()).delete(any(), any());
         }
 
         @Test
