@@ -5,6 +5,11 @@
   "calls" : [ {
     "collection" : "contacts",
     "id" : "con-1",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "contacts",
+    "id" : "con-1",
     "op" : "delete",
     "tenant" : "tenant-a"
   } ]

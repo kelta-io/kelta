@@ -1,0 +1,11 @@
+{
+  "status" : 404,
+  "headers" : { },
+  "body" : null,
+  "calls" : [ {
+    "collection" : "fields",
+    "id" : "f-b",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  } ]
+}

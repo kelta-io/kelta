@@ -418,6 +418,23 @@ class DynamicCollectionRouterGoldenTest {
         @Test void sharedSystemRow() throws Exception {
             golden("get_shared_system_row", tenantA(get("/api/collections/col-sys")));
         }
+
+        @Test void platformNonSystemRowIsNotFound() throws Exception {
+            golden("get_platform_non_system_row_not_found", tenantA(get("/api/collections/col-plat")));
+        }
+
+        @Test void platformNonSystemFieldIsNotFound() throws Exception {
+            golden("get_platform_non_system_field_not_found", tenantA(get("/api/fields/f-plat")));
+        }
+
+        @Test void sharedSystemField() throws Exception {
+            golden("get_shared_system_field", tenantA(get("/api/fields/f-sys")));
+        }
+
+        @Test void platformRowAsPlatformTenant() throws Exception {
+            golden("get_platform_row_as_platform_tenant",
+                    get("/api/collections/col-plat").header("X-Tenant-ID", SYS));
+        }
     }
 
     // ==================== Create ====================
@@ -658,6 +675,23 @@ class DynamicCollectionRouterGoldenTest {
             golden("child_get_no_relationship", tenantA(get("/api/accounts/acc-1/regions/reg-1")));
         }
 
+        @Test void getUnderOtherParent() throws Exception {
+            golden("child_get_wrong_parent_not_found", tenantA(get("/api/accounts/acc-2/contacts/con-1")));
+        }
+
+        @Test void getOtherTenantChild() throws Exception {
+            golden("child_get_other_tenant_not_found", tenantA(get("/api/collections/col-b/fields/f-b")));
+        }
+
+        @Test void getPlatformNonSystemChild() throws Exception {
+            golden("child_get_platform_non_system_field_not_found",
+                    tenantA(get("/api/collections/col-plat/fields/f-plat")));
+        }
+
+        @Test void getSharedSystemChild() throws Exception {
+            golden("child_get_shared_system_field", tenantA(get("/api/collections/col-sys/fields/f-sys")));
+        }
+
         @Test void create() throws Exception {
             golden("child_create", geo(json(tenantA(post("/api/accounts/acc-1/contacts")), """
                     {"data":{"type":"contacts","attributes":{"firstName":"Dee","account":"acc-9"},
@@ -708,6 +742,24 @@ class DynamicCollectionRouterGoldenTest {
                     """));
         }
 
+        @Test void putUnderOtherParent() throws Exception {
+            golden("child_put_wrong_parent_not_found", json(tenantA(put("/api/accounts/acc-2/contacts/con-1")), """
+                    {"data":{"attributes":{"firstName":"Moved"}}}
+                    """));
+        }
+
+        @Test void patchUnderOtherParent() throws Exception {
+            golden("child_patch_wrong_parent_not_found", json(tenantA(patch("/api/accounts/acc-2/contacts/con-2")), """
+                    {"data":{"attributes":{"firstName":"Moved"}}}
+                    """));
+        }
+
+        @Test void patchOtherTenantChild() throws Exception {
+            golden("child_patch_other_tenant_not_found", json(tenantA(patch("/api/collections/col-b/fields/f-b")), """
+                    {"data":{"attributes":{"name":"renamed"}}}
+                    """));
+        }
+
         @Test void putNoRelationship() throws Exception {
             golden("child_put_no_relationship", json(tenantA(put("/api/accounts/acc-1/regions/reg-1")), "{}"));
         }
@@ -728,6 +780,14 @@ class DynamicCollectionRouterGoldenTest {
         @Test void deleteReferenced() throws Exception {
             engine.referencedIds.add("con-1");
             golden("child_delete_referenced", tenantA(delete("/api/accounts/acc-1/contacts/con-1")));
+        }
+
+        @Test void deleteUnderOtherParent() throws Exception {
+            golden("child_delete_wrong_parent_not_found", tenantA(delete("/api/accounts/acc-2/contacts/con-1")));
+        }
+
+        @Test void deleteOtherTenantChild() throws Exception {
+            golden("child_delete_other_tenant_not_found", tenantA(delete("/api/collections/col-b/fields/f-b")));
         }
 
         @Test void deleteReadOnly() throws Exception {
@@ -1067,6 +1127,6 @@ class DynamicCollectionRouterGoldenTest {
         }
     }
 
-    private static final long EXPECTED_GOLDEN_COUNT = 93;
+    private static final long EXPECTED_GOLDEN_COUNT = 106;
 
 }

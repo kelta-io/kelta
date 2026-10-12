@@ -18,13 +18,16 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
  * The router's request-level tenant scoping for <em>tenant-scoped system collections</em>, keyed on
  * the gateway-forwarded {@code X-Tenant-ID} header: the list filter, the get-by-id visibility check,
- * the post-query narrowing of shared platform rows, and the {@code tenantId} stamp on create.
+ * the post-query narrowing of shared platform rows, and the {@code tenantId} stamp on create — plus
+ * the sub-resource parent check ({@link #belongsToParent}).
  *
  * <p>This is a second line behind Postgres RLS (which is a no-op for superuser DB roles — local
  * docker-compose, the test harness); user collections are scoped by RLS alone. It reads the
@@ -33,6 +36,9 @@ import java.util.stream.Collectors;
 final class RecordTenantScope {
 
     private static final Logger logger = LoggerFactory.getLogger(DynamicCollectionRouter.class);
+
+    private static final Pattern UUID_PATTERN = Pattern.compile(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 
     private final CollectionRegistry registry;
     private final QueryEngine queryEngine;
@@ -77,11 +83,15 @@ final class RecordTenantScope {
     }
 
     /**
-     * Get-by-id counterpart of {@link #injectTenantFilter}: a tenant-scoped system record
-     * is visible only to its owning tenant (plus the platform's own rows for the collections
-     * {@link SystemCollectionTenancy#sharesSystemRows} names). Non-tenant-scoped definitions,
-     * requests without a tenant header and rows without a {@code tenantId} pass through, matching
-     * the list path.
+     * Get-by-id counterpart of {@link #injectTenantFilter} plus {@link #filterSharedSystemRows}:
+     * a tenant-scoped system record is visible only to its owning tenant, and a platform-tenant
+     * row of a collection {@link SystemCollectionTenancy#sharesSystemRows} names is visible to
+     * other tenants only when the list path would show it too — a genuine system collection, or a
+     * field of one. Non-tenant-scoped definitions, requests without a tenant header and rows
+     * without a {@code tenantId} pass through, matching the list path.
+     *
+     * <p>Used by the router's get-by-id and, through {@link #findChild}, by the sub-resource
+     * routes before they read or write a child record.
      */
     boolean visibleToTenant(Map<String, Object> record, CollectionDefinition definition,
                             HttpServletRequest request) {
@@ -97,9 +107,53 @@ final class RecordTenantScope {
             return true;
         }
         String ownerId = String.valueOf(owner);
-        return tenantId.equals(ownerId)
-                || (SystemCollectionTenancy.sharesSystemRows(definition)
-                        && SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(ownerId));
+        if (tenantId.equals(ownerId)) {
+            return true;
+        }
+        if (!SystemCollectionTenancy.sharesSystemRows(definition)
+                || !SystemCollectionDefinitions.SYSTEM_TENANT_ID.equals(ownerId)) {
+            return false;
+        }
+        return !filterSharedSystemRows(definition, List.of(record), request).isEmpty();
+    }
+
+    /**
+     * Loads the child record a sub-resource route ({@code /api/{parent}/{parentId}/{child}/{childId}})
+     * names, as that route may see it: empty when the record does not exist, is not visible to the
+     * caller's tenant ({@link #visibleToTenant}, as on a top-level get-by-id), or belongs to a
+     * different parent ({@link #belongsToParent}). The three cases are indistinguishable to the
+     * caller, so every one answers like a missing child.
+     *
+     * <p>The get, update and delete sub-resource handlers call this before they read or write.
+     */
+    Optional<Map<String, Object>> findChild(CollectionDefinition childDef, String parentRefField,
+                                            String parentId, String childId, HttpServletRequest request) {
+        Optional<Map<String, Object>> child = queryEngine.getById(childDef, childId);
+        if (child.isEmpty()
+                || !visibleToTenant(child.get(), childDef, request)
+                || !belongsToParent(child.get(), parentRefField, parentId)) {
+            return Optional.empty();
+        }
+        return child;
+    }
+
+    /**
+     * Sub-resource check: whether {@code child} hangs off the parent the URL names, i.e. its
+     * reference field to the parent ({@code parentRefField}) holds {@code parentId}. The same
+     * predicate {@code listChildren} filters on, applied to a single loaded record, so a child is
+     * reachable by id under exactly the parent it is listed under. UUIDs compare
+     * case-insensitively; any other id compares exactly. A missing reference never matches.
+     */
+    static boolean belongsToParent(Map<String, Object> child, String parentRefField, String parentId) {
+        Object link = child.get(parentRefField);
+        if (link == null || parentId == null) {
+            return false;
+        }
+        String linkId = String.valueOf(link);
+        if (linkId.equals(parentId)) {
+            return true;
+        }
+        return UUID_PATTERN.matcher(linkId).matches() && linkId.equalsIgnoreCase(parentId);
     }
 
     /**

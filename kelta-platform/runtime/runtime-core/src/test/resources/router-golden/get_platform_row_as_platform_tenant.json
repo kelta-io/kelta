@@ -1,0 +1,34 @@
+{
+  "status" : 200,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : {
+      "attributes" : {
+        "name" : "platform-custom",
+        "systemCollection" : false,
+        "tenantId" : "00000000-0000-0000-0000-000000000001"
+      },
+      "id" : "col-plat",
+      "type" : "collections"
+    }
+  },
+  "calls" : [ {
+    "collection" : "collections",
+    "hit" : false,
+    "id" : "col-plat",
+    "op" : "cache.getByIdResponse",
+    "tenant" : "00000000-0000-0000-0000-000000000001"
+  }, {
+    "collection" : "collections",
+    "id" : "col-plat",
+    "op" : "getById",
+    "tenant" : "00000000-0000-0000-0000-000000000001"
+  }, {
+    "collection" : "collections",
+    "id" : "col-plat",
+    "op" : "cache.putByIdResponse",
+    "tenant" : "00000000-0000-0000-0000-000000000001"
+  } ]
+}

@@ -5,7 +5,7 @@
   "calls" : [ {
     "collection" : "contacts",
     "id" : "con-404",
-    "op" : "delete",
+    "op" : "getById",
     "tenant" : "tenant-a"
   } ]
 }
