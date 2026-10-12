@@ -15,6 +15,9 @@ interface UseResourceListResult<T> {
 
 /**
  * Hook for fetching a list of resources
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the hook into your app if you depend on it.
  */
 export function useResourceList<T = unknown>(
   resourceName: string,

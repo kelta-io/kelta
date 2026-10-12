@@ -19,6 +19,9 @@ import type { PageLayoutProps } from './types';
  *   <main>Page content</main>
  * </PageLayout>
  * ```
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the component into your app if you depend on it.
  */
 export function PageLayout({
   children,

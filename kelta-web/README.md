@@ -42,18 +42,21 @@ Reusable React component library for building Kelta UIs.
 **Providers & hooks:**
 - `KeltaProvider` -- Context provider wrapping client and user
 - `useKeltaClient()`, `useCurrentUser()` -- Client and user access
-- `useResource<T>()` -- Fetch and mutate a single resource
-- `useResourceList<T>()` -- Fetch paginated resource lists
-- `useDiscovery()` -- Discover available resources
+- `useResource<T>()` -- Fetch and mutate a single resource (deprecated)
+- `useResourceList<T>()` -- Fetch paginated resource lists (deprecated)
+- `useDiscovery()` -- Discover available resources (deprecated)
 
 **Components:**
 - `DataTable<T>` -- Data grid with sorting, filtering, pagination, row selection
 - `ResourceForm` -- Auto-generated forms with validation and custom field renderers
-- `ResourceDetail` -- Record detail display with field renderer registry
+- `ResourceDetail` -- Record detail display with field renderer registry (deprecated)
 - `FilterBuilder` -- Dynamic filter UI
 - `Navigation` -- Menu/navigation component
-- `PageLayout`, `TwoColumnLayout`, `ThreeColumnLayout` -- Responsive layouts
-- `LayoutRenderer` -- Dynamic layout rendering from config
+- `PageLayout`, `TwoColumnLayout`, `ThreeColumnLayout` -- Responsive layouts (deprecated)
+- `LayoutRenderer` -- Dynamic layout rendering from config (deprecated)
+
+Exports marked `@deprecated` in the source are unused by Kelta and scheduled for removal in the next
+major release of `@kelta/components`; copy one into your app if you depend on it.
 
 ### @kelta/cli
 

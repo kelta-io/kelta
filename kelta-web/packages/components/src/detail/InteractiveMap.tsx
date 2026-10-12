@@ -16,6 +16,11 @@ import { cn } from './_utils';
 
 const InteractiveMapImpl = React.lazy(() => import('./InteractiveMap.impl'));
 
+/**
+ * @deprecated Public export unused by Kelta; it will stop being exported from @kelta/components
+ * in the next major release (it stays as an internal part of `AddressMap`).
+ * Use `AddressMap` instead.
+ */
 export interface InteractiveMapProps {
   lat: number;
   lng: number;
@@ -24,6 +29,11 @@ export interface InteractiveMapProps {
   className?: string;
 }
 
+/**
+ * @deprecated Public export unused by Kelta; it will stop being exported from @kelta/components
+ * in the next major release (it stays as an internal part of `AddressMap`).
+ * Use `AddressMap` instead.
+ */
 export function InteractiveMap(props: InteractiveMapProps): React.ReactElement {
   return (
     <ErrorBoundary>

@@ -20,6 +20,11 @@ let componentRegistry: ComponentRegistryInterface | undefined;
 /**
  * Set the ComponentRegistry for custom field renderers
  * This should be called by the application if plugin-sdk is available
+ *
+ * @deprecated Exported as `setDetailComponentRegistry`/`getDetailComponentRegistry`; it only
+ * configures the deprecated `ResourceDetail` and is unused by Kelta. Scheduled for removal in the
+ * next major release of @kelta/components. `ResourceForm`'s own `setComponentRegistry`/
+ * `getComponentRegistry` are unaffected.
  */
 export function setComponentRegistry(registry: ComponentRegistryInterface): void {
   componentRegistry = registry;
@@ -27,6 +32,11 @@ export function setComponentRegistry(registry: ComponentRegistryInterface): void
 
 /**
  * Get the current ComponentRegistry
+ *
+ * @deprecated Exported as `setDetailComponentRegistry`/`getDetailComponentRegistry`; it only
+ * configures the deprecated `ResourceDetail` and is unused by Kelta. Scheduled for removal in the
+ * next major release of @kelta/components. `ResourceForm`'s own `setComponentRegistry`/
+ * `getComponentRegistry` are unaffected.
  */
 export function getComponentRegistry(): ComponentRegistryInterface | undefined {
   return componentRegistry;
@@ -79,6 +89,9 @@ const defaultRenderers: Record<string, FieldRenderer> = {
  *   }}
  * />
  * ```
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the component into your app if you depend on it.
  */
 export function ResourceDetail({
   resourceName,

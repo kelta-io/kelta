@@ -30,7 +30,7 @@ lifecycle methods.
 
 | Registration | Used by |
 |---|---|
-| `ComponentRegistry.registerFieldRenderer(fieldType, component)` (`FieldRendererProps`) | `ResourceForm` / `ResourceDetail` and the app's record pages, for custom field UIs |
+| `ComponentRegistry.registerFieldRenderer(fieldType, component)` (`FieldRendererProps`) | `ResourceForm` / `ResourceDetail` (deprecated) and the app's record pages, for custom field UIs |
 | `ComponentRegistry.registerPageComponent(name, route, component)` (`PageComponentProps`) | page-builder palette entries and routed pages |
 | `list*()` | Setup → Integration → Modules shows what is registered |
 

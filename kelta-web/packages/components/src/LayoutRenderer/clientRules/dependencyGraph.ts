@@ -111,6 +111,10 @@ function traceCycle(rules: RuleNode[]): string[] {
  * For a given changed field name, returns the rule ids whose dependencies
  * include that field, transitively. Used to skip work when only a small
  * subset of rules need to re-evaluate after a change.
+ *
+ * @deprecated Public export unused by Kelta; it will stop being exported from @kelta/components
+ * in the next major release (it stays as an internal part of `useLayoutRules`).
+ * Copy it into your app if you depend on it.
  */
 export function downstreamRules(
   changedField: string,
