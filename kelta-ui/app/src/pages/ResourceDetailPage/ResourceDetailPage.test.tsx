@@ -646,6 +646,25 @@ describe('ResourceDetailPage', () => {
       })
     })
 
+    it('invalidates the list cache the admin list reads, so it drops the deleted row', async () => {
+      const user = userEvent.setup()
+      mockAxios.delete.mockResolvedValueOnce({ data: {} })
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false, gcTime: 60_000, staleTime: 60_000 } },
+      })
+      queryClient.setQueryData(['collection-records', 'users', 1, 25], { data: [mockResource] })
+
+      renderWithProviders(<ResourceDetailPage />, { queryClient })
+      await user.click(await screen.findByTestId('delete-button'))
+      await user.click(screen.getByText('Confirm'))
+
+      await waitFor(() =>
+        expect(
+          queryClient.getQueryState(['collection-records', 'users', 1, 25])?.isInvalidated
+        ).toBe(true)
+      )
+    })
+
     it('should show error toast when delete fails', async () => {
       const user = userEvent.setup()
 

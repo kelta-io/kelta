@@ -1,16 +1,16 @@
 /**
  * useObjectPermissions Hook
  *
- * Returns CRUD permission flags for a given collection. Reads from the shared
- * /api/me/permissions cache populated by useSystemPermissions.
+ * Returns CRUD permission flags for a given collection — the object-level subset of
+ * {@link useCollectionPermissions}, which it delegates to. Reads the shared /api/me/permissions
+ * cache populated by useSystemPermissions, OBSERVING the entry (not reading it once), so a caller
+ * that rendered before the shell's permissions fetch landed re-renders when it does.
  *
  * Collections not present in the response default to all-permitted so the UI
  * degrades gracefully (the gateway still enforces at the API level).
  */
 
-import { useQueryClient } from '@tanstack/react-query'
-import type { MyPermissionsResponse } from './useSystemPermissions'
-import { MY_PERMISSIONS_QUERY_KEY } from './useSystemPermissions'
+import { useCollectionPermissions } from './useCollectionPermissions'
 
 /**
  * Object-level CRUD permission flags.
@@ -28,14 +28,6 @@ export interface UseObjectPermissionsReturn {
   error: Error | null
 }
 
-/** Default permissive permissions (used when collection has no explicit permissions) */
-const PERMISSIVE_DEFAULTS: ObjectPermissions = {
-  canCreate: true,
-  canRead: true,
-  canEdit: true,
-  canDelete: true,
-}
-
 /**
  * Hook to fetch effective object permissions for a collection.
  * Reads from the shared my-permissions cache.
@@ -46,17 +38,6 @@ const PERMISSIVE_DEFAULTS: ObjectPermissions = {
 export function useObjectPermissions(
   collectionName: string | undefined
 ): UseObjectPermissionsReturn {
-  const queryClient = useQueryClient()
-  const cached = queryClient.getQueryData<MyPermissionsResponse>(MY_PERMISSIONS_QUERY_KEY)
-
-  const permissions =
-    collectionName && cached?.objectPermissions?.[collectionName]
-      ? cached.objectPermissions[collectionName]
-      : PERMISSIVE_DEFAULTS
-
-  return {
-    permissions,
-    isLoading: !cached,
-    error: null,
-  }
+  const { permissions, isLoading, error } = useCollectionPermissions(collectionName)
+  return { permissions, isLoading, error }
 }

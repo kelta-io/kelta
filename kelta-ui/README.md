@@ -82,7 +82,7 @@ The app wraps routes in a provider hierarchy:
 | `useCollectionSummaries` | Cached list of all collections |
 | `useCollectionPermissions` | Check CRUD permissions on a collection |
 | `useFieldPermissions` | Field-level read/write permissions |
-| `useObjectPermissions` | Record-level permissions |
+| `useObjectPermissions` | Object-level CRUD permissions (subset of `useCollectionPermissions`) |
 | `usePageLayout` | Page layout configuration |
 | `useCreateResource` | Create mutation |
 | `useDeleteResource` | Delete mutation |

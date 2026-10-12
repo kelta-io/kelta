@@ -15,22 +15,34 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
 import { useApi } from '../../context/ApiContext'
-import { ApiClient, isStaleWriteError } from '../../services/apiClient'
-import { unwrapCollection } from '../../utils/jsonapi'
+import { isStaleWriteError } from '../../services/apiClient'
 import { resolveRowIfMatch } from '../../utils/rowVersion'
 import { recordRoutes } from '../../utils/recordRoutes'
-import { parseFilters } from '../app/ObjectListPage/listUrlState'
-// The shared fetcher: the `['collection-schema', name]` cache entry must hold the full schema
-// shape (incl. displayFieldName, trackHistory) every other reader expects.
-import { fetchCollectionSchema, type FieldDefinition } from '../../hooks/useCollectionSchema'
+import { parseListViewParams } from '../app/ObjectListPage/listUrlState'
+// The shared record-list data layer (record-stack convergence P8) — the same hooks and query
+// keys the end-user ObjectListPage reads: `['collection-schema', name]`, `['collection-records', …]`,
+// the observed `['my-permissions']` entry, and `useRecordMutation`'s two-stack invalidation.
+import {
+  useCollectionSchema,
+  type CollectionSchema,
+  type FieldDefinition,
+} from '../../hooks/useCollectionSchema'
+import {
+  useCollectionRecords,
+  type CollectionRecord,
+  type FilterCondition,
+  type FilterOperator,
+  type SortState,
+} from '../../hooks/useCollectionRecords'
+import { useRecordMutation } from '../../hooks/useRecordMutation'
+import { useCollectionPermissions } from '../../hooks/useCollectionPermissions'
 import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { useSavedViews } from '../../hooks/useSavedViews'
 import { useLookupDisplayMap } from '../../hooks/useLookupDisplayMap'
-import { useObjectPermissions } from '../../hooks/useObjectPermissions'
 import { ListShell } from '../../components/record/ListShell'
 import { ViewSelector } from '../../components/ViewSelector/ViewSelector'
 import { ObjectDataTable } from '../../components/ObjectDataTable/ObjectDataTable'
@@ -132,70 +144,11 @@ export function downloadFile(content: string, filename: string, mimeType: string
   URL.revokeObjectURL(url)
 }
 
-/** Field definition for collection schema — the shared runtime-schema shape. */
-export type { FieldDefinition }
+/** Schema, filter and sort shapes — the shared record-list types (no page-local forks). */
+export type { CollectionSchema, FieldDefinition, FilterCondition, FilterOperator }
 
-/**
- * Collection schema interface
- */
-export interface CollectionSchema {
-  id: string
-  name: string
-  displayName: string
-  fields: FieldDefinition[]
-}
-
-/**
- * Resource record interface
- */
-export interface Resource {
-  id: string
-  [key: string]: unknown
-}
-
-/**
- * Filter condition interface
- * Requirement 11.4, 11.5: Support multiple filter conditions with operators
- */
-export interface FilterCondition {
-  id: string
-  field: string
-  operator: FilterOperator
-  value: string
-}
-
-/**
- * Filter operator type
- * Requirement 11.5: Support filter operators
- */
-export type FilterOperator =
-  | 'equals'
-  | 'not_equals'
-  | 'contains'
-  | 'starts_with'
-  | 'ends_with'
-  | 'greater_than'
-  | 'less_than'
-  | 'greater_than_or_equal'
-  | 'less_than_or_equal'
-
-/**
- * Sort state interface
- */
-interface SortState {
-  field: string
-  direction: 'asc' | 'desc'
-}
-
-/**
- * Paginated response interface
- */
-interface PaginatedResponse {
-  data: Resource[]
-  total: number
-  page: number
-  pageSize: number
-}
+/** A list row — the shared flat record shape `useCollectionRecords` returns. */
+export type Resource = CollectionRecord
 
 /**
  * Props for ResourceListPage component
@@ -227,108 +180,51 @@ function generateFilterId(): string {
   return `filter-${++filterIdCounter}`
 }
 
-// API functions using apiClient
-
-interface FetchResourcesParams {
-  collectionName: string
-  page: number
-  pageSize: number
-  sort?: SortState
-  filters?: FilterCondition[]
-}
-
-/**
- * Map UI filter operators to JSON:API filter operators.
- * The backend's FilterCondition supports: eq, neq, gt, lt, gte, lte, contains, starts, ends
- */
-const FILTER_OPERATOR_MAP: Record<FilterOperator, string> = {
-  equals: 'eq',
-  not_equals: 'neq',
-  contains: 'contains',
-  starts_with: 'starts',
-  ends_with: 'ends',
-  greater_than: 'gt',
-  less_than: 'lt',
-  greater_than_or_equal: 'gte',
-  less_than_or_equal: 'lte',
-}
-
-async function fetchResources(
-  apiClient: ApiClient,
-  params: FetchResourcesParams
-): Promise<PaginatedResponse> {
-  const { collectionName, page, pageSize, sort, filters } = params
-
-  // Build JSON:API compliant query parameters
-  const queryParams = new URLSearchParams()
-  queryParams.set('page[number]', String(page))
-  queryParams.set('page[size]', String(pageSize))
-
-  if (sort) {
-    const sortValue = sort.direction === 'desc' ? `-${sort.field}` : sort.field
-    queryParams.set('sort', sortValue)
-  }
-
-  if (filters && filters.length > 0) {
-    for (const filter of filters) {
-      const op = FILTER_OPERATOR_MAP[filter.operator] || filter.operator
-      queryParams.set(`filter[${filter.field}][${op}]`, filter.value)
-    }
-  }
-
-  const response = await apiClient.get(`/api/${collectionName}?${queryParams.toString()}`)
-  return unwrapCollection<Resource>(response)
-}
-
-async function deleteResource(
-  apiClient: ApiClient,
-  collectionName: string,
-  resourceId: string
-): Promise<void> {
-  return apiClient.delete(`/api/${collectionName}/${resourceId}`)
-}
-
-async function deleteResources(
-  apiClient: ApiClient,
-  collectionName: string,
-  resourceIds: string[]
-): Promise<void> {
-  return apiClient.post(`/api/${collectionName}/bulk-delete`, { ids: resourceIds })
-}
-
 /**
  * ResourceListPage Component
  *
  * Main page for displaying and managing resources in a collection.
  * Provides listing, filtering, sorting, column selection, and bulk operations.
+ *
+ * The route element is reused when `/resources/:collection` changes (sidebar → another
+ * collection), so the list body is keyed on the collection: paging, sort, filters, selection,
+ * column overrides and the open dialogs start fresh for the new collection instead of carrying
+ * the previous one's state (a filter on a field the new collection does not have, page 7 of a
+ * 2-page list).
  */
-export function ResourceListPage({
-  testId = 'resource-list-page',
-}: ResourceListPageProps): React.ReactElement {
+export function ResourceListPage(props: ResourceListPageProps): React.ReactElement {
   const { collection: collectionName } = useParams<{ collection: string }>()
+  return <ResourceList key={collectionName ?? ''} collectionName={collectionName} {...props} />
+}
+
+function ResourceList({
+  collectionName,
+  testId = 'resource-list-page',
+}: ResourceListPageProps & { collectionName: string | undefined }): React.ReactElement {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { t } = useI18n()
   const { apiClient } = useApi()
   const { showToast } = useToast()
-  const { permissions: objectPermissions } = useObjectPermissions(collectionName)
+  // Observes the shared permissions entry — re-renders when the shell's fetch lands.
+  const { permissions: objectPermissions } = useCollectionPermissions(collectionName)
+
+  // Initial list state from the shared list URL format (`listUrlState`): `?filter=` (a related
+  // list's "View All" on the admin detail page), `sort=`, `page=`, `pageSize=`. The admin list
+  // keeps its state local after that — it does not write the URL back.
+  const [searchParams] = useSearchParams()
+  const [initialUrlState] = useState(() => parseListViewParams(searchParams))
 
   // Pagination state
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(25)
+  const [page, setPage] = useState(initialUrlState.page)
+  const [pageSize, setPageSize] = useState(initialUrlState.pageSize)
 
-  // Sort state
-  const [sort, setSort] = useState<SortState | undefined>(undefined)
+  // Sort state (single level — the first level of a multi-level `sort=`)
+  const [sort, setSort] = useState<SortState | undefined>(initialUrlState.sort)
 
-  // Filter state - Requirement 11.3, 11.4. Seeded from a `?filter=` deep link in the shared
-  // list URL format (`listUrlState`) — e.g. a related list's "View All" on the admin detail page.
-  const [searchParams] = useSearchParams()
-  const [filters, setFilters] = useState<FilterCondition[]>(() =>
-    parseFilters(searchParams.get('filter'))
-  )
-  const [pendingFilters, setPendingFilters] = useState<FilterCondition[]>(() =>
-    parseFilters(searchParams.get('filter'))
-  )
+  // Filter state - Requirement 11.3, 11.4
+  const [filters, setFilters] = useState<FilterCondition[]>(initialUrlState.filters)
+  const [pendingFilters, setPendingFilters] = useState<FilterCondition[]>(initialUrlState.filters)
   const [showFilters, setShowFilters] = useState(false)
 
   // Column visibility state - Requirement 11.5 (column selection)
@@ -353,16 +249,12 @@ export function ResourceListPage({
   // Saved views hook (T10)
   const savedViews = useSavedViews(collectionName || '')
 
-  // Fetch collection schema
+  // Fetch collection schema (shared hook + cache entry)
   const {
-    data: schema,
+    schema,
     isLoading: schemaLoading,
     error: schemaError,
-  } = useQuery({
-    queryKey: ['collection-schema', collectionName],
-    queryFn: () => fetchCollectionSchema(apiClient, collectionName!),
-    enabled: !!collectionName,
-  })
+  } = useCollectionSchema(collectionName)
 
   // Compute visible columns: use overrides if user has toggled, otherwise derive defaults from schema
   const visibleColumns = useMemo(() => {
@@ -376,63 +268,39 @@ export function ResourceListPage({
     return defaultColumns
   }, [visibleColumnOverrides, schema])
 
+  // The first toggle starts from the derived defaults, not an empty set — otherwise it would
+  // hide every default column but the one toggled (and toggling a shown column kept it).
   const setVisibleColumns = useCallback(
     (value: Set<string> | ((prev: Set<string>) => Set<string>)) => {
       if (typeof value === 'function') {
-        setVisibleColumnOverrides((prev) => value(prev ?? new Set()))
+        setVisibleColumnOverrides((prev) => value(prev ?? visibleColumns))
       } else {
         setVisibleColumnOverrides(value)
       }
     },
-    []
+    [visibleColumns]
   )
 
-  // Fetch resources - Requirement 11.2
+  // Fetch records - Requirement 11.2 (shared hook; `['collection-records', …]` cache entry)
   const {
-    data: resourcesData,
+    data: resources,
+    total: totalCount,
     isLoading: resourcesLoading,
     error: resourcesError,
     refetch: refetchResources,
-  } = useQuery({
-    queryKey: ['resources', collectionName, page, pageSize, sort, filters],
-    queryFn: () =>
-      fetchResources(apiClient, {
-        collectionName: collectionName!,
-        page,
-        pageSize,
-        sort,
-        filters,
-      }),
-    enabled: !!collectionName && !!schema,
+  } = useCollectionRecords({
+    collectionName,
+    page,
+    pageSize,
+    sort,
+    filters: filters.length > 0 ? filters : undefined,
+    enabled: !!schema,
   })
 
-  // Delete mutation
-  const deleteMutation = useMutation({
-    mutationFn: ({ id }: { id: string }) => deleteResource(apiClient, collectionName!, id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
-      showToast(t('success.deleted', { item: t('resources.record') }), 'success')
-      setDeleteDialogOpen(false)
-      setResourceToDelete(null)
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
-    },
-  })
-
-  // Bulk delete mutation - Requirement 11.11
-  const bulkDeleteMutation = useMutation({
-    mutationFn: (ids: string[]) => deleteResources(apiClient, collectionName!, ids),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
-      showToast(t('success.deleted', { item: `${selectedIds.size} records` }), 'success')
-      setBulkDeleteDialogOpen(false)
-      setSelectedIds(new Set())
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
-    },
-  })
+  // Record writes (shared hook — invalidates both record stacks' caches). No shared
+  // onSuccess/onError: the hook fires them for EVERY mutation, inline cell patch included,
+  // so the delete toasts and dialog cleanup live in the confirm handlers.
+  const mutations = useRecordMutation({ collectionName: collectionName || '' })
 
   // Resolve display labels for reference/lookup/master_detail fields
   const { lookupDisplayMap } = useLookupDisplayMap(schema?.fields, 'lookup-display-list')
@@ -445,10 +313,7 @@ export function ResourceListPage({
   }, [schema, visibleColumns])
 
   // Calculate total pages
-  const totalPages = useMemo(() => {
-    if (!resourcesData) return 0
-    return Math.ceil(resourcesData.total / pageSize)
-  }, [resourcesData, pageSize])
+  const totalPages = useMemo(() => Math.ceil(totalCount / pageSize), [totalCount, pageSize])
 
   // Handle sort change - Requirement 11.4 (column sorting)
   const handleSortChange = useCallback((field: string) => {
@@ -571,10 +436,18 @@ export function ResourceListPage({
   }, [])
 
   const handleDeleteConfirm = useCallback(() => {
-    if (resourceToDelete) {
-      deleteMutation.mutate({ id: resourceToDelete.id })
-    }
-  }, [resourceToDelete, deleteMutation])
+    if (!resourceToDelete) return
+    mutations.remove
+      .mutateAsync(resourceToDelete.id)
+      .then(() => {
+        showToast(t('success.deleted', { item: t('resources.record') }), 'success')
+        setDeleteDialogOpen(false)
+        setResourceToDelete(null)
+      })
+      .catch((error: Error) => {
+        showToast(error.message || t('errors.generic'), 'error')
+      })
+  }, [resourceToDelete, mutations.remove, showToast, t])
 
   const handleDeleteCancel = useCallback(() => {
     setDeleteDialogOpen(false)
@@ -587,8 +460,17 @@ export function ResourceListPage({
   }, [])
 
   const handleBulkDeleteConfirm = useCallback(() => {
-    bulkDeleteMutation.mutate(Array.from(selectedIds))
-  }, [bulkDeleteMutation, selectedIds])
+    mutations.bulkDelete
+      .mutateAsync(Array.from(selectedIds))
+      .then(() => {
+        showToast(t('success.deleted', { item: `${selectedIds.size} records` }), 'success')
+        setBulkDeleteDialogOpen(false)
+        setSelectedIds(new Set())
+      })
+      .catch((error: Error) => {
+        showToast(error.message || t('errors.generic'), 'error')
+      })
+  }, [mutations.bulkDelete, selectedIds, showToast, t])
 
   const handleBulkDeleteCancel = useCallback(() => {
     setBulkDeleteDialogOpen(false)
@@ -601,10 +483,10 @@ export function ResourceListPage({
 
   const handleExportSelected = useCallback(
     (format: ExportFormat) => {
-      if (!schema || !resourcesData) return
+      if (!schema) return
 
       // Get selected records
-      const selectedRecords = resourcesData.data.filter((r) => selectedIds.has(r.id))
+      const selectedRecords = resources.filter((r) => selectedIds.has(r.id))
       if (selectedRecords.length === 0) return
 
       const timestamp = new Date().toISOString().slice(0, 10)
@@ -628,23 +510,14 @@ export function ResourceListPage({
 
       setShowExportDropdown(false)
     },
-    [
-      schema,
-      resourcesData,
-      selectedIds,
-      collectionName,
-      visibleFields,
-      visibleColumns,
-      showToast,
-      t,
-    ]
+    [schema, resources, selectedIds, collectionName, visibleFields, visibleColumns, showToast, t]
   )
 
   const handleExportAll = useCallback(
     (format: ExportFormat) => {
-      if (!schema || !resourcesData) return
+      if (!schema) return
 
-      const records = resourcesData.data
+      const records = resources
       if (records.length === 0) return
 
       const timestamp = new Date().toISOString().slice(0, 10)
@@ -665,7 +538,7 @@ export function ResourceListPage({
 
       setShowExportDropdown(false)
     },
-    [schema, resourcesData, collectionName, visibleFields, visibleColumns, showToast, t]
+    [schema, resources, collectionName, visibleFields, visibleColumns, showToast, t]
   )
 
   // Close export dropdown when clicking outside
@@ -740,12 +613,13 @@ export function ResourceListPage({
   }, [])
 
   // Inline edit save callback (T11)
-  // Persist a single inline-edited cell via the JSON:API partial-PATCH path, then
-  // refetch the list (drives ObjectDataTable's opt-in inline edit via the shared
+  // Persist a single inline-edited cell through the shared record mutation (JSON:API partial
+  // PATCH), then refetch the list (drives ObjectDataTable's opt-in inline edit via the shared
   // InlineFieldValue control). Optimistic concurrency (P5): the row's version is checked
   // against the stored record and the PATCH carries its ETag as If-Match. A conflict reverts
-  // the cell (the commit resolves on the refetched latest value) and says why. The refetch is
-  // awaited so a second edit on the same row starts from the version this one wrote.
+  // the cell (the commit resolves on the refetched latest value) and says why; any other error
+  // stays inline. The refetch is awaited so a second edit on the same row starts from the
+  // version this one wrote.
   const handleCellCommit = useCallback(
     async (recordId: string, fieldName: string, value: unknown) => {
       const staleMessage = t('recordConflict.cellReverted')
@@ -754,37 +628,28 @@ export function ResourceListPage({
           apiClient,
           collectionName || '',
           recordId,
-          resourcesData?.data.find((r) => r.id === recordId),
+          resources.find((r) => r.id === recordId),
           staleMessage
         )
-        await apiClient.patch(
-          `/api/${collectionName}/${recordId}`,
-          {
-            data: {
-              type: collectionName,
-              id: recordId,
-              attributes: { [fieldName]: value },
-            },
-          },
-          ifMatch
-        )
+        await mutations.patch.mutateAsync({
+          id: recordId,
+          data: { [fieldName]: value },
+          ...(ifMatch ? { ifMatch } : {}),
+        })
       } catch (e) {
         if (!isStaleWriteError(e)) throw e
         showToast(staleMessage, 'error')
-        await queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
+        await refetchResources()
         return
       }
-      await queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
+      await refetchResources()
     },
-    [apiClient, collectionName, queryClient, resourcesData, showToast, t]
+    [apiClient, collectionName, resources, mutations.patch, refetchResources, showToast, t]
   )
 
   // Cell rendering + sort indicators are owned by the shared ObjectDataTable
   // (FieldRenderer / InlineFieldValue), replacing the local formatCellValue and
   // sort-indicator helpers.
-
-  const resources = resourcesData?.data ?? []
-  const totalCount = resourcesData?.total ?? 0
 
   // Status branch (schema error / not-found), rendered by the shell in place
   // of the list frame. Order matches the legacy early-returns.
@@ -928,7 +793,7 @@ export function ResourceListPage({
                           <div className="flex flex-col py-1">
                             <span className="px-4 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                               {t('resources.exportAllVisible', {
-                                count: resourcesData?.data.length ?? 0,
+                                count: resources.length,
                               })}
                             </span>
                             <button
