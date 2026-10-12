@@ -1,0 +1,1 @@
+- 2026-10-12 fix(auth): Register identity federation (OIDC brokering, SAML login and Single Logout) and the `/logout/saml2/initiate` sign-out initiator unconditionally, deciding encryption and OpenSAML availability at run time instead of with a `@ConditionalOnBean` that never matched (auth-federation-registration)
