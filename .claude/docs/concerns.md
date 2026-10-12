@@ -206,8 +206,6 @@ mailbox to a high-volume public address.
   `scheduled-jobs`, `webhooks`, `connected-apps`, `flows`, `approval-processes`, `reports`,
   `dashboards`, … do not. Each needs an audit of which reads ordinary profiles rely on before it
   gets a row.
-- `CsvImportController` (`POST /api/collections/{name}/import/csv`) creates records with no
-  create-permission check on the target collection.
 - `GET /api/profiles/{id}?include=profile-system-permissions,…` returns grant rows at
   `API_ACCESS`; the `profile-*-permissions` routes' own object check does not apply to an include.
 - **Approval instances/steps are tenant-visible to every user** (accepted 2026-07-08).

@@ -85,6 +85,31 @@ public class CerbosSubResourceAuthorizer implements SubResourceAuthorizer {
     }
 
     /**
+     * The decision {@link #authorize} makes for the child alone: what a direct request to
+     * {@code /api/{collection}} performing {@code operation} gets at the gateway. For a dedicated
+     * endpoint that writes records of a collection named in its path, where the gateway only
+     * applied the enclosing route's rule (the CSV import under {@code /api/collections/**}).
+     *
+     * <p>Same trust boundary as {@link #authorize}: requests without the gateway's identity
+     * headers, or with permissions disabled, are allowed.
+     */
+    public Decision authorizeCollection(CollectionDefinition collection, Operation operation,
+                                        HttpServletRequest request) {
+        if (!permissionsEnabled || !permissionResolver.hasIdentity(request)) {
+            return Decision.allow();
+        }
+        Caller caller = new Caller(permissionResolver.getEmail(request),
+                permissionResolver.getProfileId(request), permissionResolver.getTenantId(request));
+        Decision decision = decide(caller, collection, operation, null);
+        if (!decision.allowed()) {
+            securityLog.warn("security_event=COLLECTION_WRITE_DENIED user={} profile={} collection={} action={} path={}",
+                    caller.email(), caller.profileId(), collection.name(), action(operation),
+                    request.getRequestURI());
+        }
+        return decision;
+    }
+
+    /**
      * The gateway's decision for a direct request to {@code /api/{collection}[/{recordId}]}
      * performing {@code operation}.
      */

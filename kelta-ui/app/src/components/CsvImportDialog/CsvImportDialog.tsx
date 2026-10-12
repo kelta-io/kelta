@@ -23,6 +23,8 @@ interface ImportResult {
   rowsImported: number
   errorCount: number
   errors: RowError[]
+  /** Columns left out of every record because the caller may not write those fields. */
+  skippedColumns?: string[]
 }
 
 export interface CsvImportDialogProps {
@@ -157,6 +159,15 @@ export function CsvImportDialog({
                   {result.rowsProcessed !== 1 ? 's' : ''} imported
                 </span>
               </div>
+
+              {result.skippedColumns && result.skippedColumns.length > 0 && (
+                <p
+                  className="text-xs text-muted-foreground"
+                  data-testid="csv-import-skipped-columns"
+                >
+                  Not imported (you cannot edit these fields): {result.skippedColumns.join(', ')}
+                </p>
+              )}
 
               {result.errors.length > 0 && (
                 <ScrollArea className="h-40">
