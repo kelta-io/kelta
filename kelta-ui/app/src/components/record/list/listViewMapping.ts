@@ -1,5 +1,6 @@
 /**
- * Saved-view helpers for the end-user list (app-surfacing slice 5).
+ * Saved-view helpers for the record list core (app-surfacing slice 5; moved from
+ * `pages/app/ObjectListPage/` with the core in P9).
  *
  * Two view sources feed one ViewSelector:
  * - personal views — the existing localStorage `useSavedViews` mechanism;

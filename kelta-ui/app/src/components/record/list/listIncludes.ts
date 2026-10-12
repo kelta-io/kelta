@@ -1,5 +1,5 @@
 /**
- * Helpers for resolving reference (lookup/master-detail) columns in the object list view.
+ * Helpers for resolving reference (lookup/master-detail) columns in the record list core.
  */
 
 /** Field types that hold a foreign key to another collection. */

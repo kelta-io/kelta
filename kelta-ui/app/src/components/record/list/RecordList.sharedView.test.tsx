@@ -1,5 +1,6 @@
 /**
- * Shared views carry their renderer (K-8 item 11).
+ * Shared views carry their renderer (K-8 item 11) — on the record list core (moved from the
+ * ObjectListPage suite in P9; rendered with the saved-view, shared-view and alt-view features).
  *
  * The published `list-views` row is fetched, mapped and applied through the real
  * `useSharedListViews` → `mapSharedListView` → `applyView` path — only the schema,
@@ -15,7 +16,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/context/I18nContext'
 import { LiveRegionProvider } from '@/components/LiveRegion'
 import { MY_PERMISSIONS_QUERY_KEY } from '@/hooks/useSystemPermissions'
-import { ObjectListPage } from './ObjectListPage'
+import { recordRoutes } from '@/utils/recordRoutes'
+import { RecordList } from './RecordList'
 
 const USER_ID = 'user-1'
 
@@ -164,6 +166,8 @@ vi.mock('@/components/ui/dropdown-menu', () => ({
   ),
 }))
 
+const FEATURES = { savedViews: true, sharedViews: true, altViews: true }
+
 function renderList() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   // useCollectionPermissions reads this cache directly and reports isLoading until
@@ -181,7 +185,19 @@ function renderList() {
         <QueryClientProvider client={qc}>
           <MemoryRouter initialEntries={['/acme/app/o/projects']}>
             <Routes>
-              <Route path="/:tenantSlug/app/o/:collection" element={<ObjectListPage />} />
+              <Route
+                path="/:tenantSlug/app/o/:collection"
+                element={
+                  <RecordList
+                    variant="enduser"
+                    collectionName="projects"
+                    tenantSlug="acme"
+                    routes={recordRoutes('enduser', 'acme')}
+                    features={FEATURES}
+                    permissionBackPath="/acme/app/home"
+                  />
+                }
+              />
             </Routes>
           </MemoryRouter>
         </QueryClientProvider>
@@ -190,7 +206,7 @@ function renderList() {
   )
 }
 
-describe('ObjectListPage — a published shared view', () => {
+describe('RecordList — a published shared view', () => {
   beforeEach(() => {
     listViewRows = []
     preferenceRows = []

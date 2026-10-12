@@ -22,7 +22,7 @@ import { useApi } from '../../context/ApiContext'
 import { isStaleWriteError } from '../../services/apiClient'
 import { resolveRowIfMatch } from '../../utils/rowVersion'
 import { recordRoutes } from '../../utils/recordRoutes'
-import { parseListViewParams } from '../app/ObjectListPage/listUrlState'
+import { parseListViewParams } from '../../components/record/list/listUrlState'
 // The shared record-list data layer (record-stack convergence P8) — the same hooks and query
 // keys the end-user ObjectListPage reads: `['collection-schema', name]`, `['collection-records', …]`,
 // the observed `['my-permissions']` entry, and `useRecordMutation`'s two-stack invalidation.

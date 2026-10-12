@@ -1,5 +1,6 @@
 /**
- * Inline cell edit on the end-user list — optimistic concurrency (record-stack convergence P5).
+ * Inline cell edit on the record list core — optimistic concurrency (record-stack convergence P5;
+ * moved from the ObjectListPage suite in P9, rendered as the end-user list renders it).
  *
  * List rows carry no ETag, so a cell edit checks the row's `updatedAt` against the stored record
  * (fresh GET) and PATCHes with that GET's ETag as If-Match. A conflict — detected up front or
@@ -14,7 +15,8 @@ import { I18nProvider } from '@/context/I18nContext'
 import { LiveRegionProvider } from '@/components/LiveRegion'
 import { MY_PERMISSIONS_QUERY_KEY } from '@/hooks/useSystemPermissions'
 import { ApiError } from '@/services/apiClient'
-import { ObjectListPage } from './ObjectListPage'
+import { recordRoutes } from '@/utils/recordRoutes'
+import { RecordList } from './RecordList'
 
 const FIELDS = [
   { id: 'f-title', name: 'title', displayName: 'Title', type: 'string', required: false },
@@ -99,6 +101,8 @@ vi.mock('@/components/QuickActions', () => ({
   QuickActionsMenu: () => null,
 }))
 
+let FEATURES: { inlineEdit: boolean } = { inlineEdit: true }
+
 function renderList() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   qc.setQueryData(MY_PERMISSIONS_QUERY_KEY, {
@@ -114,7 +118,19 @@ function renderList() {
         <QueryClientProvider client={qc}>
           <MemoryRouter initialEntries={['/acme/app/o/projects']}>
             <Routes>
-              <Route path="/:tenantSlug/app/o/:collection" element={<ObjectListPage />} />
+              <Route
+                path="/:tenantSlug/app/o/:collection"
+                element={
+                  <RecordList
+                    variant="enduser"
+                    collectionName="projects"
+                    tenantSlug="acme"
+                    routes={recordRoutes('enduser', 'acme')}
+                    features={FEATURES}
+                    permissionBackPath="/acme/app/home"
+                  />
+                }
+              />
             </Routes>
           </MemoryRouter>
         </QueryClientProvider>
@@ -133,8 +149,9 @@ async function editTitle(value: string) {
   fireEvent.keyDown(input, { key: 'Enter' })
 }
 
-describe('ObjectListPage — inline cell edit concurrency', () => {
+describe('RecordList — inline cell edit concurrency', () => {
   beforeEach(() => {
+    FEATURES = { inlineEdit: true }
     localStorage.clear()
     stored = { updatedAt: LOADED_AT, etag: '"v1"' }
     getWithMeta.mockClear()
@@ -195,5 +212,13 @@ describe('ObjectListPage — inline cell edit concurrency', () => {
     )
     expect(screen.getByRole('textbox')).toBeInTheDocument()
     expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it('offers no cell editor when the inlineEdit feature is off', async () => {
+    FEATURES = { inlineEdit: false }
+    renderList()
+
+    expect(await screen.findByText('First')).toBeInTheDocument()
+    expect(screen.queryByTestId('inline-field-title')).toBeNull()
   })
 })
