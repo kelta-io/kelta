@@ -19,7 +19,8 @@ io.kelta.auth/
 - `KeltaUserDetails` — implements Spring `UserDetails`; 11-param constructor (adds `userType`
   INTERNAL|PORTAL) with a 10-param overload defaulting to INTERNAL. Serialized principals
   round-trip through `KeltaUserDetailsMixin` — grow both together.
-- `KeltaSession` — serializable session data stored in Redis
+- `KeltaSession` — serializable session data `SessionService` stores in Redis (the servlet
+  `HttpSession` is NOT in Redis — `spring.session.*` is inert, see `concerns.md`)
 - Both are plain classes (not records, not JPA entities)
 
 ### OAuth2 Flow
@@ -64,7 +65,18 @@ io.kelta.auth/
    http(s), no userinfo/fragment). Other clients keep Spring's exact match. A
    rejected URI is a 400 with no redirect — and the session is NOT ended, so an
    over-strict rule here means sign-out silently keeps the user signed in.
-   Endpoint test: `OidcLogoutEndpointTest`.
+   When the browser's session is signed in, Spring AS also requires the ID token's
+   `sid` to be the hash of that session's id. It writes `sid` at the code exchange
+   by looking the user's sessions up in the `SessionRegistry` bean
+   (`AuthorizationServerConfig.sessionRegistry()`) **by principal** — the one read
+   back from the JDBC authorization store, a different instance from the session's.
+   So `KeltaUserDetails.equals/hashCode` (tenant + user id) is load-bearing: without
+   it tokens carry no `sid` and sign-out is a 400 `invalid_token` (`sid`). The
+   authorization chain's `ConcurrentSessionFilter` keeps `lastRequest` current, so a
+   session that authorizes again gets its own `sid`, not a newer device's; the
+   `HttpSessionEventPublisher` bean drops ended sessions from the registry.
+   Tests: `OidcLogoutEndpointTest` (redirect rules), `OidcSignOutFlowTest` (form
+   login → authorize → token → logout over the JDBC store).
 
 ### First-boot platform admin password
 `config/BaselineAdminPasswordInitializer` (`ApplicationRunner`) replaces the Flyway baseline's

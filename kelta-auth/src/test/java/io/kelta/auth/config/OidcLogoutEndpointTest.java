@@ -21,6 +21,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.SecurityContextImpl;
+import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.oidc.OidcIdToken;
@@ -258,10 +259,16 @@ class OidcLogoutEndpointTest {
         }
 
         @Bean
+        SessionRegistry sessionRegistry() {
+            return new AuthorizationServerConfig().sessionRegistry();
+        }
+
+        @Bean
         SecurityFilterChain authorizationServerSecurityFilterChain(
-                HttpSecurity http, AuthDomainResolver resolver, RegisteredClientRepository clients)
-                throws Exception {
-            return new AuthorizationServerConfig().authorizationServerSecurityFilterChain(http, resolver, clients);
+                HttpSecurity http, AuthDomainResolver resolver, RegisteredClientRepository clients,
+                SessionRegistry sessionRegistry) throws Exception {
+            return new AuthorizationServerConfig()
+                    .authorizationServerSecurityFilterChain(http, resolver, clients, sessionRegistry);
         }
     }
 }

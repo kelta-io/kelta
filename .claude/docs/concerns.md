@@ -573,6 +573,12 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   accepted on a registered redirect-URI origin or a verified custom domain (https only). Spring's
   default rejects anything not registered verbatim *before* ending the session, so narrowing this
   rule silently leaves users signed in at kelta-auth — keep `OidcLogoutEndpointTest` green.
+- **Sign-out's `sid` check finds sessions by principal** (Spring AS `SessionRegistry`):
+  `KeltaUserDetails` must keep value equality (tenant + user id), or ID tokens lose `sid` and
+  `/connect/logout` answers 400 `invalid_token` for every signed-in browser. The registry is
+  in-memory, which matches the servlet-container sessions it tracks; if HTTP sessions ever move
+  to a shared store, the registry must move with them (one backed by that store), or a code
+  exchange and a sign-out served by different pods disagree on `sid`. Guard: `OidcSignOutFlowTest`.
 - **Cerbos `collectionId` keying:** the `collection` policy is UUID-keyed (gateway passes the
   route id); the `record` policy keys on the collection **name** (`architecture.md`). Mixing them
   silently denies every record to non-admin profiles.
@@ -793,7 +799,7 @@ One line each; full write-ups are in git history.
 - PLT-343 (2026-10-05) — platform admin shipped with a well-known password; `BaselineAdminPasswordInitializer`.
 - PLT-355 (2026-10-05) — client tenant headers could select a tenant; now a claim that must match the credential.
 - #1636 (2026-10-06) — kelta-auth open redirect on rejected `redirect_uri`.
-- 2026-10-12 (spa-post-logout-redirect) — post-logout redirect URIs were not registered for the SPA client, so `/connect/logout` answered 400 and sign-out left the kelta-auth session alive; origin-based `PlatformPostLogoutRedirectUriValidator`.
+- 2026-10-12 (spa-post-logout-redirect) — post-logout redirect URIs were not registered for the SPA client, so `/connect/logout` answered 400 and sign-out left the kelta-auth session alive; origin-based `PlatformPostLogoutRedirectUriValidator`. Then 400 `invalid_token` (`sid`): ID tokens had no `sid` because `KeltaUserDetails` had identity equality; value equality + `SessionRegistry`/`HttpSessionEventPublisher` beans.
 - KLT-377 (2026-10-06) — own-record CEL rules compared a UUID with the caller's email; PATs were always INTERNAL.
 - KLT-380 (2026-10-10) — `user-ui-preferences` rows were tenant-readable; owner-scoped.
 - KLT-206 — `GET /api/fields` returned every tenant's fields; `field.tenant_id` (V198) + `visibleToTenant`.
