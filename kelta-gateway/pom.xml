@@ -42,8 +42,8 @@
             <version>1.0.0-SNAPSHOT</version>
         </dependency>
 
-        <!-- GraalVM Feature API for ProtobufInitOrderFeature. Provided: native-image supplies it at
-             build time and the hosted-only Feature never runs on the JVM, so it stays out of the jar. -->
+        <!-- GraalVM Feature API for ProtobufInitOrderFeature. native-image supplies it at build time
+             and the hosted-only Feature never runs on the JVM; the boot jar excludes it below. -->
         <dependency>
             <groupId>org.graalvm.sdk</groupId>
             <artifactId>nativeimage</artifactId>
@@ -250,6 +250,14 @@
                         <exclude>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
+                        </exclude>
+                        <exclude>
+                            <groupId>org.graalvm.sdk</groupId>
+                            <artifactId>nativeimage</artifactId>
+                        </exclude>
+                        <exclude>
+                            <groupId>org.graalvm.sdk</groupId>
+                            <artifactId>word</artifactId>
                         </exclude>
                     </excludes>
                 </configuration>
