@@ -206,10 +206,12 @@ function createQueryClient() {
 // Helper to render with providers
 function renderWithProviders(
   ui: React.ReactElement,
-  { route = '/resources/users/new', plugins = [] as Plugin[] } = {}
+  {
+    route = '/resources/users/new',
+    plugins = [] as Plugin[],
+    queryClient = createQueryClient(),
+  }: { route?: string; plugins?: Plugin[]; queryClient?: QueryClient } = {}
 ) {
-  const queryClient = createQueryClient()
-
   return {
     ...render(
       <QueryClientProvider client={queryClient}>
@@ -581,6 +583,25 @@ describe('ResourceFormPage', () => {
       expect(screen.getByTestId('field-active')).toBeChecked()
       expect(screen.getByTestId('field-birthDate')).toHaveValue('1993-05-15')
       expect(screen.getByTestId('field-organizationId')).toHaveValue('org-456')
+    })
+
+    it('pre-populates when the detail page already cached the record', async () => {
+      // ResourceDetailPage caches { resource, etag } under the same key; opening Edit from it
+      // must read that entry as the record, not render a blank form.
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false, gcTime: 60_000, staleTime: 60_000 } },
+      })
+      queryClient.setQueryData(['resource', 'users', 'res-123'], {
+        resource: mockResource,
+        etag: '"v1"',
+      })
+      renderWithProviders(<ResourceFormPage />, {
+        route: '/resources/users/res-123/edit',
+        queryClient,
+      })
+
+      await waitFor(() => expect(screen.getByTestId('field-name')).toHaveValue('John Doe'))
+      expect(screen.getByTestId('field-email')).toHaveValue('john@example.com')
     })
 
     it('should submit form with PATCH method in edit mode', async () => {
