@@ -9,6 +9,18 @@
 > `PageTreeRenderer`) and, for default values, **2d** (`{ $bind }` → `resolveBindings`/`bindingScope`).
 > Source-verified against the codebase on 2026-06-22 (Flyway head V146; this slice adds no migration).
 > If code and this doc disagree, trust the code and fix this doc.
+>
+> **Superseded for the `form` widget (2026-10-12).** The `ResourceForm` design below never worked at
+> runtime: kelta-ui mounts no `KeltaProvider` (the §3.4 "verified" claim was wrong), so `ResourceForm`'s
+> `useKeltaClient()` threw and every page with a `form` widget fell to the app's root error boundary. The
+> widget now renders the app's shared `RecordForm` with `presentation="embedded"` (no page chrome, never
+> navigates; after a save the page's tables refetch, `events.onSubmit` runs with the saved record as
+> `record`, and a create resets). The saved config is unchanged — `dataView.collection`, `recordId`
+> (present → edit), `mode` (`edit` with no record id shows "no record selected"), `readOnly` — plus the
+> 1f `dataView.fields` subset, now honoured again and exposed as a field picker.
+> `registerFormFieldRenderers.ts` / `formFieldRenderers.tsx` were removed (the rich controls come from
+> `components/fieldControl`). Sections describing `ResourceForm`, Zod and `setComponentRegistry` are
+> historical. The standalone typed inputs are unaffected.
 
 ---
 
@@ -462,6 +474,7 @@ interface ResourceFormProps {
 only — no fork.** The richer controls (picklist/lookup/multi/rich-text) come from the field-renderer registry
 wired in §3.1/§5.6.
 
+> **[Wrong — see the banner: kelta-ui mounts no `KeltaProvider`.]**
 > **`ResourceForm` needs a `KeltaProvider` (`useKeltaClient`).** `@kelta/components` is already mounted under
 > a `KeltaProvider` in kelta-ui (verified: `main.tsx`, `ObjectFormPage`, `ObjectDetailPage`,
 > `CollectionsPage`, … all consume it). The page-builder runtime (`CustomPage`) and editor render inside the

@@ -1,7 +1,6 @@
 /**
  * Public surface of the standalone typed-input widgets (slice 2f). `inputWidgets` is the descriptor
- * array consumed by `registerBuiltins`; the control + hook exports are reused by the `form` widget's
- * field-renderer registry (`registerFormFieldRenderers.ts`).
+ * array consumed by `registerBuiltins`.
  */
 export { inputDescriptors as inputWidgets } from './descriptors'
 

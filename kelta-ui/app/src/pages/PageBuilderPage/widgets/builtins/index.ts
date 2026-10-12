@@ -19,7 +19,6 @@ import { metricWidget } from './metric'
 import { chatPanelWidget } from './chatPanel'
 import { appointmentSchedulerWidget } from './appointmentScheduler'
 import { videoVisitWidget } from './videoVisit'
-import { registerFormFieldRenderers } from './registerFormFieldRenderers'
 
 let registered = false
 
@@ -50,9 +49,6 @@ export function registerBuiltinWidgets(): void {
   ]) {
     widgetRegistry.register(w)
   }
-  // Upgrade the `form` widget's ResourceForm picklist/lookup/multi-picklist/rich-text fields to the
-  // rich controls via @kelta/components' setComponentRegistry seam (slice 2f).
-  registerFormFieldRenderers()
 }
 
 registerBuiltinWidgets()

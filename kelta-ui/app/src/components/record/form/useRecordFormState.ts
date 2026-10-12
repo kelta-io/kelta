@@ -8,7 +8,9 @@
  * JSON parse → `useRecordMutation` create/update, an emptied field sent as
  * `null` on update → server field errors mapped back onto fields). On success
  * it confirms with a toast and navigates via the caller's `routes` — create to
- * the NEW record's detail page, edit back to the record's detail page.
+ * the NEW record's detail page, edit back to the record's detail page — or, for
+ * an embedded form (`onSaved` given), hands the saved record to `onSaved` and
+ * stays put.
  *
  * Must run in a component keyed on `useRecordFormModel().formKey`: the
  * `useState` initializer reads `initialData` once, on mount.
@@ -32,6 +34,7 @@ import { dtosToLayoutRules } from '@/utils/layoutRules'
 import { useRecordMutation } from '@/hooks/useRecordMutation'
 import { useToast } from '@/components/Toast'
 import { ApiError, isStaleWriteError } from '@/services/apiClient'
+import type { CollectionRecord } from '@/hooks/useCollectionRecords'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { PageLayoutDto } from '@/hooks/usePageLayout'
 import { buildSaveAttributes } from './formData'
@@ -45,7 +48,13 @@ export interface UseRecordFormStateOptions {
   fields: FieldDefinition[]
   collectionName: string
   recordId?: string
-  routes: RecordFormRoutes
+  /** Where to go after a save. Absent for an embedded form, which never navigates. */
+  routes?: RecordFormRoutes
+  /**
+   * Called after a successful save INSTEAD of navigating (embedded forms). Receives the saved
+   * record as the API returned it (undefined when the response carried none).
+   */
+  onSaved?: (saved: CollectionRecord | undefined) => void
   /** Check if a field is editable (VISIBLE vs READ_ONLY from field permissions) */
   isFieldEditable?: (fieldName: string) => boolean
   /** Resolved page layout (null when none configured) */
@@ -83,6 +92,7 @@ export function useRecordFormState({
   collectionName,
   recordId,
   routes,
+  onSaved,
   isFieldEditable,
   layout,
   selectedRecordTypeId,
@@ -151,6 +161,11 @@ export function useRecordFormState({
         t(isNew ? 'success.created' : 'success.updated', { item: t('resources.record') }),
         'success'
       )
+      if (onSaved) {
+        onSaved(saved)
+        return
+      }
+      if (!routes) return
       if (isNew) {
         // Land on the new record; fall back to the list if the API returned no id.
         navigate(saved?.id ? routes.detail(String(saved.id)) : routes.list)

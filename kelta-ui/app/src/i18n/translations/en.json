@@ -590,7 +590,7 @@
     "form": {
       "label": "Form",
       "noDataSource": "Form (no data source configured)",
-      "saved": "Saved"
+      "noRecord": "Form (no record selected)"
     },
     "input": {
       "noFieldConfigured": "Input (no field configured)",

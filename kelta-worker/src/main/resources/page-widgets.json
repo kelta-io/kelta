@@ -472,6 +472,12 @@
           "bindable": false
         },
         {
+          "key": "dataView.fields",
+          "label": "Fields",
+          "kind": "field-picker",
+          "bindable": false
+        },
+        {
           "key": "mode",
           "label": "Mode",
           "kind": "select",
