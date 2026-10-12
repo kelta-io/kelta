@@ -326,6 +326,10 @@ public class ModuleController {
         health.put("version", module.get().version());
         health.put("status", module.get().status());
         health.put("loadedOnThisPod", runtimeModuleManager.isLoaded(tenantId, moduleId));
+        // loadedOnThisPod is also true of a module that failed closed (its refusing handlers are
+        // registered); loadStateOnThisPod says which: LOADED, RETRYING (infrastructure failure,
+        // with attempts and nextLoadRetryAt), FAILED (quarantined) or NOT_LOADED.
+        health.putAll(runtimeModuleManager.podLoadState(tenantId, moduleId));
         health.put("podName", System.getenv().getOrDefault("HOSTNAME", "unknown"));
         health.put("actionsDeclared", module.get().actions().size());
         // Routes registered on THIS pod, which is the question an operator actually has when a

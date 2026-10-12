@@ -119,6 +119,20 @@ public interface ModuleStore {
     void recordLoadOutcome(String id, String status, String error);
 
     /**
+     * Records a load attempt that failed for an infrastructure reason — object storage or the
+     * database unreachable — <em>without</em> changing the module's status.
+     *
+     * <p>Kept separate from {@link #recordLoadOutcome} on purpose: a transient failure must never
+     * write a status. Writing {@code QUARANTINED} is what turned a storage outage into a five-day,
+     * every-tenant module outage (startup only loads {@code ACTIVE} rows); writing {@code ACTIVE}
+     * would race an admin's disable. The error, its time and the attempt count are still persisted
+     * so the health endpoint shows the failure.
+     *
+     * @param error the failure reason
+     */
+    void recordLoadError(String id, String error);
+
+    /**
      * Load diagnostics for one module: {@code lastError}, {@code lastErrorAt}, {@code lastLoadedAt},
      * {@code loadAttempts}. Read separately rather than widening {@link TenantModuleData}, which is
      * constructed in many places that have no interest in them.

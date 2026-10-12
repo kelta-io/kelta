@@ -148,6 +148,14 @@ public class JdbcModuleStore implements ModuleStore {
     }
 
     @Override
+    public void recordLoadError(String id, String error) {
+        jdbcTemplate.update(
+            "UPDATE tenant_module SET last_error = ?, last_error_at = NOW(), "
+                + "load_attempts = load_attempts + 1, updated_at = NOW() WHERE id = ?",
+            error, id);
+    }
+
+    @Override
     public java.util.Map<String, Object> findLoadDiagnostics(String id) {
         var rows = jdbcTemplate.queryForList(
             "SELECT last_error, last_error_at, last_loaded_at, load_attempts "

@@ -136,6 +136,7 @@ stops the rollout. Two rules follow:
 | Unit test | `scim/service/ScimUserServiceTest.java` |
 | Controller test | `scim/controller/ScimUserControllerTest.java` |
 | Action handler | `handler/SubmitForApprovalActionHandler.java` |
+| Transient vs permanent failure (fail closed on the pod, never persist a terminal status for an infrastructure error, per-pod `@Scheduled` retry with capped backoff, runtime-checked enable flag) | `module/ModuleLoadFailureClassifier.java`, `module/ModuleLoadRetryScheduler.java` |
 
 ## Running Tests
 

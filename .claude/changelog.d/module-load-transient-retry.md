@@ -1,0 +1,1 @@
+- 2026-10-11 fix(modules): Retry runtime-module loads that fail for an infrastructure reason (object storage or database unreachable) with capped backoff instead of persisting QUARANTINED; only permanent failures (signature/checksum, classload, onStartup) quarantine, and re-enabling a quarantined module now reloads it on running pods (module-load-transient-retry)

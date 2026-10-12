@@ -270,9 +270,18 @@ and the module reports `QUARANTINED` with the reason in `tenant_module.last_erro
   a module before its code exists is fine; expecting its actions to do anything is not.
 - Stub mode still exists for dev as `kelta.modules.stub-mode=true`, reports `STUB` rather than
   `ACTIVE`, and is never reached by falling back from an error.
+- **Infrastructure failures do not quarantine.** If object storage or the database is unreachable
+  while the JAR is fetched or verified (or a connectivity error surfaces from `onStartup`), the module
+  fails closed on that pod with the same refusing handlers, but its status is left alone, only
+  `last_error` is recorded, and the pod retries with backoff (`kelta.modules.load-retry.*`, 30 s →
+  10 min, never gives up). An `onStartup` that throws for any other reason is still the module's
+  fault and quarantines — don't let a flaky external call in `onStartup` look like a bug.
+- Re-enabling a `QUARANTINED` module (`POST /api/modules/{moduleId}/enable`) re-runs the load on
+  every pod, without a restart.
 - `GET /api/modules/{id}/health` reports whether the module is loaded **on the pod that answered**,
   which is not the same as the stored status: loading is per-pod and driven by a fire-and-forget NATS
-  event.
+  event. `loadStateOnThisPod` distinguishes `LOADED` from `RETRYING` (with `nextLoadRetryAt`) and
+  `FAILED`.
 
 **What the platform does for a module, so it doesn't have to:**
 - **Binds the tenant** around a webhook dispatch. A module *cannot* — `io.kelta.runtime.context`
