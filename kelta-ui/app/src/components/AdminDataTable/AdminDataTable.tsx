@@ -40,8 +40,11 @@ export interface AdminColumn<T> {
   header: string
   /** How to read the column value for sorting / filtering. Defaults to row[id]. */
   accessor?: (row: T) => unknown
-  /** Custom cell renderer. Falls back to the accessor's string repr. */
-  cell?: (row: T) => React.ReactNode
+  /**
+   * Custom cell renderer. Falls back to the accessor's string repr. `index` is
+   * the row's position in the displayed (filtered + sorted) order.
+   */
+  cell?: (row: T, index: number) => React.ReactNode
   sortable?: boolean
   /** Allow this column to be hidden via the column picker. Defaults to true. */
   hideable?: boolean
@@ -272,7 +275,7 @@ export function AdminDataTable<T>({
               >
                 {visibleColumns.map((col) => (
                   <TableCell key={col.id} className={col.cellClassName}>
-                    {col.cell ? col.cell(row) : renderDefaultCell(accessorFor(col, row))}
+                    {col.cell ? col.cell(row, index) : renderDefaultCell(accessorFor(col, row))}
                   </TableCell>
                 ))}
                 {renderActions && (
