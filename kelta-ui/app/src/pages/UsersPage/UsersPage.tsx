@@ -1,6 +1,7 @@
-import React, { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { z } from 'zod'
 import { useApi } from '../../context/ApiContext'
 import type {
   CreatePlatformUserRequest,
@@ -12,6 +13,13 @@ import { getTenantSlug } from '../../context/TenantContext'
 import { useToast } from '../../components/Toast'
 import { useSystemPermissions } from '../../hooks/useSystemPermissions'
 import { useDelegatedAdmin } from '../../hooks/useDelegatedAdmin'
+import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
+import {
+  CrudFormDialog,
+  CrudSelectField,
+  CrudTextField,
+  useCrudMutations,
+} from '../../components/AdminCrud'
 import { cn } from '@/lib/utils'
 
 interface PlatformUser {
@@ -33,19 +41,28 @@ interface PlatformUser {
   updatedAt: string
 }
 
-interface CreateUserFormData {
-  email: string
-  firstName: string
-  lastName: string
-  username: string
-  profileId?: string
-}
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-interface FormErrors {
-  email?: string
-  firstName?: string
-  lastName?: string
-  profileId?: string
+const createUserSchema = z.object({
+  email: z
+    .string()
+    .refine((v) => v.trim().length > 0, 'Email is required')
+    .refine((v) => !v.trim() || EMAIL_PATTERN.test(v), 'Invalid email'),
+  firstName: z.string().refine((v) => v.trim().length > 0, 'First name is required'),
+  lastName: z.string().refine((v) => v.trim().length > 0, 'Last name is required'),
+  username: z.string(),
+  // Always required — the worker rejects a create without a profileId.
+  profileId: z.string().refine((v) => v.length > 0, 'Profile is required'),
+})
+
+type CreateUserFormData = z.infer<typeof createUserSchema>
+
+const CREATE_USER_DEFAULTS: CreateUserFormData = {
+  email: '',
+  firstName: '',
+  lastName: '',
+  username: '',
+  profileId: '',
 }
 
 export interface UsersPageProps {
@@ -67,183 +84,6 @@ function StatusBadge({ status }: { status: string }) {
     >
       {status}
     </span>
-  )
-}
-
-function UserForm({
-  onSubmit,
-  onCancel,
-  isSubmitting,
-  profileOptions,
-}: {
-  onSubmit: (data: CreateUserFormData) => void
-  onCancel: () => void
-  isSubmitting: boolean
-  /**
-   * Profile choices — always required (the worker rejects a create without a
-   * profileId). Delegated scoped mode passes the caller's manageable subset;
-   * full-admin mode passes the tenant's profiles.
-   */
-  profileOptions: DelegatedNamedRef[]
-}) {
-  const { t } = useI18n()
-  const [formData, setFormData] = useState<CreateUserFormData>({
-    email: '',
-    firstName: '',
-    lastName: '',
-    username: '',
-    profileId: '',
-  })
-  const [errors, setErrors] = useState<FormErrors>({})
-
-  const validate = useCallback((): FormErrors => {
-    const errs: FormErrors = {}
-    if (!formData.email.trim()) errs.email = 'Email is required'
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errs.email = 'Invalid email'
-    if (!formData.firstName.trim()) errs.firstName = 'First name is required'
-    if (!formData.lastName.trim()) errs.lastName = 'Last name is required'
-    if (!formData.profileId) errs.profileId = 'Profile is required'
-    return errs
-  }, [formData])
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const errs = validate()
-      setErrors(errs)
-      if (Object.keys(errs).length === 0) {
-        onSubmit(formData)
-      }
-    },
-    [formData, validate, onSubmit]
-  )
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') onCancel()
-      }}
-      role="presentation"
-    >
-      <div
-        className="w-full max-w-[480px] rounded-lg bg-card p-6 shadow-xl"
-        role="dialog"
-        aria-modal="true"
-      >
-        <h2 className="mb-4 text-xl font-semibold">{t('users.createUser')}</h2>
-        <form onSubmit={handleSubmit}>
-          <div className="mb-4">
-            <label htmlFor="email" className="mb-1 block text-sm font-medium text-foreground">
-              {t('users.email')} *
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className={cn(
-                'w-full rounded-md border border-border bg-background px-3 py-2 text-sm',
-                errors.email && 'border-destructive'
-              )}
-            />
-            {errors.email && (
-              <span className="mt-1 block text-xs text-destructive">{errors.email}</span>
-            )}
-          </div>
-          <div className="mb-4">
-            <label htmlFor="firstName" className="mb-1 block text-sm font-medium text-foreground">
-              {t('users.firstName')} *
-            </label>
-            <input
-              id="firstName"
-              type="text"
-              value={formData.firstName}
-              onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-              className={cn(
-                'w-full rounded-md border border-border bg-background px-3 py-2 text-sm',
-                errors.firstName && 'border-destructive'
-              )}
-            />
-            {errors.firstName && (
-              <span className="mt-1 block text-xs text-destructive">{errors.firstName}</span>
-            )}
-          </div>
-          <div className="mb-4">
-            <label htmlFor="lastName" className="mb-1 block text-sm font-medium text-foreground">
-              {t('users.lastName')} *
-            </label>
-            <input
-              id="lastName"
-              type="text"
-              value={formData.lastName}
-              onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-              className={cn(
-                'w-full rounded-md border border-border bg-background px-3 py-2 text-sm',
-                errors.lastName && 'border-destructive'
-              )}
-            />
-            {errors.lastName && (
-              <span className="mt-1 block text-xs text-destructive">{errors.lastName}</span>
-            )}
-          </div>
-          <div className="mb-4">
-            <label htmlFor="username" className="mb-1 block text-sm font-medium text-foreground">
-              {t('users.username')}
-            </label>
-            <input
-              id="username"
-              type="text"
-              value={formData.username}
-              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            />
-          </div>
-          <div className="mb-4">
-            <label htmlFor="profileId" className="mb-1 block text-sm font-medium text-foreground">
-              {t('users.profile')} *
-            </label>
-            <select
-              id="profileId"
-              data-testid="create-profile-select"
-              value={formData.profileId}
-              onChange={(e) => setFormData({ ...formData, profileId: e.target.value })}
-              className={cn(
-                'w-full rounded-md border border-border bg-background px-3 py-2 text-sm',
-                errors.profileId && 'border-destructive'
-              )}
-            >
-              <option value="">{t('common.select')}</option>
-              {profileOptions.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            {errors.profileId && (
-              <span className="mt-1 block text-xs text-destructive">{errors.profileId}</span>
-            )}
-          </div>
-          <div className="mt-6 flex justify-end gap-2">
-            <button
-              type="button"
-              className="cursor-pointer rounded-md border border-border bg-muted px-4 py-2 text-sm text-foreground"
-              onClick={onCancel}
-            >
-              {t('common.cancel')}
-            </button>
-            <button
-              type="submit"
-              className="cursor-pointer rounded-md border-none bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? t('common.saving') : t('common.create')}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
   )
 }
 
@@ -462,8 +302,11 @@ export function UsersPage({ testId = 'users-page' }: UsersPageProps) {
     },
   })
 
-  const createMutation = useMutation({
-    mutationFn: (formData: CreateUserFormData) =>
+  // Create only — edits go to UserDetailPage (full admin) or DelegatedEditDialog
+  // (scoped), and users are deactivated rather than deleted.
+  const { createMutation } = useCrudMutations<PlatformUser, CreateUserFormData>({
+    queryKey: ['users'],
+    create: (formData) =>
       scoped
         ? keltaClient.admin.delegated.users.create({
             email: formData.email,
@@ -473,13 +316,11 @@ export function UsersPage({ testId = 'users-page' }: UsersPageProps) {
             profileId: formData.profileId ?? '',
           })
         : keltaClient.admin.users.create(formData as CreatePlatformUserRequest),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      showToast(t('users.createSuccess'), 'success')
-      setIsFormOpen(false)
-    },
-    onError: (err: Error) => {
-      showToast(err.message || t('errors.generic'), 'error')
+    messages: {
+      created: t('users.createSuccess'),
+      updated: t('users.updateSuccess'),
+      deleted: '',
+      error: t('errors.generic'),
     },
   })
 
@@ -553,6 +394,72 @@ export function UsersPage({ testId = 'users-page' }: UsersPageProps) {
 
   const canCreate = !scoped || summary?.canCreateUsers === true
   const canToggleStatus = !scoped || summary?.canDeactivateUsers === true
+
+  // Scoped admins edit in the compact delegated dialog; full admins open the detail page.
+  const openUser = useCallback(
+    (user: PlatformUser) =>
+      scoped ? setEditUser(user) : navigate(`/${getTenantSlug()}/users/${user.id}`),
+    [scoped, navigate]
+  )
+
+  // Server-paginated and server-filtered, so the grid neither sorts nor filters
+  // the current page client-side.
+  const columns = useMemo<AdminColumn<PlatformUser>[]>(
+    () => [
+      {
+        id: 'name',
+        header: t('users.name'),
+        sortable: false,
+        accessor: (user) => `${user.firstName} ${user.lastName}`,
+        cell: (user) => (
+          <button
+            className="cursor-pointer border-none bg-transparent p-0 text-left font-medium text-primary hover:underline"
+            onClick={() => openUser(user)}
+          >
+            {user.firstName} {user.lastName}
+          </button>
+        ),
+      },
+      { id: 'email', header: t('users.email'), sortable: false },
+      {
+        id: 'username',
+        header: t('users.username'),
+        sortable: false,
+        cell: (user) => user.username || '—',
+      },
+      {
+        id: 'status',
+        header: t('users.status'),
+        sortable: false,
+        cell: (user) => <StatusBadge status={user.status} />,
+      },
+      {
+        id: 'userType',
+        header: t('users.type'),
+        sortable: false,
+        cell: (user) => (
+          <span
+            className={cn(
+              'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
+              user.userType === 'PORTAL'
+                ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+            )}
+          >
+            {user.userType === 'PORTAL' ? t('users.typePortal') : t('users.typeInternal')}
+          </span>
+        ),
+      },
+      {
+        id: 'lastLoginAt',
+        header: t('users.lastLogin'),
+        sortable: false,
+        cell: (user) =>
+          user.lastLoginAt ? formatDate(new Date(user.lastLoginAt)) : t('users.never'),
+      },
+    ],
+    [t, formatDate, openUser]
+  )
 
   if (error) {
     return (
@@ -642,105 +549,42 @@ export function UsersPage({ testId = 'users-page' }: UsersPageProps) {
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-lg border border-border bg-card">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="border-b-2 border-border p-3 text-left font-semibold text-foreground">
-                    {t('users.name')}
-                  </th>
-                  <th className="border-b-2 border-border p-3 text-left font-semibold text-foreground">
-                    {t('users.email')}
-                  </th>
-                  <th className="border-b-2 border-border p-3 text-left font-semibold text-foreground">
-                    {t('users.username')}
-                  </th>
-                  <th className="border-b-2 border-border p-3 text-left font-semibold text-foreground">
-                    {t('users.status')}
-                  </th>
-                  <th className="border-b-2 border-border p-3 text-left font-semibold text-foreground">
-                    {t('users.type')}
-                  </th>
-                  <th className="border-b-2 border-border p-3 text-left font-semibold text-foreground">
-                    {t('users.lastLogin')}
-                  </th>
-                  <th className="border-b-2 border-border p-3 text-left font-semibold text-foreground">
-                    {t('common.actions')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user: PlatformUser) => (
-                  <tr key={user.id} className="hover:bg-muted">
-                    <td className="border-b border-border p-3">
-                      <button
-                        className="cursor-pointer border-none bg-transparent p-0 text-left font-medium text-primary hover:underline"
-                        onClick={() =>
-                          scoped
-                            ? setEditUser(user)
-                            : navigate(`/${getTenantSlug()}/users/${user.id}`)
-                        }
-                      >
-                        {user.firstName} {user.lastName}
-                      </button>
-                    </td>
-                    <td className="border-b border-border p-3">{user.email}</td>
-                    <td className="border-b border-border p-3">{user.username || '—'}</td>
-                    <td className="border-b border-border p-3">
-                      <StatusBadge status={user.status} />
-                    </td>
-                    <td className="border-b border-border p-3">
-                      <span
-                        className={cn(
-                          'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
-                          user.userType === 'PORTAL'
-                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
-                            : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-                        )}
-                      >
-                        {user.userType === 'PORTAL'
-                          ? t('users.typePortal')
-                          : t('users.typeInternal')}
-                      </span>
-                    </td>
-                    <td className="border-b border-border p-3">
-                      {user.lastLoginAt ? formatDate(new Date(user.lastLoginAt)) : t('users.never')}
-                    </td>
-                    <td className="border-b border-border p-3">
-                      <div className="flex gap-2">
-                        <button
-                          className="cursor-pointer rounded border border-border bg-card px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                          onClick={() =>
-                            scoped
-                              ? setEditUser(user)
-                              : navigate(`/${getTenantSlug()}/users/${user.id}`)
-                          }
-                        >
-                          {t('common.edit')}
-                        </button>
-                        {canToggleStatus &&
-                          (user.status === 'ACTIVE' ? (
-                            <button
-                              className="cursor-pointer rounded border-none bg-destructive px-2 py-1 text-xs text-destructive-foreground hover:bg-destructive/90"
-                              onClick={() => handleStatusAction(user, 'deactivate')}
-                            >
-                              {t('users.deactivate')}
-                            </button>
-                          ) : (
-                            <button
-                              className="cursor-pointer rounded border-none bg-emerald-500 px-2 py-1 text-xs text-white hover:bg-emerald-600"
-                              onClick={() => handleStatusAction(user, 'activate')}
-                            >
-                              {t('users.activate')}
-                            </button>
-                          ))}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <AdminDataTable
+            tableId="users"
+            testId="users-table"
+            ariaLabel={t('users.title')}
+            actionsHeader={t('common.actions')}
+            filterable={false}
+            columns={columns}
+            rows={users}
+            rowKey={(user) => user.id}
+            renderActions={(user) => (
+              <div className="flex justify-end gap-2">
+                <button
+                  className="cursor-pointer rounded border border-border bg-card px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => openUser(user)}
+                >
+                  {t('common.edit')}
+                </button>
+                {canToggleStatus &&
+                  (user.status === 'ACTIVE' ? (
+                    <button
+                      className="cursor-pointer rounded border-none bg-destructive px-2 py-1 text-xs text-destructive-foreground hover:bg-destructive/90"
+                      onClick={() => handleStatusAction(user, 'deactivate')}
+                    >
+                      {t('users.deactivate')}
+                    </button>
+                  ) : (
+                    <button
+                      className="cursor-pointer rounded border-none bg-emerald-500 px-2 py-1 text-xs text-white hover:bg-emerald-600"
+                      onClick={() => handleStatusAction(user, 'activate')}
+                    >
+                      {t('users.activate')}
+                    </button>
+                  ))}
+              </div>
+            )}
+          />
 
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-center gap-4 border-t border-border pt-4">
@@ -766,14 +610,55 @@ export function UsersPage({ testId = 'users-page' }: UsersPageProps) {
         </>
       )}
 
-      {isFormOpen && (
-        <UserForm
-          onSubmit={(formData) => createMutation.mutate(formData)}
-          onCancel={() => setIsFormOpen(false)}
-          isSubmitting={createMutation.isPending}
-          profileOptions={createProfileOptions}
+      <CrudFormDialog<CreateUserFormData>
+        open={isFormOpen}
+        onClose={() => setIsFormOpen(false)}
+        title={t('users.createUser')}
+        schema={createUserSchema}
+        defaultValues={CREATE_USER_DEFAULTS}
+        onSubmit={(formData) =>
+          createMutation.mutate(formData, { onSuccess: () => setIsFormOpen(false) })
+        }
+        isSubmitting={createMutation.isPending}
+        testIdPrefix="create-user"
+        submitLabel={t('common.create')}
+      >
+        <CrudTextField<CreateUserFormData>
+          name="email"
+          id="email"
+          label={t('users.email')}
+          type="email"
+          required
         />
-      )}
+        <CrudTextField<CreateUserFormData>
+          name="firstName"
+          id="firstName"
+          label={t('users.firstName')}
+          required
+        />
+        <CrudTextField<CreateUserFormData>
+          name="lastName"
+          id="lastName"
+          label={t('users.lastName')}
+          required
+        />
+        <CrudTextField<CreateUserFormData>
+          name="username"
+          id="username"
+          label={t('users.username')}
+        />
+        {/* Delegated scoped mode offers the caller's manageable subset;
+            full-admin mode offers the tenant's profiles. */}
+        <CrudSelectField<CreateUserFormData>
+          name="profileId"
+          id="profileId"
+          label={t('users.profile')}
+          required
+          placeholder={t('common.select')}
+          options={createProfileOptions.map((p) => ({ value: p.id, label: p.name }))}
+          testId="create-profile-select"
+        />
+      </CrudFormDialog>
 
       {editUser && scoped && (
         <DelegatedEditDialog

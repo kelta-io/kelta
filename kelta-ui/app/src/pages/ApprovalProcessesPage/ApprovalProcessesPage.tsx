@@ -1,20 +1,28 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import React, { useState, useCallback, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { get, useFormContext, useWatch } from 'react-hook-form'
+import { z } from 'zod'
 import { Braces } from 'lucide-react'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import {
-  useToast,
-  ConfirmDialog,
-  LoadingSpinner,
-  ErrorMessage,
-  ExecutionLogModal,
-} from '../../components'
+import { useToast, ConfirmDialog, ExecutionLogModal } from '../../components'
 import type { LogColumn } from '../../components'
 import type { CreateApprovalProcessRequest } from '@kelta/sdk'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 import { FieldExpressionPicker } from '../../components/FieldExpressionPicker'
+import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
+import {
+  AdminCrudPage,
+  CrudCheckboxField,
+  CrudFormDialog,
+  CrudNumberField,
+  CrudSelectField,
+  CrudTextField,
+  useAdminCrud,
+  useCrudFormState,
+} from '../../components/AdminCrud'
 
 interface ApprovalProcess {
   id: string
@@ -29,17 +37,6 @@ interface ApprovalProcess {
   createdBy: string
   createdAt: string
   updatedAt: string
-}
-
-interface ApprovalProcessFormData {
-  name: string
-  description: string
-  collectionId: string
-  entryCriteria: string
-  recordEditability: string
-  allowRecall: boolean
-  active: boolean
-  executionOrder: number
 }
 
 interface StepInstance {
@@ -65,433 +62,137 @@ interface ApprovalInstance {
   stepInstances: StepInstance[]
 }
 
-interface FormErrors {
-  name?: string
-  description?: string
-  collectionId?: string
-  entryCriteria?: string
-  executionOrder?: string
-}
-
 export interface ApprovalProcessesPageProps {
   testId?: string
 }
 
-function validateForm(data: ApprovalProcessFormData): FormErrors {
-  const errors: FormErrors = {}
-  if (!data.name.trim()) {
-    errors.name = 'Name is required'
-  } else if (data.name.length > 100) {
-    errors.name = 'Name must be 100 characters or fewer'
-  }
-  if (data.description && data.description.length > 500) {
-    errors.description = 'Description must be 500 characters or fewer'
-  }
-  if (data.collectionId && data.collectionId.length > 100) {
-    errors.collectionId = 'Collection ID must be 100 characters or fewer'
-  }
-  if (data.entryCriteria && data.entryCriteria.length > 1000) {
-    errors.entryCriteria = 'Entry criteria must be 1000 characters or fewer'
-  }
-  if (data.executionOrder < 0) {
-    errors.executionOrder = 'Execution order must be 0 or greater'
-  }
-  return errors
+const approvalProcessSchema = z.object({
+  name: z
+    .string()
+    .refine((v) => v.trim().length > 0, 'Name is required')
+    .refine((v) => v.length <= 100, 'Name must be 100 characters or fewer'),
+  description: z.string().max(500, 'Description must be 500 characters or fewer'),
+  collectionId: z.string().max(100, 'Collection ID must be 100 characters or fewer'),
+  entryCriteria: z.string().max(1000, 'Entry criteria must be 1000 characters or fewer'),
+  recordEditability: z.string(),
+  allowRecall: z.boolean(),
+  active: z.boolean(),
+  executionOrder: z.number().min(0, 'Execution order must be 0 or greater'),
+})
+
+type ApprovalProcessFormData = z.infer<typeof approvalProcessSchema>
+
+const RECORD_EDITABILITY_OPTIONS = [
+  { value: 'LOCKED', label: 'Locked' },
+  { value: 'ADMIN_ONLY', label: 'Admin Only' },
+]
+
+/** Matches the CrudTextField label (DESIGN.md uppercase-11px field label). */
+const FIELD_LABEL_CLASS =
+  'text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground'
+
+function YesNoBadge({ value }: { value: boolean }): React.ReactElement {
+  return (
+    <span
+      className={cn(
+        'inline-block rounded-full px-3 py-1 text-xs font-semibold',
+        value
+          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+          : 'bg-muted text-muted-foreground'
+      )}
+    >
+      {value ? 'Yes' : 'No'}
+    </span>
+  )
 }
 
-interface ApprovalProcessFormProps {
-  approvalProcess?: ApprovalProcess
-  onSubmit: (data: ApprovalProcessFormData) => void
-  onCancel: () => void
-  isSubmitting: boolean
-}
+/**
+ * Entry-criteria textarea with an "Insert field" button that opens the
+ * FieldExpressionPicker scoped to the form's collection and inserts the chosen
+ * token at the caret.
+ */
+function EntryCriteriaField(): React.ReactElement {
+  const {
+    register,
+    setValue,
+    control,
+    formState: { errors },
+  } = useFormContext<ApprovalProcessFormData>()
+  const { isSubmitting } = useCrudFormState()
+  const collectionId = useWatch({ control, name: 'collectionId' })
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const { ref: registerRef, ...registration } = register('entryCriteria')
+  const error = get(errors, 'entryCriteria')?.message as string | undefined
 
-function ApprovalProcessForm({
-  approvalProcess,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: ApprovalProcessFormProps): React.ReactElement {
-  const isEditing = !!approvalProcess
-  const [formData, setFormData] = useState<ApprovalProcessFormData>({
-    name: approvalProcess?.name ?? '',
-    description: approvalProcess?.description ?? '',
-    collectionId: approvalProcess?.collectionId ?? '',
-    entryCriteria: approvalProcess?.entryCriteria ?? '',
-    recordEditability: approvalProcess?.recordEditability ?? 'LOCKED',
-    allowRecall: approvalProcess?.allowRecall ?? false,
-    active: approvalProcess?.active ?? true,
-    executionOrder: approvalProcess?.executionOrder ?? 0,
-  })
-  const [errors, setErrors] = useState<FormErrors>({})
-  const [touched, setTouched] = useState<Record<string, boolean>>({})
-  const [entryCriteriaPickerOpen, setEntryCriteriaPickerOpen] = useState(false)
-  const nameInputRef = useRef<HTMLInputElement>(null)
-  const entryCriteriaRef = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    nameInputRef.current?.focus()
-  }, [])
-
-  const handleChange = useCallback(
-    (field: keyof ApprovalProcessFormData, value: string | boolean | number) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-      if (errors[field as keyof FormErrors]) {
-        setErrors((prev) => ({ ...prev, [field]: undefined }))
-      }
-    },
-    [errors]
-  )
-
-  const handleBlur = useCallback(
-    (field: keyof FormErrors) => {
-      setTouched((prev) => ({ ...prev, [field]: true }))
-      const validationErrors = validateForm(formData)
-      if (validationErrors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: validationErrors[field] }))
-      }
-    },
-    [formData]
-  )
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const validationErrors = validateForm(formData)
-      setErrors(validationErrors)
-      setTouched({
-        name: true,
-        description: true,
-        collectionId: true,
-        entryCriteria: true,
-        executionOrder: true,
+  const handleInsert = useCallback(
+    (token: string) => {
+      const el = textareaRef.current
+      const start = el?.selectionStart ?? el?.value.length ?? 0
+      const end = el?.selectionEnd ?? el?.value.length ?? 0
+      const current = el?.value ?? ''
+      const next = current.slice(0, start) + token + current.slice(end)
+      setValue('entryCriteria', next, { shouldDirty: true })
+      setPickerOpen(false)
+      requestAnimationFrame(() => {
+        el?.focus()
+        el?.setSelectionRange(start + token.length, start + token.length)
       })
-      if (Object.keys(validationErrors).length === 0) {
-        onSubmit(formData)
-      }
     },
-    [formData, onSubmit]
+    [setValue]
   )
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel()
-      }
-    },
-    [onCancel]
-  )
-
-  const handleEntryCriteriaInsert = useCallback((token: string) => {
-    const el = entryCriteriaRef.current
-    const start = el?.selectionStart ?? el?.value.length ?? 0
-    const end = el?.selectionEnd ?? el?.value.length ?? 0
-    const current = el?.value ?? ''
-    const next = current.slice(0, start) + token + current.slice(end)
-    setFormData((prev) => ({ ...prev, entryCriteria: next }))
-    setEntryCriteriaPickerOpen(false)
-    requestAnimationFrame(() => {
-      el?.focus()
-      el?.setSelectionRange(start + token.length, start + token.length)
-    })
-  }, [])
-
-  const title = isEditing ? 'Edit Approval Process' : 'Create Approval Process'
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={handleKeyDown}
-      data-testid="approval-process-form-overlay"
-      role="presentation"
-    >
-      <div
-        className="w-full max-w-[600px] max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="approval-process-form-title"
-        data-testid="approval-process-form-modal"
-      >
-        <div className="flex items-center justify-between border-b border-border p-6">
-          <h2 id="approval-process-form-title" className="text-lg font-semibold text-foreground">
-            {title}
-          </h2>
-          <button
-            type="button"
-            className="rounded p-2 text-2xl leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            onClick={onCancel}
-            aria-label="Close"
-            data-testid="approval-process-form-close"
-          >
-            &times;
-          </button>
-        </div>
-        <div className="p-6">
-          <form className="flex flex-col gap-5" onSubmit={handleSubmit} noValidate>
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="approval-process-name"
-                className="text-sm font-medium text-foreground"
-              >
-                Name
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                ref={nameInputRef}
-                id="approval-process-name"
-                type="text"
-                className={cn(
-                  'rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.name && errors.name && 'border-destructive'
-                )}
-                value={formData.name}
-                onChange={(e) => handleChange('name', e.target.value)}
-                onBlur={() => handleBlur('name')}
-                placeholder="Enter approval process name"
-                aria-required="true"
-                aria-invalid={touched.name && !!errors.name}
-                disabled={isSubmitting}
-                data-testid="approval-process-name-input"
-              />
-              {touched.name && errors.name && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.name}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="approval-process-description"
-                className="text-sm font-medium text-foreground"
-              >
-                Description
-              </label>
-              <textarea
-                id="approval-process-description"
-                className={cn(
-                  'min-h-[80px] resize-y rounded-md border border-border bg-background px-3 py-2.5 font-[inherit] text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.description && errors.description && 'border-destructive'
-                )}
-                value={formData.description}
-                onChange={(e) => handleChange('description', e.target.value)}
-                onBlur={() => handleBlur('description')}
-                placeholder="Enter approval process description"
-                disabled={isSubmitting}
-                rows={3}
-                data-testid="approval-process-description-input"
-              />
-              {touched.description && errors.description && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.description}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="approval-process-collection-id"
-                className="text-sm font-medium text-foreground"
-              >
-                Collection ID
-              </label>
-              <input
-                id="approval-process-collection-id"
-                type="text"
-                className={cn(
-                  'rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.collectionId && errors.collectionId && 'border-destructive'
-                )}
-                value={formData.collectionId}
-                onChange={(e) => handleChange('collectionId', e.target.value)}
-                onBlur={() => handleBlur('collectionId')}
-                placeholder="Enter collection ID"
-                disabled={isSubmitting}
-                data-testid="approval-process-collection-id-input"
-              />
-              {touched.collectionId && errors.collectionId && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.collectionId}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <label
-                  htmlFor="approval-process-entry-criteria"
-                  className="text-sm font-medium text-foreground"
-                >
-                  Entry Criteria
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setEntryCriteriaPickerOpen(true)}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                  data-testid="entry-criteria-insert-field"
-                >
-                  <Braces className="h-3.5 w-3.5" />
-                  Insert field
-                </button>
-              </div>
-              <textarea
-                ref={entryCriteriaRef}
-                id="approval-process-entry-criteria"
-                className={cn(
-                  'min-h-[80px] resize-y rounded-md border border-border bg-background px-3 py-2.5 font-[inherit] text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.entryCriteria && errors.entryCriteria && 'border-destructive'
-                )}
-                value={formData.entryCriteria}
-                onChange={(e) => handleChange('entryCriteria', e.target.value)}
-                onBlur={() => handleBlur('entryCriteria')}
-                placeholder="Enter entry criteria formula"
-                disabled={isSubmitting}
-                rows={3}
-                data-testid="approval-process-entry-criteria-input"
-              />
-              {touched.entryCriteria && errors.entryCriteria && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.entryCriteria}
-                </span>
-              )}
-            </div>
-
-            <FieldExpressionPicker
-              open={entryCriteriaPickerOpen}
-              onOpenChange={setEntryCriteriaPickerOpen}
-              rootCollectionId={formData.collectionId || null}
-              mode="expression"
-              allowedTypes={['boolean']}
-              onInsert={handleEntryCriteriaInsert}
-              title="Insert field or function"
-              testId="approval-entry-criteria-picker"
-            />
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="approval-process-record-editability"
-                className="text-sm font-medium text-foreground"
-              >
-                Record Editability
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <select
-                id="approval-process-record-editability"
-                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                value={formData.recordEditability}
-                onChange={(e) => handleChange('recordEditability', e.target.value)}
-                disabled={isSubmitting}
-                data-testid="approval-process-record-editability-input"
-              >
-                <option value="LOCKED">Locked</option>
-                <option value="ADMIN_ONLY">Admin Only</option>
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="approval-process-execution-order"
-                className="text-sm font-medium text-foreground"
-              >
-                Execution Order
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                id="approval-process-execution-order"
-                type="number"
-                className={cn(
-                  'rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.executionOrder && errors.executionOrder && 'border-destructive'
-                )}
-                value={formData.executionOrder}
-                onChange={(e) => handleChange('executionOrder', parseInt(e.target.value, 10) || 0)}
-                onBlur={() => handleBlur('executionOrder')}
-                min={0}
-                disabled={isSubmitting}
-                data-testid="approval-process-execution-order-input"
-              />
-              {touched.executionOrder && errors.executionOrder && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.executionOrder}
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                id="approval-process-allow-recall"
-                type="checkbox"
-                className="h-4 w-4 accent-primary"
-                checked={formData.allowRecall}
-                onChange={(e) => handleChange('allowRecall', e.target.checked)}
-                disabled={isSubmitting}
-                data-testid="approval-process-allow-recall-input"
-              />
-              <label
-                htmlFor="approval-process-allow-recall"
-                className="text-sm font-medium text-foreground"
-              >
-                Allow Recall
-              </label>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                id="approval-process-active"
-                type="checkbox"
-                className="h-4 w-4 accent-primary"
-                checked={formData.active}
-                onChange={(e) => handleChange('active', e.target.checked)}
-                disabled={isSubmitting}
-                data-testid="approval-process-active-input"
-              />
-              <label
-                htmlFor="approval-process-active"
-                className="text-sm font-medium text-foreground"
-              >
-                Active
-              </label>
-            </div>
-
-            <div className="mt-2 flex justify-end gap-3 border-t border-border pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onCancel}
-                disabled={isSubmitting}
-                data-testid="approval-process-form-cancel"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isSubmitting}
-                data-testid="approval-process-form-submit"
-              >
-                {isSubmitting ? 'Saving...' : 'Save'}
-              </Button>
-            </div>
-          </form>
-        </div>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <label htmlFor="approval-process-entry-criteria" className={FIELD_LABEL_CLASS}>
+          Entry Criteria
+        </label>
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          disabled={isSubmitting}
+          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          data-testid="entry-criteria-insert-field"
+        >
+          <Braces className="h-3.5 w-3.5" />
+          Insert field
+        </button>
       </div>
+      <Textarea
+        id="approval-process-entry-criteria"
+        rows={3}
+        className="resize-y"
+        placeholder="Enter entry criteria formula"
+        disabled={isSubmitting}
+        aria-invalid={!!error}
+        aria-describedby={error ? 'approval-process-entry-criteria-error' : undefined}
+        data-testid="approval-process-entry-criteria-input"
+        {...registration}
+        ref={(el) => {
+          registerRef(el)
+          textareaRef.current = el
+        }}
+      />
+      {error && (
+        <span
+          id="approval-process-entry-criteria-error"
+          className="text-xs text-destructive"
+          role="alert"
+        >
+          {error}
+        </span>
+      )}
+      <FieldExpressionPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        rootCollectionId={collectionId || null}
+        mode="expression"
+        allowedTypes={['boolean']}
+        onInsert={handleInsert}
+        title="Insert field or function"
+        testId="approval-entry-criteria-picker"
+      />
     </div>
   )
 }
@@ -504,14 +205,6 @@ export function ApprovalProcessesPage({
   const { keltaClient } = useApi()
   const { showToast } = useToast()
 
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingApprovalProcess, setEditingApprovalProcess] = useState<ApprovalProcess | undefined>(
-    undefined
-  )
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [approvalProcessToDelete, setApprovalProcessToDelete] = useState<ApprovalProcess | null>(
-    null
-  )
   const [instancesItemId, setInstancesItemId] = useState<string | null>(null)
   const [_instancesItemName, setInstancesItemName] = useState('')
 
@@ -528,48 +221,24 @@ export function ApprovalProcessesPage({
   const approvalProcessList: ApprovalProcess[] = (approvalProcesses ??
     []) as unknown as ApprovalProcess[]
 
-  const createMutation = useMutation({
-    mutationFn: (data: ApprovalProcessFormData) =>
+  const crud = useAdminCrud<ApprovalProcess, ApprovalProcessFormData>({
+    queryKey: ['approvalProcesses'],
+    create: (data) =>
       keltaClient.admin.approvals.createProcess(
         '',
         data as unknown as CreateApprovalProcessRequest
       ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['approvalProcesses'] })
-      showToast('Approval process created successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: ApprovalProcessFormData }) =>
+    update: (approvalProcess, data) =>
       keltaClient.admin.approvals.updateProcess(
-        id,
+        approvalProcess.id,
         data as unknown as Partial<CreateApprovalProcessRequest>
       ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['approvalProcesses'] })
-      showToast('Approval process updated successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => keltaClient.admin.approvals.deleteProcess(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['approvalProcesses'] })
-      showToast('Approval process deleted successfully', 'success')
-      setDeleteDialogOpen(false)
-      setApprovalProcessToDelete(null)
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
+    remove: (approvalProcess) => keltaClient.admin.approvals.deleteProcess(approvalProcess.id),
+    messages: {
+      created: 'Approval process created successfully',
+      updated: 'Approval process updated successfully',
+      deleted: 'Approval process deleted successfully',
+      error: 'An error occurred',
     },
   })
 
@@ -754,263 +423,193 @@ export function ApprovalProcessesPage({
   ]
   void instanceColumns
 
-  const handleCreate = useCallback(() => {
-    setEditingApprovalProcess(undefined)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleEdit = useCallback((approvalProcess: ApprovalProcess) => {
-    setEditingApprovalProcess(approvalProcess)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleCloseForm = useCallback(() => {
-    setIsFormOpen(false)
-    setEditingApprovalProcess(undefined)
-  }, [])
-
-  const handleFormSubmit = useCallback(
-    (data: ApprovalProcessFormData) => {
-      if (editingApprovalProcess) {
-        updateMutation.mutate({ id: editingApprovalProcess.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editingApprovalProcess, createMutation, updateMutation]
+  const columns = useMemo<AdminColumn<ApprovalProcess>[]>(
+    () => [
+      { id: 'name', header: 'Name', cellClassName: 'text-foreground' },
+      {
+        id: 'collectionId',
+        header: 'Collection ID',
+        cell: (ap) => (
+          <span className="max-w-[300px] truncate text-muted-foreground">
+            {ap.collectionId || '-'}
+          </span>
+        ),
+      },
+      {
+        id: 'recordEditability',
+        header: 'Record Editability',
+        cell: (ap) => (
+          <span className="inline-block rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
+            {ap.recordEditability}
+          </span>
+        ),
+      },
+      { id: 'active', header: 'Active', cell: (ap) => <YesNoBadge value={ap.active} /> },
+      {
+        id: 'allowRecall',
+        header: 'Allow Recall',
+        cell: (ap) => <YesNoBadge value={ap.allowRecall} />,
+      },
+      { id: 'executionOrder', header: 'Order', cellClassName: 'text-foreground' },
+    ],
+    []
   )
 
-  const handleDeleteClick = useCallback((approvalProcess: ApprovalProcess) => {
-    setApprovalProcessToDelete(approvalProcess)
-    setDeleteDialogOpen(true)
-  }, [])
-
-  const handleDeleteConfirm = useCallback(() => {
-    if (approvalProcessToDelete) {
-      deleteMutation.mutate(approvalProcessToDelete.id)
-    }
-  }, [approvalProcessToDelete, deleteMutation])
-
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteDialogOpen(false)
-    setApprovalProcessToDelete(null)
-  }, [])
-
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <div className="flex min-h-[400px] items-center justify-center">
-          <LoadingSpinner size="large" label="Loading approval processes..." />
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <ErrorMessage
-          error={error instanceof Error ? error : new Error('An error occurred')}
-          onRetry={() => refetch()}
-        />
-      </div>
-    )
-  }
-
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const editing = crud.editing
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Approval processes</h1>
+    <AdminCrudPage
+      testId={testId}
+      title="Approval processes"
+      actions={
         <Button
           type="button"
-          onClick={handleCreate}
+          onClick={crud.openCreate}
           aria-label="Create Approval Process"
           data-testid="add-approval-process-button"
         >
           Create Approval Process
         </Button>
-      </header>
-
-      {approvalProcessList.length === 0 ? (
-        <div
-          className="rounded-lg border border-border bg-card py-16 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          <p>No approval processes found.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table
-            className="w-full border-collapse"
-            role="grid"
-            aria-label="Approval Processes"
-            data-testid="approval-processes-table"
-          >
-            <thead>
-              <tr role="row" className="bg-muted">
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Name
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Collection ID
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Record Editability
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Active
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Allow Recall
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Order
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {approvalProcessList.map((approvalProcess, index) => (
-                <tr
-                  key={approvalProcess.id}
-                  role="row"
-                  className="border-b border-border transition-colors last:border-b-0 hover:bg-muted/50"
-                  data-testid={`approval-process-row-${index}`}
-                >
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    {approvalProcess.name}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    <span className="max-w-[300px] truncate text-muted-foreground">
-                      {approvalProcess.collectionId || '-'}
-                    </span>
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    <span className="inline-block rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
-                      {approvalProcess.recordEditability}
-                    </span>
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    <span
-                      className={cn(
-                        'inline-block rounded-full px-3 py-1 text-xs font-semibold',
-                        approvalProcess.active
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : 'bg-muted text-muted-foreground'
-                      )}
-                    >
-                      {approvalProcess.active ? 'Yes' : 'No'}
-                    </span>
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    <span
-                      className={cn(
-                        'inline-block rounded-full px-3 py-1 text-xs font-semibold',
-                        approvalProcess.allowRecall
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : 'bg-muted text-muted-foreground'
-                      )}
-                    >
-                      {approvalProcess.allowRecall ? 'Yes' : 'No'}
-                    </span>
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    {approvalProcess.executionOrder}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-right text-sm">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setInstancesItemId(approvalProcess.id)
-                          setInstancesItemName(approvalProcess.name)
-                        }}
-                        aria-label={`View instances for ${approvalProcess.name}`}
-                        data-testid={`instances-button-${index}`}
-                      >
-                        {t('approvals.instances')}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEdit(approvalProcess)}
-                        aria-label={`Edit ${approvalProcess.name}`}
-                        data-testid={`edit-button-${index}`}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="border-destructive/30 text-destructive hover:bg-destructive/10"
-                        onClick={() => handleDeleteClick(approvalProcess)}
-                        aria-label={`Delete ${approvalProcess.name}`}
-                        data-testid={`delete-button-${index}`}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {isFormOpen && (
-        <ApprovalProcessForm
-          approvalProcess={editingApprovalProcess}
-          onSubmit={handleFormSubmit}
-          onCancel={handleCloseForm}
-          isSubmitting={isSubmitting}
+      }
+      isLoading={isLoading}
+      error={error}
+      onRetry={() => refetch()}
+      isEmpty={approvalProcessList.length === 0}
+      emptyMessage="No approval processes found."
+      list={
+        <AdminDataTable
+          tableId="approval-processes"
+          testId="approval-processes-table"
+          ariaLabel="Approval Processes"
+          actionsHeader="Actions"
+          columns={columns}
+          rows={approvalProcessList}
+          rowKey={(ap) => ap.id}
+          rowTestId={(_, index) => `approval-process-row-${index}`}
+          renderActions={(approvalProcess, index) => (
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setInstancesItemId(approvalProcess.id)
+                  setInstancesItemName(approvalProcess.name)
+                }}
+                aria-label={`View instances for ${approvalProcess.name}`}
+                data-testid={`instances-button-${index}`}
+              >
+                {t('approvals.instances')}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => crud.openEdit(approvalProcess)}
+                aria-label={`Edit ${approvalProcess.name}`}
+                data-testid={`edit-button-${index}`}
+              >
+                Edit
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={() => crud.requestDelete(approvalProcess)}
+                aria-label={`Delete ${approvalProcess.name}`}
+                data-testid={`delete-button-${index}`}
+              >
+                Delete
+              </Button>
+            </div>
+          )}
         />
-      )}
+      }
+    >
+      <CrudFormDialog<ApprovalProcessFormData>
+        open={crud.isFormOpen}
+        onClose={crud.closeForm}
+        title={editing ? 'Edit Approval Process' : 'Create Approval Process'}
+        schema={approvalProcessSchema}
+        defaultValues={{
+          name: editing?.name ?? '',
+          description: editing?.description ?? '',
+          collectionId: editing?.collectionId ?? '',
+          entryCriteria: editing?.entryCriteria ?? '',
+          recordEditability: editing?.recordEditability ?? 'LOCKED',
+          allowRecall: editing?.allowRecall ?? false,
+          active: editing?.active ?? true,
+          executionOrder: editing?.executionOrder ?? 0,
+        }}
+        onSubmit={crud.submit}
+        isSubmitting={crud.isSaving}
+        testIdPrefix="approval-process"
+        className="sm:max-w-[600px]"
+      >
+        <CrudTextField<ApprovalProcessFormData>
+          name="name"
+          id="approval-process-name"
+          label="Name"
+          required
+          placeholder="Enter approval process name"
+          testId="approval-process-name-input"
+        />
+        <CrudTextField<ApprovalProcessFormData>
+          name="description"
+          id="approval-process-description"
+          label="Description"
+          multiline
+          placeholder="Enter approval process description"
+          testId="approval-process-description-input"
+        />
+        <CrudTextField<ApprovalProcessFormData>
+          name="collectionId"
+          id="approval-process-collection-id"
+          label="Collection ID"
+          placeholder="Enter collection ID"
+          testId="approval-process-collection-id-input"
+        />
+        <EntryCriteriaField />
+        <CrudSelectField<ApprovalProcessFormData>
+          name="recordEditability"
+          id="approval-process-record-editability"
+          label="Record Editability"
+          required
+          options={RECORD_EDITABILITY_OPTIONS}
+          testId="approval-process-record-editability-input"
+        />
+        <CrudNumberField<ApprovalProcessFormData>
+          name="executionOrder"
+          id="approval-process-execution-order"
+          label="Execution Order"
+          required
+          min={0}
+          parse={(raw) => parseInt(raw, 10) || 0}
+          testId="approval-process-execution-order-input"
+        />
+        <CrudCheckboxField<ApprovalProcessFormData>
+          name="allowRecall"
+          id="approval-process-allow-recall"
+          label="Allow Recall"
+          testId="approval-process-allow-recall-input"
+        />
+        <CrudCheckboxField<ApprovalProcessFormData>
+          name="active"
+          id="approval-process-active"
+          label="Active"
+          testId="approval-process-active-input"
+        />
+      </CrudFormDialog>
 
       <ConfirmDialog
-        open={deleteDialogOpen}
+        open={crud.deleteTarget !== null}
         title="Delete Approval Process"
         message="Are you sure you want to delete this approval process? This action cannot be undone."
         confirmLabel="Delete"
         cancelLabel="Cancel"
-        onConfirm={handleDeleteConfirm}
-        onCancel={handleDeleteCancel}
+        onConfirm={crud.confirmDelete}
+        onCancel={crud.cancelDelete}
         variant="danger"
       />
 
@@ -1026,7 +625,7 @@ export function ApprovalProcessesPage({
           emptyMessage={t('approvals.noInstances')}
         />
       )}
-    </div>
+    </AdminCrudPage>
   )
 }
 

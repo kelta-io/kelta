@@ -1,18 +1,23 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import React, { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useFormContext, useWatch } from 'react-hook-form'
+import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import {
-  useToast,
-  ConfirmDialog,
-  LoadingSpinner,
-  ErrorMessage,
-  ExecutionLogModal,
-} from '../../components'
+import { useToast, ConfirmDialog, ExecutionLogModal } from '../../components'
 import type { LogColumn } from '../../components'
 import type { CreateScheduledJobRequest } from '@kelta/sdk'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
+import {
+  AdminCrudPage,
+  CrudCheckboxField,
+  CrudFormDialog,
+  CrudSelectField,
+  CrudTextField,
+  useAdminCrud,
+} from '../../components/AdminCrud'
 
 interface ScheduledJobConfig {
   recipients?: string[]
@@ -35,17 +40,6 @@ interface ScheduledJob {
   updatedAt: string
 }
 
-interface ScheduledJobFormData {
-  name: string
-  description: string
-  jobType: string
-  jobReferenceId: string
-  cronExpression: string
-  timezone: string
-  active: boolean
-  recipientsText: string
-}
-
 interface ScheduledJobSubmitData {
   name: string
   description: string
@@ -55,13 +49,6 @@ interface ScheduledJobSubmitData {
   timezone: string
   active: boolean
   config?: ScheduledJobConfig
-}
-
-interface FormErrors {
-  name?: string
-  description?: string
-  cronExpression?: string
-  recipientsText?: string
 }
 
 interface JobExecutionLog {
@@ -93,377 +80,74 @@ function parseRecipients(text: string): string[] {
   return recipients
 }
 
-function validateForm(data: ScheduledJobFormData): FormErrors {
-  const errors: FormErrors = {}
-  if (!data.name.trim()) {
-    errors.name = 'Name is required'
-  } else if (data.name.length > 100) {
-    errors.name = 'Name must be 100 characters or fewer'
-  }
-  if (data.description && data.description.length > 500) {
-    errors.description = 'Description must be 500 characters or fewer'
-  }
-  if (!data.cronExpression.trim()) {
-    errors.cronExpression = 'Cron expression is required'
-  }
-  if (data.jobType === 'REPORT_EXPORT') {
+const scheduledJobSchema = z
+  .object({
+    name: z
+      .string()
+      .refine((v) => v.trim().length > 0, 'Name is required')
+      .refine((v) => v.length <= 100, 'Name must be 100 characters or fewer'),
+    description: z.string().max(500, 'Description must be 500 characters or fewer'),
+    jobType: z.string(),
+    jobReferenceId: z.string(),
+    cronExpression: z.string().refine((v) => v.trim().length > 0, 'Cron expression is required'),
+    timezone: z.string(),
+    active: z.boolean(),
+    recipientsText: z.string(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.jobType !== 'REPORT_EXPORT') return
     const invalid = parseRecipients(data.recipientsText).filter((entry) => !entry.includes('@'))
     if (invalid.length > 0) {
-      errors.recipientsText = `Invalid email addresses: ${invalid.join(', ')}`
+      ctx.addIssue({
+        code: 'custom',
+        path: ['recipientsText'],
+        message: `Invalid email addresses: ${invalid.join(', ')}`,
+      })
     }
-  }
-  return errors
-}
-
-interface ScheduledJobFormProps {
-  scheduledJob?: ScheduledJob
-  onSubmit: (data: ScheduledJobSubmitData) => void
-  onCancel: () => void
-  isSubmitting: boolean
-}
-
-function ScheduledJobForm({
-  scheduledJob,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: ScheduledJobFormProps): React.ReactElement {
-  const isEditing = !!scheduledJob
-  const [formData, setFormData] = useState<ScheduledJobFormData>({
-    name: scheduledJob?.name ?? '',
-    description: scheduledJob?.description ?? '',
-    jobType: scheduledJob?.jobType ?? 'FLOW',
-    jobReferenceId: scheduledJob?.jobReferenceId ?? '',
-    cronExpression: scheduledJob?.cronExpression ?? '',
-    timezone: scheduledJob?.timezone ?? 'UTC',
-    active: scheduledJob?.active ?? true,
-    recipientsText: scheduledJob?.config?.recipients?.join(', ') ?? '',
   })
-  const [errors, setErrors] = useState<FormErrors>({})
-  const [touched, setTouched] = useState<Record<string, boolean>>({})
-  const nameInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    nameInputRef.current?.focus()
-  }, [])
+type ScheduledJobFormData = z.infer<typeof scheduledJobSchema>
 
-  const handleChange = useCallback(
-    (field: keyof ScheduledJobFormData, value: string | boolean) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-      if (errors[field as keyof FormErrors]) {
-        setErrors((prev) => ({ ...prev, [field]: undefined }))
-      }
-    },
-    [errors]
-  )
+const JOB_TYPE_OPTIONS = [
+  { value: 'FLOW', label: 'Flow' },
+  { value: 'SCRIPT', label: 'Script' },
+  { value: 'REPORT_EXPORT', label: 'Report Export' },
+]
 
-  const handleBlur = useCallback(
-    (field: keyof FormErrors) => {
-      setTouched((prev) => ({ ...prev, [field]: true }))
-      const validationErrors = validateForm(formData)
-      if (validationErrors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: validationErrors[field] }))
-      }
-    },
-    [formData]
-  )
+/**
+ * Maps the form to the API payload. Sends config whenever the job type
+ * supports it — an explicit empty recipients list clears previously saved
+ * delivery config on edit (omitting config would leave the old value in place).
+ */
+function toSubmitData(formData: ScheduledJobFormData): ScheduledJobSubmitData {
+  const { recipientsText, ...rest } = formData
+  if (formData.jobType === 'REPORT_EXPORT') {
+    return { ...rest, config: { recipients: parseRecipients(recipientsText) } }
+  }
+  return { ...rest }
+}
 
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const validationErrors = validateForm(formData)
-      setErrors(validationErrors)
-      setTouched({ name: true, description: true, cronExpression: true, recipientsText: true })
-      if (Object.keys(validationErrors).length === 0) {
-        const { recipientsText, ...rest } = formData
-        const recipients =
-          formData.jobType === 'REPORT_EXPORT' ? parseRecipients(recipientsText) : []
-        // Send config whenever the job type supports it — an explicit empty
-        // recipients list clears previously saved delivery config on edit
-        // (omitting config would leave the old value in place).
-        onSubmit(
-          formData.jobType === 'REPORT_EXPORT' ? { ...rest, config: { recipients } } : { ...rest }
-        )
-      }
-    },
-    [formData, onSubmit]
-  )
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel()
-      }
-    },
-    [onCancel]
-  )
-
-  const title = isEditing ? 'Edit Scheduled Job' : 'Create Scheduled Job'
-
+/** Email recipients textarea — only shown for REPORT_EXPORT jobs. */
+function RecipientsField(): React.ReactElement | null {
+  const { control } = useFormContext<ScheduledJobFormData>()
+  const jobType = useWatch({ control, name: 'jobType' })
+  if (jobType !== 'REPORT_EXPORT') return null
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={handleKeyDown}
-      data-testid="scheduled-job-form-overlay"
-      role="presentation"
-    >
-      <div
-        className="w-full max-w-[600px] max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="scheduled-job-form-title"
-        data-testid="scheduled-job-form-modal"
-      >
-        <div className="flex items-center justify-between border-b border-border p-6">
-          <h2 id="scheduled-job-form-title" className="text-lg font-semibold text-foreground">
-            {title}
-          </h2>
-          <button
-            type="button"
-            className="rounded p-2 text-2xl leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            onClick={onCancel}
-            aria-label="Close"
-            data-testid="scheduled-job-form-close"
-          >
-            &times;
-          </button>
-        </div>
-        <div className="p-6">
-          <form className="flex flex-col gap-5" onSubmit={handleSubmit} noValidate>
-            <div className="flex flex-col gap-2">
-              <label htmlFor="scheduled-job-name" className="text-sm font-medium text-foreground">
-                Name
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                ref={nameInputRef}
-                id="scheduled-job-name"
-                type="text"
-                className={cn(
-                  'rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.name && errors.name && 'border-destructive'
-                )}
-                value={formData.name}
-                onChange={(e) => handleChange('name', e.target.value)}
-                onBlur={() => handleBlur('name')}
-                placeholder="Enter job name"
-                aria-required="true"
-                aria-invalid={touched.name && !!errors.name}
-                disabled={isSubmitting}
-                data-testid="scheduled-job-name-input"
-              />
-              {touched.name && errors.name && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.name}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="scheduled-job-description"
-                className="text-sm font-medium text-foreground"
-              >
-                Description
-              </label>
-              <textarea
-                id="scheduled-job-description"
-                className={cn(
-                  'min-h-[80px] resize-y rounded-md border border-border bg-background px-3 py-2.5 font-[inherit] text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.description && errors.description && 'border-destructive'
-                )}
-                value={formData.description}
-                onChange={(e) => handleChange('description', e.target.value)}
-                onBlur={() => handleBlur('description')}
-                placeholder="Enter job description"
-                disabled={isSubmitting}
-                rows={3}
-                data-testid="scheduled-job-description-input"
-              />
-              {touched.description && errors.description && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.description}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="scheduled-job-type" className="text-sm font-medium text-foreground">
-                Job Type
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <select
-                id="scheduled-job-type"
-                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                value={formData.jobType}
-                onChange={(e) => handleChange('jobType', e.target.value)}
-                disabled={isSubmitting}
-                data-testid="scheduled-job-type-input"
-              >
-                <option value="FLOW">Flow</option>
-                <option value="SCRIPT">Script</option>
-                <option value="REPORT_EXPORT">Report Export</option>
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="scheduled-job-reference-id"
-                className="text-sm font-medium text-foreground"
-              >
-                Job Reference ID
-              </label>
-              <input
-                id="scheduled-job-reference-id"
-                type="text"
-                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                value={formData.jobReferenceId}
-                onChange={(e) => handleChange('jobReferenceId', e.target.value)}
-                placeholder="Enter job reference ID"
-                disabled={isSubmitting}
-                data-testid="scheduled-job-reference-id-input"
-              />
-            </div>
-
-            {formData.jobType === 'REPORT_EXPORT' && (
-              <div className="flex flex-col gap-2">
-                <label
-                  htmlFor="scheduled-job-recipients"
-                  className="text-sm font-medium text-foreground"
-                >
-                  Email recipients
-                </label>
-                <textarea
-                  id="scheduled-job-recipients"
-                  className={cn(
-                    'min-h-[80px] resize-y rounded-md border border-border bg-background px-3 py-2.5 font-[inherit] text-sm text-foreground transition-colors',
-                    'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                    'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                    touched.recipientsText && errors.recipientsText && 'border-destructive'
-                  )}
-                  value={formData.recipientsText}
-                  onChange={(e) => handleChange('recipientsText', e.target.value)}
-                  onBlur={() => handleBlur('recipientsText')}
-                  placeholder="email1@example.com, email2@example.com"
-                  aria-invalid={touched.recipientsText && !!errors.recipientsText}
-                  disabled={isSubmitting}
-                  rows={3}
-                  data-testid="scheduled-job-recipients-input"
-                />
-                <span className="text-xs text-muted-foreground">
-                  Report CSV is emailed to these addresses after each run; leave empty to skip
-                  delivery
-                </span>
-                {touched.recipientsText && errors.recipientsText && (
-                  <span
-                    className="text-xs text-destructive"
-                    role="alert"
-                    data-testid="scheduled-job-recipients-error"
-                  >
-                    {errors.recipientsText}
-                  </span>
-                )}
-              </div>
-            )}
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="scheduled-job-cron-expression"
-                className="text-sm font-medium text-foreground"
-              >
-                Cron Expression
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                id="scheduled-job-cron-expression"
-                type="text"
-                className={cn(
-                  'rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors',
-                  'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20',
-                  'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.cronExpression && errors.cronExpression && 'border-destructive'
-                )}
-                value={formData.cronExpression}
-                onChange={(e) => handleChange('cronExpression', e.target.value)}
-                onBlur={() => handleBlur('cronExpression')}
-                placeholder="0 0 * * *"
-                aria-required="true"
-                aria-invalid={touched.cronExpression && !!errors.cronExpression}
-                disabled={isSubmitting}
-                data-testid="scheduled-job-cron-expression-input"
-              />
-              {touched.cronExpression && errors.cronExpression && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.cronExpression}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="scheduled-job-timezone"
-                className="text-sm font-medium text-foreground"
-              >
-                Timezone
-              </label>
-              <input
-                id="scheduled-job-timezone"
-                type="text"
-                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                value={formData.timezone}
-                onChange={(e) => handleChange('timezone', e.target.value)}
-                placeholder="UTC"
-                disabled={isSubmitting}
-                data-testid="scheduled-job-timezone-input"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                id="scheduled-job-active"
-                type="checkbox"
-                className="h-4 w-4 accent-primary"
-                checked={formData.active}
-                onChange={(e) => handleChange('active', e.target.checked)}
-                disabled={isSubmitting}
-                data-testid="scheduled-job-active-input"
-              />
-              <label htmlFor="scheduled-job-active" className="text-sm font-medium text-foreground">
-                Active
-              </label>
-            </div>
-
-            <div className="mt-2 flex justify-end gap-3 border-t border-border pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onCancel}
-                disabled={isSubmitting}
-                data-testid="scheduled-job-form-cancel"
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isSubmitting} data-testid="scheduled-job-form-submit">
-                {isSubmitting ? 'Saving...' : 'Save'}
-              </Button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
+    <CrudTextField<ScheduledJobFormData>
+      name="recipientsText"
+      id="scheduled-job-recipients"
+      label="Email recipients"
+      multiline
+      placeholder="email1@example.com, email2@example.com"
+      hint="Report CSV is emailed to these addresses after each run; leave empty to skip delivery"
+      testId="scheduled-job-recipients-input"
+      errorTestId="scheduled-job-recipients-error"
+    />
   )
 }
+
+const STATUS_PILL =
+  'inline-block rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary'
 
 export function ScheduledJobsPage({
   testId = 'scheduled-jobs-page',
@@ -473,12 +157,6 @@ export function ScheduledJobsPage({
   const { keltaClient } = useApi()
   const { showToast } = useToast()
 
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingScheduledJob, setEditingScheduledJob] = useState<ScheduledJob | undefined>(
-    undefined
-  )
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [scheduledJobToDelete, setScheduledJobToDelete] = useState<ScheduledJob | null>(null)
   const [logsItemId, setLogsItemId] = useState<string | null>(null)
   const [_logsItemName, setLogsItemName] = useState('')
 
@@ -542,88 +220,32 @@ export function ScheduledJobsPage({
     queryFn: () => keltaClient.admin.scheduledJobs.list(),
   })
 
-  const scheduledJobList: ScheduledJob[] = (scheduledJobs ?? []) as unknown as ScheduledJob[]
-
-  const createMutation = useMutation({
-    mutationFn: (data: ScheduledJobSubmitData) =>
-      keltaClient.admin.scheduledJobs.create('', '', data as CreateScheduledJobRequest),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scheduled-jobs'] })
-      showToast('Scheduled job created successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: ScheduledJobSubmitData }) =>
-      keltaClient.admin.scheduledJobs.update(id, data as Partial<CreateScheduledJobRequest>),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scheduled-jobs'] })
-      showToast('Scheduled job updated successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => keltaClient.admin.scheduledJobs.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scheduled-jobs'] })
-      showToast('Scheduled job deleted successfully', 'success')
-      setDeleteDialogOpen(false)
-      setScheduledJobToDelete(null)
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const handleCreate = useCallback(() => {
-    setEditingScheduledJob(undefined)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleEdit = useCallback((scheduledJob: ScheduledJob) => {
-    setEditingScheduledJob(scheduledJob)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleCloseForm = useCallback(() => {
-    setIsFormOpen(false)
-    setEditingScheduledJob(undefined)
-  }, [])
-
-  const handleFormSubmit = useCallback(
-    (data: ScheduledJobSubmitData) => {
-      if (editingScheduledJob) {
-        updateMutation.mutate({ id: editingScheduledJob.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editingScheduledJob, createMutation, updateMutation]
+  const scheduledJobList = useMemo(
+    () => (scheduledJobs ?? []) as unknown as ScheduledJob[],
+    [scheduledJobs]
   )
 
-  const handleDeleteClick = useCallback((scheduledJob: ScheduledJob) => {
-    setScheduledJobToDelete(scheduledJob)
-    setDeleteDialogOpen(true)
-  }, [])
-
-  const handleDeleteConfirm = useCallback(() => {
-    if (scheduledJobToDelete) {
-      deleteMutation.mutate(scheduledJobToDelete.id)
-    }
-  }, [scheduledJobToDelete, deleteMutation])
-
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteDialogOpen(false)
-    setScheduledJobToDelete(null)
-  }, [])
+  const crud = useAdminCrud<ScheduledJob, ScheduledJobFormData>({
+    queryKey: ['scheduled-jobs'],
+    create: (data) =>
+      keltaClient.admin.scheduledJobs.create(
+        '',
+        '',
+        toSubmitData(data) as CreateScheduledJobRequest
+      ),
+    update: (scheduledJob, data) =>
+      keltaClient.admin.scheduledJobs.update(
+        scheduledJob.id,
+        toSubmitData(data) as Partial<CreateScheduledJobRequest>
+      ),
+    remove: (scheduledJob) => keltaClient.admin.scheduledJobs.delete(scheduledJob.id),
+    messages: {
+      created: 'Scheduled job created successfully',
+      updated: 'Scheduled job updated successfully',
+      deleted: 'Scheduled job deleted successfully',
+      error: 'An error occurred',
+    },
+  })
 
   const pauseMutation = useMutation({
     mutationFn: (id: string) => keltaClient.admin.scheduledJobs.pause(id),
@@ -647,244 +269,176 @@ export function ScheduledJobsPage({
     },
   })
 
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <div className="flex min-h-[400px] items-center justify-center">
-          <LoadingSpinner size="large" label="Loading scheduled jobs..." />
-        </div>
-      </div>
-    )
-  }
+  // `cell` receives no row index, so the recipients badge keys its test id off
+  // the job's position in the list as returned by the API.
+  const jobIndex = useMemo(
+    () => new Map(scheduledJobList.map((job, index) => [job.id, index])),
+    [scheduledJobList]
+  )
 
-  if (error) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <ErrorMessage
-          error={error instanceof Error ? error : new Error('An error occurred')}
-          onRetry={() => refetch()}
-        />
-      </div>
-    )
-  }
+  const columns = useMemo<AdminColumn<ScheduledJob>[]>(
+    () => [
+      { id: 'name', header: 'Name', cellClassName: 'text-foreground' },
+      {
+        id: 'jobType',
+        header: 'Job Type',
+        cell: (job) => {
+          const recipientCount = job.config?.recipients?.length ?? 0
+          return (
+            <>
+              <span className={STATUS_PILL}>{job.jobType}</span>
+              {job.jobType === 'REPORT_EXPORT' && recipientCount > 0 && (
+                <span
+                  className="ml-2 inline-block rounded-full bg-muted px-2 py-1 text-xs font-semibold text-muted-foreground"
+                  data-testid={`recipients-badge-${jobIndex.get(job.id)}`}
+                >
+                  {recipientCount} {recipientCount === 1 ? 'recipient' : 'recipients'}
+                </span>
+              )}
+            </>
+          )
+        },
+      },
+      { id: 'cronExpression', header: 'Cron Expression', cellClassName: 'text-foreground' },
+      {
+        id: 'active',
+        header: 'Active',
+        cell: (job) => (
+          <span
+            className={cn(
+              'inline-block rounded-full px-3 py-1 text-xs font-semibold',
+              job.active
+                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                : 'bg-muted text-muted-foreground'
+            )}
+          >
+            {job.active ? 'Yes' : 'No'}
+          </span>
+        ),
+      },
+      {
+        id: 'lastRun',
+        header: 'Last Run',
+        cell: (job) =>
+          job.lastRun
+            ? formatDate(new Date(job.lastRun), {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : '-',
+        cellClassName: 'text-foreground',
+      },
+      {
+        id: 'lastStatus',
+        header: 'Last Status',
+        cell: (job) =>
+          job.lastStatus ? <span className={STATUS_PILL}>{job.lastStatus}</span> : '-',
+        cellClassName: 'text-foreground',
+      },
+    ],
+    [formatDate, jobIndex]
+  )
 
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const editing = crud.editing
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Scheduled jobs</h1>
+    <AdminCrudPage
+      testId={testId}
+      title="Scheduled jobs"
+      actions={
         <Button
           type="button"
-          onClick={handleCreate}
+          onClick={crud.openCreate}
           aria-label="Create Scheduled Job"
           data-testid="add-scheduled-job-button"
         >
           Create Scheduled Job
         </Button>
-      </header>
-
-      {scheduledJobList.length === 0 ? (
-        <div
-          className="rounded-lg border border-border bg-card py-16 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          <p>No scheduled jobs found.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table
-            className="w-full border-collapse"
-            role="grid"
-            aria-label="Scheduled Jobs"
-            data-testid="scheduled-jobs-table"
-          >
-            <thead>
-              <tr role="row" className="bg-muted">
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+      }
+      isLoading={isLoading}
+      error={error}
+      onRetry={() => refetch()}
+      isEmpty={scheduledJobList.length === 0}
+      emptyMessage="No scheduled jobs found."
+      list={
+        <AdminDataTable
+          tableId="scheduled-jobs"
+          testId="scheduled-jobs-table"
+          ariaLabel="Scheduled Jobs"
+          actionsHeader="Actions"
+          columns={columns}
+          rows={scheduledJobList}
+          rowKey={(job) => job.id}
+          rowTestId={(_, index) => `scheduled-job-row-${index}`}
+          renderActions={(scheduledJob, index) => (
+            <div className="flex justify-end gap-2">
+              {scheduledJob.active ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => pauseMutation.mutate(scheduledJob.id)}
+                  disabled={pauseMutation.isPending}
+                  aria-label={`Pause ${scheduledJob.name}`}
+                  data-testid={`pause-button-${index}`}
                 >
-                  Name
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                  Pause
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => resumeMutation.mutate(scheduledJob.id)}
+                  disabled={resumeMutation.isPending}
+                  aria-label={`Resume ${scheduledJob.name}`}
+                  data-testid={`resume-button-${index}`}
                 >
-                  Job Type
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Cron Expression
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Active
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Last Run
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Last Status
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {scheduledJobList.map((scheduledJob, index) => (
-                <tr
-                  key={scheduledJob.id}
-                  role="row"
-                  className="border-b border-border transition-colors last:border-b-0 hover:bg-muted/50"
-                  data-testid={`scheduled-job-row-${index}`}
-                >
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    {scheduledJob.name}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    <span className="inline-block rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
-                      {scheduledJob.jobType}
-                    </span>
-                    {scheduledJob.jobType === 'REPORT_EXPORT' &&
-                      (scheduledJob.config?.recipients?.length ?? 0) > 0 && (
-                        <span
-                          className="ml-2 inline-block rounded-full bg-muted px-2 py-1 text-xs font-semibold text-muted-foreground"
-                          data-testid={`recipients-badge-${index}`}
-                        >
-                          {scheduledJob.config?.recipients?.length}{' '}
-                          {scheduledJob.config?.recipients?.length === 1
-                            ? 'recipient'
-                            : 'recipients'}
-                        </span>
-                      )}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    {scheduledJob.cronExpression}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    <span
-                      className={cn(
-                        'inline-block rounded-full px-3 py-1 text-xs font-semibold',
-                        scheduledJob.active
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : 'bg-muted text-muted-foreground'
-                      )}
-                    >
-                      {scheduledJob.active ? 'Yes' : 'No'}
-                    </span>
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    {scheduledJob.lastRun
-                      ? formatDate(new Date(scheduledJob.lastRun), {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })
-                      : '-'}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-foreground">
-                    {scheduledJob.lastStatus ? (
-                      <span className="inline-block rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
-                        {scheduledJob.lastStatus}
-                      </span>
-                    ) : (
-                      '-'
-                    )}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-right text-sm">
-                    <div className="flex justify-end gap-2">
-                      {scheduledJob.active ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => pauseMutation.mutate(scheduledJob.id)}
-                          disabled={pauseMutation.isPending}
-                          aria-label={`Pause ${scheduledJob.name}`}
-                          data-testid={`pause-button-${index}`}
-                        >
-                          Pause
-                        </Button>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => resumeMutation.mutate(scheduledJob.id)}
-                          disabled={resumeMutation.isPending}
-                          aria-label={`Resume ${scheduledJob.name}`}
-                          data-testid={`resume-button-${index}`}
-                        >
-                          Resume
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setLogsItemId(scheduledJob.id)
-                          setLogsItemName(scheduledJob.name)
-                        }}
-                        aria-label={`View logs for ${scheduledJob.name}`}
-                        data-testid={`logs-button-${index}`}
-                      >
-                        Logs
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEdit(scheduledJob)}
-                        aria-label={`Edit ${scheduledJob.name}`}
-                        data-testid={`edit-button-${index}`}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="border-destructive/30 text-destructive hover:bg-destructive/10"
-                        onClick={() => handleDeleteClick(scheduledJob)}
-                        aria-label={`Delete ${scheduledJob.name}`}
-                        data-testid={`delete-button-${index}`}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
+                  Resume
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setLogsItemId(scheduledJob.id)
+                  setLogsItemName(scheduledJob.name)
+                }}
+                aria-label={`View logs for ${scheduledJob.name}`}
+                data-testid={`logs-button-${index}`}
+              >
+                Logs
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => crud.openEdit(scheduledJob)}
+                aria-label={`Edit ${scheduledJob.name}`}
+                data-testid={`edit-button-${index}`}
+              >
+                Edit
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={() => crud.requestDelete(scheduledJob)}
+                aria-label={`Delete ${scheduledJob.name}`}
+                data-testid={`delete-button-${index}`}
+              >
+                Delete
+              </Button>
+            </div>
+          )}
+        />
+      }
+    >
       {logsItemId && (
         <ExecutionLogModal<JobExecutionLog>
           title="Scheduled Job Logs"
@@ -898,26 +452,92 @@ export function ScheduledJobsPage({
         />
       )}
 
-      {isFormOpen && (
-        <ScheduledJobForm
-          scheduledJob={editingScheduledJob}
-          onSubmit={handleFormSubmit}
-          onCancel={handleCloseForm}
-          isSubmitting={isSubmitting}
+      <CrudFormDialog<ScheduledJobFormData>
+        open={crud.isFormOpen}
+        onClose={crud.closeForm}
+        title={editing ? 'Edit Scheduled Job' : 'Create Scheduled Job'}
+        schema={scheduledJobSchema}
+        defaultValues={{
+          name: editing?.name ?? '',
+          description: editing?.description ?? '',
+          jobType: editing?.jobType ?? 'FLOW',
+          jobReferenceId: editing?.jobReferenceId ?? '',
+          cronExpression: editing?.cronExpression ?? '',
+          timezone: editing?.timezone ?? 'UTC',
+          active: editing?.active ?? true,
+          recipientsText: editing?.config?.recipients?.join(', ') ?? '',
+        }}
+        onSubmit={crud.submit}
+        isSubmitting={crud.isSaving}
+        testIdPrefix="scheduled-job"
+        className="sm:max-w-[600px]"
+      >
+        <CrudTextField<ScheduledJobFormData>
+          name="name"
+          id="scheduled-job-name"
+          label="Name"
+          required
+          placeholder="Enter job name"
+          testId="scheduled-job-name-input"
         />
-      )}
+        <CrudTextField<ScheduledJobFormData>
+          name="description"
+          id="scheduled-job-description"
+          label="Description"
+          multiline
+          placeholder="Enter job description"
+          testId="scheduled-job-description-input"
+        />
+        <CrudSelectField<ScheduledJobFormData>
+          name="jobType"
+          id="scheduled-job-type"
+          label="Job Type"
+          required
+          options={JOB_TYPE_OPTIONS}
+          testId="scheduled-job-type-input"
+        />
+        <CrudTextField<ScheduledJobFormData>
+          name="jobReferenceId"
+          id="scheduled-job-reference-id"
+          label="Job Reference ID"
+          placeholder="Enter job reference ID"
+          testId="scheduled-job-reference-id-input"
+        />
+        <RecipientsField />
+        <CrudTextField<ScheduledJobFormData>
+          name="cronExpression"
+          id="scheduled-job-cron-expression"
+          label="Cron Expression"
+          required
+          placeholder="0 0 * * *"
+          testId="scheduled-job-cron-expression-input"
+        />
+        <CrudTextField<ScheduledJobFormData>
+          name="timezone"
+          id="scheduled-job-timezone"
+          label="Timezone"
+          placeholder="UTC"
+          testId="scheduled-job-timezone-input"
+        />
+        <CrudCheckboxField<ScheduledJobFormData>
+          name="active"
+          id="scheduled-job-active"
+          label="Active"
+          testId="scheduled-job-active-input"
+        />
+      </CrudFormDialog>
 
       <ConfirmDialog
-        open={deleteDialogOpen}
+        open={crud.deleteTarget !== null}
         title="Delete Scheduled Job"
         message="Are you sure you want to delete this scheduled job? This action cannot be undone."
         confirmLabel="Delete"
         cancelLabel="Cancel"
-        onConfirm={handleDeleteConfirm}
-        onCancel={handleDeleteCancel}
+        onConfirm={crud.confirmDelete}
+        onCancel={crud.cancelDelete}
         variant="danger"
       />
-    </div>
+    </AdminCrudPage>
   )
 }
 

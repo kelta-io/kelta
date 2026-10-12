@@ -1,10 +1,21 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useFormContext, useWatch } from 'react-hook-form'
+import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { useToast, ConfirmDialog, LoadingSpinner } from '../../components'
 import type { CreateConnectedAppRequest } from '@kelta/sdk'
 import { cn } from '@/lib/utils'
+import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
+import {
+  AdminCrudPage,
+  CrudCheckboxField,
+  CrudFormDialog,
+  CrudNumberField,
+  CrudTextField,
+  useAdminCrud,
+} from '../../components/AdminCrud'
 
 interface ConnectedApp {
   id: string
@@ -36,29 +47,6 @@ interface ConnectedAppCreatedResponse {
   updatedAt: string
 }
 
-interface ConnectedAppFormData {
-  name: string
-  description: string
-  scopes: string
-  redirectUris: string
-  ipRestrictions: string
-  rateLimitPerHour: number
-  active: boolean
-  allowClientCredentials: boolean
-  allowAuthorizationCode: boolean
-  requirePkce: boolean
-  consentRequired: boolean
-}
-
-interface FormErrors {
-  name?: string
-  description?: string
-  scopes?: string
-  redirectUris?: string
-  ipRestrictions?: string
-  rateLimitPerHour?: string
-}
-
 export interface ConnectedAppsPageProps {
   testId?: string
 }
@@ -80,484 +68,128 @@ export function buildGrantTypesJson(
   return JSON.stringify(grants)
 }
 
-function validateForm(data: ConnectedAppFormData): FormErrors {
-  const errors: FormErrors = {}
-  if (!data.name.trim()) {
-    errors.name = 'Name is required'
-  } else if (data.name.length > 100) {
-    errors.name = 'Name must be 100 characters or fewer'
+const splitLines = (text: string): string[] =>
+  text
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+const CIDR_PATTERN = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d{1,2})?$/
+
+function isValidUrl(uri: string): boolean {
+  try {
+    new URL(uri)
+    return true
+  } catch {
+    return false
   }
-  if (data.description && data.description.length > 500) {
-    errors.description = 'Description must be 500 characters or fewer'
-  }
-  if (data.scopes.trim()) {
+}
+
+const connectedAppSchema = z.object({
+  name: z
+    .string()
+    .refine((v) => v.trim().length > 0, 'Name is required')
+    .refine((v) => v.length <= 100, 'Name must be 100 characters or fewer'),
+  description: z.string().max(500, 'Description must be 500 characters or fewer'),
+  scopes: z.string().superRefine((value, ctx) => {
+    if (!value.trim()) return
     try {
-      const parsed = JSON.parse(data.scopes)
-      if (!Array.isArray(parsed)) {
-        errors.scopes = 'Scopes must be a JSON array (e.g. ["api"])'
+      if (!Array.isArray(JSON.parse(value))) {
+        ctx.addIssue({ code: 'custom', message: 'Scopes must be a JSON array (e.g. ["api"])' })
       }
     } catch {
-      errors.scopes = 'Scopes must be valid JSON (e.g. ["api"])'
+      ctx.addIssue({ code: 'custom', message: 'Scopes must be valid JSON (e.g. ["api"])' })
     }
-  }
-  if (data.redirectUris.trim()) {
-    const uris = data.redirectUris
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean)
-    for (const uri of uris) {
-      try {
-        new URL(uri)
-      } catch {
-        errors.redirectUris =
-          'Each redirect URI must be a valid URL (e.g. https://example.com/callback)'
-        break
-      }
-    }
-  }
-  if (data.ipRestrictions.trim()) {
-    const cidrs = data.ipRestrictions
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean)
-    const cidrPattern = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d{1,2})?$/
-    for (const cidr of cidrs) {
-      if (!cidrPattern.test(cidr)) {
-        errors.ipRestrictions = 'Each entry must be a valid IP or CIDR (e.g. 10.0.0.0/8)'
-        break
-      }
-    }
-  }
-  if (data.rateLimitPerHour < 1 || data.rateLimitPerHour > 1000000) {
-    errors.rateLimitPerHour = 'Rate limit must be between 1 and 1,000,000'
-  }
-  return errors
+  }),
+  redirectUris: z
+    .string()
+    .refine(
+      (v) => splitLines(v).every(isValidUrl),
+      'Each redirect URI must be a valid URL (e.g. https://example.com/callback)'
+    ),
+  ipRestrictions: z
+    .string()
+    .refine(
+      (v) => splitLines(v).every((cidr) => CIDR_PATTERN.test(cidr)),
+      'Each entry must be a valid IP or CIDR (e.g. 10.0.0.0/8)'
+    ),
+  rateLimitPerHour: z
+    .number()
+    .refine((v) => v >= 1 && v <= 1000000, 'Rate limit must be between 1 and 1,000,000'),
+  active: z.boolean(),
+  allowClientCredentials: z.boolean(),
+  allowAuthorizationCode: z.boolean(),
+  requirePkce: z.boolean(),
+  consentRequired: z.boolean(),
+})
+
+type ConnectedAppFormData = z.infer<typeof connectedAppSchema>
+
+const toJsonArray = (text: string): string | undefined => {
+  const items = splitLines(text)
+  return items.length > 0 ? JSON.stringify(items) : undefined
 }
 
-interface ConnectedAppFormProps {
-  connectedApp?: ConnectedApp
-  onSubmit: (data: ConnectedAppFormData) => void
-  onCancel: () => void
-  isSubmitting: boolean
-}
+const toConnectedAppRequest = (data: ConnectedAppFormData): CreateConnectedAppRequest => ({
+  name: data.name,
+  description: data.description || undefined,
+  scopes: data.scopes || undefined,
+  redirectUris: toJsonArray(data.redirectUris),
+  ipRestrictions: toJsonArray(data.ipRestrictions),
+  rateLimitPerHour: data.rateLimitPerHour,
+  active: data.active,
+  grantTypes: buildGrantTypesJson(data.allowClientCredentials, data.allowAuthorizationCode),
+  requirePkce: data.allowAuthorizationCode ? data.requirePkce : false,
+  consentRequired: data.allowAuthorizationCode ? data.consentRequired : false,
+})
 
-function ConnectedAppForm({
-  connectedApp,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: ConnectedAppFormProps): React.ReactElement {
-  const isEditing = !!connectedApp
-  const [formData, setFormData] = useState<ConnectedAppFormData>({
-    name: connectedApp?.name ?? '',
-    description: connectedApp?.description ?? '',
-    scopes: '',
-    redirectUris: connectedApp?.redirectUris?.join('\n') ?? '',
-    ipRestrictions: connectedApp?.ipRestrictions?.join('\n') ?? '',
-    rateLimitPerHour: connectedApp?.rateLimitPerHour ?? 10000,
-    active: connectedApp?.active ?? true,
-    // Default a brand-new app to client_credentials only (matches the DB default);
-    // an existing app reflects its stored grant_types.
-    allowClientCredentials: connectedApp
-      ? (connectedApp.grantTypes?.includes('client_credentials') ?? false)
-      : true,
-    allowAuthorizationCode: connectedApp?.grantTypes?.includes('authorization_code') ?? false,
-    requirePkce: connectedApp?.requirePkce ?? false,
-    consentRequired: connectedApp?.consentRequired ?? true,
-  })
-  const [errors, setErrors] = useState<FormErrors>({})
-  const [touched, setTouched] = useState<Record<string, boolean>>({})
-  const nameInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    nameInputRef.current?.focus()
-  }, [])
-
-  const handleChange = useCallback(
-    (field: keyof ConnectedAppFormData, value: string | boolean | number) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-      if (errors[field as keyof FormErrors]) {
-        setErrors((prev) => ({ ...prev, [field]: undefined }))
-      }
-    },
-    [errors]
-  )
-
-  const handleBlur = useCallback(
-    (field: keyof FormErrors) => {
-      setTouched((prev) => ({ ...prev, [field]: true }))
-      const validationErrors = validateForm(formData)
-      if (validationErrors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: validationErrors[field] }))
-      }
-    },
-    [formData]
-  )
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const validationErrors = validateForm(formData)
-      setErrors(validationErrors)
-      setTouched({
-        name: true,
-        description: true,
-        scopes: true,
-        redirectUris: true,
-        ipRestrictions: true,
-        rateLimitPerHour: true,
-      })
-      if (Object.keys(validationErrors).length === 0) {
-        onSubmit(formData)
-      }
-    },
-    [formData, onSubmit]
-  )
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel()
-      }
-    },
-    [onCancel]
-  )
-
-  const title = isEditing ? 'Edit Connected App' : 'Create Connected App'
-
+/** OAuth grant-type checkboxes; PKCE / consent only apply to authorization code. */
+function GrantTypesFieldset(): React.ReactElement {
+  const { control } = useFormContext<ConnectedAppFormData>()
+  const allowAuthorizationCode = useWatch({ control, name: 'allowAuthorizationCode' })
   return (
-    <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={handleKeyDown}
-      data-testid="connected-app-form-overlay"
-      role="presentation"
-    >
-      <div
-        className="w-full max-w-[700px] max-h-[90vh] overflow-y-auto rounded-lg bg-card shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="connected-app-form-title"
-        data-testid="connected-app-form-modal"
-      >
-        <div className="flex items-center justify-between border-b border-border p-6">
-          <h2 id="connected-app-form-title" className="m-0 text-xl font-semibold text-foreground">
-            {title}
-          </h2>
-          <button
-            type="button"
-            className="rounded p-2 text-2xl leading-none text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={onCancel}
-            aria-label="Close"
-            data-testid="connected-app-form-close"
-          >
-            &times;
-          </button>
+    <fieldset className="space-y-2 rounded-md border border-border p-3">
+      <legend className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        OAuth grant types
+      </legend>
+      <p className="text-xs text-muted-foreground">
+        Client credentials mints machine tokens from the app&apos;s secret. Authorization code lets
+        the app sign a user in (redirect + consent) and act on their behalf.
+      </p>
+      <CrudCheckboxField<ConnectedAppFormData>
+        name="allowClientCredentials"
+        id="connected-app-grant-cc"
+        label="Client credentials"
+        testId="connected-app-grant-cc-input"
+      />
+      <CrudCheckboxField<ConnectedAppFormData>
+        name="allowAuthorizationCode"
+        id="connected-app-grant-ac"
+        label="Authorization code"
+        testId="connected-app-grant-ac-input"
+      />
+      {allowAuthorizationCode && (
+        <div className="ml-6 space-y-2 border-l border-border pl-4">
+          <CrudCheckboxField<ConnectedAppFormData>
+            name="requirePkce"
+            id="connected-app-pkce"
+            label="Require PKCE (public client — no secret, e.g. an SPA/mobile app)"
+            testId="connected-app-pkce-input"
+          />
+          <CrudCheckboxField<ConnectedAppFormData>
+            name="consentRequired"
+            id="connected-app-consent"
+            label="Show a consent screen"
+            testId="connected-app-consent-input"
+          />
         </div>
-        <div className="p-6">
-          <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-            <div>
-              <label
-                htmlFor="connected-app-name"
-                className="mb-1 block text-sm font-medium text-foreground"
-              >
-                Name
-                <span className="ml-0.5 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                ref={nameInputRef}
-                id="connected-app-name"
-                type="text"
-                className={cn(
-                  'w-full rounded-md border px-3 py-2 text-sm text-foreground bg-background focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-                  touched.name && errors.name ? 'border-destructive' : 'border-border'
-                )}
-                value={formData.name}
-                onChange={(e) => handleChange('name', e.target.value)}
-                onBlur={() => handleBlur('name')}
-                placeholder="Enter connected app name"
-                aria-required="true"
-                aria-invalid={touched.name && !!errors.name}
-                disabled={isSubmitting}
-                data-testid="connected-app-name-input"
-              />
-              {touched.name && errors.name && (
-                <span className="mt-1 block text-xs text-destructive" role="alert">
-                  {errors.name}
-                </span>
-              )}
-            </div>
-
-            <div>
-              <label
-                htmlFor="connected-app-description"
-                className="mb-1 block text-sm font-medium text-foreground"
-              >
-                Description
-              </label>
-              <textarea
-                id="connected-app-description"
-                className={cn(
-                  'w-full rounded-md border px-3 py-2 text-sm text-foreground bg-background focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-                  touched.description && errors.description ? 'border-destructive' : 'border-border'
-                )}
-                value={formData.description}
-                onChange={(e) => handleChange('description', e.target.value)}
-                onBlur={() => handleBlur('description')}
-                placeholder="Enter connected app description"
-                disabled={isSubmitting}
-                rows={3}
-                data-testid="connected-app-description-input"
-              />
-              {touched.description && errors.description && (
-                <span className="mt-1 block text-xs text-destructive" role="alert">
-                  {errors.description}
-                </span>
-              )}
-            </div>
-
-            {!isEditing && (
-              <div>
-                <label
-                  htmlFor="connected-app-scopes"
-                  className="mb-1 block text-sm font-medium text-foreground"
-                >
-                  Scopes
-                </label>
-                <input
-                  id="connected-app-scopes"
-                  type="text"
-                  className={cn(
-                    'w-full rounded-md border px-3 py-2 text-sm text-foreground bg-background focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-                    touched.scopes && errors.scopes ? 'border-destructive' : 'border-border'
-                  )}
-                  value={formData.scopes}
-                  onChange={(e) => handleChange('scopes', e.target.value)}
-                  onBlur={() => handleBlur('scopes')}
-                  placeholder='["api"]'
-                  disabled={isSubmitting}
-                  data-testid="connected-app-scopes-input"
-                />
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  JSON array of scope strings
-                </span>
-                {touched.scopes && errors.scopes && (
-                  <span className="mt-1 block text-xs text-destructive" role="alert">
-                    {errors.scopes}
-                  </span>
-                )}
-              </div>
-            )}
-
-            <div>
-              <label
-                htmlFor="connected-app-redirect-uris"
-                className="mb-1 block text-sm font-medium text-foreground"
-              >
-                Redirect URIs
-              </label>
-              <textarea
-                id="connected-app-redirect-uris"
-                className={cn(
-                  'w-full rounded-md border px-3 py-2 text-sm text-foreground bg-background focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-                  touched.redirectUris && errors.redirectUris
-                    ? 'border-destructive'
-                    : 'border-border'
-                )}
-                value={formData.redirectUris}
-                onChange={(e) => handleChange('redirectUris', e.target.value)}
-                onBlur={() => handleBlur('redirectUris')}
-                placeholder="https://example.com/callback"
-                disabled={isSubmitting}
-                rows={3}
-                data-testid="connected-app-redirect-uris-input"
-              />
-              <span className="mt-1 block text-xs text-muted-foreground">One URI per line</span>
-              {touched.redirectUris && errors.redirectUris && (
-                <span className="mt-1 block text-xs text-destructive" role="alert">
-                  {errors.redirectUris}
-                </span>
-              )}
-            </div>
-
-            <div>
-              <label
-                htmlFor="connected-app-ip-restrictions"
-                className="mb-1 block text-sm font-medium text-foreground"
-              >
-                IP Restrictions
-              </label>
-              <textarea
-                id="connected-app-ip-restrictions"
-                className={cn(
-                  'w-full rounded-md border px-3 py-2 text-sm text-foreground bg-background focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-                  touched.ipRestrictions && errors.ipRestrictions
-                    ? 'border-destructive'
-                    : 'border-border'
-                )}
-                value={formData.ipRestrictions}
-                onChange={(e) => handleChange('ipRestrictions', e.target.value)}
-                onBlur={() => handleBlur('ipRestrictions')}
-                placeholder="10.0.0.0/8"
-                disabled={isSubmitting}
-                rows={3}
-                data-testid="connected-app-ip-restrictions-input"
-              />
-              <span className="mt-1 block text-xs text-muted-foreground">
-                One CIDR block per line. Leave empty for no restrictions.
-              </span>
-              {touched.ipRestrictions && errors.ipRestrictions && (
-                <span className="mt-1 block text-xs text-destructive" role="alert">
-                  {errors.ipRestrictions}
-                </span>
-              )}
-            </div>
-
-            <div>
-              <label
-                htmlFor="connected-app-rate-limit"
-                className="mb-1 block text-sm font-medium text-foreground"
-              >
-                Rate Limit (per hour)
-              </label>
-              <input
-                id="connected-app-rate-limit"
-                type="number"
-                className={cn(
-                  'w-full rounded-md border px-3 py-2 text-sm text-foreground bg-background focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary',
-                  touched.rateLimitPerHour && errors.rateLimitPerHour
-                    ? 'border-destructive'
-                    : 'border-border'
-                )}
-                value={formData.rateLimitPerHour}
-                onChange={(e) =>
-                  handleChange('rateLimitPerHour', parseInt(e.target.value, 10) || 1)
-                }
-                onBlur={() => handleBlur('rateLimitPerHour')}
-                min={1}
-                max={1000000}
-                disabled={isSubmitting}
-                data-testid="connected-app-rate-limit-input"
-              />
-              {touched.rateLimitPerHour && errors.rateLimitPerHour && (
-                <span className="mt-1 block text-xs text-destructive" role="alert">
-                  {errors.rateLimitPerHour}
-                </span>
-              )}
-            </div>
-
-            <fieldset className="space-y-2 rounded-md border border-border p-3">
-              <legend className="px-1 text-sm font-medium text-foreground">
-                OAuth grant types
-              </legend>
-              <p className="text-xs text-muted-foreground">
-                Client credentials mints machine tokens from the app&apos;s secret. Authorization
-                code lets the app sign a user in (redirect + consent) and act on their behalf.
-              </p>
-              <div className="flex items-center gap-2">
-                <input
-                  id="connected-app-grant-cc"
-                  type="checkbox"
-                  checked={formData.allowClientCredentials}
-                  onChange={(e) => handleChange('allowClientCredentials', e.target.checked)}
-                  disabled={isSubmitting}
-                  className="h-4 w-4 accent-primary"
-                  data-testid="connected-app-grant-cc-input"
-                />
-                <label htmlFor="connected-app-grant-cc" className="text-sm text-foreground">
-                  Client credentials
-                </label>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="connected-app-grant-ac"
-                  type="checkbox"
-                  checked={formData.allowAuthorizationCode}
-                  onChange={(e) => handleChange('allowAuthorizationCode', e.target.checked)}
-                  disabled={isSubmitting}
-                  className="h-4 w-4 accent-primary"
-                  data-testid="connected-app-grant-ac-input"
-                />
-                <label htmlFor="connected-app-grant-ac" className="text-sm text-foreground">
-                  Authorization code
-                </label>
-              </div>
-              {formData.allowAuthorizationCode && (
-                <div className="ml-6 space-y-2 border-l border-border pl-4">
-                  <div className="flex items-center gap-2">
-                    <input
-                      id="connected-app-pkce"
-                      type="checkbox"
-                      checked={formData.requirePkce}
-                      onChange={(e) => handleChange('requirePkce', e.target.checked)}
-                      disabled={isSubmitting}
-                      className="h-4 w-4 accent-primary"
-                      data-testid="connected-app-pkce-input"
-                    />
-                    <label htmlFor="connected-app-pkce" className="text-sm text-foreground">
-                      Require PKCE (public client — no secret, e.g. an SPA/mobile app)
-                    </label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      id="connected-app-consent"
-                      type="checkbox"
-                      checked={formData.consentRequired}
-                      onChange={(e) => handleChange('consentRequired', e.target.checked)}
-                      disabled={isSubmitting}
-                      className="h-4 w-4 accent-primary"
-                      data-testid="connected-app-consent-input"
-                    />
-                    <label htmlFor="connected-app-consent" className="text-sm text-foreground">
-                      Show a consent screen
-                    </label>
-                  </div>
-                </div>
-              )}
-            </fieldset>
-
-            <div className="flex items-center gap-2">
-              <input
-                id="connected-app-active"
-                type="checkbox"
-                checked={formData.active}
-                onChange={(e) => handleChange('active', e.target.checked)}
-                disabled={isSubmitting}
-                className="h-4 w-4 accent-primary"
-                data-testid="connected-app-active-input"
-              />
-              <label htmlFor="connected-app-active" className="text-sm font-medium text-foreground">
-                Active
-              </label>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                className="rounded-md border border-border bg-secondary px-4 py-2 text-sm text-foreground hover:bg-muted disabled:opacity-50"
-                onClick={onCancel}
-                disabled={isSubmitting}
-                data-testid="connected-app-form-cancel"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                disabled={isSubmitting}
-                data-testid="connected-app-form-submit"
-              >
-                {isSubmitting ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
+      )}
+    </fieldset>
   )
 }
+
+const ACTION_BUTTON =
+  'rounded-md border border-border px-3 py-1.5 text-sm font-medium text-primary hover:border-primary hover:bg-muted'
 
 interface CredentialsDialogProps {
   clientId: string
@@ -656,10 +288,6 @@ export function ConnectedAppsPage({
   const { keltaClient } = useApi()
   const { showToast } = useToast()
 
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingApp, setEditingApp] = useState<ConnectedApp | undefined>(undefined)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [appToDelete, setAppToDelete] = useState<ConnectedApp | null>(null)
   const [tokensAppId, setTokensAppId] = useState<string | null>(null)
   const [tokensAppName, setTokensAppName] = useState('')
   const [auditAppId, setAuditAppId] = useState<string | null>(null)
@@ -703,322 +331,259 @@ export function ConnectedAppsPage({
     onError: (err: Error) => showToast(err.message || 'Failed to revoke token', 'error'),
   })
 
-  const toJsonArray = (text: string): string | undefined => {
-    const items = text
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean)
-    return items.length > 0 ? JSON.stringify(items) : undefined
-  }
-
-  const toConnectedAppRequest = (data: ConnectedAppFormData): CreateConnectedAppRequest => ({
-    name: data.name,
-    description: data.description || undefined,
-    scopes: data.scopes || undefined,
-    redirectUris: toJsonArray(data.redirectUris),
-    ipRestrictions: toJsonArray(data.ipRestrictions),
-    rateLimitPerHour: data.rateLimitPerHour,
-    active: data.active,
-    grantTypes: buildGrantTypesJson(data.allowClientCredentials, data.allowAuthorizationCode),
-    requirePkce: data.allowAuthorizationCode ? data.requirePkce : false,
-    consentRequired: data.allowAuthorizationCode ? data.consentRequired : false,
-  })
-
-  const createMutation = useMutation({
-    mutationFn: (data: ConnectedAppFormData) =>
-      keltaClient.admin.connectedApps.create('', '', toConnectedAppRequest(data)),
-    onSuccess: (result: ConnectedAppCreatedResponse) => {
-      queryClient.invalidateQueries({ queryKey: ['connected-apps'] })
-      showToast('Connected app created successfully', 'success')
-      handleCloseForm()
-      setCreatedCredentials({ clientId: result.clientId, clientSecret: result.clientSecret })
+  const crud = useAdminCrud<ConnectedApp, ConnectedAppFormData>({
+    queryKey: ['connected-apps'],
+    create: (data) => keltaClient.admin.connectedApps.create('', '', toConnectedAppRequest(data)),
+    update: (app, data) =>
+      keltaClient.admin.connectedApps.update(app.id, toConnectedAppRequest(data)),
+    remove: (app) => keltaClient.admin.connectedApps.delete(app.id),
+    messages: {
+      created: 'Connected app created successfully',
+      updated: 'Connected app updated successfully',
+      deleted: 'Connected app deleted successfully',
+      error: 'An error occurred',
     },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
+    // The client secret is only returned by create — reveal it once.
+    onCreated: (result) => {
+      const created = result as ConnectedAppCreatedResponse
+      setCreatedCredentials({ clientId: created.clientId, clientSecret: created.clientSecret })
     },
   })
 
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: ConnectedAppFormData }) =>
-      keltaClient.admin.connectedApps.update(id, toConnectedAppRequest(data)),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['connected-apps'] })
-      showToast('Connected app updated successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => keltaClient.admin.connectedApps.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['connected-apps'] })
-      showToast('Connected app deleted successfully', 'success')
-      setDeleteDialogOpen(false)
-      setAppToDelete(null)
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const handleCreate = useCallback(() => {
-    setEditingApp(undefined)
-    setIsFormOpen(true)
-  }, [])
-  const handleEdit = useCallback((app: ConnectedApp) => {
-    setEditingApp(app)
-    setIsFormOpen(true)
-  }, [])
-  const handleCloseForm = useCallback(() => {
-    setIsFormOpen(false)
-    setEditingApp(undefined)
-  }, [])
-
-  const handleFormSubmit = useCallback(
-    (data: ConnectedAppFormData) => {
-      if (editingApp) {
-        updateMutation.mutate({ id: editingApp.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editingApp, createMutation, updateMutation]
-  )
-
-  const handleDeleteClick = useCallback((app: ConnectedApp) => {
-    setAppToDelete(app)
-    setDeleteDialogOpen(true)
-  }, [])
-  const handleDeleteConfirm = useCallback(() => {
-    if (appToDelete) {
-      deleteMutation.mutate(appToDelete.id)
-    }
-  }, [appToDelete, deleteMutation])
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteDialogOpen(false)
-    setAppToDelete(null)
-  }, [])
   const handleCredentialsClose = useCallback(() => {
     setCreatedCredentials(null)
   }, [])
 
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <div className="flex min-h-[400px] items-center justify-center">
-          <LoadingSpinner size="large" label="Loading connected apps..." />
-        </div>
-      </div>
-    )
-  }
+  const columns = useMemo<AdminColumn<ConnectedApp>[]>(
+    () => [
+      { id: 'name', header: 'Name', cellClassName: 'text-foreground' },
+      {
+        id: 'clientId',
+        header: 'Client ID',
+        cell: (app) => (
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{app.clientId}</code>
+        ),
+      },
+      {
+        id: 'rateLimitPerHour',
+        header: 'Rate Limit',
+        cell: (app) => app.rateLimitPerHour.toLocaleString(),
+        cellClassName: 'text-foreground',
+      },
+      {
+        id: 'active',
+        header: 'Active',
+        cell: (app) => (
+          <span
+            className={cn(
+              'inline-block rounded px-2 py-0.5 text-xs font-medium',
+              app.active
+                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                : 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
+            )}
+          >
+            {app.active ? 'Yes' : 'No'}
+          </span>
+        ),
+      },
+      {
+        id: 'lastUsedAt',
+        header: 'Last Used',
+        cell: (app) =>
+          app.lastUsedAt
+            ? formatDate(new Date(app.lastUsedAt), {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+              })
+            : 'Never',
+        cellClassName: 'text-foreground',
+      },
+      {
+        id: 'createdAt',
+        header: 'Created',
+        cell: (app) =>
+          formatDate(new Date(app.createdAt), {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          }),
+        cellClassName: 'text-foreground',
+      },
+    ],
+    [formatDate]
+  )
 
-  if (error) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <ErrorMessage
-          error={error instanceof Error ? error : new Error('An error occurred')}
-          onRetry={() => refetch()}
-        />
-      </div>
-    )
-  }
-
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const editing = crud.editing
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-      <header className="flex items-center justify-between">
-        <h1 className="m-0 text-2xl font-semibold text-foreground">Connected apps</h1>
+    <AdminCrudPage
+      testId={testId}
+      title="Connected apps"
+      actions={
         <button
           type="button"
           className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          onClick={handleCreate}
+          onClick={crud.openCreate}
           aria-label="Create Connected App"
           data-testid="add-connected-app-button"
         >
           Create Connected App
         </button>
-      </header>
-
-      {appList.length === 0 ? (
-        <div
-          className="rounded-lg border border-border bg-card p-16 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          <p>No connected apps found.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table
-            className="w-full border-collapse text-sm"
-            role="grid"
-            aria-label="Connected Apps"
-            data-testid="connected-apps-table"
-          >
-            <thead>
-              <tr role="row" className="bg-muted">
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Name
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Client ID
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Rate Limit
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Active
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Last Used
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Created
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {appList.map((app, index) => (
-                <tr
-                  key={app.id}
-                  role="row"
-                  className="border-b border-border transition-colors last:border-b-0 hover:bg-muted/50"
-                  data-testid={`connected-app-row-${index}`}
-                >
-                  <td role="gridcell" className="px-4 py-3 text-foreground">
-                    {app.name}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3">
-                    <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-                      {app.clientId}
-                    </code>
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-foreground">
-                    {app.rateLimitPerHour.toLocaleString()}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3">
-                    <span
-                      className={cn(
-                        'inline-block rounded px-2 py-0.5 text-xs font-medium',
-                        app.active
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
-                      )}
-                    >
-                      {app.active ? 'Yes' : 'No'}
-                    </span>
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-foreground">
-                    {app.lastUsedAt
-                      ? formatDate(new Date(app.lastUsedAt), {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                        })
-                      : 'Never'}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-foreground">
-                    {formatDate(new Date(app.createdAt), {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-right">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-primary hover:border-primary hover:bg-muted"
-                        onClick={() => {
-                          setTokensAppId(app.id)
-                          setTokensAppName(app.name)
-                        }}
-                        aria-label={`Manage tokens for ${app.name}`}
-                        data-testid={`tokens-button-${index}`}
-                      >
-                        Tokens
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-primary hover:border-primary hover:bg-muted"
-                        onClick={() => {
-                          setAuditAppId(app.id)
-                          setAuditAppName(app.name)
-                        }}
-                        aria-label={`View audit trail for ${app.name}`}
-                        data-testid={`audit-button-${index}`}
-                      >
-                        Audit
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-primary hover:border-primary hover:bg-muted"
-                        onClick={() => handleEdit(app)}
-                        aria-label={`Edit ${app.name}`}
-                        data-testid={`edit-button-${index}`}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-destructive hover:border-destructive hover:bg-destructive/10"
-                        onClick={() => handleDeleteClick(app)}
-                        aria-label={`Delete ${app.name}`}
-                        data-testid={`delete-button-${index}`}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {isFormOpen && (
-        <ConnectedAppForm
-          connectedApp={editingApp}
-          onSubmit={handleFormSubmit}
-          onCancel={handleCloseForm}
-          isSubmitting={isSubmitting}
+      }
+      isLoading={isLoading}
+      error={error}
+      onRetry={() => refetch()}
+      isEmpty={appList.length === 0}
+      emptyMessage="No connected apps found."
+      list={
+        <AdminDataTable
+          tableId="connected-apps"
+          testId="connected-apps-table"
+          ariaLabel="Connected Apps"
+          actionsHeader="Actions"
+          columns={columns}
+          rows={appList}
+          rowKey={(app) => app.id}
+          rowTestId={(_, index) => `connected-app-row-${index}`}
+          renderActions={(app, index) => (
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className={ACTION_BUTTON}
+                onClick={() => {
+                  setTokensAppId(app.id)
+                  setTokensAppName(app.name)
+                }}
+                aria-label={`Manage tokens for ${app.name}`}
+                data-testid={`tokens-button-${index}`}
+              >
+                Tokens
+              </button>
+              <button
+                type="button"
+                className={ACTION_BUTTON}
+                onClick={() => {
+                  setAuditAppId(app.id)
+                  setAuditAppName(app.name)
+                }}
+                aria-label={`View audit trail for ${app.name}`}
+                data-testid={`audit-button-${index}`}
+              >
+                Audit
+              </button>
+              <button
+                type="button"
+                className={ACTION_BUTTON}
+                onClick={() => crud.openEdit(app)}
+                aria-label={`Edit ${app.name}`}
+                data-testid={`edit-button-${index}`}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-destructive hover:border-destructive hover:bg-destructive/10"
+                onClick={() => crud.requestDelete(app)}
+                aria-label={`Delete ${app.name}`}
+                data-testid={`delete-button-${index}`}
+              >
+                Delete
+              </button>
+            </div>
+          )}
         />
-      )}
+      }
+    >
+      <CrudFormDialog<ConnectedAppFormData>
+        open={crud.isFormOpen}
+        onClose={crud.closeForm}
+        title={editing ? 'Edit Connected App' : 'Create Connected App'}
+        schema={connectedAppSchema}
+        defaultValues={{
+          name: editing?.name ?? '',
+          description: editing?.description ?? '',
+          scopes: '',
+          redirectUris: editing?.redirectUris?.join('\n') ?? '',
+          ipRestrictions: editing?.ipRestrictions?.join('\n') ?? '',
+          rateLimitPerHour: editing?.rateLimitPerHour ?? 10000,
+          active: editing?.active ?? true,
+          // Default a brand-new app to client_credentials only (matches the DB default);
+          // an existing app reflects its stored grant_types.
+          allowClientCredentials: editing
+            ? (editing.grantTypes?.includes('client_credentials') ?? false)
+            : true,
+          allowAuthorizationCode: editing?.grantTypes?.includes('authorization_code') ?? false,
+          requirePkce: editing?.requirePkce ?? false,
+          consentRequired: editing?.consentRequired ?? true,
+        }}
+        onSubmit={crud.submit}
+        isSubmitting={crud.isSaving}
+        testIdPrefix="connected-app"
+        className="sm:max-w-[700px]"
+      >
+        <CrudTextField<ConnectedAppFormData>
+          name="name"
+          id="connected-app-name"
+          label="Name"
+          required
+          placeholder="Enter connected app name"
+          testId="connected-app-name-input"
+        />
+        <CrudTextField<ConnectedAppFormData>
+          name="description"
+          id="connected-app-description"
+          label="Description"
+          multiline
+          placeholder="Enter connected app description"
+          testId="connected-app-description-input"
+        />
+        {!editing && (
+          <CrudTextField<ConnectedAppFormData>
+            name="scopes"
+            id="connected-app-scopes"
+            label="Scopes"
+            placeholder='["api"]'
+            hint="JSON array of scope strings"
+            testId="connected-app-scopes-input"
+          />
+        )}
+        <CrudTextField<ConnectedAppFormData>
+          name="redirectUris"
+          id="connected-app-redirect-uris"
+          label="Redirect URIs"
+          multiline
+          placeholder="https://example.com/callback"
+          hint="One URI per line"
+          testId="connected-app-redirect-uris-input"
+        />
+        <CrudTextField<ConnectedAppFormData>
+          name="ipRestrictions"
+          id="connected-app-ip-restrictions"
+          label="IP Restrictions"
+          multiline
+          placeholder="10.0.0.0/8"
+          hint="One CIDR block per line. Leave empty for no restrictions."
+          testId="connected-app-ip-restrictions-input"
+        />
+        <CrudNumberField<ConnectedAppFormData>
+          name="rateLimitPerHour"
+          id="connected-app-rate-limit"
+          label="Rate Limit (per hour)"
+          min={1}
+          max={1000000}
+          parse={(raw) => parseInt(raw, 10) || 1}
+          testId="connected-app-rate-limit-input"
+        />
+        <GrantTypesFieldset />
+        <CrudCheckboxField<ConnectedAppFormData>
+          name="active"
+          id="connected-app-active"
+          label="Active"
+          testId="connected-app-active-input"
+        />
+      </CrudFormDialog>
+
       {createdCredentials && (
         <CredentialsDialog
           clientId={createdCredentials.clientId}
@@ -1028,13 +593,13 @@ export function ConnectedAppsPage({
       )}
 
       <ConfirmDialog
-        open={deleteDialogOpen}
+        open={crud.deleteTarget !== null}
         title="Delete Connected App"
         message="Are you sure you want to delete this connected app? This action cannot be undone."
         confirmLabel="Delete"
         cancelLabel="Cancel"
-        onConfirm={handleDeleteConfirm}
-        onCancel={handleDeleteCancel}
+        onConfirm={crud.confirmDelete}
+        onCancel={crud.cancelDelete}
         variant="danger"
       />
 
@@ -1250,7 +815,7 @@ export function ConnectedAppsPage({
           </div>
         </div>
       )}
-    </div>
+    </AdminCrudPage>
   )
 }
 
