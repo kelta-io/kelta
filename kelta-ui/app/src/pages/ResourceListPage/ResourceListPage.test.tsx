@@ -152,6 +152,68 @@ describe('ResourceListPage', () => {
     vi.restoreAllMocks()
   })
 
+  describe('collection-schema cache entry', () => {
+    it('caches the full shared schema shape (trackHistory, displayFieldName)', async () => {
+      // A narrower page-local schema under this shared key hid the record History tab
+      // (trackHistory) and display-field titles on every page read after this one.
+      mockAxios.get.mockImplementation((url: string) => {
+        if (url === '/api/collections') {
+          return Promise.resolve({
+            data: { content: [mockSchema], totalElements: 1, totalPages: 1, size: 1000, number: 0 },
+          })
+        }
+        if (url.startsWith('/api/collections/')) {
+          return Promise.resolve({
+            data: {
+              data: {
+                type: 'collections',
+                id: 'col-1',
+                attributes: {
+                  name: 'users',
+                  displayName: 'Users',
+                  trackHistory: true,
+                  displayFieldId: 'f1',
+                },
+              },
+              included: [
+                {
+                  type: 'fields',
+                  id: 'f1',
+                  attributes: { name: 'name', displayName: 'Name', type: 'string', required: true },
+                },
+              ],
+            },
+          })
+        }
+        if (url.startsWith('/api/users')) {
+          return Promise.resolve({ data: mockPaginatedResponse })
+        }
+        return Promise.reject(createAxiosError(404))
+      })
+      const queryClient = createTestQueryClient()
+      createTestWrapper()
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/resources/users']}>
+            <AuthWrapper>
+              <Routes>
+                <Route path="/resources/:collection" element={<ResourceListPage />} />
+              </Routes>
+            </AuthWrapper>
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+
+      await waitFor(() =>
+        expect(queryClient.getQueryData(['collection-schema', 'users'])).toMatchObject({
+          name: 'users',
+          trackHistory: true,
+          displayFieldName: 'name',
+        })
+      )
+    })
+  })
+
   describe('Export Utility Functions - Requirement 11.12', () => {
     describe('escapeCSVValue', () => {
       it('should return empty string for null or undefined', () => {
