@@ -119,13 +119,18 @@ function fetchCollectionSchema(
   return fetchSharedCollectionSchema(apiClient, collectionName)
 }
 
+/**
+ * The record plus its ETag — the same `{ resource, etag }` envelope `ResourceDetailPage` caches
+ * under the shared `['resource', collection, id]` key. A flat record here made Edit, opened from
+ * the detail page, read the detail page's envelope as the record and render a blank form.
+ */
 async function fetchResource(
   apiClient: ApiClient,
   collectionName: string,
   resourceId: string
-): Promise<Resource> {
-  const response = await apiClient.get(`/api/${collectionName}/${resourceId}`)
-  return unwrapResource<Resource>(response)
+): Promise<{ resource: Resource; etag?: string }> {
+  const { data, etag } = await apiClient.getWithMeta(`/api/${collectionName}/${resourceId}`)
+  return { resource: unwrapResource<Resource>(data), etag }
 }
 
 async function createResource(
@@ -508,7 +513,7 @@ export function ResourceFormPage({
 
   // Fetch resource data for edit mode
   const {
-    data: resource,
+    data: resourceEnvelope,
     isLoading: resourceLoading,
     error: resourceError,
   } = useQuery({
@@ -516,6 +521,7 @@ export function ResourceFormPage({
     queryFn: () => fetchResource(apiClient, collectionName, resourceId!),
     enabled: !!collectionName && !!resourceId,
   })
+  const resource = resourceEnvelope?.resource
 
   // Form state
   const [formData, setFormData] = useState<FormData>({})
