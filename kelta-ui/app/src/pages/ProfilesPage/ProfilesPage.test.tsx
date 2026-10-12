@@ -78,7 +78,9 @@ describe('ProfilesPage', () => {
   it('renders loading state initially', () => {
     mockAxios.get.mockReturnValue(new Promise(() => {}))
     render(<ProfilesPage />, { wrapper: createTestWrapper() })
-    expect(screen.getByText('Loading...')).toBeInTheDocument()
+    // The shared AdminCrudPage shell renders the LoadingSpinner, whose visible
+    // label is mirrored in an sr-only span — assert the visible label.
+    expect(screen.getByTestId('loading-spinner-label')).toHaveTextContent('Loading...')
   })
 
   it('renders error state with retry button', async () => {
@@ -270,5 +272,69 @@ describe('ProfilesPage', () => {
     })
     await user.click(screen.getByTestId('profile-row-0'))
     expect(mockNavigate).toHaveBeenCalledWith('/test-tenant/profiles/1')
+  })
+
+  it('submits edit form as a PATCH to the edited profile', async () => {
+    const user = userEvent.setup()
+    mockAxios.get.mockResolvedValueOnce({ data: mockProfiles })
+    mockAxios.patch.mockResolvedValueOnce({
+      data: { data: { type: 'profiles', id: '2', attributes: { name: 'Admin Renamed' } } },
+    })
+    mockAxios.get.mockResolvedValueOnce({ data: mockProfiles })
+    render(<ProfilesPage />, { wrapper: createTestWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText('Admin Profile')).toBeInTheDocument()
+    })
+    await user.click(screen.getByTestId('edit-button-1'))
+    const nameInput = screen.getByTestId('profile-name-input')
+    await user.clear(nameInput)
+    await user.type(nameInput, 'Admin Renamed')
+    await user.click(screen.getByTestId('profile-form-submit'))
+    await waitFor(() => {
+      expect(mockAxios.patch).toHaveBeenCalledWith('/api/profiles/2', {
+        data: {
+          type: 'profiles',
+          id: '2',
+          attributes: { name: 'Admin Renamed', description: 'Full admin access' },
+        },
+      })
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId('profile-form-modal')).not.toBeInTheDocument()
+    })
+  })
+
+  it('closes the form modal on Escape', async () => {
+    const user = userEvent.setup()
+    mockAxios.get.mockResolvedValueOnce({ data: mockProfiles })
+    render(<ProfilesPage />, { wrapper: createTestWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText('Standard User')).toBeInTheDocument()
+    })
+    await user.click(screen.getByTestId('new-profile-button'))
+    expect(screen.getByTestId('profile-form-modal')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByTestId('profile-form-modal')).not.toBeInTheDocument()
+    })
+  })
+
+  it('deletes the profile after confirmation', async () => {
+    const user = userEvent.setup()
+    mockAxios.get.mockResolvedValueOnce({ data: mockProfiles })
+    mockAxios.delete.mockResolvedValueOnce({ data: {} })
+    mockAxios.get.mockResolvedValueOnce({ data: [mockProfiles[0]] })
+    render(<ProfilesPage />, { wrapper: createTestWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText('Admin Profile')).toBeInTheDocument()
+    })
+    await user.click(screen.getByTestId('delete-button-1'))
+    const dialog = await screen.findByTestId('confirm-dialog')
+    expect(within(dialog).getByText(/Admin Profile/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => {
+      expect(mockAxios.delete).toHaveBeenCalledWith('/api/profiles/2')
+    })
+    expect(await screen.findByText('Profile deleted successfully')).toBeInTheDocument()
   })
 })
