@@ -17,6 +17,11 @@ interface JsonApiResource {
   id: string;
   type: string;
   attributes: Record<string, unknown>;
+  /** To-one relationships (lookup / master-detail fields), when the server emits them. */
+  relationships?: Record<
+    string,
+    { data?: { id: string; type: string } | null } | undefined
+  >;
 }
 
 interface JsonApiResponse {
@@ -385,6 +390,37 @@ export class DataFactory {
       "GET",
       `/api/${collectionName}/${id}`,
     );
+    return result.data as JsonApiResource;
+  }
+
+  /**
+   * List a collection's records matching every `field == value` pair
+   * (`?filter[<field>][eq]=<value>`). Use it to find a record created through
+   * the UI — e.g. by its unique title — and assert what was persisted.
+   */
+  async queryRecords(
+    collectionName: string,
+    equals: Record<string, string | number | boolean>,
+  ): Promise<JsonApiResource[]> {
+    const query = Object.entries(equals)
+      .map(([field, value]) => `filter[${field}][eq]=${encodeURIComponent(String(value))}`)
+      .join("&");
+    const result = await this.request(
+      "GET",
+      `/api/${collectionName}${query ? `?${query}` : ""}`,
+    );
+    return Array.isArray(result.data) ? result.data : [result.data];
+  }
+
+  /** PATCH a record's attributes (e.g. a concurrent edit behind an open form). */
+  async updateRecord(
+    collectionName: string,
+    id: string,
+    attributes: Record<string, unknown>,
+  ): Promise<JsonApiResource> {
+    const result = await this.request("PATCH", `/api/${collectionName}/${id}`, {
+      data: { type: collectionName, id, attributes },
+    });
     return result.data as JsonApiResource;
   }
 
