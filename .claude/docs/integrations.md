@@ -22,6 +22,15 @@ and later replicas of the same image skip, provided `GET /admin/policies` still 
 (`kelta.worker.cerbos.seed.force`) forces a full seed. Runtime permission changes never rely on this
 path — they sync through the profile/permission hooks and `CerbosPolicySyncCoalescer`.
 
+### Cerbos SDK on native images
+
+`cerbos-sdk-java` is gRPC + protobuf (`protobuf.version` is pinned in the gateway and worker poms).
+Both native profiles initialize protobuf and the Cerbos/`build.buf.validate` generated code at build
+time, so descriptor reflection runs on the build host. The gateway's `ProtobufInitOrderFeature`
+fixes the order those classes initialize in, because protobuf fails if `JavaFeaturesProto` goes
+before `DescriptorProtos`. Changing the Cerbos call paths alone can change that order (see
+`concerns.md` → Dependency Risks).
+
 ### Cerbos principal attributes
 
 Gateway (`CerbosPrincipalBuilder`) and worker (`CerbosAuthorizationService.buildPrincipal`) build
