@@ -112,7 +112,7 @@ npm run test:coverage    # Vitest with coverage
 
 ## Testing
 
-Vitest with jsdom, Testing Library, MSW for API mocking, and fast-check for property-based tests.
+Vitest with jsdom, Testing Library, and MSW for API mocking.
 
 ```bash
 npm run test:run         # Single run

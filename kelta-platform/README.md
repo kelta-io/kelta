@@ -28,8 +28,7 @@ The foundational library providing dynamic, runtime-configurable collection mana
 - **Query engine** -- `QueryEngine` with filtering (`FilterCondition`, 14 operators), sorting, pagination, and field selection
 - **Validation engine** -- `DefaultValidationEngine` with field constraints, custom rules, and type coercion
 - **Formula engine** -- `FormulaEvaluator` with compiled AST caching, built-in functions, and SQL translation
-- **DataPath resolution** -- Relationship traversal with prefix optimization for batch resolves
-- **Workflow engine** -- `ActionHandler` interface, `BeforeSaveHook` lifecycle, `WorkflowEngine` for rule execution
+- **Flow engine** -- `FlowEngine` state-machine executor, `ActionHandler` interface, `BeforeSaveHook` lifecycle
 - **Module system** -- `KeltaModule` plugin architecture for extending workflows
 - **Event publishing** -- Async NATS events via `PlatformEventPublisher` for configuration and record changes
 - **REST router** -- `DynamicCollectionRouter` auto-exposes JSON:API endpoints for registered collections

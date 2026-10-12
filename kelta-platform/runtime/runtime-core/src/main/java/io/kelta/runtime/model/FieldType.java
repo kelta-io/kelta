@@ -103,8 +103,7 @@ public enum FieldType {
 
     // --- New: Relationship Types ---
 
-    /** @deprecated Use {@link #MASTER_DETAIL} instead. Kept for deserialization compatibility. */
-    @Deprecated
+    /** Lookup relationship: nullable FK with ON DELETE SET NULL. Maps to VARCHAR(36) in PostgreSQL. */
     LOOKUP,
 
     /** Master-detail relationship with ON DELETE CASCADE, NOT NULL. Maps to VARCHAR(36) in PostgreSQL. */

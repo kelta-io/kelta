@@ -55,17 +55,7 @@ public class TriggerFlowActionHandler implements ActionHandler {
 
             String flowId = (String) config.get("flowId");
 
-            // Backward compatibility: check for legacy workflowRuleId config
             if (flowId == null || flowId.isBlank()) {
-                String legacyRuleId = (String) config.get("workflowRuleId");
-                if (legacyRuleId != null && !legacyRuleId.isBlank()) {
-                    log.warn("TRIGGER_FLOW action references legacy workflowRuleId '{}'. " +
-                        "Workflow rules have been migrated to flows. Update config to use 'flowId' instead.",
-                        legacyRuleId);
-                    return ActionResult.failure(
-                        "TRIGGER_FLOW: 'workflowRuleId' is deprecated. " +
-                        "Workflow rules have been migrated to flows. Use 'flowId' instead.");
-                }
                 return ActionResult.failure("TRIGGER_FLOW: 'flowId' is required in config");
             }
 
@@ -93,7 +83,7 @@ public class TriggerFlowActionHandler implements ActionHandler {
             Map<String, Object> config = objectMapper.readValue(
                 configJson, new TypeReference<>() {});
 
-            if (config.get("flowId") == null && config.get("workflowRuleId") == null) {
+            if (config.get("flowId") == null) {
                 throw new IllegalArgumentException("Config must contain 'flowId'");
             }
         } catch (IllegalArgumentException e) {

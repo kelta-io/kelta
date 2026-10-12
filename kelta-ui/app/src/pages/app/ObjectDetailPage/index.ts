@@ -1,1 +1,0 @@
-export { ObjectDetailPage } from './ObjectDetailPage'

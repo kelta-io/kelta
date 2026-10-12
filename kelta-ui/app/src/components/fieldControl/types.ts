@@ -2,8 +2,8 @@
  * FieldControl registry — unified view + edit + inline contract (Slice 1).
  *
  * A single `FieldType`-keyed source of truth so "every field is editable" is a registry
- * guarantee rather than per-page code. Merges what was split across `FieldRenderer` (display)
- * and `formFieldRenderers`/`InlineEditCell` (edit). See
+ * guarantee rather than per-page code. Merges what used to be split between `FieldRenderer`
+ * (display) and the per-page form/inline-cell editors (edit). See
  * `.claude/docs/specs/unified-record/1-field-control-registry.md`.
  */
 import type React from 'react'

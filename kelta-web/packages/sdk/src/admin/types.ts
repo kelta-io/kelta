@@ -1542,69 +1542,6 @@ export interface EmailSuppression {
   createdAt?: string;
 }
 
-// --- Workflow Rules (Phase 4 Stream B) ---
-
-export interface WorkflowRule {
-  id: string;
-  collectionId: string;
-  name: string;
-  description?: string;
-  active: boolean;
-  triggerType: 'ON_CREATE' | 'ON_UPDATE' | 'ON_CREATE_OR_UPDATE' | 'ON_DELETE';
-  filterFormula?: string;
-  reEvaluateOnUpdate: boolean;
-  executionOrder: number;
-  actions: WorkflowAction[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface WorkflowAction {
-  id: string;
-  actionType:
-    | 'FIELD_UPDATE'
-    | 'EMAIL_ALERT'
-    | 'CREATE_RECORD'
-    | 'INVOKE_SCRIPT'
-    | 'OUTBOUND_MESSAGE'
-    | 'CREATE_TASK'
-    | 'PUBLISH_EVENT';
-  executionOrder: number;
-  config: string;
-  active: boolean;
-}
-
-export interface WorkflowExecutionLog {
-  id: string;
-  workflowRuleId: string;
-  recordId: string;
-  triggerType: string;
-  status: 'SUCCESS' | 'PARTIAL_FAILURE' | 'FAILURE';
-  actionsExecuted: number;
-  errorMessage?: string;
-  executedAt: string;
-  durationMs?: number;
-}
-
-export interface CreateWorkflowRuleRequest {
-  collectionId: string;
-  name: string;
-  description?: string;
-  active?: boolean;
-  triggerType: string;
-  filterFormula?: string;
-  reEvaluateOnUpdate?: boolean;
-  executionOrder?: number;
-  actions?: CreateWorkflowActionRequest[];
-}
-
-export interface CreateWorkflowActionRequest {
-  actionType: string;
-  executionOrder?: number;
-  config: string;
-  active?: boolean;
-}
-
 // --- Approval Processes (Phase 4 Stream C) ---
 
 export interface ApprovalProcess {

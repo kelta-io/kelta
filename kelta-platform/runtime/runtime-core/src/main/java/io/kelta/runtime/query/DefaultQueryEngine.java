@@ -298,9 +298,6 @@ public class DefaultQueryEngine implements QueryEngine {
         // Evaluate before-create hooks (module-provided lifecycle hooks)
         evaluateBeforeCreateHooks(definition, recordData);
 
-        // Evaluate before-save workflow rules (BEFORE_CREATE trigger)
-        evaluateBeforeSaveWorkflows(definition, recordData, null, id, List.of(), "CREATE");
-
         // Persist via storage adapter
         Map<String, Object> created = storageAdapter.create(definition, recordData);
 
@@ -415,13 +412,6 @@ public class DefaultQueryEngine implements QueryEngine {
 
         // Evaluate before-update hooks (module-provided lifecycle hooks)
         evaluateBeforeUpdateHooks(definition, id, recordData, previousData);
-
-        // Compute changed fields for before-save workflow trigger field matching
-        List<String> changedFieldsForWorkflow = computeChangedFields(previousData, recordData);
-
-        // Evaluate before-save workflow rules (BEFORE_UPDATE trigger)
-        evaluateBeforeSaveWorkflows(definition, recordData, previousData, id,
-            changedFieldsForWorkflow, "UPDATE");
 
         // Persist via storage adapter
         Optional<Map<String, Object>> updated = storageAdapter.update(definition, id, recordData);
@@ -805,23 +795,6 @@ public class DefaultQueryEngine implements QueryEngine {
         if (result.hasFieldUpdates()) {
             recordData.putAll(result.getFieldUpdates());
         }
-    }
-
-    /**
-     * Evaluates before-save workflow rules.
-     * <p>
-     * Legacy workflow rules have been migrated to the flow engine.
-     * Before-save logic is now handled by synchronous record-triggered flows.
-     * This method is a no-op placeholder for backward compatibility.
-     */
-    private void evaluateBeforeSaveWorkflows(CollectionDefinition definition,
-                                               Map<String, Object> recordData,
-                                               Map<String, Object> previousData,
-                                               String recordId,
-                                               List<String> changedFields,
-                                               String changeType) {
-        // No-op: before-save workflow rules have been migrated to synchronous flows.
-        // Synchronous flow execution will be handled by FlowEngine in future.
     }
 
     /**
