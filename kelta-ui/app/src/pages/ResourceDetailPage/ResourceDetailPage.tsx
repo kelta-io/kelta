@@ -336,7 +336,8 @@ export function ResourceDetailPage({
   const deleteMutation = useMutation({
     mutationFn: () => deleteResource(apiClient, collectionName, resourceId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
+      // The admin list reads the shared `collection-records` cache (record-stack convergence P8).
+      queryClient.invalidateQueries({ queryKey: ['collection-records', collectionName] })
       showToast(t('success.deleted', { item: t('resources.record') }), 'success')
       navigate(adminRoutes().list(collectionName))
     },

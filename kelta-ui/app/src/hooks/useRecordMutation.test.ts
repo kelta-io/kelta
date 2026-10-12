@@ -100,14 +100,13 @@ describe('useRecordMutation — offline queueing', () => {
 })
 
 describe('useRecordMutation — cache invalidation', () => {
-  it("invalidates both stacks' list and record caches for the collection after a write", async () => {
+  it("invalidates the shared list cache and both stacks' record caches after a write", async () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: Infinity, staleTime: Infinity } },
     })
     const keys = [
       ['collection-records', 'orders', { page: 1 }],
       ['record', 'orders', 's1'],
-      ['resources', 'orders', 0, 25],
       ['resource', 'orders', 's1'],
       ['resource', 'customers', 'c1'], // another collection — untouched
     ]
@@ -123,7 +122,7 @@ describe('useRecordMutation — cache invalidation', () => {
     await waitFor(() =>
       expect(qc.getQueryState(['resource', 'orders', 's1'])?.isInvalidated).toBe(true)
     )
-    for (const key of keys.slice(0, 4)) {
+    for (const key of keys.slice(0, 3)) {
       expect(qc.getQueryState(key)?.isInvalidated).toBe(true)
     }
     expect(qc.getQueryState(['resource', 'customers', 'c1'])?.isInvalidated).toBe(false)

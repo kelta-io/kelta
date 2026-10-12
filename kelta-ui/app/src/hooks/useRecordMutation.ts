@@ -81,14 +81,13 @@ export function useRecordMutation(options: UseRecordMutationOptions): UseRecordM
   /** True when an offline replica is mounted and connectivity is down. */
   const isOffline = (): boolean => !!offline && offline.online === false
 
-  // Both record stacks show the same records, so a write refreshes both stacks' caches: the
-  // end-user list/detail (`collection-records` / `record`) and the admin list/detail
-  // (`resources` / `resource`) — the app's 5-minute staleTime would otherwise serve the
-  // pre-save record on the page a save lands on.
+  // Both record stacks show the same records, so a write refreshes every record cache for the
+  // collection: the list (`collection-records` — both stacks' lists read it since P8) and both
+  // detail pages (`record` end-user, `resource` admin) — the app's 5-minute staleTime would
+  // otherwise serve the pre-save record on the page a save lands on.
   const invalidateRecords = () => {
     queryClient.invalidateQueries({ queryKey: ['collection-records', collectionName] })
     queryClient.invalidateQueries({ queryKey: ['record', collectionName] })
-    queryClient.invalidateQueries({ queryKey: ['resources', collectionName] })
     queryClient.invalidateQueries({ queryKey: ['resource', collectionName] })
   }
 

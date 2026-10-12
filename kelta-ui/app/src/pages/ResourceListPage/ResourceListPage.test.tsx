@@ -25,6 +25,8 @@ import {
 import { ResourceListPage } from './ResourceListPage'
 import type { CollectionSchema, Resource } from './ResourceListPage'
 import { escapeCSVValue, recordsToCSV, recordsToJSON } from './ResourceListPage'
+import { recordRoutes } from '../../utils/recordRoutes'
+import { getTenantSlug } from '../../context/TenantContext'
 
 // Mock useNavigate
 const mockNavigate = vi.fn()
@@ -84,6 +86,22 @@ const mockPaginatedResponse = {
   pageSize: 25,
 }
 
+/** The schema as the worker serves it: the collection resource with its fields included. */
+function schemaResponse(schema: CollectionSchema = mockSchema) {
+  return {
+    data: {
+      type: 'collections',
+      id: schema.id,
+      attributes: { name: schema.name, displayName: schema.displayName },
+    },
+    included: schema.fields.map((field, index) => ({
+      type: 'fields',
+      id: field.id,
+      attributes: { ...field, fieldOrder: index },
+    })),
+  }
+}
+
 // Helper to create query client
 function createTestQueryClient() {
   return new QueryClient({
@@ -111,7 +129,7 @@ function setupResourceListHandlers() {
       })
     }
     if (url.startsWith('/api/collections/')) {
-      return Promise.resolve({ data: mockSchema })
+      return Promise.resolve({ data: schemaResponse() })
     }
     if (url.startsWith('/api/users')) {
       return Promise.resolve({ data: mockPaginatedResponse })
@@ -129,7 +147,7 @@ function renderWithProviders(ui: React.ReactElement, { route = '/resources/users
       <MemoryRouter initialEntries={[route]}>
         <AuthWrapper>
           <Routes>
-            <Route path="/resources/:collectionName" element={ui} />
+            <Route path="/resources/:collection" element={ui} />
           </Routes>
         </AuthWrapper>
       </MemoryRouter>
@@ -141,6 +159,8 @@ describe('ResourceListPage', () => {
   let cleanupAuthMocks: () => void
 
   beforeEach(() => {
+    // jsdom has no scrollIntoView; the shared table scrolls the focused row into view.
+    Element.prototype.scrollIntoView = vi.fn()
     cleanupAuthMocks = setupAuthMocks()
     resetMockAxios()
     vi.clearAllMocks()
@@ -395,8 +415,7 @@ describe('ResourceListPage', () => {
   })
 
   describe('Loading and Error States', () => {
-    it.skip('should display loading spinner while fetching schema', async () => {
-      // SKIPPED: Component resolves to error state before loading spinner can be asserted
+    it('should display loading spinner while fetching schema', async () => {
       // Mock a delayed response that never resolves during the assertion
       mockAxios.get.mockImplementation(() => new Promise(() => {}))
 
@@ -416,8 +435,7 @@ describe('ResourceListPage', () => {
     })
   })
 
-  describe.skip('Data Table Display - Requirement 11.2', () => {
-    // SKIPPED: Component rendering issues - needs further investigation
+  describe('Data Table Display - Requirement 11.2', () => {
     beforeEach(() => {
       setupResourceListHandlers()
     })
@@ -470,7 +488,7 @@ describe('ResourceListPage', () => {
           })
         }
         if (url.startsWith('/api/collections/')) {
-          return Promise.resolve({ data: mockSchema })
+          return Promise.resolve({ data: schemaResponse() })
         }
         if (url.startsWith('/api/users')) {
           return Promise.resolve({ data: { data: [], total: 0, page: 1, pageSize: 25 } })
@@ -486,8 +504,7 @@ describe('ResourceListPage', () => {
     })
   })
 
-  describe.skip('Column Sorting', () => {
-    // SKIPPED: Component rendering issues - needs further investigation
+  describe('Column Sorting', () => {
     beforeEach(() => {
       setupResourceListHandlers()
     })
@@ -501,7 +518,7 @@ describe('ResourceListPage', () => {
       })
 
       // Click on Name header to sort
-      const nameHeader = screen.getByTestId('header-name')
+      const nameHeader = screen.getByRole('columnheader', { name: 'Name' })
 
       // Initially should be 'none'
       expect(nameHeader).toHaveAttribute('aria-sort', 'none')
@@ -511,7 +528,10 @@ describe('ResourceListPage', () => {
 
       // After click, should be ascending (wait for state update)
       await waitFor(() => {
-        expect(screen.getByTestId('header-name')).toHaveAttribute('aria-sort', 'ascending')
+        expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
+          'aria-sort',
+          'ascending'
+        )
       })
     })
 
@@ -524,30 +544,38 @@ describe('ResourceListPage', () => {
         expect(screen.getByTestId('resources-table')).toBeInTheDocument()
       })
 
-      const nameHeader = screen.getByTestId('header-name')
+      const nameHeader = screen.getByRole('columnheader', { name: 'Name' })
 
       // First click - ascending
       fireEvent.click(nameHeader)
       await waitFor(() => {
-        expect(screen.getByTestId('header-name')).toHaveAttribute('aria-sort', 'ascending')
+        expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
+          'aria-sort',
+          'ascending'
+        )
       })
 
       // Second click - descending
-      fireEvent.click(screen.getByTestId('header-name'))
+      fireEvent.click(screen.getByRole('columnheader', { name: 'Name' }))
       await waitFor(() => {
-        expect(screen.getByTestId('header-name')).toHaveAttribute('aria-sort', 'descending')
+        expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
+          'aria-sort',
+          'descending'
+        )
       })
 
       // Third click - back to none (removes sort)
-      fireEvent.click(screen.getByTestId('header-name'))
+      fireEvent.click(screen.getByRole('columnheader', { name: 'Name' }))
       await waitFor(() => {
-        expect(screen.getByTestId('header-name')).toHaveAttribute('aria-sort', 'none')
+        expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
+          'aria-sort',
+          'none'
+        )
       })
     })
   })
 
-  describe.skip('Filter Builder - Requirements 11.3, 11.4, 11.5', () => {
-    // SKIPPED: Component rendering issues - needs further investigation
+  describe('Filter Builder - Requirements 11.3, 11.4, 11.5', () => {
     beforeEach(() => {
       setupResourceListHandlers()
     })
@@ -672,8 +700,7 @@ describe('ResourceListPage', () => {
     })
   })
 
-  describe.skip('Column Selection', () => {
-    // SKIPPED: Component rendering issues - needs further investigation
+  describe('Column Selection', () => {
     beforeEach(() => {
       setupResourceListHandlers()
     })
@@ -717,8 +744,7 @@ describe('ResourceListPage', () => {
     })
   })
 
-  describe.skip('Bulk Selection - Requirement 11.11', () => {
-    // SKIPPED: Component rendering issues - needs further investigation
+  describe('Bulk Selection - Requirement 11.11', () => {
     beforeEach(() => {
       setupResourceListHandlers()
     })
@@ -732,7 +758,7 @@ describe('ResourceListPage', () => {
       })
 
       // Select first row
-      const checkbox = screen.getByTestId('row-checkbox-0')
+      const checkbox = screen.getByRole('checkbox', { name: 'Select row r1' })
       await user.click(checkbox)
 
       expect(checkbox).toBeChecked()
@@ -750,11 +776,13 @@ describe('ResourceListPage', () => {
       })
 
       // Click select all
-      const selectAllCheckbox = screen.getByTestId('select-all-checkbox')
+      const selectAllCheckbox = screen.getByRole('checkbox', {
+        name: /select all rows|deselect all rows/i,
+      })
       await user.click(selectAllCheckbox)
 
       // All row checkboxes should be checked
-      const rowCheckboxes = screen.getAllByTestId(/^row-checkbox-/)
+      const rowCheckboxes = screen.getAllByRole('checkbox', { name: /^Select row / })
       rowCheckboxes.forEach((checkbox) => {
         expect(checkbox).toBeChecked()
       })
@@ -771,7 +799,9 @@ describe('ResourceListPage', () => {
         expect(screen.getByTestId('resources-table')).toBeInTheDocument()
       })
 
-      const selectAllCheckbox = screen.getByTestId('select-all-checkbox')
+      const selectAllCheckbox = screen.getByRole('checkbox', {
+        name: /select all rows|deselect all rows/i,
+      })
 
       // Select all
       await user.click(selectAllCheckbox)
@@ -780,7 +810,7 @@ describe('ResourceListPage', () => {
       await user.click(selectAllCheckbox)
 
       // All row checkboxes should be unchecked
-      const rowCheckboxes = screen.getAllByTestId(/^row-checkbox-/)
+      const rowCheckboxes = screen.getAllByRole('checkbox', { name: /^Select row / })
       rowCheckboxes.forEach((checkbox) => {
         expect(checkbox).not.toBeChecked()
       })
@@ -798,15 +828,14 @@ describe('ResourceListPage', () => {
       })
 
       // Select a row
-      await user.click(screen.getByTestId('row-checkbox-0'))
+      await user.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
 
       // Bulk delete button should be visible
       expect(screen.getByTestId('bulk-delete-button')).toBeInTheDocument()
     })
   })
 
-  describe.skip('Export Functionality - Requirement 11.12', () => {
-    // SKIPPED: Component rendering issues - needs further investigation
+  describe('Export Functionality - Requirement 11.12', () => {
     beforeEach(() => {
       setupResourceListHandlers()
     })
@@ -820,7 +849,7 @@ describe('ResourceListPage', () => {
       })
 
       // Select a row
-      await user.click(screen.getByTestId('row-checkbox-0'))
+      await user.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
 
       // Export button should be visible
       expect(screen.getByTestId('export-button')).toBeInTheDocument()
@@ -835,7 +864,7 @@ describe('ResourceListPage', () => {
       })
 
       // Select a row
-      await user.click(screen.getByTestId('row-checkbox-0'))
+      await user.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
 
       // Export dropdown should be hidden initially
       expect(screen.queryByTestId('export-dropdown')).not.toBeInTheDocument()
@@ -858,7 +887,7 @@ describe('ResourceListPage', () => {
       })
 
       // Select a row
-      await user.click(screen.getByTestId('row-checkbox-0'))
+      await user.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
 
       // Open export dropdown
       await user.click(screen.getByTestId('export-button'))
@@ -879,7 +908,7 @@ describe('ResourceListPage', () => {
       })
 
       // Select a row
-      await user.click(screen.getByTestId('row-checkbox-0'))
+      await user.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
 
       // Check export button ARIA attributes
       const exportButton = screen.getByTestId('export-button')
@@ -900,8 +929,7 @@ describe('ResourceListPage', () => {
     })
   })
 
-  describe.skip('Navigation', () => {
-    // SKIPPED: Component rendering issues - needs further investigation
+  describe('Navigation', () => {
     beforeEach(() => {
       setupResourceListHandlers()
     })
@@ -916,38 +944,36 @@ describe('ResourceListPage', () => {
 
       await user.click(screen.getByTestId('create-record-button'))
 
-      expect(mockNavigate).toHaveBeenCalledWith('/resources/users/new')
+      expect(mockNavigate).toHaveBeenCalledWith(recordRoutes('admin', getTenantSlug()).new('users'))
     })
 
     it('should navigate to detail page when row is clicked', async () => {
       const user = userEvent.setup()
       renderWithProviders(<ResourceListPage />)
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resource-row-0')).toBeInTheDocument()
-      })
+      await user.click(await screen.findByText('John Doe'))
 
-      await user.click(screen.getByTestId('resource-row-0'))
-
-      expect(mockNavigate).toHaveBeenCalledWith('/resources/users/r1')
+      expect(mockNavigate).toHaveBeenCalledWith(
+        recordRoutes('admin', getTenantSlug()).detail('users', 'r1')
+      )
     })
 
     it('should navigate to edit page when edit button is clicked', async () => {
       const user = userEvent.setup()
       renderWithProviders(<ResourceListPage />)
 
-      await waitFor(() => {
-        expect(screen.getByTestId('edit-button-0')).toBeInTheDocument()
-      })
+      await screen.findByText('John Doe')
+      // Row actions menu (shared ObjectDataTable) → Edit
+      await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0])
+      await user.click(await screen.findByRole('menuitem', { name: /Edit/ }))
 
-      await user.click(screen.getByTestId('edit-button-0'))
-
-      expect(mockNavigate).toHaveBeenCalledWith('/resources/users/r1/edit')
+      expect(mockNavigate).toHaveBeenCalledWith(
+        recordRoutes('admin', getTenantSlug()).edit('users', 'r1')
+      )
     })
   })
 
-  describe.skip('Pagination', () => {
-    // SKIPPED: Component rendering issues - needs further investigation
+  describe('Pagination', () => {
     beforeEach(() => {
       mockAxios.get.mockImplementation((url: string) => {
         if (url === '/api/collections') {
@@ -962,7 +988,7 @@ describe('ResourceListPage', () => {
           })
         }
         if (url.startsWith('/api/collections/')) {
-          return Promise.resolve({ data: mockSchema })
+          return Promise.resolve({ data: schemaResponse() })
         }
         if (url.startsWith('/api/users')) {
           return Promise.resolve({ data: { ...mockPaginatedResponse, total: 100 } })
@@ -1016,8 +1042,7 @@ describe('ResourceListPage', () => {
     })
   })
 
-  describe.skip('Accessibility', () => {
-    // SKIPPED: Component rendering issues - needs further investigation
+  describe('Accessibility', () => {
     beforeEach(() => {
       setupResourceListHandlers()
     })
@@ -1029,8 +1054,7 @@ describe('ResourceListPage', () => {
         expect(screen.getByTestId('resources-table')).toBeInTheDocument()
       })
 
-      const table = screen.getByTestId('resources-table')
-      expect(table).toHaveAttribute('role', 'grid')
+      const table = within(screen.getByTestId('resources-table')).getByRole('grid')
       expect(table).toHaveAttribute('aria-label')
     })
 
@@ -1038,22 +1062,26 @@ describe('ResourceListPage', () => {
       renderWithProviders(<ResourceListPage />)
 
       await waitFor(() => {
-        expect(screen.getByTestId('header-name')).toBeInTheDocument()
+        expect(screen.getByRole('columnheader', { name: 'Name' })).toBeInTheDocument()
       })
 
-      const header = screen.getByTestId('header-name')
+      const header = screen.getByRole('columnheader', { name: 'Name' })
       expect(header).toHaveAttribute('aria-sort')
-      expect(header).toHaveAttribute('tabIndex', '0')
+      expect(header).toHaveAttribute('tabindex', '0')
     })
 
     it('should have proper labels on checkboxes', async () => {
       renderWithProviders(<ResourceListPage />)
 
       await waitFor(() => {
-        expect(screen.getByTestId('select-all-checkbox')).toBeInTheDocument()
+        expect(
+          screen.getByRole('checkbox', { name: /select all rows|deselect all rows/i })
+        ).toBeInTheDocument()
       })
 
-      const selectAllCheckbox = screen.getByTestId('select-all-checkbox')
+      const selectAllCheckbox = screen.getByRole('checkbox', {
+        name: /select all rows|deselect all rows/i,
+      })
       expect(selectAllCheckbox).toHaveAttribute('aria-label')
     })
   })

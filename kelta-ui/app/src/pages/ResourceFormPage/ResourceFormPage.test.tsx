@@ -582,7 +582,7 @@ describe('ResourceFormPage', () => {
         defaultOptions: { queries: { retry: false, gcTime: 60_000, staleTime: 60_000 } },
       })
       queryClient.setQueryData(['resource', 'users', 'res-123'], { resource: mockResource })
-      queryClient.setQueryData(['resources', 'users', 0, 25, null, []], { content: [] })
+      queryClient.setQueryData(['collection-records', 'users', 1, 25], { data: [] })
       renderWithProviders(<ResourceFormPage />, { route: editRoute, queryClient })
       await waitForForm()
 
@@ -590,9 +590,9 @@ describe('ResourceFormPage', () => {
 
       await waitFor(() => expect(mockNavigate).toHaveBeenCalled())
       expect(queryClient.getQueryState(['resource', 'users', 'res-123'])?.isInvalidated).toBe(true)
-      expect(
-        queryClient.getQueryState(['resources', 'users', 0, 25, null, []])?.isInvalidated
-      ).toBe(true)
+      expect(queryClient.getQueryState(['collection-records', 'users', 1, 25])?.isInvalidated).toBe(
+        true
+      )
     })
 
     it('cancel returns to the admin detail page', async () => {
