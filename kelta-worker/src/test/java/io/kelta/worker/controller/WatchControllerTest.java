@@ -1,7 +1,6 @@
 package io.kelta.worker.controller;
 
 import tools.jackson.databind.ObjectMapper;
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
@@ -17,8 +16,8 @@ import io.kelta.worker.repository.WatchTarget;
 import io.kelta.worker.repository.WatchTargetRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.entitlement.EntitlementService;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +50,7 @@ import static org.mockito.Mockito.when;
  * watch meant a direct database write, skipping every guard asserted here.
  */
 @DisplayName("WatchController — retarget and support writes")
+@WithTenant("t1")
 class WatchControllerTest {
 
     private static final String TENANT = "t1";
@@ -102,15 +102,9 @@ class WatchControllerTest {
         this.userIdResolver = userIdResolver;
         this.dynamicCollectionRouter = mock(DynamicCollectionRouter.class);
         controller = controllerWithPromotable("");
-        TenantContext.set(TENANT);
 
         when(queryEngine.update(any(), anyString(), any()))
                 .thenAnswer(i -> Optional.of(Map.of("id", i.getArgument(1))));
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private HttpServletRequest requestFrom(String actor, boolean staff) {

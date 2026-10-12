@@ -1,9 +1,9 @@
 package io.kelta.worker.listener;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import io.kelta.worker.repository.ApprovalRepository;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.*;
 
 import java.util.HashMap;
@@ -14,6 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 @DisplayName("ApprovalRecordLockHook")
+@WithTenant("t1")
 class ApprovalRecordLockHookTest {
 
     private ApprovalRepository approvalRepository;
@@ -25,12 +26,6 @@ class ApprovalRecordLockHookTest {
         approvalRepository = mock(ApprovalRepository.class);
         collectionRegistry = mock(CollectionRegistry.class);
         hook = new ApprovalRecordLockHook(approvalRepository, collectionRegistry);
-        TenantContext.set("t1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Test

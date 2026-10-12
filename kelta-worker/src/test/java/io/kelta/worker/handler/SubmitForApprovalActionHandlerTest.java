@@ -5,11 +5,13 @@ import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionResult;
 import io.kelta.worker.service.ApprovalService;
 import io.kelta.worker.service.ApprovalService.ApprovalActionResult;
+import io.kelta.worker.util.WithTenant;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.*;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -27,11 +29,6 @@ class SubmitForApprovalActionHandlerTest {
         handler = new SubmitForApprovalActionHandler(approvalService, objectMapper);
     }
 
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
-    }
-
     @Test
     @DisplayName("Should return correct action type key")
     void shouldReturnActionTypeKey() {
@@ -40,9 +37,8 @@ class SubmitForApprovalActionHandlerTest {
 
     @Test
     @DisplayName("Should submit for approval successfully")
+    @WithTenant("t1")
     void shouldSubmitSuccessfully() {
-        TenantContext.set("t1");
-
         when(approvalService.submitForApproval("col-1", "rec-1", "user-1", null))
                 .thenReturn(ApprovalActionResult.success("inst-1", "PENDING", "Submitted"));
 
@@ -63,9 +59,8 @@ class SubmitForApprovalActionHandlerTest {
 
     @Test
     @DisplayName("Should use processId from config")
+    @WithTenant("t1")
     void shouldUseProcessIdFromConfig() {
-        TenantContext.set("t1");
-
         when(approvalService.submitForApproval("col-1", "rec-1", "user-1", "proc-1"))
                 .thenReturn(ApprovalActionResult.success("inst-1", "PENDING", "Submitted"));
 
@@ -85,9 +80,8 @@ class SubmitForApprovalActionHandlerTest {
 
     @Test
     @DisplayName("Should return failure when service fails")
+    @WithTenant("t1")
     void shouldReturnFailureOnServiceError() {
-        TenantContext.set("t1");
-
         when(approvalService.submitForApproval(any(), any(), any(), any()))
                 .thenReturn(ApprovalActionResult.error("No active process"));
 
@@ -107,9 +101,13 @@ class SubmitForApprovalActionHandlerTest {
     @Test
     @DisplayName("Should set tenant context when not present")
     void shouldSetTenantContextFromActionContext() {
-        // No tenant context set
+        // No tenant context set: the handler binds the action context's tenant for the call
+        AtomicReference<String> tenantSeenByService = new AtomicReference<>();
         when(approvalService.submitForApproval("col-1", "rec-1", "user-1", null))
-                .thenReturn(ApprovalActionResult.success("inst-1", "PENDING", "Submitted"));
+                .thenAnswer(inv -> {
+                    tenantSeenByService.set(TenantContext.get());
+                    return ApprovalActionResult.success("inst-1", "PENDING", "Submitted");
+                });
 
         ActionContext context = ActionContext.builder()
                 .tenantId("t1")
@@ -121,7 +119,8 @@ class SubmitForApprovalActionHandlerTest {
         ActionResult result = handler.execute(context);
 
         assertThat(result.successful()).isTrue();
-        // Tenant context should be cleared after execution
+        assertThat(tenantSeenByService.get()).isEqualTo("t1");
+        // The binding is scoped to the call: nothing is left bound after execution
         assertThat(TenantContext.get()).isNull();
     }
 

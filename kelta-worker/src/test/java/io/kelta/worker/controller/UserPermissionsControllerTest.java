@@ -1,11 +1,10 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.worker.cache.WorkerCacheManager;
 import io.kelta.worker.service.CerbosPermissionResolver;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -23,6 +22,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @DisplayName("UserPermissionsController Tests")
+@WithTenant("t1")
 class UserPermissionsControllerTest {
 
     private static final String USER_UUID = "22222222-2222-2222-2222-222222222222";
@@ -46,12 +46,6 @@ class UserPermissionsControllerTest {
         controller = new UserPermissionsController(permissionResolver, jdbcTemplate, cacheManager,
                 userIdResolver);
         request = mock(HttpServletRequest.class);
-        TenantContext.set("t1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Nested

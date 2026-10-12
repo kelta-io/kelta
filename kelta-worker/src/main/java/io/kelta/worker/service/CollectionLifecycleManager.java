@@ -254,15 +254,10 @@ public class CollectionLifecycleManager {
             collectionRegistry.register(definition);
 
             if (applySchema) {
-                // Set tenant context so the storage adapter uses the correct schema
-                setTenantContextFromRow(collectionRow);
-                try {
-                    // Initialize storage (creates database table if needed)
-                    // System collections have Flyway-managed tables, so initializeCollection is a no-op for them
-                    storageAdapter.initializeCollection(definition);
-                } finally {
-                    TenantContext.clear();
-                }
+                // Initialize storage (creates database table if needed) in the row's tenant
+                // scope so the storage adapter uses the correct schema. System collections have
+                // Flyway-managed tables, so initializeCollection is a no-op for them.
+                runInRowTenantScope(collectionRow, () -> storageAdapter.initializeCollection(definition));
             }
 
             // Load and register validation rules from DB
@@ -322,10 +317,9 @@ public class CollectionLifecycleManager {
             // Re-register with updated definition
             collectionRegistry.register(newDefinition);
 
-            // Set tenant context so the storage adapter uses the correct schema
-            setTenantContextFromRow(collectionRow);
-            try {
-                // Migrate the storage schema
+            // Migrate the storage schema in the row's tenant scope so the storage adapter
+            // uses the correct schema
+            runInRowTenantScope(collectionRow, () -> {
                 if (oldDefinition != null) {
                     storageAdapter.updateCollectionSchema(oldDefinition, newDefinition);
                     log.info("Schema migration completed for collection '{}' (id={})",
@@ -335,9 +329,7 @@ public class CollectionLifecycleManager {
                     log.info("Storage initialized for collection '{}' (id={})",
                             collectionName, collectionId);
                 }
-            } finally {
-                TenantContext.clear();
-            }
+            });
 
             // Refresh validation rules
             loadAndRegisterValidationRules(collectionId, collectionName);
@@ -445,10 +437,13 @@ public class CollectionLifecycleManager {
             return existing;
         }
 
-        // Set tenant context so RLS filters the query correctly
-        if (tenantId != null && !tenantId.isBlank()) {
-            TenantContext.set(tenantId);
-        }
+        // Bind the tenant so RLS filters the query correctly. A tenant the caller already bound
+        // (the request filter on the on-demand path) wins, as it did with the ThreadLocal setter.
+        return TenantContext.callWithTenantIfUnbound(tenantId, null,
+                () -> loadCollectionByNameInScope(collectionName, tenantId));
+    }
+
+    private CollectionDefinition loadCollectionByNameInScope(String collectionName, String tenantId) {
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                     SELECT_COLLECTION_BY_NAME, collectionName);
@@ -475,10 +470,6 @@ public class CollectionLifecycleManager {
             log.warn("Failed to load collection '{}' on demand (tenantId={}): {}",
                     collectionName, tenantId, e.getMessage());
             return null;
-        } finally {
-            if (tenantId != null && !tenantId.isBlank()) {
-                TenantContext.clear();
-            }
         }
     }
 
@@ -487,23 +478,29 @@ public class CollectionLifecycleManager {
     // =========================================================================
 
     /**
-     * Sets the TenantContext (tenant ID and slug) from a collection database row.
-     * This is needed during bootstrap and refresh operations where no HTTP request
-     * is in progress, so the storage adapter can resolve the correct tenant schema.
+     * Runs {@code operation} with the collection row's tenant (ID and slug) in TenantContext.
+     * This is needed during bootstrap and refresh operations where no HTTP request is in
+     * progress, so the storage adapter can resolve the correct tenant schema.
+     *
+     * <p>A tenant or slug the caller already bound (the request filter, on the on-demand and
+     * read-after-write paths) wins, as it did with the ThreadLocal setters this replaces; the
+     * row's values only fill what is unbound.
      */
-    private void setTenantContextFromRow(Map<String, Object> collectionRow) {
+    private void runInRowTenantScope(Map<String, Object> collectionRow, Runnable operation) {
         String tenantId = (String) collectionRow.get("tenant_id");
-        if (tenantId != null && !tenantId.isBlank()) {
-            TenantContext.set(tenantId);
+        if (tenantId == null || tenantId.isBlank()) {
+            operation.run();
+            return;
+        }
+        String slug = TenantContext.callWithTenantIfUnbound(tenantId, null, () -> {
             try {
-                String slug = jdbcTemplate.queryForObject(SELECT_TENANT_SLUG, String.class, tenantId);
-                if (slug != null && !slug.isBlank()) {
-                    TenantContext.setSlug(slug);
-                }
+                return jdbcTemplate.queryForObject(SELECT_TENANT_SLUG, String.class, tenantId);
             } catch (Exception e) {
                 log.debug("Could not resolve tenant slug for tenant '{}': {}", tenantId, e.getMessage());
+                return null;
             }
-        }
+        });
+        TenantContext.runWithTenantIfUnbound(tenantId, slug, operation);
     }
 
     // =========================================================================

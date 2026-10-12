@@ -403,13 +403,10 @@ public class InternalBootstrapController {
 
         log.info("JIT provision: email={} tenant={} profileId={}", email, tenantId, profileId);
 
-        // Set tenant context so RLS policies filter correctly
-        TenantContext.set(tenantId);
-        try {
-            return doJitProvisionUser(email, tenantId, firstName, lastName, profileId);
-        } finally {
-            TenantContext.clear();
-        }
+        // Bind the body's tenant so RLS scopes the lookups and writes. kelta-auth calls this
+        // internal endpoint directly (no gateway, no X-Tenant-ID), so nothing is bound yet.
+        return TenantContext.callWithTenant(tenantId,
+                () -> doJitProvisionUser(email, tenantId, firstName, lastName, profileId));
     }
 
     private ResponseEntity<Map<String, Object>> doJitProvisionUser(

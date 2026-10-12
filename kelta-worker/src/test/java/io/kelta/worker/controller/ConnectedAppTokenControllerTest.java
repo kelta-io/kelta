@@ -1,7 +1,7 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.ConnectedAppRepository;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.*;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -15,6 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 @DisplayName("ConnectedAppTokenController")
+@WithTenant("t1")
 class ConnectedAppTokenControllerTest {
 
     private ConnectedAppRepository repository;
@@ -29,12 +30,6 @@ class ConnectedAppTokenControllerTest {
         valueOps = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         controller = new ConnectedAppTokenController(repository, redisTemplate, "http://localhost:8080", 10);
-        TenantContext.set("t1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Nested

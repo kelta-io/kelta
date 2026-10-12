@@ -1,11 +1,9 @@
 package io.kelta.runtime.storage;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.FieldType;
 import io.kelta.runtime.model.StorageConfig;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -59,11 +57,6 @@ class CompositeUniqueConstraintServiceTest {
             // fresh database — no-op
         }
         adapter.initializeCollection(collection);
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private CollectionDefinition buildAvailability() {

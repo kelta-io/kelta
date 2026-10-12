@@ -3,7 +3,6 @@ package io.kelta.worker.service;
 import tools.jackson.databind.ObjectMapper;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BulkJobRepository;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,11 +30,6 @@ class BulkJobProcessorServiceTest {
     void setUp() {
         processorService = new BulkJobProcessorService(bulkJobRepository,
                 bulkOperationService, new ObjectMapper());
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Test

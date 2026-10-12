@@ -93,8 +93,13 @@ public class FormulaRecomputeService {
     }
 
     private void recompute(String collectionName, String fieldName) {
-        ensureTenantSlug();
+        // Schema-per-tenant table resolution needs the slug; bind it for the recompute when the
+        // caller's scope only carries the tenant id.
+        TenantContext.runWithTenantIfUnbound(TenantContext.get(), resolveTenantSlug(),
+                () -> recomputeInScope(collectionName, fieldName));
+    }
 
+    private void recomputeInScope(String collectionName, String fieldName) {
         CollectionDefinition definition = collectionRegistry.get(collectionName);
         if (definition == null) {
             log.warn("Cannot recompute formula: collection '{}' not registered", collectionName);
@@ -210,23 +215,27 @@ public class FormulaRecomputeService {
         return identifier.replace("\"", "\"\"");
     }
 
-    private void ensureTenantSlug() {
+    /**
+     * The slug already in scope, else the bound tenant's slug looked up by id, else {@code null}.
+     */
+    private String resolveTenantSlug() {
         if (TenantContext.getSlug() != null && !TenantContext.getSlug().isBlank()) {
-            return;
+            return TenantContext.getSlug();
         }
         String tenantId = TenantContext.get();
         if (tenantId == null || tenantId.isBlank()) {
-            return;
+            return null;
         }
         try {
             Map<String, Object> row = jdbcTemplate.queryForList(SELECT_TENANT_SLUG, tenantId)
                     .stream().findFirst().orElse(new HashMap<>());
             Object slug = row.get("slug");
             if (slug instanceof String s && !s.isBlank()) {
-                TenantContext.setSlug(s);
+                return s;
             }
         } catch (Exception e) {
             log.debug("Could not resolve slug for tenant {}: {}", tenantId, e.getMessage());
         }
+        return null;
     }
 }

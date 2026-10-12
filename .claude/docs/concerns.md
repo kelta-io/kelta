@@ -43,12 +43,10 @@ second layer; both read the shared-rows list from `SystemCollectionTenancy`.
 ### RLS invariants
 
 RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205). Rules that keep it working:
-- **`TenantContext.set(...)` is only safe where nothing is bound** (NATS listeners, bootstrap
-  runners). On a request path a bound `ScopedValue` wins and `set` is a silent no-op — seed or
-  write another tenant's rows inside `TenantContext.runWithTenant/callWithTenant(id, slug, …)`.
-  Remaining `set` call sites (`DynamicCollectionRouter`, `SearchController`,
-  `SubmitForApprovalActionHandler`, `CollectionLifecycleManager`, `CerbosPolicySyncService`,
-  `InternalBootstrapController`) set the tenant already bound, or run unbound.
+- **Bind a tenant only with a `ScopedValue` helper** — `runWithTenant`/`callWithTenant(id, slug, …)`
+  to act for a given tenant (shadows any outer binding), or `runWithTenantIfUnbound`/
+  `callWithTenantIfUnbound` in shared code that must let an outer request binding win. There
+  are no ThreadLocal setters; worker tests bind with `@WithTenant` (`testing.md`).
 - **Never bind a sentinel tenant.** `admin_bypass` matches only the empty setting, issued when
   no tenant is bound; `runAsPlatform`/`callAsPlatform` bound a sentinel, matched no policy and
   silently returned zero rows — they were removed. Don't reintroduce a sentinel helper without a
@@ -184,6 +182,19 @@ mailbox to a high-volume public address.
   `TENANT_BOOTSTRAP_TOKEN_ISSUED` on `security.audit` (log-only, not a table row). Residual: the
   token is never auto-revoked when the tenant is claimed; expired tokens no longer count against
   the 10-live cap.
+- **Server-only fields:** secret material on system collections (`credentials.dataEnc`,
+  `credential-oauth-tokens.accessTokenEnc`/`refreshTokenEnc`, `oidc-providers.clientSecretEnc`,
+  `connected-apps.clientSecretHash`, `connected-app-tokens.tokenHash`) is declared
+  `FieldDefinition.withServerOnly(true)`. `DefaultQueryEngine` strips it from every read, the
+  create/update return and `record.changed` payloads, rejects it as a filter/sort/aggregate key
+  (400) and drops client-supplied values before hooks run; the router serializer, schema/OpenAPI,
+  search index, field history, record versions and setup audit exclude it too. Real use reads the
+  column over JDBC. Any new secret, encrypted or credential-hash field gets the flag and joins the
+  list pinned by `SystemCollectionDefinitionsTest.secretMaterialIsServerOnly`
+  (`ServerOnlyFieldScenarioTest` covers the read shapes). Residuals: tenant-authored fields cannot
+  set the flag (code-declared, not stored on the `field` row); the gateway's in-memory
+  `SystemCollectionResponseCacheFilter` (10 min) can serve a pre-deploy response until it expires
+  or the pod restarts.
 
 ### Authorization gaps still open
 
@@ -669,6 +680,8 @@ One line each; full write-ups are in git history.
 - 2026-09-14 — no dependency scanning ran at all; npm audit gate added (Java still open, above).
 - #1472 — `protobufjs` RCE and `maplibre-gl` XSS criticals cleared.
 - 2026-09-09 — `TenantContext.runAsPlatform`/`callAsPlatform` silently returned zero rows; removed.
+- 2026-10-11 — `TenantContext.set`/`setSlug`/`clear` were silent no-ops under a bound `ScopedValue` and leaked on pooled threads; removed, callers use `run/callWithTenant[IfUnbound]`.
+- 2026-10-11 (V208) — encrypted/hashed secret columns were serialized like ordinary attributes (ciphertext/hashes, permission-gated); `FieldDefinition.serverOnly` (above), setup-audit values scrubbed, unused `CredentialResponseMasker` deleted.
 - 2026-07-05 — `POST /api/operations` skipped per-collection authorization; `checkCollectionAccess` added.
 - PLT-330 (2026-10-04) — any token (and, via the public path, anyone) could list every tenant; gateway narrowing (#1603/#1604) + self-scoped storage predicate.
 - PLT-331 (2026-10-04) — static routes for `users`/`profiles`/`collections` skipped the collection check; `COLLECTION_CHECKED_STATIC_ROUTES` + advice count correction.

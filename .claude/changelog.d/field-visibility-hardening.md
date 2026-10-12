@@ -1,0 +1,1 @@
+- 2026-10-11 fix(security): Add a generic server-only field property so encrypted secrets and credential hashes are never serialized, filtered on or client-written through generic record reads, events, audit and history; remove the deprecated TenantContext ThreadLocal setters in favour of ScopedValue bindings (field-visibility-hardening)

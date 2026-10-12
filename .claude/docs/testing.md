@@ -104,6 +104,14 @@ class GatewayMetricsTest {
 **Patterns**: `@DisplayName` for readable names, `@Nested` for grouping, `@BeforeEach` for setup, method names `shouldXxxWhenYyy()`, AssertJ `assertThat(actual).isEqualTo(expected)`
 
 ### Mocking
+- **Tenant context in tests** — there are no ThreadLocal setters on `TenantContext` (removed
+  2026-10-11). In kelta-worker, annotate the class or method with `@WithTenant("t1")`
+  (`io.kelta.worker.util.WithTenant`, `slug = "..."` optional, `none = true` to run a method
+  unbound under a class-level binding): `TenantScopeExtension` binds the `ScopedValue` around each
+  `@BeforeEach`, test method and `@AfterEach` invocation, the way `TenantContextFilter` binds a
+  request. MockMvc runs on the test thread, so controllers see it. Elsewhere, wrap the call in
+  `TenantContext.runWithTenant`/`callWithTenant`, or `ScopedValue.where(TenantContext.CURRENT_TENANT,
+  id).call(...)` when the code under test throws a checked exception (`TenantAwareDataSourceTest`).
 - MockWebServer for HTTP service mocks
 - MockServerHttpRequest/Exchange for gateway filter tests
 - Immutable test data: `List.of(...)` for constants

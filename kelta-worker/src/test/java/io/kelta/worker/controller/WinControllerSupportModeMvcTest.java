@@ -1,6 +1,5 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.Pagination;
@@ -14,7 +13,7 @@ import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.WinRepository;
 import io.kelta.worker.repository.WinRepository.Win;
 import io.kelta.worker.service.CerbosPermissionResolver;
-import org.junit.jupiter.api.AfterEach;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,6 +47,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@link DynamicCollectionRouter}, not reimplemented).
  */
 @DisplayName("WinController — support-mode list/get")
+@WithTenant("t1")
 class WinControllerSupportModeMvcTest {
 
     private static final String TENANT = "t1";
@@ -80,12 +80,6 @@ class WinControllerSupportModeMvcTest {
                 permissionResolver, bootstrapRepository, dynamicCollectionRouter);
 
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
-        TenantContext.set(TENANT);
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private void grantSupport(boolean granted) {

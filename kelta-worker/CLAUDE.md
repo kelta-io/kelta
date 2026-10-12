@@ -116,6 +116,7 @@ stops the rollout. Two rules follow:
 1. Declare it in `runtime-core/.../model/system/SystemCollectionDefinitions.java` — add a `<name>()` factory via the `systemBuilder(name, displayName, tableName)` helper, then add it to `all()`.
 2. The worker does **NOT** create system tables (Flyway owns them) — ship `src/main/resources/db/migration/V<n>__create_<table>.sql` **and** add the table to the RLS-enable migration (V77-style, table names hardcoded).
 3. Register a `<Name>RefreshHook` `@Bean` in `config/FlowConfig.java` via `hookRegistry.register(hook)` that publishes `kelta.config.collection.changed.<id>` (reuse `CollectionConfigEventPublisher.SUBJECT_PREFIX`).
+4. A field that stores a secret, ciphertext or a credential hash is declared `.withServerOnly(true)` (never serialized, never filterable, only a before-save hook may set it), read for real use over JDBC, and added to `SystemCollectionDefinitionsTest.secretMaterialIsServerOnly`. See `.claude/docs/architecture.md` → Server-only fields.
 
 **Reference**: `ValidationRuleRefreshHook.java`. Full recipe: `.claude/docs/playbooks.md` → "Add a system collection".
 

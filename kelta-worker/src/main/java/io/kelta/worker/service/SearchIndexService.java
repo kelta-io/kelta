@@ -128,7 +128,8 @@ public class SearchIndexService {
      * across all viewers, so a masking-configured field's plaintext must never
      * enter {@code search_content} or {@code display_value} where a
      * {@code tsvector} match (or the returned display string) would leak it.
-     * Per-viewer unmask rights don't apply here: index once, for nobody.
+     * Per-viewer unmask rights don't apply here: index once, for nobody. Server-only fields
+     * (encrypted secrets, token hashes) are excluded the same way.
      */
     private Set<String> maskingConfiguredFields(String collectionName) {
         CollectionDefinition definition = collectionRegistry.get(collectionName);
@@ -137,7 +138,7 @@ public class SearchIndexService {
         }
         Set<String> masked = new HashSet<>();
         for (io.kelta.runtime.model.FieldDefinition field : definition.fields()) {
-            if (fieldMaskingService.configFor(field).isPresent()) {
+            if (field.serverOnly() || fieldMaskingService.configFor(field).isPresent()) {
                 masked.add(field.name());
             }
         }
@@ -303,9 +304,8 @@ public class SearchIndexService {
     public void rebuildCollectionIndexAsync(String tenantId, String collectionName) {
         log.info("Rebuilding search index for collection '{}' (tenant={})", collectionName, tenantId);
         try {
-            TenantContextUtils.withTenant(tenantId, () -> {
-                ensureTenantSlug(tenantId);
-
+            String slug = TenantContext.callWithTenant(tenantId, () -> resolveTenantSlug(tenantId, null));
+            TenantContextUtils.withTenant(tenantId, slug, () -> {
                 String collectionId = lifecycleManager.getCollectionIdByName(collectionName);
                 if (collectionId == null) {
                     log.warn("Cannot rebuild index: collection '{}' not found", collectionName);
@@ -405,13 +405,9 @@ public class SearchIndexService {
     @Async
     public void rebuildAllCollectionsAsync(String tenantId, String tenantSlug, String collectionName) {
         try {
-            TenantContextUtils.withTenant(tenantId, () -> {
-                if (tenantSlug != null && !tenantSlug.isBlank()) {
-                    TenantContext.setSlug(tenantSlug);
-                } else {
-                    ensureTenantSlug(tenantId);
-                }
-
+            String slug = TenantContext.callWithTenant(tenantId,
+                    () -> resolveTenantSlug(tenantId, tenantSlug));
+            TenantContextUtils.withTenant(tenantId, slug, () -> {
                 if (collectionName != null && !collectionName.isBlank()) {
                     rebuildCollectionIndexSync(tenantId, collectionName);
                     return;
@@ -534,23 +530,27 @@ public class SearchIndexService {
     }
 
     /**
-     * Ensures the tenant slug is set in TenantContext by looking it up from the
-     * tenant ID if not already present. Required for schema-qualified queries
-     * via StorageAdapter.
+     * Resolves the tenant slug the rebuild binds for schema-qualified queries via
+     * StorageAdapter: a slug already bound in scope wins, then the caller-supplied slug, then a
+     * lookup by tenant ID. Returns {@code null} when none resolves.
      */
-    private void ensureTenantSlug(String tenantId) {
-        if (TenantContext.getSlug() != null && !TenantContext.getSlug().isBlank()) {
-            return;
+    private String resolveTenantSlug(String tenantId, String suppliedSlug) {
+        String bound = TenantContext.getSlug();
+        if (bound != null && !bound.isBlank()) {
+            return bound;
+        }
+        if (suppliedSlug != null && !suppliedSlug.isBlank()) {
+            return suppliedSlug;
         }
         try {
             String slug = jdbcTemplate.queryForObject(SELECT_TENANT_SLUG, String.class, tenantId);
-            if (slug != null) {
-                TenantContext.setSlug(slug);
-            } else {
+            if (slug == null) {
                 log.warn("Could not resolve slug for tenant {}", tenantId);
             }
+            return slug;
         } catch (Exception e) {
             log.warn("Failed to resolve slug for tenant {}: {}", tenantId, e.getMessage());
+            return null;
         }
     }
 }

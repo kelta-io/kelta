@@ -1,5 +1,7 @@
 package io.kelta.worker.service;
 
+import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import tools.jackson.core.JacksonException;
@@ -67,6 +69,9 @@ public class AuditBeforeSaveHook implements BeforeSaveHook {
      * Collections whose names should be derived from the entity type rather
      * than the collection name itself (for more readable audit entries).
      */
+    private static final Map<String, CollectionDefinition> SYSTEM_DEFINITIONS =
+            SystemCollectionDefinitions.byName();
+
     private static final Set<String> JUNCTION_COLLECTIONS = Set.of(
             "profile-system-permissions", "profile-object-permissions", "profile-field-permissions"
     );
@@ -102,7 +107,7 @@ public class AuditBeforeSaveHook implements BeforeSaveHook {
         String userId = extractUserId(record);
 
         auditService.log(tenantId, userId, "CREATED", section, entityType,
-                recordId, entityName, null, toJson(record));
+                recordId, entityName, null, toJson(visible(collectionName, record)));
     }
 
     @Override
@@ -117,7 +122,7 @@ public class AuditBeforeSaveHook implements BeforeSaveHook {
         String userId = extractUserId(record);
 
         auditService.log(tenantId, userId, "UPDATED", section, entityType,
-                id, null, null, toJson(record));
+                id, null, null, toJson(visible(collectionName, record)));
     }
 
     @Override
@@ -186,6 +191,17 @@ public class AuditBeforeSaveHook implements BeforeSaveHook {
             userId = data.get("updatedBy");
         }
         return userId != null ? userId.toString() : null;
+    }
+
+    /**
+     * The record as the audit trail may store it: without the collection's server-only fields
+     * (encrypted secrets, secret hashes). The trail is itself readable through the
+     * {@code setup-audit-entries} collection, so anything written here is effectively served.
+     * Every audited collection is a system collection, so its canonical definition decides.
+     */
+    static Map<String, Object> visible(String collectionName, Map<String, Object> record) {
+        CollectionDefinition definition = SYSTEM_DEFINITIONS.get(collectionName);
+        return definition == null ? record : definition.withoutServerOnlyFields(record);
     }
 
     private String toJson(Map<String, Object> data) {

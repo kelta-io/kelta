@@ -1,6 +1,5 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
@@ -12,7 +11,7 @@ import io.kelta.worker.repository.WinRepository;
 import io.kelta.worker.repository.WinRepository.TargetStats;
 import io.kelta.worker.repository.WinRepository.Win;
 import io.kelta.worker.service.CerbosPermissionResolver;
-import org.junit.jupiter.api.AfterEach;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,6 +32,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @DisplayName("WinController")
+@WithTenant("tenant-1")
 class WinControllerTest {
 
     private static final String TENANT = "tenant-1";
@@ -60,12 +60,6 @@ class WinControllerTest {
         when(collectionRegistry.get("wins")).thenReturn(mock(CollectionDefinition.class));
         when(userIdResolver.resolve(any(), eq(TENANT))).thenReturn(CALLER);
         when(queryEngine.create(any(), any())).thenAnswer(inv -> inv.getArgument(1));
-        TenantContext.set(TENANT);
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private MockHttpServletRequest requestFrom(String userId) {

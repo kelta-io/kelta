@@ -1,11 +1,10 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.UserInviteService;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,6 +25,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("AdminInviteController Tests")
+@WithTenant("tenant-1")
 class AdminInviteControllerTest {
 
     @Mock private UserInviteService userInviteService;
@@ -38,12 +38,6 @@ class AdminInviteControllerTest {
     @BeforeEach
     void setUp() {
         controller = new AdminInviteController(userInviteService, permissionResolver, bootstrapRepository);
-        TenantContext.set("tenant-1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private void grantManageUsers() {
@@ -102,9 +96,9 @@ class AdminInviteControllerTest {
 
     @Test
     @DisplayName("400 when no tenant context is bound")
+    @WithTenant(none = true)
     void shouldReturn400WhenNoTenantContext() {
         grantManageUsers();
-        TenantContext.clear();
 
         ResponseEntity<Map<String, String>> response = controller.invite(request, "user-1");
 

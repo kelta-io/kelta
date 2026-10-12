@@ -1,16 +1,17 @@
 package io.kelta.runtime.context;
 
 /**
- * Holder for the current tenant ID and slug.
+ * Holder for the current tenant ID and slug, bound as {@link ScopedValue}s.
  * <p>
- * Supports both the modern {@link ScopedValue}-based API (preferred) and the
- * legacy {@link ThreadLocal}-based API for backward compatibility during migration.
+ * Use {@link #runWithTenant} or {@link #callWithTenant} to establish a structured tenant
+ * scope that works correctly with virtual threads; on a worker request path the scope is
+ * already bound by {@code TenantContextFilter}, so just read {@link #get()}.
  * <p>
- * <b>Preferred usage:</b> Use {@link #runWithTenant} or {@link #callWithTenant} to
- * establish a structured tenant scope that works correctly with virtual threads.
- * <p>
- * <b>Legacy usage:</b> {@link #set}/{@link #clear} still work via ThreadLocal
- * but are deprecated and will be removed in a future release.
+ * The ThreadLocal setters ({@code set}/{@code setSlug}/{@code clear}) were removed
+ * 2026-10-11: {@link #get()} preferred a bound ScopedValue over the ThreadLocal, so on a
+ * request path {@code set(...)} was a silent no-op, and on pooled threads a value that was
+ * never cleared leaked into the next task. {@link #runWithTenantIfUnbound} keeps the old
+ * "an outer binding wins" precedence for the few shared paths that need it.
  * <p>
  * <b>Cross-tenant work:</b> there is no "platform scope" helper, and binding a sentinel
  * tenant id is the one thing that will not work. The RLS bypass is keyed on an
@@ -39,24 +40,20 @@ public final class TenantContext {
     public static final ScopedValue<String> CURRENT_TENANT = ScopedValue.newInstance();
     public static final ScopedValue<String> CURRENT_TENANT_SLUG = ScopedValue.newInstance();
 
-    // ThreadLocal fallback (deprecated, for backward compatibility)
-    private static final ThreadLocal<String> LEGACY_TENANT = new ThreadLocal<>();
-    private static final ThreadLocal<String> LEGACY_TENANT_SLUG = new ThreadLocal<>();
-
     private TenantContext() {}
 
     /**
-     * Returns the current tenant ID from either ScopedValue or ThreadLocal.
+     * Returns the bound tenant ID, or {@code null} when none is bound.
      */
     public static String get() {
-        return CURRENT_TENANT.isBound() ? CURRENT_TENANT.get() : LEGACY_TENANT.get();
+        return CURRENT_TENANT.isBound() ? CURRENT_TENANT.get() : null;
     }
 
     /**
-     * Returns the current tenant slug from either ScopedValue or ThreadLocal.
+     * Returns the bound tenant slug, or {@code null} when none is bound.
      */
     public static String getSlug() {
-        return CURRENT_TENANT_SLUG.isBound() ? CURRENT_TENANT_SLUG.get() : LEGACY_TENANT_SLUG.get();
+        return CURRENT_TENANT_SLUG.isBound() ? CURRENT_TENANT_SLUG.get() : null;
     }
 
     // ── Modern ScopedValue API (preferred) ──────────────────────────────
@@ -94,30 +91,45 @@ public final class TenantContext {
                           .call(operation);
     }
 
-    // ── Legacy ThreadLocal API (deprecated) ─────────────────────────────
+    // ── Caller-precedence helpers ───────────────────────────────────────
 
     /**
-     * @deprecated Use {@link #runWithTenant(String, Runnable)} instead.
+     * Runs {@code operation} with {@code tenantId}/{@code tenantSlug} bound <em>only where the
+     * caller has not already bound a value</em>: an outer binding (the worker's request filter, a
+     * NATS listener's scope) wins, and each of the two values is filled independently.
+     *
+     * <p>This is the precedence the removed ThreadLocal setters had — {@code get()} always
+     * preferred a bound {@link ScopedValue} over the ThreadLocal. It exists for shared code that
+     * runs both on request paths, where the tenant is pre-bound, and on background paths, where it
+     * is not, and must not override the request's binding. Code that is handed an explicit tenant
+     * to act for should use {@link #runWithTenant}/{@link #callWithTenant}, which shadow an outer
+     * binding. A {@code null} or blank argument binds nothing.
      */
-    @Deprecated(forRemoval = true)
-    public static void set(String tenantId) {
-        LEGACY_TENANT.set(tenantId);
+    public static void runWithTenantIfUnbound(String tenantId, String tenantSlug, Runnable operation) {
+        callWithTenantIfUnbound(tenantId, tenantSlug, () -> {
+            operation.run();
+            return null;
+        });
     }
 
     /**
-     * @deprecated Use {@link #runWithTenant(String, String, Runnable)} instead.
+     * Value-returning form of {@link #runWithTenantIfUnbound(String, String, Runnable)}.
      */
-    @Deprecated(forRemoval = true)
-    public static void setSlug(String slug) {
-        LEGACY_TENANT_SLUG.set(slug);
-    }
-
-    /**
-     * @deprecated No longer needed with ScopedValue — scope is automatically bounded.
-     */
-    @Deprecated(forRemoval = true)
-    public static void clear() {
-        LEGACY_TENANT.remove();
-        LEGACY_TENANT_SLUG.remove();
+    public static <T> T callWithTenantIfUnbound(String tenantId, String tenantSlug,
+                                                ScopedValue.CallableOp<T, RuntimeException> operation) {
+        boolean bindTenant = !CURRENT_TENANT.isBound() && tenantId != null && !tenantId.isBlank();
+        boolean bindSlug = !CURRENT_TENANT_SLUG.isBound() && tenantSlug != null && !tenantSlug.isBlank();
+        if (bindTenant && bindSlug) {
+            return ScopedValue.where(CURRENT_TENANT, tenantId)
+                              .where(CURRENT_TENANT_SLUG, tenantSlug)
+                              .call(operation);
+        }
+        if (bindTenant) {
+            return ScopedValue.where(CURRENT_TENANT, tenantId).call(operation);
+        }
+        if (bindSlug) {
+            return ScopedValue.where(CURRENT_TENANT_SLUG, tenantSlug).call(operation);
+        }
+        return operation.call();
     }
 }

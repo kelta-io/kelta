@@ -147,8 +147,8 @@ export interface OIDCProvider {
   name: string;
   issuer: string;
   clientId: string;
+  /** Write-only: sent to set or rotate the secret; the stored (encrypted) value is never returned. */
   clientSecret?: string;
-  clientSecretEnc?: string;
   scopes: string[];
   active: boolean;
   // OIDC Discovery endpoint overrides (auto-discovered from issuer when null)

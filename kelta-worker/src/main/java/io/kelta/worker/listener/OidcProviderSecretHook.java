@@ -20,9 +20,10 @@ import java.util.Map;
  *   <li>Removes the plaintext from the record so it is never stored</li>
  * </ol>
  *
- * <p>On reads, {@code clientSecretEnc} is masked (not returned as plaintext) by
- * the response transformer. The encrypted value is only decrypted internally
- * when kelta-auth needs to perform token exchange with the external IdP.
+ * <p>{@code clientSecretEnc} is a server-only field ({@code FieldDefinition.serverOnly}): the
+ * query engine never returns it and ignores a caller-supplied value, so this hook is the only
+ * writer. The encrypted value is only decrypted internally (read from the column directly) when
+ * kelta-auth needs to perform token exchange with the external IdP.
  */
 @Component
 @ConditionalOnProperty(name = "kelta.encryption.key")

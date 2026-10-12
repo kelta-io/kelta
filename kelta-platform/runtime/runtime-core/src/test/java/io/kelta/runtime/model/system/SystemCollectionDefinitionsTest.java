@@ -127,4 +127,22 @@ class SystemCollectionDefinitionsTest {
         assertEquals(FieldType.LOOKUP, reportId.type());
         assertTrue(reportId.nullable(), "reportId must be nullable — collectionName is a valid alternative target");
     }
+
+    @Test
+    @DisplayName("Secret material is declared server-only, and nothing else is")
+    void secretMaterialIsServerOnly() {
+        Map<String, java.util.Set<String>> serverOnly = new java.util.TreeMap<>();
+        for (CollectionDefinition def : SystemCollectionDefinitions.all()) {
+            if (!def.serverOnlyFieldNames().isEmpty()) {
+                serverOnly.put(def.name(), def.serverOnlyFieldNames());
+            }
+        }
+        // Pinned on purpose: adding a secret-bearing field means adding it here too.
+        assertEquals(Map.of(
+                "connected-app-tokens", java.util.Set.of("tokenHash"),
+                "connected-apps", java.util.Set.of("clientSecretHash"),
+                "credential-oauth-tokens", java.util.Set.of("accessTokenEnc", "refreshTokenEnc"),
+                "credentials", java.util.Set.of("dataEnc"),
+                "oidc-providers", java.util.Set.of("clientSecretEnc")), serverOnly);
+    }
 }

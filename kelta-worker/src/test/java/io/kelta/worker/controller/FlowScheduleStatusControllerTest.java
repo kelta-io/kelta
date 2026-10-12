@@ -1,8 +1,7 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.ScheduledJobRepository;
-import org.junit.jupiter.api.AfterEach;
+import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -20,6 +19,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @DisplayName("FlowScheduleStatusController")
+@WithTenant("t1")
 class FlowScheduleStatusControllerTest {
 
     private ScheduledJobRepository repository;
@@ -29,12 +29,6 @@ class FlowScheduleStatusControllerTest {
     void setUp() {
         repository = mock(ScheduledJobRepository.class);
         controller = new FlowScheduleStatusController(repository);
-        TenantContext.set("t1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     @Nested
@@ -164,8 +158,8 @@ class FlowScheduleStatusControllerTest {
 
         @Test
         @DisplayName("Returns 400 when no tenant context")
+        @WithTenant(none = true)
         void returns400WithoutTenant() {
-            TenantContext.clear();
             var response = controller.getFlowSchedule("flow-1");
             assertThat(response.getStatusCode().value()).isEqualTo(400);
         }
@@ -247,8 +241,8 @@ class FlowScheduleStatusControllerTest {
 
         @Test
         @DisplayName("Returns 400 when no tenant context")
+        @WithTenant(none = true)
         void returns400WithoutTenant() {
-            TenantContext.clear();
             var response = controller.getFlowRuns("flow-1", 20);
             assertThat(response.getStatusCode().value()).isEqualTo(400);
         }

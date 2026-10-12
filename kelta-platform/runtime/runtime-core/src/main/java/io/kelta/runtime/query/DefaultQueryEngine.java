@@ -207,6 +207,9 @@ public class DefaultQueryEngine implements QueryEngine {
         // Decrypt encrypted fields on results
         decryptFields(definition, result.data());
 
+        // Server-only fields never leave the engine, whatever fields[] the caller asked for
+        stripServerOnlyFields(definition, result.data());
+
         // Log query performance
         long duration = System.currentTimeMillis() - startTime;
         logger.debug("Query executed on collection '{}': {} records returned in {}ms",
@@ -232,6 +235,7 @@ public class DefaultQueryEngine implements QueryEngine {
                 throw new InvalidQueryException(spec.field(),
                     "Aggregation field does not exist in collection '" + definition.name() + "'");
             }
+            rejectServerOnly(definition, spec.field(), "an aggregation");
         }
 
         return storageAdapter.aggregate(definition, filters == null ? List.of() : filters, specs);
@@ -246,6 +250,7 @@ public class DefaultQueryEngine implements QueryEngine {
         result.ifPresent(record -> {
             computeVirtualFields(definition, List.of(record));
             decryptFields(definition, List.of(record));
+            definition.stripServerOnlyFields(record);
         });
         return result;
     }
@@ -260,9 +265,10 @@ public class DefaultQueryEngine implements QueryEngine {
             throw new ReadOnlyCollectionException(definition.name());
         }
 
-        // Create mutable copy
-        Map<String, Object> recordData = new HashMap<>(data);
-        
+        // Create mutable copy. A server-only value is the platform's to set (a before-save hook
+        // may add one below); one supplied by the caller is dropped.
+        Map<String, Object> recordData = definition.withoutServerOnlyFields(data);
+
         // Add system fields
         String id = UUID.randomUUID().toString();
         Instant now = Instant.now();
@@ -303,17 +309,21 @@ public class DefaultQueryEngine implements QueryEngine {
 
         logger.debug("Created record '{}' in collection '{}'", id, definition.name());
 
-        // Invoke after-create hooks
+        // Invoke after-create hooks (they see the full record, server-only fields included)
         invokeAfterCreateHooks(definition, created);
+
+        // Everything past this point leaves the engine: event subscribers (realtime, webhooks,
+        // flows, search) and the caller's response.
+        Map<String, Object> visible = definition.withoutServerOnlyFields(created);
 
         // Publish record change event
         publishRecordEvent(EventFactory.createRecordEvent("record.created",
                 extractTenantId(recordData), extractUserId(recordData),
-                RecordChangedPayload.created(definition.name(), id, created)
+                RecordChangedPayload.created(definition.name(), id, visible)
                         .withContainsMaskedFields(definition.hasMaskingConfiguredFields())
                         .withOwnerScoped(definition.isOwnerScoped())));
 
-        return created;
+        return visible;
     }
 
     @Override
@@ -333,8 +343,9 @@ public class DefaultQueryEngine implements QueryEngine {
             return Optional.empty();
         }
 
-        // Create mutable copy
-        Map<String, Object> recordData = new HashMap<>(data);
+        // Create mutable copy, dropping caller-supplied server-only values (a before-save hook
+        // may still set one below)
+        Map<String, Object> recordData = definition.withoutServerOnlyFields(data);
 
         // Update timestamp
         recordData.put("updatedAt", Instant.now());
@@ -422,19 +433,20 @@ public class DefaultQueryEngine implements QueryEngine {
             // Compute changed fields by comparing previous data with the update data
             List<String> changedFields = computeChangedFields(previousData, recordData);
 
-            // Invoke after-update hooks
+            // Invoke after-update hooks (they see the full record, server-only fields included)
             invokeAfterUpdateHooks(definition, id, record, previousData);
 
-            // Publish record change event
+            // Publish record change event — without server-only values in either snapshot
             publishRecordEvent(EventFactory.createRecordEvent("record.updated",
                     extractTenantId(mergedData), extractUserId(mergedData),
-                    RecordChangedPayload.updated(definition.name(), id, mergedData,
-                            previousData, changedFields)
+                    RecordChangedPayload.updated(definition.name(), id,
+                            definition.withoutServerOnlyFields(mergedData),
+                            definition.withoutServerOnlyFields(previousData), changedFields)
                             .withContainsMaskedFields(definition.hasMaskingConfiguredFields())
                             .withOwnerScoped(definition.isOwnerScoped())));
         });
 
-        return updated;
+        return updated.map(definition::withoutServerOnlyFields);
     }
     
     @Override
@@ -483,7 +495,8 @@ public class DefaultQueryEngine implements QueryEngine {
             if (recordData != null) {
                 publishRecordEvent(EventFactory.createRecordEvent("record.deleted",
                         extractTenantId(recordData), extractUserId(recordData),
-                        RecordChangedPayload.deleted(definition.name(), id, recordData)
+                        RecordChangedPayload.deleted(definition.name(), id,
+                                definition.withoutServerOnlyFields(recordData))
                                 .withContainsMaskedFields(definition.hasMaskingConfiguredFields())
                                 .withOwnerScoped(definition.isOwnerScoped())));
             }
@@ -501,6 +514,7 @@ public class DefaultQueryEngine implements QueryEngine {
                 throw new InvalidQueryException(sortField.fieldName(), 
                     "Sort field does not exist in collection '" + definition.name() + "'");
             }
+            rejectServerOnly(definition, sortField.fieldName(), "a sort");
         }
     }
     
@@ -513,6 +527,7 @@ public class DefaultQueryEngine implements QueryEngine {
                 throw new InvalidQueryException(filter.fieldName(),
                     "Filter field does not exist in collection '" + definition.name() + "'");
             }
+            rejectServerOnly(definition, filter.fieldName(), "a filter");
         }
     }
     
@@ -528,6 +543,31 @@ public class DefaultQueryEngine implements QueryEngine {
         }
     }
     
+    /**
+     * Refuses a server-only field as a filter, sort or aggregation key. Evaluating a predicate,
+     * an ordering or an aggregate over a value the engine never returns would disclose it
+     * indirectly (one prefix match at a time), so it is rejected rather than answered.
+     */
+    private static void rejectServerOnly(CollectionDefinition definition, String fieldName, String use) {
+        if (definition.isServerOnlyField(fieldName)) {
+            throw new InvalidQueryException(fieldName,
+                "Field cannot be used in " + use + " on collection '" + definition.name() + "'");
+        }
+    }
+
+    /**
+     * Removes server-only fields from every record of a result page, in place.
+     */
+    private static void stripServerOnlyFields(CollectionDefinition definition,
+                                              List<Map<String, Object>> records) {
+        if (records == null || definition.serverOnlyFieldNames().isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> record : records) {
+            definition.stripServerOnlyFields(record);
+        }
+    }
+
     /**
      * Checks if a field name is valid for the collection.
      * System fields (id, createdAt, updatedAt, createdBy, updatedBy) are always valid.

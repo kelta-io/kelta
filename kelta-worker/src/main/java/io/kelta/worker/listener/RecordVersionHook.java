@@ -110,7 +110,8 @@ public class RecordVersionHook implements BeforeSaveHook {
         List<String> changedFields = versionedFieldNames(ctx.definition).stream()
                 .filter(field -> record.get(field) != null)
                 .toList();
-        write(tenantId, ctx.collectionId, recordId, "CREATED", record, changedFields,
+        write(tenantId, ctx.collectionId, recordId, "CREATED",
+                visibleSnapshot(ctx.definition, record), changedFields,
                 resolveUser(record));
     }
 
@@ -127,7 +128,8 @@ public class RecordVersionHook implements BeforeSaveHook {
         if (changedFields.isEmpty()) {
             return; // no-op update — don't mint a version
         }
-        write(tenantId, ctx.collectionId, id, "UPDATED", record, changedFields,
+        write(tenantId, ctx.collectionId, id, "UPDATED",
+                visibleSnapshot(ctx.definition, record), changedFields,
                 resolveUser(record));
     }
 
@@ -162,7 +164,8 @@ public class RecordVersionHook implements BeforeSaveHook {
         if (ctx == null) {
             return;
         }
-        write(tenantId, ctx.collectionId, id, "DELETED", record, List.of(), resolveUser(record));
+        write(tenantId, ctx.collectionId, id, "DELETED",
+                visibleSnapshot(ctx.definition, record), List.of(), resolveUser(record));
     }
 
     private static String pendingKey(String collectionName, String id) {
@@ -185,9 +188,22 @@ public class RecordVersionHook implements BeforeSaveHook {
         return new Context(collectionId, definition);
     }
 
+    /** The record without server-only fields, which never enter a snapshot. */
+    private static Map<String, Object> visibleSnapshot(CollectionDefinition definition,
+                                                       Map<String, Object> record) {
+        Map<String, Object> copy = new java.util.LinkedHashMap<>(record);
+        for (io.kelta.runtime.model.FieldDefinition field : definition.fields()) {
+            if (field.serverOnly()) {
+                copy.remove(field.name());
+            }
+        }
+        return copy;
+    }
+
     /** User field names eligible for change detection (audit/identity keys excluded). */
     private List<String> versionedFieldNames(CollectionDefinition definition) {
         return definition.fields().stream()
+                .filter(field -> !field.serverOnly()) // never versioned, never snapshotted
                 .map(io.kelta.runtime.model.FieldDefinition::name)
                 .filter(name -> !EXCLUDED_FIELDS.contains(name))
                 .toList();

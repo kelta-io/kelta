@@ -1,9 +1,9 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.MetadataPromotionService;
+import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.*;
 import org.springframework.http.HttpStatus;
@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @DisplayName("PromotionController")
+@WithTenant("t1")
 class PromotionControllerTest {
 
     private MetadataPromotionService promotionService;
@@ -32,12 +33,6 @@ class PromotionControllerTest {
         bootstrapRepository = mock(BootstrapRepository.class);
         request = mock(HttpServletRequest.class);
         controller = new PromotionController(promotionService, permissionResolver, bootstrapRepository);
-        TenantContext.set("t1");
-    }
-
-    @AfterEach
-    void tearDown() {
-        TenantContext.clear();
     }
 
     private void grantPermission() {
