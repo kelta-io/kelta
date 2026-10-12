@@ -245,4 +245,37 @@ class PublicPathMatcherTest {
         assertThat(matcher.isTenantScopedPublicPath("/otel/v1/traces")).isFalse();
         assertThat(matcher.isTenantScopedPublicPath("/api/users")).isFalse();
     }
+
+    @Test
+    void prefixesMatchWholeSegmentsOnly() {
+        PublicPathMatcher matcher = new PublicPathMatcher(BOOTSTRAP_PATHS, List.of("/otel", "/api/track"),
+                List.of("/api/tenants"));
+
+        assertThat(matcher.isPublicRequest(MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/track/open").build()))).isTrue();
+        assertThat(matcher.isPublicRequest(MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/track").build()))).isTrue();
+
+        for (String path : List.of("/api/tracking", "/api/tracks/123", "/otelx", "/api/ui-pages-archive",
+                "/api/tenants-history")) {
+            assertThat(matcher.isPublicRequest(MockServerWebExchange.from(
+                    MockServerHttpRequest.get(path).build()))).as("GET " + path).isFalse();
+            assertThat(matcher.isPublicRequest(MockServerWebExchange.from(
+                    MockServerHttpRequest.post(path).build()))).as("POST " + path).isFalse();
+        }
+        assertThat(matcher.isTenantScopedPublicPath("/api/ui-menus-legacy")).isFalse();
+    }
+
+    @Test
+    void trailingSlashOnAConfiguredPrefixIsIgnored() {
+        PublicPathMatcher matcher = new PublicPathMatcher(List.of("/api/ui-pages/"), List.of("/"));
+
+        assertThat(matcher.isPublicRequest(MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/ui-pages").build()))).isTrue();
+        assertThat(matcher.isPublicRequest(MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/ui-pages/abc").build()))).isTrue();
+        // A bare "/" would cover every route; it is never treated as a prefix.
+        assertThat(matcher.isPublicRequest(MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/users").build()))).isFalse();
+    }
 }

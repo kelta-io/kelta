@@ -12,10 +12,19 @@ import java.util.Set;
  * <p>{@link CerbosSubResourceAuthorizer} needs it to give a child-resource request the decision a
  * direct request to the child collection gets at the gateway. {@code GatewayStaticRoutesSyncTest}
  * reads the gateway sources and fails when the two drift.
+ *
+ * <p>{@code ReservedCollectionNameHook} uses {@link #isStaticSegment} to keep a tenant collection
+ * from taking a name the gateway already routes as a {@code static-} route: such a collection
+ * would be authorized by the static route's rule instead of its own permissions.
  */
-final class GatewayStaticRoutes {
+public final class GatewayStaticRoutes {
 
     private GatewayStaticRoutes() {}
+
+    /** True when {@code /api/<segment>/**} is served through a gateway {@code static-} route. */
+    public static boolean isStaticSegment(String segment) {
+        return segment != null && SEGMENTS.contains(segment);
+    }
 
     /**
      * The {@code /api/<segment>/**} prefixes the gateway serves through a {@code static-} route.

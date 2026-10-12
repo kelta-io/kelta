@@ -861,7 +861,10 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
 - **New top-level path**: a brand-new `/api/<x>/**` segment must be registered as a static
   route in `kelta-gateway/.../service/RouteConfigService.registerStaticRoutes()` (and
   `config/RouteInitializer.registerStaticRoutes()`) or the gateway returns **404**. Sub-paths
-  under an existing segment need no new route.
+  under an existing segment need no new route. Static-route segments are reserved: a tenant
+  collection cannot be created with (or renamed to) one of those names
+  (`ReservedCollectionNameHook`, backed by the worker's `GatewayStaticRoutes` copy, which
+  `GatewayStaticRoutesSyncTest` keeps in sync with the gateway).
 - **Public (unauthenticated) endpoint**: to expose a path with no JWT, add its prefix to
   `kelta.gateway.security.unauthenticated-paths` (all methods) or `public-paths` (GET/HEAD only)
   in the gateway `application.yml`, *and* register its worker static route. Example: mass-email
@@ -872,6 +875,9 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   endpoint gated in-controller on `MANAGE_CAMPAIGNS` (the DB-lookup pattern above).
   Either list is guarded by `PublicSurfaceTest`, which reads the **shipped** `application.yml`
   and asserts the allowlist equals a reviewed set — widening it must also edit that test.
+  Entries match whole path segments (`PublicPathMatcher.matches`): `/api/track` covers
+  `/api/track` and `/api/track/**`, never `/api/tracking`; a bare `/` is ignored. The
+  tenant-slug `platform-paths` list matches the same way.
 - **UI bootstrap endpoints**: `kelta-ui/app/src/utils/bootstrapCache.ts` fetches `ui-pages`,
   `ui-menus`, `ui-translations`, `oidc-providers`, and `tenants` **with no token**, before a
   session exists. Every one of those must be in `public-paths` (GET/HEAD only) or the gateway

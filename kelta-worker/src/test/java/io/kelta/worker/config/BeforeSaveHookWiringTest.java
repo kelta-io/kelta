@@ -111,6 +111,7 @@ class BeforeSaveHookWiringTest {
                 "CollectionDeletionGuardHook",
                 "CollectionLifecycleHook",
                 "CollectionOwnershipValidationHook",
+                "ReservedCollectionNameHook",
                 "CollectionConfigEventPublisher"));
         m.put("credentials", List.of("CredentialEventPublisher"));
         m.put("dashboard-components", List.of("DashboardComponentConfigHook"));
