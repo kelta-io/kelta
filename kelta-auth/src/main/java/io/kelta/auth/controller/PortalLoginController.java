@@ -98,8 +98,11 @@ public class PortalLoginController {
         securityContextRepository.saveContext(context, request, response);
 
         // Keep the login-flow tenant attribute consistent with form login so
-        // downstream pages (consent, session) resolve the same tenant.
-        request.getSession().setAttribute("tenantId", userDetails.getTenantId());
+        // downstream pages (consent, session) resolve the same tenant. It must be
+        // the slug, as LoginController writes: TenantContextFilter compares it with
+        // the slug in the SPA's /oauth2/authorize redirect_uri, and a UUID there
+        // reads as a tenant switch that clears the session this method just saved.
+        request.getSession().setAttribute("tenantId", verified.get().tenantSlug());
 
         // A magic link opens in a fresh browser context, so there is no saved
         // /oauth2/authorize request to replay. Send the user to the tenant's

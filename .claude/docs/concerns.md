@@ -677,6 +677,7 @@ One line each; full write-ups are in git history.
 - Older: Superset SQL injection hardening; gateway actuator requires JWT except health/info; `/internal/**` JWT auth (flag-gated); schema-name sanitization in `SchemaLifecycleModule`.
 
 **Bugs**
+- 2026-10-11 — portal magic-link sign-in never reached the end-user app: `PortalLoginController.verify` stored the tenant UUID in the session while `TenantContextFilter` compares the `/oauth2/authorize` redirect slug, so it read as a tenant switch and cleared the new session (back to the password form). Now stores the slug; found by un-gating `e2e-tests/tests/auth/portal-login.spec.ts`.
 - `RouteRegistry.AUTHORITATIVE_STATIC_PATHS` — member-controller static routes were overwritten by their collection's generic route (portal 403s).
 - V181/V182 + `CollectionDeletionGuardHook` — collections became undeletable once used; cascade, S3 purge, `?force=true` guard, physical table drop.
 - e2e litter in a product tenant (2026-08-06) — cli-smoke refuses schema mutation on non-disposable tenants; `DataFactory` force-delete teardown; stuck collections cleaned 2026-08-08.

@@ -1,1 +1,1 @@
-- 2026-10-11 test(e2e): Un-gate or remove unconditionally skipped Playwright specs (e2e-unskip-or-remove)
+- 2026-10-11 test(e2e): Un-gate or remove unconditionally skipped Playwright specs; fix portal magic-link sign-in clearing its own session (e2e-unskip-or-remove)
