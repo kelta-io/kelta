@@ -3,6 +3,9 @@ import type { FilterExpression, SortCriteria } from '@kelta/sdk';
 
 /**
  * Column definition for DataTable
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major release of
+ * @kelta/components. The Kelta UI's lists use its own `AdminDataTable` / `ObjectDataTable`. Copy it into your app if you depend on it.
  */
 export interface ColumnDefinition<T = unknown> {
   /**
@@ -38,6 +41,9 @@ export interface ColumnDefinition<T = unknown> {
 
 /**
  * Props for DataTable component
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major release of
+ * @kelta/components. The Kelta UI's lists use its own `AdminDataTable` / `ObjectDataTable`. Copy it into your app if you depend on it.
  */
 export interface DataTableProps<T = unknown> {
   /**

@@ -64,7 +64,7 @@ There is **no central route/nav config object** — wiring is explicit:
    standard `/api/{collection}` JSON:API; admin controllers often return a `single(...)`
    envelope with rows under `attributes` — unwrap manually.
 
-Reuse `@kelta/components` (don't fork tables/filters/forms) and follow `DESIGN.md`. Full
+Reuse the canonical shared components (`AdminDataTable`, `ObjectDataTable`/`ListShell`, `FilterBuilder`, `fieldControl`, `RecordShell`; don't fork tables/filters/forms — `.claude/docs/conventions.md` → Component reuse) and follow `DESIGN.md`. Full
 recipe incl. backend: `.claude/docs/playbooks.md` → "Add an admin UI page".
 
 ## Context Providers

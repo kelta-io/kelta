@@ -134,7 +134,7 @@ Follow the patterns described in [`.claude/docs/conventions.md`](.claude/docs/co
 
 Key points:
 - Backend: Java records, `JdbcTemplate` with hand-written SQL — no Spring Data JPA.
-- Frontend: React 19, TypeScript; reuse components from `@kelta/components`.
+- Frontend: React 19, TypeScript; reuse the shared components in `kelta-ui/app/src/components` (tables, filters, field controls, record shell — see `.claude/docs/conventions.md` → Component reuse).
 - Commit messages: [Conventional Commits](https://www.conventionalcommits.org/) —
   `type(scope): description`.
 

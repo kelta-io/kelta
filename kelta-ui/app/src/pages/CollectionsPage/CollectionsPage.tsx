@@ -2,7 +2,6 @@
  * CollectionsPage Component
  *
  * Displays a paginated list of collections with filtering, sorting, and CRUD actions.
- * Uses DataTable from @kelta/components for the list display.
  *
  * Requirements:
  * - 3.1: Display a paginated list of all collections
