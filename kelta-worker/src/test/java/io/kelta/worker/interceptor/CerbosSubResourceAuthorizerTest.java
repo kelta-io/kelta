@@ -272,4 +272,43 @@ class CerbosSubResourceAuthorizerTest {
                 collection("contacts", false), null, Operation.CREATE), request).allowed()).isTrue();
         verifyNoInteractions(authz);
     }
+
+    @Nested
+    @DisplayName("authorizeCollection (a direct request to the collection)")
+    class DirectCollection {
+
+        @Test
+        @DisplayName("a create needs create on the collection")
+        void createNeedsCreate() {
+            Decision denied = authorizer.authorizeCollection(collection("contacts", false), Operation.CREATE, request);
+            assertThat(denied.outcome()).isEqualTo(Outcome.FORBIDDEN);
+            assertThat(denied.detail()).isEqualTo("Insufficient permissions for create on contacts");
+
+            grant("contacts", "create");
+            assertThat(authorizer.authorizeCollection(collection("contacts", false), Operation.CREATE, request)
+                    .allowed()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a system collection behind a static route gets that route's rule")
+        void staticRouteRule() {
+            Decision denied = authorizer.authorizeCollection(collection("users", true), Operation.CREATE, request);
+            assertThat(denied.allowed()).isFalse();
+
+            grantSystem("MANAGE_USERS");
+            assertThat(authorizer.authorizeCollection(collection("users", true), Operation.CREATE, request)
+                    .allowed()).isTrue();
+        }
+
+        @Test
+        @DisplayName("requests without the gateway's identity headers are not checked")
+        void noIdentity() {
+            MockHttpServletRequest internal = new MockHttpServletRequest();
+            internal.addHeader("X-Tenant-ID", TENANT);
+
+            assertThat(authorizer.authorizeCollection(collection("contacts", false), Operation.CREATE, internal)
+                    .allowed()).isTrue();
+            verifyNoInteractions(authz);
+        }
+    }
 }

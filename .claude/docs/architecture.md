@@ -490,6 +490,13 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   (`concerns.md` → Fragile Areas; `CollectionSchemaControllerTest` registers the router stand-in).
   The generated OpenAPI document (`GET /api/docs/openapi.json`) covers system collections for the
   same reason.
+- **CSV import** (`POST /api/collections/{name}/import/csv`, `CsvImportController`): also rides
+  `static-collections` (its sub-path is exempt from that route's collection check), so the
+  controller authorizes it as a create on the target collection — the decision a direct
+  `POST /api/{name}` gets at the gateway, via `CerbosSubResourceAuthorizer.authorizeCollection` —
+  and leaves write-denied columns out of every record via `FieldWriteGuard`, reporting them as
+  `skippedColumns`. Any other dedicated endpoint that writes records of a collection named in its
+  path should do the same.
 - **Layout tree** (`GET|PUT /api/page-layouts/{id}/tree`,
   `PUT /api/collections/{name}/layouts/{layoutName}/tree`, `PageLayoutTreeController`): rides the
   existing `static-page-layouts` / `static-collections` routes, so only `API_ACCESS` is checked at

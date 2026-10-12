@@ -45,11 +45,33 @@ public class CsvImportService {
 
     public record ImportResult(int rowsProcessed, int rowsImported, List<RowError> errors) {}
 
-    public ImportResult importCsv(String collectionName, InputStream csvStream) throws IOException {
-        CollectionDefinition definition = collectionRegistry.get(collectionName);
-        if (definition == null) {
-            throw new IllegalArgumentException("Collection not found: " + collectionName);
+    /** The collection an import into {@code collectionName} writes to, or {@code null} when none. */
+    public CollectionDefinition resolveCollection(String collectionName) {
+        return collectionRegistry.get(collectionName);
+    }
+
+    /**
+     * The CSV header's columns that would be imported into {@code definition}: trimmed, non-blank,
+     * not a system field and naming a field of the collection. Reads only the header row.
+     */
+    public List<String> importableColumns(CollectionDefinition definition, InputStream csvStream) throws IOException {
+        List<String[]> rows = parseCsv(csvStream);
+        if (rows.isEmpty()) {
+            return List.of();
         }
+        return importableColumns(definition, Arrays.asList(rows.get(0)), Set.of());
+    }
+
+    /**
+     * Creates one record per data row.
+     *
+     * @param excludedColumns columns left out of every record even though they name a field — the
+     *                        caller's write-denied fields, so they get their default as on any
+     *                        other create
+     */
+    public ImportResult importCsv(CollectionDefinition definition, InputStream csvStream,
+                                  Set<String> excludedColumns) throws IOException {
+        String collectionName = definition.name();
 
         Map<String, FieldDefinition> fieldsByName = new LinkedHashMap<>();
         if (definition.fields() != null) {
@@ -67,10 +89,7 @@ public class CsvImportService {
         List<String> columnNames = Arrays.asList(headers);
 
         // Identify which columns map to writable fields
-        List<String> importableColumns = columnNames.stream()
-                .map(String::trim)
-                .filter(name -> !name.isBlank() && !SYSTEM_FIELDS.contains(name) && fieldsByName.containsKey(name))
-                .toList();
+        List<String> importableColumns = importableColumns(definition, columnNames, excludedColumns);
 
         if (importableColumns.isEmpty()) {
             return new ImportResult(0, 0,
@@ -136,6 +155,21 @@ public class CsvImportService {
         }
 
         return new ImportResult(dataRowCount, imported, errors);
+    }
+
+    private static List<String> importableColumns(CollectionDefinition definition, List<String> headers,
+                                                  Set<String> excludedColumns) {
+        Set<String> fieldNames = new HashSet<>();
+        if (definition.fields() != null) {
+            for (FieldDefinition f : definition.fields()) {
+                fieldNames.add(f.name());
+            }
+        }
+        return headers.stream()
+                .map(String::trim)
+                .filter(name -> !name.isBlank() && !SYSTEM_FIELDS.contains(name) && fieldNames.contains(name)
+                        && !excludedColumns.contains(name))
+                .toList();
     }
 
     /**
