@@ -21,6 +21,8 @@ import { getTenantSlug } from '../../context/TenantContext'
 import { useApi } from '../../context/ApiContext'
 import { ApiClient } from '../../services/apiClient'
 import { unwrapCollection, unwrapResource, extractIncluded } from '../../utils/jsonapi'
+import { normalizeFieldType } from '../../utils/normalizeFieldType'
+import type { FieldDefinition } from '../../hooks/useCollectionSchema'
 import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { useSavedViews } from '../../hooks/useSavedViews'
 import { useLookupDisplayMap } from '../../hooks/useLookupDisplayMap'
@@ -126,62 +128,8 @@ export function downloadFile(content: string, filename: string, mimeType: string
   URL.revokeObjectURL(url)
 }
 
-/**
- * Field definition interface for collection schema
- */
-export interface FieldDefinition {
-  id: string
-  name: string
-  displayName?: string
-  type:
-    | 'string'
-    | 'number'
-    | 'boolean'
-    | 'date'
-    | 'datetime'
-    | 'json'
-    | 'reference'
-    | 'picklist'
-    | 'multi_picklist'
-    | 'currency'
-    | 'percent'
-    | 'auto_number'
-    | 'phone'
-    | 'email'
-    | 'url'
-    | 'rich_text'
-    | 'encrypted'
-    | 'external_id'
-    | 'geolocation'
-    | 'lookup'
-    | 'master_detail'
-    | 'formula'
-    | 'rollup_summary'
-  required: boolean
-  referenceTarget?: string
-  referenceCollectionId?: string
-}
-
-/**
- * Reverse mapping from backend canonical types (uppercase) to UI types (lowercase).
- */
-const BACKEND_TYPE_TO_UI: Record<string, FieldDefinition['type']> = {
-  DOUBLE: 'number',
-  INTEGER: 'number',
-  LONG: 'number',
-  JSON: 'json',
-  ARRAY: 'json',
-  REFERENCE: 'master_detail',
-  LOOKUP: 'master_detail',
-}
-
-function normalizeFieldType(backendType: string): FieldDefinition['type'] {
-  const upper = backendType.toUpperCase()
-  if (upper in BACKEND_TYPE_TO_UI) {
-    return BACKEND_TYPE_TO_UI[upper]
-  }
-  return backendType.toLowerCase() as FieldDefinition['type']
-}
+/** Field definition for collection schema — the shared runtime-schema shape. */
+export type { FieldDefinition }
 
 /**
  * Collection schema interface

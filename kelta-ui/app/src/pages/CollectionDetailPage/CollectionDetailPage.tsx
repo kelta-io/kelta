@@ -45,29 +45,13 @@ import type {
   PicklistDependency,
   SetupAuditTrailEntry,
 } from '../../types/collections'
-import type { FieldType } from '../../types/collections'
+import { normalizeFieldType } from '../../utils/normalizeFieldType'
 
 /**
- * Reverse mapping from backend canonical types (uppercase) to UI types (lowercase).
- * The backend stores "DOUBLE" for what the UI calls "number", and "JSON" for "object".
- * Most types simply lowercase (e.g., "STRING" → "string", "PICKLIST" → "picklist").
+ * The designer shows legacy REFERENCE / LOOKUP fields as the type they are stored
+ * as, rather than collapsing them to master_detail like the record pages do.
  */
-const BACKEND_TYPE_TO_UI: Record<string, FieldType> = {
-  DOUBLE: 'number',
-  INTEGER: 'number',
-  LONG: 'number',
-  JSON: 'json',
-  ARRAY: 'json',
-}
-
-function normalizeFieldType(backendType: string): FieldType {
-  // Check explicit mapping first, then just lowercase
-  const upper = backendType.toUpperCase()
-  if (upper in BACKEND_TYPE_TO_UI) {
-    return BACKEND_TYPE_TO_UI[upper]
-  }
-  return backendType.toLowerCase() as FieldType
-}
+const DESIGNER_TYPE_OPTIONS = { collapseRelationships: false } as const
 
 /**
  * Props for CollectionDetailPage component
@@ -207,7 +191,7 @@ export function CollectionDetailPage({
       if (result.fields) {
         result.fields = result.fields.map((f) => ({
           ...f,
-          type: normalizeFieldType(f.type),
+          type: normalizeFieldType(f.type, DESIGNER_TYPE_OPTIONS),
         }))
       }
       return result
@@ -313,7 +297,7 @@ export function CollectionDetailPage({
           return {
             name: attrs.name as string,
             displayName: (attrs.displayName as string | undefined) ?? undefined,
-            type: normalizeFieldType((attrs.type as string) ?? 'string'),
+            type: normalizeFieldType((attrs.type as string) ?? 'string', DESIGNER_TYPE_OPTIONS),
             referenceTarget: (attrs.referenceTarget as string | undefined) ?? undefined,
           }
         })

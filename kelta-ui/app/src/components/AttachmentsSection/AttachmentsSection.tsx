@@ -24,6 +24,7 @@ import { getFileTypeInfo, isImageType, formatFileSize } from './fileTypeUtils'
 import { FileViewer } from './FileViewer'
 import type { FileViewerAttachment } from './FileViewer'
 import type { Attachment } from '../../hooks/useRecordContext'
+import { formatRelativeTime } from '../../utils/formatRelativeTime'
 
 export type { Attachment }
 
@@ -41,28 +42,6 @@ export interface AttachmentsSectionProps {
   attachments?: Attachment[]
   /** Callback to invalidate the parent query cache */
   onMutate?: () => void
-}
-
-/**
- * Format a date string as a relative time (e.g., "3 hours ago", "2 days ago").
- */
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  if (isNaN(date.getTime())) return dateStr
-
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffSeconds = Math.floor(diffMs / 1000)
-  const diffMinutes = Math.floor(diffSeconds / 60)
-  const diffHours = Math.floor(diffMinutes / 60)
-  const diffDays = Math.floor(diffHours / 24)
-
-  if (diffSeconds < 60) return 'just now'
-  if (diffMinutes < 60) return diffMinutes === 1 ? '1 minute ago' : `${diffMinutes} minutes ago`
-  if (diffHours < 24) return diffHours === 1 ? '1 hour ago' : `${diffHours} hours ago`
-  if (diffDays < 7) return diffDays === 1 ? '1 day ago' : `${diffDays} days ago`
-
-  return date.toLocaleDateString()
 }
 
 /**
@@ -325,7 +304,7 @@ export function AttachmentsSection({
                     {formatFileSize(attachment.fileSize)}
                     <span>&middot;</span>
                     <time dateTime={attachment.uploadedAt}>
-                      {formatRelativeTime(attachment.uploadedAt)}
+                      {formatRelativeTime(attachment.uploadedAt, { style: 'long' })}
                     </time>
                     <span>&middot;</span>
                     <span>{attachment.uploadedBy}</span>

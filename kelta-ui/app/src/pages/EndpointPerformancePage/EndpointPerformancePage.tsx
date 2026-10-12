@@ -4,6 +4,7 @@ import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
 import { LoadingSpinner, ErrorMessage } from '../../components'
 import { cn } from '@/lib/utils'
+import { formatLatency } from '@/utils/formatDuration'
 import { useNavigate } from 'react-router-dom'
 
 export interface EndpointPerformancePageProps {
@@ -51,12 +52,7 @@ export function EndpointPerformancePage({ className }: EndpointPerformancePagePr
   const sortIndicator = (key: SortKey) =>
     sortKey === key ? (sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : ''
 
-  const formatDuration = (micros: number) => {
-    const ms = micros / 1000
-    if (ms < 1) return `${(ms * 1000).toFixed(0)}\u00B5s`
-    if (ms < 1000) return `${ms.toFixed(1)}ms`
-    return `${(ms / 1000).toFixed(2)}s`
-  }
+  const formatMicros = (micros: number) => formatLatency(micros / 1000)
 
   return (
     <div
@@ -145,16 +141,16 @@ export function EndpointPerformancePage({ className }: EndpointPerformancePagePr
                     {ep.requestCount.toLocaleString()}
                   </td>
                   <td className="border-b border-border p-3 text-right font-mono text-xs">
-                    {formatDuration(ep.p50)}
+                    {formatMicros(ep.p50)}
                   </td>
                   <td className="border-b border-border p-3 text-right font-mono text-xs">
-                    {formatDuration(ep.p95)}
+                    {formatMicros(ep.p95)}
                   </td>
                   <td className="border-b border-border p-3 text-right font-mono text-xs">
-                    {formatDuration(ep.p99)}
+                    {formatMicros(ep.p99)}
                   </td>
                   <td className="border-b border-border p-3 text-right font-mono text-xs">
-                    {formatDuration(ep.avgDuration)}
+                    {formatMicros(ep.avgDuration)}
                   </td>
                 </tr>
               ))}

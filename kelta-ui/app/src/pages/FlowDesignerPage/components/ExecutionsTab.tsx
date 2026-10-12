@@ -5,6 +5,7 @@ import { useToast, LoadingSpinner } from '../../../components'
 import { unwrapCollection } from '../../../utils/jsonapi'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { formatDuration } from '@/utils/formatDuration'
 import {
   CheckCircle2,
   XCircle,
@@ -74,13 +75,6 @@ function statusBadge(status: string) {
       {status}
     </span>
   )
-}
-
-function formatDuration(ms: number | null): string {
-  if (ms == null) return '-'
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  return `${(ms / 60000).toFixed(1)}m`
 }
 
 function formatRelativeTime(dateStr: string | null): string {

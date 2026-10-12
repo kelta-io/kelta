@@ -18,6 +18,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type { MetricsTimeSeries } from '@kelta/sdk'
+import { formatLatency } from '@/utils/formatDuration'
 
 // ---------------------------------------------------------------------------
 // Types & Constants
@@ -151,12 +152,6 @@ function generateZeroFilledData(
     points.push(point)
   }
   return points
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1) return `${(ms * 1000).toFixed(0)}\u00B5s`
-  if (ms < 1000) return `${ms.toFixed(1)}ms`
-  return `${(ms / 1000).toFixed(2)}s`
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +418,7 @@ export function MonitoringOverviewPage(): React.ReactElement {
                       {ep.endpoint}
                     </td>
                     <td className="border-b border-border px-2 py-2 text-right font-mono text-xs">
-                      {formatDuration(ep.p95)}
+                      {formatLatency(ep.p95)}
                     </td>
                     <td className="border-b border-border px-2 py-2 text-right">
                       {ep.requestCount.toLocaleString()}

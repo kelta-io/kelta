@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import type { ApiClient } from '../../services/apiClient'
 import type { Note } from '../../hooks/useRecordContext'
+import { formatRelativeTime } from '../../utils/formatRelativeTime'
 
 export type { Note }
 
@@ -38,28 +39,6 @@ export interface NotesSectionProps {
   notes?: Note[]
   /** Callback to invalidate the parent query cache */
   onMutate?: () => void
-}
-
-/**
- * Format a date string as a relative time (e.g., "3 hours ago", "2 days ago").
- */
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  if (isNaN(date.getTime())) return dateStr
-
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffSeconds = Math.floor(diffMs / 1000)
-  const diffMinutes = Math.floor(diffSeconds / 60)
-  const diffHours = Math.floor(diffMinutes / 60)
-  const diffDays = Math.floor(diffHours / 24)
-
-  if (diffSeconds < 60) return 'just now'
-  if (diffMinutes < 60) return diffMinutes === 1 ? '1 minute ago' : `${diffMinutes} minutes ago`
-  if (diffHours < 24) return diffHours === 1 ? '1 hour ago' : `${diffHours} hours ago`
-  if (diffDays < 7) return diffDays === 1 ? '1 day ago' : `${diffDays} days ago`
-
-  return date.toLocaleDateString()
 }
 
 /**
@@ -307,7 +286,9 @@ export function NotesSection({
                   <div className="flex items-center gap-1 mt-2 text-xs text-muted-foreground">
                     <span>{note.createdBy}</span>
                     <span>&middot;</span>
-                    <time dateTime={note.createdAt}>{formatRelativeTime(note.createdAt)}</time>
+                    <time dateTime={note.createdAt}>
+                      {formatRelativeTime(note.createdAt, { style: 'long' })}
+                    </time>
                   </div>
                   <div className="flex gap-2 mt-2">
                     <Button

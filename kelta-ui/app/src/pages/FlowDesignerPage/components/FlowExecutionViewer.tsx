@@ -18,6 +18,7 @@ import { ChoiceNode } from './nodes/ChoiceNode'
 import { TerminalNode } from './nodes/TerminalNode'
 import { ControlNode } from './nodes/ControlNode'
 import { FlowEdge, FLOW_EDGE_TYPE } from './edges/FlowEdge'
+import { formatDuration } from '@/utils/formatDuration'
 
 const NODE_TYPES: NodeTypes = {
   task: TaskNode,
@@ -43,13 +44,6 @@ interface FlowExecutionViewerProps {
   steps: StepLog[]
   selectedNodeId: string | null
   onNodeSelect: (stateId: string | null) => void
-}
-
-function formatDuration(ms: number | null): string {
-  if (ms == null) return ''
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  return `${(ms / 60000).toFixed(1)}m`
 }
 
 /**
@@ -114,7 +108,7 @@ export function FlowExecutionViewer({
         data: {
           ...node.data,
           debugStatus: step?.status || null,
-          debugDuration: step ? formatDuration(step.durationMs) : null,
+          debugDuration: step ? formatDuration(step.durationMs, '') : null,
           debugError: step?.errorMessage || null,
           debugBorderClass: `${borderColor} ${ringClass}`,
         },

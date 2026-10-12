@@ -28,6 +28,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { useApi } from '@/context/ApiContext'
 import { useConfig } from '@/context/ConfigContext'
+import { formatRelativeTime } from '@/utils/formatRelativeTime'
 import { useAppContext } from '@/context/AppContext'
 import { parseResourcePath } from './navTabs'
 import type { MenuConfig, MenuItemConfig } from '@/types/config'
@@ -65,22 +66,6 @@ function getCollectionNames(
     visit(menu.items)
   }
   return collections
-}
-
-/**
- * Format a timestamp into relative time.
- */
-function formatRelativeTime(timestamp: number): string {
-  const diffMs = Date.now() - timestamp
-  const diffMinutes = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMinutes / 60)
-  const diffDays = Math.floor(diffHours / 24)
-
-  if (diffMinutes < 1) return 'just now'
-  if (diffMinutes < 60) return `${diffMinutes}m ago`
-  if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays === 1) return 'yesterday'
-  return `${diffDays}d ago`
 }
 
 /**
@@ -257,7 +242,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps): React.R
                 <Clock className="mr-2 h-4 w-4 text-muted-foreground" />
                 <span className="flex-1 truncate">{item.label}</span>
                 <span className="text-xs text-muted-foreground">
-                  {formatRelativeTime(item.timestamp)}
+                  {formatRelativeTime(item.timestamp, { lowercase: true, beyondWeek: 'days' })}
                 </span>
               </CommandItem>
             ))}

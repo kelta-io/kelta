@@ -12,6 +12,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import { useI18n } from '../../context/I18nContext'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
+import { getRelativeTimeBucket } from '@/utils/formatRelativeTime'
 
 /**
  * Props for the RecordHeader component
@@ -67,31 +68,21 @@ function formatRelativeTime(
   dateString: string,
   t: (key: string, params?: Record<string, string | number>) => string
 ): string {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-
-  if (diffMs < 0) {
-    return t('recordHeader.justNow')
+  // Days keep counting (no "yesterday", no fallback to a date) in the header.
+  const bucket = getRelativeTimeBucket(dateString, { yesterday: false, beyondWeek: 'days' })
+  switch (bucket?.unit) {
+    case 'now':
+      return t('recordHeader.justNow')
+    case 'minute':
+      return t('recordHeader.minutesAgo', { count: bucket.count })
+    case 'hour':
+      return t('recordHeader.hoursAgo', { count: bucket.count })
+    case 'day':
+      return t('recordHeader.daysAgo', { count: bucket.count })
+    default:
+      // Unparseable timestamp (other buckets are unreachable with these options).
+      return dateString
   }
-
-  const diffMinutes = Math.floor(diffMs / (1000 * 60))
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-
-  if (diffMinutes < 1) {
-    return t('recordHeader.justNow')
-  }
-
-  if (diffMinutes < 60) {
-    return t('recordHeader.minutesAgo', { count: diffMinutes })
-  }
-
-  if (diffHours < 24) {
-    return t('recordHeader.hoursAgo', { count: diffHours })
-  }
-
-  return t('recordHeader.daysAgo', { count: diffDays })
 }
 
 /**

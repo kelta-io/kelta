@@ -29,49 +29,19 @@ import type { LayoutFormFieldDefinition } from '../../components/LayoutFormSecti
 import { useLayoutRules } from '@kelta/components'
 import { dtosToLayoutRules } from '../../utils/layoutRules'
 import { unwrapResource, extractIncluded, wrapResource } from '../../utils/jsonapi'
+import { normalizeFieldType } from '../../utils/normalizeFieldType'
+import type { FieldDefinition as SchemaFieldDefinition } from '../../hooks/useCollectionSchema'
 import { ApiError } from '../../services/apiClient'
 import type { ApiClient } from '../../services/apiClient'
 
 /**
- * Field definition interface for collection schema
+ * Field definition for the resource form: the shared runtime-schema shape plus
+ * the form-only metadata (constraints, default, ordering, validation) this page reads.
  */
-export interface FieldDefinition {
-  id: string
-  name: string
-  displayName?: string
-  type:
-    | 'string'
-    | 'number'
-    | 'boolean'
-    | 'date'
-    | 'datetime'
-    | 'json'
-    | 'reference'
-    | 'picklist'
-    | 'multi_picklist'
-    | 'currency'
-    | 'percent'
-    | 'auto_number'
-    | 'phone'
-    | 'email'
-    | 'url'
-    | 'rich_text'
-    | 'encrypted'
-    | 'external_id'
-    | 'geolocation'
-    | 'lookup'
-    | 'master_detail'
-    | 'formula'
-    | 'rollup_summary'
-  required: boolean
+export interface FieldDefinition extends SchemaFieldDefinition {
   unique?: boolean
   indexed?: boolean
   defaultValue?: unknown
-  referenceTarget?: string
-  referenceCollectionId?: string
-  fieldTypeConfig?: string | Record<string, unknown>
-  enumValues?: string[]
-  lookupOptions?: LookupOption[]
   order?: number
   validation?: ValidationRule[]
 }
@@ -126,28 +96,6 @@ export interface ResourceFormPageProps {
   resourceId?: string
   /** Optional test ID for testing */
   testId?: string
-}
-
-/**
- * Reverse mapping from backend canonical types (uppercase) to UI types (lowercase).
- * The backend stores "DOUBLE" for what the UI calls "number", etc.
- */
-const BACKEND_TYPE_TO_UI: Record<string, FieldDefinition['type']> = {
-  DOUBLE: 'number',
-  INTEGER: 'number',
-  LONG: 'number',
-  JSON: 'json',
-  ARRAY: 'json',
-  REFERENCE: 'master_detail',
-  LOOKUP: 'master_detail',
-}
-
-function normalizeFieldType(backendType: string): FieldDefinition['type'] {
-  const upper = backendType.toUpperCase()
-  if (upper in BACKEND_TYPE_TO_UI) {
-    return BACKEND_TYPE_TO_UI[upper]
-  }
-  return backendType.toLowerCase() as FieldDefinition['type']
 }
 
 /** Picklist value returned from the API (field names match backend schema) */

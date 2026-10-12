@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { CheckCircle2, XCircle, Loader2, SkipForward, X } from 'lucide-react'
+import { formatDuration } from '@/utils/formatDuration'
 
 interface StepLog {
   id: string
@@ -30,13 +31,6 @@ const statusIcons: Record<string, React.ReactNode> = {
   FAILED: <XCircle className="h-4 w-4 text-red-600" />,
   RUNNING: <Loader2 className="h-4 w-4 animate-spin text-blue-600" />,
   SKIPPED: <SkipForward className="h-4 w-4 text-gray-400" />,
-}
-
-function formatDuration(ms: number | null): string {
-  if (ms == null) return '-'
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  return `${(ms / 60000).toFixed(1)}m`
 }
 
 function JsonViewer({ data }: { data: unknown }) {

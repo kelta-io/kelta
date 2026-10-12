@@ -35,34 +35,10 @@ import { resolveGlobalPicklistId } from '@/hooks/usePicklistOptions'
 import { useI18n } from '../../context/I18nContext'
 import { LoadingSpinner } from '../LoadingSpinner'
 import { FieldExpressionPicker } from '../FieldExpressionPicker'
+import type { FieldType } from '../../types/collections'
 
-/**
- * Field type enumeration
- */
-export type FieldType =
-  | 'string'
-  | 'number'
-  | 'boolean'
-  | 'date'
-  | 'datetime'
-  | 'json'
-  | 'reference'
-  | 'picklist'
-  | 'multi_picklist'
-  | 'currency'
-  | 'percent'
-  | 'auto_number'
-  | 'phone'
-  | 'email'
-  | 'url'
-  | 'rich_text'
-  | 'encrypted'
-  | 'external_id'
-  | 'geolocation'
-  | 'lookup'
-  | 'master_detail'
-  | 'formula'
-  | 'rollup_summary'
+/** Field type enumeration (canonical: `types/collections`). */
+export type { FieldType }
 
 /**
  * Validation rule type enumeration
