@@ -4,6 +4,7 @@ import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.worker.interceptor.FieldWriteGuard;
 import io.kelta.worker.service.CerbosAuthorizationService;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.CollectionLifecycleManager;
@@ -22,6 +23,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -56,12 +58,15 @@ class AtomicOperationsControllerTest {
         permissionResolver = mock(CerbosPermissionResolver.class);
         request = mock(HttpServletRequest.class);
         controller = new AtomicOperationsController(queryEngine, registry, lifecycleManager,
-                authzService, permissionResolver, 100);
+                authzService, permissionResolver, new FieldWriteGuard(authzService), 100);
 
         // Default: an authenticated caller with identity headers present.
         when(permissionResolver.getEmail(request)).thenReturn("u@x.io");
         when(permissionResolver.getProfileId(request)).thenReturn("profile-1");
         when(permissionResolver.getTenantId(request)).thenReturn("tenant-1");
+        // Default: every submitted field is writable.
+        when(authzService.batchCheckFieldAccess(anyString(), anyString(), anyString(), anyString(), anyList(),
+                eq("write"))).thenAnswer(inv -> inv.getArgument(4));
     }
 
     @Test
@@ -222,5 +227,56 @@ class AtomicOperationsControllerTest {
         assertThat(attributes)
                 .doesNotContainKey("createdBy")
                 .doesNotContainKey("updatedBy");
+    }
+
+    // ---- Field-level write rules ---------------------------------------------------
+
+    @Test
+    @DisplayName("an add drops the attributes the caller may not write, as a single create does")
+    @SuppressWarnings("unchecked")
+    void addAppliesFieldWriteRules() {
+        CollectionDefinition contacts = mock(CollectionDefinition.class);
+        when(registry.get("contacts")).thenReturn(contacts);
+        when(lifecycleManager.getCollectionIdByName("contacts")).thenReturn("uuid-c");
+        when(authzService.checkCollectionAccess(anyString(), anyString(), anyString(), eq("uuid-c"), eq("create")))
+                .thenReturn(true);
+        when(authzService.batchCheckFieldAccess(eq("u@x.io"), eq("profile-1"), eq("tenant-1"), eq("contacts"),
+                anyList(), eq("write"))).thenReturn(List.of("name"));
+        when(queryEngine.create(eq(contacts), anyMap())).thenReturn(Map.of("id", "rec-1", "name", "x"));
+
+        Map<String, Object> op = Map.of("op", "add", "data", Map.of(
+                "type", "contacts", "attributes", Map.of("name", "x", "internalScore", 95)));
+        ResponseEntity<?> response = controller.executeOperations(Map.of("atomic:operations", List.of(op)), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(queryEngine).create(eq(contacts), captor.capture());
+        assertThat(captor.getValue()).containsEntry("name", "x").doesNotContainKey("internalScore");
+    }
+
+    @Test
+    @DisplayName("an update drops the attributes the caller may not write")
+    @SuppressWarnings("unchecked")
+    void updateAppliesFieldWriteRules() {
+        CollectionDefinition contacts = mock(CollectionDefinition.class);
+        when(registry.get("contacts")).thenReturn(contacts);
+        when(lifecycleManager.getCollectionIdByName("contacts")).thenReturn("uuid-c");
+        when(authzService.checkCollectionAccess(anyString(), anyString(), anyString(), eq("uuid-c"), eq("edit")))
+                .thenReturn(true);
+        when(authzService.batchCheckFieldAccess(anyString(), anyString(), anyString(), eq("contacts"),
+                anyList(), eq("write"))).thenReturn(List.of("name"));
+        when(queryEngine.update(eq(contacts), eq("rec-1"), anyMap()))
+                .thenReturn(java.util.Optional.of(Map.of("id", "rec-1", "name", "y")));
+
+        Map<String, Object> op = Map.of("op", "update",
+                "ref", Map.of("type", "contacts", "id", "rec-1"),
+                "data", Map.of("type", "contacts", "id", "rec-1",
+                        "attributes", Map.of("name", "y", "internalScore", 1)));
+        ResponseEntity<?> response = controller.executeOperations(Map.of("atomic:operations", List.of(op)), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(queryEngine).update(eq(contacts), eq("rec-1"), captor.capture());
+        assertThat(captor.getValue()).containsEntry("name", "y").doesNotContainKey("internalScore");
     }
 }

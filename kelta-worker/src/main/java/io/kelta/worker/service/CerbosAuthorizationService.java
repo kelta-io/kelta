@@ -199,6 +199,53 @@ public class CerbosAuthorizationService {
         }
     }
 
+    /**
+     * System-permission check — the worker-side mirror of the gateway's
+     * {@code CerbosAuthorizationService.checkSystemPermission}: the same {@code system_feature}
+     * resource (id and {@code featureName} = the permission, action = the permission, scope = the
+     * tenant), so a profile's grant, permission sets included, answers identically on both sides.
+     *
+     * <p>Fail-closed: a Cerbos circuit-open / timeout / error denies.
+     *
+     * @param permissionName e.g. {@code MANAGE_USERS}
+     */
+    public boolean checkSystemPermission(String email, String profileId, String tenantId,
+                                         String permissionName) {
+        if (isCircuitOpen()) {
+            log.warn("Cerbos circuit open — denying system check (fail-closed): user={} permission={}",
+                    email, permissionName);
+            return false;
+        }
+
+        Principal principal = buildPrincipal(email, profileId, tenantId);
+
+        Future<Boolean> future = cerbosExecutor.submit(() -> {
+            Resource resource = Resource.newInstance("system_feature", permissionName)
+                    .withAttribute("featureName", AttributeValue.stringValue(permissionName))
+                    .withScope(tenantId);
+            CheckResult result = cerbosClient.check(principal, resource, permissionName);
+            return result.isAllowed(permissionName);
+        });
+
+        try {
+            boolean allowed = future.get(CERBOS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            recordSuccess();
+            log.debug("Cerbos system check: user={} permission={} allowed={}", email, permissionName, allowed);
+            return allowed;
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            recordFailure();
+            log.error("Cerbos system check timed out (fail-closed): user={} permission={}", email, permissionName);
+            return false;
+        } catch (Exception e) {
+            future.cancel(true);
+            recordFailure();
+            log.error("Cerbos system check failed (fail-closed): user={} permission={} error={}",
+                    email, permissionName, e.getMessage());
+            return false;
+        }
+    }
+
     public boolean checkRecordAccess(String email, String profileId, String tenantId,
                                       String collectionId, String recordId,
                                       Map<String, Object> recordAttributes, String action) {

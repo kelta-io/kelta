@@ -97,6 +97,14 @@ public class CollectionLifecycleManager {
             SELECT id FROM collection WHERE name = ? AND active = true LIMIT 1
             """;
 
+    /** The tenant's own collection first, else the system collection — never another tenant's. */
+    private static final String SELECT_TENANT_VISIBLE_COLLECTION_ID = """
+            SELECT id FROM collection
+            WHERE name = ? AND active = true AND (tenant_id = ? OR system_collection = true)
+            ORDER BY system_collection ASC
+            LIMIT 1
+            """;
+
     private static final String SELECT_VALIDATION_RULES = """
             SELECT name, error_condition_formula, error_message, error_field,
                    evaluate_on, active, severity
@@ -957,6 +965,30 @@ public class CollectionLifecycleManager {
             }
         } catch (Exception e) {
             log.warn("Failed to resolve collection ID for '{}': {}", collectionName, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Returns the id of the collection named {@code collectionName} that {@code tenantId} can
+     * address — its own collection, else the system collection of that name, never another
+     * tenant's — or {@code null} if there is none. This is the id the gateway's route for that
+     * collection carries, and so the one the Cerbos {@code collection} policy is keyed on.
+     *
+     * @param collectionName the collection name
+     * @param tenantId       the caller's tenant id
+     * @return the collection ID, or null
+     */
+    public String getTenantVisibleCollectionId(String collectionName, String tenantId) {
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    SELECT_TENANT_VISIBLE_COLLECTION_ID, collectionName, tenantId);
+            if (!rows.isEmpty()) {
+                return (String) rows.get(0).get("id");
+            }
+        } catch (Exception e) {
+            log.warn("Failed to resolve collection ID for '{}' (tenant {}): {}",
+                    collectionName, tenantId, e.getMessage());
         }
         return null;
     }

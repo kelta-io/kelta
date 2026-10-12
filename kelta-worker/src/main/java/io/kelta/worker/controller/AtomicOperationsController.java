@@ -9,6 +9,7 @@ import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.router.AtomicOperationExecutor;
 import io.kelta.runtime.router.AtomicOperationExecutor.AtomicOperationException;
+import io.kelta.worker.interceptor.FieldWriteGuard;
 import io.kelta.worker.service.CerbosAuthorizationService;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.CollectionLifecycleManager;
@@ -21,7 +22,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -47,6 +50,7 @@ public class AtomicOperationsController {
     private final CollectionLifecycleManager lifecycleManager;
     private final CerbosAuthorizationService authzService;
     private final CerbosPermissionResolver permissionResolver;
+    private final FieldWriteGuard fieldWriteGuard;
     private final int maxOperations;
 
     public AtomicOperationsController(
@@ -55,11 +59,13 @@ public class AtomicOperationsController {
             CollectionLifecycleManager lifecycleManager,
             CerbosAuthorizationService authzService,
             CerbosPermissionResolver permissionResolver,
+            FieldWriteGuard fieldWriteGuard,
             @Value("${kelta.api.max-batch-operations:100}") int maxOperations) {
         this.executor = new AtomicOperationExecutor(queryEngine, collectionRegistry);
         this.lifecycleManager = lifecycleManager;
         this.authzService = authzService;
         this.permissionResolver = permissionResolver;
+        this.fieldWriteGuard = fieldWriteGuard;
         this.maxOperations = Math.min(maxOperations, HARD_CEILING);
     }
 
@@ -109,6 +115,10 @@ public class AtomicOperationsController {
         if (denial != null) {
             return denial;
         }
+
+        // Field-level write rules, as on a single-record create/update: a field the caller may
+        // not write is dropped from that operation's attributes.
+        operations = applyFieldWriteRules(operations, request);
 
         // Execute within transaction
         try {
@@ -184,6 +194,36 @@ public class AtomicOperationsController {
             }
         }
         return null;
+    }
+
+    /**
+     * Removes from each add/update operation the attributes the caller may not write, with the
+     * rule {@code CerbosFieldWriteSecurityAdvice} applies to a single-record body (the advice does
+     * not see the individual operations of a batch). Metadata collections are exempt, as they are
+     * there. Returns new operations; the parsed ones are not modified.
+     */
+    private List<AtomicOperation> applyFieldWriteRules(List<AtomicOperation> operations,
+                                                       HttpServletRequest request) {
+        String email = permissionResolver.getEmail(request);
+        String profileId = permissionResolver.getProfileId(request);
+        String scopeTenant = permissionResolver.getTenantId(request);
+
+        List<AtomicOperation> result = new ArrayList<>(operations.size());
+        for (AtomicOperation op : operations) {
+            String collectionName = collectionOf(op);
+            if (op == null || actionFor(op.op()) == null || "remove".equals(op.op())
+                    || op.data() == null || op.data().attributes() == null
+                    || collectionName == null || FieldWriteGuard.isMetadataCollection(collectionName)) {
+                result.add(op);
+                continue;
+            }
+            Map<String, Object> attributes = new LinkedHashMap<>(op.data().attributes());
+            fieldWriteGuard.stripUnwritable(attributes, null, email, profileId, scopeTenant, collectionName);
+            AtomicOperation.ResourceData data = op.data();
+            result.add(new AtomicOperation(op.op(), op.ref(), new AtomicOperation.ResourceData(
+                    data.type(), data.id(), data.lid(), attributes, data.relationships())));
+        }
+        return result;
     }
 
     /** Collection name an operation targets: {@code data.type} for add, else {@code ref.type}. */

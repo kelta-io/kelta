@@ -105,6 +105,7 @@ class DynamicCollectionRouterRequestMappingTest {
                 "org.springframework.http.ResponseEntity<java.util.Map<java.lang.String, java.lang.Object>> updatePatch(@PathVariable(collectionName) java.lang.String, @PathVariable(id) java.lang.String, @RequestBody(required=true) java.util.Map<java.lang.String, java.lang.Object>, jakarta.servlet.http.HttpServletRequest)",
                 "org.springframework.http.ResponseEntity<java.util.Map<java.lang.String, java.lang.Object>> updatePut(@PathVariable(collectionName) java.lang.String, @PathVariable(id) java.lang.String, @RequestBody(required=true) java.util.Map<java.lang.String, java.lang.Object>, jakarta.servlet.http.HttpServletRequest)",
                 "void setOnDemandLoader(io.kelta.runtime.registry.CollectionOnDemandLoader)",
+                "void setSubResourceAuthorizer(io.kelta.runtime.router.SubResourceAuthorizer)",
                 "void setSystemCollectionCache(io.kelta.runtime.router.SystemCollectionCache)",
                 "void setUserIdResolver(io.kelta.runtime.router.UserIdResolver)");
         assertEquals(expected, actual);

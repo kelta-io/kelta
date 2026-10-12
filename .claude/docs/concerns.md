@@ -157,7 +157,8 @@ mailbox to a high-volume public address.
 - **`POST /api/operations`:** `AtomicOperationsController` mirrors the gateway verb check via
   `CerbosAuthorizationService.checkCollectionAccess`, keyed on the collection **UUID**
   (`getCollectionIdByName`) — keep it UUID-keyed; any denial fails the whole batch; missing
-  identity or Cerbos error denies. It stamps `createdBy`/`updatedBy` (KLT-500) but, unlike the
+  identity or Cerbos error denies. Each add/update op then gets the field write rules
+  (`FieldWriteGuard`, shared with `CerbosFieldWriteSecurityAdvice`). It stamps `createdBy`/`updatedBy` (KLT-500) but, unlike the
   router, never stamps `createdGeo`/`updatedGeo` and doesn't inject `tenantId` for tenant-scoped
   system collections when the client omits it.
 - **Delegated administration (V157):** `DelegatedAdminScopeValidationHook` rejection of
@@ -750,6 +751,7 @@ One line each; full write-ups are in git history.
 - PLT-330 (2026-10-04) — any token (and, via the public path, anyone) could list every tenant; gateway narrowing (#1603/#1604) + self-scoped storage predicate.
 - PLT-331 (2026-10-04) — static routes for `users`/`profiles`/`collections` skipped the collection check; `COLLECTION_CHECKED_STATIC_ROUTES` + advice count correction.
 - 2026-10-12 (child-route-authz) — child-resource paths `/api/{parent}/{parentId}/{child}[/{childId}]` were authorized against the parent collection only; the gateway now also requires the child's own decision (parent needs `read`), and the record/field-write advices use the child collection.
+- 2026-10-12 (child-authz-static-and-create) — the worker authorizes the router's generic child handlers against the child collection under every parent, `static-` ones included (`CerbosSubResourceAuthorizer`); field write rules apply to creates (top-level, child, `/api/operations`) and to to-one relationships, as to updates.
 - PLT-337 (2026-10-04, V204) — provisioned tenant admins shared the password `password`; claim by invite.
 - PLT-343 (2026-10-05) — platform admin shipped with a well-known password; `BaselineAdminPasswordInitializer`.
 - PLT-355 (2026-10-05) — client tenant headers could select a tenant; now a claim that must match the credential.

@@ -1,10 +1,8 @@
 package io.kelta.worker.interceptor;
 
-import io.kelta.worker.service.CerbosAuthorizationService;
+import io.kelta.runtime.router.DynamicCollectionRouter;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import jakarta.servlet.http.HttpServletRequest;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.annotation.Order;
@@ -16,11 +14,19 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.servlet.mvc.method.annotation.RequestBodyAdviceAdapter;
 
 import java.lang.reflect.Type;
-import java.util.*;
+import java.util.Map;
+import java.util.Set;
 
 /**
- * Strips HIDDEN and READ_ONLY fields from PUT/PATCH request bodies
- * based on Cerbos field-level write permissions.
+ * Strips HIDDEN, READ_ONLY and MASKED fields from record write bodies based on Cerbos field-level
+ * write permissions: PUT/PATCH requests, and the POST of a record create — the generic collection
+ * router's top-level and child-resource create handlers.
+ *
+ * <p>Create and update get the same rule: a field the caller may not write is removed from the
+ * body, whether it arrives in {@code attributes} or as a JSON:API {@code relationships} entry (the
+ * router stores a to-one relationship as the field's value). On a create the stored record then
+ * gets the field's default, or null; on an update the stored value stays. The rule itself lives in
+ * {@link FieldWriteGuard}, shared with the atomic operations endpoint.
  *
  * <p>Complements {@link CerbosFieldSecurityAdvice} which handles read-side stripping.
  * Together they provide bidirectional field-level security enforcement.
@@ -33,22 +39,18 @@ import java.util.*;
 @Order(10)
 public class CerbosFieldWriteSecurityAdvice extends RequestBodyAdviceAdapter {
 
-    private static final Logger log = LoggerFactory.getLogger(CerbosFieldWriteSecurityAdvice.class);
-    private static final Logger securityLog = LoggerFactory.getLogger("security.audit");
+    /** The generic router's create handlers, whose POST bodies are record writes. */
+    private static final Set<String> CREATE_HANDLERS = Set.of("create", "createChild");
 
-    private static final Set<String> SYSTEM_FIELDS = Set.of(
-            "createdAt", "updatedAt", "createdBy", "updatedBy"
-    );
-
-    private final CerbosAuthorizationService authzService;
+    private final FieldWriteGuard fieldWriteGuard;
     private final CerbosPermissionResolver permissionResolver;
     private final boolean permissionsEnabled;
 
     public CerbosFieldWriteSecurityAdvice(
-            CerbosAuthorizationService authzService,
+            FieldWriteGuard fieldWriteGuard,
             CerbosPermissionResolver permissionResolver,
             @Value("${kelta.gateway.security.permissions-enabled:true}") boolean permissionsEnabled) {
-        this.authzService = authzService;
+        this.fieldWriteGuard = fieldWriteGuard;
         this.permissionResolver = permissionResolver;
         this.permissionsEnabled = permissionsEnabled;
     }
@@ -66,14 +68,28 @@ public class CerbosFieldWriteSecurityAdvice extends RequestBodyAdviceAdapter {
         String method = request.getMethod();
         String path = request.getRequestURI();
 
-        // Only apply to PUT/PATCH on collection data endpoints
-        if (!"PUT".equals(method) && !"PATCH".equals(method)) return false;
+        // PUT/PATCH on collection data endpoints, and POST to the router's record-create handlers
+        boolean update = "PUT".equals(method) || "PATCH".equals(method);
+        boolean create = "POST".equals(method) && isRecordCreate(methodParameter);
+        if (!update && !create) return false;
         if (!path.startsWith("/api/")) return false;
         if (path.startsWith("/api/admin/") || path.startsWith("/api/me/")) return false;
-        if (isMetadataPath(path)) return false;
+        if (ApiPaths.isMetadataPath(path)) return false;
         if (!permissionResolver.hasIdentity(request)) return false;
 
         return true;
+    }
+
+    /**
+     * Whether the body belongs to one of {@link DynamicCollectionRouter}'s create handlers.
+     * Matched on the handler method, not the path: other controllers accept POST bodies under
+     * the same paths that are not record writes.
+     */
+    private static boolean isRecordCreate(MethodParameter methodParameter) {
+        return methodParameter != null
+                && methodParameter.getMethod() != null
+                && DynamicCollectionRouter.class.isAssignableFrom(methodParameter.getContainingClass())
+                && CREATE_HANDLERS.contains(methodParameter.getMethod().getName());
     }
 
     @Override
@@ -94,74 +110,24 @@ public class CerbosFieldWriteSecurityAdvice extends RequestBodyAdviceAdapter {
         // The collection being written — the child on a child-resource route.
         String collectionId = ApiPaths.collectionName(request);
 
-        // Navigate JSON:API structure: { "data": { "attributes": { ... } } }
+        // Navigate JSON:API structure: { "data": { "attributes": { ... }, "relationships": { ... } } }
         Map<String, Object> typedBody = (Map<String, Object>) bodyMap;
         Object dataObj = typedBody.get("data");
         if (!(dataObj instanceof Map<?, ?> dataMap)) {
             // Not JSON:API format — try flat attributes
-            stripFromAttributes(typedBody, email, profileId, tenantId, collectionId);
+            fieldWriteGuard.stripUnwritable(typedBody, null, email, profileId, tenantId, collectionId);
             return body;
         }
 
         Map<String, Object> data = (Map<String, Object>) dataMap;
-        Object attrObj = data.get("attributes");
-        if (!(attrObj instanceof Map<?, ?> attrMap)) return body;
+        Map<String, Object> attributes = data.get("attributes") instanceof Map<?, ?> attrMap
+                ? (Map<String, Object>) attrMap : null;
+        Map<String, Object> relationships = data.get("relationships") instanceof Map<?, ?> relMap
+                ? (Map<String, Object>) relMap : null;
+        if (attributes == null && relationships == null) return body;
 
-        Map<String, Object> attributes = (Map<String, Object>) attrMap;
-        stripFromAttributes(attributes, email, profileId, tenantId, collectionId);
+        fieldWriteGuard.stripUnwritable(attributes, relationships, email, profileId, tenantId, collectionId);
 
         return body;
-    }
-
-    private void stripFromAttributes(Map<String, Object> attributes, String email,
-                                      String profileId, String tenantId, String collectionId) {
-        // Collect non-system fields to check
-        List<String> fieldsToCheck = attributes.keySet().stream()
-                .filter(f -> !SYSTEM_FIELDS.contains(f))
-                .toList();
-
-        if (fieldsToCheck.isEmpty()) return;
-
-        // Batch Cerbos check for write permission
-        List<String> allowedFields;
-        try {
-            allowedFields = authzService.batchCheckFieldAccess(
-                    email, profileId, tenantId, collectionId, fieldsToCheck, "write");
-        } catch (Exception e) {
-            // Fail-closed: deny all non-system field writes if Cerbos unreachable
-            log.error("Cerbos unreachable for write field check — fail-closed, stripping all non-system fields", e);
-            securityLog.warn("security_event=FIELD_WRITE_DENIED_CERBOS_FAILURE user={} collection={} fields={}",
-                    email, collectionId, fieldsToCheck);
-            for (String field : fieldsToCheck) {
-                attributes.remove(field);
-            }
-            return;
-        }
-
-        Set<String> allowedSet = new HashSet<>(allowedFields);
-        List<String> strippedFields = fieldsToCheck.stream()
-                .filter(f -> !allowedSet.contains(f))
-                .toList();
-
-        if (!strippedFields.isEmpty()) {
-            log.debug("Stripping {} write-denied fields from {} for user={}",
-                    strippedFields.size(), collectionId, email);
-            securityLog.info("security_event=FIELD_WRITE_DENIED user={} collection={} fields={}",
-                    email, collectionId, strippedFields);
-            for (String field : strippedFields) {
-                attributes.remove(field);
-            }
-        }
-    }
-
-    private boolean isMetadataPath(String path) {
-        return path.startsWith("/api/collections")
-                || path.startsWith("/api/profiles")
-                || path.startsWith("/api/security-audit-logs")
-                || path.startsWith("/api/plugins")
-                || path.startsWith("/api/oidc")
-                || path.startsWith("/api/tenants")
-                || path.startsWith("/api/metrics")
-                || path.startsWith("/api/flows");
     }
 }
