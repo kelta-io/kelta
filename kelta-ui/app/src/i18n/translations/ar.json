@@ -11,7 +11,6 @@
     "message": "ليس لديك إذن للوصول إلى هذه الصفحة.",
     "loggedInAs": "مسجل الدخول كـ: {{email}}",
     "requiredPermissions": "الأذونات المطلوبة:",
-    "requiredRoles": "الأدوار",
     "requiredPolicies": "السياسات",
     "goHome": "الذهاب إلى لوحة التحكم",
     "goBack": "العودة",
@@ -41,18 +40,14 @@
     "create": "إنشاء",
     "search": "بحث",
     "filter": "تصفية",
-    "sort": "ترتيب",
     "actions": "إجراءات",
     "confirm": "تأكيد",
     "close": "إغلاق",
     "yes": "نعم",
     "no": "لا",
-    "ok": "موافق",
     "back": "رجوع",
     "next": "التالي",
     "previous": "السابق",
-    "submit": "إرسال",
-    "reset": "إعادة تعيين",
     "clear": "مسح",
     "select": "اختيار",
     "selected": "محدد",
@@ -75,23 +70,11 @@
     "unauthorized": "غير مصرح لك بالوصول إلى هذا المورد."
   },
   "navigation": {
-    "home": "الرئيسية",
-    "dashboard": "لوحة التحكم",
     "collections": "المجموعات",
-    "authorization": "التفويض",
-    "roles": "الأدوار",
-    "policies": "السياسات",
     "oidcProviders": "مزودي OIDC",
-    "builder": "المنشئ",
     "pages": "الصفحات",
     "menus": "القوائم",
-    "packages": "الحزم",
-    "migrations": "الترحيلات",
-    "resources": "الموارد",
-    "plugins": "الإضافات",
-    "settings": "الإعدادات",
-    "menu": "القائمة",
-    "noMenus": "لا توجد قوائم متاحة"
+    "plugins": "الإضافات"
   },
   "collections": {
     "title": "المجموعات",
@@ -108,14 +91,9 @@
     "fields": "الحقول",
     "addField": "إضافة حقل",
     "editField": "تعديل الحقل",
-    "deleteField": "حذف الحقل",
     "fieldName": "اسم الحقل",
     "fieldType": "نوع الحقل",
-    "validation": "التحقق",
     "versionHistory": "سجل الإصدارات",
-    "version": "الإصدار",
-    "currentVersion": "الحالي",
-    "viewVersion": "عرض الإصدار",
     "created": "تاريخ الإنشاء",
     "updated": "تاريخ التحديث",
     "confirmDelete": "هل أنت متأكد من حذف هذه المجموعة؟",
@@ -164,52 +142,7 @@
     }
   },
   "authorization": {
-    "title": "التفويض",
-    "createRole": "إنشاء دور",
-    "editRole": "تعديل الدور",
-    "deleteRole": "حذف الدور",
-    "roleName": "اسم الدور",
-    "createPolicy": "إنشاء سياسة",
-    "editPolicy": "تعديل السياسة",
-    "deletePolicy": "حذف السياسة",
-    "policyName": "اسم السياسة",
-    "rules": "القواعد",
-    "routeAuthorization": "تفويض المسار",
-    "fieldAuthorization": "تفويض الحقل",
-    "operations": {
-      "read": "قراءة",
-      "create": "إنشاء",
-      "update": "تحديث",
-      "delete": "حذف",
-      "list": "قائمة"
-    }
-  },
-  "roles": {
-    "namePlaceholder": "مثال: admin",
-    "descriptionPlaceholder": "أدخل وصفاً لهذا الدور...",
-    "confirmDelete": "هل أنت متأكد من حذف هذا الدور؟ لا يمكن التراجع عن هذا الإجراء.",
-    "validation": {
-      "nameRequired": "اسم الدور مطلوب",
-      "nameTooLong": "يجب أن يكون اسم الدور 50 حرفاً أو أقل",
-      "nameFormat": "يجب أن يكون الاسم بأحرف صغيرة، يبدأ بحرف، ويحتوي فقط على أحرف وأرقام وشرطات سفلية",
-      "descriptionTooLong": "يجب أن يكون الوصف 500 حرف أو أقل"
-    }
-  },
-  "policies": {
-    "namePlaceholder": "مثال: admin_access",
-    "descriptionPlaceholder": "أدخل وصفاً لهذه السياسة...",
-    "expression": "التعبير",
-    "expressionPlaceholder": "مثال: user.role == \"admin\"",
-    "expressionHint": "أدخل تعبير السياسة باستخدام الصيغة المدعومة. مثال: user.role == \"admin\" أو resource.owner_id == user.id",
-    "confirmDelete": "هل أنت متأكد من حذف هذه السياسة؟ لا يمكن التراجع عن هذا الإجراء.",
-    "validation": {
-      "nameRequired": "اسم السياسة مطلوب",
-      "nameTooLong": "يجب أن يكون اسم السياسة 50 حرفاً أو أقل",
-      "nameFormat": "يجب أن يكون الاسم بأحرف صغيرة، يبدأ بحرف، ويحتوي فقط على أحرف وأرقام وشرطات سفلية",
-      "descriptionTooLong": "يجب أن يكون الوصف 500 حرف أو أقل",
-      "expressionRequired": "التعبير مطلوب",
-      "expressionTooLong": "يجب أن يكون التعبير 2000 حرف أو أقل"
-    }
+    "title": "التفويض"
   },
   "oidc": {
     "title": "مزودي OIDC",
@@ -445,16 +378,7 @@
     "exportSuccess": "تم تصدير {{count}} سجلات بنجاح كـ {{format}}",
     "bulkDelete": "حذف المحدد",
     "confirmDelete": "هل أنت متأكد من حذف هذا السجل؟",
-    "confirmBulkDelete": "هل أنت متأكد من حذف {{count}} سجلات؟",
-    "noCollections": "لا توجد مجموعات متاحة",
-    "noCollectionsHint": "قم بإنشاء مجموعات في صفحة المجموعات لتصفح بياناتها هنا.",
-    "columns": "الأعمدة",
-    "rowsPerPage": "صفوف لكل صفحة",
-    "totalRecords": "{{count}} سجل إجمالي",
-    "pageInfo": "صفحة {{page}} من {{total}}",
-    "fieldValue": "قيمة الحقل",
-    "noFieldValue": "لا توجد قيمة",
-    "metadata": "البيانات الوصفية"
+    "confirmBulkDelete": "هل أنت متأكد من حذف {{count}} سجلات؟"
   },
   "dashboard": {
     "title": "لوحة التحكم",
@@ -471,19 +395,7 @@
     "autoRefresh": "التحديث التلقائي",
     "healthAlerts": "تنبيهات الصحة"
   },
-  "settings": {
-    "title": "الإعدادات",
-    "language": "اللغة",
-    "theme": "المظهر",
-    "themeLight": "فاتح",
-    "themeDark": "داكن",
-    "themeSystem": "النظام"
-  },
   "plugins": {
-    "title": "الإضافات",
-    "loading": "جاري تحميل الإضافات...",
-    "loaded": "تم تحميل الإضافة بنجاح",
-    "loadError": "فشل تحميل الإضافة",
     "noPlugins": "لا توجد إضافات مثبتة",
     "enabled": "مُفعّل",
     "disabled": "مُعطّل",
@@ -508,99 +420,13 @@
       "loading": "جاري التحميل",
       "loaded": "تم التحميل",
       "error": "خطأ"
-    },
-    "errors": {
-      "loadFailed": "فشل تحميل الإضافة \"{{name}}\": {{error}}",
-      "initFailed": "فشل تهيئة الإضافة",
-      "notFound": "الإضافة غير موجودة"
     }
   },
   "profiles": {
-    "title": "الملفات الشخصية",
-    "createProfile": "إنشاء ملف شخصي",
-    "name": "الاسم",
-    "description": "الوصف",
-    "createSuccess": "تم إنشاء الملف الشخصي بنجاح",
-    "deleteSuccess": "تم حذف الملف الشخصي بنجاح",
-    "permissionsSaved": "تم حفظ الأذونات بنجاح",
-    "noProfiles": "لم يتم العثور على ملفات شخصية",
-    "selectProfile": "اختر ملفاً شخصياً لعرض أذوناته",
-    "objectPermissions": "أذونات الكائنات",
-    "systemPermissions": "أذونات النظام",
-    "fieldPermissions": "أذونات الحقول",
-    "noCollections": "لا توجد مجموعات متاحة",
-    "collection": "المجموعة",
-    "create": "إنشاء",
-    "read": "قراءة",
-    "edit": "تعديل",
-    "delete": "حذف",
-    "viewAll": "عرض الكل",
-    "modifyAll": "تعديل الكل",
-    "fieldPermissionsInfo": "أذونات الحقول تتحكم في رؤية الحقول الفردية. يتم تعيينها عبر واجهة برمجة التطبيقات.",
-    "fieldId": "الحقل",
-    "visibility": "الرؤية",
-    "noFieldPermissions": "لم يتم تكوين أذونات حقول"
+    "collection": "المجموعة"
   },
   "sharing": {
-    "title": "إعدادات المشاركة",
-    "owdTab": "الإعدادات الافتراضية للمؤسسة",
-    "rulesTab": "قواعد المشاركة",
-    "groupsTab": "مجموعات المستخدمين",
-    "selectCollection": "المجموعة",
-    "chooseCollection": "اختر مجموعة...",
-    "selectCollectionFirst": "اختر مجموعة لعرض إعدادات المشاركة الخاصة بها.",
-    "owdSettings": "الإعداد الافتراضي على مستوى المؤسسة",
-    "internalAccess": "الوصول الداخلي",
-    "externalAccess": "الوصول الخارجي",
-    "publicReadWrite": "قراءة/كتابة عامة",
-    "publicRead": "قراءة عامة فقط",
-    "private": "خاص",
-    "owdSaved": "تم حفظ الإعداد الافتراضي",
-    "sharingRules": "قواعد المشاركة",
-    "createRule": "إنشاء قاعدة",
-    "ruleName": "اسم القاعدة",
-    "ruleType": "نوع القاعدة",
-    "ownerBased": "حسب المالك",
-    "criteriaBased": "حسب المعايير",
-    "sharedTo": "مشاركة مع",
-    "sharedToType": "نوع المشاركة",
-    "role": "دور",
-    "group": "مجموعة",
-    "accessLevel": "مستوى الوصول",
-    "readOnly": "قراءة فقط",
-    "readWrite": "قراءة/كتابة",
-    "status": "الحالة",
-    "active": "نشط",
-    "inactive": "غير نشط",
-    "ruleActions": "إجراءات",
-    "ruleCreated": "تم إنشاء قاعدة المشاركة",
-    "ruleDeleted": "تم حذف قاعدة المشاركة",
-    "noRules": "لم يتم تكوين قواعد مشاركة لهذه المجموعة.",
-    "userGroups": "مجموعات المستخدمين",
-    "createGroup": "إنشاء مجموعة",
-    "groupName": "اسم المجموعة",
-    "groupDescription": "الوصف",
-    "groupType": "النوع",
-    "members": "الأعضاء",
-    "groupCreated": "تم إنشاء مجموعة المستخدمين",
-    "groupDeleted": "تم حذف مجموعة المستخدمين",
-    "noGroups": "لم يتم العثور على مجموعات مستخدمين.",
-    "noDescription": "بدون وصف",
-    "delete": "حذف"
-  },
-  "roleHierarchy": {
-    "title": "التسلسل الهرمي للأدوار",
-    "level": "المستوى",
-    "description": "الوصف",
-    "parent": "الدور الأب",
-    "noParent": "بدون أب (جذر)",
-    "directChildren": "الفروع المباشرة",
-    "changeParent": "تغيير الأب",
-    "changeParentFor": "تغيير الأب لـ {{name}}",
-    "parentRole": "الدور الأب",
-    "parentUpdated": "تم تحديث الدور الأب",
-    "noRoles": "لم يتم تعريف أدوار. أنشئ أدواراً في صفحة الأدوار أولاً.",
-    "loadError": "فشل تحميل التسلسل الهرمي للأدوار."
+    "accessLevel": "مستوى الوصول"
   },
   "audit": {
     "title": "سجل التدقيق",
@@ -651,7 +477,6 @@
     "tierUpdateError": "فشل تحديث مستوى المستأجر."
   },
   "metrics": {
-    "title": "المقاييس",
     "loadError": "فشل في تحميل المقاييس.",
     "totalRequests": "إجمالي الطلبات",
     "errorRate": "معدل الخطأ",
@@ -756,7 +581,6 @@
   },
   "monitoring": {
     "title": "Monitoring",
-    "description": "View metrics, request logs, errors, and system performance",
     "tabs": {
       "overview": "Overview",
       "requests": "Requests",
@@ -781,20 +605,13 @@
     "serverError": "خطأ في الخادم. يرجى المحاولة لاحقاً."
   },
   "success": {
-    "saved": "تم حفظ التغييرات بنجاح.",
     "created": "تم إنشاء {{item}} بنجاح.",
     "updated": "تم تحديث {{item}} بنجاح.",
     "deleted": "تم حذف {{item}} بنجاح."
   },
   "fieldsPanel": {
     "noFields": "لا توجد حقول محددة",
-    "addFieldHint": "انقر على \"إضافة حقل\" لإنشاء أول حقل.",
-    "fieldListLabel": "قائمة حقول المجموعة",
-    "fieldItemLabel": "حقل: {{name}}",
-    "editFieldLabel": "تعديل الحقل {{name}}",
-    "deleteFieldLabel": "حذف الحقل {{name}}",
-    "confirmDelete": "هل أنت متأكد من حذف الحقل \"{{name}}\"؟ لا يمكن التراجع عن هذا الإجراء.",
-    "reorderHint": "استخدم Alt+مفاتيح الأسهم لإعادة ترتيب الحقول"
+    "addFieldHint": "انقر على \"إضافة حقل\" لإنشاء أول حقل."
   },
   "collectionForm": {
     "namePlaceholder": "مثال: user_profiles",
@@ -827,28 +644,8 @@
     "ownerScopeReads": "إخفاء سجلات الآخرين عند القراءة أيضًا",
     "ownerScopeReadsHint": "ألغِ التحديد للمجموعات العامة القراءة التي يعدّلها كاتبها فقط: يقرأ كل من لديه صلاحية القراءة جميع السجلات، لكن المالك وحده يمكنه تعديلها."
   },
-  "authorizationPanel": {
-    "title": "التفويض",
-    "hint": "قم بتكوين السياسات التي تتحكم في الوصول إلى مسارات وحقول هذه المجموعة. تحدد السياسات من يمكنه تنفيذ عمليات محددة.",
-    "routeDescription": "اختر سياسة لكل عملية مسار. يجب على المستخدمين استيفاء السياسة لتنفيذ العملية.",
-    "fieldDescription": "قم بتكوين التحكم في الوصول على مستوى الحقل. قم بتوسيع حقل لتعيين سياسات القراءة والكتابة.",
-    "noPolicy": "بدون سياسة (السماح للجميع)",
-    "configuredCount": "{{count}} مُعدّ",
-    "routeOperationsLabel": "قائمة تفويض عمليات المسار",
-    "fieldListLabel": "قائمة تفويض الحقول",
-    "selectPolicyHint": "اختر سياسة للتحكم في وصول {{operation}}",
-    "noFields": "لا توجد حقول محددة في هذه المجموعة. أضف حقولاً لتكوين التفويض على مستوى الحقل.",
-    "hasConfiguredPolicies": "لديه سياسات مُعدّة",
-    "noPoliciesWarning": "لم يتم تحديد سياسات. قم بإنشاء سياسات في صفحة السياسات لتكوين التفويض.",
-    "fieldOperations": {
-      "read": "قراءة",
-      "write": "كتابة"
-    }
-  },
   "resourceForm": {
     "noFields": "لا توجد حقول محددة في هذه المجموعة.",
-    "referenceId": "أدخل معرف المرجع",
-    "referenceIdPlaceholder": "أدخل معرف {{collection}}",
     "validation": {
       "invalidNumber": "يرجى إدخال رقم صالح",
       "invalidJson": "يرجى إدخال JSON صالح",
@@ -910,9 +707,7 @@
     "delete": "حذف",
     "confirmDelete": "حذف هذا المرفق؟",
     "empty": "لا توجد مرفقات بعد.",
-    "comingSoon": "ميزة المرفقات قادمة قريباً.",
-    "fileSize": "{{size}}",
-    "uploadedBy": "رفع بواسطة {{user}}"
+    "comingSoon": "ميزة المرفقات قادمة قريباً."
   },
   "fileViewer": {
     "preview": "معاينة {{name}}",
@@ -929,7 +724,6 @@
     "delete": "حذف",
     "confirmDelete": "حذف هذه الملاحظة؟",
     "empty": "لا توجد ملاحظات بعد. انقر على \"إضافة ملاحظة\" للبدء.",
-    "comingSoon": "ميزة الملاحظات قادمة قريباً.",
     "placeholder": "اكتب ملاحظة..."
   },
   "userMenu": {
