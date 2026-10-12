@@ -368,7 +368,7 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 | `CollectionDetailPage.tsx` (kelta-ui) | 2,208 | Split tabs into their own components |
 | `FieldEditor.tsx` (kelta-ui) | 1,988 | Split per-type config sections |
 | `PageBuilderPage.tsx` (kelta-ui) | 1,474 | Extract page-list table, config modal, editor shell |
-| `RuntimeModuleManager.java` (kelta-worker) | 1,300 | Split JAR loading / registration / lifecycle |
+| `RuntimeModuleManager.java` (kelta-worker) | 461 | Split 2026-10-12 (was 1,693) into package-private `ModuleInstaller`, `ModuleLoader` (839 — load/unload, quarantine and retry; sole owner of per-pod load state), `ModuleRegistrar`, `ModuleDispatcher` (routes, webhooks, UI bundle); what remains is the public façade + enable/disable/uninstall |
 | `SchemaMigrationEngine.java` (runtime-core) | 1,106 | Split non-destructive vs destructive paths |
 
 **Resolved:** `SystemCollectionDefinitions.java` (runtime-core, ~3,400 lines and the repo's
