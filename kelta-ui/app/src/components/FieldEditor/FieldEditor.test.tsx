@@ -685,6 +685,61 @@ describe('FieldEditor Component', () => {
       })
     })
 
+    it('should show the media section for a string field and omit it for a number field', async () => {
+      const user = userEvent.setup()
+      renderWithProviders(<FieldEditor {...defaultProps} />)
+
+      expect(screen.getByTestId('media-config')).toBeInTheDocument()
+      // Options appear only once the field is a media field
+      expect(screen.queryByTestId('field-media-content-types-input')).toBeNull()
+
+      await user.selectOptions(screen.getByTestId('field-type-select'), 'number')
+      expect(screen.queryByTestId('media-config')).toBeNull()
+    })
+
+    it('should build fieldTypeConfig.media when media uploads are enabled', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined)
+      const user = userEvent.setup()
+      renderWithProviders(<FieldEditor {...defaultProps} onSave={onSave} />)
+
+      await user.type(screen.getByTestId('field-name-input'), 'photo_key')
+      await user.click(screen.getByTestId('field-media-enabled-checkbox'))
+      await user.type(
+        screen.getByTestId('field-media-content-types-input'),
+        'image/, application/pdf'
+      )
+      await user.type(screen.getByTestId('field-media-max-size-input'), '2.5')
+      await user.click(screen.getByTestId('field-editor-submit'))
+
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'photo_key',
+            fieldTypeConfig: expect.objectContaining({
+              media: {
+                enabled: true,
+                contentTypes: ['image/', 'application/pdf'],
+                maxFileSize: 2621440,
+              },
+            }),
+          })
+        )
+      })
+    })
+
+    it('should omit fieldTypeConfig.media when media uploads stay disabled', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined)
+      const user = userEvent.setup()
+      renderWithProviders(<FieldEditor {...defaultProps} onSave={onSave} />)
+
+      await user.type(screen.getByTestId('field-name-input'), 'plain_text')
+      await user.click(screen.getByTestId('field-editor-submit'))
+
+      await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+      const saved = onSave.mock.calls[0][0] as FieldDefinition
+      expect((saved.fieldTypeConfig as Record<string, unknown> | undefined)?.media).toBeUndefined()
+    })
+
     it('should not call onSave when form is invalid', async () => {
       const onSave = vi.fn().mockResolvedValue(undefined)
       const user = userEvent.setup()
@@ -880,6 +935,55 @@ describe('FieldEditor Component', () => {
           })
         )
       })
+    })
+  })
+
+  describe('Media field config - Edit Mode', () => {
+    const mediaField: FieldDefinition = {
+      ...mockField,
+      fieldTypeConfig: {
+        media: { enabled: true, contentTypes: ['image/'], maxFileSize: 10485760 },
+      },
+    }
+
+    it('should prefill the media section from the stored config', () => {
+      renderWithProviders(<FieldEditor {...defaultProps} field={mediaField} />)
+
+      expect(screen.getByTestId('field-media-enabled-checkbox')).toBeChecked()
+      expect(screen.getByTestId('field-media-content-types-input')).toHaveValue('image/')
+      expect(screen.getByTestId('field-media-max-size-input')).toHaveValue('10')
+    })
+
+    it('should keep the media config when another setting is saved', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined)
+      const user = userEvent.setup()
+      renderWithProviders(<FieldEditor {...defaultProps} field={mediaField} onSave={onSave} />)
+
+      await user.click(screen.getByTestId('field-unique-checkbox'))
+      await user.click(screen.getByTestId('field-editor-submit'))
+
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledWith(
+          expect.objectContaining({
+            fieldTypeConfig: expect.objectContaining({
+              media: { enabled: true, contentTypes: ['image/'], maxFileSize: 10485760 },
+            }),
+          })
+        )
+      })
+    })
+
+    it('should clear the media config when unchecked', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined)
+      const user = userEvent.setup()
+      renderWithProviders(<FieldEditor {...defaultProps} field={mediaField} onSave={onSave} />)
+
+      await user.click(screen.getByTestId('field-media-enabled-checkbox'))
+      await user.click(screen.getByTestId('field-editor-submit'))
+
+      await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+      const saved = onSave.mock.calls[0][0] as FieldDefinition
+      expect((saved.fieldTypeConfig as Record<string, unknown> | undefined)?.media).toBeUndefined()
     })
   })
 

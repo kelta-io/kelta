@@ -1,0 +1,1 @@
+- 2026-10-11 feat(media): Generic media fields (`fieldTypeConfig.media`) with `POST /api/{collection}/upload-url` and a record-checked `GET /api/{collection}/download/<key>` redirect replace a tenant-specific photo-upload controller (generic-public-media)

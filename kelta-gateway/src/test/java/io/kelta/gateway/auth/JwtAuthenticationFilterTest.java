@@ -175,7 +175,7 @@ class JwtAuthenticationFilterTest {
     @Test
     void shouldAdmitAsGuestWhenTenantHasAGuestProfileAndNoAuthHeader() {
         // Given — no Authorization header, but the tenant has configured a Guest profile
-        MockServerHttpRequest request = MockServerHttpRequest.get("/api/facility-photos").build();
+        MockServerHttpRequest request = MockServerHttpRequest.get("/api/listings").build();
         MockServerWebExchange exchange = MockServerWebExchange.from(request);
         exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-1");
 

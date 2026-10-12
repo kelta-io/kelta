@@ -8,7 +8,7 @@
 | Cerbos | Authorization (gRPC) | `cerbos-sdk-java` 0.12.0 | `${CERBOS_HOST}:${CERBOS_GRPC_PORT:3593}` | `kelta-gateway/.../authz/cerbos/CerbosAuthorizationService.java`, `kelta-worker/.../service/CerbosAuthorizationService.java` |
 | Svix | Webhook delivery | `com.svix:svix` 1.68.0 | `${SVIX_SERVER_URL}` | `kelta-worker/.../listener/SvixWebhookPublisher.java`, `.../service/SvixTenantService.java` |
 | Superset | Embedded analytics | REST API | `${SUPERSET_URL}` | `kelta-worker/.../service/SupersetApiClient.java`, `kelta-ui/app/` (`@superset-ui/embedded-sdk`) |
-| AWS S3 / Garage | Object storage | `aws-sdk-s3` 2.30.1 | `${KELTA_S3_ENDPOINT}` | `kelta-worker/.../service/S3StorageService.java` |
+| AWS S3 / Garage | Object storage | `aws-sdk-s3` 2.30.1 | `${KELTA_S3_ENDPOINT}` | `kelta-worker/.../service/S3StorageService.java` (attachments); media bucket `${KELTA_MEDIA_*}` → `.../service/MediaStorageService.java` (see Media fields below) |
 | Keycloak | OIDC federation | Spring Security OAuth2 | Port 8180 (docker-compose) | `kelta-auth/.../federation/FederatedUserMapper.java` |
 | GitHub Container Registry (ghcr.io) | Public multi-arch (amd64/arm64) JVM images of the quickstart services, one per `v*.*.*` tag: `ghcr.io/kelta-io/<service>:<version>`, `:latest` for non-prerelease tags | `docker/build-push-action`, `buildx imagetools` | `GITHUB_TOKEN` with `packages: write` (no other secret) | `.github/workflows/release.yml`, `.github/release/` — see `ci-cd.md` → `release.yml`. **Consumed by the quickstart:** base `docker-compose.yml` pulls `ghcr.io/kelta-io/<service>:${KELTA_VERSION}` (pinned in `.env.example`) for auth/worker/gateway/ui, and the CI `quickstart` job runs exactly those pulled images; `make up*` layers `docker-compose.build.yml` to build from source instead. The homelab deploy keeps using Harbor |
 
@@ -51,6 +51,73 @@ Files attach to any record via the `attachments` system collection (backed by `f
 2. **List / read / download** — `attachments` is routed by `DynamicCollectionRouter` like any collection (`GET /api/attachments?filter[collectionId][eq]=…&filter[recordId][eq]=…`, get-by-id, `?include=attachments`). `AttachmentUrlEnricher` (`@ControllerAdvice`, `@ConditionalOnBean(S3StorageService)`) injects a presigned `downloadUrl` for any `attachments` resource with a `storageKey`. `FileController` (`GET /api/files/**`) streams objects server-side with `Range` support.
 3. **Delete** — `DELETE /api/attachments/{id}` (`AttachmentUploadController#deleteAttachment`) deletes the S3 object **and** the row. Its literal path beats the router's `/api/{collection}/{id}`, so the generic delete (which would orphan the S3 object) is bypassed. S3 deletion is best-effort and never blocks the metadata delete.
 4. **Cascade cleanup** — `AttachmentCleanupHook` (wildcard `afterDelete`, order 200) removes a record's `file_attachment` rows + S3 objects when the **parent** record is deleted. Lookup uses `idx_attachment_tenant_record` (Flyway V142). The `attachments` collection itself is skipped (handled by the dedicated delete above). S3 cleanup is gated on `S3StorageService.isEnabled()`; row cleanup always runs.
+
+### Media fields (direct-to-storage uploads, public-capable)
+
+A **media field** holds the storage key of an object uploaded straight from a browser to the
+platform **media bucket** — e.g. listing photos on a public site. Any tenant collection can have
+one; it is pure field metadata, so nothing in the platform names a tenant's collection. Unlike
+attachments there is no `file_attachment` row and no finalize step: the tenant's own record *is*
+the metadata.
+
+**Configure (metadata).** On a STRING or TEXT field set `fieldTypeConfig.media` (the admin
+FieldEditor → "Media uploads" section writes the same shape):
+
+```json
+{ "media": { "enabled": true, "contentTypes": ["image/"], "maxFileSize": 10485760 } }
+```
+
+`enabled` must be literally `true` (fail-closed parse, `MediaFieldConfig`). `contentTypes` entries
+ending in `/` match by prefix, others exactly; default `["image/"]`. `image/svg+xml` is accepted
+only when listed exactly, and HTML/JS/executable types never. `maxFileSize` (bytes) can only
+lower the platform ceiling. A field update already broadcasts `kelta.config.field.changed`, so
+every pod sees a config change — no new hook or subject.
+
+**Endpoints** (`MediaUploadController`; both nested under the collection's own route):
+
+1. `POST /api/{collection}/upload-url` `{fileName, contentType, fileSize, field?}` → a presigned
+   PUT plus `storageKey` = `<tenantId>/<collection>/<uuid>/<sanitized fileName>`, `field`,
+   `downloadPath`, `headers` (send exactly that `Content-Type`). `field` is required only when the
+   collection has more than one media field. 404 when the collection has no media field; 503 when
+   the media bucket is not configured.
+2. The client PUTs the bytes, then creates/updates a record through the ordinary collection route
+   with the media field set to `storageKey`.
+3. `GET /api/{collection}/download/<storageKey>` → `302` to a presigned GET (15 min),
+   `Cache-Control: private, max-age=60`, so a plain `<img src>` works without a bearer token.
+
+**Authorization.** The gateway authorizes both paths as calls on that collection — `create` for
+the POST, `read` for the GET — via the normal route lookup, so a Guest profile with read on the
+collection makes its media public and nothing more. The download then requires that the key's
+tenant segment is the caller's tenant, its collection segment is this collection, and a record of
+this collection references it in a media field — looked up through the `QueryEngine` (RLS +
+owner-scoped reads) and passed through the record-level Cerbos decision a record `GET` gets
+(`CerbosRecordAuthorizationAdvice.isRecordReadable`, incl. manual shares). Anything else is a 404.
+Writes of the record itself are owner-guarded by `OwnerScopeGuardHook` when the collection
+declares ownership.
+
+**Platform config** (`kelta.storage.media.*`, all `${ENV:default}` in `application.yml`, bean is
+unconditional for the native image): `KELTA_MEDIA_ENABLED` (default `false`), `KELTA_MEDIA_BUCKET`
+(default `kelta-media`), `KELTA_MEDIA_ENDPOINT` / `KELTA_MEDIA_PUBLIC_ENDPOINT` /
+`KELTA_MEDIA_REGION` / `KELTA_MEDIA_ACCESS_KEY` / `KELTA_MEDIA_SECRET_KEY` (each defaults to the
+matching `kelta.storage.s3.*` value), `KELTA_MEDIA_MAX_FILE_SIZE` (default 15 MB),
+`KELTA_MEDIA_URL_EXPIRY_MINUTES` (default 15).
+
+**Adopting it for an existing collection** (CLI/MCP/API, no code):
+
+1. Make sure the deployment sets `KELTA_MEDIA_ENABLED=true` and `KELTA_MEDIA_BUCKET` to the bucket
+   that already holds the objects.
+2. Update the field that stores the key: `update_field` (MCP) / `PATCH /api/fields/{id}` with
+   `fieldTypeConfig.media.enabled = true` (plus `contentTypes` / `maxFileSize` if needed). Mark it
+   `indexed` — every download filters the collection on that field.
+3. Grant the collection `create` to the profiles that upload and `read` to the ones that view
+   (Guest for a public site); set `ownerField`/`ownerScope`/`ownerScopeReads` if members may only
+   change their own rows.
+
+Existing objects stay readable without being moved **when their keys already have the generic
+layout** `<tenantId>/<collection name>/<uuid>/<file>` in the configured bucket and the record
+stores the bare key: the download path, key layout and response shape are those of the
+collection-specific endpoint this replaced. Do step 2 **before** the worker that drops the old
+endpoint rolls out — until a field is media-enabled its collection's downloads 404.
 
 ## Data Storage
 

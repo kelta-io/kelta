@@ -1857,6 +1857,16 @@
       "pattern": "Custom pattern",
       "patternHelp": "# reveals a character; any other character is shown literally, right-aligned."
     },
+    "media": {
+      "title": "Media uploads",
+      "help": "Callers who may create records can upload a file straight to media storage; the field stores its key. Anyone who can read the record can load the file at /api/{collection}/download/{key}.",
+      "enabled": "Store media uploads in this field",
+      "contentTypes": "Accepted content types",
+      "contentTypesHelp": "Comma-separated. An entry ending in / matches by prefix (image/); others match exactly. Defaults to images. SVG must be listed exactly.",
+      "maxFileSize": "Maximum file size (MB)",
+      "maxFileSizeInvalid": "Enter a size in megabytes, e.g. 10 or 2.5",
+      "maxFileSizeHelp": "Can only lower the platform limit, never raise it."
+    },
     "rollup": {
       "title": "Rollup Summary Configuration",
       "childCollection": "Child Collection",

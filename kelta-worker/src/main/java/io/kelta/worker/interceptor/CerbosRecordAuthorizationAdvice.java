@@ -186,6 +186,34 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
     }
 
     /**
+     * The read decision this advice would make for one record of {@code collectionName}, for a
+     * handler that serves something derived from a record without returning the record itself
+     * (a media download redirect has no body for this advice to filter). Same inputs, same
+     * outcome as a {@code GET /api/{collection}/{id}} answered through this advice: allowed when
+     * permissions are disabled or the request carries no Cerbos identity (the advice leaves such
+     * bodies untouched), otherwise the record-level Cerbos decision widened by manual shares.
+     *
+     * @param record a flat record as {@link io.kelta.runtime.query.QueryEngine} returns it
+     *               ({@code id} plus field values)
+     */
+    public boolean isRecordReadable(HttpServletRequest request, String collectionName,
+                                    Map<String, Object> record) {
+        if (!permissionsEnabled || !permissionResolver.hasIdentity(request)) {
+            return true;
+        }
+        Map<String, Object> attributes = new LinkedHashMap<>(record);
+        Object id = attributes.remove("id");
+        if (id == null) {
+            return false; // the advice passes id-less bodies through; a lookup result must have one
+        }
+        Map<String, Object> resource = new LinkedHashMap<>();
+        resource.put("id", String.valueOf(id));
+        resource.put("attributes", attributes);
+        return isRecordAllowed(permissionResolver.getEmail(request), permissionResolver.getProfileId(request),
+                permissionResolver.getTenantId(request), collectionName, resource, "read");
+    }
+
+    /**
      * Takes the dropped rows out of the list's pagination counts, so the response does not report
      * rows the caller may not read ({@code data: []} with {@code totalCount: 3} confirms they
      * exist). Same page-local arithmetic as {@code DynamicCollectionRouter.restrictSharedSystemRows}.

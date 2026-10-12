@@ -355,6 +355,17 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     pinned against a real PDP by `CerbosGeneratedPolicyIT` (harness) via the golden files in
     `kelta-worker/src/test/resources/cerbos/golden/` — change the generator, regenerate the
     goldens (the unit test prints the JSON on drift), and the IT re-checks the allow/deny matrix.
+- **Endpoints nested under a collection's own path** (`/api/{collection}/<literal>/...`) need no
+  gateway static route: `RouteRegistry.findByPath` resolves the caller's collection route and the
+  gateway runs that collection's Cerbos object check for the HTTP verb (POST→`create`,
+  GET→`read`, …) before the worker sees the request. The worker must still 404 a collection the
+  caller's tenant does not have — an unmatched route is let through on `API_ACCESS` alone.
+  Example: media fields — `POST /api/{collection}/upload-url` and
+  `GET /api/{collection}/download/<key>` (`MediaUploadController`), whose download additionally
+  re-checks the referencing record via the `QueryEngine` (owner scope) and
+  `CerbosRecordAuthorizationAdvice.isRecordReadable` because a redirect has no body for the
+  record advice to filter (`integrations.md` → Media fields). Literal segments beat the router's
+  variables at equal depth, but test the mapping with the router stand-in registered.
 - **Static routes** (`/api/admin/**`, `/api/me/**`, `/api/_search/**`, `/api/metrics/**`,
   `/api/operations`): `RouteAuthorizationFilter` **skips** ids starting `static-` — they get only
   the blanket `API_ACCESS` system-permission check. The worker advices **exclude** `/api/admin/` — and the record-level advice also excludes `/api/telehealth/` (those controllers scope access per participant themselves; the generic record check emptied portal users' appointment lists, fixed 2026-07-12).
