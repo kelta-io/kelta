@@ -1,5 +1,10 @@
 import type { VisibilityRule } from '@kelta/sdk';
 
+/**
+ * @deprecated Public export unused by Kelta; it will stop being exported from @kelta/components
+ * in the next major release (it stays as an internal part of `isVisible`).
+ * Use `isVisible` instead.
+ */
 export function parseVisibilityRule(json: string | undefined | null): VisibilityRule | null {
   if (!json) return null;
   try {
@@ -19,6 +24,11 @@ export function parseVisibilityRule(json: string | undefined | null): Visibility
   }
 }
 
+/**
+ * @deprecated Public export unused by Kelta; it will stop being exported from @kelta/components
+ * in the next major release (it stays as an internal part of `isVisible`).
+ * Use `isVisible` instead.
+ */
 export function evaluateVisibilityRule(
   rule: VisibilityRule,
   record: Record<string, unknown>

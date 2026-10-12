@@ -484,6 +484,9 @@ function RelatedListRenderer({ relatedList }: RelatedListRendererProps): ReactEl
  *   mode="view"
  * />
  * ```
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the component into your app if you depend on it.
  */
 export function LayoutRenderer({
   layout,

@@ -4,6 +4,9 @@ import type { FieldDefinition } from '@kelta/sdk';
 
 /**
  * Field renderer function type
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the type into your app if you depend on it.
  */
 export type FieldRenderer = (value: unknown, field: FieldDefinition) => ReactNode;
 
@@ -24,6 +27,9 @@ export type FieldRendererComponent = (props: FieldRendererProps) => ReactElement
 
 /**
  * Props for ResourceDetail component
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the type into your app if you depend on it.
  */
 export interface ResourceDetailProps {
   /**

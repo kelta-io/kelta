@@ -5,6 +5,10 @@
  * (same shape, same `kind` discriminants).
  */
 
+/**
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the type into your app if you depend on it.
+ */
 export interface RecordHeaderConfigDto {
   titleFields?: string[];
   avatarFrom?: string[];

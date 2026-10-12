@@ -2,6 +2,9 @@ import type { ReactNode, CSSProperties } from 'react';
 
 /**
  * Responsive breakpoint configuration
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the type into your app if you depend on it.
  */
 export interface ResponsiveBreakpoints {
   /**
@@ -20,6 +23,9 @@ export interface ResponsiveBreakpoints {
 
 /**
  * Props for PageLayout component
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the type into your app if you depend on it.
  */
 export interface PageLayoutProps {
   /**
@@ -55,6 +61,9 @@ export interface PageLayoutProps {
 
 /**
  * Props for TwoColumnLayout component
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the type into your app if you depend on it.
  */
 export interface TwoColumnLayoutProps {
   /**
@@ -105,6 +114,9 @@ export interface TwoColumnLayoutProps {
 
 /**
  * Props for ThreeColumnLayout component
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the type into your app if you depend on it.
  */
 export interface ThreeColumnLayoutProps {
   /**

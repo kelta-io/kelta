@@ -30,6 +30,11 @@ const RULE_KIND_LABEL: Record<LayoutRule['kind'], string> = {
   script: 'Script',
 };
 
+/**
+ * @deprecated Public export unused by Kelta; it will stop being exported from @kelta/components
+ * in the next major release (it stays as an internal part of `useLayoutRules`).
+ * Use `useLayoutRules` instead.
+ */
 export interface RuleEngineOptions {
   /**
    * Layout-scoped client rules to apply.
@@ -57,6 +62,10 @@ export interface RuleEngineOptions {
  * Cycles in compute/default dependencies disable the entire client-rule
  * set for that layout (fail-closed); diagnostics are exposed via
  * `getDiagnostics()` so the builder UI can show them.
+ *
+ * @deprecated Public export unused by Kelta; it will stop being exported from @kelta/components
+ * in the next major release (it stays as an internal part of `useLayoutRules`).
+ * Use `useLayoutRules` instead.
  */
 export class RuleEngine {
   private readonly evaluator: FormulaEvaluator;

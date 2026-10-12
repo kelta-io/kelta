@@ -30,6 +30,9 @@ const DEFAULT_BREAKPOINTS = {
  *   collapsibleOnMobile
  * />
  * ```
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the component into your app if you depend on it.
  */
 export function TwoColumnLayout({
   sidebar,

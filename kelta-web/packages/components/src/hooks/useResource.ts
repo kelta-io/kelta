@@ -3,6 +3,9 @@ import { useKeltaClient } from '../context/KeltaContext';
 
 /**
  * Hook for fetching and mutating a single resource
+ *
+ * @deprecated Unused by Kelta; scheduled for removal in the next major
+ * release of @kelta/components. Copy the hook into your app if you depend on it.
  */
 export function useResource<T = unknown>(resourceName: string, recordId?: string) {
   const client = useKeltaClient();
