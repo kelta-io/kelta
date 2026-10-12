@@ -3,18 +3,25 @@
  *
  * Displays a list of security profiles with create, edit, clone, and delete
  * functionality. System profiles can only be cloned (not edited or deleted).
- * Clicking a row navigates to the detail page. Uses TanStack Query for data
- * fetching and modal forms for management.
+ * Clicking a row navigates to the detail page. Built on the shared AdminCrud
+ * building block.
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import React, { useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { z } from 'zod'
 import { useApi } from '../../context/ApiContext'
 import { useTenant } from '../../context/TenantContext'
 import { useI18n } from '../../context/I18nContext'
 import { useToast, ConfirmDialog } from '../../components'
-import { cn } from '@/lib/utils'
+import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
+import {
+  AdminCrudPage,
+  CrudFormDialog,
+  CrudTextField,
+  useAdminCrud,
+} from '../../components/AdminCrud'
 import { Button } from '@/components/ui/button'
 import { Lock, Plus, Pencil, Copy, Trash2 } from 'lucide-react'
 import type { CreateProfileRequest, UpdateProfileRequest } from '@kelta/sdk'
@@ -28,28 +35,22 @@ interface SecurityProfile {
   updatedAt: string
 }
 
-interface ProfileFormData {
-  name: string
-  description: string
-}
+const profileSchema = z.object({
+  name: z
+    .string()
+    .refine((v) => v.trim().length > 0, 'Profile name is required')
+    .refine((v) => v.length <= 255, 'Name must be 255 characters or fewer'),
+  description: z.string(),
+})
 
-interface ProfileFormErrors {
-  name?: string
-}
+type ProfileFormData = z.infer<typeof profileSchema>
 
 export interface ProfilesPageProps {
   testId?: string
 }
 
-function validateProfileForm(data: ProfileFormData): ProfileFormErrors {
-  const errors: ProfileFormErrors = {}
-  if (!data.name.trim()) {
-    errors.name = 'Profile name is required'
-  } else if (data.name.length > 255) {
-    errors.name = 'Name must be 255 characters or fewer'
-  }
-  return errors
-}
+const ACTION_BUTTON =
+  'inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs font-medium'
 
 function SystemBadge() {
   return (
@@ -57,174 +58,6 @@ function SystemBadge() {
       <Lock size={12} />
       System
     </span>
-  )
-}
-
-interface ProfileFormModalProps {
-  profile?: SecurityProfile
-  onSubmit: (data: ProfileFormData) => void
-  onCancel: () => void
-  isSubmitting: boolean
-}
-
-function ProfileFormModal({ profile, onSubmit, onCancel, isSubmitting }: ProfileFormModalProps) {
-  const nameInputRef = useRef<HTMLInputElement>(null)
-  const [formData, setFormData] = useState<ProfileFormData>({
-    name: profile?.name ?? '',
-    description: profile?.description ?? '',
-  })
-  const [errors, setErrors] = useState<ProfileFormErrors>({})
-  const [touched, setTouched] = useState<Record<string, boolean>>({})
-
-  useEffect(() => {
-    nameInputRef.current?.focus()
-  }, [])
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onCancel])
-
-  const validate = useCallback(
-    (data: ProfileFormData): ProfileFormErrors => validateProfileForm(data),
-    []
-  )
-
-  const handleChange = useCallback(
-    (field: keyof ProfileFormData, value: string) => {
-      const updated = { ...formData, [field]: value }
-      setFormData(updated)
-      if (touched[field]) {
-        const newErrors = validate(updated)
-        setErrors((prev) => ({ ...prev, [field]: newErrors[field as keyof ProfileFormErrors] }))
-      }
-    },
-    [formData, touched, validate]
-  )
-
-  const handleBlur = useCallback(
-    (field: keyof ProfileFormData) => {
-      setTouched((prev) => ({ ...prev, [field]: true }))
-      const newErrors = validate(formData)
-      setErrors((prev) => ({ ...prev, [field]: newErrors[field as keyof ProfileFormErrors] }))
-    },
-    [formData, validate]
-  )
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const newErrors = validate(formData)
-      setErrors(newErrors)
-      setTouched({ name: true, description: true })
-      if (Object.keys(newErrors).length === 0) {
-        onSubmit(formData)
-      }
-    },
-    [formData, onSubmit, validate]
-  )
-
-  const inputClassName = (field: keyof ProfileFormErrors) =>
-    cn(
-      'w-full rounded-md border bg-background px-3 py-2 text-sm',
-      touched[field] && errors[field] ? 'border-destructive' : 'border-border'
-    )
-
-  return (
-    <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="profile-form-title"
-      data-testid="profile-form-modal"
-    >
-      <div className="w-full max-w-[480px] rounded-lg border border-border bg-card shadow-xl">
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h2 id="profile-form-title" className="text-lg font-semibold text-foreground">
-            {profile ? 'Edit Profile' : 'New Profile'}
-          </h2>
-          <button
-            type="button"
-            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={onCancel}
-            aria-label="Close"
-            data-testid="profile-form-close"
-          >
-            ×
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          <div className="flex flex-col gap-4 px-6 py-4">
-            <div className="flex flex-col gap-1">
-              <label htmlFor="profile-name" className="text-sm font-medium text-foreground">
-                Name <span className="text-destructive">*</span>
-              </label>
-              <input
-                ref={nameInputRef}
-                id="profile-name"
-                type="text"
-                className={inputClassName('name')}
-                value={formData.name}
-                onChange={(e) => handleChange('name', e.target.value)}
-                onBlur={() => handleBlur('name')}
-                aria-invalid={touched.name && !!errors.name}
-                aria-describedby={errors.name ? 'profile-name-error' : undefined}
-                disabled={isSubmitting}
-                placeholder="Enter profile name"
-                data-testid="profile-name-input"
-              />
-              {touched.name && errors.name && (
-                <span
-                  id="profile-name-error"
-                  className="text-xs text-destructive"
-                  role="alert"
-                  data-testid="profile-name-error"
-                >
-                  {errors.name}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label htmlFor="profile-description" className="text-sm font-medium text-foreground">
-                Description
-              </label>
-              <textarea
-                id="profile-description"
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                value={formData.description}
-                onChange={(e) => handleChange('description', e.target.value)}
-                disabled={isSubmitting}
-                placeholder="Enter profile description"
-                rows={3}
-                data-testid="profile-description-input"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onCancel}
-              disabled={isSubmitting}
-              data-testid="profile-form-cancel"
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isSubmitting} data-testid="profile-form-submit">
-              {isSubmitting ? 'Saving...' : 'Save'}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
   )
 }
 
@@ -236,11 +69,6 @@ export function ProfilesPage({ testId = 'profiles-page' }: ProfilesPageProps): R
   const queryClient = useQueryClient()
   const { showToast } = useToast()
 
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingProfile, setEditingProfile] = useState<SecurityProfile | undefined>(undefined)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [profileToDelete, setProfileToDelete] = useState<SecurityProfile | null>(null)
-
   const {
     data: profiles,
     isLoading,
@@ -250,51 +78,22 @@ export function ProfilesPage({ testId = 'profiles-page' }: ProfilesPageProps): R
     queryKey: ['profiles'],
     queryFn: () => keltaClient.admin.profiles.list() as unknown as Promise<SecurityProfile[]>,
   })
-
   const profileList = profiles ?? []
 
-  // Mutations
-  const createMutation = useMutation({
-    mutationFn: (data: ProfileFormData) =>
-      keltaClient.admin.profiles.create(
-        data as CreateProfileRequest
-      ) as unknown as Promise<SecurityProfile>,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['profiles'] })
-      showToast('Profile created successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (error: Error) => {
-      showToast(error.message || 'Failed to create profile', 'error')
-    },
-  })
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: ProfileFormData }) =>
-      keltaClient.admin.profiles.update(
-        id,
-        data as UpdateProfileRequest
-      ) as unknown as Promise<SecurityProfile>,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['profiles'] })
-      showToast('Profile updated successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (error: Error) => {
-      showToast(error.message || 'Failed to update profile', 'error')
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => keltaClient.admin.profiles.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['profiles'] })
-      showToast('Profile deleted successfully', 'success')
-      setDeleteDialogOpen(false)
-      setProfileToDelete(null)
-    },
-    onError: (error: Error) => {
-      showToast(error.message || 'Failed to delete profile', 'error')
+  const crud = useAdminCrud<SecurityProfile, ProfileFormData>({
+    queryKey: ['profiles'],
+    create: (data) => keltaClient.admin.profiles.create(data as CreateProfileRequest),
+    update: (profile, data) =>
+      keltaClient.admin.profiles.update(profile.id, data as UpdateProfileRequest),
+    remove: (profile) => keltaClient.admin.profiles.delete(profile.id),
+    messages: {
+      created: 'Profile created successfully',
+      updated: 'Profile updated successfully',
+      deleted: 'Profile deleted successfully',
+      error: 'Failed to save profile',
+      createError: 'Failed to create profile',
+      updateError: 'Failed to update profile',
+      deleteError: 'Failed to delete profile',
     },
   })
 
@@ -305,255 +104,152 @@ export function ProfilesPage({ testId = 'profiles-page' }: ProfilesPageProps): R
       queryClient.invalidateQueries({ queryKey: ['profiles'] })
       showToast('Profile cloned successfully', 'success')
     },
-    onError: (error: Error) => {
-      showToast(error.message || 'Failed to clone profile', 'error')
+    onError: (err: Error) => {
+      showToast(err.message || 'Failed to clone profile', 'error')
     },
   })
 
-  // Handlers
-  const handleRowClick = useCallback(
-    (profile: SecurityProfile) => {
-      navigate(`/${tenantSlug}/profiles/${profile.id}`)
-    },
-    [navigate, tenantSlug]
+  const columns = useMemo<AdminColumn<SecurityProfile>[]>(
+    () => [
+      {
+        id: 'name',
+        header: 'Name',
+        cellClassName: 'font-medium text-foreground',
+      },
+      {
+        id: 'description',
+        header: 'Description',
+        cell: (p) => p.description || '—',
+        cellClassName: 'max-w-[300px] truncate text-muted-foreground',
+      },
+      {
+        id: 'isSystem',
+        header: 'System',
+        cell: (p) => (p.isSystem ? <SystemBadge /> : null),
+      },
+      {
+        id: 'createdAt',
+        header: 'Created',
+        cell: (p) =>
+          formatDate(new Date(p.createdAt), { year: 'numeric', month: 'short', day: 'numeric' }),
+        cellClassName: 'text-muted-foreground',
+      },
+    ],
+    [formatDate]
   )
 
-  const handleCreate = useCallback(() => {
-    setEditingProfile(undefined)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleEdit = useCallback((profile: SecurityProfile) => {
-    setEditingProfile(profile)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleCloseForm = useCallback(() => {
-    setIsFormOpen(false)
-    setEditingProfile(undefined)
-  }, [])
-
-  const handleFormSubmit = useCallback(
-    (data: ProfileFormData) => {
-      if (editingProfile) {
-        updateMutation.mutate({ id: editingProfile.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editingProfile, createMutation, updateMutation]
-  )
-
-  const handleDeleteClick = useCallback((profile: SecurityProfile) => {
-    setProfileToDelete(profile)
-    setDeleteDialogOpen(true)
-  }, [])
-
-  const handleDeleteConfirm = useCallback(() => {
-    if (profileToDelete) {
-      deleteMutation.mutate(profileToDelete.id)
-    }
-  }, [profileToDelete, deleteMutation])
-
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteDialogOpen(false)
-    setProfileToDelete(null)
-  }, [])
-
-  const handleClone = useCallback(
-    (profile: SecurityProfile) => {
-      cloneMutation.mutate(profile.id)
-    },
-    [cloneMutation]
-  )
-
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <div className="flex min-h-[400px] items-center justify-center text-muted-foreground">
-          Loading...
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-        <div className="flex flex-col items-center justify-center gap-4 p-12 text-muted-foreground">
-          <p>Failed to load profiles.</p>
-          <Button variant="outline" onClick={() => refetch()}>
-            Retry
-          </Button>
-        </div>
-      </div>
-    )
-  }
+  const editing = crud.editing
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8" data-testid={testId}>
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Profiles</h1>
-        <Button onClick={handleCreate} data-testid="new-profile-button">
+    <AdminCrudPage
+      testId={testId}
+      title="Profiles"
+      actions={
+        <Button onClick={crud.openCreate} data-testid="new-profile-button">
           <Plus size={16} />
           New Profile
         </Button>
-      </header>
-
-      {profileList.length === 0 ? (
-        <div
-          className="rounded-lg border border-border bg-card py-16 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          <p>No profiles found. Create your first profile to get started.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table
-            className="w-full border-collapse"
-            role="grid"
-            aria-label="Profiles"
-            data-testid="profiles-table"
-          >
-            <thead>
-              <tr role="row" className="bg-muted">
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+      }
+      isLoading={isLoading}
+      error={error}
+      loadErrorMessage="Failed to load profiles."
+      onRetry={() => refetch()}
+      isEmpty={profileList.length === 0}
+      emptyMessage="No profiles found. Create your first profile to get started."
+      list={
+        <AdminDataTable
+          tableId="profiles"
+          testId="profiles-table"
+          ariaLabel="Profiles"
+          columns={columns}
+          rows={profileList}
+          rowKey={(p) => p.id}
+          rowTestId={(_, index) => `profile-row-${index}`}
+          onRowClick={(p) => navigate(`/${tenantSlug}/profiles/${p.id}`)}
+          renderActions={(profile, index) => (
+            <div className="flex justify-end gap-2">
+              {!profile.isSystem && (
+                <button
+                  type="button"
+                  className={`${ACTION_BUTTON} text-primary hover:border-primary hover:bg-muted`}
+                  onClick={() => crud.openEdit(profile)}
+                  data-testid={`edit-button-${index}`}
+                  title="Edit profile"
                 >
-                  Name
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                  <Pencil size={12} />
+                  Edit
+                </button>
+              )}
+              <button
+                type="button"
+                className={`${ACTION_BUTTON} text-primary hover:border-primary hover:bg-muted`}
+                onClick={() => cloneMutation.mutate(profile.id)}
+                data-testid={`clone-button-${index}`}
+                title="Clone profile"
+              >
+                <Copy size={12} />
+                Clone
+              </button>
+              {!profile.isSystem && (
+                <button
+                  type="button"
+                  className={`${ACTION_BUTTON} text-destructive hover:border-destructive hover:bg-destructive/10`}
+                  onClick={() => crud.requestDelete(profile)}
+                  data-testid={`delete-button-${index}`}
+                  title="Delete profile"
                 >
-                  Description
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  System
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Created
-                </th>
-                <th
-                  role="columnheader"
-                  scope="col"
-                  className="border-b border-border px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {profileList.map((profile, index) => (
-                <tr
-                  key={profile.id}
-                  role="row"
-                  className="cursor-pointer border-b border-border transition-colors hover:bg-muted/50"
-                  onClick={() => handleRowClick(profile)}
-                  data-testid={`profile-row-${index}`}
-                >
-                  <td role="gridcell" className="px-4 py-3 text-sm font-medium text-foreground">
-                    {profile.name}
-                  </td>
-                  <td
-                    role="gridcell"
-                    className="max-w-[300px] truncate px-4 py-3 text-sm text-muted-foreground"
-                  >
-                    {profile.description || '\u2014'}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm">
-                    {profile.isSystem && <SystemBadge />}
-                  </td>
-                  <td role="gridcell" className="px-4 py-3 text-sm text-muted-foreground">
-                    {formatDate(new Date(profile.createdAt), {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                  </td>
-                  <td role="gridcell" className="w-[1%] whitespace-nowrap px-4 py-3">
-                    <div
-                      role="toolbar"
-                      className="flex justify-end gap-2"
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
-                      {!profile.isSystem && (
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs font-medium text-primary hover:border-primary hover:bg-muted"
-                          onClick={() => handleEdit(profile)}
-                          data-testid={`edit-button-${index}`}
-                          title="Edit profile"
-                        >
-                          <Pencil size={12} />
-                          Edit
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs font-medium text-primary hover:border-primary hover:bg-muted"
-                        onClick={() => handleClone(profile)}
-                        data-testid={`clone-button-${index}`}
-                        title="Clone profile"
-                      >
-                        <Copy size={12} />
-                        Clone
-                      </button>
-                      {!profile.isSystem && (
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs font-medium text-destructive hover:border-destructive hover:bg-destructive/10"
-                          onClick={() => handleDeleteClick(profile)}
-                          data-testid={`delete-button-${index}`}
-                          title="Delete profile"
-                        >
-                          <Trash2 size={12} />
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Create/Edit Modal */}
-      {isFormOpen && (
-        <ProfileFormModal
-          profile={editingProfile}
-          onSubmit={handleFormSubmit}
-          onCancel={handleCloseForm}
-          isSubmitting={createMutation.isPending || updateMutation.isPending}
+                  <Trash2 size={12} />
+                  Delete
+                </button>
+              )}
+            </div>
+          )}
         />
-      )}
+      }
+    >
+      <CrudFormDialog<ProfileFormData>
+        open={crud.isFormOpen}
+        onClose={crud.closeForm}
+        title={editing ? 'Edit Profile' : 'New Profile'}
+        schema={profileSchema}
+        defaultValues={{
+          name: editing?.name ?? '',
+          description: editing?.description ?? '',
+        }}
+        onSubmit={crud.submit}
+        isSubmitting={crud.isSaving}
+        testIdPrefix="profile"
+      >
+        <CrudTextField<ProfileFormData>
+          name="name"
+          id="profile-name"
+          label="Name"
+          required
+          placeholder="Enter profile name"
+          testId="profile-name-input"
+          errorTestId="profile-name-error"
+        />
+        <CrudTextField<ProfileFormData>
+          name="description"
+          id="profile-description"
+          label="Description"
+          multiline
+          placeholder="Enter profile description"
+          testId="profile-description-input"
+        />
+      </CrudFormDialog>
 
-      {/* Delete Confirmation Dialog */}
       <ConfirmDialog
-        open={deleteDialogOpen}
+        open={crud.deleteTarget !== null}
         title="Delete Profile"
-        message={`Are you sure you want to delete "${profileToDelete?.name}"? This action cannot be undone.`}
+        message={`Are you sure you want to delete "${crud.deleteTarget?.name}"? This action cannot be undone.`}
         confirmLabel="Delete"
         cancelLabel="Cancel"
-        onConfirm={handleDeleteConfirm}
-        onCancel={handleDeleteCancel}
+        onConfirm={crud.confirmDelete}
+        onCancel={crud.cancelDelete}
         variant="danger"
       />
-    </div>
+    </AdminCrudPage>
   )
 }
 

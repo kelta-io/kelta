@@ -62,14 +62,29 @@ export interface AdminDataTableProps<T> {
   columns: AdminColumn<T>[]
   rows: T[]
   rowKey: (row: T) => string
-  /** Render-prop for the per-row actions cell (Design / Edit / etc.). */
-  renderActions?: (row: T) => React.ReactNode
+  /**
+   * Render-prop for the per-row actions cell (Design / Edit / etc.). `index` is
+   * the row's position in the displayed (filtered + sorted) order.
+   */
+  renderActions?: (row: T, index: number) => React.ReactNode
   emptyMessage?: React.ReactNode
   loading?: boolean
   /** Optional row click handler (e.g. open detail). */
   onRowClick?: (row: T) => void
   /** Class name applied to the wrapper. */
   className?: string
+  /** Test id on the wrapper. Defaults to `admin-data-table`. */
+  testId?: string
+  /** Accessible name for the `<table>` element. */
+  ariaLabel?: string
+  /**
+   * Per-row test id. Defaults to `admin-data-table-row-<rowKey>`; pages that
+   * predate this table pass their own (e.g. `profile-row-<index>`) so existing
+   * e2e selectors keep working.
+   */
+  rowTestId?: (row: T, index: number) => string
+  /** Header label for the actions column. Defaults to `Actions`. */
+  actionsHeader?: string
 }
 
 export function AdminDataTable<T>({
@@ -82,6 +97,10 @@ export function AdminDataTable<T>({
   loading,
   onRowClick,
   className,
+  testId = 'admin-data-table',
+  ariaLabel,
+  rowTestId,
+  actionsHeader = 'Actions',
 }: AdminDataTableProps<T>): React.ReactElement {
   const [hidden, setHidden] = useState<Set<string>>(() => loadHiddenColumns(tableId))
   const [sort, setSort] = useState<AdminSortState | null>(null)
@@ -146,7 +165,7 @@ export function AdminDataTable<T>({
   const hasAnyFilter = filter && filter.filters.length > 0
 
   return (
-    <div className={cn('flex flex-col gap-2', className)} data-testid="admin-data-table">
+    <div className={cn('flex flex-col gap-2', className)} data-testid={testId}>
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -183,7 +202,7 @@ export function AdminDataTable<T>({
         </div>
       )}
 
-      <Table>
+      <Table aria-label={ariaLabel}>
         <TableHeader>
           <TableRow>
             {visibleColumns.map((col) => {
@@ -219,7 +238,7 @@ export function AdminDataTable<T>({
                 </TableHead>
               )
             })}
-            {renderActions && <TableHead className="w-1 text-right">Actions</TableHead>}
+            {renderActions && <TableHead className="w-1 text-right">{actionsHeader}</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -242,12 +261,14 @@ export function AdminDataTable<T>({
               </TableCell>
             </TableRow>
           ) : (
-            sortedRows.map((row) => (
+            sortedRows.map((row, index) => (
               <TableRow
                 key={rowKey(row)}
                 className={onRowClick ? 'cursor-pointer' : undefined}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
-                data-testid={`admin-data-table-row-${rowKey(row)}`}
+                data-testid={
+                  rowTestId ? rowTestId(row, index) : `admin-data-table-row-${rowKey(row)}`
+                }
               >
                 {visibleColumns.map((col) => (
                   <TableCell key={col.id} className={col.cellClassName}>
@@ -256,7 +277,7 @@ export function AdminDataTable<T>({
                 ))}
                 {renderActions && (
                   <TableCell className="w-1 text-right" onClick={(e) => e.stopPropagation()}>
-                    {renderActions(row)}
+                    {renderActions(row, index)}
                   </TableCell>
                 )}
               </TableRow>

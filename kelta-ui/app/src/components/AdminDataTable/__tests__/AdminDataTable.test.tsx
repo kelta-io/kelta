@@ -86,6 +86,32 @@ describe('AdminDataTable', () => {
     )
     expect(screen.getByText('No data here.')).toBeInTheDocument()
   })
+
+  it('supports custom test ids, aria label, actions header and displayed-order indexes', async () => {
+    render(
+      <AdminDataTable
+        tableId="t7"
+        testId="things-table"
+        ariaLabel="Things"
+        actionsHeader="Acciones"
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => r.id}
+        rowTestId={(_, index) => `thing-row-${index}`}
+        renderActions={(r, index) => <button data-testid={`act-${index}`}>{r.name}</button>}
+      />
+    )
+    expect(screen.getByTestId('things-table')).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Things' })).toBeInTheDocument()
+    expect(screen.getByText('Acciones')).toBeInTheDocument()
+    expect(screen.getByTestId('thing-row-0')).toHaveTextContent('Bravo')
+    expect(screen.getByTestId('act-0')).toHaveTextContent('Bravo')
+
+    // Indexes follow the displayed (sorted) order, not the input order.
+    await userEvent.click(screen.getByTestId('admin-data-table-sort-name'))
+    expect(screen.getByTestId('thing-row-0')).toHaveTextContent('Alpha')
+    expect(screen.getByTestId('act-0')).toHaveTextContent('Alpha')
+  })
 })
 
 describe('evaluateFilter (admin)', () => {

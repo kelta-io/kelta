@@ -1,0 +1,1 @@
+- 2026-10-12 refactor(ui): Add a shared AdminCrud building block (page shell, CRUD state + mutations with toasts, react-hook-form/zod form dialog on the ui dialog) and move the Profiles and Picklists admin pages onto it (admin-crud-foundation)
