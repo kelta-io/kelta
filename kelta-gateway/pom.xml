@@ -22,6 +22,7 @@
         <java.version>25</java.version>
         <spring-cloud.version>2025.1.1</spring-cloud.version>
         <protobuf.version>4.32.0</protobuf.version>
+        <graalvm-sdk.version>25.0.2</graalvm-sdk.version>
         <junit-quickcheck.version>1.0</junit-quickcheck.version>
         <skipITs>true</skipITs>
     </properties>
@@ -39,6 +40,15 @@
             <groupId>io.kelta</groupId>
             <artifactId>runtime-jsonapi</artifactId>
             <version>1.0.0-SNAPSHOT</version>
+        </dependency>
+
+        <!-- GraalVM Feature API for ProtobufInitOrderFeature. Provided: native-image supplies it at
+             build time and the hosted-only Feature never runs on the JVM, so it stays out of the jar. -->
+        <dependency>
+            <groupId>org.graalvm.sdk</groupId>
+            <artifactId>nativeimage</artifactId>
+            <version>${graalvm-sdk.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <!-- Spring Cloud Gateway (renamed in Spring Cloud 2025.x) -->
@@ -389,8 +399,14 @@
                                   All protobuf-generated packages (Cerbos SDK + transitive
                                   deps) must be initialized at build time so their descriptor
                                   registration (which uses reflection) runs during the build.
+                                  Analysis initializes them in whatever order it reaches them, and
+                                  protobuf fails if JavaFeaturesProto goes before DescriptorProtos:
+                                  ProtobufInitOrderFeature pins the order (registered here, not in a
+                                  native-image.properties: Spring AOT writes that file for this
+                                  artifact). ProtobufInitOrderFeatureTest guards both args.
                                 -->
                                 <buildArg>--initialize-at-build-time=com.google.protobuf</buildArg>
+                                <buildArg>--features=io.kelta.gateway.config.ProtobufInitOrderFeature</buildArg>
                                 <buildArg>--initialize-at-build-time=com.google.api</buildArg>
                                 <buildArg>--initialize-at-build-time=com.google.gson</buildArg>
                                 <buildArg>--initialize-at-build-time=dev.cerbos</buildArg>

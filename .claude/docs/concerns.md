@@ -640,6 +640,17 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   both clock origins at run time; `NativeImageClockOriginTest` guards it. A library that ships
   `--initialize-at-build-time` for a whole package needs its clock/entropy/host-state statics
   checked; reproduce with `unshare --time --monotonic=<negative>`.
+- **Build-time class init runs in analysis order, which any reachable-code change can shift.**
+  protobuf-java (4.32–4.36 at least) throws `getDescriptor() called before internalInit()` if
+  `JavaFeaturesProto` initializes before `DescriptorProtos` (its `<clinit>` pulls in
+  `DescriptorProtos`, whose feature resolution registers the still-uninitialized
+  `JavaFeaturesProto.java_`). With `--initialize-at-build-time=com.google.protobuf`, #1734 changed
+  only gateway code and the gateway image stopped building on `main` (no PR job builds native).
+  The gateway's `ProtobufInitOrderFeature` (`--features=` in the native profile) initializes
+  `DescriptorProtos` first; `ProtobufInitOrderFeatureTest` guards it. Don't register features in
+  `META-INF/native-image/io.kelta/<artifact>/native-image.properties`: Spring AOT writes that file.
+  The worker sidesteps the same cycle by initializing `JavaFeaturesProto`/`DescriptorProtos` at
+  run time.
 - **Every new `kelta.*` NATS subject namespace needs its own JetStream stream** in
   `JetStreamInitializer` (`ensureStream` is add-if-absent; existing streams can't gain subjects).
   Otherwise the publish never acks (`CancellationException`) and the event is dropped.
