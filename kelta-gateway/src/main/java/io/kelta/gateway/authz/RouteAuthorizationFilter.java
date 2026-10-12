@@ -16,10 +16,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.server.PathContainer;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -47,6 +49,11 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>API_ACCESS system permission via Cerbos</li>
  *   <li>Object-level CRUD permissions via Cerbos (read/create/edit/delete on collection)</li>
+ *   <li>For a child-resource path {@code /api/{parent}/{parentId}/{child}[/{childId}]} under a
+ *       collection route whose child segment names a collection the caller's tenant can address:
+ *       {@code read} on the parent and the child collection's own decision for the HTTP method
+ *       (see {@code authorizeChildPath}). A child segment that names none, or a dedicated
+ *       endpoint listed in {@link DedicatedSubResources}, keeps the parent route's decision.</li>
  * </ul>
  *
  * <p>System permission overrides (VIEW_ALL_DATA, MODIFY_ALL_DATA) are encoded
@@ -56,6 +63,7 @@ import java.util.regex.Pattern;
  * {@code X-User-Profile-Id}, {@code X-User-Email}, {@code X-Cerbos-Scope}.
  */
 @Component
+@ImportRuntimeHints(DedicatedSubResources.Hints.class)
 public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
 
     private static final Logger log = LoggerFactory.getLogger(RouteAuthorizationFilter.class);
@@ -64,6 +72,31 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
 
     /** Any caller-supplied filter on the tenants {@code id}: {@code filter[id]}, {@code filter[id][eq]}, … */
     private static final Pattern TENANT_ID_FILTER = Pattern.compile("(?i)^filter\\[\\s*id\\s*\\](\\[[^\\]]*\\])?$");
+
+    /**
+     * Worker endpoints of the child-resource shape served by a dedicated controller rather than the
+     * generic child handlers ({@code GET /api/dashboards/{name}/tree}, …): their trailing segment
+     * names an operation, so they keep the parent route's own decision even when a tenant has a
+     * collection named like that segment. Loaded from {@value DedicatedSubResources#RESOURCE};
+     * the worker's {@code DedicatedSubResourcesDriftTest} keeps that file in step with its
+     * controllers.
+     */
+    private static final DedicatedSubResources DEDICATED_SUB_RESOURCES = DedicatedSubResources.loadDefault();
+
+    /** Outcome of authorizing one route for one method. */
+    private sealed interface Decision permits Allow, Deny, NotFound {}
+
+    /**
+     * Forward {@code exchange}. {@code narrowed} marks an allow that only holds for a rewritten
+     * request (the own-tenant view of {@code /api/tenants}).
+     */
+    private record Allow(ServerWebExchange exchange, boolean narrowed) implements Decision {}
+
+    /** 403 with {@code detail}. */
+    private record Deny(String collectionName, String detail) implements Decision {}
+
+    /** 404 — the response must not confirm the target exists. */
+    private record NotFound(String collectionName) implements Decision {}
 
     private final RouteRegistry routeRegistry;
     private final boolean permissionsEnabled;
@@ -166,89 +199,157 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                         // No route found — not a collection API call, allow through
                         return forwardWithHeaders(exchange, chain, principal);
                     }
+                    exchange.getAttributes().put(RequestLoggingFilter.ROUTE_ATTR, route.get().getCollectionName());
 
-                    String collectionId = route.get().getId();
-                    String collectionName = route.get().getCollectionName();
-                    exchange.getAttributes().put(RequestLoggingFilter.ROUTE_ATTR, collectionName);
+                    HttpMethod method = exchange.getRequest().getMethod();
 
-                    // A static route that fronts a real system collection (users, profiles,
-                    // collections — declared in RouteConfigService) is authorized against that
-                    // collection, so the request is refused before the worker validates its body.
-                    StaticCollectionCheck staticCheck = route.get().getCollectionCheck();
-                    if (staticCheck != null
-                            && staticCheck.appliesTo(exchange.getRequest().getMethod(), path)) {
-                        return checkStaticCollection(exchange, chain, path, principal, route.get(), staticCheck);
+                    // 3. A child-resource path under a collection route acts on the child
+                    // collection, so it is authorized against the child as well as the parent.
+                    PathContainer requestPath = exchange.getRequest().getPath().pathWithinApplication();
+                    Optional<ChildResourcePath> child = ChildResourcePath.parse(requestPath);
+                    if (child.isPresent() && !isStaticRoute(route.get())
+                            && !DEDICATED_SUB_RESOURCES.matches(method, requestPath)) {
+                        return authorizeChildPath(exchange, chain, principal, route.get(), child.get(), method);
                     }
 
-                    // Other static routes (admin, me, metrics, search, etc.) are not
-                    // real collections — they only require the API_ACCESS check
-                    // above.  Skip the collection-level Cerbos check for them.
-                    if (collectionId.startsWith("static-")) {
-                        // Designating a module signing key is a grant of code-execution
-                        // authority: a module JAR signed by a trusted key runs arbitrary Java in
-                        // the worker JVM (SandboxedModuleClassLoader allows java.* wholesale).
-                        // API_ACCESS — all the rest of /api/modules/** carries — is far too weak
-                        // a gate for that, so writes here need MANAGE_CREDENTIALS. Reads are left
-                        // at API_ACCESS: the keys are public, and the dependentModules count is
-                        // what makes a rotation safe to plan.
-                        if ("static-modules".equals(collectionId)
-                                && path.startsWith("/api/modules/signing-keys")
-                                && isWriteMethod(exchange)) {
-                            return cerbosService.checkSystemPermission(principal, "MANAGE_CREDENTIALS")
-                                    .flatMap(allowed -> {
-                                        if (!allowed) {
-                                            log.warn("User {} denied MANAGE_CREDENTIALS for module "
-                                                    + "signing key write on path: {}",
-                                                    principal.getUsername(), path);
-                                            metrics.recordAuthzDenied(tenantSlug, collectionName, methodStr);
-                                            return forbidden(exchange,
-                                                    "Insufficient permissions: MANAGE_CREDENTIALS required");
-                                        }
-                                        return forwardWithHeaders(exchange, chain, principal);
-                                    });
-                        }
-                        // Tenant management write operations require MANAGE_TENANTS
-                        if ("static-tenants".equals(collectionId) && isWriteMethod(exchange)) {
-                            return cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")
-                                    .flatMap(allowed -> {
-                                        if (!allowed) {
-                                            log.warn("User {} denied MANAGE_TENANTS for tenant write on path: {}",
-                                                    principal.getUsername(), path);
-                                            metrics.recordAuthzDenied(tenantSlug, collectionName, methodStr);
-                                            return forbidden(exchange,
-                                                    "Insufficient permissions: MANAGE_TENANTS required");
-                                        }
-                                        return forwardWithHeaders(exchange, chain, principal);
-                                    });
-                        }
-                        // The tenants collection has no tenant_id column — each row *is* a tenant —
-                        // so nothing downstream narrows reads of it to the caller. Without
-                        // MANAGE_TENANTS (the platform-admin grant that already gates writes) a
-                        // caller may read only its own tenant's row.
-                        if ("static-tenants".equals(collectionId)) {
-                            return cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")
-                                    .flatMap(platformAdmin -> platformAdmin
-                                            ? forwardWithHeaders(exchange, chain, principal)
-                                            : forwardOwnTenantOnly(exchange, chain, path, principal));
-                        }
-                        return forwardWithHeaders(exchange, chain, principal);
+                    // 4. Everything else: the route's own decision for this method
+                    return decide(exchange, principal, path, method, route.get())
+                            .flatMap(decision -> apply(exchange, chain, principal, decision));
+                });
+    }
+
+    /**
+     * Authorizes {@code /api/{parent}/{parentId}/{child}[/{childId}]}, which the worker's generic
+     * collection router serves from the <em>child</em> collection. Two checks, both required:
+     * <ul>
+     *   <li>{@code read} on the parent collection — the caller addresses the child records through
+     *       a parent record, whatever the operation on the child;</li>
+     *   <li>exactly the decision a direct request to {@code /api/{child}[/{childId}]} with the same
+     *       method gets ({@link #decide}), so the child's object permission (or, for a static
+     *       route, that route's own rule) governs the operation.</li>
+     * </ul>
+     * The child segment is resolved among the collections the caller's tenant can address
+     * ({@link RouteRegistry#findTenantVisibleByPath}) — never another tenant's same-named
+     * collection. When it names none, the request gets the parent route's own decision for its
+     * method, exactly as before child paths were recognized: the segment is then an operation
+     * of a dedicated endpoint, or a child the gateway's route table does not know (yet). The
+     * worker authorizes its generic child handlers itself, which covers a child collection
+     * created after the gateway's last route refresh.
+     */
+    private Mono<Void> authorizeChildPath(ServerWebExchange exchange,
+                                          GatewayFilterChain chain,
+                                          GatewayPrincipal principal,
+                                          RouteDefinition parentRoute,
+                                          ChildResourcePath child,
+                                          HttpMethod method) {
+        String childPath = child.directPath();
+        Optional<RouteDefinition> childRoute = child.isAddressable()
+                ? routeRegistry.findTenantVisibleByPath(childPath, TenantResolutionFilter.getTenantId(exchange))
+                : Optional.empty();
+        if (childRoute.isEmpty()) {
+            log.debug("Child segment '{}' under '{}' names no collection of the caller's tenant; "
+                    + "keeping the parent route's decision", child.childName(), parentRoute.getCollectionName());
+            return decide(exchange, principal, exchange.getRequest().getPath().value(), method, parentRoute)
+                    .flatMap(decision -> apply(exchange, chain, principal, decision));
+        }
+
+        return decide(exchange, principal, exchange.getRequest().getPath().value(), HttpMethod.GET, parentRoute)
+                .flatMap(parentDecision -> {
+                    if (!isFullAllow(parentDecision)) {
+                        return apply(exchange, chain, principal, asDenial(parentDecision, parentRoute, HttpMethod.GET));
                     }
+                    return decide(exchange, principal, childPath, method, childRoute.get())
+                            .map(childDecision -> isFullAllow(childDecision)
+                                    // forward the request as sent, not the direct-path stand-in
+                                    ? new Allow(exchange, false)
+                                    : asDenial(childDecision, childRoute.get(), method))
+                            .flatMap(decision -> apply(exchange, chain, principal, decision));
+                });
+    }
 
-                    // Map HTTP method to Cerbos action
-                    String action = mapMethodToAction(exchange.getRequest().getMethod());
+    /**
+     * The route's authorization decision for {@code method} on {@code path}: the shared core of a
+     * direct request and of each half of a child-resource request.
+     */
+    private Mono<Decision> decide(ServerWebExchange exchange,
+                                  GatewayPrincipal principal,
+                                  String path,
+                                  HttpMethod method,
+                                  RouteDefinition route) {
+        String collectionId = route.getId();
+        String collectionName = route.getCollectionName();
 
-                    // 3. Check collection-level permission
-                    return cerbosService.checkObjectPermission(principal, collectionId, action)
-                            .flatMap(allowed -> {
-                                if (!allowed) {
-                                    log.warn("User {} denied {} on collection '{}' (id={})",
-                                            principal.getUsername(), action, collectionName, collectionId);
-                                    metrics.recordAuthzDenied(tenantSlug, collectionName, methodStr);
-                                    return forbidden(exchange,
-                                            "Insufficient permissions for " + action + " on " + collectionName);
-                                }
-                                return forwardWithHeaders(exchange, chain, principal);
-                            });
+        // A static route that fronts a real system collection (users, profiles,
+        // collections — declared in RouteConfigService) is authorized against that
+        // collection, so the request is refused before the worker validates its body.
+        StaticCollectionCheck staticCheck = route.getCollectionCheck();
+        if (staticCheck != null && staticCheck.appliesTo(method, path)) {
+            return decideStaticCollection(exchange, principal, path, method, route, staticCheck);
+        }
+
+        // Other static routes (admin, me, metrics, search, etc.) are not
+        // real collections — they only require the API_ACCESS check
+        // above.  Skip the collection-level Cerbos check for them.
+        if (isStaticRoute(route)) {
+            // Designating a module signing key is a grant of code-execution
+            // authority: a module JAR signed by a trusted key runs arbitrary Java in
+            // the worker JVM (SandboxedModuleClassLoader allows java.* wholesale).
+            // API_ACCESS — all the rest of /api/modules/** carries — is far too weak
+            // a gate for that, so writes here need MANAGE_CREDENTIALS. Reads are left
+            // at API_ACCESS: the keys are public, and the dependentModules count is
+            // what makes a rotation safe to plan.
+            if ("static-modules".equals(collectionId)
+                    && path.startsWith("/api/modules/signing-keys")
+                    && StaticCollectionCheck.isWrite(method)) {
+                return cerbosService.checkSystemPermission(principal, "MANAGE_CREDENTIALS")
+                        .map(allowed -> {
+                            if (!allowed) {
+                                log.warn("User {} denied MANAGE_CREDENTIALS for module "
+                                        + "signing key write on path: {}",
+                                        principal.getUsername(), path);
+                                return new Deny(collectionName,
+                                        "Insufficient permissions: MANAGE_CREDENTIALS required");
+                            }
+                            return new Allow(exchange, false);
+                        });
+            }
+            // Tenant management write operations require MANAGE_TENANTS
+            if ("static-tenants".equals(collectionId) && StaticCollectionCheck.isWrite(method)) {
+                return cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")
+                        .map(allowed -> {
+                            if (!allowed) {
+                                log.warn("User {} denied MANAGE_TENANTS for tenant write on path: {}",
+                                        principal.getUsername(), path);
+                                return new Deny(collectionName,
+                                        "Insufficient permissions: MANAGE_TENANTS required");
+                            }
+                            return new Allow(exchange, false);
+                        });
+            }
+            // The tenants collection has no tenant_id column — each row *is* a tenant —
+            // so nothing downstream narrows reads of it to the caller. Without
+            // MANAGE_TENANTS (the platform-admin grant that already gates writes) a
+            // caller may read only its own tenant's row.
+            if ("static-tenants".equals(collectionId)) {
+                return cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")
+                        .map(platformAdmin -> platformAdmin
+                                ? new Allow(exchange, false)
+                                : ownTenantOnly(exchange, path, principal));
+            }
+            return Mono.just(new Allow(exchange, false));
+        }
+
+        // Collection route: the Cerbos object permission for the HTTP method's action
+        String action = mapMethodToAction(method);
+        return cerbosService.checkObjectPermission(principal, collectionId, action)
+                .map(allowed -> {
+                    if (!allowed) {
+                        log.warn("User {} denied {} on collection '{}' (id={})",
+                                principal.getUsername(), action, collectionName, collectionId);
+                        return new Deny(collectionName,
+                                "Insufficient permissions for " + action + " on " + collectionName);
+                    }
+                    return new Allow(exchange, false);
                 });
     }
 
@@ -258,28 +359,25 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
      * — for a write — the declared override system permission. Fails closed when the collection's
      * route is not registered (bootstrap not loaded): without its id there is nothing to check.
      */
-    private Mono<Void> checkStaticCollection(ServerWebExchange exchange,
-                                             GatewayFilterChain chain,
-                                             String path,
-                                             GatewayPrincipal principal,
-                                             RouteDefinition staticRoute,
-                                             StaticCollectionCheck staticCheck) {
-        String tenantSlug = TenantResolutionFilter.getTenantSlug(exchange);
-        String methodStr = exchange.getRequest().getMethod() != null ? exchange.getRequest().getMethod().name() : "unknown";
+    private Mono<Decision> decideStaticCollection(ServerWebExchange exchange,
+                                                  GatewayPrincipal principal,
+                                                  String path,
+                                                  HttpMethod method,
+                                                  RouteDefinition staticRoute,
+                                                  StaticCollectionCheck staticCheck) {
         String collectionName = staticRoute.getCollectionName();
-        String action = mapMethodToAction(exchange.getRequest().getMethod());
+        String action = mapMethodToAction(method);
 
         Optional<RouteDefinition> backing = routeRegistry.findCollectionRouteBehind(staticRoute);
         if (backing.isEmpty()) {
             log.error("No collection route behind static route '{}' — denying {} on path: {}",
                     staticRoute.getId(), action, path);
-            metrics.recordAuthzDenied(tenantSlug, collectionName, methodStr);
-            return forbidden(exchange, "Insufficient permissions for " + action + " on " + collectionName);
+            return Mono.just(new Deny(collectionName,
+                    "Insufficient permissions for " + action + " on " + collectionName));
         }
 
         String override = staticCheck.writeOverridePermission();
-        Mono<Boolean> overrideAllowed = override != null
-                && StaticCollectionCheck.isWrite(exchange.getRequest().getMethod())
+        Mono<Boolean> overrideAllowed = override != null && StaticCollectionCheck.isWrite(method)
                 ? cerbosService.checkSystemPermission(principal, override)
                 : Mono.just(false);
 
@@ -287,16 +385,60 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                 .flatMap(viaOverride -> viaOverride
                         ? Mono.just(true)
                         : cerbosService.checkObjectPermission(principal, backing.get().getId(), action))
-                .flatMap(allowed -> {
+                .map(allowed -> {
                     if (!allowed) {
                         log.warn("User {} denied {} on static collection route '{}' (collection id={})",
                                 principal.getUsername(), action, collectionName, backing.get().getId());
-                        metrics.recordAuthzDenied(tenantSlug, collectionName, methodStr);
-                        return forbidden(exchange,
+                        return new Deny(collectionName,
                                 "Insufficient permissions for " + action + " on " + collectionName);
                     }
-                    return forwardWithHeaders(exchange, chain, principal);
+                    return new Allow(exchange, false);
                 });
+    }
+
+    /** Carries out a {@link Decision}: forward, 403 or 404 (both denials are recorded). */
+    private Mono<Void> apply(ServerWebExchange exchange,
+                             GatewayFilterChain chain,
+                             GatewayPrincipal principal,
+                             Decision decision) {
+        return switch (decision) {
+            case Allow allow -> forwardWithHeaders(allow.exchange(), chain, principal);
+            case Deny deny -> {
+                recordDenied(exchange, deny.collectionName());
+                yield forbidden(exchange, deny.detail());
+            }
+            case NotFound notFound -> {
+                recordDenied(exchange, notFound.collectionName());
+                yield notFound(exchange);
+            }
+        };
+    }
+
+    private void recordDenied(ServerWebExchange exchange, String collectionName) {
+        String methodStr = exchange.getRequest().getMethod() != null ? exchange.getRequest().getMethod().name() : "unknown";
+        metrics.recordAuthzDenied(TenantResolutionFilter.getTenantSlug(exchange), collectionName, methodStr);
+    }
+
+    /** An unconditional allow — not one that only holds for a narrowed rewrite of the request. */
+    private static boolean isFullAllow(Decision decision) {
+        return decision instanceof Allow allow && !allow.narrowed();
+    }
+
+    /**
+     * Half of a child-resource decision that did not allow outright. A narrowed allow (the
+     * own-tenant view of {@code /api/tenants}) is a denial here: the narrowing rewrites the
+     * direct path's query, which is not the request being forwarded.
+     */
+    private Decision asDenial(Decision decision, RouteDefinition route, HttpMethod method) {
+        if (decision instanceof Allow) {
+            return new Deny(route.getCollectionName(),
+                    "Insufficient permissions for " + mapMethodToAction(method) + " on " + route.getCollectionName());
+        }
+        return decision;
+    }
+
+    private static boolean isStaticRoute(RouteDefinition route) {
+        return route.getId() != null && route.getId().startsWith("static-");
     }
 
     /**
@@ -323,24 +465,19 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
      * filters still apply and can only narrow further. A request for any other tenant's row (or
      * anything beneath it) is a 404, not a 403, so the response does not confirm the id exists.
      */
-    private Mono<Void> forwardOwnTenantOnly(ServerWebExchange exchange,
-                                            GatewayFilterChain chain,
-                                            String path,
-                                            GatewayPrincipal principal) {
+    private Decision ownTenantOnly(ServerWebExchange exchange, String path, GatewayPrincipal principal) {
         String ownTenantId = principal.getTenantId();
         String rest = path.length() > TENANTS_PATH.length() ? path.substring(TENANTS_PATH.length()) : "";
         if (rest.isEmpty() || "/".equals(rest)) {
-            return forwardWithHeaders(narrowTenantsList(exchange, ownTenantId, false), chain, principal);
+            return new Allow(narrowTenantsList(exchange, ownTenantId, false), true);
         }
         String requestedId = rest.substring(1).split("/", 2)[0];
         if (!requestedId.equals(ownTenantId)) {
             log.warn("User {} denied read of another tenant's record on path: {}",
                     principal.getUsername(), path);
-            metrics.recordAuthzDenied(TenantResolutionFilter.getTenantSlug(exchange), "tenants",
-                    exchange.getRequest().getMethod() != null ? exchange.getRequest().getMethod().name() : "unknown");
-            return notFound(exchange);
+            return new NotFound("tenants");
         }
-        return forwardWithHeaders(exchange, chain, principal);
+        return new Allow(exchange, false);
     }
 
     /**
@@ -425,10 +562,6 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                 .getBytes(StandardCharsets.UTF_8);
         return exchange.getResponse().writeWith(
                 Mono.just(exchange.getResponse().bufferFactory().wrap(body)));
-    }
-
-    private boolean isWriteMethod(ServerWebExchange exchange) {
-        return StaticCollectionCheck.isWrite(exchange.getRequest().getMethod());
     }
 
     private String mapMethodToAction(HttpMethod method) {

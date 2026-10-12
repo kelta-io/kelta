@@ -88,11 +88,11 @@ public class CerbosFieldWriteSecurityAdvice extends RequestBodyAdviceAdapter {
         if (attrs == null) return body;
 
         HttpServletRequest request = attrs.getRequest();
-        String path = request.getRequestURI();
         String email = permissionResolver.getEmail(request);
         String profileId = permissionResolver.getProfileId(request);
         String tenantId = permissionResolver.getTenantId(request);
-        String collectionId = extractCollectionId(path);
+        // The collection being written — the child on a child-resource route.
+        String collectionId = ApiPaths.collectionName(request);
 
         // Navigate JSON:API structure: { "data": { "attributes": { ... } } }
         Map<String, Object> typedBody = (Map<String, Object>) bodyMap;
@@ -163,10 +163,5 @@ public class CerbosFieldWriteSecurityAdvice extends RequestBodyAdviceAdapter {
                 || path.startsWith("/api/tenants")
                 || path.startsWith("/api/metrics")
                 || path.startsWith("/api/flows");
-    }
-
-    private String extractCollectionId(String path) {
-        String[] parts = path.split("/");
-        return parts.length >= 3 ? parts[2] : "";
     }
 }

@@ -616,4 +616,71 @@ class CerbosRecordAuthorizationAdviceTest {
             verifyNoInteractions(authzService);
         }
     }
+
+    @Nested
+    @DisplayName("child-resource routes")
+    class ChildResourceRoutes {
+
+        private ServletServerHttpRequest matched(String method, String path, Map<String, String> uriVariables) {
+            ServletServerHttpRequest request = createRequest(path);
+            MockHttpServletRequest servlet = (MockHttpServletRequest) request.getServletRequest();
+            servlet.setMethod(method);
+            servlet.setAttribute(org.springframework.web.servlet.HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE,
+                    uriVariables);
+            return request;
+        }
+
+        private Map<String, Object> listOf(String... ids) {
+            List<Map<String, Object>> data = new ArrayList<>();
+            for (String id : ids) {
+                data.add(Map.of("id", id, "attributes", Map.of()));
+            }
+            return Map.of("data", data);
+        }
+
+        @Test
+        @DisplayName("A child list is checked against the child collection, not the parent")
+        void childListUsesChildCollection() {
+            var request = matched("GET", "/api/accounts/a1/contacts",
+                    Map.of("parentName", "accounts", "parentId", "a1", "childName", "contacts"));
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), eq("contacts"), anyList(), eq("read")))
+                    .thenReturn(Set.of("c1"));
+
+            Object result = advice.beforeBodyWrite(listOf("c1", "c2"), null, MediaType.APPLICATION_JSON, null,
+                    request, null);
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> data = (List<Map<String, Object>>) ((Map<String, Object>) result).get("data");
+            assertThat(data).extracting(r -> r.get("id")).containsExactly("c1");
+            verify(authzService, never()).batchCheckRecordAccess(any(), any(), any(), eq("accounts"), anyList(), any());
+        }
+
+        @Test
+        @DisplayName("A child record write response is checked with the child's edit rules")
+        void childWriteUsesChildCollectionAndAction() {
+            var request = matched("PATCH", "/api/accounts/a1/contacts/c1",
+                    Map.of("parentName", "accounts", "parentId", "a1", "childName", "contacts", "childId", "c1"));
+            when(authzService.checkRecordAccess(any(), any(), any(), eq("contacts"), eq("c1"), anyMap(), eq("edit")))
+                    .thenReturn(false);
+
+            Map<String, Object> body = Map.of("data", Map.of("id", "c1", "attributes", Map.of("name", "x")));
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(((Map<?, ?>) result).get("data")).isNull();
+            verify(authzService, never()).checkRecordAccess(any(), any(), any(), eq("accounts"), any(), anyMap(), any());
+        }
+
+        @Test
+        @DisplayName("A dedicated controller at child depth keeps the first segment's collection")
+        void dedicatedControllerAtChildDepthKeepsFirstSegment() {
+            var request = matched("POST", "/api/attachments/a1/finalize", Map.of("id", "a1"));
+            when(authzService.checkRecordAccess(any(), any(), any(), eq("attachments"), eq("a1"), anyMap(), eq("create")))
+                    .thenReturn(true);
+
+            Map<String, Object> body = Map.of("data", Map.of("id", "a1", "attributes", Map.of()));
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(result).isSameAs(body);
+        }
+    }
 }

@@ -234,4 +234,49 @@ class CerbosFieldWriteSecurityAdviceTest {
             assertThat(result).isEqualTo("not a map");
         }
     }
+
+    @Nested
+    @DisplayName("child-resource routes")
+    class ChildResourceRoutes {
+
+        private void matchedChildRoute(String method, String path, Map<String, String> uriVariables) {
+            setUpRequest(method, path);
+            ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest()
+                    .setAttribute(org.springframework.web.servlet.HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE,
+                            uriVariables);
+        }
+
+        @Test
+        @DisplayName("A child update is stripped by the child collection's field rules")
+        void childUpdateUsesChildFieldRules() {
+            matchedChildRoute("PATCH", "/api/accounts/a1/contacts/c1",
+                    Map.of("parentName", "accounts", "parentId", "a1", "childName", "contacts", "childId", "c1"));
+            when(authzService.batchCheckFieldAccess(any(), any(), any(), eq("contacts"), anyList(), eq("write")))
+                    .thenReturn(List.of("name"));
+
+            Map<String, Object> attributes = new LinkedHashMap<>();
+            attributes.put("name", "John");
+            attributes.put("ssn", "123-45-6789");
+            Map<String, Object> body = Map.of("data", Map.of("type", "contacts", "attributes", attributes));
+
+            advice.afterBodyRead(body, null, null, null, null);
+
+            assertThat(attributes).containsOnlyKeys("name");
+            org.mockito.Mockito.verify(authzService, org.mockito.Mockito.never())
+                    .batchCheckFieldAccess(any(), any(), any(), eq("accounts"), anyList(), any());
+        }
+
+        @Test
+        @DisplayName("Without a matched child handler the first segment is the collection")
+        void topLevelUpdateUsesFirstSegment() {
+            matchedChildRoute("PUT", "/api/contacts/c1", Map.of("collectionName", "contacts", "id", "c1"));
+            when(authzService.batchCheckFieldAccess(any(), any(), any(), eq("contacts"), anyList(), eq("write")))
+                    .thenReturn(List.of("name"));
+
+            Map<String, Object> attributes = new LinkedHashMap<>(Map.of("name", "John"));
+            advice.afterBodyRead(Map.of("data", Map.of("attributes", attributes)), null, null, null, null);
+
+            assertThat(attributes).containsOnlyKeys("name");
+        }
+    }
 }
