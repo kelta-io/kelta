@@ -97,8 +97,14 @@ through `PackageImportService` — see [`2-provenance-provisioning.md`](2-proven
 
 - `DEGRADED` — loaded, but something declared is unavailable (required setting unset, declared port
   refused, UI bundle missing). Real handlers for what loaded; quarantined for the rest.
-- `QUARANTINED` — load failed (signature, checksum, classload, `onStartup` threw). Quarantined
-  handlers only.
+- `QUARANTINED` — load failed for a reason that is the module's own (signature, checksum, classload,
+  `onStartup` threw, rejected service port, JAR object gone). Quarantined handlers only.
+  **An infrastructure failure never writes it** (object storage or the database unreachable, no JAR
+  storage on the pod): the module fails closed on that pod with the same refusing handlers, only
+  `last_error` is recorded, the status is left alone, and `ModuleLoadRetryScheduler` retries with
+  capped exponential backoff. Classification is by load phase (`ModuleLoadFailureClassifier`). This
+  is the 2026-10-06 lesson — see `concerns.md` → "An object-storage outage quarantined every
+  runtime module for five days".
 - `STUB` — **explicit dev opt-in** (`kelta.modules.stub-mode=true`), never reached by falling back
   from an error, and reported as such by the API and UI.
 
@@ -145,7 +151,7 @@ This is the exact defect fixed in #1390; it is a contract, not a preference.
 
 | Slice | Child spec | Axis | State (verified 2026-10-11) |
 |---|---|---|---|
-| 0 — Fail closed | not needed — slice shipped | **backend, security** — kill the silent stub fallback | ✅ **Shipped.** CI job `worker-image-is-jvm` in `.github/workflows/ci.yml` asserts `build-and-publish-containers.yml` builds the worker from `kelta-worker/Dockerfile.jvm`, and is in `quality-gate`'s `needs`. `V189__module_fail_closed.sql` adds `QUARANTINED`/`DEGRADED`/`STUB` to `chk_module_status` and `tenant_module.last_error`, `last_error_at`, `last_loaded_at`, `load_attempts`. `RuntimeModuleManager` quarantines on signature, checksum or classload failure (`quarantine(...)` registers `createQuarantinedHandler`, which throws `ModuleUnavailableException` rather than returning a failure, because `TaskStateExecutor` would relabel any failed `ActionResult` as `ActionFailed`). Stub handlers only under the explicit `kelta.modules.stub-mode` opt-in (`application.yml` `${KELTA_MODULES_STUB_MODE:false}`, wired in `ModuleConfig`). `GET /api/modules/{id}/health` (`ModuleController`) reports `loadedOnThisPod` + `podName`. `ModulesPage` installs a signed JAR through `/api/modules/install-jar`. Test: `RuntimeModuleManagerQuarantineTest`. Not done: `STATUS_DEGRADED` exists in `TenantModuleData` but nothing writes it |
+| 0 — Fail closed | not needed — slice shipped | **backend, security** — kill the silent stub fallback | ✅ **Shipped.** CI job `worker-image-is-jvm` in `.github/workflows/ci.yml` asserts `build-and-publish-containers.yml` builds the worker from `kelta-worker/Dockerfile.jvm`, and is in `quality-gate`'s `needs`. `V189__module_fail_closed.sql` adds `QUARANTINED`/`DEGRADED`/`STUB` to `chk_module_status` and `tenant_module.last_error`, `last_error_at`, `last_loaded_at`, `load_attempts`. `RuntimeModuleManager` quarantines on signature, checksum or classload failure (`quarantine(...)` registers `createQuarantinedHandler`, which throws `ModuleUnavailableException` rather than returning a failure, because `TaskStateExecutor` would relabel any failed `ActionResult` as `ActionFailed`). Stub handlers only under the explicit `kelta.modules.stub-mode` opt-in (`application.yml` `${KELTA_MODULES_STUB_MODE:false}`, wired in `ModuleConfig`). `GET /api/modules/{id}/health` (`ModuleController`) reports `loadedOnThisPod` + `podName`. `ModulesPage` installs a signed JAR through `/api/modules/install-jar`. Test: `RuntimeModuleManagerQuarantineTest`. **Follow-up (2026-10-11, module-load-transient-retry):** quarantine is now reserved for permanent failures; a transient one (storage/DB unreachable) fails closed on the pod, records `last_error` via `ModuleStore.recordLoadError` without touching the status, and is retried per pod by `ModuleLoadRetryScheduler` (`kelta.modules.load-retry.*`); re-enabling a quarantined module reloads it on running pods (`ensureLoaded`); health reports `loadStateOnThisPod`. Test: `RuntimeModuleManagerLoadRetryTest`. Not done: `STATUS_DEGRADED` exists in `TenantModuleData` but nothing writes it |
 | 1 — Billable-channel guard | not needed — slice shipped | backend (money risk, ~20 lines) | ✅ **Shipped in code.** `AlertDispatchService.java` declares `BILLABLE_CHANNELS = Set.of(CHANNEL_SMS)` and, when no `channels` entitlement resolves, delivers only the non-billable requested channels. `WatchController.java` applies the same filter when it narrows a watch's requested channels. SMS therefore goes out only on an affirmative entitlement. Gap: no unit test pins the "no entitlement → SMS dropped" case (`AlertDispatchServiceTest.noEntitlementMeansNoGating` covers `push` only); worth adding with the next change to either file |
 | 2 — Provenance + unified provisioning | [`2-provenance-provisioning.md`](2-provenance-provisioning.md) | backend (DB, reuse `PackageImportService`) | ✅ **Shipped** (KLT-504). `ModuleMetadataProvisioner` translates the manifest's `collections` into a package and applies it through `PackageImportService.importPackage` (dry run, then a filtered apply pass so an existing collection is adopted with none of its fields written); `ModuleCollectionProvisioner` is deleted. `module_provisioned_resource` (V190) gets one row per `COLLECTION` and `FIELD`, with `resource_id` and a SHA-256 `content_hash` for `CREATED` rows (null for `ADOPTED`); `ModuleProvenanceStore.record` never downgrades a `CREATED` row. `GET /api/modules/{moduleId}/provisioned-resources` lists the caller tenant's rows, including after uninstall. Left for slice 3: nothing calls `deleteForModule` and uninstall removes nothing |
 | 3 — Lifecycle | [`3-lifecycle.md`](3-lifecycle.md) | backend (manifest v2, install plan, upgrade, uninstall) | 🔴 **Not started — spec written** (KLT-537), split into three PRs: 3a manifest v2 + `minPlatformVersion` check against `KELTA_VERSION`, 3b install plan + `planHash` + upgrade, 3c uninstall of unedited `CREATED` resources with `purgeData` consent; no migration. In code, installing over an existing module id still throws "already installed" (`RuntimeModuleManager.installModule` / `installModuleWithJar`); no manifest v2, install plan or `planHash` |
@@ -203,10 +209,12 @@ record until a slice closes them.
 8. **PARTIAL — observability.** Done: `GET /api/modules/{id}/health` returns `isLoaded()` as
    `loadedOnThisPod` with `podName`, `routesRegisteredOnThisPod` and the V189 load diagnostics
    (`last_error`, `last_error_at`, `last_loaded_at`, `load_attempts`); `FAILED` is reachable again
-   (a provisioning failure sets it). Still missing: no Micrometer metrics in
-   `kelta-worker/.../module/` (load outcomes, quarantines, handler invocations or errors per module),
-   no per-module attribution of handler failures beyond the log line, and `DEGRADED` is defined but
-   never written.
+   (a provisioning failure sets it). Load-failure metrics now exist (2026-10-11):
+   `kelta_worker_module_load_failures{kind,phase}`, `kelta_worker_module_load_recovered` and the
+   alertable gauge `kelta_worker_module_load_retry_pending`, and the health endpoint adds
+   `loadStateOnThisPod` (`LOADED`/`RETRYING`/`FAILED`/`NOT_LOADED`). Still missing: no metrics for
+   handler invocations or errors per module, no per-module attribution of handler failures beyond
+   the log line, and `DEGRADED` is defined but never written.
 9. **OPEN — cross-pod divergence is silent.** Install/enable still rely on a fire-and-forget NATS
    event (`ModuleEventListener`) with no ack and no periodic reconcile. The health endpoint makes
    divergence *observable*, one pod per request; nothing detects or repairs it.

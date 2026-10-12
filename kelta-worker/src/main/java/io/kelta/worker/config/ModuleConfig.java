@@ -14,6 +14,8 @@ import io.kelta.worker.module.JdbcModuleSigningKeyStore;
 import io.kelta.worker.module.JdbcModuleStore;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
 import io.kelta.worker.module.ModuleJarService;
+import io.kelta.worker.module.ModuleLoadRetryPolicy;
+import io.kelta.worker.module.ModuleLoadRetryScheduler;
 import io.kelta.worker.module.ModuleMetadataProvisioner;
 import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleRouteRegistry;
@@ -21,6 +23,7 @@ import io.kelta.worker.module.ModuleSignatureVerifier;
 import io.kelta.worker.module.RuntimeModuleManager;
 import io.kelta.worker.service.S3StorageService;
 import io.kelta.worker.service.TenantSlugResolver;
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +32,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import io.kelta.runtime.event.PlatformEventPublisher;
@@ -44,7 +48,9 @@ import java.util.Map;
  * loads all active modules on application startup.
  * <p>
  * When S3 storage is available, modules can be loaded from their JAR files
- * via sandboxed ClassLoaders. Without S3, stub handlers are used.
+ * via sandboxed ClassLoaders. Without S3, a module with a JAR fails closed on the pod (refusing
+ * handlers) and is retried by {@link ModuleLoadRetryScheduler}; stub handlers exist only under
+ * the explicit {@code kelta.modules.stub-mode} opt-in.
  * <p>
  * Enabled by default. Disable with {@code kelta.modules.runtime.enabled=false}.
  *
@@ -52,6 +58,7 @@ import java.util.Map;
  */
 @Configuration
 @ConditionalOnProperty(name = "kelta.modules.runtime.enabled", havingValue = "true", matchIfMissing = true)
+@Import(ModuleLoadRetryScheduler.class)
 public class ModuleConfig {
 
     private static final Logger log = LoggerFactory.getLogger(ModuleConfig.class);
@@ -114,7 +121,14 @@ public class ModuleConfig {
                                                        ModuleProvenanceStore provenanceStore,
                                                        ModuleRouteRegistry moduleRouteRegistry,
                                                        @Value("${kelta.modules.stub-mode:false}")
-                                                       boolean stubModeEnabled) {
+                                                       boolean stubModeEnabled,
+                                                       @Value("${kelta.modules.load-retry.initial-backoff-ms:30000}")
+                                                       long retryInitialBackoffMs,
+                                                       @Value("${kelta.modules.load-retry.max-backoff-ms:600000}")
+                                                       long retryMaxBackoffMs,
+                                                       @Value("${kelta.modules.load-retry.escalate-after-attempts:8}")
+                                                       int retryEscalateAfterAttempts,
+                                                       @Nullable MeterRegistry meterRegistry) {
         // Runtime-loaded modules get the same credential bridge the compile-time modules get
         // (FlowConfig wires the identical extension). Without it a module cannot reach the vault
         // at all, so anything talking to an external API — the case runtime modules exist for —
@@ -141,6 +155,11 @@ public class ModuleConfig {
         manager.setStubModeEnabled(stubModeEnabled);
         manager.setProvenanceStore(provenanceStore);
         manager.setModuleRouteRegistry(moduleRouteRegistry);
+        // A load that fails for an infrastructure reason (object storage or database unreachable)
+        // fails closed on the pod and is retried with this backoff instead of being quarantined.
+        manager.setLoadRetryPolicy(ModuleLoadRetryPolicy.ofMillis(
+            retryInitialBackoffMs, retryMaxBackoffMs, retryEscalateAfterAttempts));
+        manager.setMeterRegistry(meterRegistry);
         return manager;
     }
 

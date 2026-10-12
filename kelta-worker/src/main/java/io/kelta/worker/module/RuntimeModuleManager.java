@@ -16,7 +16,12 @@ import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import io.kelta.runtime.workflow.ModuleUnavailableException;
 import io.kelta.runtime.workflow.module.KeltaModule;
 import io.kelta.runtime.workflow.module.ModuleContext;
+import io.kelta.worker.module.ModuleLoadFailureClassifier.Kind;
+import io.kelta.worker.module.ModuleLoadFailureClassifier.Phase;
 import io.kelta.worker.service.TenantSlugResolver;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -25,6 +30,9 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -114,6 +122,52 @@ public class RuntimeModuleManager {
      */
     private record LoadedModule(Set<String> actionKeys, List<BeforeSaveHook> hooks, String s3Key) {
     }
+
+    /** Metric: load failures, tagged {@code kind} (transient|permanent) and {@code phase}. */
+    static final String METRIC_LOAD_FAILURES = "kelta_worker_module_load_failures";
+    /** Metric: modules whose load recovered on a retry after a transient failure. */
+    static final String METRIC_LOAD_RECOVERED = "kelta_worker_module_load_recovered";
+    /** Metric: modules (plus the startup module list) awaiting a load retry on this pod. */
+    static final String METRIC_LOAD_RETRY_PENDING = "kelta_worker_module_load_retry_pending";
+
+    /**
+     * What this pod knows about a module load that failed, keyed "tenantId:moduleId".
+     *
+     * <p>A failed module is still in {@link #loadedModules} — its refusing handlers are registered
+     * and unload must remove them — so this map is what tells a healthy load apart from a
+     * fail-closed one. {@code nextAttemptAt} is null when no retry is scheduled: a permanent
+     * failure, or a transient one whose row stopped being {@code ACTIVE}.
+     */
+    record LoadFailure(String tenantId, String moduleId, String moduleRowId, Kind kind, Phase phase,
+                       String reason, int attempts, Instant firstFailedAt, Instant nextAttemptAt,
+                       boolean escalated) {
+
+        boolean retryDue(Instant now) {
+            return kind == Kind.TRANSIENT && nextAttemptAt != null && !now.isBefore(nextAttemptAt);
+        }
+    }
+
+    /**
+     * Per-pod load-failure state. Deliberately local and never broadcast: each pod loads its own
+     * classloaders from the JAR, so whether a load failed is a fact about this pod (its network,
+     * its disk, its view of object storage) and not configuration. Critical Rule 1 — broadcast
+     * every config change over NATS — governs shared configuration; the shared state here is the
+     * {@code tenant_module} row, which a transient failure deliberately does not change.
+     */
+    private final Map<String, LoadFailure> loadFailures = new ConcurrentHashMap<>();
+
+    private ModuleLoadRetryPolicy retryPolicy = ModuleLoadRetryPolicy.DEFAULTS;
+    private Clock clock = Clock.systemUTC();
+    private MeterRegistry meterRegistry;
+
+    /**
+     * Set when listing the ACTIVE modules at startup failed (database unreachable). Without a
+     * retry nothing would ever load on this pod: there is no row-level failure to retry, because
+     * no row was ever read.
+     */
+    private volatile boolean startupLoadPending;
+    private volatile int startupLoadAttempts;
+    private volatile Instant startupLoadRetryAt;
 
     /**
      * Creates a RuntimeModuleManager with JAR loading support.
@@ -441,8 +495,29 @@ public class RuntimeModuleManager {
         }
 
         moduleStore.updateStatus(module.id(), TenantModuleData.STATUS_ACTIVE);
-        loadModule(tenantId, module);
+        // Re-enabling a QUARANTINED module is how an admin asks for another try, so a failed load
+        // on this pod must not satisfy the "already loaded" short-circuit.
+        ensureLoaded(tenantId, module);
         log.info("Enabled module '{}' for tenant {}", moduleId, tenantId);
+    }
+
+    /**
+     * Loads a module, first discarding a failed attempt on this pod so the load actually re-runs.
+     *
+     * <p>{@link #loadModule} is a no-op for anything already in {@link #loadedModules}, and a
+     * fail-closed module is in there (its refusing handlers are registered). That is right for
+     * INSTALLED events and startup, but it made an explicit enable of a quarantined module do
+     * nothing on every pod that had already tried it. A healthy load is left alone, so the ENABLED
+     * event arriving back at the pod that served the request does not churn its classloader.
+     *
+     * @param tenantId the tenant ID
+     * @param module   the module row
+     */
+    public void ensureLoaded(String tenantId, TenantModuleData module) {
+        if (loadFailures.containsKey(key(tenantId, module.moduleId()))) {
+            unloadModule(tenantId, module.moduleId());
+        }
+        loadModule(tenantId, module);
     }
 
     /**
@@ -512,13 +587,17 @@ public class RuntimeModuleManager {
             // Explicit dev opt-in only. Never reached by falling back from an error.
             loadWithStubs(tenantId, module);
             recordOutcome(module, TenantModuleData.STATUS_STUB, null);
-        } else {
+            onLoadSucceeded(tenantId, module);
+        } else if (module.s3Key() == null) {
             // A module with no JAR has no implementation. Its declared actions used to return
             // success, which is indistinguishable from the work actually happening.
-            quarantine(tenantId, module,
-                module.s3Key() == null
-                    ? "no implementation uploaded (manifest-only install)"
-                    : "JAR storage is unavailable on this pod");
+            quarantine(tenantId, module, Phase.SOURCE,
+                "no implementation uploaded (manifest-only install)");
+        } else {
+            // The module has a JAR; this pod just cannot reach JAR storage. That is a fact about
+            // the pod, so it must not write a terminal status every other pod would then honour.
+            failClosedPendingRetry(tenantId, module, Phase.SOURCE,
+                "JAR storage is unavailable on this pod", null);
         }
 
         loaded.add(module.moduleId());
@@ -548,9 +627,14 @@ public class RuntimeModuleManager {
      */
     private void loadFromJar(String tenantId, TenantModuleData module) {
         String classLoaderKey = tenantId + ":" + module.moduleId();
+        // Which step is running decides whether a failure is the module's fault or the
+        // infrastructure's — see ModuleLoadFailureClassifier.
+        Phase phase = Phase.FETCH;
         try {
             URL jarUrl = jarService.downloadJarToCache(module.s3Key());
+            phase = Phase.VERIFY;
             verifyDownloadedJar(module, jarUrl);
+            phase = Phase.LOAD;
             SandboxedModuleClassLoader classLoader = new SandboxedModuleClassLoader(
                 module.moduleId(), jarUrl, getClass().getClassLoader());
 
@@ -603,13 +687,13 @@ public class RuntimeModuleManager {
 
             // Clears any previous failure, so a module that recovers stops reporting a stale error.
             recordOutcome(module, TenantModuleData.STATUS_ACTIVE, null);
+            onLoadSucceeded(tenantId, module);
 
-        } catch (Exception e) {
-            // ERROR, not WARN: this module is not running. It used to fall back to stub handlers
-            // that returned success, so a rejected JAR looked healthy at every level an admin
-            // could see.
-            log.error("Module '{}' failed to load for tenant {} and is QUARANTINED: {}",
-                module.moduleId(), tenantId, e.getMessage(), e);
+        } catch (Exception | LinkageError e) {
+            // LinkageError too: NoClassDefFoundError, UnsupportedClassVersionError and
+            // ExceptionInInitializerError are what a bad JAR actually throws from loadClass and
+            // newInstance, and as Errors they used to escape this catch — and the startup loop's —
+            // leaving no refusing handlers and no recorded outcome.
 
             // Clean up partial ClassLoader on failure
             SandboxedModuleClassLoader cl = activeClassLoaders.remove(classLoaderKey);
@@ -630,28 +714,148 @@ public class RuntimeModuleManager {
                 moduleServiceRegistry.remove(tenantId, partialServices);
             }
 
-            // Fail closed. Handlers are registered but refuse to run, so a flow step fails with
-            // a specific, attributable error instead of ResourceNotFound (which reads to an admin
-            // as a mistyped action key) or, worse, a success against code that never ran.
+            // Fail closed either way. Handlers are registered but refuse to run, so a flow step
+            // fails with a specific, attributable error instead of ResourceNotFound (which reads
+            // to an admin as a mistyped action key) or, worse, a success against code that never
+            // ran. What differs is whether the failure is persisted as terminal.
             String reason = e.getClass().getSimpleName()
                     + (e.getMessage() == null ? "" : ": " + e.getMessage());
-            quarantine(tenantId, module, reason);
+            if (ModuleLoadFailureClassifier.classify(phase, e) == Kind.PERMANENT) {
+                // ERROR, not WARN: this module is not running. It used to fall back to stub
+                // handlers that returned success, so a rejected JAR looked healthy at every level
+                // an admin could see.
+                log.error("Module '{}' failed to load for tenant {} ({} phase) and is QUARANTINED: {}",
+                    module.moduleId(), tenantId, phase.tag(), e.getMessage(), e);
+                quarantine(tenantId, module, phase, reason);
+            } else {
+                failClosedPendingRetry(tenantId, module, phase, reason, e);
+            }
         }
     }
 
     /**
-     * Registers refusing handlers for every action the manifest declares, and records why.
+     * Fails a module closed for a reason that is the module's own — bad signature or checksum, a
+     * class that will not load, {@code onStartup} throwing, a rejected service port, no JAR at all
+     * — and persists {@code QUARANTINED}, which only an admin's re-enable clears.
+     */
+    private void quarantine(String tenantId, TenantModuleData module, Phase phase, String reason) {
+        registerRefusingHandlers(tenantId, module, reason);
+        recordOutcome(module, TenantModuleData.STATUS_QUARANTINED, reason);
+        loadFailures.put(key(tenantId, module.moduleId()), new LoadFailure(tenantId,
+            module.moduleId(), module.id(), Kind.PERMANENT, phase, reason, 1, clock.instant(),
+            null, false));
+        countFailure(Kind.PERMANENT, phase);
+    }
+
+    /**
+     * Fails a module closed on this pod for an infrastructure reason, and schedules another try.
+     *
+     * <p>Same refusing handlers as {@link #quarantine} — nothing runs that did not load and verify
+     * — but the persisted status is left as it is and only the error is recorded. The 2026-10-06
+     * incident is why: object storage refused connections during a rollout, every module on every
+     * tenant was written {@code QUARANTINED}, startup only loads {@code ACTIVE} rows, and they all
+     * stayed down for five days with nothing wrong with any of them.
+     *
+     * <p>Logs ERROR on the first failure and once more on escalation; the retries in between are
+     * WARN, so an outage does not bury the log in stack traces every tick.
+     *
+     * @param cause the failure, or null when there is no exception (no JAR storage on this pod)
+     */
+    private void failClosedPendingRetry(String tenantId, TenantModuleData module, Phase phase,
+                                        String reason, Throwable cause) {
+        String key = key(tenantId, module.moduleId());
+        Instant now = clock.instant();
+        LoadFailure failure = loadFailures.compute(key, (k, previous) -> {
+            boolean continuing = previous != null && previous.kind() == Kind.TRANSIENT;
+            int attempts = continuing ? previous.attempts() + 1 : 1;
+            return new LoadFailure(tenantId, module.moduleId(), module.id(), Kind.TRANSIENT, phase,
+                reason, attempts, continuing ? previous.firstFailedAt() : now,
+                now.plus(retryPolicy.backoffAfter(attempts)), continuing && previous.escalated());
+        });
+        long waitSeconds = Duration.between(now, failure.nextAttemptAt()).toSeconds();
+
+        if (failure.attempts() == 1) {
+            log.error("Module '{}' could not be loaded for tenant {} ({} phase): {}. Treated as an "
+                    + "infrastructure failure: its actions refuse on this pod, its status is NOT "
+                    + "changed, and the load is retried in {}s",
+                module.moduleId(), tenantId, phase.tag(), reason, waitSeconds, cause);
+        } else if (!failure.escalated()
+                && failure.attempts() >= retryPolicy.escalateAfterAttempts()) {
+            log.error("Module '{}' for tenant {} has still not loaded after {} attempts since {} "
+                    + "({} phase): {}. Retrying every {}s until it does",
+                module.moduleId(), tenantId, failure.attempts(), failure.firstFailedAt(),
+                phase.tag(), reason, retryPolicy.maxBackoff().toSeconds());
+            loadFailures.computeIfPresent(key, (k, current) -> current == failure
+                ? withEscalated(current) : current);
+        } else {
+            log.warn("Module '{}' load retry {} for tenant {} failed ({} phase): {}; "
+                    + "next attempt in {}s",
+                module.moduleId(), failure.attempts(), tenantId, phase.tag(), reason, waitSeconds);
+        }
+
+        registerRefusingHandlers(tenantId, module,
+            "temporarily unavailable, the load will be retried (" + reason + ")");
+        try {
+            moduleStore.recordLoadError(module.id(), reason);
+        } catch (Exception e) {
+            log.warn("Could not record load error for module '{}': {}",
+                module.moduleId(), e.getMessage());
+        }
+        countFailure(Kind.TRANSIENT, phase);
+    }
+
+    private static LoadFailure withEscalated(LoadFailure f) {
+        return new LoadFailure(f.tenantId(), f.moduleId(), f.moduleRowId(), f.kind(), f.phase(),
+            f.reason(), f.attempts(), f.firstFailedAt(), f.nextAttemptAt(), true);
+    }
+
+    /**
+     * Clears this pod's failure state after a successful load, logging a recovery when the load
+     * had been failing transiently.
+     */
+    private void onLoadSucceeded(String tenantId, TenantModuleData module) {
+        LoadFailure previous = loadFailures.remove(key(tenantId, module.moduleId()));
+        if (previous != null && previous.kind() == Kind.TRANSIENT) {
+            log.warn("Module '{}' loaded for tenant {} after {} failed attempt(s) since {}",
+                module.moduleId(), tenantId, previous.attempts(), previous.firstFailedAt());
+            if (meterRegistry != null) {
+                Counter.builder(METRIC_LOAD_RECOVERED)
+                    .description("Module loads that succeeded on retry after a transient failure")
+                    .register(meterRegistry)
+                    .increment();
+            }
+        }
+    }
+
+    /**
+     * Registers handlers that refuse to run for every action the manifest declares.
      *
      * <p>Registering rather than leaving the keys absent is deliberate: an absent key surfaces to a
      * flow as {@code ResourceNotFound}, which an admin reads as a typo in the step. A refusing
      * handler names the module and the reason.
      */
-    private void quarantine(String tenantId, TenantModuleData module, String reason) {
+    private void registerRefusingHandlers(String tenantId, TenantModuleData module, String reason) {
         for (var action : module.actions()) {
             actionHandlerRegistry.registerTenantHandler(tenantId,
-                createQuarantinedHandler(action, module, reason));
+                createRefusingHandler(action, module, reason));
         }
-        recordOutcome(module, TenantModuleData.STATUS_QUARANTINED, reason);
+    }
+
+    /** Tagged by kind and phase only — never by tenant or module, which would be unbounded. */
+    private void countFailure(Kind kind, Phase phase) {
+        if (meterRegistry == null) {
+            return;
+        }
+        Counter.builder(METRIC_LOAD_FAILURES)
+            .description("Runtime module load failures on this pod")
+            .tag("kind", kind.tag())
+            .tag("phase", phase.tag())
+            .register(meterRegistry)
+            .increment();
+    }
+
+    private static String key(String tenantId, String moduleId) {
+        return tenantId + ":" + moduleId;
     }
 
     /** Persists a load outcome, never letting a bookkeeping failure mask the load result. */
@@ -1089,6 +1293,16 @@ public class RuntimeModuleManager {
      * @param moduleId the module identifier from the manifest
      */
     public void unloadModule(String tenantId, String moduleId) {
+        // A disable, uninstall or explicit re-enable ends whatever this pod was retrying.
+        loadFailures.remove(key(tenantId, moduleId));
+        unloadRegistrations(tenantId, moduleId);
+    }
+
+    /**
+     * Removes everything a load registered — real or refusing handlers, hooks, routes, services,
+     * the classloader — but not this pod's failure bookkeeping, so a retry keeps counting attempts.
+     */
+    private void unloadRegistrations(String tenantId, String moduleId) {
         Set<String> loaded = loadedModules.get(tenantId);
         if (loaded == null || !loaded.contains(moduleId)) {
             log.debug("Module '{}' not loaded for tenant {}", moduleId, tenantId);
@@ -1158,16 +1372,195 @@ public class RuntimeModuleManager {
      * Loads all active modules on pod startup.
      */
     public void loadAllActiveModules() {
-        List<TenantModuleData> activeModules = moduleStore.findAllActive();
+        List<TenantModuleData> activeModules;
+        try {
+            activeModules = moduleStore.findAllActive();
+        } catch (RuntimeException e) {
+            // Database unreachable at startup. This used to be logged once by the caller and then
+            // nothing loaded on this pod until it restarted.
+            int attempts = ++startupLoadAttempts;
+            Duration wait = retryPolicy.backoffAfter(attempts);
+            startupLoadRetryAt = clock.instant().plus(wait);
+            startupLoadPending = true;
+            if (attempts == 1 || attempts == retryPolicy.escalateAfterAttempts()) {
+                log.error("Could not list active runtime modules (attempt {}): {}. No module is "
+                        + "loaded on this pod yet; retrying in {}s",
+                    attempts, e.getMessage(), wait.toSeconds(), e);
+            } else {
+                log.warn("Listing active runtime modules failed again (attempt {}): {}; "
+                        + "retrying in {}s", attempts, e.getMessage(), wait.toSeconds());
+            }
+            countFailure(Kind.TRANSIENT, Phase.SOURCE);
+            return;
+        }
+        if (startupLoadPending) {
+            log.warn("Listed active runtime modules after {} failed attempt(s)", startupLoadAttempts);
+        }
+        startupLoadPending = false;
+        startupLoadAttempts = 0;
+        startupLoadRetryAt = null;
         log.info("Loading {} active runtime modules on startup", activeModules.size());
         for (TenantModuleData module : activeModules) {
             try {
                 loadModule(module.tenantId(), module);
             } catch (Exception e) {
+                // loadModule classifies and records its own failures; reaching here means a bug in
+                // the load path itself, not in the module.
                 log.error("Failed to load module '{}' for tenant {}: {}",
                     module.moduleId(), module.tenantId(), e.getMessage(), e);
-                moduleStore.updateStatus(module.id(), TenantModuleData.STATUS_FAILED);
+                markFailed(module.id());
             }
+        }
+    }
+
+    /**
+     * Re-attempts loads that failed on this pod for an infrastructure reason and are now due.
+     * Called on a fixed delay by {@link ModuleLoadRetryScheduler}.
+     *
+     * <p>Each due module's row is re-read first: a retry only runs while the module is still
+     * {@code ACTIVE} in the database. A row that is gone is unloaded (its uninstall event was
+     * missed); a row in any other status parks the failure — the refusing handlers stay, nothing
+     * more is retried, and a later enable starts afresh via {@link #ensureLoaded}.
+     *
+     * <p>Runs per tenant under {@link TenantContext}, as the NATS-driven load path does.
+     */
+    public void retryPendingLoads() {
+        Instant now = clock.instant();
+        if (startupLoadPending && startupLoadRetryAt != null && !now.isBefore(startupLoadRetryAt)) {
+            loadAllActiveModules();
+        }
+        for (LoadFailure failure : List.copyOf(loadFailures.values())) {
+            if (!failure.retryDue(now)) {
+                continue;
+            }
+            try {
+                TenantContext.runWithTenant(failure.tenantId(), () -> retryLoad(failure));
+            } catch (RuntimeException e) {
+                // Could not even read the row — the database is the thing that is down. Push the
+                // next attempt back as if the load itself had failed, without touching handlers.
+                Instant retryAt = clock.instant()
+                    .plus(retryPolicy.backoffAfter(failure.attempts() + 1));
+                loadFailures.computeIfPresent(key(failure.tenantId(), failure.moduleId()),
+                    (k, current) -> current == failure
+                        ? new LoadFailure(current.tenantId(), current.moduleId(),
+                            current.moduleRowId(), current.kind(), current.phase(),
+                            current.reason(), current.attempts() + 1, current.firstFailedAt(),
+                            retryAt, current.escalated())
+                        : current);
+                log.warn("Could not retry loading module '{}' for tenant {}: {}",
+                    failure.moduleId(), failure.tenantId(), e.getMessage());
+            }
+        }
+    }
+
+    private void retryLoad(LoadFailure failure) {
+        String key = key(failure.tenantId(), failure.moduleId());
+        Optional<TenantModuleData> row = moduleStore.findById(failure.moduleRowId());
+        if (loadFailures.get(key) != failure) {
+            return; // an enable, disable or uninstall on another thread got there first
+        }
+        if (row.isEmpty()) {
+            log.warn("Module '{}' for tenant {} no longer exists; dropping its load retry and "
+                + "unloading it", failure.moduleId(), failure.tenantId());
+            unloadModule(failure.tenantId(), failure.moduleId());
+            return;
+        }
+        TenantModuleData module = row.get();
+        if (!TenantModuleData.STATUS_ACTIVE.equals(module.status())) {
+            log.warn("Module '{}' for tenant {} is now {}; no longer retrying its load",
+                failure.moduleId(), failure.tenantId(), module.status());
+            loadFailures.computeIfPresent(key, (k, current) -> current == failure
+                ? new LoadFailure(current.tenantId(), current.moduleId(), current.moduleRowId(),
+                    current.kind(), current.phase(), current.reason(), current.attempts(),
+                    current.firstFailedAt(), null, current.escalated())
+                : current);
+            return;
+        }
+        log.info("Retrying load of module '{}' for tenant {} (attempt {})",
+            failure.moduleId(), failure.tenantId(), failure.attempts() + 1);
+        // Strip the refusing handlers so loadModule's already-loaded short-circuit does not
+        // apply; the failure entry stays so the attempt count carries over.
+        unloadRegistrations(failure.tenantId(), failure.moduleId());
+        loadModule(failure.tenantId(), module);
+    }
+
+    /** What this pod's last load of a module produced. */
+    public enum PodLoadState {
+        /** Loaded and running (or stub handlers under explicit stub mode). */
+        LOADED,
+        /** Failed for an infrastructure reason; refusing handlers registered, retry scheduled. */
+        RETRYING,
+        /** Failed and not being retried — quarantined, or its row stopped being ACTIVE. */
+        FAILED,
+        /** Not loaded on this pod. */
+        NOT_LOADED
+    }
+
+    /**
+     * This pod's view of a module's load, for the health endpoint: the state, and when retrying,
+     * the attempt count, phase and next attempt time.
+     */
+    public Map<String, Object> podLoadState(String tenantId, String moduleId) {
+        Map<String, Object> state = new java.util.LinkedHashMap<>();
+        LoadFailure failure = loadFailures.get(key(tenantId, moduleId));
+        PodLoadState podState;
+        if (!isLoaded(tenantId, moduleId)) {
+            podState = PodLoadState.NOT_LOADED;
+        } else if (failure == null) {
+            podState = PodLoadState.LOADED;
+        } else if (failure.kind() == Kind.TRANSIENT && failure.nextAttemptAt() != null) {
+            podState = PodLoadState.RETRYING;
+        } else {
+            podState = PodLoadState.FAILED;
+        }
+        state.put("loadStateOnThisPod", podState.name());
+        if (failure != null && podState != PodLoadState.NOT_LOADED) {
+            state.put("loadFailureKind", failure.kind().name());
+            state.put("loadFailurePhase", failure.phase().name());
+            if (podState == PodLoadState.RETRYING) {
+                state.put("loadRetryAttempts", failure.attempts());
+                state.put("loadFailingSince", failure.firstFailedAt().toString());
+                state.put("nextLoadRetryAt", failure.nextAttemptAt().toString());
+            }
+        }
+        return state;
+    }
+
+    /** Modules (plus the startup module list) awaiting a load retry on this pod. */
+    public int pendingLoadRetries() {
+        int pending = (int) loadFailures.values().stream()
+            .filter(f -> f.kind() == Kind.TRANSIENT && f.nextAttemptAt() != null)
+            .count();
+        return pending + (startupLoadPending ? 1 : 0);
+    }
+
+    /** This pod's failure record for a module, or null. Package-private for tests. */
+    LoadFailure loadFailure(String tenantId, String moduleId) {
+        return loadFailures.get(key(tenantId, moduleId));
+    }
+
+    /** Backoff for transient load failures. Setter so the constructor overloads stay as they are. */
+    public void setLoadRetryPolicy(ModuleLoadRetryPolicy retryPolicy) {
+        this.retryPolicy = Objects.requireNonNull(retryPolicy);
+    }
+
+    /** Test seam for backoff timing. */
+    void setClock(Clock clock) {
+        this.clock = Objects.requireNonNull(clock);
+    }
+
+    /**
+     * Enables load metrics: {@value #METRIC_LOAD_FAILURES} (tagged {@code kind}, {@code phase}),
+     * {@value #METRIC_LOAD_RECOVERED}, and the {@value #METRIC_LOAD_RETRY_PENDING} gauge — the one
+     * to alert on, since it stays non-zero for as long as a module is down on a pod.
+     */
+    public void setMeterRegistry(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+        if (meterRegistry != null) {
+            Gauge.builder(METRIC_LOAD_RETRY_PENDING, this, RuntimeModuleManager::pendingLoadRetries)
+                .description("Runtime modules awaiting a load retry on this pod after an "
+                    + "infrastructure failure")
+                .register(meterRegistry);
         }
     }
 
@@ -1227,8 +1620,8 @@ public class RuntimeModuleManager {
      * rather than showing a blank, and the failure carries a stable {@code ModuleUnavailable} code
      * a flow's Catch clause can be written against.
      */
-    private ActionHandler createQuarantinedHandler(TenantModuleData.TenantModuleActionData action,
-                                                    TenantModuleData module, String reason) {
+    private ActionHandler createRefusingHandler(TenantModuleData.TenantModuleActionData action,
+                                                 TenantModuleData module, String reason) {
         return new ActionHandler() {
             @Override
             public String getActionTypeKey() {
@@ -1239,7 +1632,7 @@ public class RuntimeModuleManager {
             public ActionResult execute(ActionContext context) {
                 // Null-safe on purpose: the refusal itself must be what surfaces, not an NPE
                 // from the log line.
-                log.error("Refused action '{}': module '{}' v{} is quarantined for tenant {} ({})",
+                log.error("Refused action '{}': module '{}' v{} is not running for tenant {} ({})",
                     action.actionKey(), module.moduleId(), module.version(),
                     context == null ? module.tenantId() : context.tenantId(), reason);
                 throw new ModuleUnavailableException(

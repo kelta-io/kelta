@@ -66,7 +66,11 @@ public class ModuleEventListener {
                     case INSTALLED, ENABLED -> {
                         Optional<TenantModuleData> module =
                             moduleStore.findByTenantAndModuleId(tenantId, moduleId);
-                        if (module.isPresent()) {
+                        if (module.isPresent() && changeType == ModuleChangeType.ENABLED) {
+                            // An enable is an explicit request to try again: re-run a load that
+                            // failed on this pod instead of hitting the already-loaded no-op.
+                            runtimeModuleManager.ensureLoaded(tenantId, module.get());
+                        } else if (module.isPresent()) {
                             runtimeModuleManager.loadModule(tenantId, module.get());
                         } else {
                             log.warn("Module '{}' not found in DB for tenant {}", moduleId, tenantId);

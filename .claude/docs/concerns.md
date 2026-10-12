@@ -439,6 +439,18 @@ POST mappings stop at three segments, so POST works — which reads as a method-
 stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 `CollectionSchemaControllerTest`).
 
+### Runtime module loading
+
+- **A transient infrastructure error must never be written as a terminal state.** Only failures
+  `ModuleLoadFailureClassifier` calls `PERMANENT` (bad signature/checksum, missing JAR, classload,
+  throwing `onStartup`) may record `QUARANTINED`; storage/DB/network failures fail closed on the
+  pod, write only `last_error`/`load_attempts` (`ModuleStore.recordLoadError`) and retry
+  (`ModuleLoadRetryScheduler`). Any new "mark it broken" path must ask whether a retry could fix it.
+  Alert on `kelta_worker_module_load_retry_pending`.
+- **Rows quarantined before the transient-retry fix stay `QUARANTINED`** (open) — an old outage
+  quarantine is indistinguishable from a real one. Re-enable them
+  (`POST /api/modules/{moduleId}/enable`), which now reloads on running pods without a restart.
+
 ### Gateway routing
 
 - **Member-controller static routes that share a path with a system collection must be in
@@ -730,6 +742,7 @@ One line each; full write-ups are in git history.
 - 2026-07-02 — gateway native image missing a bootstrap DTO reflect entry took the API down; 2026-07-11 — NATS payloads serialized `{}` on native (#1240); 2026-07-12 — GraalJS `new Date()` failed on native.
 - 2026-08-10 (#1344) — tracing exported nothing on native images (env-var-only conditional property).
 - 2026-10-05 — Netty build-time clock origin outage.
+- 2026-10-06 — an object-store outage during JAR load quarantined every runtime module; quarantine was sticky (startup loads only `ACTIVE`), so modules stayed off ~5 days until re-enabled by hand. Load failures now classified by phase; transient ones retry with backoff instead of quarantining, and re-enable reloads on running pods. Lesson: transient infra errors must never be terminal.
 - 2026-07-11 — chat/video subjects had no JetStream streams; 2026-07-12 — durable consumer config drift took down worker subscriptions.
 - Older: federated users stuck PENDING_ACTIVATION; password reset sent no email; `EmptyResultDataAccessException` and null `reset_token_expires_at` in `PasswordController`.
 
