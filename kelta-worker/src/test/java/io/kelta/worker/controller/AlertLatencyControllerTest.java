@@ -197,4 +197,44 @@ class AlertLatencyControllerTest {
                 .andExpect(status().isForbidden());
         verifyNoInteractions(deliveryRepository);
     }
+
+    private MockMvc viewAnalyticsMvc() {
+        when(permissionResolver.getProfileId(any())).thenReturn("profile-analytics");
+        when(bootstrapRepository.findProfileSystemPermissions("profile-analytics")).thenReturn(
+                List.of(Map.of("permission_name", "VIEW_ANALYTICS", "granted", Boolean.TRUE)));
+        return MockMvcBuilders.standaloneSetup(controller).build();
+    }
+
+    @Test
+    @DisplayName("MockMvc: an internal caller with only VIEW_ANALYTICS gets the aggregate summary")
+    void viewAnalyticsGetsSummary() throws Exception {
+        when(deliveryRepository.findSentSince(eq(TENANT), any(), isNull())).thenReturn(List.of(
+                new DeliveryLatencyRow("a1", "push", "SENT", CREATED, CREATED.plusSeconds(4)),
+                new DeliveryLatencyRow("a2", "email", "SENT", CREATED, CREATED.plusSeconds(8))));
+
+        viewAnalyticsMvc().perform(get("/api/alerts/latency")
+                        .header("X-User-Id", "analytics-1")
+                        .header("X-User-Type", "INTERNAL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.count").value(2))
+                .andExpect(jsonPath("$.data.p50Seconds").value(6.0));
+    }
+
+    @Test
+    @DisplayName("MockMvc: a PORTAL actor with VIEW_ANALYTICS on their profile is refused (403)")
+    void portalWithViewAnalyticsDenied() throws Exception {
+        viewAnalyticsMvc().perform(get("/api/alerts/latency")
+                        .header("X-User-Id", "member-1")
+                        .header("X-User-Type", "PORTAL"))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(deliveryRepository);
+    }
+
+    @Test
+    @DisplayName("VIEW_ANALYTICS is not added to the support-view READ set")
+    void supportReadSetUnchanged() {
+        assertThat(SupportPermissions.READ)
+                .containsExactlyInAnyOrder(SupportPermissions.MANAGE_DATA, SupportPermissions.VIEW_ALL_DATA);
+        assertThat(AlertLatencyController.LATENCY_READ).contains(AlertLatencyController.VIEW_ANALYTICS);
+    }
 }

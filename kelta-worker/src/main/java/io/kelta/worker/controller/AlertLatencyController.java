@@ -31,8 +31,12 @@ import java.util.Set;
  * {@code kelta_alert_delivery_latency_seconds} timer.
  *
  * <p>{@code /api/alerts/**} is a {@code static-} gateway route, so only {@code API_ACCESS} is
- * checked there; this controller requires an internal operator holding {@code MANAGE_DATA} or the
- * read-only {@code VIEW_ALL_DATA} ({@link SupportPermissions#READ}).
+ * checked there; this controller requires an internal caller holding {@code MANAGE_DATA}, the
+ * read-only {@code VIEW_ALL_DATA}, or {@code VIEW_ANALYTICS} ({@link #LATENCY_READ}). The body is
+ * aggregate only — no member, alert or row ids — so it sits with the other aggregate analytics
+ * ({@code DashboardDataController}, {@code ReportExecutionController}) that {@code VIEW_ANALYTICS}
+ * gates. {@link SupportPermissions#READ} deliberately stays without it: that set also gates the
+ * watch/win support views, which expose member data.
  * The tenant is the request's bound {@link TenantContext} — there is no cross-tenant view.
  */
 @RestController
@@ -41,6 +45,9 @@ public class AlertLatencyController {
 
     static final Set<String> CHANNELS = Set.of("push", "email", "sms");
     static final Duration DEFAULT_WINDOW = Duration.ofDays(7);
+    static final String VIEW_ANALYTICS = "VIEW_ANALYTICS";
+    static final Set<String> LATENCY_READ = Set.of(
+            SupportPermissions.MANAGE_DATA, SupportPermissions.VIEW_ALL_DATA, VIEW_ANALYTICS);
 
     private final AlertDeliveryRepository deliveryRepository;
     private final CerbosPermissionResolver permissionResolver;
@@ -106,9 +113,12 @@ public class AlertLatencyController {
         return channel;
     }
 
-    /** Internal staff holding {@code MANAGE_DATA} or {@code VIEW_ALL_DATA}; never a PORTAL actor. */
+    /**
+     * Internal staff holding {@code MANAGE_DATA}, {@code VIEW_ALL_DATA} or {@code VIEW_ANALYTICS}
+     * (the summary is aggregate only); never a PORTAL actor, whatever their profile grants.
+     */
     boolean hasReadPermission(HttpServletRequest request) {
         return SupportPermissions.internalHoldsAny(request, permissionResolver, bootstrapRepository,
-                SupportPermissions.READ);
+                LATENCY_READ);
     }
 }

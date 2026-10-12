@@ -704,9 +704,12 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
 - **Alert delivery latency** (consumer-alerting slice-4 addendum): `GET /api/alerts/latency`
   (`AlertLatencyController`) rides the `static-alerts` route (`/api/alerts/**`, also an
   authoritative static path in `RouteRegistry`), so the gateway checks only `API_ACCESS`; the
-  controller requires an INTERNAL caller holding `MANAGE_DATA` or the read-only `VIEW_ALL_DATA`
-  (`SupportPermissions.READ`, the same read check as the watch/win support views; PORTAL
-  short-circuits to 403). It is read-only and
+  controller requires an INTERNAL caller holding `MANAGE_DATA`, the read-only `VIEW_ALL_DATA`,
+  or `VIEW_ANALYTICS` (controller-local `AlertLatencyController.LATENCY_READ`; PORTAL
+  short-circuits to 403). `VIEW_ANALYTICS` is accepted because the body is aggregate only
+  (count/percentiles — no member, alert or row ids), the same grant that gates
+  `DashboardDataController`/`ReportExecutionController`; it is deliberately **not** in
+  `SupportPermissions.READ`, which also gates the watch/win support views that expose member data. It is read-only and
   scoped to the bound tenant: the query joins `alert_delivery` to `alert` with an explicit
   `alert.tenant_id = ?`, because `alert_delivery` carries no `tenant_id` (only the parent-alert
   RLS policy). Latency is `alert_delivery.sent_at - alert.created_at` — `alert.created_at` is
