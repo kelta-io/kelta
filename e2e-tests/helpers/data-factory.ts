@@ -359,6 +359,24 @@ export class DataFactory {
     );
   }
 
+  /**
+   * Create a row in any JSON:API collection — typically a system collection such as
+   * `ui-pages`, `reports`, `dashboards` or `approval-processes` — and track it for
+   * deletion at {@link cleanup}. Rows are deleted in reverse creation order, so create
+   * a parent before its children.
+   */
+  async createResource(
+    type: string,
+    attributes: Record<string, unknown>,
+  ): Promise<JsonApiResource> {
+    const result = await this.request("POST", `/api/${type}`, {
+      data: { type, attributes },
+    });
+    const resource = result.data as JsonApiResource;
+    this.createdEntities.push({ type, id: resource.id });
+    return resource;
+  }
+
   async getRecord(
     collectionName: string,
     id: string,

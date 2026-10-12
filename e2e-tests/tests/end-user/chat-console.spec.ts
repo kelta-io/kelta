@@ -1,57 +1,90 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../../fixtures";
+import { tenantApi } from "../../helpers/api-request";
 
 /**
- * Chat console + portal chat-panel (telehealth slice 3) — post-deploy spec.
+ * Staff chat console (`/app/chat`, telehealth slice 3), driven by the signed-in e2e user:
+ * start an internal conversation → send a message from the composer → it is in the thread
+ * and stored server-side → close it → the thread turns read-only.
  *
- * Skip-gated until slices 1–3 are live on the dev stack (per the
- * approvals-inbox precedent): needs a portal user (magic-link login via
- * mailpit) and a custom page carrying the chat-panel widget.
+ * The portal side (chat-panel widget, a portal member's session) and the realtime
+ * invalidation between two browsers are not exercised here: the conversation/message
+ * contract, participant rows and the closed-conversation write rejection are proven
+ * against the real stack by the kelta-test-harness ChatBackendScenarioTest, and the
+ * widget by chatPanel.test.tsx.
  *
- * Manual smoke (documented in specs/telehealth/3-chat-ui.md):
- *  1. Portal user opens the tenant page with the chat-panel → Start a
- *     conversation → sends "hello".
- *  2. Agent opens /app/chat → Queue tab shows the conversation → Claim →
- *     replies; unread badge on the bell clears after opening the thread.
- *  3. Portal panel shows the reply (invalidation refetch, no reload).
- *  4. Agent closes the conversation → portal panel shows the closed state.
+ * Conversations have no delete endpoint; the one this test opens is left CLOSED.
  */
-test.describe.skip("Chat console + portal widget (post-deploy)", () => {
-  const base = process.env.KELTA_APP_URL ?? "http://localhost:5173";
-  const tenant = process.env.KELTA_TENANT_SLUG ?? "acme";
+test.describe("Chat console", () => {
+  // Leaves rows with no delete endpoint (or edits the shared admin user), so it
+  // runs only on the throwaway PR stack — never in the post-deploy run.
+  test.skip(
+    process.env.E2E_EPHEMERAL_STACK !== "true",
+    "ephemeral CI stack only (E2E_EPHEMERAL_STACK)",
+  );
 
-  test("agent inbox round-trip with a portal conversation", async ({
-    browser,
+  test("start a conversation, send a message, close it", async ({
+    page,
+    tenantSlug,
+    apiBaseUrl,
   }) => {
-    const agentContext = await browser.newContext({
-      storageState: "playwright/.auth/agent.json",
-    });
-    const portalContext = await browser.newContext({
-      storageState: "playwright/.auth/portal.json",
-    });
+    const api = tenantApi({ apiBaseUrl, tenantSlug });
+    const body = `hello from e2e ${Date.now()}`;
 
-    const portal = await portalContext.newPage();
-    await portal.goto(`${base}/${tenant}/app/p/support`);
-    await portal.getByTestId("page-node-chat-panel-start").click();
-    await portal
-      .getByTestId("page-node-chat-panel-composer-input")
-      .fill("hello from the portal");
-    await portal.getByTestId("page-node-chat-panel-composer-send").click();
+    await page.goto(`/${tenantSlug}/app/chat`);
+    await expect(page.getByTestId("chat-console")).toBeVisible();
 
-    const agent = await agentContext.newPage();
-    await agent.goto(`${base}/${tenant}/app/chat`);
-    await agent.getByTestId("chat-console-tab-queue").click();
-    await agent
-      .getByText("hello from the portal")
-      .waitFor({ state: "visible" });
+    // 1. Start a conversation; the console opens it.
+    const started = page.waitForResponse(
+      (resp) =>
+        new URL(resp.url()).pathname.endsWith("/api/chat/conversations") &&
+        resp.request().method() === "POST",
+    );
+    await page.getByTestId("chat-console-new").click();
+    const startResponse = await started;
+    expect(startResponse.status(), "POST /api/chat/conversations").toBe(201);
+    const conversationId = ((await startResponse.json()) as { id: string }).id;
+    await expect(page.getByTestId(`chat-console-item-${conversationId}`)).toBeVisible();
 
-    await agentContext.close();
-    await portalContext.close();
-  });
+    // 2. Send a message from the composer.
+    const composerInput = page.getByTestId("chat-console-composer-input");
+    await expect(composerInput).toBeVisible();
+    await composerInput.fill(body);
+    const sent = page.waitForResponse(
+      (resp) =>
+        new URL(resp.url()).pathname.endsWith(
+          `/api/chat/conversations/${conversationId}/messages`,
+        ) && resp.request().method() === "POST",
+    );
+    await page.getByTestId("chat-console-composer-send").click();
+    expect((await sent).status(), "POST .../messages").toBe(201);
+    await expect(page.getByTestId("chat-console-messages")).toContainText(body);
 
-  test("closed conversations reject the composer", async ({ page }) => {
-    await page.goto(`${base}/${tenant}/app/chat`);
-    // Selecting a CLOSED conversation renders the read-only strip instead of
-    // the composer.
+    // Stored server-side, attributed to an internal sender.
+    const history = await api<{
+      data?: { body: string; senderType: string }[];
+    }>("GET", `/api/chat/conversations/${conversationId}/messages`);
+    expect(history.status).toBe(200);
+    expect(history.body.data?.map((m) => m.body)).toContain(body);
+    expect(
+      history.body.data?.find((m) => m.body === body)?.senderType,
+    ).toBe("INTERNAL");
+
+    // 3. Close it: the composer is replaced by the read-only strip.
+    const closed = page.waitForResponse(
+      (resp) =>
+        new URL(resp.url()).pathname.endsWith(
+          `/api/chat/conversations/${conversationId}/close`,
+        ) && resp.request().method() === "POST",
+    );
+    await page.getByTestId("chat-console-close").click();
+    expect((await closed).ok(), "POST .../close").toBe(true);
     await expect(page.getByText("This conversation is closed")).toBeVisible();
+    await expect(page.getByTestId("chat-console-composer")).toHaveCount(0);
+
+    const conversation = await api<{ status?: string }>(
+      "GET",
+      `/api/chat/conversations/${conversationId}`,
+    );
+    expect(conversation.body.status).toBe("CLOSED");
   });
 });

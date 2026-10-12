@@ -638,8 +638,9 @@ its own change with a full compose run.
 - `CreateValidationRuleTool` (kelta-mcp) has no test; every MCP tool should assert its on-the-wire
   JSON:API body with WireMock JSON-path matchers.
 - **Page-builder action runtime** (`runtime/executeAction.ts`) is covered only by Vitest with mocked
-  `apiClient`/router/toast; the real-path guard is the skip-gated post-deploy
-  `e2e-tests/tests/page-builder-v2.spec.ts`, which must be run against a deployed env.
+  `apiClient`/router/toast, except `createRecord`: `e2e-tests/tests/page-builder-v2.spec.ts` (runs in
+  every PR's E2E job since the 2026-10 e2e-honesty batch) authors a page via the `ui-pages` API and
+  asserts the button's record persists. `runFlow` polling and `assertSafeUrl` stay Vitest-only.
 - **Rules from past false greens:** an assertion that a value was passed to a mock is not an
   assertion that the database accepts it (DB-constraint writes need a real-DB harness scenario); a
   suite that compiles and typechecks is not coverage until a job runs it under a runtime that can

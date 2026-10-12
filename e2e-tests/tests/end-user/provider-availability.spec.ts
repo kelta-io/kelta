@@ -1,45 +1,121 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../../fixtures";
+import { tenantApi } from "../../helpers/api-request";
 
 /**
- * Provider self-service availability (telehealth). Post-deploy spec, skip-gated
- * like the scheduling spec — it needs a live stack and a provider auth state
- * (an INTERNAL user who is a telehealth provider).
+ * Provider self-service availability (`/app/provider-availability`, telehealth).
  *
- * Backend contract (server-enforced ownership): the page reads and writes
- * GET/PUT `/api/telehealth/availability/me`; the provider id comes from the
- * authenticated identity, never the body, so a provider can only edit their own
- * schedule. Unit coverage: AvailabilityServiceTest (worker) +
- * ProviderAvailabilityPage.test.tsx (ui).
+ * The page reads and replaces GET/PUT `/api/telehealth/availability/me`; the provider id
+ * comes from the authenticated identity, never the body, so any INTERNAL user — here the
+ * e2e admin — edits only their own schedule. Unit coverage: AvailabilityServiceTest
+ * (worker) + ProviderAvailabilityPage.test.tsx (ui).
  *
- * Manual / live smoke:
- *  1. Provider signs into the staff app, opens My appointments → "My availability".
- *  2. Adds a window to a weekday, Save → "Availability saved" toast.
- *  3. Reload → the window persists.
- *  4. Booking (portal) now offers slots inside the new window; removing the
- *     window and saving makes those slots disappear.
+ * The suite also runs post-deploy against a shared tenant, so the admin's schedule is
+ * read before the test and written back afterwards.
  */
-test.describe.skip("Provider availability (post-deploy)", () => {
-  const base = process.env.KELTA_APP_URL ?? "http://localhost:5173";
-  const tenant = process.env.KELTA_TENANT_SLUG ?? "acme";
+interface AvailabilityDto {
+  timezone: string;
+  rules: { weekday: number; startTime: string; endTime: string }[];
+  exceptions: {
+    exceptionDate: string;
+    closed: boolean;
+    startTime: string | null;
+    endTime: string | null;
+  }[];
+}
 
-  test("provider edits and saves their weekly schedule", async ({ browser }) => {
-    const context = await browser.newContext({
-      storageState: "playwright/.auth/provider.json",
-    });
-    const page = await context.newPage();
+const MONDAY = 1;
 
-    await page.goto(`${base}/${tenant}/app/provider-availability`);
-    await expect(page.getByText("My availability")).toBeVisible();
+test.describe("Provider availability", () => {
+  // Leaves rows with no delete endpoint (or edits the shared admin user), so it
+  // runs only on the throwaway PR stack — never in the post-deploy run.
+  test.skip(
+    process.env.E2E_EPHEMERAL_STACK !== "true",
+    "ephemeral CI stack only (E2E_EPHEMERAL_STACK)",
+  );
 
-    // Add a window to the first weekday that has an "Add hours" control.
-    await page.getByRole("button", { name: /add hours/i }).first().click();
-    await page.getByRole("button", { name: /save changes/i }).click();
-    await expect(page.getByText("Availability saved")).toBeVisible();
+  test("a provider adds weekly hours, saves, and they persist", async ({
+    page,
+    tenantSlug,
+    apiBaseUrl,
+  }) => {
+    const api = tenantApi({ apiBaseUrl, tenantSlug });
+    const original = await api<AvailabilityDto>(
+      "GET",
+      "/api/telehealth/availability/me",
+    );
+    expect(
+      original.status,
+      `GET availability/me failed: ${JSON.stringify(original.body)}`,
+    ).toBe(200);
+    const mondayWindowsBefore = original.body.rules.filter(
+      (r) => r.weekday === MONDAY,
+    ).length;
 
-    // The saved window survives a reload (persisted server-side).
-    await page.reload();
-    await expect(page.locator('input[type="time"]').first()).toHaveValue(/\d{2}:\d{2}/);
+    try {
+      await page.goto(`/${tenantSlug}/app/provider-availability`);
+      await expect(
+        page.getByRole("heading", { name: "My availability" }),
+      ).toBeVisible();
 
-    await context.close();
+      // The weekday rows render Monday first; its "Add hours" adds a 09:00–17:00 window.
+      await page.getByRole("button", { name: "Add hours" }).first().click();
+
+      const saved = page.waitForResponse(
+        (resp) =>
+          resp.url().includes("/api/telehealth/availability/me") &&
+          resp.request().method() === "PUT",
+      );
+      await page.getByRole("button", { name: "Save changes" }).click();
+      const saveResponse = await saved;
+      expect(saveResponse.ok(), `PUT availability/me ${saveResponse.status()}`).toBe(
+        true,
+      );
+      await expect(page.getByText("Availability saved")).toBeVisible();
+
+      // Persisted server-side: the new Monday window is in the provider's own schedule…
+      const after = await api<AvailabilityDto>(
+        "GET",
+        "/api/telehealth/availability/me",
+      );
+      const mondayRules = after.body.rules.filter((r) => r.weekday === MONDAY);
+      expect(mondayRules).toHaveLength(mondayWindowsBefore + 1);
+      expect(
+        mondayRules.some(
+          (r) =>
+            r.startTime.startsWith("09:00") && r.endTime.startsWith("17:00"),
+        ),
+      ).toBe(true);
+
+      // …and the page shows it again after a reload.
+      await page.reload();
+      await expect(
+        page.getByRole("heading", { name: "My availability" }),
+      ).toBeVisible();
+      const startInputs = page.getByLabel("Start", { exact: true });
+      await expect(startInputs).toHaveCount(
+        original.body.rules.length + 1 + countOpenExceptions(original.body),
+      );
+      await expect(startInputs.first()).toHaveValue(/^\d{2}:\d{2}$/);
+    } finally {
+      const restored = await api("PUT", "/api/telehealth/availability/me", {
+        timezone: original.body.timezone,
+        rules: original.body.rules,
+        exceptions: original.body.exceptions.map((e) => ({
+          exceptionDate: e.exceptionDate,
+          closed: e.closed,
+          startTime: e.closed ? "" : e.startTime,
+          endTime: e.closed ? "" : e.endTime,
+        })),
+      });
+      expect(
+        restored.status,
+        `restoring availability failed: ${JSON.stringify(restored.body)}`,
+      ).toBe(200);
+    }
   });
 });
+
+/** Date exceptions with hours (not closed all day) also render a "Start" time input. */
+function countOpenExceptions(dto: AvailabilityDto): number {
+  return dto.exceptions.filter((e) => !e.closed).length;
+}

@@ -286,10 +286,11 @@ New surfaces (bindings into the DOM, event-driven navigation/writes) require:
 
 ## End-to-end e2e ownership
 
-New admin routes can't get Playwright e2e in the introducing PR (route absent until deployed), but the
-full flow must have ONE owned spec — not a phantom "covered by the parent." **Add
-`e2e-tests/.../page-builder-v2.spec.ts`, owned by the terminal behavior slice (2e), authored post-deploy
-before the feature is declared done:** palette → drop into a grid column → bind a prop → wire a button
+The full flow must have ONE owned spec — not a phantom "covered by the parent." (The original
+premise that a new route can't get e2e in its introducing PR was wrong: the PR's E2E job builds
+HEAD. The spec now runs there, authoring the page through the `ui-pages` JSON:API rather than
+drag-and-drop — see `testing.md` → End-to-end.) **Add
+`e2e-tests/.../page-builder-v2.spec.ts`, owned by the terminal behavior slice (2e):** palette → drop into a grid column → bind a prop → wire a button
 `onClick` event → save → publish → open the runtime page → **assert a mutation succeeds** (a record is
 created via the button event and persists), not merely that the page renders. 1h adds a negative
 authz case (denied user → 404).

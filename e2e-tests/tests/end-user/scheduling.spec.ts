@@ -1,53 +1,126 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../../fixtures";
+import { myUserId, tenantApi } from "../../helpers/api-request";
 
 /**
- * Telehealth scheduling (slice 4) — post-deploy spec, skip-gated until slices
- * 1–4 are live (approvals-inbox precedent). Needs a provider with availability
- * rules, a portal user (magic-link auth state), and a custom page carrying the
- * appointment-scheduler widget.
+ * Telehealth scheduling (slice 4) — the provider's side: a booked appointment appears on
+ * /app/appointments and the provider cancels it from there.
  *
- * Manual smoke (documented in specs/telehealth/4-scheduling.md):
- *  1. Seed availability for a provider (admin, telehealth-availability rows).
- *  2. Portal user opens the page with the scheduler → picks provider, slot,
- *     confirms → mailpit shows "appointment confirmed" with an .ics attachment
- *     and a visit link.
- *  3. Clicking the visit link in a fresh browser lands SIGNED IN on /app.
- *  4. Booking the same slot again fails with "no longer available".
- *  5. Provider sees the appointment on /app/appointments; Complete moves it.
- *  6. One hour before start, the reminder email arrives (sweep; shorten
- *     kelta.telehealth.reminders.offset-minutes in dev to test).
+ * The signed-in e2e user acts as the provider (any INTERNAL user can). The booking is made
+ * the way staff book on a portal member's behalf: an availability rule for tomorrow, a
+ * portal member, a free slot from /api/telehealth/slots, then POST /api/telehealth/appointments.
+ * That booking contract — slot computation, the double-book 409, the participant share and
+ * cancel freeing the slot — is proven against the real stack by the kelta-test-harness
+ * TelehealthSchedulingScenarioTest; the portal-side scheduler widget by
+ * appointmentScheduler.test.tsx.
+ *
+ * Appointments have no delete endpoint; the one this test books is left CANCELLED. The
+ * portal member is invited under a fixed address, and a re-invite reuses the user.
  */
-test.describe.skip("Appointment scheduling (post-deploy)", () => {
-  const base = process.env.KELTA_APP_URL ?? "http://localhost:5173";
-  const tenant = process.env.KELTA_TENANT_SLUG ?? "acme";
+interface Slot {
+  start: string;
+  end: string;
+}
 
-  test("portal user books a slot from the scheduler widget", async ({
-    browser,
+test.describe("Appointment scheduling", () => {
+  // Leaves rows with no delete endpoint (or edits the shared admin user), so it
+  // runs only on the throwaway PR stack — never in the post-deploy run.
+  test.skip(
+    process.env.E2E_EPHEMERAL_STACK !== "true",
+    "ephemeral CI stack only (E2E_EPHEMERAL_STACK)",
+  );
+
+  test("a booked appointment is on the provider's schedule and can be cancelled", async ({
+    page,
+    dataFactory,
+    tenantSlug,
+    apiBaseUrl,
   }) => {
-    const portalContext = await browser.newContext({
-      storageState: "playwright/.auth/portal.json",
+    const api = tenantApi({ apiBaseUrl, tenantSlug });
+    const providerId = await myUserId(api);
+
+    const invited = await api<{ userId?: string }>(
+      "POST",
+      "/api/admin/users/portal-invite",
+      {
+        email: "e2e-scheduling-patient@example.com",
+        firstName: "Scheduling",
+        lastName: "Patient",
+      },
+    );
+    expect(
+      [200, 201],
+      `portal invite failed (${invited.status}): ${JSON.stringify(invited.body)}`,
+    ).toContain(invited.status);
+    const portalUserId = invited.body.userId as string;
+
+    // Tomorrow, 09:00–17:00 UTC (weekday: Sunday = 0 … Saturday = 6).
+    const tomorrow = new Date();
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    tomorrow.setUTCHours(0, 0, 0, 0);
+    await dataFactory.createResource("telehealth-availability", {
+      providerId,
+      kind: "RULE",
+      weekday: tomorrow.getUTCDay(),
+      startTime: "09:00",
+      endTime: "17:00",
+      timezone: "UTC",
+      active: true,
     });
-    const portal = await portalContext.newPage();
 
-    await portal.goto(`${base}/${tenant}/app/p/book-a-visit`);
-    await portal
-      .getByTestId("appointment-scheduler-provider")
-      .selectOption({ index: 1 });
-    await portal
-      .locator('[data-testid^="appointment-scheduler-slot-"]')
-      .first()
-      .click();
-    await portal.getByTestId("appointment-scheduler-confirm").click();
+    const from = tomorrow.toISOString();
+    const to = new Date(tomorrow.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    const slots = await api<{ data?: Slot[] }>(
+      "GET",
+      `/api/telehealth/slots?providerId=${providerId}&from=${encodeURIComponent(from)}` +
+        `&to=${encodeURIComponent(to)}&duration=30`,
+    );
+    expect(slots.status, JSON.stringify(slots.body)).toBe(200);
+    const slot = slots.body.data?.[0];
+    expect(slot, "tomorrow's rule offers at least one free slot").toBeTruthy();
 
+    const visitType = `E2E visit ${Date.now()}`;
+    const booked = await api<{ id?: string; status?: string }>(
+      "POST",
+      "/api/telehealth/appointments",
+      {
+        providerId,
+        portalUserId,
+        start: slot!.start,
+        durationMinutes: 30,
+        visitType,
+      },
+    );
+    expect(booked.status, JSON.stringify(booked.body)).toBe(201);
+    const appointmentId = String(booked.body.id);
+
+    // ── The provider's schedule lists it, confirmed ──
+    await page.goto(`/${tenantSlug}/app/appointments`);
     await expect(
-      portal.getByText("Booked! A confirmation email is on its way."),
+      page.getByRole("heading", { name: "My Appointments" }),
     ).toBeVisible();
+    const row = page.getByTestId(`appointments-page-row-${appointmentId}`);
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await expect(row).toContainText(visitType);
+    await expect(row).toContainText("CONFIRMED");
 
-    await portalContext.close();
-  });
+    // ── Cancel from the row ──
+    const cancelled = page.waitForResponse(
+      (resp) =>
+        new URL(resp.url()).pathname.endsWith(
+          `/api/telehealth/appointments/${appointmentId}/cancel`,
+        ) && resp.request().method() === "POST",
+    );
+    await row.getByRole("button", { name: "Cancel" }).click();
+    expect((await cancelled).ok(), "POST .../cancel").toBe(true);
+    await expect(row).toContainText("CANCELLED");
+    await expect(row.getByRole("button", { name: "Cancel" })).toHaveCount(0);
 
-  test("provider works the schedule on /app/appointments", async ({ page }) => {
-    await page.goto(`${base}/${tenant}/app/appointments`);
-    await expect(page.getByText("My Appointments")).toBeVisible();
+    // The slot is free again server-side.
+    const slotsAfter = await api<{ data?: Slot[] }>(
+      "GET",
+      `/api/telehealth/slots?providerId=${providerId}&from=${encodeURIComponent(from)}` +
+        `&to=${encodeURIComponent(to)}&duration=30`,
+    );
+    expect(slotsAfter.body.data?.map((s) => s.start)).toContain(slot!.start);
   });
 });

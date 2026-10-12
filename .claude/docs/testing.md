@@ -218,6 +218,23 @@ write with `page.route(...)`, assert the request body, and `route.fulfill(...)` 
 response (`tests/admin/setup/email-settings.spec.ts`). Records a test creates are fine as long as
 it tears them down.
 
+**No unconditional skips.** A `test.skip(...)` / `test.describe.skip(...)` with no condition
+asserts nothing while reading as coverage. The PR's E2E job builds and runs HEAD, so a route or
+endpoint the PR adds already exists there — "skip until deployed" is never a reason. Seed what
+the spec needs through the API (`DataFactory`, including `createResource` for system
+collections such as `ui-pages`, `reports`, `approval-processes`; `helpers/api-request.ts` for
+non-JSON:API endpoints) and tear it down. The only allowed skips are **conditional on an
+environment capability**, with the reason in the message: `E2E_REAL_SIGN_IN` (a browser sign-in
+through kelta-auth's form), `E2E_MAILPIT_URL` (reading mail — the CI stack's Mailpit),
+`E2E_EPHEMERAL_STACK` (the spec leaves rows with no delete endpoint or edits the shared admin —
+the post-deploy run executes the same suite against the production default tenant), a built
+CLI, a seeded row the spec cannot create. A flow that needs infrastructure the CI stack does not
+run (LiveKit video, S3 archives) has no Playwright spec; it is covered by unit tests plus a
+`kelta-test-harness` scenario where real-DB behavior is involved. Specs that must not inherit
+the shared admin session (sign-in, sign-out, portal login) import the plain Playwright `test`
+with an empty `storageState`: the `fixtures` page re-injects the admin's tokens on every
+navigation.
+
 ### Writing stable visual specs
 
 A `toHaveScreenshot` spec must render the same pixels on every run, in a tenant that every other

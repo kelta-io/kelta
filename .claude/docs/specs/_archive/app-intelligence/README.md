@@ -131,8 +131,9 @@ per slice; 2/3/4 each touch a different backend service, so don't batch them.
   optionally moves to `usePreferenceValue` (follow-up if scope grows).
 
 Every slice: unit tests in-PR (Vitest / service unit); harness scenario only where a
-real-DB behavior is in play (slice 4's unique constraint); post-deploy Playwright
-skip-gated; i18n keys for all new strings; docs rows in the same PR.
+real-DB behavior is in play (slice 4's unique constraint); a Playwright spec that runs in
+the PR's E2E job (never skip-gated — `testing.md` → End-to-end); i18n keys for all new
+strings; docs rows in the same PR.
 
 ## Child-spec template
 
