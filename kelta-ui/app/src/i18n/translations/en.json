@@ -1464,6 +1464,7 @@
     "sectionTitle": "{{collection}} Information",
     "noEditableFields": "No editable fields in this collection.",
     "selectPlaceholder": "Select...",
+    "encryptedPlaceholder": "Enter a new value (the stored value is never shown)",
     "schemaLoadError": "Failed to load collection schema.",
     "goBack": "Go back",
     "saveFailed": "Failed to save record",

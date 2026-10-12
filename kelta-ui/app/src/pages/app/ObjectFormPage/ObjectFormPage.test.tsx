@@ -9,7 +9,7 @@
  * from the admin form (record-stack convergence P3): client validation rules,
  * blur rules, schema defaults, clear-to-null on update, per-field validation,
  * create → the new record's detail page, and the edit-mode record type.
- * (`FormField` itself is covered in `components/record/form/FormField.test.tsx`.)
+ * (`FormFieldRow` itself is covered in `components/record/form/FormFieldRow.test.tsx`.)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'

@@ -101,15 +101,26 @@ function isValidUrl(value: string): boolean {
   }
 }
 
+/** Options for {@link validateFieldValue} / {@link validateFormValues}. */
+export interface ValidateFieldOptions {
+  /**
+   * Validating an edit of an existing record. A blank `encrypted` field then means "keep the
+   * stored secret" (the form never loads it — write-only), so it is not a required failure.
+   */
+  isUpdate?: boolean
+}
+
 /**
  * Validate one field's form value. Returns the (translated) error message, or `null`.
  */
 export function validateFieldValue(
   field: FieldDefinition,
   value: unknown,
-  t: TranslateFn
+  t: TranslateFn,
+  options: ValidateFieldOptions = {}
 ): string | null {
   if (isEmptyFormValue(value)) {
+    if (field.type === 'encrypted' && options.isUpdate) return null
     return field.required && field.type !== 'boolean' ? t('common.required') : null
   }
 
@@ -208,11 +219,12 @@ export function validateFieldValue(
 export function validateFormValues(
   fields: FieldDefinition[],
   values: Record<string, unknown>,
-  t: TranslateFn
+  t: TranslateFn,
+  options: ValidateFieldOptions = {}
 ): Record<string, string> {
   const errors: Record<string, string> = {}
   for (const field of fields) {
-    const message = validateFieldValue(field, values[field.name], t)
+    const message = validateFieldValue(field, values[field.name], t, options)
     if (message) errors[field.name] = message
   }
   return errors

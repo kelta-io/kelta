@@ -40,6 +40,25 @@ describe('validateFieldValue — required', () => {
   })
 })
 
+describe('validateFieldValue — encrypted (write-only)', () => {
+  const secret = field({ name: 'api_key', type: 'encrypted', required: true })
+
+  it('requires a value on create', () => {
+    expect(validateFieldValue(secret, '', t)).toBe('Required')
+  })
+
+  it('accepts a blank value on update (keeps the stored secret)', () => {
+    expect(validateFieldValue(secret, '', t, { isUpdate: true })).toBeNull()
+    expect(validateFormValues([secret], {}, t, { isUpdate: true })).toEqual({})
+  })
+
+  it('still flags other blank required fields on update', () => {
+    expect(validateFieldValue(field({ required: true }), '', t, { isUpdate: true })).toBe(
+      'Required'
+    )
+  })
+})
+
 describe('validateFieldValue — formats', () => {
   it.each([
     ['email', 'not-an-email', 'Please enter a valid email address'],

@@ -28,6 +28,8 @@ export interface MultiPicklistSelectProps {
   'aria-invalid'?: boolean
   /** Id of the element describing the control (e.g. its field-error alert) */
   'aria-describedby'?: string
+  /** `data-testid` for the control's root element */
+  'data-testid'?: string
 }
 
 export function MultiPicklistSelect({
@@ -42,6 +44,7 @@ export function MultiPicklistSelect({
   className,
   'aria-invalid': ariaInvalid,
   'aria-describedby': ariaDescribedBy,
+  'data-testid': testId,
 }: MultiPicklistSelectProps): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -121,7 +124,12 @@ export function MultiPicklistSelect({
 
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-    <div ref={containerRef} className={cn('relative w-full', className)} onKeyDown={handleKeyDown}>
+    <div
+      ref={containerRef}
+      className={cn('relative w-full', className)}
+      onKeyDown={handleKeyDown}
+      data-testid={testId}
+    >
       <button
         type="button"
         id={id}

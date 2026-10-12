@@ -155,3 +155,43 @@ describe('buildSaveAttributes clearing a field', () => {
     expect(errors.crew).toBe('Please enter valid JSON')
   })
 })
+
+describe('encrypted fields are write-only', () => {
+  const secret = field({ name: 'api_key', type: 'encrypted' })
+
+  it('never loads the stored value into the form on edit', () => {
+    const data = computeInitialFormData(false, { name: 'Ada', api_key: 'stored' }, [
+      field(),
+      secret,
+    ])
+    expect(data.name).toBe('Ada')
+    expect('api_key' in data).toBe(false)
+  })
+
+  it('applies no schema default or prefill on create', () => {
+    const data = computeInitialFormData(
+      true,
+      undefined,
+      [{ ...secret, defaultValue: 'default-secret' }],
+      { api_key: 'from-query' }
+    )
+    expect(data.api_key).toBeUndefined()
+  })
+
+  it('sends a newly typed value', () => {
+    const { attributes } = buildSaveAttributes([secret], { api_key: 'new' }, { initialData: {} })
+    expect(attributes).toEqual({ api_key: 'new' })
+  })
+
+  it('omits a blank value on update — never clears the stored secret', () => {
+    for (const blank of [undefined, '']) {
+      const { attributes } = buildSaveAttributes(
+        [secret],
+        { api_key: blank },
+        // Even if a caller's initial data carried a value, blank means "keep it".
+        { initialData: { api_key: 'stored' } }
+      )
+      expect(attributes).toEqual({})
+    }
+  })
+})

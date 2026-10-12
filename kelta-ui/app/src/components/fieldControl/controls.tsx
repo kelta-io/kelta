@@ -4,10 +4,14 @@
  * Read views delegate to `FieldRenderer` (via `FieldControlView`); this file supplies the missing
  * edit + inline editors — including reference/lookup/master_detail, multi_picklist, json,
  * rich_text and geolocation, which had no edit path before. Server-computed types
- * (formula/rollup_summary/auto_number/encrypted) expose a disabled editor and never round-trip.
+ * (formula/rollup_summary/auto_number) expose a read-only editor and never round-trip; encrypted
+ * has a write-only editor used by the record form only (not inline/bulk editable).
+ *
+ * Every `Edit` honors the record form's DOM contract via `FieldEditProps`: `id`, `testId`,
+ * `aria-invalid`/`aria-describedby`, `placeholder`, `ctx.readOnly` (disabled) and `ctx.required`.
  */
 /* eslint-disable react-refresh/only-export-components -- field-control module: many internal edit components + the CONTROLS map */
-import React from 'react'
+import React, { useState } from 'react'
 import type { FieldType } from '@/hooks/useCollectionSchema'
 import { LookupSelect } from '@/components/LookupSelect'
 import { MultiPicklistSelect, normalizeMultiPicklistValue } from '@/components/MultiPicklistSelect'
@@ -37,87 +41,108 @@ function toDateInputString(value: unknown, kind: 'date' | 'datetime'): string {
 
 // --- edit controls -----------------------------------------------------------
 
-function TextEdit({ value, ctx, onChange, onBlur, id, type }: FieldEditProps): React.ReactElement {
+/**
+ * The DOM attributes every simple (single-element) edit control carries: id, test id, accessible
+ * name, and the error/required a11y state the record form wires (`aria-invalid` +
+ * `aria-describedby` → its `field-error-<name>` alert).
+ */
+function controlAttrs(props: FieldEditProps) {
+  const { id, testId, ctx } = props
+  return {
+    id,
+    'data-testid': testId,
+    'aria-label': ctx.displayName ?? ctx.fieldName,
+    'aria-invalid': props['aria-invalid'],
+    'aria-describedby': props['aria-describedby'],
+    'aria-required': ctx.required || undefined,
+  }
+}
+
+function TextEdit(props: FieldEditProps): React.ReactElement {
+  const { value, ctx, onChange, onBlur, type, placeholder } = props
   const htmlType =
     type === 'email' ? 'email' : type === 'phone' ? 'tel' : type === 'url' ? 'url' : 'text'
   return (
     <input
-      id={id}
+      {...controlAttrs(props)}
       type={htmlType}
       className={INPUT_CLASS}
       value={toInputString(value)}
       disabled={ctx.readOnly}
+      placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
       onBlur={onBlur}
-      aria-label={ctx.displayName ?? ctx.fieldName}
     />
   )
 }
 
-function NumberEdit({ value, ctx, onChange, onBlur, id }: FieldEditProps): React.ReactElement {
+/**
+ * number / currency / percent. Emits a `number` (or `''` when cleared) so consumers that persist
+ * the raw value — the record form — send a JSON number; `coerce` maps `''` → `null` for the
+ * inline/bulk surfaces. Currency and percent step in hundredths.
+ */
+function NumberEdit(props: FieldEditProps): React.ReactElement {
+  const { value, ctx, onChange, onBlur, type, placeholder } = props
+  const step = type === 'currency' || type === 'percent' ? '0.01' : undefined
   return (
     <input
-      id={id}
+      {...controlAttrs(props)}
       type="number"
+      step={step}
       className={INPUT_CLASS}
       value={toInputString(value)}
       disabled={ctx.readOnly}
-      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
       onBlur={onBlur}
-      aria-label={ctx.displayName ?? ctx.fieldName}
     />
   )
 }
 
-function BooleanEdit({ value, ctx, onChange, id }: FieldEditProps): React.ReactElement {
+function BooleanEdit(props: FieldEditProps): React.ReactElement {
+  const { value, ctx, onChange, onBlur } = props
   return (
     <input
-      id={id}
+      {...controlAttrs(props)}
       type="checkbox"
       className="h-4 w-4 accent-primary"
       checked={Boolean(value)}
       disabled={ctx.readOnly}
       onChange={(e) => onChange(e.target.checked)}
-      aria-label={ctx.displayName ?? ctx.fieldName}
+      onBlur={onBlur}
     />
   )
 }
 
 function makeDateEdit(kind: 'date' | 'datetime') {
-  return function DateEdit({
-    value,
-    ctx,
-    onChange,
-    onBlur,
-    id,
-  }: FieldEditProps): React.ReactElement {
+  return function DateEdit(props: FieldEditProps): React.ReactElement {
+    const { value, ctx, onChange, onBlur } = props
     return (
       <input
-        id={id}
+        {...controlAttrs(props)}
         type={kind === 'date' ? 'date' : 'datetime-local'}
         className={INPUT_CLASS}
         value={toDateInputString(value, kind)}
         disabled={ctx.readOnly}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
-        aria-label={ctx.displayName ?? ctx.fieldName}
       />
     )
   }
 }
 
-function PicklistEdit({ value, ctx, onChange, onBlur, id }: FieldEditProps): React.ReactElement {
+function PicklistEdit(props: FieldEditProps): React.ReactElement {
+  const { value, ctx, onChange, onBlur, placeholder } = props
   return (
     <select
-      id={id}
+      {...controlAttrs(props)}
       className={INPUT_CLASS}
-      value={typeof value === 'string' ? value : ''}
+      value={value === null || value === undefined ? '' : String(value)}
       disabled={ctx.readOnly}
       onChange={(e) => onChange(e.target.value)}
       onBlur={onBlur}
-      aria-label={ctx.displayName ?? ctx.fieldName}
     >
-      <option value="" />
+      <option value="">{placeholder ?? ''}</option>
       {(ctx.enumValues ?? []).map((opt) => (
         <option key={opt} value={opt}>
           {ctx.picklistDisplayMap?.get(opt)?.label || opt}
@@ -127,7 +152,8 @@ function PicklistEdit({ value, ctx, onChange, onBlur, id }: FieldEditProps): Rea
   )
 }
 
-function MultiPicklistEdit({ value, ctx, onChange, id }: FieldEditProps): React.ReactElement {
+function MultiPicklistEdit(props: FieldEditProps): React.ReactElement {
+  const { value, ctx, onChange, id, placeholder } = props
   return (
     <MultiPicklistSelect
       id={id}
@@ -135,52 +161,70 @@ function MultiPicklistEdit({ value, ctx, onChange, id }: FieldEditProps): React.
       value={normalizeMultiPicklistValue(value)}
       options={ctx.enumValues ?? []}
       onChange={(vals) => onChange(vals)}
+      placeholder={placeholder}
+      required={ctx.required}
       disabled={ctx.readOnly}
+      data-testid={props.testId}
+      aria-invalid={props['aria-invalid']}
+      aria-describedby={props['aria-describedby']}
     />
   )
 }
 
-function ReferenceEdit({ value, ctx, onChange, id }: FieldEditProps): React.ReactElement {
+function ReferenceEdit(props: FieldEditProps): React.ReactElement {
+  const { value, ctx, onChange, id, placeholder } = props
   return (
     <LookupSelect
       id={id}
       name={ctx.fieldName ?? ''}
-      value={typeof value === 'string' ? value : ''}
+      value={value === null || value === undefined ? '' : String(value)}
       options={ctx.referenceOptions ?? []}
       onChange={(v) => onChange(v)}
+      placeholder={placeholder}
+      required={ctx.required}
       disabled={ctx.readOnly}
-      data-testid={ctx.fieldName ? `field-${ctx.fieldName}-lookup` : undefined}
+      error={!!props['aria-invalid']}
+      aria-describedby={props['aria-describedby']}
+      data-testid={props.testId ?? (ctx.fieldName ? `field-${ctx.fieldName}-lookup` : undefined)}
     />
   )
 }
 
-function RichTextEdit({ value, ctx, onChange }: FieldEditProps): React.ReactElement {
+function RichTextEdit(props: FieldEditProps): React.ReactElement {
+  const { value, ctx, onChange, id, placeholder } = props
   const html = typeof value === 'string' ? value : ''
   if (ctx.readOnly) {
     return <FieldControlView type="rich_text" value={html} ctx={ctx} truncate={false} />
   }
   return (
     <RichTextEditor
+      id={id}
       value={html}
       onChange={(next) => onChange(next)}
-      testId={ctx.fieldName ? `field-${ctx.fieldName}-richtext` : undefined}
+      placeholder={placeholder ?? ''}
+      testId={props.testId ?? (ctx.fieldName ? `field-${ctx.fieldName}-richtext` : undefined)}
+      aria-label={ctx.displayName ?? ctx.fieldName}
+      aria-invalid={props['aria-invalid']}
+      aria-describedby={props['aria-describedby']}
+      aria-required={ctx.required}
     />
   )
 }
 
-function JsonEdit({ value, ctx, onChange, onBlur, id }: FieldEditProps): React.ReactElement {
+function JsonEdit(props: FieldEditProps): React.ReactElement {
+  const { value, ctx, onChange, onBlur, placeholder } = props
   const text =
     typeof value === 'string' ? value : value == null ? '' : JSON.stringify(value, null, 2)
   return (
     <textarea
-      id={id}
+      {...controlAttrs(props)}
       className={`${INPUT_CLASS} font-mono text-xs`}
-      rows={4}
+      rows={6}
       value={text}
       disabled={ctx.readOnly}
+      placeholder={placeholder ?? '{}'}
       onChange={(e) => onChange(e.target.value)}
       onBlur={onBlur}
-      aria-label={ctx.displayName ?? ctx.fieldName}
     />
   )
 }
@@ -195,7 +239,8 @@ function readGeo(value: unknown): { lat: string; lng: string } {
   return { lat: '', lng: '' }
 }
 
-function GeolocationEdit({ value, ctx, onChange, onBlur, id }: FieldEditProps): React.ReactElement {
+function GeolocationEdit(props: FieldEditProps): React.ReactElement {
+  const { value, ctx, onChange, onBlur, id } = props
   const { lat, lng } = readGeo(value)
   const emit = (nextLat: string, nextLng: string): void => {
     if (nextLat === '' && nextLng === '') {
@@ -207,10 +252,16 @@ function GeolocationEdit({ value, ctx, onChange, onBlur, id }: FieldEditProps): 
       longitude: nextLng === '' ? null : Number(nextLng),
     })
   }
+  const a11y = {
+    'aria-invalid': props['aria-invalid'],
+    'aria-describedby': props['aria-describedby'],
+    'aria-required': ctx.required || undefined,
+  }
   return (
     <div className="flex gap-2">
       <input
         id={id}
+        data-testid={props.testId}
         type="number"
         step="any"
         className={INPUT_CLASS}
@@ -220,8 +271,11 @@ function GeolocationEdit({ value, ctx, onChange, onBlur, id }: FieldEditProps): 
         onChange={(e) => emit(e.target.value, lng)}
         onBlur={onBlur}
         aria-label={`${ctx.displayName ?? ctx.fieldName} latitude`}
+        {...a11y}
       />
       <input
+        id={id ? `${id}-longitude` : undefined}
+        data-testid={props.testId ? `${props.testId}-longitude` : undefined}
         type="number"
         step="any"
         className={INPUT_CLASS}
@@ -231,14 +285,45 @@ function GeolocationEdit({ value, ctx, onChange, onBlur, id }: FieldEditProps): 
         onChange={(e) => emit(lat, e.target.value)}
         onBlur={onBlur}
         aria-label={`${ctx.displayName ?? ctx.fieldName} longitude`}
+        {...a11y}
       />
     </div>
   )
 }
 
-function ComputedEdit({ value, ctx, type }: FieldEditProps): React.ReactElement {
+/**
+ * encrypted — a WRITE-ONLY secret input (product decision). It never displays a value it was not
+ * typed in this mount: a stored (or masked) value passed in by the consumer stays hidden, so the
+ * editor starts empty and shows only what the user enters. Honors `readOnly` (disabled).
+ *
+ * The record form additionally never loads the stored value into its state and only sends the
+ * field when the user typed one (`formData.ts`). Inline/bulk surfaces don't offer encrypted at all
+ * (`editable: false`, `coerce` → omit), so the full record form is its only writer.
+ */
+function EncryptedEdit(props: FieldEditProps): React.ReactElement {
+  const { value, ctx, onChange, onBlur, placeholder } = props
+  const [typed, setTyped] = useState(false)
   return (
-    <div className="opacity-70">
+    <input
+      {...controlAttrs(props)}
+      type="password"
+      autoComplete="new-password"
+      className={INPUT_CLASS}
+      value={typed ? toInputString(value) : ''}
+      disabled={ctx.readOnly}
+      placeholder={placeholder}
+      onChange={(e) => {
+        setTyped(true)
+        onChange(e.target.value)
+      }}
+      onBlur={onBlur}
+    />
+  )
+}
+
+function ComputedEdit({ value, ctx, type, id, testId }: FieldEditProps): React.ReactElement {
+  return (
+    <div className="opacity-70" id={id} data-testid={testId}>
       <FieldControlView type={type} value={value} ctx={ctx} />
     </div>
   )
@@ -300,10 +385,12 @@ function makeControl(
   return control
 }
 
-function makeComputedControl(): FieldControl {
+function makeComputedControl(
+  Edit: React.ComponentType<FieldEditProps> = ComputedEdit
+): FieldControl {
   return {
     View: FieldControlView,
-    Edit: ComputedEdit,
+    Edit,
     InlineEdit: makeReadOnlyInline(FieldControlView),
     coerce: () => undefined, // never POST/PATCH a server-computed value
     validate: () => null,
@@ -346,7 +433,9 @@ export const CONTROLS: Record<FieldType, FieldControl> = {
   auto_number: computedControl,
   formula: computedControl,
   rollup_summary: computedControl,
-  encrypted: computedControl,
+  // Write-only: editable only through the full record form's `Edit`; never inline/bulk, never
+  // round-tripped by `coerce` (see `EncryptedEdit`).
+  encrypted: makeComputedControl(EncryptedEdit),
 }
 
 function validateJson(value: unknown, ctx: import('./types').FieldControlContext): string | null {
