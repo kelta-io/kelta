@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { FieldRenderer } from './FieldRenderer'
 import { componentRegistry } from '@/services/componentRegistry'
+import { RecordStackProvider } from '@/context/RecordStackContext'
 
 function renderField(props: React.ComponentProps<typeof FieldRenderer>) {
   return render(
@@ -215,6 +216,47 @@ describe('FieldRenderer', () => {
       })
       const link = screen.getByText('Acme Corp')
       expect(link.closest('a')?.getAttribute('href')).toBe('/demo/app/o/accounts/uuid-123')
+    })
+
+    it.each(['lookup', 'master_detail', 'reference'] as const)(
+      'links a %s inside the admin record stack to /resources',
+      (type) => {
+        render(
+          <MemoryRouter>
+            <RecordStackProvider variant="admin">
+              <FieldRenderer
+                type={type}
+                value="uuid-123"
+                displayLabel="Acme Corp"
+                tenantSlug="demo"
+                targetCollection="accounts"
+              />
+            </RecordStackProvider>
+          </MemoryRouter>
+        )
+        expect(screen.getByText('Acme Corp').closest('a')?.getAttribute('href')).toBe(
+          '/demo/resources/accounts/uuid-123'
+        )
+      }
+    )
+
+    it('links inside the end-user record stack to /app/o', () => {
+      render(
+        <MemoryRouter>
+          <RecordStackProvider variant="enduser">
+            <FieldRenderer
+              type="lookup"
+              value="uuid-123"
+              displayLabel="Acme Corp"
+              tenantSlug="demo"
+              targetCollection="accounts"
+            />
+          </RecordStackProvider>
+        </MemoryRouter>
+      )
+      expect(screen.getByText('Acme Corp').closest('a')?.getAttribute('href')).toBe(
+        '/demo/app/o/accounts/uuid-123'
+      )
     })
 
     it('falls back to ID when no display label', () => {

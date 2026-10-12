@@ -12,6 +12,7 @@ import React, { useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
+import { recordRoutes } from '../../utils/recordRoutes'
 import { useCollectionSummaries, type CollectionSummary } from '../../hooks/useCollectionSummaries'
 import { LoadingSpinner, ErrorMessage } from '../../components'
 
@@ -66,7 +67,7 @@ export function ResourceBrowserPage({
   // Handle collection selection - navigate to collection data view
   const handleCollectionSelect = useCallback(
     (collection: CollectionSummary) => {
-      navigate(`/${getTenantSlug()}/resources/${collection.name}`)
+      navigate(recordRoutes('admin', getTenantSlug()).list(collection.name))
     },
     [navigate]
   )

@@ -12,6 +12,7 @@ import React from 'react'
 import { AlertCircle } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { useRecordRoutes } from '@/context/RecordStackContext'
 import type { RecordLoadOutcome } from './recordLoadOutcome'
 
 export interface RecordNotFoundStateProps {
@@ -33,6 +34,7 @@ export function RecordNotFoundState({
   onNavigate,
 }: RecordNotFoundStateProps): React.ReactElement {
   const collectionMissing = outcome === 'collection-missing'
+  const routes = useRecordRoutes(tenantSlug)
   return (
     <div className="space-y-4 p-6" data-testid="record-not-found">
       <Alert>
@@ -51,7 +53,7 @@ export function RecordNotFoundState({
           Go to Home
         </Button>
         {!collectionMissing && (
-          <Button variant="outline" onClick={() => onNavigate(`${basePath}/o/${collectionName}`)}>
+          <Button variant="outline" onClick={() => onNavigate(routes.list(collectionName))}>
             Back to list
           </Button>
         )}

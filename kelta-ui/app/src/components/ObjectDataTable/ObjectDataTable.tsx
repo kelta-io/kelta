@@ -45,6 +45,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { FieldRenderer } from '@/components/FieldRenderer'
 import { InlineFieldValue } from '@/components/record/InlineFieldValue'
 import { useTableKeyboardNav } from '@/hooks/useTableKeyboardNav'
+import { useRecordRoutes } from '@/context/RecordStackContext'
 import { cn } from '@/lib/utils'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { CollectionRecord, SortState } from '@/hooks/useCollectionRecords'
@@ -130,8 +131,9 @@ export interface ObjectDataTableProps {
   collectionName: string
   /**
    * Row activation (row click, "View" action, keyboard Enter). When omitted the
-   * table navigates to the end-user record route (`/{tenant}/app/o/{collection}/{id}`).
-   * The admin resource browser passes this to route to `/{tenant}/resources/...` instead.
+   * table navigates to the record's detail page in the record stack it renders in
+   * (`useRecordRoutes` — `/{tenant}/resources/...` inside the admin `ListShell`,
+   * `/{tenant}/app/o/...` otherwise).
    */
   onRowClick?: (record: CollectionRecord) => void
   /** Callback when edit is clicked on a row */
@@ -431,7 +433,7 @@ export function ObjectDataTable({
 }: ObjectDataTableProps): React.ReactElement {
   const { tenantSlug } = useParams<{ tenantSlug: string }>()
   const navigate = useNavigate()
-  const basePath = `/${tenantSlug}/app`
+  const routes = useRecordRoutes(tenantSlug ?? '')
 
   // Ref for virtual scrolling container
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -476,7 +478,7 @@ export function ObjectDataTable({
         if (onRowClick) {
           onRowClick(visibleRecords[index])
         } else {
-          navigate(`${basePath}/o/${collectionName}/${visibleRecords[index].id}`)
+          navigate(routes.detail(collectionName, visibleRecords[index].id))
         }
       }
     },
@@ -546,10 +548,10 @@ export function ObjectDataTable({
       if (onRowClick) {
         onRowClick(record)
       } else {
-        navigate(`${basePath}/o/${collectionName}/${record.id}`)
+        navigate(routes.detail(collectionName, record.id))
       }
     },
-    [onRowClick, navigate, basePath, collectionName]
+    [onRowClick, navigate, routes, collectionName]
   )
 
   // Get aria-sort value for a column

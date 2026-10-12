@@ -38,6 +38,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useScriptExecution } from '@/hooks/useScriptExecution'
+import { useRecordStack } from '@/context/RecordStackContext'
+import { recordRoutes } from '@/utils/recordRoutes'
 import type {
   QuickActionDefinition,
   QuickActionExecutionContext,
@@ -81,6 +83,7 @@ export function QuickActionButton({
   size = 'sm',
 }: QuickActionButtonProps): React.ReactElement {
   const navigate = useNavigate()
+  const recordStack = useRecordStack()
   const { execute, isPending } = useScriptExecution()
   const [showConfirmation, setShowConfirmation] = useState(false)
 
@@ -91,8 +94,7 @@ export function QuickActionButton({
       switch (action.config.type) {
         case 'create_related': {
           const config = action.config as CreateRelatedConfig
-          const basePath = `/${executionContext.tenantSlug}/app`
-          // Navigate to the new record form for the target collection
+          // Navigate to the new record form for the target collection (same record stack)
           // The lookup field will be pre-filled via URL search params
           const params = new URLSearchParams()
           if (executionContext.recordId) {
@@ -103,8 +105,12 @@ export function QuickActionButton({
               params.set(key, String(value))
             }
           }
-          const query = params.toString()
-          navigate(`${basePath}/o/${config.targetCollection}/new${query ? `?${query}` : ''}`)
+          navigate(
+            recordRoutes(recordStack, executionContext.tenantSlug).new(
+              config.targetCollection,
+              params
+            )
+          )
           break
         }
 
@@ -158,7 +164,7 @@ export function QuickActionButton({
       const message = error instanceof Error ? error.message : 'Action failed'
       toast.error(message)
     }
-  }, [action, executionContext, execute, navigate, onComplete])
+  }, [action, executionContext, execute, navigate, onComplete, recordStack])
 
   const handleClick = useCallback(() => {
     if (action.requiresConfirmation) {

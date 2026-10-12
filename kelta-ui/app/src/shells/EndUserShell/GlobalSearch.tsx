@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { useApi } from '@/context/ApiContext'
 import { useConfig } from '@/context/ConfigContext'
 import { formatRelativeTime } from '@/utils/formatRelativeTime'
+import { recordRoutes } from '@/utils/recordRoutes'
 import { useAppContext } from '@/context/AppContext'
 import { parseResourcePath } from './navTabs'
 import type { MenuConfig, MenuItemConfig } from '@/types/config'
@@ -169,6 +170,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps): React.R
   )
 
   const basePath = `/${tenantSlug}/app`
+  const routes = recordRoutes('enduser', tenantSlug ?? '')
 
   return (
     <CommandDialog open={open} onOpenChange={handleOpenChange} shouldFilter={false}>
@@ -199,9 +201,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps): React.R
               {results.map((result) => (
                 <CommandItem
                   key={`${result.collectionName}-${result.id}`}
-                  onSelect={() =>
-                    handleSelect(`${basePath}/o/${result.collectionName}/${result.id}`)
-                  }
+                  onSelect={() => handleSelect(routes.detail(result.collectionName, result.id))}
                 >
                   <FileText className="mr-2 h-4 w-4 text-muted-foreground" />
                   <span className="flex-1 truncate">{result.displayValue}</span>
@@ -237,7 +237,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps): React.R
             {recentItems.slice(0, 5).map((item) => (
               <CommandItem
                 key={`recent-${item.collectionName}-${item.id}`}
-                onSelect={() => handleSelect(`${basePath}/o/${item.collectionName}/${item.id}`)}
+                onSelect={() => handleSelect(routes.detail(item.collectionName, item.id))}
               >
                 <Clock className="mr-2 h-4 w-4 text-muted-foreground" />
                 <span className="flex-1 truncate">{item.label}</span>
@@ -257,7 +257,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps): React.R
               {collections.map((col) => (
                 <CommandItem
                   key={`col-${col.name}`}
-                  onSelect={() => handleSelect(`${basePath}/o/${col.name}`)}
+                  onSelect={() => handleSelect(routes.list(col.name))}
                 >
                   <Database className="mr-2 h-4 w-4 text-muted-foreground" />
                   <span>{col.label}</span>

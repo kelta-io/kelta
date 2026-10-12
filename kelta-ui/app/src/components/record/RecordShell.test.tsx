@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { RecordShell } from './RecordShell'
+import { useRecordStack } from '@/context/RecordStackContext'
+
+function StackProbe() {
+  return <span data-testid="stack">{useRecordStack()}</span>
+}
 
 describe('RecordShell', () => {
   it('renders only the loading state when isLoading', () => {
@@ -82,5 +87,16 @@ describe('RecordShell', () => {
   it('omits the section nav cell when no sectionNav slot is supplied', () => {
     render(<RecordShell variant="enduser" body={<div>body</div>} rail={<div>rail</div>} />)
     expect(screen.queryByTestId('record-shell-section-nav')).toBeNull()
+  })
+
+  // Record-stack convergence P7: shared components inside the shell link within its stack.
+  it.each(['admin', 'enduser'] as const)('provides the %s record stack to its slots', (variant) => {
+    render(<RecordShell variant={variant} body={<StackProbe />} />)
+    expect(screen.getByTestId('stack')).toHaveTextContent(variant)
+  })
+
+  it('provides the record stack to the status slot', () => {
+    render(<RecordShell variant="admin" statusSlot={<StackProbe />} body={<div>body</div>} />)
+    expect(screen.getByTestId('stack')).toHaveTextContent('admin')
   })
 })

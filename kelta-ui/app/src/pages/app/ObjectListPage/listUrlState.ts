@@ -8,6 +8,7 @@
  * - filter=[{"id":"f1","field":"status","operator":"equals","value":"active"}]
  */
 import type { SortState, FilterCondition, FilterOperator } from '@/hooks/useCollectionRecords'
+import { recordRoutes } from '@/utils/recordRoutes'
 
 /**
  * Parse filter conditions from a URL search param.
@@ -119,6 +120,5 @@ export function buildListUrl(
   if (sort) {
     params.set('sort', sort.direction === 'desc' ? `-${sort.field}` : sort.field)
   }
-  const query = params.toString()
-  return `/${tenantSlug}/app/o/${collectionName}${query ? `?${query}` : ''}`
+  return recordRoutes('enduser', tenantSlug).list(collectionName, params)
 }

@@ -18,6 +18,8 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useApi } from '../context/ApiContext'
 import { parseAxiosError } from '../services/apiClient'
+import { useRecordStack } from '../context/RecordStackContext'
+import { recordRoutes } from '../utils/recordRoutes'
 import type {
   ScriptExecutionResult,
   ScriptResultAction,
@@ -75,6 +77,7 @@ export function useScriptExecution(): UseScriptExecutionReturn {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { apiClient } = useApi()
+  const recordStack = useRecordStack()
 
   const handleResultAction = useCallback(
     (result: ScriptExecutionResult, context: QuickActionExecutionContext) => {
@@ -122,8 +125,7 @@ export function useScriptExecution(): UseScriptExecutionReturn {
 
         case 'open_record': {
           const { collection, recordId } = result.action
-          const basePath = `/${context.tenantSlug}/app`
-          navigate(`${basePath}/o/${collection}/${recordId}`)
+          navigate(recordRoutes(recordStack, context.tenantSlug).detail(collection, recordId))
           break
         }
 
@@ -132,7 +134,7 @@ export function useScriptExecution(): UseScriptExecutionReturn {
           break
       }
     },
-    [navigate, queryClient]
+    [navigate, queryClient, recordStack]
   )
 
   const mutation = useMutation({

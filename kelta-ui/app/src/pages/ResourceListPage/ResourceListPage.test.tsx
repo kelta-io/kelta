@@ -214,6 +214,39 @@ describe('ResourceListPage', () => {
     })
   })
 
+  describe('?filter= deep link', () => {
+    // A related list's "View All" on the admin detail page links here with the shared list URL
+    // filter format (record-stack convergence P7); the list must open already filtered.
+    it('applies the URL filter to the records request', async () => {
+      setupResourceListHandlers()
+      const filter = JSON.stringify([
+        { id: 'parent', field: 'organizationId', operator: 'equals', value: 'org-456' },
+      ])
+      const queryClient = createTestQueryClient()
+      createTestWrapper()
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={[`/resources/users?filter=${encodeURIComponent(filter)}`]}>
+            <AuthWrapper>
+              <Routes>
+                <Route path="/resources/:collection" element={<ResourceListPage />} />
+              </Routes>
+            </AuthWrapper>
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+
+      await waitFor(() => {
+        const recordUrls = mockAxios.get.mock.calls
+          .map(([url]) => String(url))
+          .filter((url) => url.startsWith('/api/users?'))
+        expect(recordUrls.length).toBeGreaterThan(0)
+        const params = new URLSearchParams(recordUrls[0].split('?')[1])
+        expect(params.get('filter[organizationId][eq]')).toBe('org-456')
+      })
+    })
+  })
+
   describe('Export Utility Functions - Requirement 11.12', () => {
     describe('escapeCSVValue', () => {
       it('should return empty string for null or undefined', () => {

@@ -11,6 +11,7 @@ import { ConfirmDialog } from '../../../components/ConfirmDialog/ConfirmDialog'
 import { useApi } from '../../../context/ApiContext'
 import { useI18n } from '../../../context/I18nContext'
 import { useMyIdentity } from '../../../hooks/useMyIdentity'
+import { recordRoutes } from '../../../utils/recordRoutes'
 import {
   useMyApprovals,
   type PendingApprovalRow,
@@ -92,7 +93,7 @@ export function ApprovalsInboxPage() {
 
   const openRecord = (row: { collectionName: string | null; recordId: string | null }) => {
     if (row.collectionName && row.recordId) {
-      navigate(`/${tenantSlug}/app/o/${row.collectionName}/${row.recordId}`)
+      navigate(recordRoutes('enduser', tenantSlug ?? '').detail(row.collectionName, row.recordId))
     }
   }
 

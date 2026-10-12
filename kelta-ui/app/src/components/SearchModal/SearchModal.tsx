@@ -16,6 +16,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useRecentRecords } from '../../hooks/useRecentRecords'
 import { formatRelativeTime } from '../../utils/formatRelativeTime'
 import { getTenantSlug } from '../../context/TenantContext'
+import { recordRoutes } from '../../utils/recordRoutes'
 import { cn } from '@/lib/utils'
 import {
   Dialog,
@@ -168,7 +169,8 @@ export function SearchModal({ open, onClose }: SearchModalProps): React.ReactEle
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const tenantSlug = getTenantSlug()
-  const basePath = `/${tenantSlug}/app`
+  // This palette lives in the admin header, so records open in the admin stack (`/resources`).
+  const routes = useMemo(() => recordRoutes('admin', tenantSlug), [tenantSlug])
   const userId = user?.id ?? 'anonymous'
   const { recentRecords } = useRecentRecords(userId)
   const { summaries: collectionSummaries } = useCollectionSummaries()
@@ -219,7 +221,7 @@ export function SearchModal({ open, onClose }: SearchModalProps): React.ReactEle
             type: 'record' as const,
             title: String(item.displayValue || id),
             subtitle: labelMap[collectionName] || collectionName,
-            path: `${basePath}/o/${collectionName}/${id}`,
+            path: routes.detail(collectionName, id),
           }
         })
         setRecordResults(results)
@@ -233,7 +235,7 @@ export function SearchModal({ open, onClose }: SearchModalProps): React.ReactEle
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [query, apiClient, collectionSummaries, basePath])
+  }, [query, apiClient, collectionSummaries, routes])
 
   // Build results list
   const results = useMemo((): SearchResult[] => {
@@ -246,7 +248,7 @@ export function SearchModal({ open, onClose }: SearchModalProps): React.ReactEle
         type: 'recent' as const,
         title: r.displayValue,
         subtitle: `${r.collectionDisplayName || r.collectionName} · ${formatRelativeTime(r.viewedAt)}`,
-        path: `${basePath}/o/${r.collectionName}/${r.id}`,
+        path: routes.detail(r.collectionName, r.id),
       }))
     }
 
@@ -269,11 +271,11 @@ export function SearchModal({ open, onClose }: SearchModalProps): React.ReactEle
         type: 'recent' as const,
         title: r.displayValue,
         subtitle: r.collectionDisplayName || r.collectionName,
-        path: `${basePath}/o/${r.collectionName}/${r.id}`,
+        path: routes.detail(r.collectionName, r.id),
       }))
 
     return [...recordResults, ...pageResults, ...recentResults]
-  }, [query, recordResults, recentRecords, basePath])
+  }, [query, recordResults, recentRecords, routes])
 
   // Reset active index when results change
   useEffect(() => {

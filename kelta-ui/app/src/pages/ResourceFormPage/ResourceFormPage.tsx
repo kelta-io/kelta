@@ -30,6 +30,7 @@ import { RecordForm } from '@/components/record/form/RecordForm'
 import type { RecordFormChromeContext, RecordFormRoutes } from '@/components/record/form/RecordForm'
 import { useI18n } from '@/context/I18nContext'
 import { getTenantSlug } from '@/context/TenantContext'
+import { recordRoutes } from '@/utils/recordRoutes'
 
 /**
  * Props for ResourceFormPage component
@@ -57,17 +58,18 @@ export function ResourceFormPage({
 
   const collectionName = propCollectionName || routeCollection || ''
   const resourceId = propResourceId || routeResourceId
-  const basePath = `/${getTenantSlug()}/resources`
+  const tenantSlug = getTenantSlug()
+  const basePath = `/${tenantSlug}/resources`
   // Clone applies to create only (the core ignores it on edit).
   const cloneSourceId = (!resourceId && searchParams.get('clone')) || undefined
 
-  const routes = useMemo<RecordFormRoutes>(
-    () => ({
-      list: `${basePath}/${collectionName}`,
-      detail: (id: string) => `${basePath}/${collectionName}/${id}`,
-    }),
-    [basePath, collectionName]
-  )
+  const routes = useMemo<RecordFormRoutes>(() => {
+    const admin = recordRoutes('admin', tenantSlug)
+    return {
+      list: admin.list(collectionName),
+      detail: (id: string) => admin.detail(collectionName, id),
+    }
+  }, [tenantSlug, collectionName])
 
   const breadcrumb = ({ collectionLabel, isNew, isClone }: RecordFormChromeContext) => (
     <Breadcrumb>

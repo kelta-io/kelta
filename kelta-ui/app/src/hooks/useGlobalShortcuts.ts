@@ -11,8 +11,8 @@
  * - g h → Go to Home
  * - g c → Go to Collections
  * - g r → Go to Resources
- * - n → New record (on list page)
- * - e → Edit record (on detail page)
+ * - n → New record (on a record list page — admin `/resources` or end-user `/app/o`)
+ * - e → Edit record (on a record detail page — same stack as the page)
  * - Backspace → Go back
  * - Escape → Close help overlay
  */
@@ -21,6 +21,7 @@ import { useState, useCallback, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useKeyboardShortcuts } from './useKeyboardShortcuts'
 import { getTenantSlug } from '../context/TenantContext'
+import { parseRecordPath, recordRoutes } from '../utils/recordRoutes'
 
 export function useGlobalShortcuts() {
   const navigate = useNavigate()
@@ -31,10 +32,9 @@ export function useGlobalShortcuts() {
   const gPrefixRef = useRef(false)
   const gTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Determine context (account for /{slug}/ prefix in tenant URLs)
-  const isDetailPage = /^\/[^/]+\/resources\/[^/]+\/[^/]+$/.test(location.pathname)
-  const isListPage =
-    /^\/[^/]+\/resources\/[^/]+$/.test(location.pathname) && !location.pathname.endsWith('/new')
+  // The record page being shown, if any, in either record stack. New / edit shortcuts stay
+  // in that stack (and tenant).
+  const recordPage = parseRecordPath(location.pathname)
 
   const clearGPrefix = useCallback(() => {
     gPrefixRef.current = false
@@ -139,9 +139,9 @@ export function useGlobalShortcuts() {
     {
       key: 'n',
       handler: () => {
-        if (isListPage) {
-          const match = location.pathname.match(/^\/[^/]+\/resources\/([^/]+)$/)
-          if (match) navigate(`/${getTenantSlug()}/resources/${match[1]}/new`)
+        if (recordPage?.kind === 'list') {
+          const routes = recordRoutes(recordPage.variant, recordPage.tenantSlug)
+          navigate(routes.new(recordPage.collection))
         }
       },
       description: 'New record',
@@ -150,9 +150,9 @@ export function useGlobalShortcuts() {
     {
       key: 'e',
       handler: () => {
-        if (isDetailPage) {
-          const match = location.pathname.match(/^\/[^/]+\/resources\/([^/]+)\/([^/]+)$/)
-          if (match) navigate(`/${getTenantSlug()}/resources/${match[1]}/${match[2]}/edit`)
+        if (recordPage?.kind === 'detail' && recordPage.id) {
+          const routes = recordRoutes(recordPage.variant, recordPage.tenantSlug)
+          navigate(routes.edit(recordPage.collection, recordPage.id))
         }
       },
       description: 'Edit record',
