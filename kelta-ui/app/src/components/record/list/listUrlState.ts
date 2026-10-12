@@ -1,7 +1,8 @@
 /**
- * Canonical URL state for the end-user list view (`/app/o/<collection>`), extracted from
- * ObjectListPage so other surfaces (dashboard drill-through, saved views) can build and
- * parse the same deep-link format.
+ * Canonical URL state for a record list (`/app/o/<collection>`, `/resources/<collection>`):
+ * the format the record list core (`RecordList`, via `useListParams`) reads and writes, and
+ * that other surfaces (dashboard drill-through, saved views, related-list "View All") build
+ * deep links in. Moved here from `pages/app/ObjectListPage/` with the list core (P9).
  *
  * URL format:
  * - page=2&pageSize=50&sort=-createdAt

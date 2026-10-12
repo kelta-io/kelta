@@ -37,7 +37,7 @@ import {
   type SortRow,
 } from './ListViewEditors'
 import type { SavedView } from '@/hooks/useSavedViews'
-import { parseTypeConfig } from '@/pages/app/ObjectListPage/listViewMapping'
+import { parseTypeConfig } from '@/components/record/list/listViewMapping'
 
 /** Renderers a shared view can publish (V196); the end-user list honours all four. */
 const VIEW_TYPES = ['TABLE', 'KANBAN', 'CALENDAR', 'GALLERY'] as const

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useApi } from '../context/ApiContext'
 import type { SavedView } from './useSavedViews'
-import { mapSharedListView, type ListViewRow } from '../pages/app/ObjectListPage/listViewMapping'
+import { mapSharedListView, type ListViewRow } from '../components/record/list/listViewMapping'
 
 /**
  * Admin-authored shared list views for a collection: `list-views` rows with

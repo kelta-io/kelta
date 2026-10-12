@@ -16,7 +16,7 @@ import {
   type DashboardTimeRange,
   type WidgetPayload,
 } from '../../../hooks/useDashboardData'
-import { buildListUrl } from '../ObjectListPage/listUrlState'
+import { buildListUrl } from '@/components/record/list/listUrlState'
 import { recordRoutes } from '@/utils/recordRoutes'
 import { WidgetFrame } from './widgets/WidgetFrame'
 import { MetricWidget } from './widgets/MetricWidget'

@@ -1234,7 +1234,9 @@ instead of a dead-end 403.
 
 ### Record detail path — one `RecordShell` for both stacks (unified record)
 
-There is now **one record-detail path**. Both the end-user runtime (`/:tenant/app/o/:collection/:id`, `ObjectDetailPage`) and the admin Resource Browser (`/:tenant/resources/:collection/:id`, `ResourceDetailPage`) are **thin `variant` wrappers over `RecordShell`** (`kelta-ui/app/src/components/record/RecordShell.tsx`): `RecordShell` owns the page skeleton (loading/status branches + breadcrumb → header → body(+rail) → tab bar → below-tabs → dialogs), variant chrome is passed as slots, and the field body renders through `RecordDetailBody` (`LayoutFieldSections` when the layout has sections, else a variant fallback). The shared `DetailTabBar` drives related lists (with inline CRUD) + Notes/Attachments/System tabs for both. A fix to view/inline-edit/related-CRUD/rules/optimistic-locking lands once and shows in both stacks. Do **not** reintroduce a per-stack detail body. (The list pages — `ObjectListPage`/`ResourceListPage` — are not yet one component: they share `ListShell`, `ObjectDataTable` and the record-list data layer — `useCollectionSchema`, `useCollectionRecords` (`['collection-records', …]`), `useRecordMutation`, `useCollectionPermissions` — but each page still owns its toolbar, filter UI and view state. The admin list keeps filter/sort/page state local (seeded from the URL, reset when the route switches collection); the end-user list keeps it in the URL. The admin list still resolves lookup labels with `useLookupDisplayMap` rather than the end-user list's JSON:API `include`.)
+There is now **one record-detail path**. Both the end-user runtime (`/:tenant/app/o/:collection/:id`, `ObjectDetailPage`) and the admin Resource Browser (`/:tenant/resources/:collection/:id`, `ResourceDetailPage`) are **thin `variant` wrappers over `RecordShell`** (`kelta-ui/app/src/components/record/RecordShell.tsx`): `RecordShell` owns the page skeleton (loading/status branches + breadcrumb → header → body(+rail) → tab bar → below-tabs → dialogs), variant chrome is passed as slots, and the field body renders through `RecordDetailBody` (`LayoutFieldSections` when the layout has sections, else a variant fallback). The shared `DetailTabBar` drives related lists (with inline CRUD) + Notes/Attachments/System tabs for both. A fix to view/inline-edit/related-CRUD/rules/optimistic-locking lands once and shows in both stacks. Do **not** reintroduce a per-stack detail body. (The list pages are converging the same way — see **Record list** below.)
+
+**Record list — one `RecordList` core (convergence in progress).** The end-user list (`ObjectListPage`) is a thin `variant="enduser"` wrapper over `RecordList` (`kelta-ui/app/src/components/record/list/`, P9): `useRecordListModel` owns the data (the shared record-list data layer — `useCollectionSchema`, `useCollectionRecords` (`['collection-records', …]`), `useRecordMutation`, `useCollectionPermissions`), the list state and every list action; optional features (saved/shared views, column chooser, density, group-by, kanban/calendar/gallery, mass edit, import, export, quick actions, inline edit) are switched on by a `features` prop, never by `variant`; and the state lives in the URL (`urlState="sync"`, the end-user list) or in a local copy seeded from it (`'seed'`). The body is keyed on the collection, so switching collection on the reused route element starts the list fresh. The admin list (`ResourceListPage`) already reads the same data layer and URL format but still owns its toolbar, filter builder, column toggles and view state, keeping filter/sort/page local (seeded from the URL, reset when the route switches collection); it moves onto the core in P10. **Lookup labels on the list come from JSON:API `include`, not `useLookupDisplayMap`.** The core requests `?include=<field names>` for the visible lookup columns and labels each included record by `resolveLookupDisplayField(<target schema from the collection store>)` (`utils/lookupDisplayField.ts`): the target's display field → a field named `name` (any case) → the first string field → the raw id; unknown target schema → `name`. Why: one request per page instead of a schema fetch plus a 200-row target fetch per target collection; it labels exactly the rows on the page (`useLookupDisplayMap` shows a raw id for any target row past its first 200); and included resources pass through the read-side field-level security advice, so a display field the viewer cannot read is not shown. `useLookupDisplayMap` now uses the same `resolveLookupDisplayField` rule, so labels read the same either way (before P9 the end-user list fell back to `name` only). When the admin list adopts the core it will show the same labels as today for targets within their first 200 rows, correct labels past that, only the visible lookup columns resolved, and a raw id where FLS hides the target's display field; P10 must confirm `include` resolves for lookups whose target is a system collection.
 
 **Record links stay in the stack they render in.** Every record URL is built by `recordRoutes` (`kelta-ui/app/src/utils/recordRoutes.ts`); `RecordShell`, `ListShell` and `RecordForm` provide their `variant` through `RecordStackProvider`, so the shared components inside them — related-list rows, "View All" and "New", lookup links, the table's default row navigation, Clone, quick actions — link to `/resources/...` on an admin page and `/app/o/...` on an end-user one (`conventions.md` → Component reuse). The admin list reads the same deep-link format as the end-user list (`listUrlState.parseListViewParams`: `filter`, `sort`, `page`, `pageSize`), so a related list's "View All" opens filtered in both stacks, and Clone (`?clone=<id>` → `RecordForm`'s `cloneFromId`) works from both detail pages.
 
@@ -1447,13 +1449,13 @@ and `typeConfig` (JSONB, per-renderer settings keyed by lowercased view type —
 They mirror the fields the per-user `SavedView` already had, so an admin can publish "the
 board" instead of a column set every user re-configures.
 
-**Resolution precedence on the end-user list** (`ObjectListPage`), highest first:
+**Resolution precedence on the end-user list** (`RecordList` core, `useListViewState`), highest first:
 
 1. the viewer's own override for that shared view — one `user-ui-preferences` row per
    collection (`prefType: 'list-view-type'`, `useViewTypeOverrides`), a map of shared-view
    id → `{viewType, typeConfig}`, written when the toolbar switch is used on a shared view;
 2. the published `viewType`/`typeConfig` on the shared row, mapped by
-   `mapSharedListView` (`ObjectListPage/listViewMapping.ts`);
+   `mapSharedListView` (`components/record/list/listViewMapping.ts`);
 3. `table`.
 
 The stored value is uppercase and the frontend `SavedViewType` is lowercase;
@@ -1462,7 +1464,7 @@ unrecognized** (a row written before V196, or by a rolled-back platform version)
 erroring, and drops a `typeConfig` section missing its required field (kanban lane, calendar
 date) instead of passing it through half-formed. The toolbar override never writes the
 shared row — a user flipping a published board back to a table changes only their own
-preference row. `ObjectListPage` waits for `useViewTypeOverrides().isLoaded` before applying
+preference row. `useListViewState` waits for `useViewTypeOverrides().isLoaded` before applying
 a default/linked view, so a published board does not flash in ahead of the viewer's choice.
 
 Both write paths produce the same row: `kelta list-views create|update --view-type KANBAN
@@ -1550,7 +1552,7 @@ nothing. The loader now **derives the target name from `reference_collection_id`
 and resolve includes. **Consumer contract:** clients request a *forward* lookup by the **field name**
 (`?include=title`), NOT the target collection name (`?include=titles`); the end-user list/detail/
 related views build `?include=` from reference field names accordingly (see
-`ObjectListPage/listIncludes.ts`). Resolving a forward lookup's display value also needs the **target
+`components/record/list/listIncludes.ts`). Resolving a forward lookup's display value also needs the **target
 collection to have a display field** (`collection.display_field_id`), else the included row has no
 label to show.
 

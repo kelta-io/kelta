@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useApi } from '../context/ApiContext'
 import { fetchCollectionSchema } from './useCollectionSchema'
 import type { FieldDefinition } from './useCollectionSchema'
+import { resolveLookupDisplayField } from '../utils/lookupDisplayField'
 
 /** Reference field types that should have their display values resolved */
 const REFERENCE_TYPES = new Set(['master_detail', 'lookup', 'reference'])
@@ -86,7 +87,7 @@ export function useLookupDisplayMap(
           async ([, { fields: groupFields, targetName: knownName, targetId }]) => {
             try {
               let targetName: string
-              let displayFieldName = 'id'
+              let displayFieldName: string
 
               if (knownName) {
                 // We have the collection name — use fetchCollectionSchema for proper
@@ -94,19 +95,7 @@ export function useLookupDisplayMap(
                 targetName = knownName
                 try {
                   const schema = await fetchCollectionSchema(apiClient, knownName)
-                  if (schema.displayFieldName) {
-                    displayFieldName = schema.displayFieldName
-                  } else if (schema.fields?.length) {
-                    const nameField = schema.fields.find((f) => f.name.toLowerCase() === 'name')
-                    if (nameField) {
-                      displayFieldName = nameField.name
-                    } else {
-                      const firstStringField = schema.fields.find((f) => f.type === 'string')
-                      if (firstStringField) {
-                        displayFieldName = firstStringField.name
-                      }
-                    }
-                  }
+                  displayFieldName = resolveLookupDisplayField(schema)
                 } catch {
                   // Schema fetch failed — fall back to "name" field
                   displayFieldName = 'name'
@@ -119,19 +108,7 @@ export function useLookupDisplayMap(
                 targetName = collection.name
                 try {
                   const schema = await fetchCollectionSchema(apiClient, targetName)
-                  if (schema.displayFieldName) {
-                    displayFieldName = schema.displayFieldName
-                  } else if (schema.fields?.length) {
-                    const nameField = schema.fields.find((f) => f.name.toLowerCase() === 'name')
-                    if (nameField) {
-                      displayFieldName = nameField.name
-                    } else {
-                      const firstStringField = schema.fields.find((f) => f.type === 'string')
-                      if (firstStringField) {
-                        displayFieldName = firstStringField.name
-                      }
-                    }
-                  }
+                  displayFieldName = resolveLookupDisplayField(schema)
                 } catch {
                   displayFieldName = 'name'
                 }
