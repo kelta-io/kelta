@@ -4,7 +4,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import io.kelta.runtime.context.TenantAwareDataSource;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.PlatformEventPublisher;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.CoreSystemCollections;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.repository.EnvironmentRepository;
@@ -130,7 +130,7 @@ class SandboxAdminHardeningRlsIntegrationTest {
         QueryEngine queryEngine = mock(QueryEngine.class);
         when(queryEngine.create(any(), anyMap())).thenAnswer(inv -> seedTenantLikeProvisioningHook(inv.getArgument(1)));
         CollectionRegistry collectionRegistry = mock(CollectionRegistry.class);
-        when(collectionRegistry.get("tenants")).thenReturn(SystemCollectionDefinitions.tenants());
+        when(collectionRegistry.get("tenants")).thenReturn(CoreSystemCollections.tenants());
 
         EnvironmentRepository environmentRepository = new EnvironmentRepository(app);
         SandboxEnvironmentService environmentService = mock(SandboxEnvironmentService.class);

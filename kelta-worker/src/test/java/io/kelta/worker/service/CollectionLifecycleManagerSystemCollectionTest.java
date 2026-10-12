@@ -2,6 +2,7 @@ package io.kelta.worker.service;
 
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldType;
+import io.kelta.runtime.model.system.CoreSystemCollections;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.storage.StorageAdapter;
@@ -166,7 +167,7 @@ class CollectionLifecycleManagerSystemCollectionTest {
             verify(collectionRegistry).register(defCaptor.capture());
 
             CollectionDefinition registered = defCaptor.getValue();
-            CollectionDefinition canonical = SystemCollectionDefinitions.users();
+            CollectionDefinition canonical = CoreSystemCollections.users();
 
             assertThat(registered.name()).isEqualTo("users");
             assertThat(registered.systemCollection()).isTrue();
@@ -192,7 +193,7 @@ class CollectionLifecycleManagerSystemCollectionTest {
             assertThat(registered.name()).isEqualTo("profiles");
             assertThat(registered.systemCollection()).isTrue();
             assertThat(registered.fields()).hasSize(
-                    SystemCollectionDefinitions.profiles().fields().size());
+                    CoreSystemCollections.profiles().fields().size());
         }
 
     }
@@ -368,7 +369,7 @@ class CollectionLifecycleManagerSystemCollectionTest {
         @Test
         @DisplayName("Should return existing definition if already loaded")
         void returnsExistingDefinition() {
-            CollectionDefinition existingDef = SystemCollectionDefinitions.tenants();
+            CollectionDefinition existingDef = CoreSystemCollections.tenants();
             when(collectionRegistry.get("tenants")).thenReturn(existingDef);
 
             CollectionDefinition result = lifecycleManager.loadCollectionByName("tenants", null);

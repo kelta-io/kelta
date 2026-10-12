@@ -1,7 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.model.CollectionDefinition;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.ReportSystemCollections;
 import io.kelta.runtime.query.*;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.repository.BootstrapRepository;
@@ -66,7 +66,7 @@ class ReportExecutionControllerTest {
     @Test
     void shouldExecuteReportSuccessfully() {
         // Set up reports collection in registry
-        CollectionDefinition reportsDef = SystemCollectionDefinitions.reports();
+        CollectionDefinition reportsDef = ReportSystemCollections.reports();
         when(collectionRegistry.get("reports")).thenReturn(reportsDef);
 
         // Set up report config lookup
@@ -105,7 +105,7 @@ class ReportExecutionControllerTest {
 
     @Test
     void shouldReturn404WhenReportNotFound() {
-        CollectionDefinition reportsDef = SystemCollectionDefinitions.reports();
+        CollectionDefinition reportsDef = ReportSystemCollections.reports();
         when(collectionRegistry.get("reports")).thenReturn(reportsDef);
         when(queryEngine.getById(eq(reportsDef), eq("nonexistent")))
             .thenReturn(Optional.empty());
@@ -117,7 +117,7 @@ class ReportExecutionControllerTest {
 
     @Test
     void shouldReturn400WhenExecutionFails() {
-        CollectionDefinition reportsDef = SystemCollectionDefinitions.reports();
+        CollectionDefinition reportsDef = ReportSystemCollections.reports();
         when(collectionRegistry.get("reports")).thenReturn(reportsDef);
 
         Map<String, Object> reportConfig = new HashMap<>();
@@ -147,7 +147,7 @@ class ReportExecutionControllerTest {
 
     @Test
     void shouldReturnGroupedDataWhenGroupByIsSet() {
-        CollectionDefinition reportsDef = SystemCollectionDefinitions.reports();
+        CollectionDefinition reportsDef = ReportSystemCollections.reports();
         when(collectionRegistry.get("reports")).thenReturn(reportsDef);
 
         Map<String, Object> reportConfig = new HashMap<>();
@@ -208,7 +208,7 @@ class ReportExecutionControllerTest {
     @Test
     void executeAcceptsManageReportsAsFallback() {
         grantPermission("MANAGE_REPORTS");
-        CollectionDefinition reportsDef = SystemCollectionDefinitions.reports();
+        CollectionDefinition reportsDef = ReportSystemCollections.reports();
         when(collectionRegistry.get("reports")).thenReturn(reportsDef);
         when(queryEngine.getById(eq(reportsDef), eq("report-1"))).thenReturn(Optional.empty());
 

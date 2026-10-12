@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ListViewRendererFieldsTest {
 
     private static FieldDefinition field(String name) {
-        return SystemCollectionDefinitions.listViews().fields().stream()
+        return UiSystemCollections.listViews().fields().stream()
                 .filter(f -> name.equals(f.name()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("list-views has no field \"" + name + "\""));
@@ -56,7 +56,7 @@ class ListViewRendererFieldsTest {
 
     @Test
     void rendererFieldsDoNotDisturbTheExistingColumnSet() {
-        CollectionDefinition listViews = SystemCollectionDefinitions.listViews();
+        CollectionDefinition listViews = UiSystemCollections.listViews();
         List<String> names = listViews.fields().stream().map(FieldDefinition::name).toList();
 
         assertThat(names).contains("collectionId", "name", "visibility", "columns", "filters",

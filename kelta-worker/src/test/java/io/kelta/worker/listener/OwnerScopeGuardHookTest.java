@@ -5,7 +5,10 @@ import io.kelta.runtime.context.CallerContext.UserType;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.OwnerScope;
+import io.kelta.runtime.model.system.CollaborationSystemCollections;
+import io.kelta.runtime.model.system.ConsumerAlertingSystemCollections;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.UiSystemCollections;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.workflow.BeforeSaveResult;
@@ -223,10 +226,10 @@ class OwnerScopeGuardHookTest {
 
     static Stream<Named<CollectionDefinition>> retiredHookShapes() {
         return Stream.of(
-                SystemCollectionDefinitions.watches(),
-                SystemCollectionDefinitions.wins(),
-                SystemCollectionDefinitions.userUiPreferences(),
-                SystemCollectionDefinitions.notes(),
+                ConsumerAlertingSystemCollections.watches(),
+                ConsumerAlertingSystemCollections.wins(),
+                UiSystemCollections.userUiPreferences(),
+                CollaborationSystemCollections.notes(),
                 tenantCreatedByCollection("field-reports"),
                 tenantCreatedByCollection("facility-photos"),
                 tenantCreatedByCollection("facility-comments"))

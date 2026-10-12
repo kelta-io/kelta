@@ -6,7 +6,9 @@ import ch.qos.logback.core.read.ListAppender;
 import io.kelta.runtime.context.RequestAuthentication;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.CoreSystemCollections;
+import io.kelta.runtime.model.system.IntegrationSystemCollections;
+import io.kelta.runtime.model.system.UiSystemCollections;
 import io.kelta.runtime.query.Pagination;
 import io.kelta.runtime.query.QueryRequest;
 
@@ -116,9 +118,9 @@ class PhysicalTableStorageAdapterAnonymousReadTest {
 
     private static List<CollectionDefinition> publicBootstrapCollections() {
         return List.of(
-                SystemCollectionDefinitions.uiPages(),
-                SystemCollectionDefinitions.uiMenus(),
-                SystemCollectionDefinitions.oidcProviders());
+                UiSystemCollections.uiPages(),
+                UiSystemCollections.uiMenus(),
+                IntegrationSystemCollections.oidcProviders());
     }
 
     private static QueryRequest query() {
@@ -157,7 +159,7 @@ class PhysicalTableStorageAdapterAnonymousReadTest {
                     definition.name());
         }
         assertTrue(as(RequestAuthentication.ANONYMOUS,
-                () -> adapter.getById(SystemCollectionDefinitions.tenants(), TENANT_A)).isEmpty());
+                () -> adapter.getById(CoreSystemCollections.tenants(), TENANT_A)).isEmpty());
         assertTrue(executedSql.isEmpty(), "got: " + executedSql);
     }
 
@@ -165,7 +167,7 @@ class PhysicalTableStorageAdapterAnonymousReadTest {
     @DisplayName("anonymous, no tenant: the self-scoped tenants collection lists nothing either")
     void anonymousWithoutTenantListsNoTenants() {
         var result = as(RequestAuthentication.ANONYMOUS,
-                () -> adapter.query(SystemCollectionDefinitions.tenants(), query()));
+                () -> adapter.query(CoreSystemCollections.tenants(), query()));
 
         assertEquals(0, result.data().size());
     }
@@ -189,7 +191,7 @@ class PhysicalTableStorageAdapterAnonymousReadTest {
     void schedulerThreadStillReadsUnscoped() throws Exception {
         AtomicReference<Integer> rows = new AtomicReference<>();
         Thread scheduler = new Thread(
-                () -> rows.set(adapter.query(SystemCollectionDefinitions.uiPages(), query()).data().size()),
+                () -> rows.set(adapter.query(UiSystemCollections.uiPages(), query()).data().size()),
                 "scheduler-1");
         scheduler.start();
         scheduler.join();
@@ -203,7 +205,7 @@ class PhysicalTableStorageAdapterAnonymousReadTest {
     @DisplayName("platform-scoped (MANAGE_TENANTS) read of tenants with no tenant: every row, DEBUG not WARN")
     void platformScopedTenantsReadLogsAtDebug() {
         var result = as(RequestAuthentication.PLATFORM_SCOPED,
-                () -> adapter.query(SystemCollectionDefinitions.tenants(), query()));
+                () -> adapter.query(CoreSystemCollections.tenants(), query()));
 
         assertEquals(2, result.data().size());
         assertTrue(logAppender.list.stream().anyMatch(e -> e.getLevel() == Level.DEBUG
@@ -216,7 +218,7 @@ class PhysicalTableStorageAdapterAnonymousReadTest {
     @DisplayName("authenticated but not platform-scoped, no tenant: unchanged — unscoped, and WARNs")
     void authenticatedWithoutTenantStillWarns() {
         var result = as(RequestAuthentication.AUTHENTICATED,
-                () -> adapter.query(SystemCollectionDefinitions.uiPages(), query()));
+                () -> adapter.query(UiSystemCollections.uiPages(), query()));
 
         assertEquals(2, result.data().size());
         assertTrue(logged(Level.WARN), "got: " + logAppender.list);

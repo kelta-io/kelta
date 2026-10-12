@@ -1,7 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.model.CollectionDefinition;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.ReportSystemCollections;
 import io.kelta.runtime.query.*;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.workflow.BeforeSaveResult;
@@ -89,7 +89,7 @@ class DashboardDataControllerTest {
         QueryResult componentsResult = QueryResult.of(components, 2L, new Pagination(1, 100));
 
         // First getById for dashboard, then executeQuery for components
-        CollectionDefinition componentsDef = SystemCollectionDefinitions.dashboardComponents();
+        CollectionDefinition componentsDef = ReportSystemCollections.dashboardComponents();
         when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
         when(queryEngine.executeQuery(eq(componentsDef), any())).thenReturn(componentsResult);
 
@@ -146,7 +146,7 @@ class DashboardDataControllerTest {
         when(queryEngine.getById(any(), eq("dash-2")))
             .thenReturn(Optional.of(dashboard));
 
-        CollectionDefinition componentsDef = SystemCollectionDefinitions.dashboardComponents();
+        CollectionDefinition componentsDef = ReportSystemCollections.dashboardComponents();
         when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
         when(queryEngine.executeQuery(eq(componentsDef), any()))
             .thenReturn(QueryResult.empty(new Pagination(1, 100)));
@@ -172,7 +172,7 @@ class DashboardDataControllerTest {
         List<Map<String, Object>> components = List.of(
             Map.of("id", "comp-err", "componentType", "metric", "dashboardId", "dash-3",
                    "sortOrder", 1, "config", Map.of()));
-        CollectionDefinition componentsDef = SystemCollectionDefinitions.dashboardComponents();
+        CollectionDefinition componentsDef = ReportSystemCollections.dashboardComponents();
         when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
         when(queryEngine.executeQuery(eq(componentsDef), any()))
             .thenReturn(QueryResult.of(components, 1L, new Pagination(1, 100)));
@@ -196,7 +196,7 @@ class DashboardDataControllerTest {
 
     @Test
     void shouldExecuteSingleComponent() {
-        CollectionDefinition componentsDef = SystemCollectionDefinitions.dashboardComponents();
+        CollectionDefinition componentsDef = ReportSystemCollections.dashboardComponents();
         when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
 
         Map<String, Object> component = new HashMap<>();
@@ -224,7 +224,7 @@ class DashboardDataControllerTest {
 
     @Test
     void shouldReturn404WhenComponentNotFound() {
-        CollectionDefinition componentsDef = SystemCollectionDefinitions.dashboardComponents();
+        CollectionDefinition componentsDef = ReportSystemCollections.dashboardComponents();
         when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
         when(queryEngine.getById(eq(componentsDef), eq("nonexistent")))
             .thenReturn(Optional.empty());
@@ -237,7 +237,7 @@ class DashboardDataControllerTest {
 
     @Test
     void shouldReturn404WhenComponentBelongsToDifferentDashboard() {
-        CollectionDefinition componentsDef = SystemCollectionDefinitions.dashboardComponents();
+        CollectionDefinition componentsDef = ReportSystemCollections.dashboardComponents();
         when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
 
         Map<String, Object> component = new HashMap<>();
@@ -254,7 +254,7 @@ class DashboardDataControllerTest {
 
     @Test
     void shouldReturn400WhenWidgetExecutionFails() {
-        CollectionDefinition componentsDef = SystemCollectionDefinitions.dashboardComponents();
+        CollectionDefinition componentsDef = ReportSystemCollections.dashboardComponents();
         when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
 
         Map<String, Object> component = new HashMap<>();
@@ -289,7 +289,7 @@ class DashboardDataControllerTest {
 
     @Test
     void validateReportsValidWhenNoErrors() {
-        CollectionDefinition componentsDef = SystemCollectionDefinitions.dashboardComponents();
+        CollectionDefinition componentsDef = ReportSystemCollections.dashboardComponents();
         when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
 
         Map<String, Object> component = new HashMap<>();
@@ -415,7 +415,7 @@ class DashboardDataControllerTest {
     // =========================================================================
 
     private void setupDashboardRegistry() {
-        CollectionDefinition dashboardsDef = SystemCollectionDefinitions.dashboards();
+        CollectionDefinition dashboardsDef = ReportSystemCollections.dashboards();
         when(collectionRegistry.get("dashboards")).thenReturn(dashboardsDef);
     }
 }

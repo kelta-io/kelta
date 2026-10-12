@@ -365,7 +365,6 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 
 | File | Lines | Proposed fix |
 |------|------:|--------------|
-| `SystemCollectionDefinitions.java` (runtime-core) | 3,537 | Move to JSON/YAML config loaded at startup |
 | `PhysicalTableStorageAdapter.java` (runtime-core) | 2,423 | Extract SQL builder / DDL classes; separate concerns |
 | `CollectionDetailPage.tsx` (kelta-ui) | 2,208 | Split tabs into their own components |
 | `DynamicCollectionRouter.java` (runtime-core) | 2,043 | Extract RouteResolutionHandler, InclusionHandler, FieldMapperHandler |
@@ -373,6 +372,14 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 | `PageBuilderPage.tsx` (kelta-ui) | 1,474 | Extract page-list table, config modal, editor shell |
 | `RuntimeModuleManager.java` (kelta-worker) | 1,300 | Split JAR loading / registration / lifecycle |
 | `SchemaMigrationEngine.java` (runtime-core) | 1,106 | Split non-destructive vs destructive paths |
+
+**Resolved:** `SystemCollectionDefinitions.java` (runtime-core, ~3,400 lines and the repo's
+biggest merge hotspot) was split 2026-10-12 into one class per section (`CoreSystemCollections`,
+`UiSystemCollections`, `AutomationSystemCollections`, `AuditLogSystemCollections`, … — 17 in
+`model/system/`, largest ~390 lines) plus package-private `SystemCollectionBuilders`.
+`SystemCollectionDefinitions` keeps only `all()` / `byName()` / `SYSTEM_TENANT_ID`.
+Two parallel slices adding system collections now usually touch different section files and
+only collide on the `all()` list.
 
 **Other:**
 - **Stale `KELTA_BILLING` JetStream stream.** Compiled-in billing is gone (module-platform slice 8),

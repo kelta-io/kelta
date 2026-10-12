@@ -1,7 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.model.CollectionDefinition;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.ConsumerAlertingSystemCollections;
 import io.kelta.runtime.query.Pagination;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.query.QueryRequest;
@@ -70,7 +70,7 @@ class WinControllerSupportModeMvcTest {
         UserIdResolver userIdResolver = mock(UserIdResolver.class);
         when(userIdResolver.resolve(anyString(), any())).thenAnswer(i -> i.getArgument(0));
 
-        CollectionDefinition winsDefinition = SystemCollectionDefinitions.wins();
+        CollectionDefinition winsDefinition = ConsumerAlertingSystemCollections.wins();
         CollectionRegistry registry = mock(CollectionRegistry.class);
         when(registry.get(WinController.COLLECTION)).thenReturn(winsDefinition);
 

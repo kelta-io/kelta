@@ -66,7 +66,7 @@ class SystemCollectionDefinitionsTest {
     @Test
     @DisplayName("Should define tenants collection correctly")
     void shouldDefineTenants() {
-        CollectionDefinition tenants = SystemCollectionDefinitions.tenants();
+        CollectionDefinition tenants = CoreSystemCollections.tenants();
         assertNotNull(tenants);
         assertEquals("tenants", tenants.name());
         assertEquals("Tenants", tenants.displayName());
@@ -76,7 +76,7 @@ class SystemCollectionDefinitionsTest {
     @Test
     @DisplayName("Should define users collection correctly")
     void shouldDefineUsers() {
-        CollectionDefinition users = SystemCollectionDefinitions.users();
+        CollectionDefinition users = CoreSystemCollections.users();
         assertNotNull(users);
         assertEquals("users", users.name());
         assertEquals("Users", users.displayName());
@@ -99,7 +99,7 @@ class SystemCollectionDefinitionsTest {
     @Test
     @DisplayName("Should define fields with correct types in users collection")
     void shouldDefineFieldsWithCorrectTypes() {
-        CollectionDefinition users = SystemCollectionDefinitions.users();
+        CollectionDefinition users = CoreSystemCollections.users();
         assertNotNull(users.fields());
         assertFalse(users.fields().isEmpty());
         // Users should have fields like email, status, etc.
@@ -110,7 +110,7 @@ class SystemCollectionDefinitionsTest {
     @Test
     @DisplayName("Should default layout-fields columnNumber to 0 (0-based columns)")
     void shouldDefaultLayoutFieldColumnNumberToZero() {
-        CollectionDefinition layoutFields = SystemCollectionDefinitions.layoutFields();
+        CollectionDefinition layoutFields = UiSystemCollections.layoutFields();
         FieldDefinition columnNumber = layoutFields.fields().stream()
                 .filter(f -> "columnNumber".equals(f.name()))
                 .findFirst()
@@ -121,7 +121,7 @@ class SystemCollectionDefinitionsTest {
     @Test
     @DisplayName("Should make dashboard-components.reportId an optional LOOKUP (KLT-213)")
     void shouldMakeDashboardComponentReportIdOptionalLookup() {
-        CollectionDefinition dashboardComponents = SystemCollectionDefinitions.dashboardComponents();
+        CollectionDefinition dashboardComponents = ReportSystemCollections.dashboardComponents();
         FieldDefinition reportId = dashboardComponents.getField("reportId");
         assertNotNull(reportId);
         assertEquals(FieldType.LOOKUP, reportId.type());

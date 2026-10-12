@@ -43,7 +43,7 @@ class SystemCollectionJsonDefaultsTest {
 
     @Test
     void listViewFiltersDefaultsToEmptyJsonArray() {
-        CollectionDefinition listViews = SystemCollectionDefinitions.listViews();
+        CollectionDefinition listViews = UiSystemCollections.listViews();
         FieldDefinition filters = listViews.fields().stream()
                 .filter(f -> "filters".equals(f.name()))
                 .findFirst()

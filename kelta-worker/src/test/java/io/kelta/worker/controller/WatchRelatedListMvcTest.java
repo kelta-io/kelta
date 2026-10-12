@@ -2,7 +2,7 @@ package io.kelta.worker.controller;
 
 import tools.jackson.databind.ObjectMapper;
 import io.kelta.runtime.model.CollectionDefinition;
-import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.model.system.ConsumerAlertingSystemCollections;
 import io.kelta.runtime.query.Pagination;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.query.QueryRequest;
@@ -68,7 +68,7 @@ class WatchRelatedListMvcTest {
         when(userIdResolver.resolve(anyString(), any())).thenAnswer(i -> i.getArgument(0));
         EntitlementService entitlements = mock(EntitlementService.class);
 
-        CollectionDefinition watches = SystemCollectionDefinitions.watches();
+        CollectionDefinition watches = ConsumerAlertingSystemCollections.watches();
         CollectionRegistry registry = mock(CollectionRegistry.class);
         when(registry.get(WatchController.COLLECTION)).thenReturn(watches);
         when(registry.get(WatchController.TARGET_COLLECTION)).thenReturn(mock(CollectionDefinition.class));
