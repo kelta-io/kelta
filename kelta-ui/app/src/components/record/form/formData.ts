@@ -1,5 +1,5 @@
 /**
- * Pure form-state helpers for ObjectFormPage: initial form data from a record
+ * Pure form-state helpers for the record form (`RecordForm`): initial form data from a record
  * (or defaults for a new one) and the reverse mapping back to a JSON:API
  * attributes payload on save.
  */
@@ -14,7 +14,7 @@ export function computeInitialFormData(
   isNew: boolean,
   record: Record<string, unknown> | undefined,
   fields: FieldDefinition[],
-  queryDefaults?: Record<string, string>
+  queryDefaults?: Record<string, unknown>
 ): Record<string, unknown> {
   if (!isNew && record) {
     const data: Record<string, unknown> = { ...record }

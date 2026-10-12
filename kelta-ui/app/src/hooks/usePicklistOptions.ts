@@ -7,7 +7,8 @@
  * `fieldTypeConfig` may arrive as a parsed object OR a JSON string; `globalPicklistId` (or the
  * legacy pre-#1222 `picklistSourceId` + `picklistSourceType: 'GLOBAL'` dialect) → `GLOBAL` source,
  * else the field id → `FIELD`. Active values are kept and sorted by `sortOrder`. Errors fall back
- * to an empty list. `ObjectFormPage`/`ResourceFormPage` share `resolvePicklistSource` directly.
+ * to an empty list. The record form core (`useRecordFormModel`) and `ResourceFormPage` share
+ * `resolvePicklistSource` directly.
  */
 import { useMemo } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
