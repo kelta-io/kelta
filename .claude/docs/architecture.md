@@ -670,9 +670,9 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   One property genuinely weakened: the compiled-in path claimed each event id in the same
   transaction as the mutation, so a failure rolled the claim back and the retry re-ran. A module
   writes through `QueryEngine` with no transaction of its own, so it **converges on redelivery**
-  instead. Admin authoring of plans and rules happens on the module's own collections; the V178
-  `billing-plans`/`billing-entitlement-rules` system collections (gated by **`MANAGE_BILLING`**)
-  remain only until their tables are dropped and drive nothing.
+  instead. Admin authoring of plans and rules happens on the module's own collections (the
+  module declares **`MANAGE_BILLING`**); the V178 `billing-*` system collections and tables were
+  dropped by V209.
 - **Entitlements** (module-platform slice 8, 2026-10-11): platform code that gates on a member's
   plan (`WatchController`, `AlertDispatchService`) injects the worker's `EntitlementService`,
   whose only implementation, `ModuleEntitlementService`, calls the tenant's module-published

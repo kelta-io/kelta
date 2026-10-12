@@ -421,9 +421,8 @@ records a FAILED delivery.
 > **Billing is the `kelta-billing` runtime module only** (`kelta-modules/billing`, see its
 > README). The worker's compiled-in copy was removed on 2026-10-11 (module-platform slice 8).
 > The module keeps its data in its own collections (`billing_plans`, `billing_customers`,
-> `billing_subscriptions`, `billing_passes`, `billing_entitlement_rules`); the V178
-> `billing_*` platform tables and `billing-*` system collections are inert leftovers awaiting a
-> drop. Platform code reads entitlements through `ModuleEntitlementService`: the tenant's module
+> `billing_subscriptions`, `billing_passes`, `billing_entitlement_rules`); the V178 platform
+> tables and their `billing-*` system collections were dropped by V209. Platform code reads entitlements through `ModuleEntitlementService`: the tenant's module
 > `EntitlementProvider`, else `MemberEntitlements.EMPTY` (see **Entitlements** below).
 
 A tenant sells plans to its **PORTAL** members. Stripe owns money, tax, invoicing, and
@@ -517,8 +516,7 @@ that has not configured origins cannot redirect anywhere rather than anywhere at
 **Quota enforcement.** The module's `billing_entitlement_rules` rows say "records in collection
 X are capped by entitlement key Y", and the module's wildcard before-save hook enforces them, so
 capping a new collection is configuration rather than code. It **skips `appliesTo=PORTAL`
-rules** (a module cannot read the caller's user type) — use `appliesTo=ALL`. Rows in the legacy
-`billing-entitlement-rules` system collection enforce nothing. A rule's optional `countFilter` narrows what
+rules** (a module cannot read the caller's user type) — use `appliesTo=ALL`. A rule's optional `countFilter` narrows what
 counts (e.g. only ACTIVE rows); its field names are validated against the collection definition
 and its values bound as parameters. At the limit the create is rejected with **HTTP 400**
 (JSON:API code `beforeSaveHook`) carrying an upgrade-oriented message. Enforcement **fails
