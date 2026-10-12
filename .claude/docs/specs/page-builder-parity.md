@@ -83,7 +83,7 @@ Use these — do not rebuild.
 |------|-------|------|
 | Expression evaluation | `FormulaEvaluator.evaluate(expr, flatScope)`, `extractFieldRefs` | `kelta-web/packages/formula/src/` |
 | Bound data table | `DataTable` (resourceName, columns, filters, pagination) | `kelta-web/packages/components/src/` |
-| Typed create/edit form | `ResourceForm` (schema-driven, Zod, typed inputs, field authz) | `kelta-web/packages/components/src/` |
+| Typed create/edit form | `RecordForm` (`presentation="embedded"`: schema + layout, `fieldControl` inputs, permissions, client validation, `If-Match`) — **not** `ResourceForm`, which needs a `KeltaProvider` the app does not mount | `kelta-ui/app/src/components/record/form/` |
 | Responsive layout chrome | `PageLayout`/`*ColumnLayout`, `ResponsiveBreakpoints`, `RuleEngine`/`useLayoutRules` | `kelta-web/packages/components/src/` |
 | Read-only bound value + 21 field types | `FieldRenderer` (plugin-overridable) | `kelta-ui/app/src/components/FieldRenderer/` |
 | Expression/field picker (literal↔expr) | `FieldExpressionPicker` (FieldsTab + FunctionsTab, StaticNamespace roots, emits dot-paths/fn stubs) | `kelta-ui/app/src/components/FieldExpressionPicker/` |
@@ -182,7 +182,7 @@ New dir `kelta-ui/app/src/pages/PageBuilderPage/widgets/`:
   - Content: `heading`, `text`, `image`, `icon`, `link`, `button`.
   - Data: `table` (→ `DataTable`), `list`/`repeater` (binds an array source, renders children per
     `item`), `field-value` (→ `FieldRenderer`), `chart` (→ `recharts`).
-  - Input: `form` (→ `ResourceForm`; **category `input`** — fixed in 2a, not moved later), `text-input`,
+  - Input: `form` (→ embedded `RecordForm`; **category `input`** — fixed in 2a, not moved later), `text-input`,
     `number-input`, `checkbox`, `dropdown` (picklist via schema), `datepicker`, `lookup` (→ `LookupSelect`),
     `multi-picklist` (→ `MultiPicklistSelect`), `rich-text` (→ `RichTextEditor`).
   - Navigation: `nav` (→ `Navigation`), `tabs` (→ radix).
@@ -365,7 +365,7 @@ Backend keystone first (zero FE dependency, additive); FE slices build on the re
   `/api/flows/{id}/execute` + optional poll reading `data.id`; `navigate`/`openUrl` with **URL scheme
   allow-list**; `refreshData`/`setVar`/`showToast`; `createRecord`/`updateRecord` → JSON:API). **Owns the
   post-deploy `page-builder-v2.spec.ts` e2e** (asserts a mutation, not just render).
-- **2f — Typed form widgets** (FE). `form` → `ResourceForm`; standalone typed inputs (`dropdown`,
+- **2f — Typed form widgets** (FE). `form` → `ResourceForm` (since replaced by the embedded `RecordForm` — see the 2f spec banner); standalone typed inputs (`dropdown`,
   `datepicker`, `checkbox`, `number-input`, `lookup`, `multi-picklist`) from `useCollectionSchema` +
   picklist endpoint. `rich-text` output sanitized. Replaces text-only `FormNode`.
 - **2g — Widget breadth** (FE). `chart`, `tabs`, `nav`, `icon`, `link` (+`image`) — `link.href`/`image.src`

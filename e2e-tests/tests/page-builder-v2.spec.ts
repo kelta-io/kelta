@@ -101,4 +101,99 @@ test.describe("Page Builder v2 — events & actions", () => {
       )
       .toBe(1);
   });
+
+  test("a form widget creates a record on the runtime page and runs onSubmit", async ({
+    page,
+    dataFactory,
+    tenantSlug,
+    apiBaseUrl,
+  }) => {
+    // The form widget embeds the app's RecordForm. It used to mount a library form that
+    // needed a provider the app never mounts, so any page with a form crashed to the error
+    // screen — this pins that the form renders, saves, and stays on the page.
+    const collection = await dataFactory.createCollection();
+    const collectionName = collection.attributes.name as string;
+    await dataFactory.addField(collection.id, {
+      name: "status",
+      displayName: "Status",
+      type: "string",
+    });
+    await dataFactory.waitForStorageReady(collectionName);
+
+    const marker = `e2e-form-${Date.now()}`;
+    const uiPage = await dataFactory.createResource("ui-pages", {
+      name: `E2E Form ${marker}`,
+      slug: marker,
+      path: `/${marker}`,
+      title: `E2E Form ${marker}`,
+      published: true,
+      config: {
+        schemaVersion: 2,
+        layout: { kind: "grid" },
+        components: [
+          {
+            id: "order-form",
+            type: "form",
+            props: {
+              dataView: { collection: collectionName },
+              mode: "create",
+              readOnly: false,
+            },
+            events: {
+              // The saved record is `record` in the onSubmit scope.
+              onSubmit: [
+                {
+                  action: "showToast",
+                  level: "info",
+                  message: { $bind: "record.status" },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    const pageSlug = uiPage.attributes.slug as string;
+
+    await page.goto(`/${tenantSlug}/app/p/${pageSlug}`);
+    const status = page.getByTestId("field-status");
+    await expect(status).toBeVisible();
+    await expect(page.getByTestId("error-boundary-fallback")).toHaveCount(0);
+
+    await status.fill(marker);
+    const created = page.waitForResponse(
+      (resp) =>
+        resp.request().method() === "POST" &&
+        new URL(resp.url()).pathname.endsWith(`/api/${collectionName}`),
+    );
+    await page.getByTestId("save-button").click();
+    const createResponse = await created;
+    expect(
+      createResponse.ok(),
+      `form create POST returned ${createResponse.status()}`,
+    ).toBe(true);
+
+    // onSubmit ran with the saved record; the form stayed on the page, reset for the next entry.
+    await expect(page.getByText(marker, { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/app/p/${pageSlug}$`));
+    await expect(status).toHaveValue("");
+
+    const api = tenantApi({ apiBaseUrl, tenantSlug });
+    await expect
+      .poll(
+        async () => {
+          const list = await api<{
+            data?: { attributes?: Record<string, unknown> }[];
+          }>("GET", `/api/${collectionName}?page[size]=50`);
+          return (list.body?.data ?? []).filter(
+            (r) => r.attributes?.status === marker,
+          ).length;
+        },
+        {
+          timeout: 15_000,
+          message: "expected the form widget to persist a record",
+        },
+      )
+      .toBe(1);
+  });
 });

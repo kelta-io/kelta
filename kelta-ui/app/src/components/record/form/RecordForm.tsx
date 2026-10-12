@@ -25,10 +25,14 @@
  * reloads). P6 converged the admin form onto it: clone (`cloneFromId` — a create
  * seeded from an existing record), the record-load error state, the success
  * toast, the empty-schema disabled Save, and the `banner` / `showFieldTypeHints`
- * chrome. See `.claude/docs/conventions.md` → Component reuse.
+ * chrome. P7 made it embeddable (`presentation="embedded"`, the page-builder `form`
+ * widget): no page padding or `h1`, no Cancel, never navigates — `onSaved` gets the
+ * saved record, then a create resets to a blank form and an edit re-reads the record
+ * (fresh values + ETag) — plus `readOnly` and a `fieldNames` subset (both also usable
+ * on a page). See `.claude/docs/conventions.md` → Component reuse.
  */
 
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Save, X, Loader2, AlertCircle } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -43,6 +47,7 @@ import { useI18n } from '@/context/I18nContext'
 import { InsufficientPrivileges } from '@/components/InsufficientPrivileges'
 import { RecordConflictDialog } from '@/components/record/RecordConflictDialog'
 import { RecordStackProvider } from '@/context/RecordStackContext'
+import type { CollectionRecord } from '@/hooks/useCollectionRecords'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { PageLayoutDto } from '@/hooks/usePageLayout'
 import type { RecordType } from '@/types/collections'
@@ -76,7 +81,13 @@ function renderSlot(slot: ChromeSlot | undefined, ctx: RecordFormChromeContext):
   return typeof slot === 'function' ? slot(ctx) : slot
 }
 
-export interface RecordFormProps {
+/** Called after an embedded form saves, with the saved record as the API returned it. */
+export type RecordFormSavedHandler = (
+  record: CollectionRecord | undefined,
+  context: { isNew: boolean }
+) => void
+
+interface RecordFormCommonProps {
   /** Which stack renders this form. Exposed as `data-variant` and provided as the record
    *  stack (`RecordStackProvider`) to the form body; the slots drive the chrome. */
   variant?: RecordFormVariant
@@ -84,8 +95,16 @@ export interface RecordFormProps {
   collectionName: string
   /** Record being edited; absent = create. */
   recordId?: string
-  /** Navigation targets — the form never builds URLs itself. */
-  routes: RecordFormRoutes
+  /**
+   * Show the record without letting it be edited: every field read-only, no Save. Gated on
+   * read permission instead of create/edit.
+   */
+  readOnly?: boolean
+  /**
+   * Render only these fields, in this order (unknown names are skipped; empty = every field).
+   * The page layout is not used when a subset is given — its sections would not match it.
+   */
+  fieldNames?: string[]
   /** Initial values for a NEW record (only keys naming a schema field apply). */
   prefill?: Record<string, unknown>
   /**
@@ -108,8 +127,44 @@ export interface RecordFormProps {
   testId?: string
 }
 
+/** A full-page form: navigates via `routes` after save, on cancel and from the error states. */
+interface RecordFormPageProps extends RecordFormCommonProps {
+  presentation?: 'page'
+  /** Navigation targets — the form never builds URLs itself. */
+  routes: RecordFormRoutes
+  onSaved?: never
+}
+
+/**
+ * A form embedded in another surface (the page-builder `form` widget): no page padding, an `h2`
+ * title, no Cancel, and it never navigates. After a save it calls `onSaved`, then a create resets
+ * to a blank form and an edit re-reads the record (its saved values and new ETag).
+ */
+interface RecordFormEmbeddedProps extends RecordFormCommonProps {
+  presentation: 'embedded'
+  routes?: never
+  onSaved?: RecordFormSavedHandler
+}
+
+export type RecordFormProps = RecordFormPageProps | RecordFormEmbeddedProps
+
+/** No field is editable (`readOnly`). */
+const NEVER_EDITABLE = (): boolean => false
+
+/** The `fieldNames` subset of `fields`, in `fieldNames` order; every field when none are named. */
+function selectFormFields(fields: FieldDefinition[], fieldNames?: string[]): FieldDefinition[] {
+  if (!fieldNames || fieldNames.length === 0) return fields
+  const byName = new Map(fields.map((field) => [field.name, field]))
+  return fieldNames.flatMap((name) => {
+    const field = byName.get(name)
+    return field ? [field] : []
+  })
+}
+
 interface RecordFormBodyProps {
   variant: RecordFormVariant
+  embedded: boolean
+  readOnly: boolean
   isNew: boolean
   isClone: boolean
   initialData: Record<string, unknown>
@@ -117,8 +172,11 @@ interface RecordFormBodyProps {
   collectionName: string
   collectionLabel: string
   recordId?: string
-  routes: RecordFormRoutes
-  onCancel: () => void
+  routes?: RecordFormRoutes
+  /** Embedded forms: replaces navigation after a save. */
+  onSaved?: (saved: CollectionRecord | undefined) => void
+  /** Absent = no Cancel button (embedded forms). */
+  onCancel?: () => void
   breadcrumb?: ChromeSlot
   banner?: ChromeSlot
   headerExtras?: React.ReactNode
@@ -149,6 +207,8 @@ interface RecordFormBodyProps {
  */
 function RecordFormBody({
   variant,
+  embedded,
+  readOnly,
   isNew,
   isClone,
   initialData,
@@ -157,6 +217,7 @@ function RecordFormBody({
   collectionLabel,
   recordId,
   routes,
+  onSaved,
   onCancel,
   breadcrumb,
   banner,
@@ -192,6 +253,7 @@ function RecordFormBody({
     collectionName,
     recordId,
     routes,
+    onSaved,
     isFieldEditable,
     layout,
     selectedRecordTypeId,
@@ -210,53 +272,70 @@ function RecordFormBody({
     }
   }, [onReload])
 
-  const pageTitle = isClone
-    ? t('recordForm.cloneTitle', { collection: collectionLabel })
-    : isNew
-      ? t('recordForm.newTitle', { collection: collectionLabel })
-      : t('recordForm.editTitle', { collection: collectionLabel })
+  const pageTitle = readOnly
+    ? collectionLabel
+    : isClone
+      ? t('recordForm.cloneTitle', { collection: collectionLabel })
+      : isNew
+        ? t('recordForm.newTitle', { collection: collectionLabel })
+        : t('recordForm.editTitle', { collection: collectionLabel })
+  // Embedded in a page that has its own h1: the form's title is a section heading.
+  const TitleTag = embedded ? 'h2' : 'h1'
   const chromeContext: RecordFormChromeContext = { collectionLabel, isNew, isClone }
   // Nothing to save on a collection without a single form field.
   const nothingToSave = displayFields.length === 0
 
   return (
-    <div className="space-y-4 p-6" data-testid={testId} data-variant={variant}>
+    <div
+      className={embedded ? 'space-y-4' : 'space-y-4 p-6'}
+      data-testid={testId}
+      data-variant={variant}
+      data-presentation={embedded ? 'embedded' : 'page'}
+    >
       {/* Breadcrumb */}
       {renderSlot(breadcrumb, chromeContext)}
 
       {/* Form header */}
       <div className="flex items-center justify-between">
-        <h1
-          className="text-xl font-semibold tracking-tight text-foreground"
-          data-testid="page-title"
+        <TitleTag
+          className={
+            embedded
+              ? 'text-base font-semibold text-foreground'
+              : 'text-xl font-semibold tracking-tight text-foreground'
+          }
+          data-testid={embedded ? 'record-form-title' : 'page-title'}
         >
           {pageTitle}
-        </h1>
+        </TitleTag>
         <div className="flex items-center gap-2">
           {headerExtras}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onCancel}
-            disabled={isSaving}
-            data-testid="cancel-button"
-          >
-            <X className="mr-1.5 h-3.5 w-3.5" />
-            {t('common.cancel')}
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={isSaving || nothingToSave}
-            data-testid="save-button"
-          >
-            {isSaving ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Save className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            {isSaving ? t('common.saving') : t('common.save')}
-          </Button>
+          {onCancel && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onCancel}
+              disabled={isSaving}
+              data-testid="cancel-button"
+            >
+              <X className="mr-1.5 h-3.5 w-3.5" />
+              {t('common.cancel')}
+            </Button>
+          )}
+          {!readOnly && (
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={isSaving || nothingToSave}
+              data-testid="save-button"
+            >
+              {isSaving ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {isSaving ? t('common.saving') : t('common.save')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -366,19 +445,24 @@ function RecordFormBody({
   )
 }
 
-export function RecordForm({
-  variant = 'enduser',
-  collectionName,
-  recordId,
-  routes,
-  prefill,
-  cloneFromId,
-  breadcrumb,
-  banner,
-  headerExtras,
-  showFieldTypeHints = false,
-  testId,
-}: RecordFormProps): React.ReactElement {
+export function RecordForm(props: RecordFormProps): React.ReactElement {
+  const {
+    variant = 'enduser',
+    collectionName,
+    recordId,
+    routes,
+    onSaved,
+    readOnly = false,
+    fieldNames,
+    prefill,
+    cloneFromId,
+    breadcrumb,
+    banner,
+    headerExtras,
+    showFieldTypeHints = false,
+    testId,
+  } = props
+  const embedded = props.presentation === 'embedded'
   const navigate = useNavigate()
   const { t } = useI18n()
   const {
@@ -402,14 +486,33 @@ export function RecordForm({
     reload,
   } = useRecordFormModel({ collectionName, recordId, prefill, cloneFromId })
 
-  // Handle cancel (also used by the error state)
+  const formFields = useMemo(() => selectFormFields(fields, fieldNames), [fields, fieldNames])
+
+  // Handle cancel (also used by the error state). Embedded forms have no routes: no Cancel.
   const handleCancel = useCallback(() => {
+    if (!routes) return
     if (recordId) {
       navigate(routes.detail(recordId))
     } else {
       navigate(routes.list)
     }
   }, [navigate, routes, recordId])
+
+  // Embedded: stay on the surface after a save. `resetCount` re-keys the body so a create
+  // starts the next entry blank; an edit re-reads the record so the next save carries the
+  // new ETag instead of tripping the stale-write check.
+  const [resetCount, setResetCount] = useState(0)
+  const handleEmbeddedSaved = useCallback(
+    (saved: CollectionRecord | undefined) => {
+      onSaved?.(saved, { isNew })
+      if (isNew) {
+        setResetCount((count) => count + 1)
+      } else {
+        void reload()
+      }
+    },
+    [onSaved, isNew, reload]
+  )
 
   // Loading state
   if (isLoading) {
@@ -425,14 +528,27 @@ export function RecordForm({
     )
   }
 
-  // Permission check: canCreate for new, canEdit for edit
-  const requiredPermission = isNew ? permissions.canCreate : permissions.canEdit
+  // Permission check: canRead when read-only, else canCreate for new, canEdit for edit
+  const requiredPermission = readOnly
+    ? permissions.canRead
+    : isNew
+      ? permissions.canCreate
+      : permissions.canEdit
   if (!requiredPermission) {
+    if (embedded) {
+      // No full-page gate (its Go back would navigate away from the host page).
+      return (
+        <Alert variant="destructive" data-testid="record-form-forbidden">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{t('errors.forbidden')}</AlertDescription>
+        </Alert>
+      )
+    }
     return (
       <InsufficientPrivileges
-        action={isNew ? 'create' : 'edit'}
+        action={readOnly ? 'view' : isNew ? 'create' : 'edit'}
         resource={collectionLabel}
-        backPath={recordId ? routes.detail(recordId) : routes.list}
+        backPath={routes && (recordId ? routes.detail(recordId) : routes.list)}
       />
     )
   }
@@ -440,7 +556,7 @@ export function RecordForm({
   // Error state: the schema, or the record being edited / cloned, could not be loaded
   if (schemaError || recordError) {
     return (
-      <div className="space-y-4 p-6" data-testid="record-form-error">
+      <div className={embedded ? 'space-y-4' : 'space-y-4 p-6'} data-testid="record-form-error">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>{t('common.error')}</AlertTitle>
@@ -450,9 +566,11 @@ export function RecordForm({
               : t('recordForm.recordLoadError')}
           </AlertDescription>
         </Alert>
-        <Button variant="outline" onClick={handleCancel}>
-          {t('recordForm.goBack')}
-        </Button>
+        {routes && (
+          <Button variant="outline" onClick={handleCancel}>
+            {t('recordForm.goBack')}
+          </Button>
+        )}
       </div>
     )
   }
@@ -460,24 +578,27 @@ export function RecordForm({
   return (
     <RecordStackProvider variant={variant}>
       <RecordFormBody
-        key={formKey}
+        key={`${formKey}:${resetCount}`}
         variant={variant}
+        embedded={embedded}
+        readOnly={readOnly}
         isNew={isNew}
         isClone={isClone}
         initialData={initialData}
-        fields={fields}
+        fields={formFields}
         collectionName={collectionName}
         collectionLabel={collectionLabel}
         recordId={recordId}
         routes={routes}
-        onCancel={handleCancel}
+        onSaved={embedded ? handleEmbeddedSaved : undefined}
+        onCancel={routes ? handleCancel : undefined}
         breadcrumb={breadcrumb}
         banner={banner}
         headerExtras={headerExtras}
         showFieldTypeHints={showFieldTypeHints}
         testId={testId}
-        isFieldEditable={isFieldEditable}
-        layout={layout}
+        isFieldEditable={readOnly ? NEVER_EDITABLE : isFieldEditable}
+        layout={fieldNames && fieldNames.length > 0 ? null : layout}
         recordTypes={recordTypes}
         selectedRecordTypeId={selectedRecordTypeId}
         onRecordTypeChange={setSelectedRecordTypeId}

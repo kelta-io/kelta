@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/context/I18nContext'
+import { ToastProvider } from '@/components/Toast'
 import { OfflineProvider, InMemoryOfflineStore } from '@/offline'
 import { CustomPage } from './CustomPage'
 import { componentRegistry } from '@/services/componentRegistry'
@@ -25,15 +26,23 @@ vi.mock('@/context/ApiContext', () => ({
   })),
 }))
 
-// The `form` widget renders @kelta/components' ResourceForm, which needs a KeltaProvider + SDK client.
-// CustomPage tests only assert tree wiring, so we stub ResourceForm to a marker exposing resourceName.
-// The full typed-submit flow is covered in widgets/builtins/form.test.tsx.
-vi.mock('@kelta/components', () => ({
-  ResourceForm: ({ resourceName }: { resourceName: string }) => (
-    <div data-testid="resource-form" data-resource={resourceName} />
+// The `form` widget embeds the shared RecordForm, which needs the shell's auth/toast/plugin providers.
+// CustomPage tests only assert tree wiring, so we stub RecordForm to a marker exposing its collection.
+// The real create/edit flow is covered in widgets/builtins/form.test.tsx.
+vi.mock('@/components/record/form/RecordForm', () => ({
+  RecordForm: ({
+    collectionName,
+    presentation,
+  }: {
+    collectionName: string
+    presentation: string
+  }) => (
+    <div
+      data-testid="record-form"
+      data-collection={collectionName}
+      data-presentation={presentation}
+    />
   ),
-  setComponentRegistry: vi.fn(),
-  getComponentRegistry: vi.fn(() => undefined),
 }))
 
 function contract(components: unknown[], title = 'My Page') {
@@ -45,11 +54,13 @@ function renderAt(slug = 'my-page') {
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
-        <MemoryRouter initialEntries={[`/test-tenant/app/p/${slug}`]}>
-          <Routes>
-            <Route path=":tenantSlug/app/p/:pageSlug" element={<CustomPage />} />
-          </Routes>
-        </MemoryRouter>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[`/test-tenant/app/p/${slug}`]}>
+            <Routes>
+              <Route path=":tenantSlug/app/p/:pageSlug" element={<CustomPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
       </I18nProvider>
     </QueryClientProvider>
   )
@@ -188,7 +199,7 @@ describe('CustomPage', () => {
     expect(mockGetList).not.toHaveBeenCalled()
   })
 
-  it('renders a form node bound to a collection through ResourceForm (slice 2f)', async () => {
+  it('renders a form node bound to a collection through the embedded RecordForm', async () => {
     mockGet.mockResolvedValueOnce(
       contract([
         {
@@ -201,9 +212,11 @@ describe('CustomPage', () => {
 
     renderAt()
 
-    // The `form` widget mounts the typed/validated ResourceForm bound to the configured collection.
+    // The `form` widget mounts the app's record form, embedded, bound to the configured collection.
     await waitFor(() => expect(screen.getByTestId('page-node-form')).toBeInTheDocument())
-    expect(screen.getByTestId('resource-form')).toHaveAttribute('data-resource', 'leads')
+    const form = screen.getByTestId('record-form')
+    expect(form).toHaveAttribute('data-collection', 'leads')
+    expect(form).toHaveAttribute('data-presentation', 'embedded')
   })
 
   it('shows a placeholder for a form node without a data source', async () => {
