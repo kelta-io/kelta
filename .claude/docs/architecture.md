@@ -632,8 +632,12 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   prefix does not shadow — hyphen, not slash); portal profiles get no read permission on it,
   the same default-deny stance the watch/billing collections take. Anonymous (unauthenticated)
   ingest is intentionally NOT offered until the public-traffic hardening controls can gate it.
-- **Per-member record quotas** (consumer-alerting slice 1B): `MemberEntitlementQuotaHook` is a
-  **wildcard** `BeforeSaveHook` (order -90) — it runs on every record create in the system, so
+- **Per-member record quotas** (consumer-alerting slice 1B) are now enforced **only by the
+  `kelta-billing` module's** `MemberEntitlementQuotaHook`, a tenant-scoped wildcard hook registered
+  on install from its `billing_entitlement_rules` collection; the worker's compiled-in hook was
+  removed on 2026-10-11, and the module's copy skips `appliesTo=PORTAL` rules (it cannot read the
+  caller's user type). What follows describes the removed compiled-in hook's design, which the
+  module mirrors: a **wildcard** `BeforeSaveHook` (order -90) runs on every record create, so
   its fast path (cached empty rule list) does no query and no allocation. Note
   `BeforeSaveHookRegistry` runs every collection-specific hook before any wildcard hook, so
   `getOrder()` only sorts within the wildcard group. Counting goes through
@@ -655,8 +659,16 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   One property genuinely weakened: the compiled-in path claimed each event id in the same
   transaction as the mutation, so a failure rolled the claim back and the retry re-ran. A module
   writes through `QueryEngine` with no transaction of its own, so it **converges on redelivery**
-  instead. Admin authoring of plans and rules still rides the system-collection JSON:API gated by
-  **`MANAGE_BILLING`**.
+  instead. Admin authoring of plans and rules happens on the module's own collections; the V178
+  `billing-plans`/`billing-entitlement-rules` system collections (gated by **`MANAGE_BILLING`**)
+  remain only until their tables are dropped and drive nothing.
+- **Entitlements** (module-platform slice 8, 2026-10-11): platform code that gates on a member's
+  plan (`WatchController`, `AlertDispatchService`) injects the worker's `EntitlementService`,
+  whose only implementation, `ModuleEntitlementService`, calls the tenant's module-published
+  `EntitlementProvider` (tenant id **and** slug bound, uncached) and otherwise returns
+  `MemberEntitlements.EMPTY`. No module, a throwing module, a null answer or an unresolvable slug
+  all mean `EMPTY` — the answer a tenant without billing always had: watches uncapped, push/email
+  ungated, SMS never sent.
 - **Runtime-module webhooks**: `POST /api/modules/webhooks/{tenantId}/{moduleId}` is an
   **unauthenticated path** and the platform verifies **nothing** — it is a raw dispatcher into
   the `ActionHandler` the module's manifest names in `webhookHandlerKey`, and **the module owns
@@ -691,7 +703,8 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   lookup, so a portal profile that happens to grant either permission still gets the
   owner-scoped view, and an INTERNAL caller holding neither is 403 rather
   than silently scoped to an empty self. Writes go through `QueryEngine`, not the repository, so
-  the owner guard and `MemberEntitlementQuotaHook` both fire. `watches` declares ownership
+  the owner guard and (where the billing module is installed) its `MemberEntitlementQuotaHook`
+  both fire. `watches` declares ownership
   (`memberId`, `ALL`, reads scoped), so `OwnerScopeGuardHook` covers the **generic dynamic
   route**, which bypasses the controller entirely for writes — creating/editing/deleting another
   member's watch is refused (404 on update/delete) and the owner field is immutable. **Support

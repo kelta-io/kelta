@@ -241,7 +241,7 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
 (writes via `QueryEngine`). Anything else is **not** narrowed:
 - **Raw-JDBC member-data paths** — `WatchRepository`/`WatchTargetRepository`,
   `AlertRepository`/`AlertDeliveryRepository`, `PushRepository`, `WinController`, `ChatService`,
-  `AppointmentService`, `BillingSubscriptionRepository` — keep their in-code scoping
+  `AppointmentService` — keep their in-code scoping
   (`SelfScopedController`, in-controller caller checks).
 - **Connected-app machine identities** bind no `CallerContext`, so the guard admits their writes
   as the internal tier. Their reach is bounded by Cerbos grants; don't grant one write on an
@@ -364,6 +364,15 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 | `SchemaMigrationEngine.java` (runtime-core) | 1,106 | Split non-destructive vs destructive paths |
 
 **Other:**
+- **Legacy billing data left inert (module-platform slice 8, 2026-10-11).** Compiled-in billing is
+  gone (entitlements come only from the `kelta-billing` module, else `EMPTY`; V207 dropped
+  `billing_webhook_event`), but the five V178 tables (`billing_plan`/`_customer`/`_subscription`/
+  `_pass`/`_entitlement_rule`) and their `billing-*` system collections remain and nothing reads
+  them — editing `billing-plans`/`billing-entitlement-rules` changes nothing. Copy any tenant data
+  still there into the module's collections (`kelta-modules/billing/VERIFICATION.md` → prod
+  rollout) before the follow-up migration drops tables + definitions. The `KELTA_BILLING` JetStream
+  stream is no longer provisioned, but an existing one stays on the NATS server until removed by
+  hand (`nats stream rm KELTA_BILLING`); nothing publishes to `kelta.billing.>`.
 - **Email templates have two lookup axes** — `EmailRepository.findTemplateByKey` (`template_key`,
   V133 `user.*` seeds) and `findTemplateByName` (`name`, V141 seeds). Both fall back
   tenant → `'system'`, so the "wrong" axis still works but may land on a different seed row.
@@ -422,7 +431,7 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 ### Gateway routing
 
 - **Member-controller static routes that share a path with a system collection must be in
-  `RouteRegistry.AUTHORITATIVE_STATIC_PATHS`** (`/api/watches|wins|devices|billing/**`), or the
+  `RouteRegistry.AUTHORITATIVE_STATIC_PATHS`** (`/api/watches|wins|devices/**`), or the
   collection's generic route overwrites the `static-` route and portal members get 403. Not a
   blanket "static wins": config collections rely on their generic route's per-resource Cerbos.
 - **Routes are keyed by (path, tenant)** — collection names are unique only per tenant (sandboxes

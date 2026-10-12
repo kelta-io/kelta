@@ -17,8 +17,8 @@ import java.util.List;
  * tenant-scoped with a {@code job_type} CHECK constraint, so using it would mean a migration plus
  * a row per tenant to do something that is inherently cross-tenant.
  *
- * <p><b>This sweep is a gate, not a tidier.</b> Unlike {@code BillingPassExpirySweep}, whose work
- * the read path re-derives anyway, nothing else notices a breach — if this stops running, nobody
+ * <p><b>This sweep is a gate, not a tidier.</b> Unlike a pass-expiry sweep (the billing module's
+ * {@code billing:expire-passes}), whose work the read path re-derives anyway, nothing else notices a breach — if this stops running, nobody
  * is paged and the only symptom is silence. That is why it publishes a liveness timestamp, and why
  * an operator alert on that timestamp is worth more than one on any counter here.
  *

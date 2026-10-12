@@ -180,9 +180,9 @@ kelta:
       # Used for endpoints receiving data from unauthenticated sources (e.g., browser OTEL SDK,
       # campaign open-pixel / click-redirect / unsubscribe links authenticated by HMAC token,
       # telehealth visit links authenticated by their signed token, LiveKit webhooks
-      # authenticated by their signed JWT + body digest, payment-processor
-      # billing webhooks authenticated by their HMAC signature, and runtime-module
-      # webhooks where the dispatched module handler owns its own verification).
+      # authenticated by their signed JWT + body digest, and runtime-module webhooks
+      # where the dispatched module handler owns its own verification — e.g. the
+      # billing module's payment-processor webhook, checked against its HMAC signature).
       # NOTE: an unauthenticated path also bypasses TenantIpAllowlistFilter, so a
       # restricted tenant gets no network restriction there — the endpoint's own
       # signature check is the only trust anchor. Keep these prefixes narrow.

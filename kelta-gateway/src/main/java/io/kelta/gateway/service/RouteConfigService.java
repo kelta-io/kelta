@@ -227,12 +227,6 @@ public class RouteConfigService {
                 {"approvals", "/api/approvals/**", "approvals"},
                 {"svix", "/api/svix/**", "svix"},
                 {"webhooks", "/api/webhooks/**", "webhooks"},
-                // Portal billing — a static- route, so only API_ACCESS is checked
-                // here; the controller enforces member scoping. Inbound processor
-                // webhooks no longer ride this path: they go to the module route
-                // (/api/modules/webhooks/{tenantId}/{moduleId}), whose handler owns
-                // the HMAC check. This route goes away with BillingController itself.
-                {"billing", "/api/billing/**", "billing"},
                 // Member-facing watch API (consumer-alerting slice 5) — a static-
                 // route, so only API_ACCESS is checked here; WatchController owns
                 // member scoping and the collection's ownership metadata

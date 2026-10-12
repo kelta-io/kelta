@@ -14,7 +14,7 @@ import io.kelta.worker.repository.WatchTarget;
 import io.kelta.worker.repository.WatchTargetRepository;
 import io.kelta.worker.service.availability.WatchCriteria;
 import io.kelta.worker.service.availability.AlertDispatchService;
-import io.kelta.worker.service.billing.EntitlementService;
+import io.kelta.worker.service.entitlement.EntitlementService;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
 import io.kelta.worker.interceptor.SelfScopedController;
 import jakarta.servlet.http.HttpServletRequest;
@@ -60,8 +60,9 @@ import java.util.Optional;
  * <p>Writes go through {@link QueryEngine} rather than straight to the repository
  * so the platform's hooks fire: the generic owner guard ({@code OwnerScopeGuardHook},
  * driven by the {@code watches} ownership metadata: {@code ownerField=memberId},
- * {@code ownerScope=ALL}) and {@code MemberEntitlementQuotaHook} (plan limits).
- * Bypassing it would silently skip both. This controller additionally pre-checks the
+ * {@code ownerScope=ALL}) and, when the tenant has installed the billing module, its
+ * {@code MemberEntitlementQuotaHook} (plan limits). Bypassing it would silently skip
+ * both. This controller additionally pre-checks the
  * quota so a member at their limit gets an actionable message instead of a bare
  * validation error.
  *
@@ -209,8 +210,8 @@ public class WatchController implements SelfScopedController {
         // watch_target behind, so retrying in a loop mints unlimited rows — each one
         // something the poller can be asked to poll — while never creating a watch.
         //
-        // Still a pre-check for a nicer message, not the guard; the quota hook enforces
-        // it on the way through.
+        // Still a pre-check for a nicer message, not the guard; the billing module's
+        // quota hook, where installed, enforces it on the way through.
         int limit = entitlementService.intLimit(tenantId, subject, ENTITLEMENT_MAX_WATCHES,
                 Integer.MAX_VALUE);
         if (limit != Integer.MAX_VALUE) {

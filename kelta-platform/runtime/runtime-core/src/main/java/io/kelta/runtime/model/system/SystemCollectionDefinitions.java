@@ -129,7 +129,11 @@ public final class SystemCollectionDefinitions {
         // Archival & retention (telehealth slice 7)
         definitions.add(telehealthArchives());
 
-        // Portal billing (consumer-alerting slice 1)
+        // Portal billing (consumer-alerting slice 1) — LEGACY. Billing now runs only as the
+        // kelta-billing runtime module, which keeps its data in its own collections; no
+        // platform code reads or writes these five billing-* collections any more. They stay
+        // registered so existing rows remain visible until their tables are dropped
+        // (module-platform slice 8).
         definitions.add(billingPlans());
         definitions.add(billingEntitlementRules());
 
@@ -951,8 +955,11 @@ public final class SystemCollectionDefinitions {
 
     /**
      * Quota enforcement as configuration (consumer-alerting slice 1): "records in
-     * collection X are capped by entitlement key Y". The generic member-quota hook
-     * reads these rows, so capping a new collection needs no new code.
+     * collection X are capped by entitlement key Y".
+     *
+     * <p><b>Legacy — enforces nothing.</b> The compiled-in quota hook that read these rows
+     * was removed; quotas are enforced only by the billing module's own hook, from its
+     * {@code billing_entitlement_rules} collection.
      */
     public static CollectionDefinition billingEntitlementRules() {
         return systemBuilder("billing-entitlement-rules", "Billing Entitlement Rules",

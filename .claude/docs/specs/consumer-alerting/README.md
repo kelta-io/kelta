@@ -177,9 +177,9 @@ on top (numerics SUM, booleans OR, arrays union).
 
 | Subject | Stream | Publisher → consumer |
 |---------|--------|----------------------|
-| `kelta.billing.entitlement.changed.<tenantId>.<userId>` | KELTA_BILLING (new) | webhook svc / expiry sweep → worker broadcast cache-evict |
+| `kelta.billing.entitlement.changed.<tenantId>.<userId>` | KELTA_BILLING (new) | webhook svc / expiry sweep → worker broadcast cache-evict — **retired 2026-10-11** with the compiled-in billing (module-platform slice 8) |
 | `kelta.availability.event.<tenantId>.<source>` | KELTA_AVAILABILITY (new, ~1h maxAge) | poller → worker queue-group matcher |
-| `kelta.trigger.<tenantId>.billing.subscription` | KELTA_TRIGGERS (existing) | webhook svc → tenant flows (welcome / payment-issue / win-back) |
+| `kelta.trigger.<tenantId>.billing.subscription` | KELTA_TRIGGERS (existing) | webhook svc → tenant flows (welcome / payment-issue / win-back) — **retired 2026-10-11**; the billing module publishes no NATS, use record-triggered flows on its collections |
 | `kelta.trigger.<tenantId>.availability` | KELTA_TRIGGERS (existing) | matcher post-fanout → tenant flows (digest / ticker) |
 | `kelta.trigger.<tenantId>.poller-health` | KELTA_TRIGGERS (existing) | poller heartbeat → tenant staleness flow |
 

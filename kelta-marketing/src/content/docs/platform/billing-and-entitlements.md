@@ -46,9 +46,11 @@ in the module's UI bundle.
 
 ## Entitlements
 
-The module publishes an entitlement provider to the platform, so features that gate on entitlements (alert
-delivery, watch limits, quota hooks) resolve them from the module on tenants where it is installed. Entitlements
-are resolved live (not cached); a failing module falls back to the platform default rather than widening access.
+The module publishes an entitlement provider to the platform, and it is the platform's only source of
+entitlements: features that gate on them (alert delivery, watch limits) ask the module on tenants where it is
+installed. Entitlements are resolved live (not cached). A tenant without the module — or with a module that is
+failing — has no entitlements: watch counts are uncapped, push and email are not gated, and SMS (a billable
+channel) is never sent, since it needs an affirmative entitlement.
 
 ## Limitations
 

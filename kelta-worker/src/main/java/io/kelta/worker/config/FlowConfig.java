@@ -28,7 +28,6 @@ import io.kelta.worker.listener.CerbosPolicySyncHook;
 import io.kelta.worker.listener.FieldPermissionSyncHook;
 import io.kelta.worker.listener.ProfilePermissionSyncHook;
 import io.kelta.worker.listener.ApiSpecConfigHook;
-import io.kelta.worker.listener.BillingPlanRefreshHook;
 import io.kelta.worker.listener.CredentialEncryptionHook;
 import io.kelta.worker.listener.CredentialEventPublisher;
 import io.kelta.runtime.module.integration.api.OpenApiSpecParser;
@@ -614,44 +613,6 @@ public class FlowConfig {
             BeforeSaveHookRegistry hookRegistry,
             PlatformEventPublisher eventPublisher) {
         LayoutRuleRefreshHook hook = new LayoutRuleRefreshHook(eventPublisher);
-        hookRegistry.register(hook);
-        return hook;
-    }
-
-    @Bean
-    public BillingPlanRefreshHook billingPlanRefreshHook(
-            BeforeSaveHookRegistry hookRegistry,
-            PlatformEventPublisher eventPublisher) {
-        BillingPlanRefreshHook hook = new BillingPlanRefreshHook(eventPublisher);
-        hookRegistry.register(hook);
-        return hook;
-    }
-
-    @Bean
-    public io.kelta.worker.listener.BillingEntitlementRuleRefreshHook billingEntitlementRuleRefreshHook(
-            BeforeSaveHookRegistry hookRegistry,
-            PlatformEventPublisher eventPublisher) {
-        io.kelta.worker.listener.BillingEntitlementRuleRefreshHook hook =
-                new io.kelta.worker.listener.BillingEntitlementRuleRefreshHook(eventPublisher);
-        hookRegistry.register(hook);
-        return hook;
-    }
-
-    /**
-     * Wildcard hook — runs on every record create, so its fast path (cached empty
-     * rule list) must stay allocation-free. See the class doc.
-     */
-    @Bean
-    public io.kelta.worker.listener.MemberEntitlementQuotaHook memberEntitlementQuotaHook(
-            BeforeSaveHookRegistry hookRegistry,
-            io.kelta.worker.service.billing.BillingEntitlementRuleCache ruleCache,
-            io.kelta.worker.service.billing.EntitlementService entitlementService,
-            io.kelta.runtime.registry.CollectionRegistry collectionRegistry,
-            io.kelta.runtime.query.QueryEngine queryEngine,
-            tools.jackson.databind.ObjectMapper objectMapper) {
-        io.kelta.worker.listener.MemberEntitlementQuotaHook hook =
-                new io.kelta.worker.listener.MemberEntitlementQuotaHook(
-                        ruleCache, entitlementService, collectionRegistry, queryEngine, objectMapper);
         hookRegistry.register(hook);
         return hook;
     }

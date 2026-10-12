@@ -4,7 +4,7 @@ import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.worker.repository.AlertDeliveryRepository;
 import io.kelta.worker.repository.Watch;
 import io.kelta.worker.repository.WatchTarget;
-import io.kelta.worker.service.billing.EntitlementService;
+import io.kelta.worker.service.entitlement.EntitlementService;
 import io.kelta.worker.service.push.DefaultPushService;
 import io.kelta.worker.service.sms.SmsDeliveryException;
 import io.kelta.worker.service.sms.SmsMessage;
