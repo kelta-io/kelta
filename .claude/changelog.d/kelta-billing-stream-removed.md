@@ -1,0 +1,1 @@
+- 2026-10-12 docs(concerns): Record removal of the stale KELTA_BILLING JetStream stream (kelta-billing-stream-removed)
