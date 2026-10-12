@@ -582,6 +582,76 @@ describe('OIDCProvidersPage', () => {
         expect(screen.getByText(/updated successfully/i)).toBeInTheDocument()
       })
     })
+
+    it('sends every form field, with a blank secret meaning "keep the existing secret"', async () => {
+      const user = userEvent.setup()
+      mockAxios.patch.mockResolvedValueOnce({ data: mockProviders[0] })
+
+      render(<OIDCProvidersPage />, { wrapper: createTestWrapper() })
+      await user.click(await screen.findByTestId('edit-button-0'))
+      await screen.findByTestId('oidc-form-modal')
+
+      await user.type(screen.getByTestId('oidc-roles-claim-input'), '  realm_access.roles  ')
+      await user.click(screen.getByTestId('oidc-form-submit'))
+
+      await waitFor(() => expect(mockAxios.patch).toHaveBeenCalled())
+      const [url, body] = mockAxios.patch.mock.calls[0] as [
+        string,
+        { data: { attributes: Record<string, unknown> } },
+      ]
+      expect(url).toContain('/api/oidc-providers/1')
+      expect(body.data.attributes).toEqual({
+        name: 'Google',
+        issuer: 'https://accounts.google.com',
+        clientId: 'google-client-id-123',
+        clientSecret: '',
+        scopes: ['openid', 'profile', 'email'],
+        jwksUri: '',
+        authorizationUri: '',
+        tokenUri: '',
+        userinfoUri: '',
+        endSessionUri: '',
+        rolesClaim: 'realm_access.roles',
+        rolesMapping: '',
+        emailClaim: '',
+        usernameClaim: '',
+        nameClaim: '',
+        groupsClaim: '',
+        groupsProfileMapping: '',
+      })
+    })
+  })
+
+  describe('Create Provider payload', () => {
+    it('posts the entered secret and the split scopes', async () => {
+      const user = userEvent.setup()
+      mockAxios.get.mockResolvedValue({ data: mockProviders })
+      mockAxios.post.mockResolvedValueOnce({ data: mockProviders[0] })
+
+      render(<OIDCProvidersPage />, { wrapper: createTestWrapper() })
+      await user.click(await screen.findByTestId('add-provider-button'))
+      await screen.findByTestId('oidc-form-modal')
+
+      await user.type(screen.getByTestId('oidc-name-input'), 'Auth0')
+      await user.type(screen.getByTestId('oidc-issuer-input'), 'https://dev.auth0.com')
+      await user.type(screen.getByTestId('oidc-client-id-input'), 'auth0-client-id')
+      await user.type(screen.getByTestId('oidc-client-secret-input'), 'secret123')
+      await user.click(screen.getByTestId('oidc-form-submit'))
+
+      await waitFor(() => expect(mockAxios.post).toHaveBeenCalled())
+      const [url, body] = mockAxios.post.mock.calls[0] as [
+        string,
+        { data: { attributes: Record<string, unknown> } },
+      ]
+      expect(url).toContain('/api/oidc-providers')
+      expect(body.data.attributes).toMatchObject({
+        name: 'Auth0',
+        issuer: 'https://dev.auth0.com',
+        clientId: 'auth0-client-id',
+        clientSecret: 'secret123',
+        scopes: ['openid', 'profile', 'email', 'roles'],
+      })
+    })
   })
 
   describe('Delete Provider', () => {
@@ -715,11 +785,12 @@ describe('OIDCProvidersPage', () => {
     it('should have accessible table structure', async () => {
       render(<OIDCProvidersPage />, { wrapper: createTestWrapper() })
 
+      // The shared AdminDataTable renders a native, labelled <table>.
       await waitFor(() => {
-        expect(screen.getByRole('grid')).toBeInTheDocument()
+        expect(screen.getByRole('table')).toBeInTheDocument()
       })
 
-      expect(screen.getByRole('grid')).toHaveAttribute('aria-label', 'OIDC Providers')
+      expect(screen.getByRole('table')).toHaveAttribute('aria-label', 'OIDC Providers')
     })
 
     it('should have accessible action buttons', async () => {
@@ -749,11 +820,15 @@ describe('OIDCProvidersPage', () => {
 
       await user.click(screen.getByTestId('add-provider-button'))
 
+      // The shared CrudFormDialog (Radix) labels the dialog by its title and
+      // makes it modal by hiding the rest of the page from assistive tech.
       await waitFor(() => {
         const modal = screen.getByTestId('oidc-form-modal')
         expect(modal).toHaveAttribute('role', 'dialog')
-        expect(modal).toHaveAttribute('aria-modal', 'true')
-        expect(modal).toHaveAttribute('aria-labelledby', 'oidc-form-title')
+        expect(screen.getByRole('dialog', { name: 'Add Provider' })).toBe(modal)
+        expect(
+          screen.getByTestId('oidc-providers-page').closest('[aria-hidden="true"]')
+        ).not.toBeNull()
       })
     })
 

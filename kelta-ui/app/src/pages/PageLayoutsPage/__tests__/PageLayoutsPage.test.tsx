@@ -219,14 +219,14 @@ describe('PageLayoutsPage', () => {
       })
     })
 
-    it('should render the layouts table with correct grid role', async () => {
+    it('should render the layouts table as a labelled table', async () => {
       render(<PageLayoutsPage />, { wrapper: createTestWrapper() })
 
       await waitFor(() => {
         expect(screen.getByTestId('page-layouts-table')).toBeInTheDocument()
       })
 
-      expect(screen.getByRole('grid', { name: /page layouts/i })).toBeInTheDocument()
+      expect(screen.getByRole('table', { name: /page layouts/i })).toBeInTheDocument()
     })
 
     it('should display all layout names in the table', async () => {
@@ -548,6 +548,23 @@ describe('PageLayoutsPage', () => {
       const collectionSelect = screen.getByTestId('layout-collection-id-input') as HTMLSelectElement
       expect(collectionSelect).toBeDisabled()
     })
+
+    it('should send the unchanged collection with the edited metadata', async () => {
+      const user = userEvent.setup()
+      mockAxios.put.mockResolvedValueOnce({ data: mockLayouts[0] })
+      render(<PageLayoutsPage />, { wrapper: createTestWrapper() })
+
+      await user.click(await screen.findByTestId('edit-button-0'))
+      await screen.findByTestId('layout-form-modal')
+      await user.type(screen.getByTestId('layout-name-input'), ' v2')
+      await user.click(screen.getByTestId('layout-form-submit'))
+
+      await waitFor(() => expect(mockAxios.put).toHaveBeenCalled())
+      const [url, body] = mockAxios.put.mock.calls[0] as [string, unknown]
+      expect(url).toContain('/api/page-layouts/layout-1')
+      expect(JSON.stringify(body)).toContain('"collectionId":"col-1"')
+      expect(JSON.stringify(body)).toContain('"name":"Account Detail Layout v2"')
+    })
   })
 
   // -------------------------------------------------------------------------
@@ -708,14 +725,14 @@ describe('PageLayoutsPage', () => {
       setupAxiosMocks()
     })
 
-    it('should have accessible table structure with grid role', async () => {
+    it('should have accessible table structure with a labelled table', async () => {
       render(<PageLayoutsPage />, { wrapper: createTestWrapper() })
 
       await waitFor(() => {
-        expect(screen.getByRole('grid')).toBeInTheDocument()
+        expect(screen.getByRole('table')).toBeInTheDocument()
       })
 
-      expect(screen.getByRole('grid')).toHaveAttribute('aria-label', 'Page Layouts')
+      expect(screen.getByRole('table')).toHaveAttribute('aria-label', 'Page Layouts')
     })
 
     it('should have accessible action buttons with aria-labels', async () => {

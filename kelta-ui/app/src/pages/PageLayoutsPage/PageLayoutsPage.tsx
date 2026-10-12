@@ -6,16 +6,26 @@
  * editor for composing layout sections, field placements, and related lists.
  *
  * Modes:
- * - list: Table of existing layouts with create/edit/delete
+ * - list: Table of existing layouts with create/edit/delete (shared AdminCrud block)
  * - editor: Three-panel drag-and-drop layout builder
  */
 
-import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { useToast, ConfirmDialog, LoadingSpinner } from '../../components'
 import { useCollectionSummaries, type CollectionSummary } from '../../hooks/useCollectionSummaries'
+import {
+  AdminCrudPage,
+  CrudCheckboxField,
+  CrudFormDialog,
+  CrudSelectField,
+  CrudTextField,
+  useAdminCrud,
+} from '../../components/AdminCrud'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { RulesEditor } from './RulesEditor'
 import { AssignmentRulesEditor } from './components/AssignmentRulesEditor'
@@ -134,20 +144,6 @@ interface ApiRelatedList {
   sortOrder: number
 }
 
-interface PageLayoutFormData {
-  name: string
-  description: string
-  layoutType: string
-  collectionId: string
-  isDefault: boolean
-}
-
-interface FormErrors {
-  name?: string
-  description?: string
-  collectionId?: string
-}
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -210,21 +206,20 @@ function pageLayoutColumns(
 // Validation
 // ---------------------------------------------------------------------------
 
-function validateForm(data: PageLayoutFormData): FormErrors {
-  const errors: FormErrors = {}
-  if (!data.name.trim()) {
-    errors.name = 'Name is required'
-  } else if (data.name.length > 100) {
-    errors.name = 'Name must be 100 characters or fewer'
-  }
-  if (data.description && data.description.length > 500) {
-    errors.description = 'Description must be 500 characters or fewer'
-  }
-  if (!data.collectionId) {
-    errors.collectionId = 'Collection is required'
-  }
-  return errors
-}
+const pageLayoutSchema = z.object({
+  name: z
+    .string()
+    .refine((v) => v.trim().length > 0, 'Name is required')
+    .refine((v) => v.length <= 100, 'Name must be 100 characters or fewer'),
+  description: z.string().max(500, 'Description must be 500 characters or fewer'),
+  layoutType: z.string(),
+  collectionId: z.string().refine((v) => v !== '', 'Collection is required'),
+  isDefault: z.boolean(),
+})
+
+type PageLayoutFormData = z.infer<typeof pageLayoutSchema>
+
+const LAYOUT_TYPE_OPTIONS = LAYOUT_TYPES.map((type) => ({ value: type, label: type }))
 
 // ---------------------------------------------------------------------------
 // Mapping helpers: API → Editor state
@@ -275,272 +270,6 @@ function apiRelatedListToEditor(r: ApiRelatedList): EditorRelatedList {
     rowLimit: r.rowLimit,
     sortOrder: r.sortOrder,
   }
-}
-
-// ---------------------------------------------------------------------------
-// PageLayoutForm (modal for create/edit metadata)
-// ---------------------------------------------------------------------------
-
-interface PageLayoutFormProps {
-  layout?: PageLayoutSummary
-  collections: CollectionSummary[]
-  onSubmit: (data: PageLayoutFormData) => void
-  onCancel: () => void
-  isSubmitting: boolean
-}
-
-function PageLayoutForm({
-  layout,
-  collections,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: PageLayoutFormProps): React.ReactElement {
-  const isEditing = !!layout
-  const [formData, setFormData] = useState<PageLayoutFormData>({
-    name: layout?.name ?? '',
-    description: layout?.description ?? '',
-    layoutType: layout?.layoutType ?? 'DETAIL',
-    collectionId: layout?.collectionId ?? '',
-    isDefault: layout?.isDefault ?? false,
-  })
-  const [errors, setErrors] = useState<FormErrors>({})
-  const [touched, setTouched] = useState<Record<string, boolean>>({})
-  const nameInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    nameInputRef.current?.focus()
-  }, [])
-
-  const handleChange = useCallback(
-    (field: keyof PageLayoutFormData, value: string | boolean) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-      if (typeof value === 'string' && errors[field as keyof FormErrors]) {
-        setErrors((prev) => ({ ...prev, [field]: undefined }))
-      }
-    },
-    [errors]
-  )
-
-  const handleBlur = useCallback(
-    (field: keyof FormErrors) => {
-      setTouched((prev) => ({ ...prev, [field]: true }))
-      const validationErrors = validateForm(formData)
-      if (validationErrors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: validationErrors[field] }))
-      }
-    },
-    [formData]
-  )
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      const validationErrors = validateForm(formData)
-      setErrors(validationErrors)
-      setTouched({ name: true, description: true, collectionId: true })
-      if (Object.keys(validationErrors).length === 0) {
-        onSubmit(formData)
-      }
-    },
-    [formData, onSubmit]
-  )
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel()
-      }
-    },
-    [onCancel]
-  )
-
-  const title = isEditing ? 'Edit Layout' : 'Create Layout'
-
-  return (
-    <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={handleKeyDown}
-      data-testid="layout-form-overlay"
-      role="presentation"
-    >
-      <div
-        className="max-h-[90vh] w-full max-w-[600px] overflow-y-auto rounded-lg bg-background shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="layout-form-title"
-        data-testid="layout-form-modal"
-      >
-        <div className="flex items-center justify-between border-b border-border p-6">
-          <h2 id="layout-form-title" className="m-0 text-xl font-semibold text-foreground">
-            {title}
-          </h2>
-          <button
-            type="button"
-            className="cursor-pointer rounded border-none bg-transparent p-2 text-2xl leading-none text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
-            onClick={onCancel}
-            aria-label="Close"
-            data-testid="layout-form-close"
-          >
-            &times;
-          </button>
-        </div>
-        <div className="p-6">
-          <form className="flex flex-col gap-5" onSubmit={handleSubmit} noValidate>
-            <div className="flex flex-col gap-2">
-              <label htmlFor="layout-name" className="text-sm font-medium text-foreground">
-                Name
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <input
-                ref={nameInputRef}
-                id="layout-name"
-                type="text"
-                className={cn(
-                  'rounded-md border border-border bg-background px-3.5 py-2.5 text-sm text-foreground transition-all duration-200 focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.name && errors.name && 'border-destructive'
-                )}
-                value={formData.name}
-                onChange={(e) => handleChange('name', e.target.value)}
-                onBlur={() => handleBlur('name')}
-                placeholder="Enter layout name"
-                aria-required="true"
-                aria-invalid={touched.name && !!errors.name}
-                disabled={isSubmitting}
-                data-testid="layout-name-input"
-              />
-              {touched.name && errors.name && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.name}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="layout-description" className="text-sm font-medium text-foreground">
-                Description
-              </label>
-              <textarea
-                id="layout-description"
-                className={cn(
-                  'min-h-[80px] resize-y rounded-md border border-border bg-background px-3.5 py-2.5 font-[inherit] text-sm text-foreground transition-all duration-200 focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.description && errors.description && 'border-destructive'
-                )}
-                value={formData.description}
-                onChange={(e) => handleChange('description', e.target.value)}
-                onBlur={() => handleBlur('description')}
-                placeholder="Enter layout description"
-                disabled={isSubmitting}
-                rows={3}
-                data-testid="layout-description-input"
-              />
-              {touched.description && errors.description && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.description}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="layout-type" className="text-sm font-medium text-foreground">
-                Layout Type
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <select
-                id="layout-type"
-                className="rounded-md border border-border bg-background px-3.5 py-2.5 text-sm text-foreground transition-all duration-200 focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                value={formData.layoutType}
-                onChange={(e) => handleChange('layoutType', e.target.value)}
-                disabled={isSubmitting}
-                data-testid="layout-type-select"
-              >
-                {LAYOUT_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="layout-collection-id" className="text-sm font-medium text-foreground">
-                Collection
-                <span className="ml-1 text-destructive" aria-hidden="true">
-                  *
-                </span>
-              </label>
-              <select
-                id="layout-collection-id"
-                className={cn(
-                  'rounded-md border border-border bg-background px-3.5 py-2.5 text-sm text-foreground transition-all duration-200 focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
-                  touched.collectionId && errors.collectionId && 'border-destructive'
-                )}
-                value={formData.collectionId}
-                onChange={(e) => handleChange('collectionId', e.target.value)}
-                onBlur={() => handleBlur('collectionId')}
-                aria-required="true"
-                aria-invalid={touched.collectionId && !!errors.collectionId}
-                disabled={isSubmitting || isEditing}
-                data-testid="layout-collection-id-input"
-              >
-                <option value="">Select a collection</option>
-                {collections.map((col) => (
-                  <option key={col.id} value={col.id}>
-                    {col.displayName || col.name}
-                  </option>
-                ))}
-              </select>
-              {touched.collectionId && errors.collectionId && (
-                <span className="text-xs text-destructive" role="alert">
-                  {errors.collectionId}
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                id="layout-is-default"
-                type="checkbox"
-                className="h-4 w-4 accent-primary"
-                checked={formData.isDefault}
-                onChange={(e) => handleChange('isDefault', e.target.checked)}
-                disabled={isSubmitting}
-                data-testid="layout-is-default-input"
-              />
-              <label htmlFor="layout-is-default" className="text-sm font-medium text-foreground">
-                Default Layout
-              </label>
-            </div>
-
-            <div className="mt-2 flex justify-end gap-3 border-t border-border pt-4">
-              <button
-                type="button"
-                className="cursor-pointer rounded-md border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground transition-all duration-200 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={onCancel}
-                disabled={isSubmitting}
-                data-testid="layout-form-cancel"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="cursor-pointer rounded-md border-none bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors duration-200 hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isSubmitting}
-                data-testid="layout-form-submit"
-              >
-                {isSubmitting ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,19 +844,13 @@ function LayoutEditorView({ layoutId, onBack }: LayoutEditorViewProps): React.Re
 export function PageLayoutsPage({
   testId = 'page-layouts-page',
 }: PageLayoutsPageProps): React.ReactElement {
-  const queryClient = useQueryClient()
   const { formatDate } = useI18n()
   const { apiClient } = useApi()
-  const { showToast } = useToast()
 
   // View mode: list or editor
   const [viewMode, setViewMode] = useState<'list' | 'editor'>('list')
   const [editingLayoutId, setEditingLayoutId] = useState<string | null>(null)
 
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingLayout, setEditingLayout] = useState<PageLayoutSummary | undefined>(undefined)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [layoutToDelete, setLayoutToDelete] = useState<PageLayoutSummary | null>(null)
   const [rulesEditorLayout, setRulesEditorLayout] = useState<PageLayoutSummary | null>(null)
   const [assignmentEditorLayout, setAssignmentEditorLayout] = useState<PageLayoutSummary | null>(
     null
@@ -1154,102 +877,45 @@ export function PageLayoutsPage({
     return map
   }, [collections])
 
+  const collectionOptions = useMemo(
+    () => collections.map((col) => ({ value: col.id, label: col.displayName || col.name })),
+    [collections]
+  )
+
   const layoutList = layouts ?? []
 
-  const createMutation = useMutation({
-    mutationFn: (data: PageLayoutFormData) =>
+  const crud = useAdminCrud<PageLayoutSummary, PageLayoutFormData>({
+    queryKey: ['pageLayouts'],
+    create: (data) =>
       apiClient.postResource<PageLayoutSummary>(
         `/api/page-layouts?collectionId=${encodeURIComponent(data.collectionId)}`,
         data
       ),
-    onSuccess: (newLayout) => {
-      queryClient.invalidateQueries({ queryKey: ['pageLayouts'] })
-      showToast('Layout created successfully', 'success')
-      handleCloseForm()
-      // Open the editor for the new layout
-      setEditingLayoutId(newLayout.id)
-      setViewMode('editor')
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: PageLayoutFormData }) =>
-      apiClient.putResource<PageLayoutSummary>(`/api/page-layouts/${id}`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pageLayouts'] })
-      showToast('Layout updated successfully', 'success')
-      handleCloseForm()
-    },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => apiClient.delete(`/api/page-layouts/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pageLayouts'] })
-      showToast('Layout deleted successfully', 'success')
-      setDeleteDialogOpen(false)
-      setLayoutToDelete(null)
-      if (editingLayoutId === layoutToDelete?.id) {
+    update: (layout, data) =>
+      apiClient.putResource<PageLayoutSummary>(`/api/page-layouts/${layout.id}`, data),
+    remove: async (layout) => {
+      await apiClient.delete(`/api/page-layouts/${layout.id}`)
+      if (editingLayoutId === layout.id) {
         setViewMode('list')
         setEditingLayoutId(null)
       }
     },
-    onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
+    messages: {
+      created: 'Layout created successfully',
+      updated: 'Layout updated successfully',
+      deleted: 'Layout deleted successfully',
+      error: 'An error occurred',
+    },
+    // Open the editor for the new layout
+    onCreated: (newLayout) => {
+      setEditingLayoutId((newLayout as PageLayoutSummary).id)
+      setViewMode('editor')
     },
   })
-
-  const handleCreate = useCallback(() => {
-    setEditingLayout(undefined)
-    setIsFormOpen(true)
-  }, [])
-
-  const handleEditMetadata = useCallback((layout: PageLayoutSummary) => {
-    setEditingLayout(layout)
-    setIsFormOpen(true)
-  }, [])
 
   const handleDesign = useCallback((layout: PageLayoutSummary) => {
     setEditingLayoutId(layout.id)
     setViewMode('editor')
-  }, [])
-
-  const handleCloseForm = useCallback(() => {
-    setIsFormOpen(false)
-    setEditingLayout(undefined)
-  }, [])
-
-  const handleFormSubmit = useCallback(
-    (data: PageLayoutFormData) => {
-      if (editingLayout) {
-        updateMutation.mutate({ id: editingLayout.id, data })
-      } else {
-        createMutation.mutate(data)
-      }
-    },
-    [editingLayout, createMutation, updateMutation]
-  )
-
-  const handleDeleteClick = useCallback((layout: PageLayoutSummary) => {
-    setLayoutToDelete(layout)
-    setDeleteDialogOpen(true)
-  }, [])
-
-  const handleDeleteConfirm = useCallback(() => {
-    if (layoutToDelete) {
-      deleteMutation.mutate(layoutToDelete.id)
-    }
-  }, [layoutToDelete, deleteMutation])
-
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteDialogOpen(false)
-    setLayoutToDelete(null)
   }, [])
 
   const handleBackFromEditor = useCallback(() => {
@@ -1265,136 +931,161 @@ export function PageLayoutsPage({
     [collectionMap]
   )
 
+  const columns = useMemo(
+    () => pageLayoutColumns(formatDate, getCollectionName),
+    [formatDate, getCollectionName]
+  )
+
   // Editor mode
   if (viewMode === 'editor' && editingLayoutId) {
     return <LayoutEditorView layoutId={editingLayoutId} onBack={handleBackFromEditor} />
   }
 
-  // List mode: loading
-  if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1400px] p-8 max-md:p-4" data-testid={testId}>
-        <div className="flex min-h-[400px] items-center justify-center">
-          <LoadingSpinner size="large" label="Loading layouts..." />
-        </div>
-      </div>
-    )
-  }
-
-  // List mode: error
-  if (error) {
-    return (
-      <div className="mx-auto max-w-[1400px] p-8 max-md:p-4" data-testid={testId}>
-        <ErrorMessage
-          error={error instanceof Error ? error : new Error('An error occurred')}
-          onRetry={() => refetch()}
-        />
-      </div>
-    )
-  }
-
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const editing = crud.editing
 
   // List mode
   return (
-    <div className="mx-auto max-w-[1400px] p-8 max-md:p-4" data-testid={testId}>
-      <header className="mb-8 flex items-center justify-between max-md:mb-4 max-md:flex-col max-md:items-start max-md:gap-4">
-        <h1 className="m-0 text-3xl font-semibold text-foreground">Page Layouts</h1>
-        <button
+    <AdminCrudPage
+      testId={testId}
+      title="Page Layouts"
+      actions={
+        <Button
           type="button"
-          className="cursor-pointer rounded-md border-none bg-primary px-6 py-3 text-base font-medium text-primary-foreground transition-colors duration-200 hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 max-md:w-full"
-          onClick={handleCreate}
+          onClick={crud.openCreate}
           aria-label="Create Layout"
           data-testid="add-layout-button"
         >
           Create Layout
-        </button>
-      </header>
-
-      {layoutList.length === 0 ? (
-        <div
-          className="rounded-lg border border-border bg-background px-8 py-16 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          <p>No page layouts found. Create one to get started.</p>
-        </div>
-      ) : (
-        <div
-          className="overflow-hidden rounded-lg border border-border bg-background max-md:overflow-x-auto"
-          data-testid="page-layouts-table"
-          aria-label="Page Layouts"
-          role="grid"
-        >
-          <AdminDataTable
-            tableId="page-layouts"
-            rows={layoutList}
-            rowKey={(layout) => layout.id}
-            columns={pageLayoutColumns(formatDate, getCollectionName)}
-            renderActions={(layout) => {
-              const index = layoutList.indexOf(layout)
-              return (
-                <div className="flex justify-end gap-2 max-md:flex-col">
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-md border border-primary bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-200 hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 max-md:w-full"
-                    onClick={() => handleDesign(layout)}
-                    aria-label={`Design ${layout.name}`}
-                    data-testid={`design-button-${index}`}
-                  >
-                    Design
-                  </button>
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-md border border-border bg-transparent px-4 py-2 text-sm font-medium text-primary transition-all duration-200 hover:border-primary hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 max-md:w-full"
-                    onClick={() => handleEditMetadata(layout)}
-                    aria-label={`Edit ${layout.name}`}
-                    data-testid={`edit-button-${index}`}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-md border border-border bg-transparent px-4 py-2 text-sm font-medium text-primary transition-all duration-200 hover:border-primary hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 max-md:w-full"
-                    onClick={() => setRulesEditorLayout(layout)}
-                    aria-label={`Rules for ${layout.name}`}
-                    data-testid={`rules-button-${index}`}
-                  >
-                    Rules
-                  </button>
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-md border border-border bg-transparent px-4 py-2 text-sm font-medium text-primary transition-all duration-200 hover:border-primary hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 max-md:w-full"
-                    onClick={() => setAssignmentEditorLayout(layout)}
-                    aria-label={`Assignments for ${layout.name}`}
-                    data-testid={`assignments-button-${index}`}
-                  >
-                    Assignments
-                  </button>
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-md border border-border bg-transparent px-4 py-2 text-sm font-medium text-destructive transition-all duration-200 hover:border-destructive hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 max-md:w-full"
-                    onClick={() => handleDeleteClick(layout)}
-                    aria-label={`Delete ${layout.name}`}
-                    data-testid={`delete-button-${index}`}
-                  >
-                    Delete
-                  </button>
-                </div>
-              )
-            }}
-          />
-        </div>
-      )}
-
-      {isFormOpen && (
-        <PageLayoutForm
-          layout={editingLayout}
-          collections={collections}
-          onSubmit={handleFormSubmit}
-          onCancel={handleCloseForm}
-          isSubmitting={isSubmitting}
+        </Button>
+      }
+      isLoading={isLoading}
+      error={error}
+      onRetry={() => refetch()}
+      isEmpty={layoutList.length === 0}
+      emptyMessage="No page layouts found. Create one to get started."
+      list={
+        <AdminDataTable
+          tableId="page-layouts"
+          testId="page-layouts-table"
+          ariaLabel="Page Layouts"
+          columns={columns}
+          rows={layoutList}
+          rowKey={(layout) => layout.id}
+          renderActions={(layout, index) => (
+            <div className="flex justify-end gap-2 max-md:flex-col">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => handleDesign(layout)}
+                aria-label={`Design ${layout.name}`}
+                data-testid={`design-button-${index}`}
+              >
+                Design
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => crud.openEdit(layout)}
+                aria-label={`Edit ${layout.name}`}
+                data-testid={`edit-button-${index}`}
+              >
+                Edit
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setRulesEditorLayout(layout)}
+                aria-label={`Rules for ${layout.name}`}
+                data-testid={`rules-button-${index}`}
+              >
+                Rules
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setAssignmentEditorLayout(layout)}
+                aria-label={`Assignments for ${layout.name}`}
+                data-testid={`assignments-button-${index}`}
+              >
+                Assignments
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={() => crud.requestDelete(layout)}
+                aria-label={`Delete ${layout.name}`}
+                data-testid={`delete-button-${index}`}
+              >
+                Delete
+              </Button>
+            </div>
+          )}
         />
-      )}
+      }
+    >
+      <CrudFormDialog<PageLayoutFormData>
+        open={crud.isFormOpen}
+        onClose={crud.closeForm}
+        title={editing ? 'Edit Layout' : 'Create Layout'}
+        schema={pageLayoutSchema}
+        defaultValues={{
+          name: editing?.name ?? '',
+          description: editing?.description ?? '',
+          layoutType: editing?.layoutType ?? 'DETAIL',
+          collectionId: editing?.collectionId ?? '',
+          isDefault: editing?.isDefault ?? false,
+        }}
+        onSubmit={crud.submit}
+        isSubmitting={crud.isSaving}
+        testIdPrefix="layout"
+        className="sm:max-w-[600px]"
+      >
+        <CrudTextField<PageLayoutFormData>
+          name="name"
+          id="layout-name"
+          label="Name"
+          required
+          placeholder="Enter layout name"
+          testId="layout-name-input"
+        />
+        <CrudTextField<PageLayoutFormData>
+          name="description"
+          id="layout-description"
+          label="Description"
+          multiline
+          placeholder="Enter layout description"
+          testId="layout-description-input"
+        />
+        <CrudSelectField<PageLayoutFormData>
+          name="layoutType"
+          id="layout-type"
+          label="Layout Type"
+          required
+          options={LAYOUT_TYPE_OPTIONS}
+          testId="layout-type-select"
+        />
+        <CrudSelectField<PageLayoutFormData>
+          name="collectionId"
+          id="layout-collection-id"
+          label="Collection"
+          required
+          placeholder="Select a collection"
+          options={collectionOptions}
+          disabled={!!editing}
+          testId="layout-collection-id-input"
+        />
+        <CrudCheckboxField<PageLayoutFormData>
+          name="isDefault"
+          id="layout-is-default"
+          label="Default Layout"
+          testId="layout-is-default-input"
+        />
+      </CrudFormDialog>
 
       {rulesEditorLayout && (
         <RulesEditor
@@ -1416,16 +1107,16 @@ export function PageLayoutsPage({
       )}
 
       <ConfirmDialog
-        open={deleteDialogOpen}
+        open={crud.deleteTarget !== null}
         title="Delete Layout"
         message="Are you sure you want to delete this layout? This action cannot be undone."
         confirmLabel="Delete"
         cancelLabel="Cancel"
-        onConfirm={handleDeleteConfirm}
-        onCancel={handleDeleteCancel}
+        onConfirm={crud.confirmDelete}
+        onCancel={crud.cancelDelete}
         variant="danger"
       />
-    </div>
+    </AdminCrudPage>
   )
 }
 
