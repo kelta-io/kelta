@@ -39,6 +39,45 @@ describe('computeInitialFormData', () => {
   })
 })
 
+describe('computeInitialFormData schema defaults (create)', () => {
+  it("applies each field's schema defaultValue on create", () => {
+    const fields = [
+      field({ name: 'status', defaultValue: 'Open' }),
+      field({ name: 'qty', type: 'number', defaultValue: 3 }),
+      field({ name: 'active', type: 'boolean', defaultValue: true }),
+      field({ name: 'notes' }),
+    ]
+    const data = computeInitialFormData(true, undefined, fields)
+    expect(data).toEqual({ status: 'Open', qty: 3, active: true })
+  })
+
+  it('formats defaults for their controls (date, datetime, JSON, boolean text)', () => {
+    const fields = [
+      field({ name: 'day', type: 'date', defaultValue: '2026-01-15T00:00:00Z' }),
+      field({ name: 'at', type: 'datetime', defaultValue: '2026-01-15T09:30:00Z' }),
+      field({ name: 'cfg', type: 'json', defaultValue: { a: 1 } }),
+      field({ name: 'flag', type: 'boolean', defaultValue: 'true' }),
+    ]
+    const data = computeInitialFormData(true, undefined, fields)
+    expect(data.day).toBe('2026-01-15')
+    expect(data.at).toBe('2026-01-15T09:30')
+    expect(data.cfg).toBe(JSON.stringify({ a: 1 }, null, 2))
+    expect(data.flag).toBe(true)
+  })
+
+  it('lets a query-param prefill win over the schema default', () => {
+    const fields = [field({ name: 'status', defaultValue: 'Open' })]
+    const data = computeInitialFormData(true, undefined, fields, { status: 'Closed' })
+    expect(data.status).toBe('Closed')
+  })
+
+  it('ignores schema defaults in edit mode', () => {
+    const fields = [field({ name: 'status', defaultValue: 'Open' })]
+    const data = computeInitialFormData(false, { id: 'r1', status: null }, fields)
+    expect(data.status).toBeNull()
+  })
+})
+
 describe('buildSaveAttributes', () => {
   it('parses JSON field text back to structured JSON', () => {
     const fields = [field({ name: 'crew', type: 'json' })]
@@ -69,5 +108,50 @@ describe('buildSaveAttributes', () => {
     const fields = [field({ name: 'title' }), field({ name: 'crew', type: 'json' })]
     const { attributes } = buildSaveAttributes(fields, { title: '', crew: undefined })
     expect(attributes).toEqual({})
+  })
+})
+
+describe('buildSaveAttributes clearing a field', () => {
+  const fields = [
+    field({ name: 'title' }),
+    field({ name: 'amount', type: 'number' }),
+    field({ name: 'notes' }),
+    field({ name: 'crew', type: 'json' }),
+  ]
+
+  it('update: sends null for a field emptied from a non-empty initial value', () => {
+    const initialData = { title: 'A', amount: 7, notes: '', crew: '{"a":1}' }
+    const { attributes } = buildSaveAttributes(
+      fields,
+      { title: 'A', amount: '', notes: '', crew: '' },
+      { initialData }
+    )
+    expect(attributes).toEqual({ title: 'A', amount: null, crew: null })
+  })
+
+  it('update: does not start sending fields that were already blank', () => {
+    const initialData = { title: 'A', notes: undefined }
+    const { attributes } = buildSaveAttributes(
+      fields,
+      { title: 'A', notes: '', amount: undefined },
+      { initialData }
+    )
+    expect(attributes).toEqual({ title: 'A' })
+    expect(attributes).not.toHaveProperty('notes')
+    expect(attributes).not.toHaveProperty('amount')
+  })
+
+  it('create: keeps omitting blank fields (no initialData)', () => {
+    const { attributes } = buildSaveAttributes(fields, { title: 'A', amount: '', notes: '' })
+    expect(attributes).toEqual({ title: 'A' })
+  })
+
+  it('uses the caller-supplied invalid-JSON message', () => {
+    const { errors } = buildSaveAttributes(
+      [field({ name: 'crew', type: 'json' })],
+      { crew: '{nope' },
+      { invalidJsonMessage: 'Please enter valid JSON' }
+    )
+    expect(errors.crew).toBe('Please enter valid JSON')
   })
 })

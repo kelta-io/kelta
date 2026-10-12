@@ -1,12 +1,14 @@
 /**
  * FormField — the record form's per-field control renderer.
  *
- * Moved verbatim from `ObjectFormPage` (record-stack convergence P2). A later
- * slice replaces it with the `components/fieldControl` registry; until then
- * keep it equivalent so the end-user form does not change.
+ * Moved from `ObjectFormPage` (record-stack convergence P2). A later slice
+ * replaces it with the `components/fieldControl` registry. P3 added `onBlur`
+ * (client `onBlur` rules) and the error a11y wiring: the control carries
+ * `aria-invalid` and `aria-describedby` → the `field-error-<name>` alert.
  */
 
 import React from 'react'
+import { useI18n } from '@/context/I18nContext'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { FieldLabel } from '@/components/kelta'
@@ -52,9 +54,11 @@ interface FormFieldProps {
   field: FieldDefinition
   value: unknown
   onChange: (name: string, value: unknown) => void
+  /** Called with the field name when focus leaves the control */
+  onBlur?: (name: string) => void
   /** Whether the field is read-only due to field-level permissions */
   readOnly?: boolean
-  /** Server-side validation error message for this field */
+  /** Validation error message for this field (client or server) */
   error?: string
   /** Optional plugin-provided custom renderer for this field type */
   pluginRenderer?: React.ComponentType<import('../../../types/plugin').FieldRendererProps>
@@ -67,12 +71,29 @@ export function FormField({
   field,
   value,
   onChange,
+  onBlur,
   readOnly = false,
   error,
   pluginRenderer: PluginRenderer,
 }: FormFieldProps): React.ReactElement {
+  const { t } = useI18n()
   const isReadOnly = READ_ONLY_TYPES.has(field.type) || readOnly
   const fieldId = `field-${field.name}`
+  const errorId = `${fieldId}-error`
+
+  // Error a11y: the control is marked invalid and described by the alert below it.
+  const errorA11y = {
+    'aria-invalid': !!error,
+    'aria-describedby': error ? errorId : undefined,
+  }
+  const handleBlur = onBlur ? () => onBlur(field.name) : undefined
+  // Composite controls (lookup, multi-picklist, plugin renderers) move focus between
+  // inner elements — report a blur only when focus leaves the whole control.
+  const handleCompositeBlur = onBlur
+    ? (e: React.FocusEvent<HTMLDivElement>) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onBlur(field.name)
+      }
+    : undefined
 
   const labelEl = (
     <FieldLabel htmlFor={fieldId}>
@@ -82,7 +103,12 @@ export function FormField({
   )
 
   const errorEl = error ? (
-    <p className="text-sm text-destructive" role="alert" data-testid={`field-error-${field.name}`}>
+    <p
+      id={errorId}
+      className="text-sm text-destructive"
+      role="alert"
+      data-testid={`field-error-${field.name}`}
+    >
       {error}
     </p>
   ) : null
@@ -92,17 +118,23 @@ export function FormField({
     return (
       <div className="space-y-2">
         {labelEl}
-        <PluginErrorBoundary compact componentType="field renderer">
-          <PluginRenderer
-            name={field.name}
-            value={value}
-            onChange={(v) => onChange(field.name, v)}
-            readOnly={isReadOnly}
-            disabled={isReadOnly}
-            error={error}
-            metadata={{ fieldType: field.type, required: field.required }}
-          />
-        </PluginErrorBoundary>
+        <div onBlur={handleCompositeBlur}>
+          <PluginErrorBoundary compact componentType="field renderer">
+            <PluginRenderer
+              name={field.name}
+              value={value}
+              onChange={(v) => onChange(field.name, v)}
+              readOnly={isReadOnly}
+              disabled={isReadOnly}
+              error={error}
+              metadata={{
+                fieldType: field.type,
+                required: field.required,
+                errorId: error ? errorId : undefined,
+              }}
+            />
+          </PluginErrorBoundary>
+        </div>
         {errorEl}
       </div>
     )
@@ -117,7 +149,9 @@ export function FormField({
             id={fieldId}
             checked={Boolean(value)}
             onCheckedChange={(checked) => onChange(field.name, checked)}
+            onBlur={handleBlur}
             disabled={isReadOnly}
+            {...errorA11y}
           />
           <FieldLabel htmlFor={fieldId} className="mb-0">
             {field.displayName || field.name}
@@ -135,15 +169,19 @@ export function FormField({
     return (
       <div className="space-y-2">
         {labelEl}
-        <MultiPicklistSelect
-          id={fieldId}
-          name={field.name}
-          value={arrayValue}
-          options={field.enumValues || []}
-          onChange={(values) => onChange(field.name, values)}
-          disabled={isReadOnly}
-          required={field.required}
-        />
+        <div onBlur={handleCompositeBlur}>
+          <MultiPicklistSelect
+            id={fieldId}
+            name={field.name}
+            value={arrayValue}
+            options={field.enumValues || []}
+            onChange={(values) => onChange(field.name, values)}
+            placeholder={t('recordForm.selectPlaceholder')}
+            disabled={isReadOnly}
+            required={field.required}
+            {...errorA11y}
+          />
+        </div>
         {errorEl}
       </div>
     )
@@ -159,10 +197,12 @@ export function FormField({
           data-testid={fieldId}
           value={value != null ? String(value) : ''}
           onChange={(e) => onChange(field.name, e.target.value)}
+          onBlur={handleBlur}
           disabled={isReadOnly}
+          {...errorA11y}
           className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <option value="">Select...</option>
+          <option value="">{t('recordForm.selectPlaceholder')}</option>
           {(field.enumValues || []).map((val: string) => (
             <option key={val} value={val}>
               {field.enumOptions?.find((o) => o.value === val)?.label || val}
@@ -180,16 +220,20 @@ export function FormField({
     return (
       <div className="space-y-2">
         {labelEl}
-        <LookupSelect
-          id={fieldId}
-          name={field.name}
-          value={value != null ? String(value) : ''}
-          options={options}
-          onChange={(v) => onChange(field.name, v)}
-          placeholder="Select..."
-          required={field.required}
-          disabled={isReadOnly}
-        />
+        <div onBlur={handleCompositeBlur}>
+          <LookupSelect
+            id={fieldId}
+            name={field.name}
+            value={value != null ? String(value) : ''}
+            options={options}
+            onChange={(v) => onChange(field.name, v)}
+            placeholder={t('recordForm.selectPlaceholder')}
+            required={field.required}
+            disabled={isReadOnly}
+            error={!!error}
+            aria-describedby={errorA11y['aria-describedby']}
+          />
+        </div>
         {errorEl}
       </div>
     )
@@ -214,7 +258,9 @@ export function FormField({
           data-testid={fieldId}
           value={textValue}
           onChange={(e) => onChange(field.name, e.target.value)}
+          onBlur={handleBlur}
           disabled={isReadOnly}
+          {...errorA11y}
           rows={field.type === 'json' ? 6 : 4}
           className={field.type === 'json' ? 'font-mono text-sm' : ''}
           placeholder={field.type === 'json' ? '{}' : ''}
@@ -235,6 +281,8 @@ export function FormField({
           type="password"
           value={value != null ? String(value) : ''}
           onChange={(e) => onChange(field.name, e.target.value)}
+          onBlur={handleBlur}
+          {...errorA11y}
         />
         {errorEl}
       </div>
@@ -262,9 +310,11 @@ export function FormField({
               : e.target.value
           onChange(field.name, newValue)
         }}
+        onBlur={handleBlur}
         disabled={isReadOnly}
         step={step}
         required={field.required}
+        {...errorA11y}
       />
       {errorEl}
     </div>

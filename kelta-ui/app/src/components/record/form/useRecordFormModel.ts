@@ -5,19 +5,23 @@
  * the record (edit mode), object + field permissions, record types (with the
  * default auto-selected on create) and their picklist overrides, the resolved
  * page layout, picklist values and lookup options merged into the fields, and
- * the initial form data (record values, or defaults + `prefill` on create).
+ * the collection's client-enforced validation rules, and the initial form data
+ * (record values, or schema defaults + `prefill` on create).
  *
  * Form STATE (values, errors, client layout rules, save) lives in
  * `useRecordFormState`, which runs inside a body component remounted by
  * `formKey` — so its `useState` initializer sees the right `initialData` once
  * the async data above has resolved.
  *
- * Moved from `ObjectFormPage` (record-stack convergence P2); behavior is
- * unchanged. Both the end-user and (later) admin form wrappers use it.
+ * Moved from `ObjectFormPage` (record-stack convergence P2); P3 added the
+ * client validation rules, schema defaults on create, and the edit-mode record
+ * type taken from the loaded record. Both the end-user and (later) admin form
+ * wrappers use it.
  */
 
-import React, { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import type { CollectionValidationRule } from '@kelta/sdk'
 import { useAuth } from '@/context/AuthContext'
 import { useApi } from '@/context/ApiContext'
 import { useCollectionSchema } from '@/hooks/useCollectionSchema'
@@ -81,13 +85,25 @@ export interface RecordFormModel {
   /** Resolved page layout (null when none configured). */
   layout: PageLayoutDto | null
   recordTypes: RecordType[] | undefined
+  /**
+   * The user's pick, else (edit) the loaded record's type or (create) the default
+   * record type — drives the layout and the type's picklist restrictions.
+   */
   selectedRecordTypeId: string | undefined
   setSelectedRecordTypeId: (id: string | undefined) => void
+  /**
+   * Active collection validation rules with `enforceOnClient` — fed to the client
+   * rule engine so they show inline and block an ERROR-severity save. UX only; the
+   * worker enforces every rule.
+   */
+  validationRules: CollectionValidationRule[]
   /** Initial form values for the body's `useState`. */
   initialData: Record<string, unknown>
   /** Changes whenever the form's data source changes — key the body on it. */
   formKey: string
 }
+
+const NO_VALIDATION_RULES: CollectionValidationRule[] = []
 
 /** Stable serialization of the create-mode prefill, used in the remount key. */
 function prefillKey(prefill: Record<string, unknown> | undefined): string {
@@ -142,21 +158,21 @@ export function useRecordFormModel({
     enabled: !!schema?.id,
   })
 
-  const [selectedRecordTypeId, setSelectedRecordTypeId] = useState<string | undefined>(() => {
-    // For edit mode, use the record's existing recordTypeId
-    if (!isNew && record?.recordTypeId) return String(record.recordTypeId)
-    return undefined
-  })
-
-  // Auto-select default record type on create when record types exist
-  React.useEffect(() => {
-    if (isNew && recordTypes && recordTypes.length > 0 && !selectedRecordTypeId) {
-      const defaultType = recordTypes.find((rt) => rt.isDefault)
-      if (defaultType) {
-        setSelectedRecordTypeId(defaultType.id)
-      }
-    }
-  }, [isNew, recordTypes, selectedRecordTypeId])
+  // The selected record type is derived until the user picks one: edit mode takes the
+  // loaded record's type (the record is not loaded on the first render, so it can't be
+  // captured once), create mode the collection's default type.
+  const [recordTypeChoice, setRecordTypeChoice] = useState<{ id: string | undefined } | null>(null)
+  const recordRecordTypeId =
+    !isNew && record?.recordTypeId ? String(record.recordTypeId) : undefined
+  const defaultRecordTypeId = isNew ? recordTypes?.find((rt) => rt.isDefault)?.id : undefined
+  const selectedRecordTypeId = recordTypeChoice
+    ? recordTypeChoice.id
+    : isNew
+      ? defaultRecordTypeId
+      : recordRecordTypeId
+  const setSelectedRecordTypeId = useCallback((id: string | undefined) => {
+    setRecordTypeChoice({ id })
+  }, [])
 
   // Fetch picklist overrides for the selected record type
   const { data: recordTypePicklistOverrides } = useQuery({
@@ -177,6 +193,24 @@ export function useRecordFormModel({
       return map
     },
     enabled: !!selectedRecordTypeId,
+  })
+
+  // Collection-wide validation rules with enforce_on_client = true (same query
+  // key as the admin form, so the two share the cache). Failure → no client rules;
+  // the worker still enforces them.
+  const { data: validationRules = NO_VALIDATION_RULES } = useQuery({
+    queryKey: ['client-validation-rules', schema?.id],
+    queryFn: async () => {
+      try {
+        return await apiClient.getList<CollectionValidationRule>(
+          `/api/validation-rules?filter[collectionId][eq]=${schema!.id}&filter[active][eq]=true&filter[enforceOnClient][eq]=true&page[size]=100`
+        )
+      } catch {
+        return NO_VALIDATION_RULES
+      }
+    },
+    enabled: !!schema?.id,
+    staleTime: 5 * 60 * 1000,
   })
 
   // Resolve page layout for this collection (returns null if none configured)
@@ -323,6 +357,7 @@ export function useRecordFormModel({
     recordTypes,
     selectedRecordTypeId,
     setSelectedRecordTypeId,
+    validationRules,
     initialData,
     formKey,
   }

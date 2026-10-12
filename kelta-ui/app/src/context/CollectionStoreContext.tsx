@@ -52,6 +52,26 @@ interface RawResource {
 }
 
 /**
+ * A JSON column's value: unwraps the `{ type: "jsonb", value: "<json>" }` wrapper (parsing
+ * the inner JSON text) and passes an already-parsed value through. `null` → `undefined`.
+ */
+function unwrapJsonColumn(raw: unknown): unknown {
+  if (raw === null || raw === undefined) return undefined
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    const wrapper = raw as Record<string, unknown>
+    if (wrapper.type === 'jsonb' && 'value' in wrapper) {
+      if (wrapper.null === true || typeof wrapper.value !== 'string') return undefined
+      try {
+        return JSON.parse(wrapper.value)
+      } catch {
+        return wrapper.value
+      }
+    }
+  }
+  return raw
+}
+
+/**
  * Parse the bulk collections+fields JSON:API response into CollectionSchema[].
  *
  * The response shape is:
@@ -144,6 +164,10 @@ function parseCollectionsResponse(response: unknown): CollectionSchema[] {
           referenceTarget: (a.referenceTarget as string) || undefined,
           referenceCollectionId: refCollId,
           fieldTypeConfig,
+          // The record form applies these (create default, client validation); without
+          // them here the preloaded schema silently drops what the per-collection fetch has.
+          defaultValue: unwrapJsonColumn(a.defaultValue),
+          constraints: unwrapJsonColumn(a.constraints) as FieldDefinition['constraints'],
         } as FieldDefinition
       })
 

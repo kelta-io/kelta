@@ -1449,8 +1449,26 @@
       "maxLength": "Must be at most {{max}} characters",
       "pattern": "Value does not match the required pattern",
       "email": "Please enter a valid email address",
-      "url": "Please enter a valid URL"
+      "url": "Please enter a valid URL",
+      "invalidPhone": "Invalid phone number format",
+      "invalidLatitude": "Latitude must be between -90 and 90",
+      "invalidLongitude": "Longitude must be between -180 and 180"
     }
+  },
+  "recordForm": {
+    "newTitle": "New {{collection}}",
+    "editTitle": "Edit {{collection}}",
+    "recordType": "Record type",
+    "selectRecordType": "Select record type...",
+    "defaultRecordType": "{{name}} (Default)",
+    "sectionTitle": "{{collection}} Information",
+    "noEditableFields": "No editable fields in this collection.",
+    "selectPlaceholder": "Select...",
+    "schemaLoadError": "Failed to load collection schema.",
+    "goBack": "Go back",
+    "saveFailed": "Failed to save record",
+    "validationFailed": "Validation failed",
+    "fixInvalidJson": "Fix invalid JSON before saving"
   },
   "fieldEditor": {
     "namePlaceholder": "e.g., first_name",

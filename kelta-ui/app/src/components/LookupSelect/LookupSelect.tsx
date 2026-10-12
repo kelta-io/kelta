@@ -25,6 +25,8 @@ export interface LookupSelectProps {
   error?: boolean
   className?: string
   'data-testid'?: string
+  /** Id of the element describing the control (e.g. its field-error alert) */
+  'aria-describedby'?: string
 }
 
 export function LookupSelect({
@@ -39,6 +41,7 @@ export function LookupSelect({
   error = false,
   className,
   'data-testid': testId,
+  'aria-describedby': ariaDescribedBy,
 }: LookupSelectProps): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -197,6 +200,8 @@ export function LookupSelect({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={isOpen ? listboxId : undefined}
+        aria-invalid={error || undefined}
+        aria-describedby={ariaDescribedBy}
         data-testid={testId ? `${testId}-trigger` : undefined}
       >
         <span

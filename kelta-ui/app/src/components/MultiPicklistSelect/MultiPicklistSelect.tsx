@@ -24,6 +24,10 @@ export interface MultiPicklistSelectProps {
   required?: boolean
   disabled?: boolean
   className?: string
+  /** Marks the control invalid (e.g. it has a field error) */
+  'aria-invalid'?: boolean
+  /** Id of the element describing the control (e.g. its field-error alert) */
+  'aria-describedby'?: string
 }
 
 export function MultiPicklistSelect({
@@ -36,6 +40,8 @@ export function MultiPicklistSelect({
   required = false,
   disabled = false,
   className,
+  'aria-invalid': ariaInvalid,
+  'aria-describedby': ariaDescribedBy,
 }: MultiPicklistSelectProps): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -135,6 +141,8 @@ export function MultiPicklistSelect({
         aria-expanded={isOpen}
         aria-controls={isOpen ? listboxId : undefined}
         aria-required={required}
+        aria-invalid={ariaInvalid || undefined}
+        aria-describedby={ariaDescribedBy}
       >
         <span className="flex flex-1 flex-wrap items-center gap-1 overflow-hidden">
           {value.length === 0 ? (

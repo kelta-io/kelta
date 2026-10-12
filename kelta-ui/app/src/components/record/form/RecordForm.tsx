@@ -13,8 +13,11 @@
  * by the caller, so the end-user (`/app/o`) `ObjectFormPage` — and, in a later
  * slice, the admin `ResourceFormPage` — are thin `variant` wrappers over it.
  *
- * Record-stack convergence P2: moved from `ObjectFormPage` with no behavior
- * change. See `.claude/docs/conventions.md` → Component reuse.
+ * Record-stack convergence P2: moved from `ObjectFormPage`; P3 added the admin
+ * form's correctness features (client validation rules, blur rules, schema
+ * defaults, clear-to-null, per-field validation with linked a11y errors, create
+ * → new record's detail page, i18n). See `.claude/docs/conventions.md` →
+ * Component reuse.
  */
 
 import React, { useCallback } from 'react'
@@ -28,10 +31,12 @@ import { Separator } from '@/components/ui/separator'
 import { LayoutFormSections } from '@/components/LayoutFormSections'
 import type { LayoutFormFieldDefinition } from '@/components/LayoutFormSections/LayoutFormSections'
 import { usePlugins } from '@/context/PluginContext'
+import { useI18n } from '@/context/I18nContext'
 import { InsufficientPrivileges } from '@/components/InsufficientPrivileges'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { PageLayoutDto } from '@/hooks/usePageLayout'
 import type { RecordType } from '@/types/collections'
+import type { CollectionValidationRule } from '@kelta/sdk'
 import { FormField } from './FormField'
 import { useRecordFormModel } from './useRecordFormModel'
 import { useRecordFormState } from './useRecordFormState'
@@ -40,9 +45,9 @@ export type RecordFormVariant = 'enduser' | 'admin'
 
 /** Where the form navigates: after save, on cancel, and from the permission gate. */
 export interface RecordFormRoutes {
-  /** The collection's list (create → save/cancel). */
+  /** The collection's list (create → cancel). */
   list: string
-  /** A record's detail page (edit → save/cancel). */
+  /** A record's detail page (create → the new record after save; edit → save/cancel). */
   detail: (id: string) => string
 }
 
@@ -97,6 +102,8 @@ interface RecordFormBodyProps {
   selectedRecordTypeId?: string
   /** Callback when record type selection changes */
   onRecordTypeChange?: (id: string | undefined) => void
+  /** Collection validation rules enforced on the client */
+  validationRules?: CollectionValidationRule[]
 }
 
 /**
@@ -122,14 +129,17 @@ function RecordFormBody({
   recordTypes,
   selectedRecordTypeId,
   onRecordTypeChange,
+  validationRules,
 }: RecordFormBodyProps): React.ReactElement {
   const { getFieldRenderer } = usePlugins()
+  const { t } = useI18n()
   const {
     formData,
     formErrors,
     ruleEngine,
     displayFields,
     handleFieldChange,
+    handleFieldBlur,
     handleSave,
     isSaving,
   } = useRecordFormState({
@@ -142,9 +152,12 @@ function RecordFormBody({
     isFieldEditable,
     layout,
     selectedRecordTypeId,
+    validationRules,
   })
 
-  const pageTitle = isNew ? `New ${collectionLabel}` : `Edit ${collectionLabel}`
+  const pageTitle = isNew
+    ? t('recordForm.newTitle', { collection: collectionLabel })
+    : t('recordForm.editTitle', { collection: collectionLabel })
 
   return (
     <div className="space-y-4 p-6" data-testid={testId} data-variant={variant}>
@@ -164,7 +177,7 @@ function RecordFormBody({
             data-testid="cancel-button"
           >
             <X className="mr-1.5 h-3.5 w-3.5" />
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button size="sm" onClick={handleSave} disabled={isSaving} data-testid="save-button">
             {isSaving ? (
@@ -172,7 +185,7 @@ function RecordFormBody({
             ) : (
               <Save className="mr-1.5 h-3.5 w-3.5" />
             )}
-            {isSaving ? 'Saving...' : 'Save'}
+            {isSaving ? t('common.saving') : t('common.save')}
           </Button>
         </div>
       </div>
@@ -185,7 +198,7 @@ function RecordFormBody({
           <CardContent className="py-3">
             <div className="flex items-center gap-4">
               <FieldLabel htmlFor="recordType" className="mb-0 whitespace-nowrap">
-                Record type
+                {t('recordForm.recordType')}
               </FieldLabel>
               <select
                 id="recordType"
@@ -194,11 +207,10 @@ function RecordFormBody({
                 onChange={(e) => onRecordTypeChange?.(e.target.value || undefined)}
                 className="flex h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
-                <option value="">Select record type...</option>
+                <option value="">{t('recordForm.selectRecordType')}</option>
                 {recordTypes.map((rt) => (
                   <option key={rt.id} value={rt.id}>
-                    {rt.name}
-                    {rt.isDefault ? ' (Default)' : ''}
+                    {rt.isDefault ? t('recordForm.defaultRecordType', { name: rt.name }) : rt.name}
                   </option>
                 ))}
               </select>
@@ -225,6 +237,7 @@ function RecordFormBody({
                   value={formData[field.name]}
                   onChange={fieldIsEditable && !layoutReadOnly ? handleFieldChange : () => {}}
                   readOnly={!fieldIsEditable || layoutReadOnly}
+                  onBlur={handleFieldBlur}
                   error={formErrors[field.name]}
                   pluginRenderer={getFieldRenderer(field.type)}
                 />
@@ -235,13 +248,13 @@ function RecordFormBody({
       ) : (
         <Card data-testid="form-fields">
           <CardHeader className="py-3">
-            <CardTitle className="text-sm font-medium">{collectionLabel} Information</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              {t('recordForm.sectionTitle', { collection: collectionLabel })}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {displayFields.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No editable fields in this collection.
-              </p>
+              <p className="text-sm text-muted-foreground">{t('recordForm.noEditableFields')}</p>
             ) : (
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                 {displayFields.map((field) => {
@@ -253,6 +266,7 @@ function RecordFormBody({
                       value={formData[field.name]}
                       onChange={fieldIsEditable ? handleFieldChange : () => {}}
                       readOnly={!fieldIsEditable}
+                      onBlur={handleFieldBlur}
                       error={formErrors[field.name]}
                       pluginRenderer={getFieldRenderer(field.type)}
                     />
@@ -278,6 +292,7 @@ export function RecordForm({
   testId,
 }: RecordFormProps): React.ReactElement {
   const navigate = useNavigate()
+  const { t } = useI18n()
   const {
     isNew,
     isLoading,
@@ -290,6 +305,7 @@ export function RecordForm({
     recordTypes,
     selectedRecordTypeId,
     setSelectedRecordTypeId,
+    validationRules,
     initialData,
     formKey,
   } = useRecordFormModel({ collectionName, recordId, prefill })
@@ -330,13 +346,13 @@ export function RecordForm({
       <div className="space-y-4 p-6">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Error</AlertTitle>
+          <AlertTitle>{t('common.error')}</AlertTitle>
           <AlertDescription>
-            {schemaError.message || 'Failed to load collection schema.'}
+            {schemaError.message || t('recordForm.schemaLoadError')}
           </AlertDescription>
         </Alert>
         <Button variant="outline" onClick={handleCancel}>
-          Go back
+          {t('recordForm.goBack')}
         </Button>
       </div>
     )
@@ -362,6 +378,7 @@ export function RecordForm({
       recordTypes={recordTypes}
       selectedRecordTypeId={selectedRecordTypeId}
       onRecordTypeChange={setSelectedRecordTypeId}
+      validationRules={validationRules}
     />
   )
 }
