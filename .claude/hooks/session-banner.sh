@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# SessionStart hook. Prints a one-screen summary of the queue + the current
-# task brief if this is a worker session.
+# SessionStart hook. Prints a short session summary (host, cwd, branch) and,
+# when an external task runner sets EMF_TASK_FILE, the start of that task brief.
 #
-# Output goes to stderr (Claude shows it as session context) and is also
-# echoed to stdout so the launching tmux pane shows it.
+# Output goes to stderr (Claude shows it as session context).
 
 set -uo pipefail
 
 emit() { printf '%s\n' "$1" >&2; }
 
 
-emit "─── EMF autopilot session ───"
+emit "─── Kelta session ───"
 emit "host:    $(hostname)  user: $(whoami)"
 emit "cwd:     $(pwd)"
 emit "branch:  $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '(no git)')"

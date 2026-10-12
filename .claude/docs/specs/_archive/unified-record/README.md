@@ -233,6 +233,6 @@ never omit silently):
 - `.claude/docs/architecture.md` — record-event server hook order; 409 conflict path.
 - `.claude/docs/concerns.md` — large-file notes for the folded components; script-governor abuse
   surface.
-- `CLAUDE.md` reference-doc table — add a row pointing at `specs/unified-record/`; correct the
+- `CLAUDE.md` reference-doc table — add a row pointing at `specs/_archive/unified-record/`; correct the
   Flyway-head line (code head is **V148**, doc says V147).
 - `project_outsystems_roadmap.md` (memory) — record the unified-record slices.

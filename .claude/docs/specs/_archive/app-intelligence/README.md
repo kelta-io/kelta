@@ -1,7 +1,7 @@
 # App Intelligence & Resilience (App-UX Phase 4) — Parent Spec
 
 > **Status:** parent planning spec. Phase 4 of the app-UX roadmap (Phases 1–3 —
-> `specs/app-surfacing/`, `specs/app-data-entry/`, `specs/app-platform/` — are
+> `specs/_archive/app-surfacing/`, `specs/_archive/app-data-entry/`, `specs/_archive/app-platform/` — are
 > complete). Each slice below gets a child spec in this directory before (or with) its
 > implementation PR. Child specs extend, never contradict, this parent.
 >

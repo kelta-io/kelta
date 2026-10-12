@@ -1,6 +1,6 @@
 # Telehealth Slice 8 — Headless Portal Auth
 
-**Status:** SHIPPED (this slice) · **Parent:** `specs/telehealth/README.md` · **Depends on:** slice 1 (portal identity)
+**Status:** SHIPPED (this slice) · **Parent:** `specs/_archive/telehealth/README.md` · **Depends on:** slice 1 (portal identity)
 
 Slice 1's portal login is Thymeleaf-only: the magic-link email points at
 `GET /portal/login/verify`, which establishes a kelta-auth session and 302s to

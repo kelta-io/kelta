@@ -76,7 +76,7 @@ comments; notes are read through their parent record — exactly today's behavio
 ## 7. Docs to update
 
 `kelta-worker/CLAUDE.md`, `concerns.md` (remove per-hook notes; close user-ui-preferences read
-gap), `specs/consumer-alerting/*` and `specs/app-data-entry/1-user-preferences.md` (point to the
+gap), `specs/consumer-alerting/*` and `specs/_archive/app-data-entry/1-user-preferences.md` (point to the
 generic mechanism), `status.md`.
 
 ## 8. Risks & open questions

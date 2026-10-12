@@ -189,7 +189,7 @@ No gateway change (routes exist), no worker change, no SDK change.
 - `.claude/docs/status.md` — Reports & dashboards row: end-user viewer ships
   (`DashboardDataController` gains its first UI consumer); note preset-only time ranges +
   accessLevel deferral in the gap column.
-- `.claude/docs/specs/app-surfacing/README.md` — slice 3 marked shipped.
+- `.claude/docs/specs/_archive/app-surfacing/README.md` — slice 3 marked shipped.
 - `.claude/docs/conventions.md` — `buildListUrl`/`listUrlState.ts` as the canonical
   drill-through helper (parent promised this row).
 - `.claude/docs/architecture.md` — one line on the viewer consuming the pass-through

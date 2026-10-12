@@ -9,7 +9,7 @@
 > [Security](#security) sections below.
 >
 > Source-verified 2026-07-08, immediately after Phase 1
-> ([`specs/app-surfacing/`](../app-surfacing/README.md)) fully merged (#1194–#1199). Flyway
+> ([`specs/_archive/app-surfacing/`](../app-surfacing/README.md)) fully merged (#1194–#1199). Flyway
 > head file is V1__baseline + `V162__seed_view_analytics_permission.sql`; **next new
 > migration is V163** (deployed history keeps pre-flatten numbering — never number below
 > V162). If code and this doc disagree, trust the code and fix this doc.

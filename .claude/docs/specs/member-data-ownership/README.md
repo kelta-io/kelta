@@ -20,7 +20,7 @@
 ## How to use this document
 
 Read this parent first. Child specs each cover one PR-sized slice and follow the child-spec
-template in `specs/app-surfacing/README.md` (sections 1–8; sections that don't apply say
+template in `specs/_archive/app-surfacing/README.md` (sections 1–8; sections that don't apply say
 "N/A — reason").
 
 ## Slice plan
@@ -86,7 +86,7 @@ platform has no generic way to say that. What exists today:
 **Consequences seen in production (2026-10-06):** an external member site could not let members manage
 watchlists safely — granting the Portal User profile CRUD would expose every member's rows — so
 it ships a backend-for-frontend that holds a service account and filters by owner in its own
-code (the same workaround `specs/expat-clinic/README.md` §5.2 documents). Its settings page
+code (the same workaround `specs/_archive/expat-clinic/README.md` §5.2 documents). Its settings page
 writes `users` fields that don't exist (`displayName`, `region`, `pushTokens`, …) and a
 member-facing key can't hold `MANAGE_USERS` safely.
 
@@ -225,7 +225,7 @@ Bugs this effort fixes or must account for:
 
 ## Child-spec template
 
-Per `specs/app-surfacing/README.md`: 1 Goal & scope · 2 UI samples · 3 Data & API contracts ·
+Per `specs/_archive/app-surfacing/README.md`: 1 Goal & scope · 2 UI samples · 3 Data & API contracts ·
 4 DB migrations · 5 File-by-file code changes · 6 Test plan · 7 Docs to update · 8 Risks & open
 questions.
 

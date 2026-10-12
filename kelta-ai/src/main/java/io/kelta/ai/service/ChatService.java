@@ -39,7 +39,7 @@ public class ChatService {
 
     /**
      * Guard against unbounded conversation-history growth (see
-     * docs/superpowers/specs/2026-07-27-ai-chat-length-guard-design.md).
+     * .claude/docs/specs/_archive/ai-chat-length-guard-design.md).
      * claude-sonnet-5's context window is 200k tokens and Anthropic reserves
      * the full requested max-tokens budget (32,768 default) against it on
      * every call, so the real ceiling is ~167k input tokens. This threshold

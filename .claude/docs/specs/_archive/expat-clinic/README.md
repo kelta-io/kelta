@@ -101,7 +101,7 @@ Portal login today is Thymeleaf pages in kelta-auth; `verify` 302-redirects to
 `{ui-base-url}/{tenantSlug}/app` (kelta-ui, not our site). A third-party frontend cannot
 complete login cleanly.
 
-**New platform slice (small, ~1–1.5 days, PR to `emf`):** `specs/telehealth/8-portal-auth-headless.md`
+**New platform slice (small, ~1–1.5 days, PR to `emf`):** `specs/_archive/telehealth/8-portal-auth-headless.md`
 
 - `POST /portal/api/login/request {email}` → 202 (JSON, enumeration-safe, same token machinery).
 - `POST /portal/api/login/verify {token}` → 200 `{accessToken, expiresAt}` (same JWT the session flow mints; portal claims).
@@ -677,7 +677,7 @@ docs updated in-PR. Estimates are focused working days.
 | Inventory race on concurrent checkouts | Movements ledger + flow fold; sample scale OK; note for real use |
 | **Name/domain choice** (Atlântico/atlantico.rzware.com are placeholders) | Craig confirms before P6 SEO work |
 | Locale set (drop/add uk? add nl/it?) | Confirm before P9 translation fill |
-| Where slice spec lives | `specs/telehealth/8-portal-auth-headless.md`, written in P1 |
+| Where slice spec lives | `specs/_archive/telehealth/8-portal-auth-headless.md`, written in P1 |
 
 ---
 

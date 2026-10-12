@@ -1,6 +1,6 @@
 # Maven build artifacts
 target/
-!target/emf-gateway-*.jar
+!target/kelta-gateway-*.jar
 
 # IDE files
 .idea/
