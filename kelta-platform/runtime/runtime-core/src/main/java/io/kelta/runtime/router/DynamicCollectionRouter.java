@@ -30,6 +30,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -268,6 +269,7 @@ public class DynamicCollectionRouter {
             // the cache only ever stores no-include responses, so include-bearing requests
             // must skip the lookup or they'd receive a stale parent without included children.
             List<String> includeNames = JsonApiIncludeResolver.parseIncludeParam(params);
+            List<String> sparseFields = QueryRequest.fieldsFromParams(params);
 
             // Check system collection cache for get-by-id (no-include requests only)
             String tenantId = request.getHeader("X-Tenant-ID");
@@ -276,7 +278,7 @@ public class DynamicCollectionRouter {
                         tenantId, collectionName, id);
                 if (cached.isPresent()) {
                     logger.debug("Cache hit for system collection get: {}/{}", collectionName, id);
-                    return ResponseEntity.ok(cached.get());
+                    return ResponseEntity.ok(projectSparseFieldset(cached.get(), sparseFields));
                 }
             }
 
@@ -321,8 +323,36 @@ public class DynamicCollectionRouter {
             if (etag != null) {
                 ok.header(HttpHeaders.ETAG, etag);
             }
-            return ok.body(response);
+            return ok.body(projectSparseFieldset(response, sparseFields));
         });
+    }
+
+    /**
+     * Narrows a single-resource document to a JSON:API sparse fieldset: {@code data.attributes}
+     * and {@code data.relationships} keep only the named keys; {@code id}, {@code type} and
+     * {@code included} are untouched. Returns a copy, because the unprojected document may be
+     * the one held by the system-collection cache.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> projectSparseFieldset(Map<String, Object> document, List<String> fields) {
+        if (fields.isEmpty() || !(document.get("data") instanceof Map<?, ?> data)) {
+            return document;
+        }
+        Map<String, Object> projectedData = new LinkedHashMap<>((Map<String, Object>) data);
+        for (String member : List.of("attributes", "relationships")) {
+            if (projectedData.get(member) instanceof Map<?, ?> values) {
+                Map<String, Object> kept = new LinkedHashMap<>();
+                ((Map<String, Object>) values).forEach((key, value) -> {
+                    if (fields.contains(key)) {
+                        kept.put(key, value);
+                    }
+                });
+                projectedData.put(member, kept);
+            }
+        }
+        Map<String, Object> projected = new LinkedHashMap<>(document);
+        projected.put("data", projectedData);
+        return projected;
     }
 
     /**

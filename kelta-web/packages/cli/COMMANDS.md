@@ -671,6 +671,7 @@ List records in a collection
 Get a single record
 
 - `--include <rels>` — Related resources to include
+- `--fields <fields>` — Sparse fieldset, comma-separated
 
 ### `kelta records create <collection>`
 

@@ -89,6 +89,30 @@ describe('records get/create/update/delete', () => {
     const def = command('get');
     await def.handler(ctx, def.input.parse({ collection: 'x', id: '9', include: 'a,b' }) as never);
     expect(get).toHaveBeenCalledWith('9', { include: ['a', 'b'] });
+    expect(get.mock.calls[0][1]).not.toHaveProperty('fields');
+  });
+
+  it('get passes --fields as a sparse fieldset', async () => {
+    const get = vi.fn().mockResolvedValue({ data: { id: '9' } });
+    const { ctx } = fakeCtx({ get });
+    const def = command('get');
+    await def.handler(ctx, def.input.parse({ collection: 'x', id: '9', fields: 'a,b' }) as never);
+    expect(get).toHaveBeenCalledWith('9', { fields: ['a', 'b'] });
+  });
+
+  it('get sends no fields when --fields is absent', async () => {
+    const get = vi.fn().mockResolvedValue({ data: { id: '9' } });
+    const { ctx } = fakeCtx({ get });
+    const def = command('get');
+    await def.handler(ctx, def.input.parse({ collection: 'x', id: '9' }) as never);
+    expect(get).toHaveBeenCalledWith('9', undefined);
+  });
+
+  it('get declares --fields like records list', () => {
+    expect(command('get').options).toContainEqual({
+      flag: '--fields <fields>',
+      description: 'Sparse fieldset, comma-separated',
+    });
   });
 
   it('create parses --data and calls the SDK', async () => {

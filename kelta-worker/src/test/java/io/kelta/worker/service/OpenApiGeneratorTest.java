@@ -175,6 +175,24 @@ class OpenApiGeneratorTest {
     }
 
     @Test
+    @DisplayName("Get-by-id operations document the sparse-fieldset parameter")
+    @SuppressWarnings("unchecked")
+    void getByIdOperationsDocumentFieldsParameter() {
+        Map<String, Object> spec = generator.generate(
+                List.of(createCollection("contacts", "Contacts", false, false)), null);
+
+        Map<String, Object> paths = (Map<String, Object>) spec.get("paths");
+        Map<String, Object> get = (Map<String, Object>) ((Map<String, Object>)
+                paths.get("/api/contacts/{id}")).get("get");
+        List<Map<String, Object>> params = (List<Map<String, Object>>) get.get("parameters");
+
+        Map<String, Object> fields = paramNamed(params, "fields[{type}]");
+        assertThat(fields.get("in")).isEqualTo("query");
+        assertThat((String) fields.get("description")).contains("Sparse fieldset", "fields=a,b");
+        assertThat(paramNamed(params, "id").get("in")).isEqualTo("path");
+    }
+
+    @Test
     @DisplayName("Every documented filter operator is one the parser accepts")
     @SuppressWarnings("unchecked")
     void documentedFilterOperatorsMatchTheParser() {

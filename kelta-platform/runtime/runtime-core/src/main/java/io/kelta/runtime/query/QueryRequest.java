@@ -97,6 +97,18 @@ public record QueryRequest(
     }
     
     /**
+     * Reads the sparse fieldset ({@code fields=a,b} or {@code fields[type]=a,b}) with the
+     * same rules {@link #fromParams(MultiValueMap)} applies, without parsing the rest of
+     * the query — for reads such as get-by-id that take no pagination or filters.
+     *
+     * @param params the HTTP query parameters, may be null
+     * @return the requested field names, or an empty list if none were requested
+     */
+    public static List<String> fieldsFromParams(MultiValueMap<String, String> params) {
+        return params != null ? parseFields(resolveFieldsParam(params.toSingleValueMap())) : List.of();
+    }
+
+    /**
      * Creates a default QueryRequest with default pagination and no sorting, filtering, or field selection.
      * 
      * @return a new QueryRequest with defaults

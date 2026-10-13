@@ -118,10 +118,7 @@ public class OpenApiGenerator {
                         "Filter on a field. {op} is one of: " + String.join(" ", FILTER_OPERATORS)
                                 + ". `in` accepts the parameter repeated once per value; the shorthand"
                                 + " filter[{field}]=value means eq."),
-                queryParam("fields[{type}]", "string",
-                        "Sparse fieldset: comma-separated attribute/relationship names to return"
-                                + " (id is always included). The bare form fields=a,b is also accepted;"
-                                + " {type} is not validated against the resource type.")
+                sparseFieldsetParam()
         ));
         op.put("responses", responses(
                 response("200", "List of " + col.name() + " resources", schemaRef(col.name() + "ListResponse")),
@@ -135,12 +132,19 @@ public class OpenApiGenerator {
         var op = new LinkedHashMap<String, Object>();
         op.put("summary", "Get " + col.displayName() + " by ID");
         op.put("tags", List.of(col.displayName()));
-        op.put("parameters", List.of(pathParam("id", "Resource ID (UUID)")));
+        op.put("parameters", List.of(pathParam("id", "Resource ID (UUID)"), sparseFieldsetParam()));
         op.put("responses", responses(
                 response("200", "Single " + col.name() + " resource", schemaRef(col.name() + "Response")),
                 errorResponse("404", "Not found")
         ));
         return op;
+    }
+
+    private Map<String, Object> sparseFieldsetParam() {
+        return queryParam("fields[{type}]", "string",
+                "Sparse fieldset: comma-separated attribute/relationship names to return"
+                        + " (id is always included). The bare form fields=a,b is also accepted;"
+                        + " {type} is not validated against the resource type.");
     }
 
     private Map<String, Object> createOperation(CollectionDefinition col) {
