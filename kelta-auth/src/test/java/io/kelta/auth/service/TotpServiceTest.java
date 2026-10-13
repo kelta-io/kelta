@@ -20,6 +20,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.AdditionalMatchers.and;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -215,6 +216,20 @@ class TotpServiceTest {
                     .thenReturn(List.of());
 
             assertThat(totpService.isMfaLocked("user-1")).isFalse();
+        }
+
+        @Test
+        void shouldStartAFreshCountOnceTheMfaLockHasExpired() {
+            when(jdbcTemplate.queryForList(contains("SELECT mfa_failed_attempts"), eq("user-1")))
+                    .thenReturn(List.of(Map.of("mfa_failed_attempts", 1)));
+
+            totpService.incrementMfaFailedAttempts("user-1");
+
+            verify(jdbcTemplate).update(
+                    and(contains("mfa_failed_attempts = CASE WHEN mfa_locked_until <= NOW() THEN 1"),
+                            contains("mfa_locked_until = CASE WHEN mfa_locked_until <= NOW() THEN NULL")),
+                    eq("user-1"));
+            verify(jdbcTemplate, never()).update(contains("SET mfa_locked_until = ?"), any(), any());
         }
     }
 

@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.AdditionalMatchers.and;
 import static org.mockito.Mockito.*;
 
 @DisplayName("PasswordPolicyService")
@@ -166,7 +167,21 @@ class PasswordPolicyServiceTest {
 
             service.incrementFailedAttempts("user-1", null);
 
-            verify(jdbcTemplate).update(contains("failed_attempts = failed_attempts + 1"), any(Timestamp.class), any());
+            verify(jdbcTemplate).update(contains("ELSE failed_attempts + 1"),
+                    any(Timestamp.class), any(Timestamp.class), any(Timestamp.class), eq("user-1"));
+        }
+
+        @Test
+        @DisplayName("Should start a fresh count once a lockout has expired")
+        void shouldRestartCountAfterExpiredLock() {
+            when(jdbcTemplate.queryForList(anyString(), any(Object[].class))).thenReturn(List.of());
+
+            service.incrementFailedAttempts("user-1", null);
+
+            verify(jdbcTemplate).update(
+                    and(contains("failed_attempts = CASE WHEN locked_until <= ? THEN 1"),
+                            contains("locked_until = CASE WHEN locked_until <= ? THEN NULL")),
+                    any(Timestamp.class), any(Timestamp.class), any(Timestamp.class), eq("user-1"));
         }
 
         @Test
