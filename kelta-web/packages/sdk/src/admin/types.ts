@@ -968,6 +968,7 @@ export interface RecordTypePicklistOverride {
   id: string;
   recordTypeId?: string;
   fieldId: string;
+  /** The field's API name, resolved from the collection's fields (the field id if not found). */
   fieldName: string;
   /**
    * The picklist values this record type allows. Stored as a JSONB array; legacy rows that hold

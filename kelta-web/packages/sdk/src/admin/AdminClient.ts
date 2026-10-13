@@ -198,8 +198,17 @@ function parseRecordTypeAvailableValues(raw: unknown): string[] {
   return Array.isArray(parsed) && parsed.every((v) => typeof v === 'string') ? parsed : [];
 }
 
-function normalizePicklistOverride(raw: RecordTypePicklistOverride): RecordTypePicklistOverride {
-  return { ...raw, availableValues: parseRecordTypeAvailableValues(raw.availableValues) };
+function normalizePicklistOverride(
+  raw: RecordTypePicklistOverride,
+  fieldNames?: Map<string, string>
+): RecordTypePicklistOverride {
+  return {
+    ...raw,
+    availableValues: parseRecordTypeAvailableValues(raw.availableValues),
+    // The stored row only carries the field id; resolve its API name from the collection's
+    // fields, falling back to the id when the field is not found.
+    fieldName: fieldNames?.get(raw.fieldId) ?? raw.fieldName ?? raw.fieldId,
+  };
 }
 
 /**
@@ -872,6 +881,27 @@ export class AdminClient {
     },
   };
 
+  /**
+   * Field id → API name for one collection, used to fill names on rows that only store field
+   * ids. Resolves to an empty map when the collection id is blank or the lookup fails, so the
+   * caller falls back to the field id instead of failing.
+   */
+  private async fieldNamesById(collectionId: string): Promise<Map<string, string>> {
+    if (!collectionId) {
+      return new Map();
+    }
+    try {
+      const response = await this.axios.get(
+        `/api/fields?filter[collectionId][eq]=${encodeURIComponent(collectionId)}&page[size]=200`
+      );
+      return new Map(
+        unwrapJsonApiList<{ id: string; name: string }>(response.data).map((f) => [f.id, f.name])
+      );
+    } catch {
+      return new Map();
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Record types
   // ---------------------------------------------------------------------------
@@ -924,33 +954,52 @@ export class AdminClient {
     },
 
     getPicklistOverrides: async (
-      _collectionId: string,
+      collectionId: string,
       recordTypeId: string
     ): Promise<RecordTypePicklistOverride[]> => {
       // One row per record type × picklist field, so the HTTP maximum page (200) covers every
       // field; the default page of 20 would silently drop overrides.
-      const response = await this.axios.get(
-        `/api/record-type-picklists?filter[recordTypeId][eq]=${encodeURIComponent(recordTypeId)}&page[size]=200`
-      );
-      return unwrapJsonApiList<RecordTypePicklistOverride>(response.data).map(
-        normalizePicklistOverride
+      const [response, fieldNames] = await Promise.all([
+        this.axios.get(
+          `/api/record-type-picklists?filter[recordTypeId][eq]=${encodeURIComponent(recordTypeId)}&page[size]=200`
+        ),
+        this.fieldNamesById(collectionId),
+      ]);
+      return unwrapJsonApiList<RecordTypePicklistOverride>(response.data).map((row) =>
+        normalizePicklistOverride(row, fieldNames)
       );
     },
 
+    /**
+     * Creates or replaces the override for one record type and field. The store holds one row
+     * per (record type, field), so an existing row is updated in place rather than duplicated.
+     */
     setPicklistOverride: async (
-      _collectionId: string,
+      collectionId: string,
       recordTypeId: string,
       fieldId: string,
       request: SetPicklistOverrideRequest
     ): Promise<RecordTypePicklistOverride> => {
-      const body = toJsonApiBody('record-type-picklists', {
-        ...(request as unknown as Record<string, unknown>),
-        recordTypeId,
-        fieldId,
-      });
-      const response = await this.axios.post('/api/record-type-picklists', body);
+      const [existing, fieldNames] = await Promise.all([
+        this.axios.get(
+          `/api/record-type-picklists?filter[recordTypeId][eq]=${encodeURIComponent(recordTypeId)}&filter[fieldId][eq]=${encodeURIComponent(fieldId)}&page[size]=1`
+        ),
+        this.fieldNamesById(collectionId),
+      ]);
+      const existingId = unwrapJsonApiList<RecordTypePicklistOverride>(existing.data)[0]?.id;
+      const attributes = request as unknown as Record<string, unknown>;
+      const response = existingId
+        ? await this.axios.patch(
+            `/api/record-type-picklists/${existingId}`,
+            toJsonApiBody('record-type-picklists', attributes, existingId)
+          )
+        : await this.axios.post(
+            '/api/record-type-picklists',
+            toJsonApiBody('record-type-picklists', { ...attributes, recordTypeId, fieldId })
+          );
       return normalizePicklistOverride(
-        unwrapJsonApiResource<RecordTypePicklistOverride>(response.data)
+        unwrapJsonApiResource<RecordTypePicklistOverride>(response.data),
+        fieldNames
       );
     },
 

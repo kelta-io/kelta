@@ -377,7 +377,45 @@ describe('AdminClient recordTypes', () => {
     expect(overrides[0].fieldId).toBe('field-a');
   });
 
-  it('sends availableValues as an array and normalizes the created override', async () => {
+  const fieldsResponse = {
+    data: {
+      data: [
+        { type: 'fields', id: 'field-a', attributes: { name: 'status' } },
+        { type: 'fields', id: 'field-b', attributes: { name: 'priority' } },
+      ],
+    },
+  };
+
+  /** Routes GETs: the collection's fields, otherwise the given override rows. */
+  const routeGets = (overrideRows: unknown[]) =>
+    mockGet.mockImplementation(async (url: string) =>
+      url.startsWith('/api/fields') ? fieldsResponse : { data: { data: overrideRows } }
+    );
+
+  it('resolves fieldName from the collection fields, falling back to the field id', async () => {
+    routeGets([overrideRow('a', ['Open']), overrideRow('z', ['High'])]);
+
+    const overrides = await client.recordTypes.getPicklistOverrides('col-1', 'rt-1');
+
+    expect(mockGet).toHaveBeenCalledWith(
+      '/api/fields?filter[collectionId][eq]=col-1&page[size]=200'
+    );
+    expect(overrides.map((o) => o.fieldName)).toEqual(['status', 'field-z']);
+  });
+
+  it('still returns overrides when the field lookup fails', async () => {
+    mockGet.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/fields')) throw new Error('forbidden');
+      return { data: { data: [overrideRow('a', ['Open'])] } };
+    });
+
+    const overrides = await client.recordTypes.getPicklistOverrides('col-1', 'rt-1');
+
+    expect(overrides[0].fieldName).toBe('field-a');
+  });
+
+  it('creates the override when none exists for the record type and field', async () => {
+    routeGets([]);
     mockPost.mockResolvedValue({ data: { data: overrideRow('a', '["Open"]') } });
 
     const created = await client.recordTypes.setPicklistOverride('col-1', 'rt-1', 'field-a', {
@@ -385,6 +423,10 @@ describe('AdminClient recordTypes', () => {
       defaultValue: 'Open',
     });
 
+    expect(mockGet).toHaveBeenCalledWith(
+      '/api/record-type-picklists?filter[recordTypeId][eq]=rt-1&filter[fieldId][eq]=field-a&page[size]=1'
+    );
+    expect(mockPatch).not.toHaveBeenCalled();
     const body = mockPost.mock.calls[0][1];
     expect(mockPost.mock.calls[0][0]).toBe('/api/record-type-picklists');
     expect(body.data.attributes).toEqual({
@@ -394,5 +436,25 @@ describe('AdminClient recordTypes', () => {
       fieldId: 'field-a',
     });
     expect(created.availableValues).toEqual(['Open']);
+    expect(created.fieldName).toBe('status');
+  });
+
+  it('updates the existing override in place instead of creating a duplicate', async () => {
+    routeGets([overrideRow('a', ['Open', 'Closed'])]);
+    mockPatch.mockResolvedValue({ data: { data: overrideRow('a', ['Closed']) } });
+
+    const updated = await client.recordTypes.setPicklistOverride('col-1', 'rt-1', 'field-a', {
+      availableValues: ['Closed'],
+    });
+
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockPatch.mock.calls[0][0]).toBe('/api/record-type-picklists/a');
+    expect(mockPatch.mock.calls[0][1].data).toMatchObject({
+      type: 'record-type-picklists',
+      id: 'a',
+      attributes: { availableValues: ['Closed'] },
+    });
+    expect(updated.availableValues).toEqual(['Closed']);
+    expect(updated.fieldName).toBe('status');
   });
 });
