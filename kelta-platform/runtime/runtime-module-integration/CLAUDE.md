@@ -36,10 +36,15 @@ engine discovers them through the module SPI:
   dependencies via `context.getExtension(Type.class)`. The worker registers these extensions in
   `FlowConfig.moduleRegistry()`: `FlowEngine`, `RollupSummaryService`, `JdbcTemplate`,
   `TransactionTemplate`, `EmailService`, `ScriptExecutor`, `ApiSpecStore`, **`CredentialResolverPort`**,
-  `IdempotencyStore`.
+  `IdempotencyStore`, **`OutboundUrlGuard`**.
+  - A handler that fetches a **tenant-configured URL** uses runtime-core's `OutboundHttpClient`
+    with the `OutboundUrlGuard` extension (the worker registers it; `IntegrationModule` falls back
+    to a guard that allows no private range) — see `HttpCalloutActionHandler`. That gives the
+    non-public-address check, per-hop redirect re-validation, a deadline and a body cap.
   - ⚠️ `RestTemplate` is **NOT** a registered extension — `getExtension(RestTemplate.class)`
-    returns `null`. HTTP handlers must default: `restTemplate != null ? restTemplate : new RestTemplate()`
-    (see `HttpCalloutActionHandler`). Trusting the extension to be non-null NPEs at startup.
+    returns `null`. Handlers that use it default:
+    `restTemplate != null ? restTemplate : new RestTemplate()`. Trusting the extension to be
+    non-null NPEs at startup.
 - **Secrets** (webhook URLs, API keys): resolve through the `CredentialResolverPort` extension
   (`resolve(tenantId, reference, purpose)`) — store a credential **reference** in node config,
   not the plaintext secret.
@@ -67,7 +72,8 @@ descriptor-driven): see `.claude/docs/playbooks.md` → "Add a flow action handl
 
 ## Tests
 
-JUnit 5 + Mockito; `MockWebServer` for outbound HTTP. Co-locate `*ActionHandlerTest.java`.
+JUnit 5 + Mockito; a real loopback `com.sun.net.httpserver.HttpServer` for outbound HTTP (allow
+`127.0.0.0/8` on the guard in the test). Co-locate `*ActionHandlerTest.java`.
 
 ```bash
 mvn test -f kelta-platform/pom.xml -pl runtime/runtime-module-integration

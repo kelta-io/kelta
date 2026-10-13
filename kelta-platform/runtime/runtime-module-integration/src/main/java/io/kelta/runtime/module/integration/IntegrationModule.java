@@ -12,6 +12,7 @@ import io.kelta.runtime.module.integration.spi.ScriptExecutor;
 import io.kelta.runtime.module.integration.spi.noop.LoggingEmailService;
 import io.kelta.runtime.module.integration.spi.noop.LoggingPendingActionStore;
 import io.kelta.runtime.module.integration.spi.noop.LoggingScriptExecutor;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import io.kelta.runtime.workflow.ActionHandler;
 import io.kelta.runtime.workflow.module.KeltaModule;
 import io.kelta.runtime.workflow.module.ModuleContext;
@@ -46,6 +47,10 @@ import java.util.List;
  * <p>If no SPI implementations are provided via ModuleContext extensions,
  * logging no-op implementations are used as defaults.
  *
+ * <p>{@code HTTP_CALLOUT} fetches through the {@link OutboundUrlGuard} extension (the host
+ * service's guard, carrying its private-range allow-list). Without one it uses a guard that
+ * allows no private range, so a missing extension never widens what a flow can reach.
+ *
  * @since 1.0.0
  */
 public class IntegrationModule implements KeltaModule {
@@ -74,7 +79,11 @@ public class IntegrationModule implements KeltaModule {
         // HTTP handlers — use RestTemplate from extensions or create default
         RestTemplate restTemplate = context.getExtension(RestTemplate.class);
 
-        handlers.add(new HttpCalloutActionHandler(objectMapper, restTemplate));
+        OutboundUrlGuard urlGuard = context.getExtension(OutboundUrlGuard.class);
+        if (urlGuard == null) {
+            urlGuard = new OutboundUrlGuard("");
+        }
+        handlers.add(new HttpCalloutActionHandler(objectMapper, urlGuard));
         handlers.add(new OutboundMessageActionHandler(objectMapper, restTemplate));
 
         // Simple handlers (ObjectMapper only)

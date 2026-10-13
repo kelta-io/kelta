@@ -3,7 +3,10 @@ package io.kelta.runtime.module.integration;
 import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.runtime.module.integration.spi.PendingActionStore;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
+import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandler;
+import io.kelta.runtime.workflow.ActionResult;
 import io.kelta.runtime.workflow.module.ModuleContext;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -134,5 +137,43 @@ class IntegrationModuleTest {
         module.onStartup(context);
 
         assertEquals(8, module.getActionHandlers().size());
+    }
+
+    @Test
+    @DisplayName("HTTP_CALLOUT refuses private targets when no guard extension is supplied")
+    void calloutWithoutGuardExtensionRefusesPrivateTargets() {
+        module.onStartup(new ModuleContext(null, null, null, new ObjectMapper()));
+
+        ActionResult result = callout().execute(calloutContext("http://127.0.0.1:9/x"));
+
+        assertFalse(result.successful());
+        assertTrue(result.errorMessage().contains("refused"), result.errorMessage());
+    }
+
+    @Test
+    @DisplayName("HTTP_CALLOUT uses the guard extension's allow-list")
+    void calloutUsesGuardExtension() {
+        Map<Class<?>, Object> extensions = Map.of(OutboundUrlGuard.class, new OutboundUrlGuard("127.0.0.0/8"));
+        module.onStartup(new ModuleContext(null, null, null, new ObjectMapper(), null, extensions));
+
+        // Allowed by the guard, so the request is attempted; nothing listens on the discard port.
+        ActionResult result = callout().execute(calloutContext("http://127.0.0.1:9/x"));
+
+        assertFalse(result.successful());
+        assertFalse(result.errorMessage().contains("refused"), result.errorMessage());
+    }
+
+    private ActionHandler callout() {
+        return module.getActionHandlers().stream()
+            .filter(h -> "HTTP_CALLOUT".equals(h.getActionTypeKey()))
+            .findFirst().orElseThrow();
+    }
+
+    private static ActionContext calloutContext(String url) {
+        return ActionContext.builder()
+            .tenantId("t1").collectionId("c1").collectionName("orders").recordId("r1")
+            .data(Map.of()).userId("user-1")
+            .actionConfigJson("{\"url\": \"" + url + "\"}")
+            .workflowRuleId("wf1").executionLogId("log1").build();
     }
 }

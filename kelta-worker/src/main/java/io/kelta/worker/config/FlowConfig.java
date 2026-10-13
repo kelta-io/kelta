@@ -184,7 +184,8 @@ public class FlowConfig {
                                           @Autowired(required = false)
                                               io.kelta.runtime.module.integration.spi.CredentialResolverPort credentialResolverPort,
                                           @Autowired(required = false)
-                                              io.kelta.runtime.module.integration.spi.IdempotencyStore idempotencyStore) {
+                                              io.kelta.runtime.module.integration.spi.IdempotencyStore idempotencyStore,
+                                          io.kelta.runtime.outbound.OutboundUrlGuard outboundUrlGuard) {
         ModuleRegistry registry = new ModuleRegistry(actionHandlerRegistry, beforeSaveHookRegistry);
 
         if (discoveredModules != null && !discoveredModules.isEmpty()) {
@@ -194,6 +195,9 @@ public class FlowConfig {
             extensions.put(JdbcTemplate.class, jdbcTemplate);
             extensions.put(org.springframework.transaction.support.TransactionTemplate.class,
                     transactionTemplate);
+            // Flow HTTP callouts fetch tenant-configured URLs through the same guard (and
+            // allow-list) as every other outbound fetch of a tenant-supplied URL.
+            extensions.put(io.kelta.runtime.outbound.OutboundUrlGuard.class, outboundUrlGuard);
 
             if (emailService != null) {
                 extensions.put(EmailService.class, emailService);
