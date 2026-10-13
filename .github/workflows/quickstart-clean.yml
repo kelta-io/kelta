@@ -1,0 +1,90 @@
+name: Quickstart (clean runner)
+
+# Times the README quickstart the way a stranger runs it, on a fresh GitHub-hosted runner with
+# nothing cached: git clone → make setup → docker compose up -d --wait (pulling the
+# ghcr.io/kelta-io/*:${KELTA_VERSION} images the compose file pins) → first collection created.
+# One `timeout 300` wraps the whole path and the job fails when it expires.
+#
+# The `quickstart` job in ci.yml times only stack start → first collection, on the self-hosted
+# runner's shared Docker daemon with the Kelta images pulled before its timer starts, so its
+# number is a lower bound. This one is the upper bound a new user actually sees.
+#
+# No actions/checkout, docker pull or cache step runs before the timer: the clone is part of
+# the timed span. The collection is created by ci/quickstart-run.sh (the same script ci.yml
+# uses), told to use docker-compose.yml alone — the README's plain `docker compose up`.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quickstart-clean-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quickstart-clean:
+    name: Quickstart from a clean runner (budget 300s)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: kelta
+      QUICKSTART_COMPOSE_FILES: docker-compose.yml
+    steps:
+      - name: 'Time: git clone → make setup → compose up → first collection (budget 300s)'
+        run: |
+          set +e
+          START=$(date +%s)
+          echo "QUICKSTART_START=$START" >> "$GITHUB_ENV"
+          timeout 300 bash -c '
+            set -euo pipefail
+            git clone "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$RUNNER_TEMP/quickstart"
+            cd "$RUNNER_TEMP/quickstart"
+            git checkout --detach "$GITHUB_SHA"
+            make setup
+            grep "^KELTA_VERSION=" .env
+            bash ci/quickstart-run.sh
+          '
+          RESULT=$?
+          echo "QUICKSTART_END=$(date +%s)" >> "$GITHUB_ENV"
+          if [ "$RESULT" -eq 124 ]; then
+            echo "::error::Quickstart did not finish within the 300s budget."
+            exit 1
+          elif [ "$RESULT" -ne 0 ]; then
+            echo "::error::Quickstart failed (exit $RESULT)."
+            exit 1
+          fi
+
+      - name: Report elapsed seconds
+        if: always()
+        run: |
+          if [ -z "${QUICKSTART_START:-}" ]; then
+            echo "Quickstart (clean runner): not started" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          ELAPSED=$(( ${QUICKSTART_END:-$(date +%s)} - QUICKSTART_START ))
+          echo "Quickstart (clean runner): ${ELAPSED}s of 300s"
+          echo "Quickstart (clean runner): **${ELAPSED}s** of 300s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: |
+          [ -d "$RUNNER_TEMP/quickstart" ] || exit 0
+          cd "$RUNNER_TEMP/quickstart"
+          mkdir -p "$RUNNER_TEMP/quickstart-logs"
+          for s in kelta-auth kelta-worker kelta-gateway kelta-ui postgres redis nats cerbos mailpit; do
+            docker compose logs --no-color "$s" > "$RUNNER_TEMP/quickstart-logs/${s}.log" 2>&1 || true
+          done
+
+      - name: Upload logs
+        continue-on-error: true
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickstart-clean-logs
+          path: ${{ runner.temp }}/quickstart-logs/
+          if-no-files-found: ignore
+          retention-days: 14

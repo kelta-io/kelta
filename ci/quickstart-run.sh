@@ -12,11 +12,19 @@
 # than bind-mounted. (Same constraint docker-compose.ci.yml works around for
 # cerbos: "Bind mounts don't work with the remote k8s-runner Docker daemon —
 # bake config + policies into a CI-only image instead.")
+#
+# QUICKSTART_COMPOSE_FILES (space-separated, default "docker-compose.yml
+# docker-compose.ci.yml") picks the compose files. The clean-runner workflow
+# (.github/workflows/quickstart-clean.yml) sets it to "docker-compose.yml" so `up`
+# is the README's plain `docker compose up -d --wait`, image pull included.
 set -euo pipefail
 
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME must be set}"
 NETWORK="${COMPOSE_PROJECT_NAME}_kelta-network"
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.ci.yml)
+COMPOSE=(docker compose)
+for f in ${QUICKSTART_COMPOSE_FILES:-docker-compose.yml docker-compose.ci.yml}; do
+  COMPOSE+=(-f "$f")
+done
 
 "${COMPOSE[@]}" up -d --wait --wait-timeout 300
 
