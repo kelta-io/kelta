@@ -392,7 +392,7 @@ are bugs. When in doubt, trust the code and correct the doc to match.
 | `concerns.md` | Known risks, fragile files (don't bloat), tech debt, test gaps, Postgres connection sizing |
 | `ci-cd.md` | GitHub Actions pipeline, Harbor/ArgoCD deploy, smoke/rollback, container builds |
 | `status.md` | **Capability map: what's Complete vs UI-only-stub vs Planned** — check before touching a subsystem |
-| `specs/` | Forward-looking multi-slice specs; each `specs/<name>/README.md` has a status line. Shipped specs live in `specs/_archive/`. Active: `page-builder-parity.md` + `page-builder/`, `consumer-alerting/`, `kelta-cli/`, `member-data-ownership/`, `module-platform/`, `support-mailbox/`. Read the relevant slice spec before implementing it. |
+| `specs/` | Forward-looking multi-slice specs; each `specs/<name>/README.md` has a status line. Shipped specs live in `specs/_archive/` (see `specs/README.md`). Active: `page-builder-parity.md`, `consumer-alerting/`, `kelta-cli/`, `member-data-ownership/`, `module-platform/`, `support-mailbox/`. Read the relevant slice spec before implementing it. |
 
 Module-level: `kelta-{ai,auth,gateway,mcp,worker}/CLAUDE.md`, `kelta-ui/DESIGN.md`.
 Agent-facing CLI guide: `kelta-web/packages/cli/AGENTS.md` (generated — `npm run gen:docs`;

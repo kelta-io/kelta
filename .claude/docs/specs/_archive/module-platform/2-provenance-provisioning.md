@@ -8,7 +8,7 @@
 > against real Postgres (the unit test pins the SQL text).
 > Source-verified against main `ece7925` on 2026-10-11 (Flyway head V206).
 
-> Child of [`.claude/docs/specs/module-platform/README.md`](README.md). Implements the parent's
+> Child of [`.claude/docs/specs/module-platform/README.md`](../../module-platform/README.md). Implements the parent's
 > **Provenance** shared contract and the Reuse map row "Provision collections, fields, …" →
 > `PackageImportService`. Closes the open half of Known defect 6 that does not need slice 3.
 

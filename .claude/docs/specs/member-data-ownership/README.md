@@ -28,10 +28,10 @@ template in `specs/_archive/app-surfacing/README.md` (sections 1–8; sections t
 | Slice | Child spec | Axis |
 |-------|-----------|------|
 | 0 — This spec + doc wiring | (this file) | foundation (docs) |
-| 1 — Caller identity plumbing | `1-caller-identity.md` | **gateway + worker, security** |
-| 2 — Owner-scoped collections | `2-owner-scoped-collections.md` | **worker + runtime-core + UI, security** |
-| 3 — Member self-profile | `3-member-self-profile.md` | **worker, security** |
-| 4 — Retire the bespoke owner-guard hooks | `4-retire-guard-hooks.md` | worker (refactor, security) |
+| 1 — Caller identity plumbing | [`1-caller-identity.md`](../_archive/member-data-ownership/1-caller-identity.md) | **gateway + worker, security** |
+| 2 — Owner-scoped collections | [`2-owner-scoped-collections.md`](../_archive/member-data-ownership/2-owner-scoped-collections.md) | **worker + runtime-core + UI, security** |
+| 3 — Member self-profile | [`3-member-self-profile.md`](../_archive/member-data-ownership/3-member-self-profile.md) | **worker, security** |
+| 4 — Retire the bespoke owner-guard hooks | [`4-retire-guard-hooks.md`](../_archive/member-data-ownership/4-retire-guard-hooks.md) | worker (refactor, security) |
 | 5 — Tenant adoption guide (external sites) | `5-tenant-adoption.md` | docs + tenant metadata (no platform code) |
 
 **Dependency order (hard edges): 1 → 2 → 4; 1 → 3.** Slice 5 depends on 2 and 3 being deployed.
@@ -41,7 +41,7 @@ never auto-merged** (CLAUDE.md Rule 5).
 ## Context
 
 Kelta's consumer-facing tenants (portal members on external sites — the
-[consumer-alerting](../consumer-alerting/README.md) and [telehealth](../telehealth/README.md)
+[consumer-alerting](../consumer-alerting/README.md) and [telehealth](../_archive/telehealth/README.md)
 efforts) all need the same thing: *a member may only read and change their own rows.* The
 platform has no generic way to say that. What exists today:
 

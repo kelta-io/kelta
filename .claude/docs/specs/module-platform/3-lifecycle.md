@@ -474,7 +474,7 @@ fields. Its provenance row goes with it, and it is not deleted separately.
 creation hash was taken over, so an untouched resource matches:
 
 - `COLLECTION` and `FIELD`: the slice-2 hash is over the *package item data* (§3 of
-  [`2-provenance-provisioning.md`](2-provenance-provisioning.md)). The snapshot reads the same keys
+  [`2-provenance-provisioning.md`](../_archive/module-platform/2-provenance-provisioning.md)). The snapshot reads the same keys
   back from the row: `SELECT name, display_name, path, active, current_version FROM collection
   WHERE id = ? AND tenant_id = ?`, and for a field `SELECT c.name AS collection_name, f.name,
   f.display_name, f.type, f.required, f.field_order, f.active FROM field f JOIN collection c ON

@@ -1,10 +1,10 @@
 # 2a — Widget registry + shared render module + model
 
 > **Slice:** 2a (FE foundation keystone). **Axis:** foundation.
-> **Parent:** [`../page-builder-parity.md`](../page-builder-parity.md). This child spec **extends, never
-> contradicts** the parent's [The shared model](../page-builder-parity.md#the-shared-model),
-> [Widget registry](../page-builder-parity.md#widget-registry), and
-> [Page-level config (v2)](../page-builder-parity.md#page-level-config-v2) sections. The
+> **Parent:** [`../page-builder-parity.md`](../../page-builder-parity.md). This child spec **extends, never
+> contradicts** the parent's [The shared model](../../page-builder-parity.md#the-shared-model),
+> [Widget registry](../../page-builder-parity.md#widget-registry), and
+> [Page-level config (v2)](../../page-builder-parity.md#page-level-config-v2) sections. The
 > `WidgetDescriptor` / `PropFieldSchema` / `PageComponent` v2 / `Binding` / `PropValue` types are
 > **defined here once** for the whole effort; later slices consume them.
 > Source-verified against the codebase on 2026-06-22 (Flyway head V146; this slice adds no migration).

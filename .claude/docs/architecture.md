@@ -838,7 +838,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `kelta_alert_delivery_latency_seconds` timer (tags `tenant`, `channel`, percentile histogram)
   recorded by `AlertDispatchService` once per SENT delivery. Returns
   `{data:{count,p50Seconds,p90Seconds,since,channel}}`; `since` defaults to now − 7d; percentiles
-  are interpolated (`percentile_cont`-equivalent). Detail: `specs/consumer-alerting/4-availability-matcher.md` §9.
+  are interpolated (`percentile_cont`-equivalent). Detail: `specs/_archive/consumer-alerting/4-availability-matcher.md` §9.
 - **Member win API + ticker** (consumer-alerting slices 9, K-8): `/api/wins/**` is a static route
   (`API_ACCESS` only; scoping in `WinController`). `POST /api/wins`, `GET /api/wins` and
   `GET /api/wins/{id}` are self-only (owner from `X-User-Id`) with the same

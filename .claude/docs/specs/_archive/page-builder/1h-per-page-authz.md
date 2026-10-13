@@ -1,8 +1,8 @@
 # Slice 1h — Per-page authorization (optional)
 
-> Child spec of [page-builder-parity.md](../page-builder-parity.md). Extends, never contradicts, the
-> parent's [Backend changes (pass-through only)](../page-builder-parity.md#backend-changes-small--pass-through-only)
-> (the "Per-page authz (optional, slice 1h)" bullet) and [Page-level config (v2)](../page-builder-parity.md#page-level-config-v2)
+> Child spec of [page-builder-parity.md](../../page-builder-parity.md). Extends, never contradicts, the
+> parent's [Backend changes (pass-through only)](../../page-builder-parity.md#backend-changes-small--pass-through-only)
+> (the "Per-page authz (optional, slice 1h)" bullet) and [Page-level config (v2)](../../page-builder-parity.md#page-level-config-v2)
 > (the `access?: { requiredPermission?: string }` key). Builds directly on
 > [1g — Render contract v2](./1g-render-contract-v2.md) — that slice's 7-field `PageRenderContract`
 > and `parseConfig` helper are assumed to already be in place.
@@ -36,7 +36,7 @@ no body — indistinguishable from an unknown/unpublished slug. When the key is 
   `requiredPermission` is present**, performing the system-permission check via
   `BootstrapRepository.findProfileSystemPermissions(profileId)` — the exact pattern
   `TenantOtlpTargetController` and `UserPermissionsController` use (architecture.md
-  ["Worker-side system-permission check"](../../architecture.md)).
+  ["Worker-side system-permission check"](../../../architecture.md)).
 - `PageRenderController` resolving `profileId` from the gateway-forwarded `X-User-Profile-Id` header
   via the existing `CerbosPermissionResolver`, and passing it into `render(...)`.
 - A small FE inspector control — a **page-settings "Access" field** (permission picker) — that writes
@@ -87,7 +87,7 @@ A new **page-settings** field (not a per-widget prop) hosted **inside the page-s
 slice 2d creates** (1h adds no panel of its own and does not assume one pre-exists), rendered by the
 same schema-driven inspector loop introduced in 2b. It is a `select`-kind field whose options are
 the tenant's system-permission catalog (the 15 permissions in
-[`SystemPermissionChecklist.tsx`](../../../../kelta-ui/app/src/components/SecurityEditor/SystemPermissionChecklist.tsx) —
+[`SystemPermissionChecklist.tsx`](../../../../../kelta-ui/app/src/components/SecurityEditor/SystemPermissionChecklist.tsx) —
 `VIEW_SETUP`, `MANAGE_USERS`, `MANAGE_REPORTS`, …), plus a default "Anyone (published)" no-restriction
 option that clears the key.
 
@@ -124,7 +124,7 @@ which is stripped on save). The label/description shown come from the catalog en
 ### 2.2 Stored `config` deltas
 
 **Restricted page** (stored `config` excerpt — v2 shape from 1g, with the new `access` sibling).
-Per the parent's [canonical storage](../page-builder-parity.md#page-level-config-v2), the tree lives
+Per the parent's [canonical storage](../../page-builder-parity.md#page-level-config-v2), the tree lives
 at **`config.components`** — there is **no `config.tree` wrapper** in stored config; `access`,
 `variables`, `dataSources`, and `schemaVersion` are siblings of `components`:
 
@@ -310,16 +310,16 @@ private boolean hasSystemPermission(String profileId, String permission) {
 
 **Permission-check helper found in the real code (reuse this exact mechanism):**
 
-- Identity: [`CerbosPermissionResolver.getProfileId(HttpServletRequest)`](../../../../kelta-worker/src/main/java/io/kelta/worker/service/CerbosPermissionResolver.java)
+- Identity: [`CerbosPermissionResolver.getProfileId(HttpServletRequest)`](../../../../../kelta-worker/src/main/java/io/kelta/worker/service/CerbosPermissionResolver.java)
   reads `request.getHeader("X-User-Profile-Id")` (set by the gateway's
   `RouteAuthorizationFilter.forwardWithHeaders` on **every** forwarded request, including
   `/api/pages/**`).
-- Grant lookup: [`BootstrapRepository.findProfileSystemPermissions(String profileId)`](../../../../kelta-worker/src/main/java/io/kelta/worker/repository/BootstrapRepository.java)
+- Grant lookup: [`BootstrapRepository.findProfileSystemPermissions(String profileId)`](../../../../../kelta-worker/src/main/java/io/kelta/worker/repository/BootstrapRepository.java)
   → `List<Map<String,Object>>` rows of
   `SELECT permission_name, granted FROM profile_system_permission WHERE profile_id = ?`. The exact
   `.anyMatch(p -> PERMISSION.equals(p.get("permission_name")) && Boolean.TRUE.equals(p.get("granted")))`
   predicate is copied verbatim from
-  [`TenantOtlpTargetController.requireSetupPermission`](../../../../kelta-worker/src/main/java/io/kelta/worker/controller/TenantOtlpTargetController.java)
+  [`TenantOtlpTargetController.requireSetupPermission`](../../../../../kelta-worker/src/main/java/io/kelta/worker/controller/TenantOtlpTargetController.java)
   (lines 102–104) — the canonical reference for an `/api/admin/**` in-controller system-permission gate.
   The only behavioral difference: that controller **throws** `ResponseStatusException(FORBIDDEN)`;
   here we return `Optional.empty()` so the controller maps to **404** (privacy posture).
@@ -357,7 +357,7 @@ public ResponseEntity<PageRenderContract> render(@PathVariable String slug, Http
 
 `requiredPermission` nests under `config.access` inside the existing `FieldDefinition.json("config")`
 column on `ui-pages` (declared in `SystemCollectionDefinitions.uiPages()`,
-[`runtime-core/.../model/system/SystemCollectionDefinitions.java`](../../../../kelta-platform/runtime/runtime-core/src/main/java/io/kelta/runtime/model/system/SystemCollectionDefinitions.java)).
+[`runtime-core/.../model/system/SystemCollectionDefinitions.java`](../../../../../kelta-platform/runtime/runtime-core/src/main/java/io/kelta/runtime/model/system/SystemCollectionDefinitions.java)).
 The grant data it is checked against (`profile_system_permission`) already exists. No new column, no
 constraint, no Flyway migration.
 
@@ -411,7 +411,7 @@ worker, so wiring it into `PageRenderService` is a constructor add only.
 > (§5.1–5.2) is independent and can ship first; this FE control is sequenced **after 2d**.
 
 Reuses the **2b** schema-driven inspector field-kind machinery (the parent's
-[Inspector + canvas](../page-builder-parity.md#inspector--canvas) `PropFieldSchema` with
+[Inspector + canvas](../../page-builder-parity.md#inspector--canvas) `PropFieldSchema` with
 `kind ∈ … | select | …`). This is a **page-settings** field (page-level, not a widget prop), so it is
 registered in the page-settings schema list (alongside name/slug/path/published) rather than a widget's
 `propSchema`.
@@ -422,7 +422,7 @@ registered in the page-settings schema list (alongside name/slug/path/published)
   list. (Do **not** add it directly to `PageBuilderPage.tsx` — 1h ships after 2d so it lands
   schema-driven in the drawer from the start.)
 - **Options source:** import the permission catalog from
-  [`SystemPermissionChecklist.tsx`](../../../../kelta-ui/app/src/components/SecurityEditor/SystemPermissionChecklist.tsx).
+  [`SystemPermissionChecklist.tsx`](../../../../../kelta-ui/app/src/components/SecurityEditor/SystemPermissionChecklist.tsx).
   Export its `PERMISSION_CATEGORIES` (or a flattened `SYSTEM_PERMISSIONS` list) so the picker reuses the
   single canonical catalog instead of duplicating the 15 names. Prepend an "Anyone (published)" option
   whose value clears the key. (Per architecture.md, this FE constant **is** the canonical permission
@@ -453,7 +453,7 @@ no awareness of it.
 
 Mocked `QueryEngine` + `CollectionRegistry` + **`BootstrapRepository`**, real `JsonMapper` — matching
 the existing idiom
-([`PageRenderServiceTest`](../../../../kelta-worker/src/test/java/io/kelta/worker/service/PageRenderServiceTest.java):
+([`PageRenderServiceTest`](../../../../../kelta-worker/src/test/java/io/kelta/worker/service/PageRenderServiceTest.java):
 `@ExtendWith(MockitoExtension.class)`, `JsonMapper.builder().build()`, the `oneRow(page)` helper). The
 service factory gains the mocked `bootstrapRepository`; all existing tests call
 `service().render("home", "p-1")` (a profile id is now required).
@@ -484,7 +484,7 @@ controller responds **404** (reuses the existing `notFound` assertion — no new
 ### 6.3 kelta-test-harness integration test — `PageRenderAuthzScenarioTest` (required)
 
 **Add a real-DB scenario.** Per the
-[DB-constraint test-gap guard](../../testing.md#real-db-guard-for-constraint-bearing-writes),
+[DB-constraint test-gap guard](../../../testing.md#real-db-guard-for-constraint-bearing-writes),
 the convention extends to any path whose correctness depends on a **real-Postgres + RLS** behavior that
 mocked worker tests cannot observe. 1h's gate is exactly that: it reads `profile_system_permission`
 under RLS (`app.current_tenant_id`) and **gates page visibility** (404-not-403). Mocked-permission

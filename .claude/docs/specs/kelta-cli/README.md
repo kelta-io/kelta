@@ -1,7 +1,7 @@
 # Kelta CLI — Cross-Platform Admin CLI + Local MCP (Parent Spec)
 
 > **Status:** partially shipped (verified against main 2026-10-09) — slices 1
-> (`1-foundation.md`), 2 (`2-browser-login.md`) and 3 (`3-admin-surface.md`) **shipped**;
+> ([`1-foundation.md`](../_archive/kelta-cli/1-foundation.md)), 2 ([`2-browser-login.md`](../_archive/kelta-cli/2-browser-login.md)) and 3 ([`3-admin-surface.md`](../_archive/kelta-cli/3-admin-surface.md)) **shipped**;
 > slices 4 (`4-ai-ergonomics.md`), 5 (`5-local-mcp.md`) and 6 (`6-distribution.md`)
 > **partially shipped** — each lists its remaining gaps under `## Open`. Do not file tasks
 > for anything not listed there.
@@ -30,9 +30,9 @@ every child references it.
 | Slice | Child spec | Axis |
 |-------|-----------|------|
 | 0 — This spec + doc wiring | (this file) | foundation (docs) |
-| 1 — CLI foundation (registry, profiles, output, SDK re-base, CI) | `1-foundation.md` | frontend/CLI |
-| 2 — Browser login + PAT lifecycle | `2-browser-login.md` | **auth, security — NO auto-merge** |
-| 3 — Admin command surface | `3-admin-surface.md` | CLI (API parity) |
+| 1 — CLI foundation (registry, profiles, output, SDK re-base, CI) | [`1-foundation.md`](../_archive/kelta-cli/1-foundation.md) | frontend/CLI |
+| 2 — Browser login + PAT lifecycle | [`2-browser-login.md`](../_archive/kelta-cli/2-browser-login.md) | **auth, security — NO auto-merge** |
+| 3 — Admin command surface | [`3-admin-surface.md`](../_archive/kelta-cli/3-admin-surface.md) | CLI (API parity) |
 | 4 — AI ergonomics (`manifest`, `api`, non-interactive contract) | `4-ai-ergonomics.md` | CLI (agent UX) |
 | 5 — Local MCP (`kelta mcp serve` / `install`) | `5-local-mcp.md` | CLI + MCP |
 | 6 — Distribution: binaries, downloads service, self-update, pipeline | `6-distribution.md` | CI/CD + new service |

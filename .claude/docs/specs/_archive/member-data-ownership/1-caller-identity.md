@@ -1,6 +1,6 @@
 # Slice 1 — Caller Identity Plumbing
 
-> Parent: [`README.md`](README.md). **Security — never auto-merged.**
+> Parent: [`README.md`](../../member-data-ownership/README.md). **Security — never auto-merged.**
 
 ## 1. Goal & scope
 

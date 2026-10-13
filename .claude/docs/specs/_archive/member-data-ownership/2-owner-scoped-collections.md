@@ -1,6 +1,6 @@
 # Slice 2 — Owner-Scoped Collections
 
-> Parent: [`README.md`](README.md). Depends on slice 1. **Security — never auto-merged.**
+> Parent: [`README.md`](../../member-data-ownership/README.md). Depends on slice 1. **Security — never auto-merged.**
 
 ## 1. Goal & scope
 
