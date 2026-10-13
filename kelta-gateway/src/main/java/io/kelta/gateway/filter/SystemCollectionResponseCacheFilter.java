@@ -1,26 +1,26 @@
 package io.kelta.gateway.filter;
 
+import io.kelta.gateway.auth.GatewayPrincipal;
+import io.kelta.gateway.auth.JwtAuthenticationFilter;
 import io.kelta.gateway.cache.GatewayCacheManager;
 import io.kelta.gateway.error.ResponseHelpers;
-import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.core.io.buffer.DataBufferFactory;
-import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpResponse;
-import org.springframework.http.server.reactive.ServerHttpResponseDecorator;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -36,17 +36,28 @@ import java.util.regex.Pattern;
  * <p>Behavior:
  * <ol>
  *   <li><strong>Cache hit:</strong> Returns the cached response body directly,
- *       bypassing the worker entirely.</li>
- *   <li><strong>Cache miss:</strong> Forwards the request to the worker,
- *       captures the successful response body, caches it, and returns it
- *       to the client.</li>
+ *       bypassing the worker.</li>
+ *   <li><strong>Cache miss:</strong> Records the cache key on the exchange and forwards the
+ *       request; {@link SystemCollectionResponseCaptureFilter} stores the worker's 200 response
+ *       under that key as it is written to the client.</li>
  * </ol>
+ *
+ * <p>Two properties keep a cached answer equal to the one the worker would give:
+ * <ul>
+ *   <li>The filter runs <em>after</em> {@code RouteAuthorizationFilter} (order 0), so every
+ *       request — hit or miss — is authorized for its caller first, and the key is built from the
+ *       request as authorization forwards it (e.g. the narrowed {@code /api/tenants} view).</li>
+ *   <li>The key carries the caller ({@link #callerKey}): the worker filters these responses per
+ *       caller (record-level authorization including {@code included[]}, field-level security,
+ *       manual record shares), so one caller's response is only ever served to the same caller.</li>
+ * </ul>
  *
  * <p>Only caches GET requests to known system collection API paths that return
  * a 200 OK response with JSON content.
  *
  * <p>Cache invalidation is driven by NATS events consumed by
- * {@link io.kelta.gateway.listener.SystemCollectionRouteListener}.
+ * {@link io.kelta.gateway.listener.SystemCollectionRouteListener}, and by a write to a
+ * cacheable collection through this gateway.
  *
  * @since 1.0.0
  */
@@ -56,10 +67,22 @@ public class SystemCollectionResponseCacheFilter implements GlobalFilter, Ordere
     private static final Logger log = LoggerFactory.getLogger(SystemCollectionResponseCacheFilter.class);
 
     /**
-     * Runs after authentication (-100) and rate limiting (-50) but before
-     * the default gateway routing (0).
+     * Runs after route authorization (0) so a cached response is only served to a caller the
+     * route allows, and before the worker header transformation (50).
      */
-    private static final int ORDER = -10;
+    static final int ORDER = 10;
+
+    /**
+     * Exchange attribute holding the key a cache miss is stored under. Set only on a miss;
+     * {@link SystemCollectionResponseCaptureFilter} caches the response only when it is present.
+     */
+    static final String CACHE_KEY_ATTR = "gateway.systemCollectionResponseCacheKey";
+
+    private static final Set<HttpMethod> MUTATING_METHODS =
+            Set.of(HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.DELETE);
+
+    /** Caller segment of the key for a request without a principal. */
+    static final String ANONYMOUS_CALLER = "anonymous";
 
     /**
      * System collections whose responses should be cached at the gateway layer.
@@ -99,69 +122,38 @@ public class SystemCollectionResponseCacheFilter implements GlobalFilter, Ordere
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getPath().value();
         String collectionName = extractCollectionName(path);
+        if (collectionName == null || !CACHEABLE_COLLECTIONS.contains(collectionName)) {
+            return chain.filter(exchange);
+        }
 
         // For mutating requests (POST, PATCH, PUT, DELETE) on cacheable collections,
         // evict the gateway cache eagerly so the next GET returns fresh data.
         // This avoids the race condition where the UI refetches before the async
         // NATS cache-eviction event is consumed.
-        if (exchange.getRequest().getMethod() != HttpMethod.GET) {
-            if (collectionName != null && CACHEABLE_COLLECTIONS.contains(collectionName)) {
-                log.debug("Mutating request on cacheable collection '{}', evicting gateway cache", collectionName);
-                cacheManager.evictSystemCollectionResponses(collectionName);
-            }
+        HttpMethod method = exchange.getRequest().getMethod();
+        if (MUTATING_METHODS.contains(method)) {
+            log.debug("Mutating request on cacheable collection '{}', evicting gateway cache", collectionName);
+            cacheManager.evictSystemCollectionResponses(collectionName);
+            return chain.filter(exchange);
+        }
+        if (method != HttpMethod.GET) {
             return chain.filter(exchange);
         }
 
-        if (collectionName == null || !CACHEABLE_COLLECTIONS.contains(collectionName)) {
-            return chain.filter(exchange);
-        }
+        String cacheKey = buildCacheKey(
+                TenantResolutionFilter.getTenantId(exchange),
+                callerKey(JwtAuthenticationFilter.getPrincipal(exchange)),
+                path,
+                exchange.getRequest().getURI().getRawQuery());
 
-        String tenantId = TenantResolutionFilter.getTenantId(exchange);
-        String query = exchange.getRequest().getURI().getRawQuery();
-        String cacheKey = buildCacheKey(tenantId, path, query);
-
-        // Check cache
         Optional<byte[]> cached = cacheManager.getSystemCollectionResponse(cacheKey);
         if (cached.isPresent()) {
-            log.debug("Gateway cache hit for system collection: {} (key={})", collectionName, cacheKey);
+            log.debug("Gateway cache hit for system collection: {}", collectionName);
             return writeCachedResponse(exchange, cached.get());
         }
 
-        // Cache miss — decorate response to capture body for caching
-        ServerHttpResponse originalResponse = exchange.getResponse();
-        DataBufferFactory bufferFactory = originalResponse.bufferFactory();
-
-        ServerHttpResponseDecorator decoratedResponse = new ServerHttpResponseDecorator(originalResponse) {
-            @Override
-            public Mono<Void> writeWith(Publisher<? extends DataBuffer> body) {
-                HttpStatus statusCode = HttpStatus.resolve(
-                        getDelegate().getStatusCode() != null
-                                ? getDelegate().getStatusCode().value() : 0);
-
-                // Only cache 200 OK responses
-                if (statusCode != HttpStatus.OK) {
-                    return super.writeWith(body);
-                }
-
-                return DataBufferUtils.join(Flux.from(body))
-                        .flatMap(dataBuffer -> {
-                            byte[] content = new byte[dataBuffer.readableByteCount()];
-                            dataBuffer.read(content);
-                            DataBufferUtils.release(dataBuffer);
-
-                            // Cache the response body
-                            cacheManager.putSystemCollectionResponse(cacheKey, content);
-                            log.debug("Gateway cached response for system collection: {} ({} bytes)",
-                                    collectionName, content.length);
-
-                            // Write the original content to the client
-                            return getDelegate().writeWith(
-                                    Mono.just(bufferFactory.wrap(content)));
-                        });
-            }
-        };
-
-        return chain.filter(exchange.mutate().response(decoratedResponse).build());
+        exchange.getAttributes().put(CACHE_KEY_ATTR, cacheKey);
+        return chain.filter(exchange);
     }
 
     /**
@@ -178,12 +170,50 @@ public class SystemCollectionResponseCacheFilter implements GlobalFilter, Ordere
         return null;
     }
 
-    private String buildCacheKey(String tenantId, String path, String query) {
-        String key = (tenantId != null ? tenantId : "_") + ":" + path;
+    /**
+     * {@code <tenant>:<caller>:<path>[?<query>]}. The path stays a plain substring of the key, which
+     * is what {@link GatewayCacheManager#evictSystemCollectionResponses} matches on; the caller
+     * segment is hex, so it can never contain {@code /api/}.
+     */
+    static String buildCacheKey(String tenantId, String callerKey, String path, String query) {
+        String key = (tenantId != null ? tenantId : "_") + ":" + callerKey + ":" + path;
         if (query != null && !query.isEmpty()) {
             key += "?" + query;
         }
         return key;
+    }
+
+    /**
+     * Identifies the caller as the worker sees it: every principal attribute the gateway forwards
+     * and authorization can depend on (user, profile, tenant, groups, user type, connected-app
+     * scopes, request-origin country). Hashed so the key stays short and free of path characters.
+     */
+    static String callerKey(GatewayPrincipal principal) {
+        if (principal == null) {
+            return ANONYMOUS_CALLER;
+        }
+        Object userType = principal.getClaims().get("user_type");
+        String identity = String.join("\u0000",
+                nullToEmpty(principal.getTenantId()),
+                nullToEmpty(principal.getUserId()),
+                principal.getUsername(),
+                nullToEmpty(principal.getProfileId()),
+                nullToEmpty(principal.getProfileName()),
+                String.join(",", principal.getGroups().stream().sorted().toList()),
+                userType != null ? userType.toString() : "",
+                nullToEmpty(principal.getConnectedAppId()),
+                nullToEmpty(principal.getAppScopes()),
+                nullToEmpty(principal.getGeoCountry()));
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(identity.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
+    }
+
+    private static String nullToEmpty(String value) {
+        return value != null ? value : "";
     }
 
     private Mono<Void> writeCachedResponse(ServerWebExchange exchange, byte[] body) {

@@ -202,6 +202,13 @@ mailbox to a high-volume public address.
   set the flag (code-declared, not stored on the `field` row); the gateway's in-memory
   `SystemCollectionResponseCacheFilter` (10 min) can serve a pre-deploy response until it expires
   or the pod restarts.
+- **Gateway system-collection response cache:** the lookup
+  (`SystemCollectionResponseCacheFilter`) stays ordered after `RouteAuthorizationFilter` and its
+  key keeps the caller segment (`callerKey` — every principal attribute the worker or Cerbos can
+  decide on); the capture half stays before `NettyWriteResponseFilter` and stores only when the
+  lookup recorded a key. A new principal attribute that changes what the worker returns joins
+  `callerKey`. Pinned by `SystemCollectionResponseCacheChainTest` +
+  `SystemCollectionResponseCacheScenarioTest`.
 
 ### Authorization gaps still open
 
@@ -797,6 +804,7 @@ its own change with a full compose run.
 One line each; full write-ups are in git history.
 
 **Security**
+- 2026-10-12 (gateway-cache-caller-key) — vary the system-collection response cache by caller: the gateway cache key now carries a caller fingerprint and the lookup runs after `RouteAuthorizationFilter`, so every read is authorized and answered for its own caller (`SystemCollectionResponseCaptureFilter` stores, `SystemCollectionResponseCacheFilter` looks up).
 - 2026-10-12 (span-body-redaction) — the gateway recorded JSON request/response bodies as span attributes unredacted; both gateway and worker now use the shared `SensitiveBodyRedactor` (runtime-jsonapi: secret-named keys at any depth, PAT/JWT-shaped values, redact before truncate, no content captured for non-JSON/invalid JSON or `credentials` paths). Bodies captured before the fix remain in trace storage until retention expires.
 - 2026-10-12 (auth-principal-erase-credentials) — erase credentials from the authenticated principal: `KeltaUserDetails` is a `CredentialsContainer`, so `ProviderManager` clears the password hash after authentication; `KeltaUserDetailsMixin` never writes it to the authorization store and reads stored rows that still carry it without keeping it. `auth_method` reads `hasLocalCredential()`, not the hash.
 - 2026-10-12 (outbound-url-guard-shared) — OpenAPI spec import/validate, flow `HTTP_CALLOUT` and kelta-auth's login-time OIDC discovery now fetch tenant-supplied URLs through the shared runtime-core `OutboundHttpClient`.
