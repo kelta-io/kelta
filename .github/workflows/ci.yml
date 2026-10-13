@@ -840,7 +840,16 @@ jobs:
       - name: Stop stack + remove volumes
         if: always()
         run: |
-          docker compose --profile ai --profile tools --profile seed down -v || true
+          docker compose --profile ai --profile tools --profile seed down -v --rmi local || true
+
+      # The node's Docker daemon is shared and nothing else cleans it; see ci/docker-reclaim.sh.
+      # Guarded because an update_snapshots_ref dispatch can check out a branch without it.
+      - name: Reclaim shared Docker disk
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          if [ -f ci/docker-reclaim.sh ]; then bash ci/docker-reclaim.sh; else echo "ci/docker-reclaim.sh not on this ref, skipping"; fi
 
   # ===========================================================================
   # Quickstart smoke test (K-3) — proves the documented "clone → docker compose
@@ -982,7 +991,15 @@ jobs:
       - name: Stop stack + remove volumes
         if: always()
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v || true
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v --rmi local || true
+
+      # The node's Docker daemon is shared and nothing else cleans it; see ci/docker-reclaim.sh.
+      - name: Reclaim shared Docker disk
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          if [ -f ci/docker-reclaim.sh ]; then bash ci/docker-reclaim.sh; else echo "ci/docker-reclaim.sh not on this ref, skipping"; fi
 
   # ===========================================================================
   # Tenant templates — installs every examples/templates/*/ (metadata package, list
@@ -1093,8 +1110,16 @@ jobs:
         if: always()
         run: |
           docker rm -f "${COMPOSE_PROJECT_NAME}_templates" 2>/dev/null || true
-          docker compose down -v || true
+          docker compose down -v --rmi local || true
           docker image rm "kelta-templates-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
+
+      # The node's Docker daemon is shared and nothing else cleans it; see ci/docker-reclaim.sh.
+      - name: Reclaim shared Docker disk
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          if [ -f ci/docker-reclaim.sh ]; then bash ci/docker-reclaim.sh; else echo "ci/docker-reclaim.sh not on this ref, skipping"; fi
 
   # ===========================================================================
   # Upgrade test — upgrades the newest release reachable from HEAD to HEAD on the same Docker
@@ -1295,8 +1320,16 @@ jobs:
         env:
           COMPOSE_FILE: ${{ env.HEAD_COMPOSE_FILE }}
         run: |
-          timeout 300 docker compose down -v || true
+          timeout 300 docker compose down -v --rmi local || true
           docker image rm "upgrade-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
+
+      # The node's Docker daemon is shared and nothing else cleans it; see ci/docker-reclaim.sh.
+      - name: Reclaim shared Docker disk
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          if [ -f ci/docker-reclaim.sh ]; then bash ci/docker-reclaim.sh; else echo "ci/docker-reclaim.sh not on this ref, skipping"; fi
 
   # ===========================================================================
   # The worker image must stay JVM.
