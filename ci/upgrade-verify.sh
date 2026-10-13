@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks that the upgraded stack still holds everything ci/upgrade-seed.sh wrote on the release
-# it was upgraded from. Run by the "Upgrade Test" workflow (.github/workflows/upgrade-test.yml)
+# it was upgraded from. Run by the upgrade job (`upgrade` in .github/workflows/ci.yml)
 # on the compose network of the HEAD stack, which was started on the release stack's volumes:
 #
 #   bash ci/upgrade-verify.sh seed.json       (or the seed JSON on stdin)

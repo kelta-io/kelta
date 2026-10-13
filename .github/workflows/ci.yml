@@ -62,6 +62,7 @@ jobs:
       runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
       quickstart: ${{ steps.filter.outputs.quickstart }}
       templates: ${{ steps.filter.outputs.templates }}
+      upgrade: ${{ steps.filter.outputs.upgrade }}
       workflows: ${{ steps.filter.outputs.workflows }}
       ci_scripts: ${{ steps.filter.outputs.ci_scripts }}
       dora: ${{ steps.filter.outputs.dora }}
@@ -1089,6 +1090,208 @@ jobs:
           docker image rm "kelta-templates-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
 
   # ===========================================================================
+  # Upgrade test — upgrades the newest release reachable from HEAD to HEAD on the same Docker
+  # volumes and checks that data written on the release reads back unchanged: the path
+  # UPGRADING.md tells a self-hoster to take (bump KELTA_VERSION, pull, up; kelta-worker runs
+  # Flyway on boot).
+  #
+  #   1. Resolve the newest v*.*.* tag that is an ancestor of HEAD.
+  #   2. Boot that release's ghcr images: docker-compose.yml + docker-compose.ci.yml with
+  #      KELTA_VERSION=<tag without the v> (the quickstart job's stack, a different version).
+  #   3. Seed a tenant, a collection with five field types, three records and a user through the
+  #      API (ci/upgrade-seed.sh) and keep what the release returned (seed.json).
+  #   4. `docker compose stop` — containers stop, volumes stay.
+  #   5. Start HEAD on the same COMPOSE_PROJECT_NAME, hence the same volumes, built the way the
+  #      e2e job builds it (docker-compose.build.yml + docker-compose.ci-build.yml, persistent
+  #      kelta-ci builder).
+  #   6. ci/upgrade-verify.sh re-reads every seeded resource and fails naming each missing record
+  #      or differing field.
+  #
+  # Runs when the `upgrade` path filter matches — migrations, the compose files, the Dockerfiles,
+  # docker/cerbos, .env.example, this file and the job's ci/ scripts — or `workflows` does. It is
+  # a quality-gate dependency, so a migration that breaks upgrades blocks the merge. (It was a
+  # separate upgrade-test.yml before KLT-576, outside the gate, so a red run did not stop
+  # auto-merge.)
+  # ===========================================================================
+  upgrade:
+    name: Upgrade last release to HEAD
+    needs: changes
+    if: needs.changes.outputs.upgrade == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: k8s-runner-integration
+    timeout-minutes: 35
+    concurrency:
+      group: upgrade-${{ github.head_ref || github.ref }}
+      cancel-in-progress: true
+    defaults:
+      run:
+        # bash -eo pipefail: the verify step pipes into tee, and must still fail when verify does.
+        shell: bash
+    env:
+      # Fixed for the whole job: both stacks share it, so HEAD starts on the release's volumes.
+      COMPOSE_PROJECT_NAME: upg-${{ github.run_id }}-${{ github.run_attempt }}
+      # The release stack: released images pinned by KELTA_VERSION, CI-safe overrides.
+      RELEASE_COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
+      # The HEAD stack: the e2e job's from-source file set.
+      HEAD_COMPOSE_FILE: docker-compose.yml:docker-compose.build.yml:docker-compose.ci.yml:docker-compose.ci-build.yml
+      # Select the persistent builder explicitly, or `up` rebuilds cold on the default builder
+      # (see the e2e job in ci.yml).
+      BUILDX_BUILDER: kelta-ci
+      # CI-only literals. The first is applied once, on the release's first boot, with a forced
+      # change to the second; HEAD must still accept the second after the upgrade.
+      KELTA_BOOTSTRAP_ADMIN_PASSWORD: ci-bootstrap-admin-secret
+      # Meets the default password policy (set through the forced change).
+      ADMIN_PASSWORD: ci-upgrade-Kp7-Wq3-Zt9
+    steps:
+      - name: Checkout code (full history + tags, for the release lookup)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve the release to upgrade from
+        id: release
+        run: |
+          TAG=$(git describe --tags --abbrev=0 --match 'v*.*.*' HEAD) \
+            || { echo "::error::No v*.*.* tag is an ancestor of HEAD — nothing to upgrade from"; exit 1; }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Upgrading $TAG ($(git rev-parse --short "$TAG^{commit}")) → HEAD ($(git rev-parse --short HEAD))" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Docker Buildx (persistent kelta-ci builder)
+        timeout-minutes: 3
+        run: |
+          docker buildx inspect kelta-ci >/dev/null 2>&1 \
+            || docker buildx create --name kelta-ci --driver docker-container
+          docker buildx inspect --bootstrap kelta-ci
+
+      - name: Generate .env (JWK_SET + encryption key)
+        run: make setup
+
+      # Docker on this runner is remote: the scripts are baked into a throwaway image rather than
+      # bind-mounted. Built from ci/ alone so the context stays small.
+      - name: Build the seed/verify runner image
+        timeout-minutes: 5
+        run: |
+          docker buildx build --load -q -t "upgrade-runner:${COMPOSE_PROJECT_NAME}" -f - ci <<'DOCKERFILE'
+          FROM alpine:3.20
+          RUN apk add --no-cache bash curl jq coreutils
+          COPY upgrade-seed.sh upgrade-verify.sh upgrade-verify.test.sh /ci/
+          DOCKERFILE
+
+      - name: Self-test ci/upgrade-verify.sh (stub mode, no stack)
+        timeout-minutes: 2
+        run: docker run --rm "upgrade-runner:${COMPOSE_PROJECT_NAME}" bash /ci/upgrade-verify.test.sh
+
+      - name: Build HEAD service images (JVM, persistent builder cache)
+        timeout-minutes: 15
+        run: |
+          docker buildx bake --builder kelta-ci \
+            -f docker-compose.yml -f docker-compose.build.yml \
+            -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
+            --load \
+            kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
+
+      - name: Pull release ${{ steps.release.outputs.tag }} images
+        timeout-minutes: 6
+        env:
+          COMPOSE_FILE: ${{ env.RELEASE_COMPOSE_FILE }}
+          KELTA_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          docker compose config --images | grep "^ghcr.io/kelta-io/.*:${KELTA_VERSION}$"
+          timeout 300 docker compose pull kelta-auth kelta-worker kelta-gateway kelta-ui
+
+      - name: Start release ${{ steps.release.outputs.tag }}
+        timeout-minutes: 8
+        env:
+          COMPOSE_FILE: ${{ env.RELEASE_COMPOSE_FILE }}
+          KELTA_VERSION: ${{ steps.release.outputs.version }}
+        run: timeout 420 docker compose up -d --wait --wait-timeout 300
+
+      - name: Complete platform admin first sign-in (forced password change)
+        timeout-minutes: 3
+        run: |
+          timeout 120 docker run --rm -i --network "${COMPOSE_PROJECT_NAME}_kelta-network" \
+            -e INITIAL_PASSWORD="$KELTA_BOOTSTRAP_ADMIN_PASSWORD" \
+            -e NEW_PASSWORD="$ADMIN_PASSWORD" \
+            curlimages/curl:8.11.0 sh < ci/admin-first-sign-in.sh
+
+      - name: Seed tenant, collection, records and user on the release
+        timeout-minutes: 6
+        run: |
+          mkdir -p _upgrade
+          timeout 300 docker run --rm --network "${COMPOSE_PROJECT_NAME}_kelta-network" \
+            -e ADMIN_PASSWORD "upgrade-runner:${COMPOSE_PROJECT_NAME}" \
+            bash /ci/upgrade-seed.sh > _upgrade/seed.json
+          jq . _upgrade/seed.json
+
+      - name: Stop the release stack (volumes kept)
+        timeout-minutes: 4
+        env:
+          COMPOSE_FILE: ${{ env.RELEASE_COMPOSE_FILE }}
+          KELTA_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          timeout 180 docker compose stop
+          # Logs of the release's containers, kept before HEAD recreates them.
+          mkdir -p _logs/release
+          for s in $(docker compose config --services); do
+            timeout 60 docker compose logs --no-color "$s" > "_logs/release/${s}.log" 2>&1 || true
+          done
+          docker volume inspect --format '{{ .Name }} kept' "${COMPOSE_PROJECT_NAME}_postgres_data"
+
+      - name: Start HEAD on the release's volumes (Flyway migrates on kelta-worker boot)
+        timeout-minutes: 15
+        env:
+          COMPOSE_FILE: ${{ env.HEAD_COMPOSE_FILE }}
+        run: timeout 840 docker compose up -d --wait --wait-timeout 420
+
+      - name: Verify every seeded record and the user read back unchanged
+        timeout-minutes: 6
+        run: |
+          timeout 300 docker run --rm -i --network "${COMPOSE_PROJECT_NAME}_kelta-network" \
+            -e ADMIN_PASSWORD "upgrade-runner:${COMPOSE_PROJECT_NAME}" \
+            bash /ci/upgrade-verify.sh < _upgrade/seed.json | tee _upgrade/verify.txt
+          {
+            echo "### Upgrade ${{ steps.release.outputs.tag }} → HEAD"
+            echo ""
+            echo '```'
+            cat _upgrade/verify.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dump compose logs on failure (every service)
+        if: failure()
+        env:
+          COMPOSE_FILE: ${{ env.HEAD_COMPOSE_FILE }}
+        run: |
+          mkdir -p _logs/head
+          for s in $(docker compose config --services); do
+            timeout 60 docker compose logs --no-color "$s" > "_logs/head/${s}.log" 2>&1 || true
+          done
+          # The worker's log carries the Flyway run; print its tail inline too.
+          tail -n 200 _logs/head/kelta-worker.log || true
+
+      - name: Upload logs and seed data
+        continue-on-error: true
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-test-logs
+          path: |
+            _logs/
+            _upgrade/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop stack + remove volumes
+        if: always()
+        env:
+          COMPOSE_FILE: ${{ env.HEAD_COMPOSE_FILE }}
+        run: |
+          timeout 300 docker compose down -v || true
+          docker image rm "upgrade-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
+
+  # ===========================================================================
   # The worker image must stay JVM.
   #
   # Runtime module loading needs a bytecode interpreter: SandboxedModuleClassLoader defines classes
@@ -1215,8 +1418,8 @@ jobs:
   # Every ci/*.test.* file runs here. Some also run elsewhere, on purpose:
   #   - ci/templates-install-check.test.ts also runs inside the templates job's runner
   #     container (ci/templates-install-check.sh), before it installs any template.
-  #   - ci/upgrade-verify.test.sh also runs in upgrade-test.yml's seed/verify image,
-  #     before that workflow boots a stack.
+  #   - ci/upgrade-verify.test.sh also runs in the upgrade job's seed/verify image,
+  #     before that job boots a stack.
   # shellcheck (pinned release, not the runner's apt package) runs at its default
   # severity, the same as actionlint's run: linting in lint-workflows. Fix new
   # findings rather than excluding files.
@@ -1350,13 +1553,13 @@ jobs:
 
   quality-gate:
     name: Quality Gate
-    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, worker-image-is-jvm, dependency-audit, lint-workflows, test-ci-scripts, test-dora]
+    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, upgrade, worker-image-is-jvm, dependency-audit, lint-workflows, test-ci-scripts, test-dora]
     if: always()
     runs-on: k8s-runner
     steps:
       - name: Check job results
         run: |
-          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart templates worker-image-is-jvm dependency-audit lint-workflows test-ci-scripts test-dora; do
+          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart templates upgrade worker-image-is-jvm dependency-audit lint-workflows test-ci-scripts test-dora; do
             case "${job}" in
               test-java)         result="${{ needs.test-java.result }}" ;;
               test-runtime)      result="${{ needs.test-runtime.result }}" ;;
@@ -1367,6 +1570,7 @@ jobs:
               e2e)               result="${{ needs.e2e.result }}" ;;
               quickstart)        result="${{ needs.quickstart.result }}" ;;
               templates)         result="${{ needs.templates.result }}" ;;
+              upgrade)           result="${{ needs.upgrade.result }}" ;;
               worker-image-is-jvm) result="${{ needs.worker-image-is-jvm.result }}" ;;
               dependency-audit)  result="${{ needs.dependency-audit.result }}" ;;
               lint-workflows)    result="${{ needs.lint-workflows.result }}" ;;

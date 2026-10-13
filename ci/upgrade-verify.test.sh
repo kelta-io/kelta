@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for ci/upgrade-verify.sh in its stub mode (no stack): a clean read-back passes, and a
 # missing record, a changed value, a dropped field and a changed user field each fail with a
-# non-zero exit that names the resource and the field. The "Upgrade Test" workflow runs this
+# non-zero exit that names the resource and the field. The upgrade job in ci.yml runs this
 # before it boots anything; locally: `bash ci/upgrade-verify.test.sh` (needs bash and jq).
 set -euo pipefail
 
