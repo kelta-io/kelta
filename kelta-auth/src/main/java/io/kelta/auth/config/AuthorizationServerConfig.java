@@ -40,6 +40,10 @@ import org.springframework.security.oauth2.server.authorization.token.OAuth2Toke
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
 import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.session.ConcurrentSessionFilter;
+import org.springframework.security.web.session.HttpSessionEventPublisher;
+import org.springframework.security.core.session.SessionRegistry;
+import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
@@ -63,6 +67,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationValidator;
+import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcLogoutAuthenticationProvider;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -83,14 +88,18 @@ public class AuthorizationServerConfig {
     public SecurityFilterChain authorizationServerSecurityFilterChain(
             HttpSecurity http,
             AuthDomainResolver authDomainResolver,
-            RegisteredClientRepository registeredClientRepository) throws Exception {
+            RegisteredClientRepository registeredClientRepository,
+            SessionRegistry sessionRegistry) throws Exception {
         // Configure OIDC on the configurer BEFORE capturing endpoint matchers,
         // so that OIDC discovery endpoints (/.well-known/openid-configuration)
         // are included in the security matcher for this chain.
         OAuth2AuthorizationServerConfigurer authorizationServerConfigurer =
                 new OAuth2AuthorizationServerConfigurer();
         authorizationServerConfigurer
-                .oidc(Customizer.withDefaults())
+                // The platform UI signs out to a tenant-scoped URI on its own origin, which
+                // Spring's exact-match post-logout check would reject before ending the session.
+                .oidc(oidc -> oidc.logoutEndpoint(logout -> logout
+                        .authenticationProviders(configurePostLogoutRedirectUriValidator(authDomainResolver))))
                 // Spring AS has no built-in client-authentication path for public-client
                 // refresh_token requests (PublicClientAuthenticationConverter matches PKCE
                 // authorization_code only), so the SPA's silent refresh would 302 to the
@@ -116,6 +125,13 @@ public class AuthorizationServerConfig {
                         new IdpHintAwareLoginEntryPoint("/login"),
                         new MediaTypeRequestMatcher(MediaType.TEXT_HTML)
                 ))
+            // Spring AS writes the ID token's sid from the user's most recently active session
+            // in the SessionRegistry, and only registers a session on its FIRST authorization.
+            // Refreshing lastRequest on every request here keeps a session that authorizes
+            // again (a new tab signing in silently) the most recent one, so its ID token names
+            // its own session rather than one the same user opened later on another device.
+            // Nothing marks a session expired, so this filter never logs anyone out.
+            .addFilter(new ConcurrentSessionFilter(sessionRegistry))
             .with(authorizationServerConfigurer, Customizer.withDefaults());
 
         return http.build();
@@ -319,6 +335,27 @@ public class AuthorizationServerConfig {
         return service;
     }
 
+    /**
+     * The OIDC session registry Spring AS uses for the ID token's {@code sid} claim and the
+     * end-session endpoint's {@code sid} check (it adopts a {@link SessionRegistry} bean in
+     * place of its private default). HTTP sessions live in this pod's servlet container, and
+     * so does this registry. Sessions are found by principal, which relies on
+     * {@link KeltaUserDetails#equals(Object)}.
+     */
+    @Bean
+    public SessionRegistry sessionRegistry() {
+        return new SessionRegistryImpl();
+    }
+
+    /**
+     * Publishes servlet session lifecycle events so {@link #sessionRegistry()} forgets a
+     * session when it is invalidated or times out, and follows a session-id change.
+     */
+    @Bean
+    public HttpSessionEventPublisher httpSessionEventPublisher() {
+        return new HttpSessionEventPublisher();
+    }
+
     @Bean
     public OAuth2AuthorizationConsentService authorizationConsentService(
             JdbcTemplate jdbcTemplate, RegisteredClientRepository registeredClientRepository) {
@@ -408,6 +445,21 @@ public class AuthorizationServerConfig {
             for (AuthenticationProvider provider : authenticationProviders) {
                 if (provider instanceof OAuth2AuthorizationCodeRequestAuthenticationProvider authCodeProvider) {
                     authCodeProvider.setAuthenticationValidator(new PlatformRedirectUriValidator(resolver));
+                }
+            }
+        };
+    }
+
+    /**
+     * Replaces the default post_logout_redirect_uri validator on the OIDC logout
+     * authentication provider with {@link PlatformPostLogoutRedirectUriValidator}.
+     */
+    private Consumer<List<AuthenticationProvider>> configurePostLogoutRedirectUriValidator(
+            AuthDomainResolver resolver) {
+        return authenticationProviders -> {
+            for (AuthenticationProvider provider : authenticationProviders) {
+                if (provider instanceof OidcLogoutAuthenticationProvider logoutProvider) {
+                    logoutProvider.setAuthenticationValidator(new PlatformPostLogoutRedirectUriValidator(resolver));
                 }
             }
         };

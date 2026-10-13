@@ -8,9 +8,10 @@
  * `real-sign-in.spec.ts` (same E2E_REAL_SIGN_IN opt-in, which the CI stack sets). Signing
  * out here never touches the session the rest of the suite uses.
  *
- * What it asserts is the SPA's half of logout: the user menu's Sign out clears the
- * session, and a protected page afterwards lands on the login page instead of
- * re-authenticating.
+ * What it asserts: the user menu's Sign out clears the SPA's tokens, kelta-auth's
+ * end-session endpoint ends the authorization-server session and returns the browser to
+ * the app, and a fresh tab (no SPA logout flag) then gets kelta-auth's sign-in form
+ * instead of being signed straight back in.
  */
 import { test, expect } from "@playwright/test";
 import { loginViaInternalForm } from "../../helpers/internal-login";
@@ -62,6 +63,29 @@ test.describe("Logout", () => {
         url.origin !== appOrigin || url.searchParams.get("logged_out") === "true",
       { timeout: 30_000 },
     );
+    // The end-session endpoint accepts the tenant-scoped post-logout URI and sends the
+    // browser back to the app; a rejected URI leaves it on an error page at kelta-auth.
+    await page.waitForURL((url) => url.origin === appOrigin, {
+      timeout: 30_000,
+    });
+
+    // A fresh tab has none of the SPA's sessionStorage logout state, so the login page
+    // auto-starts sign-in. With the kelta-auth session ended, that shows the sign-in
+    // form rather than completing silently.
+    const freshTab = await page.context().newPage();
+    await freshTab.goto(`/${tenantSlug}/login`, { waitUntil: "load" });
+    try {
+      await freshTab
+        .locator('[data-testid="login-page"] button[type="button"]')
+        .last()
+        .click({ timeout: 3_000 });
+    } catch {
+      // No provider button: auto-login already redirected to kelta-auth.
+    }
+    await expect(freshTab.locator("#username")).toBeVisible({
+      timeout: 45_000,
+    });
+    await freshTab.close();
 
     // A protected page now sends the browser to the login page — and it stays there
     // (no silent re-authentication from leftover tokens).

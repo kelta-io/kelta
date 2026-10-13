@@ -6,6 +6,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 
 public class KeltaUserDetails implements UserDetails {
 
@@ -91,5 +92,31 @@ public class KeltaUserDetails implements UserDetails {
     @Override
     public boolean isEnabled() {
         return active;
+    }
+
+    /**
+     * Two instances are the same user when they carry the same user id in the same tenant.
+     * <p>
+     * Spring Authorization Server finds a user's sessions in its {@code SessionRegistry} by
+     * principal: when it puts {@code sid} into an ID token (from the principal read back from
+     * the JDBC authorization store, a new instance) and when the end-session endpoint checks
+     * that {@code sid} (from the principal in the HTTP session). With identity equality the
+     * first lookup never matched, so ID tokens carried no {@code sid} and sign-out was rejected
+     * with {@code invalid_token}.
+     */
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) {
+            return true;
+        }
+        if (!(other instanceof KeltaUserDetails that)) {
+            return false;
+        }
+        return Objects.equals(id, that.id) && Objects.equals(tenantId, that.tenantId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, tenantId);
     }
 }
