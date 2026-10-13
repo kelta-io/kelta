@@ -17,6 +17,11 @@ import java.util.*;
  * is responsible for transaction management. On any failure, this executor
  * throws an exception so the caller's transaction rolls back.
  *
+ * <p>Record change events ({@code kelta.record.changed.*}) raised by the
+ * {@link QueryEngine} writes are published after the caller's transaction
+ * commits, in operation order, and never on rollback — consumers never see a
+ * batch that did not commit.
+ *
  * <p>Maintains a local ID (lid) map for resolving server-generated IDs
  * within the same batch request.
  *

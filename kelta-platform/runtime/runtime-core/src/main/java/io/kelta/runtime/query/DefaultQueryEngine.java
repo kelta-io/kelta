@@ -28,6 +28,8 @@ import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.*;
@@ -698,13 +700,32 @@ public class DefaultQueryEngine implements QueryEngine {
 
     /**
      * Publishes a record change event if a publisher is configured.
-     * Failures are handled gracefully — they are logged but do not cause the
-     * main CRUD operation to fail.
+     *
+     * <p>Inside a transaction the event is deferred to {@code afterCommit()}, so consumers
+     * (flows, search index, cache eviction, webhooks, realtime) never see uncommitted state
+     * and a rolled-back write publishes nothing. One synchronization is registered per event,
+     * in write order. Without a transaction the event is published immediately.
+     *
+     * <p>Failures are handled gracefully — they are logged but do not cause the
+     * main CRUD operation (or later events in the same transaction) to fail.
      */
     private void publishRecordEvent(PlatformEvent<RecordChangedPayload> event) {
         if (recordEventPublisher == null) {
             return;
         }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publishNow(event);
+                }
+            });
+        } else {
+            publishNow(event);
+        }
+    }
+
+    private void publishNow(PlatformEvent<RecordChangedPayload> event) {
         try {
             recordEventPublisher.publish(event);
         } catch (Exception e) {
