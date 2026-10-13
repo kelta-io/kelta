@@ -1,7 +1,8 @@
 /**
- * Forgot password, signed out: kelta-auth's login form links to /forgot-password, which
- * mails a single-use link to /reset-password; the new password must meet the tenant's
- * policy, and afterwards the user signs in with it.
+ * Invite and forgot password, signed out. An invite email links to kelta-auth's
+ * /reset-password page, where the invited user sets a first password; kelta-auth's login
+ * form links to /forgot-password, which mails a single-use link to the same page. Every
+ * password must meet the tenant's policy, and afterwards the user signs in with it.
  *
  * Imports the plain Playwright `test` with an empty storage state: the `../../fixtures`
  * page fixture re-injects the e2e admin's session on every navigation. The flow uses a
@@ -11,16 +12,17 @@
  * rate limit and policy are covered through the real security chain by kelta-auth's
  * PasswordResetFlowTest.
  */
-import { test, expect, type APIRequestContext } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { tenantApi } from "../../helpers/api-request";
 
 const tenantSlug = process.env.E2E_TENANT_SLUG || "default";
 const apiBaseUrl = process.env.E2E_API_BASE_URL || "https://kelta.io";
 const mailpitUrl = process.env.E2E_MAILPIT_URL || "";
 
-/** Meets the default password policy: no dictionary word and no part of the user's name or
- * email — the address is `e2e-forgot-…`, so not even "e2e". */
-const NEW_PASSWORD = "Qz7#Lm2!Vx9w-Kp4";
+/** Both meet the default password policy: no dictionary word and no part of the user's name
+ * or email — the address is `e2e-forgot-…`, so not even "e2e". */
+const FIRST_PASSWORD = "Qz7#Lm2!Vx9w-Kp4";
+const NEW_PASSWORD = "Wy4$Hn8@Tc3q-Rm6";
 
 test.use({
   storageState: { cookies: [], origins: [] },
@@ -49,12 +51,13 @@ test.describe("Forgot password", () => {
     ).toBeVisible();
   });
 
-  test("a user resets a forgotten password from the emailed link and signs in with it", async ({
+  test("an invited user sets a first password from the invite, then resets a forgotten one", async ({
     page,
+    browser,
     request,
   }) => {
-    test.skip(!mailpitUrl, "E2E_MAILPIT_URL not set — the link is read from Mailpit");
-    test.setTimeout(150_000);
+    test.skip(!mailpitUrl, "E2E_MAILPIT_URL not set — the links are read from Mailpit");
+    test.setTimeout(240_000);
 
     const api = tenantApi({ apiBaseUrl, tenantSlug });
     const email = `e2e-forgot-${Date.now()}@example.com`;
@@ -75,86 +78,134 @@ test.describe("Forgot password", () => {
     const userId = created.body.data!.id;
 
     try {
-      // The invite gives the user a credential (no usable password yet).
+      // An invite (re-)sent now: its link holds the user's one live token.
       const invited = await api("POST", `/api/admin/users/${userId}/invite`);
       expect(invited.status, `invite failed: ${JSON.stringify(invited.body)}`).toBeLessThan(300);
+      const inviteLink = await pollLink(request, email, (subject) => !/^Reset/.test(subject));
 
-      // From the app's sign-in page, as a person would.
-      await page.goto(`/${tenantSlug}/login`, { waitUntil: "load" });
-      await page.getByRole("link", { name: "Forgot password?" }).click();
-      await page.getByLabel("Email").fill(email);
-      await page.getByRole("button", { name: "Email me a reset link" }).click();
-      await expect(
-        page.getByText("If an account exists with that email"),
-      ).toBeVisible();
-
-      let link: string | undefined;
-      await expect
-        .poll(
-          async () => {
-            link = await findResetLink(request, email);
-            return Boolean(link);
-          },
-          { timeout: 30_000, message: `no reset link mailed to ${email}` },
-        )
-        .toBe(true);
-
-      // A password the tenant's policy refuses is not accepted.
-      await page.goto(link!);
+      // The invite opens kelta-auth's page, worded for a first password.
+      await page.goto(inviteLink);
+      await expect(page.getByText("Set your password")).toBeVisible();
       await page.getByLabel("New Password", { exact: true }).fill("password123");
       await page.getByLabel("Confirm New Password").fill("password123");
-      await page.getByRole("button", { name: "Reset Password" }).click();
+      await page.getByRole("button", { name: "Set Password" }).click();
       await expect(page.getByRole("alert")).toContainText("common");
 
       // The same link still works for a password that meets the policy.
-      await page.getByLabel("New Password", { exact: true }).fill(NEW_PASSWORD);
-      await page.getByLabel("Confirm New Password").fill(NEW_PASSWORD);
-      await page.getByRole("button", { name: "Reset Password" }).click();
+      await page.getByLabel("New Password", { exact: true }).fill(FIRST_PASSWORD);
+      await page.getByLabel("Confirm New Password").fill(FIRST_PASSWORD);
+      await page.getByRole("button", { name: "Set Password" }).click();
+      await expect(page.getByText("Your password is set. Sign in with it.")).toBeVisible();
 
-      // Same browser as the app's sign-in: back to the form, which resumes the app.
-      await expect(
-        page.getByText("Your password was reset. Sign in with your new password."),
-      ).toBeVisible();
-      await page.locator("#username").fill(email);
-      await page.locator("#password").fill(NEW_PASSWORD);
-      await page.getByRole("button", { name: "Sign In" }).click();
-      await page.waitForURL(
-        (url) =>
-          url.pathname.startsWith(`/${tenantSlug}/`) &&
-          !url.pathname.includes("/auth/callback") &&
-          !url.pathname.includes("/login"),
-        { timeout: 60_000 },
-      );
-      await expect(page.getByTestId("user-menu-button")).toBeVisible({
-        timeout: 30_000,
+      // Opened from the email, not from an app: the page links to the tenant's app.
+      await page.getByRole("link", { name: "Continue to sign in" }).click();
+      await signInAndLand(page, email, FIRST_PASSWORD);
+
+      // Later, on another device, the password is forgotten.
+      const other = await browser.newContext({
+        baseURL: test.info().project.use.baseURL,
+        storageState: { cookies: [], origins: [] },
       });
+      try {
+        const device = await other.newPage();
+        await device.goto(`/${tenantSlug}/login`, { waitUntil: "load" });
+        await device.getByRole("link", { name: "Forgot password?" }).click();
+        await device.getByLabel("Email").fill(email);
+        await device.getByRole("button", { name: "Email me a reset link" }).click();
+        await expect(device.getByText("If an account exists with that email")).toBeVisible();
+        const resetLink = await pollLink(request, email, (subject) => /^Reset/.test(subject));
 
-      // Single use: the link is refused afterwards.
-      await page.goto(link!);
-      await expect(
-        page.getByText("This reset link is invalid, expired, or was already used."),
-      ).toBeVisible();
+        await device.goto(resetLink);
+        await expect(device.getByText("Choose a new password")).toBeVisible();
+        await device.getByLabel("New Password", { exact: true }).fill(FIRST_PASSWORD);
+        await device.getByLabel("Confirm New Password").fill(FIRST_PASSWORD);
+        await device.getByRole("button", { name: "Reset Password" }).click();
+        await expect(device.getByRole("alert")).toContainText("recently used");
+
+        await device.getByLabel("New Password", { exact: true }).fill(NEW_PASSWORD);
+        await device.getByLabel("Confirm New Password").fill(NEW_PASSWORD);
+        await device.getByRole("button", { name: "Reset Password" }).click();
+
+        // Same browser as the app's sign-in: back to the form, which resumes the app.
+        await expect(device.getByText("Your new password is set. Sign in with it.")).toBeVisible();
+        await device.locator("#username").fill(email);
+        await device.locator("#password").fill(NEW_PASSWORD);
+        await device.getByRole("button", { name: "Sign In" }).click();
+        await waitForApp(device);
+
+        // Single use: both links are refused afterwards.
+        for (const link of [resetLink, inviteLink]) {
+          await device.goto(link);
+          await expect(
+            device.getByText("This link is invalid, expired, or was already used."),
+          ).toBeVisible();
+        }
+      } finally {
+        await other.close();
+      }
     } finally {
       await api("DELETE", `/api/users/${userId}`);
     }
   });
 });
 
-interface MailpitSearch {
-  messages?: { ID: string }[];
+async function waitForApp(page: Page): Promise<void> {
+  await page.waitForURL(
+    (url) =>
+      url.pathname.startsWith(`/${tenantSlug}/`) &&
+      !url.pathname.includes("/auth/callback") &&
+      !url.pathname.includes("/login"),
+    { timeout: 60_000 },
+  );
+  await expect(page.getByTestId("user-menu-button")).toBeVisible({ timeout: 30_000 });
 }
 
-/** The /reset-password link mailed to `to` (the invite email, which has none, is skipped). */
+/** From the app's hand-off to kelta-auth's form: sign in and land in the app. */
+async function signInAndLand(page: Page, email: string, password: string): Promise<void> {
+  await page.locator("#username").waitFor({ state: "visible", timeout: 45_000 });
+  await page.locator("#username").fill(email);
+  await page.locator("#password").fill(password);
+  await page.getByRole("button", { name: "Sign In" }).click();
+  await waitForApp(page);
+}
+
+/** Waits for the newest /reset-password link mailed to `to` in a message whose subject matches. */
+async function pollLink(
+  request: APIRequestContext,
+  to: string,
+  subject: (subject: string) => boolean,
+): Promise<string> {
+  let link: string | undefined;
+  await expect
+    .poll(
+      async () => {
+        link = await findResetLink(request, to, subject);
+        return Boolean(link);
+      },
+      { timeout: 30_000, message: `no link mailed to ${to}` },
+    )
+    .toBe(true);
+  return link!;
+}
+
+interface MailpitSearch {
+  messages?: { ID: string; Subject: string }[];
+}
+
+/** The /reset-password link in the newest message to `to` whose subject matches. */
 async function findResetLink(
   request: APIRequestContext,
   to: string,
+  subject: (subject: string) => boolean,
 ): Promise<string | undefined> {
   const search = await request.get(
-    `${mailpitUrl}/api/v1/search?query=${encodeURIComponent(`to:${to}`)}&limit=10`,
+    `${mailpitUrl}/api/v1/search?query=${encodeURIComponent(`to:${to}`)}&limit=20`,
   );
   if (!search.ok()) return undefined;
   const { messages = [] } = (await search.json()) as MailpitSearch;
-  for (const { ID } of messages) {
+  // Mailpit lists the newest message first.
+  for (const { ID, Subject } of messages) {
+    if (!subject(Subject)) continue;
     const message = await request.get(`${mailpitUrl}/api/v1/message/${ID}`);
     if (!message.ok()) continue;
     const { Text = "", HTML = "" } = (await message.json()) as {

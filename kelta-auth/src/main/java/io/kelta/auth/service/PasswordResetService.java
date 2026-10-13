@@ -156,9 +156,17 @@ public class PasswordResetService {
         }
     }
 
-    /** Whether {@code token} is a live reset token (the reset page checks before showing its form). */
-    public boolean isUsable(String token) {
-        return findToken(token).isPresent();
+    /**
+     * A live token's account, as the reset page shows it: {@code firstPassword} when the account
+     * has no password yet (an invite — the worker's {@code UserInviteService} writes the same
+     * column).
+     */
+    public record TokenInfo(boolean firstPassword) {}
+
+    /** {@code token}'s account when it is a live reset token (the reset page checks before showing its form). */
+    public Optional<TokenInfo> describe(String token) {
+        return findToken(token).map(row -> new TokenInfo(
+                !(row.get("password_hash") instanceof String hash) || hash.isBlank()));
     }
 
     /**
@@ -211,7 +219,8 @@ public class PasswordResetService {
             return Optional.empty();
         }
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT uc.user_id, uc.reset_token_expires_at, pu.tenant_id, pu.email, pu.first_name, pu.last_name, "
+                "SELECT uc.user_id, uc.reset_token_expires_at, uc.password_hash, pu.tenant_id, pu.email, pu.first_name, "
+                        + "pu.last_name, "
                         + "t.slug AS tenant_slug "
                         + "FROM user_credential uc JOIN platform_user pu ON pu.id = uc.user_id "
                         + "JOIN tenant t ON t.id = pu.tenant_id "

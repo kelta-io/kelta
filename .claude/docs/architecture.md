@@ -1995,16 +1995,24 @@ the record it is showing); `mergeContext` feeds `${var}` substitution. Sends are
 
 ### User invitation flow
 
+A password user is invited by `UserInviteService.inviteUser` (admin and delegated
+`…/users/{id}/invite`, SCIM create when the tenant's `auto_invite_on_create`, tenant
+provisioning's seeded admin): it stores a 7-day token in `user_credential.reset_token`
+(`force_change_on_login = true`) and mails the `user.invite` template with
+`actionUrl = <kelta.auth.issuer-uri>/reset-password?token=…`. That is kelta-auth's reset page,
+where the user sets a first password under the tenant's policy (see `kelta-auth/CLAUDE.md` →
+Forgot password). The link is built on the configured issuer, never on a request's host, and
+carries only the token.
+
 `POST /api/internal/email/invite` (worker `InternalEmailController`) accepts
 `{ email, tenantId, inviteToken }` and sends the invitation email using the
-`user_invite` template (V141, name-based lookup). The controller resolves the
-tenant display name, builds an `inviteLink` from `kelta.external-base-url` +
-the token, substitutes `${inviteLink}` and `${tenantName}`, and queues delivery
-via `DefaultEmailService.sendByName` — which honours the tenant's SMTP
-credential override (or falls back to the platform default) the same way as
-the rest of the email pipeline. `kelta-auth`'s `WorkerClient.sendInviteEmail`
-calls this endpoint after a federated user is newly JIT-provisioned, so SSO
-sign-ups receive a notification email in addition to their existing session.
+`user_invite` template (V141, name-based lookup). `kelta-auth`'s
+`WorkerClient.sendInviteEmail` calls it after a federated user is newly JIT-provisioned. That user
+signs in with their identity provider and has no password to set, so `${inviteLink}` is the
+tenant's app, `<kelta.mailbox.app-base-url>/<slug>/app` (the app host, falling back to
+`kelta.external-base-url`); `inviteToken` only identifies the send in the email log. Delivery goes
+through `DefaultEmailService.sendByName`, which honours the tenant's SMTP credential override (or
+falls back to the platform default) like the rest of the email pipeline.
 
 ### First-boot platform admin credential
 

@@ -219,6 +219,22 @@ class PasswordResetServiceTest {
         }
 
         @Test
+        @DisplayName("describe: a live token of an account with no password yet is a first password")
+        void describesAFirstPassword() {
+            Map<String, Object> invited = tokenRow(Instant.now().plusSeconds(600));
+            invited.put("password_hash", "");
+            Map<String, Object> existing = tokenRow(Instant.now().plusSeconds(600));
+            existing.put("password_hash", "$2a$hash");
+            token("invite", invited);
+            token("reset", existing);
+            token("gone");
+
+            assertThat(service().describe("invite")).contains(new PasswordResetService.TokenInfo(true));
+            assertThat(service().describe("reset")).contains(new PasswordResetService.TokenInfo(false));
+            assertThat(service().describe("gone")).isEmpty();
+        }
+
+        @Test
         @DisplayName("an unknown token is invalid")
         void unknownToken() {
             token("bad-token");

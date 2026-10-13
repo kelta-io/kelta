@@ -28,7 +28,7 @@ class UserInviteServiceTest {
     void setUp() {
         jdbcTemplate = mock(JdbcTemplate.class);
         emailService = mock(EmailService.class);
-        service = new UserInviteService(jdbcTemplate, emailService, "https://ui.example.com");
+        service = new UserInviteService(jdbcTemplate, emailService, "https://auth.example.com/");
     }
 
     @Test
@@ -53,8 +53,21 @@ class UserInviteServiceTest {
                 .containsEntry("firstName", "Ada")
                 .containsEntry("tenantName", "Acme")
                 .containsEntry("email", "ada@example.com");
-        assertThat((String) vars.getValue().get("actionUrl"))
-                .startsWith("https://ui.example.com/accept-invite?token=");
+        assertThat(vars.getValue().get("actionUrl"))
+                .as("kelta-auth's reset page on the configured issuer, the token only")
+                .isEqualTo("https://auth.example.com/reset-password?token=" + token);
+    }
+
+    @Test
+    @DisplayName("Should store the token but send nothing when no issuer is configured")
+    void shouldNotSendWithoutAnIssuer() {
+        UserInviteService unconfigured = new UserInviteService(jdbcTemplate, emailService, " ");
+        when(jdbcTemplate.queryForList(anyString(), eq("u1"), eq("t1")))
+                .thenReturn(List.of(Map.of("email", "ada@example.com", "first_name", "Ada", "tenant_name", "Acme")));
+        when(jdbcTemplate.update(anyString(), any(), any(), any(), any())).thenReturn(1);
+
+        assertThat(unconfigured.inviteUser("t1", "u1")).isNotNull();
+        verifyNoInteractions(emailService);
     }
 
     @Test

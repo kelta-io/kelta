@@ -10,12 +10,16 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
+import java.util.Optional;
+
 /**
  * The signed-out "forgot password" pages: {@code /forgot-password} asks for the email address
  * and mails a reset link, {@code /reset-password?token=…} (the link) sets the new password. Both
  * are form posts with the session's CSRF token, like the login form; the JSON equivalents for an
  * external frontend are {@code /auth/password/reset-request} and {@code /auth/password/reset}
- * ({@link PasswordController}). The work is {@link PasswordResetService}'s.
+ * ({@link PasswordController}). The work is {@link PasswordResetService}'s. An invite link (the
+ * worker's {@code UserInviteService}) opens the same reset page; for an account with no password
+ * yet the page reads "Set your password".
  *
  * <p>Every handler takes the {@link HttpSession}, so the session exists before the page renders:
  * the form's CSRF token is stored in it while Thymeleaf writes the form, and by then part of the
@@ -54,11 +58,13 @@ public class ForgotPasswordController {
     @GetMapping("/reset-password")
     public String showResetForm(@RequestParam(value = "token", required = false) String token,
                                 HttpSession session, Model model) {
-        if (!resetService.isUsable(token)) {
+        Optional<PasswordResetService.TokenInfo> info = resetService.describe(token);
+        if (info.isEmpty()) {
             model.addAttribute("invalid", true);
             return "reset-password";
         }
         model.addAttribute("token", token);
+        model.addAttribute("firstPassword", info.get().firstPassword());
         return "reset-password";
     }
 
@@ -69,6 +75,9 @@ public class ForgotPasswordController {
                                 HttpSession session,
                                 Model model) {
         model.addAttribute("token", token);
+        // Before the reset spends the token: the wording of the page shown again on an error.
+        model.addAttribute("firstPassword",
+                resetService.describe(token).map(PasswordResetService.TokenInfo::firstPassword).orElse(false));
         if (!newPassword.equals(confirmPassword)) {
             model.addAttribute("error", "New passwords do not match.");
             return "reset-password";

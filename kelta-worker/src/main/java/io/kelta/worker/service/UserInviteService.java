@@ -16,8 +16,10 @@ import java.util.UUID;
 /**
  * Generates an invite token for a user and queues the {@code user.invite}
  * template email. The token piggy-backs on the existing {@code user_credential}
- * reset-token columns — the accept-invite UI uses the same /reset-password
- * endpoint to set the user's initial password.
+ * reset-token columns, so the emailed link opens kelta-auth's {@code /reset-password}
+ * page ({@code ForgotPasswordController}), where the user sets a first password under
+ * the tenant's password policy. The link is built on the configured kelta-auth issuer
+ * ({@code kelta.auth.issuer-uri}) — never on a request's host — and carries only the token.
  *
  * <p>Auto-triggered from {@code ScimUserService.createUser} when the tenant
  * has {@code auto_invite_on_create=true}, and on demand from
@@ -31,14 +33,15 @@ public class UserInviteService {
 
     private final JdbcTemplate jdbcTemplate;
     private final EmailService emailService;
-    private final String uiBaseUrl;
+    private final String authBaseUrl;
 
     public UserInviteService(JdbcTemplate jdbcTemplate,
                              EmailService emailService,
-                             @Value("${kelta.external-base-url:}") String uiBaseUrl) {
+                             @Value("${kelta.auth.issuer-uri:https://auth.kelta.io}") String authIssuerUri) {
         this.jdbcTemplate = jdbcTemplate;
         this.emailService = emailService;
-        this.uiBaseUrl = uiBaseUrl;
+        String base = authIssuerUri == null ? "" : authIssuerUri.trim();
+        this.authBaseUrl = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
     }
 
     /**
@@ -65,8 +68,8 @@ public class UserInviteService {
         String token = UUID.randomUUID().toString();
         Instant expiresAt = Instant.now().plus(INVITE_EXPIRY);
 
-        // Upsert a user_credential row holding the invite token. The
-        // /auth/password/reset endpoint validates this same column on accept.
+        // Upsert a user_credential row holding the invite token. kelta-auth's
+        // /reset-password page (and /auth/password/reset) validates this same column.
         int updated = jdbcTemplate.update(
                 "UPDATE user_credential SET reset_token = ?, reset_token_expires_at = ?, "
                         + "force_change_on_login = true, updated_at = ? WHERE user_id = ?",
@@ -80,7 +83,11 @@ public class UserInviteService {
                     UUID.randomUUID().toString(), userId, token, Timestamp.from(expiresAt));
         }
 
-        String actionUrl = uiBaseUrl + "/accept-invite?token=" + token + "&email=" + email;
+        if (authBaseUrl.isEmpty()) {
+            log.error("Invite for user {} in tenant {} not sent: kelta.auth.issuer-uri is blank", userId, tenantId);
+            return token;
+        }
+        String actionUrl = authBaseUrl + "/reset-password?token=" + token;
         emailService.sendByKey(tenantId, email, "user.invite",
                 Map.of(
                         "tenantName", tenantName,
