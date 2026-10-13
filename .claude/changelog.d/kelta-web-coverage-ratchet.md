@@ -1,0 +1,1 @@
+- 2026-10-12 test(kelta-web): Enforce the Vitest coverage thresholds — they sat under an ignored `thresholds.global` key — as a ratchet at the measured totals (kelta-web-coverage-ratchet)

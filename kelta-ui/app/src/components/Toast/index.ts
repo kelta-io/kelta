@@ -1,22 +1,7 @@
 /**
- * Toast Notification System Export
- *
- * Provides toast notifications with success, error, warning, and info variants.
- * Includes ToastProvider context and useToast hook for managing notifications.
+ * Legacy toast API (deprecated) — a thin adapter over `sonner`, the app's single toast API.
+ * New code calls `toast` from `'sonner'`; see `./Toast`.
  */
-export {
-  Toast,
-  ToastProvider,
-  useToast,
-  ToastContext,
-  DEFAULT_DURATION,
-  DEFAULT_MAX_TOASTS,
-} from './Toast'
+export { ToastProvider, useToast } from './Toast'
 
-export type {
-  ToastType,
-  ToastData,
-  ToastProps,
-  ToastContextValue,
-  ToastProviderProps,
-} from './Toast'
+export type { ToastType, ToastContextValue, ToastProviderProps } from './Toast'

@@ -1,16 +1,17 @@
 /**
- * useActionRunner tests. Mounts the hook inside the app providers (Toast/Router/QueryClient) with a
+ * useActionRunner tests. Mounts the hook inside the app providers (Router/QueryClient + the sonner
+ * `<Toaster />`) with a
  * mocked `useApi` so we can control the apiClient. Asserts: empty/undefined lists are a no-op; a
  * showToast action fires a toast; a rejecting action surfaces ONE error toast and does not throw out of
  * `run`.
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/context/I18nContext'
-import { ToastProvider } from '@/components/Toast/Toast'
+import { Toaster } from 'sonner'
 import type { ApiClient } from '@/services/apiClient'
 import { useActionRunner } from './useActionRunner'
 
@@ -25,7 +26,10 @@ function makeWrapper() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <I18nProvider>
-          <ToastProvider>{children}</ToastProvider>
+          <>
+            {children}
+            <Toaster />
+          </>
         </I18nProvider>
       </BrowserRouter>
     </QueryClientProvider>
@@ -48,7 +52,7 @@ describe('useActionRunner', () => {
       await result.current.run(undefined, {})
     })
     expect(postResource).not.toHaveBeenCalled()
-    expect(document.querySelector('[data-testid="toast-container"]')).toBeNull()
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull()
   })
 
   it('fires a success toast for a showToast action', async () => {
@@ -56,7 +60,10 @@ describe('useActionRunner', () => {
     await act(async () => {
       await result.current.run([{ action: 'showToast', level: 'success', message: 'Hi' }], {})
     })
-    expect(document.querySelector('[data-testid="toast-success"]')).not.toBeNull()
+    await waitFor(() =>
+      expect(document.querySelector('[data-sonner-toast][data-type="success"]')).not.toBeNull()
+    )
+    expect(document.querySelector('[data-sonner-toast]')?.textContent).toContain('Hi')
   })
 
   it('surfaces ONE error toast when an action rejects and does not throw out of run', async () => {
@@ -68,7 +75,11 @@ describe('useActionRunner', () => {
         {}
       )
     })
-    const errors = document.querySelectorAll('[data-testid="toast-error"]')
+    await waitFor(() =>
+      expect(document.querySelector('[data-sonner-toast][data-type="error"]')).not.toBeNull()
+    )
+    const errors = document.querySelectorAll('[data-sonner-toast][data-type="error"]')
     expect(errors.length).toBe(1)
+    expect(errors[0].textContent).toContain('Boom')
   })
 })

@@ -43,7 +43,7 @@ import { PluginProvider } from '../../context/PluginContext'
 import { AuthProvider } from '../../context/AuthContext'
 import { ApiProvider } from '../../context/ApiContext'
 import { I18nProvider } from '../../context/I18nContext'
-import { ToastProvider } from '../../components/Toast'
+import { Toaster } from 'sonner'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../vitest.setup'
 
@@ -2068,7 +2068,10 @@ describe('PageBuilderPage', () => {
                 <AuthProvider>
                   <ApiProvider>
                     <PluginProvider plugins={[customPlugin]}>
-                      <ToastProvider>{children}</ToastProvider>
+                      <>
+                        {children}
+                        <Toaster />
+                      </>
                     </PluginProvider>
                   </ApiProvider>
                 </AuthProvider>
@@ -2150,7 +2153,10 @@ describe('PageBuilderPage', () => {
                 <AuthProvider>
                   <ApiProvider>
                     <PluginProvider plugins={[customPlugin]}>
-                      <ToastProvider>{children}</ToastProvider>
+                      <>
+                        {children}
+                        <Toaster />
+                      </>
                     </PluginProvider>
                   </ApiProvider>
                 </AuthProvider>

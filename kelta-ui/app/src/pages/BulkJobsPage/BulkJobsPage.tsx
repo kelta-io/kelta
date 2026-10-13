@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react'
+import { toast } from 'sonner'
 import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog } from '../../components'
+import { ConfirmDialog } from '../../components'
 import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
 import {
   AdminCrudPage,
@@ -145,7 +146,6 @@ function BulkJobFileField({
 export function BulkJobsPage({ testId = 'bulk-jobs-page' }: BulkJobsPageProps): React.ReactElement {
   const { formatDate } = useI18n()
   const { keltaClient, apiClient } = useApi()
-  const { showToast } = useToast()
 
   const [file, setFile] = useState<File | null>(null)
   const [downloadingJobId, setDownloadingJobId] = useState<string | null>(null)
@@ -220,12 +220,12 @@ export function BulkJobsPage({ testId = 'bulk-jobs-page' }: BulkJobsPageProps): 
         document.body.removeChild(a)
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Failed to download results'
-        showToast(message, 'error')
+        toast.error(message)
       } finally {
         setDownloadingJobId(null)
       }
     },
-    [apiClient, showToast]
+    [apiClient]
   )
 
   const columns = useMemo<AdminColumn<BulkJob>[]>(

@@ -22,8 +22,13 @@ vi.mock('../../hooks/useSystemPermissions', () => ({
   useSystemPermissions: () => ({ hasPermission, isLoading: false }),
 }))
 
-const showToast = vi.fn()
-vi.mock('../../components/Toast', () => ({ useToast: () => ({ showToast }) }))
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('sonner')>()),
+  toast: mockToast,
+}))
 
 const getOne = vi.fn()
 const getList = vi.fn()
@@ -152,6 +157,6 @@ describe('UserDetailPage — admin PAT mint', () => {
     await waitFor(() =>
       expect(screen.getByTestId('minted-token-value')).toHaveTextContent('klt_admin_minted_token')
     )
-    expect(showToast).toHaveBeenCalledWith('Token minted successfully', 'success')
+    expect(mockToast.success).toHaveBeenCalledWith('Token minted successfully')
   })
 })

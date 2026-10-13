@@ -12,10 +12,11 @@
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner } from '../../components'
+import { ConfirmDialog, LoadingSpinner } from '../../components'
 import { useCollectionSummaries, type CollectionSummary } from '../../hooks/useCollectionSummaries'
 import {
   AdminCrudPage,
@@ -283,7 +284,6 @@ interface LayoutEditorViewProps {
 
 function LayoutEditorViewInner({ layoutId, onBack }: LayoutEditorViewProps): React.ReactElement {
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
   const { state, setLayout, setAvailableFields, markSaved } = useLayoutEditor()
 
@@ -728,10 +728,10 @@ function LayoutEditorViewInner({ layoutId, onBack }: LayoutEditorViewProps): Rea
       queryClient.invalidateQueries({ queryKey: ['pageLayout', layoutId] })
       queryClient.invalidateQueries({ queryKey: ['page-layout-resolve'] })
       markSaved()
-      showToast('Layout saved successfully', 'success')
+      toast.success('Layout saved successfully')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to save layout', 'error')
+      toast.error(err.message || 'Failed to save layout')
     },
   })
 
@@ -739,10 +739,12 @@ function LayoutEditorViewInner({ layoutId, onBack }: LayoutEditorViewProps): Rea
     saveMutation.mutate()
   }, [saveMutation])
 
+  // Leaving with unsaved changes asks first.
+  const [confirmLeave, setConfirmLeave] = useState(false)
   const handleBack = useCallback(() => {
     if (state.isDirty) {
-      const confirmed = window.confirm('You have unsaved changes. Are you sure you want to leave?')
-      if (!confirmed) return
+      setConfirmLeave(true)
+      return
     }
     onBack()
   }, [state.isDirty, onBack])
@@ -825,6 +827,17 @@ function LayoutEditorViewInner({ layoutId, onBack }: LayoutEditorViewProps): Rea
           {layoutDetail?.layoutType === 'DETAIL' && <DetailExtrasPanel />}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmLeave}
+        title="Unsaved changes"
+        message="You have unsaved changes. Are you sure you want to leave?"
+        confirmLabel="Leave"
+        cancelLabel="Stay"
+        variant="danger"
+        onConfirm={onBack}
+        onCancel={() => setConfirmLeave(false)}
+      />
     </div>
   )
 }

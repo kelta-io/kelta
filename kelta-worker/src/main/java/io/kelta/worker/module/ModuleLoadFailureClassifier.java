@@ -14,6 +14,7 @@ import java.net.http.HttpTimeoutException;
 import java.sql.SQLRecoverableException;
 import java.sql.SQLTransientException;
 import java.util.Locale;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Decides whether a failed module load is the module's fault or the infrastructure's.
@@ -117,6 +118,7 @@ public final class ModuleLoadFailureClassifier {
                     || current instanceof SocketTimeoutException
                     || current instanceof UnknownHostException
                     || current instanceof HttpTimeoutException
+                    || current instanceof TimeoutException
                     || current instanceof SdkClientException) {
                 return true;
             }

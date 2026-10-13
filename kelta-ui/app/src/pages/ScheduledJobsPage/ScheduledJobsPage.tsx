@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useFormContext, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, ExecutionLogModal } from '../../components'
+import { ConfirmDialog, ExecutionLogModal } from '../../components'
 import type { LogColumn } from '../../components'
 import type { CreateScheduledJobRequest } from '@kelta/sdk'
 import { cn } from '@/lib/utils'
@@ -155,7 +156,6 @@ export function ScheduledJobsPage({
   const queryClient = useQueryClient()
   const { formatDate } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const [logsItemId, setLogsItemId] = useState<string | null>(null)
   const [_logsItemName, setLogsItemName] = useState('')
@@ -251,10 +251,10 @@ export function ScheduledJobsPage({
     mutationFn: (id: string) => keltaClient.admin.scheduledJobs.pause(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['scheduled-jobs'] })
-      showToast('Scheduled job paused', 'success')
+      toast.success('Scheduled job paused')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to pause job', 'error')
+      toast.error(err.message || 'Failed to pause job')
     },
   })
 
@@ -262,10 +262,10 @@ export function ScheduledJobsPage({
     mutationFn: (id: string) => keltaClient.admin.scheduledJobs.resume(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['scheduled-jobs'] })
-      showToast('Scheduled job resumed', 'success')
+      toast.success('Scheduled job resumed')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to resume job', 'error')
+      toast.error(err.message || 'Failed to resume job')
     },
   })
 

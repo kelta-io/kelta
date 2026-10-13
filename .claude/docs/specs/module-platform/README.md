@@ -102,7 +102,9 @@ through `PackageImportService` — see [`2-provenance-provisioning.md`](2-proven
   **An infrastructure failure never writes it** (object storage or the database unreachable, no JAR
   storage on the pod): the module fails closed on that pod with the same refusing handlers, only
   `last_error` is recorded, the status is left alone, and `ModuleLoadRetryScheduler` retries with
-  capped exponential backoff. Classification is by load phase (`ModuleLoadFailureClassifier`). This
+  capped exponential backoff. Classification is by load phase (`ModuleLoadFailureClassifier`). The
+  admin re-enables a quarantined module (or retries a retrying one now) from the Modules page or
+  `POST /api/modules/{moduleId}/enable` — every pod reloads, no restart. This
   is the 2026-10-06 lesson — see `concerns.md` → "An object-storage outage quarantined every
   runtime module for five days".
 - `STUB` — **explicit dev opt-in** (`kelta.modules.stub-mode=true`), never reached by falling back

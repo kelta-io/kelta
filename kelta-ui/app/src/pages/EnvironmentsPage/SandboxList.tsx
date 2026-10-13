@@ -8,12 +8,13 @@
  */
 
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plug, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { CreateEnvironmentDialog } from './CreateEnvironmentDialog'
 import {
   archiveEnvironment,
@@ -98,7 +99,6 @@ function EnvironmentTypeBadge({ type }: { type: EnvironmentType }): React.ReactE
 export function SandboxList(): React.ReactElement {
   const { t, formatDate } = useI18n()
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [pendingRefresh, setPendingRefresh] = useState<Environment | null>(null)
@@ -125,11 +125,11 @@ export function SandboxList(): React.ReactElement {
   const refreshMutation = useMutation({
     mutationFn: (envId: string) => refreshEnvironment(apiClient, envId),
     onSuccess: () => {
-      showToast(t('environments.refreshStarted'), 'success')
+      toast.success(t('environments.refreshStarted'))
       queryClient.invalidateQueries({ queryKey: ['environments'] })
     },
     onError: (mutationError: Error) => {
-      showToast(mutationError.message, 'error')
+      toast.error(mutationError.message)
     },
   })
 
@@ -137,24 +137,24 @@ export function SandboxList(): React.ReactElement {
     mutationFn: (envId: string) => testEnvironmentConnection(apiClient, envId),
     onSuccess: (result: ConnectionTestResult) => {
       if (result.ok) {
-        showToast(t('environments.connectionOk'), 'success')
+        toast.success(t('environments.connectionOk'))
       } else {
-        showToast(result.error || t('errors.generic'), 'error')
+        toast.error(result.error || t('errors.generic'))
       }
     },
     onError: (mutationError: Error) => {
-      showToast(mutationError.message, 'error')
+      toast.error(mutationError.message)
     },
   })
 
   const deleteMutation = useMutation({
     mutationFn: (envId: string) => archiveEnvironment(apiClient, envId),
     onSuccess: () => {
-      showToast(t('environments.deleted'), 'success')
+      toast.success(t('environments.deleted'))
       queryClient.invalidateQueries({ queryKey: ['environments'] })
     },
     onError: (mutationError: Error) => {
-      showToast(mutationError.message, 'error')
+      toast.error(mutationError.message)
     },
   })
 

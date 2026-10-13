@@ -9,10 +9,7 @@ import React from 'react'
 import { get, useFormContext, useWatch, type FieldPath, type FieldValues } from 'react-hook-form'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { useCrudFormState } from './crudFormState'
-
-const FIELD_LABEL_CLASS =
-  'text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground'
+import { CRUD_FIELD_LABEL_CLASS, useCrudFormState } from './crudFormState'
 
 interface CrudFieldBaseProps<TValues extends FieldValues> {
   name: FieldPath<TValues>
@@ -63,7 +60,7 @@ function FieldLabel({
   required?: boolean
 }) {
   return (
-    <label htmlFor={htmlFor} className={FIELD_LABEL_CLASS}>
+    <label htmlFor={htmlFor} className={CRUD_FIELD_LABEL_CLASS}>
       {label}
       {required && (
         <span className="ml-0.5 text-destructive" aria-hidden="true">
@@ -87,6 +84,8 @@ export interface CrudTextFieldProps<
   multiline?: boolean
   rows?: number
   type?: React.HTMLInputTypeAttribute
+  /** Content on the control's row, after it (e.g. an "Insert field" button). */
+  trailing?: React.ReactNode
 }
 
 export function CrudTextField<TValues extends FieldValues = FieldValues>({
@@ -102,6 +101,7 @@ export function CrudTextField<TValues extends FieldValues = FieldValues>({
   multiline,
   rows = 3,
   type = 'text',
+  trailing,
 }: CrudTextFieldProps<TValues>): React.ReactElement {
   const {
     register,
@@ -120,13 +120,22 @@ export function CrudTextField<TValues extends FieldValues = FieldValues>({
     ...register(name),
   }
 
+  const control = multiline ? (
+    <Textarea rows={rows} className="resize-y" {...controlProps} />
+  ) : (
+    <Input type={type} {...controlProps} />
+  )
+
   return (
     <div className="flex flex-col gap-1.5">
       <FieldLabel htmlFor={id} label={label} required={required} />
-      {multiline ? (
-        <Textarea rows={rows} className="resize-y" {...controlProps} />
+      {trailing != null ? (
+        <div className={multiline ? 'flex items-start gap-2' : 'flex items-center gap-2'}>
+          {control}
+          <div className="shrink-0">{trailing}</div>
+        </div>
       ) : (
-        <Input type={type} {...controlProps} />
+        control
       )}
       {hint != null && <FieldHint id={id}>{hint}</FieldHint>}
       {error && (
@@ -154,6 +163,11 @@ export interface CrudSelectFieldProps<
   errorTestId?: string
   /** Help text under the control, wired to `aria-describedby` as `<id>-hint`. */
   hint?: React.ReactNode
+  /**
+   * Called with the new value after the user picks an option (the form value is
+   * already updated) — e.g. to reset fields that depend on this one.
+   */
+  onValueChange?: (value: string) => void
 }
 
 const SELECT_CLASS =
@@ -171,6 +185,7 @@ export function CrudSelectField<TValues extends FieldValues = FieldValues>({
   required,
   errorTestId,
   hint,
+  onValueChange,
 }: CrudSelectFieldProps<TValues>): React.ReactElement {
   const {
     register,
@@ -195,7 +210,11 @@ export function CrudSelectField<TValues extends FieldValues = FieldValues>({
         aria-invalid={!!error}
         aria-describedby={describedBy(id, hint != null, !!error)}
         data-testid={testId}
-        {...register(name)}
+        {...register(name, {
+          onChange: onValueChange
+            ? (e: React.ChangeEvent<HTMLSelectElement>) => onValueChange(e.target.value)
+            : undefined,
+        })}
         value={value == null ? '' : String(value)}
       >
         {placeholder !== undefined && <option value="">{placeholder}</option>}

@@ -4,7 +4,12 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.zaxxer.hikari.HikariDataSource;
 import io.kelta.auth.controller.ForcePasswordChangeController;
+import io.kelta.auth.controller.PasswordController;
+import io.kelta.auth.model.KeltaUserDetails;
+import io.kelta.auth.service.PasswordPolicyService;
+import io.kelta.auth.service.WorkerClient;
 import io.kelta.auth.service.KeltaUserDetailsService;
+import io.kelta.auth.session.UserSessionRevoker;
 import io.kelta.runtime.context.TenantAwareDataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -13,6 +18,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -183,6 +189,40 @@ class BaselineAdminPasswordIntegrationTest {
     }
 
     @Test
+    @DisplayName("/auth/password/change and the email-link reset write the real schema and sign the user out elsewhere")
+    void passwordEndpointsOnPostgres() {
+        boot("Initial-Value-1a2b3c");
+        UserSessionRevoker revoker = Mockito.mock(UserSessionRevoker.class);
+        PasswordController controller = new PasswordController(app, ENCODER, Mockito.mock(WorkerClient.class),
+                Mockito.mock(PasswordPolicyService.class), revoker, new AuthProperties());
+        KeltaUserDetails user = new KeltaUserDetails(ADMIN_USER_ID, ADMIN_EMAIL, PLATFORM_TENANT_ID, null,
+                null, "Admin", null, true, false, true);
+        Authentication signedIn = UsernamePasswordAuthenticationToken.authenticated(user, null, user.getAuthorities());
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/auth/password/change");
+        String sessionId = request.getSession(true).getId();
+
+        var changed = controller.changePassword(
+                new PasswordController.ChangePasswordRequest("Initial-Value-1a2b3c", "Changed-Value-4d5e6f"),
+                signedIn, request);
+
+        assertThat(changed.getStatusCode().value()).as("%s", changed.getBody()).isEqualTo(200);
+        assertThat(signIn("Changed-Value-4d5e6f").isAuthenticated()).isTrue();
+        assertThat(credential().get("force_change_on_login")).isEqualTo(false);
+        Mockito.verify(revoker).signOutElsewhere(ADMIN_USER_ID, sessionId);
+
+        assertThat(controller.requestPasswordReset(new PasswordController.ResetRequestBody(ADMIN_EMAIL))
+                .getStatusCode().value()).isEqualTo(200);
+        String token = admin.queryForObject("SELECT reset_token FROM user_credential WHERE user_id = ?",
+                String.class, ADMIN_USER_ID);
+        var reset = controller.resetPassword(new PasswordController.ResetPasswordRequest(token, "Reset-Value-7g8h9i"),
+                new MockHttpServletRequest("POST", "/auth/password/reset"));
+
+        assertThat(reset.getStatusCode().value()).as("%s", reset.getBody()).isEqualTo(200);
+        assertThat(signIn("Reset-Value-7g8h9i").isAuthenticated()).isTrue();
+        Mockito.verify(revoker).signOutElsewhere(ADMIN_USER_ID, null);
+    }
+
+    @Test
     @DisplayName("fresh install: \"password\" stops working and the admin must change the replacement")
     void baselinePasswordNoLongerAuthenticates() {
         assertThat(signIn("password")).as("precondition: the baseline seed").isNotNull();
@@ -234,7 +274,7 @@ class BaselineAdminPasswordIntegrationTest {
 
         MockHttpSession session = new MockHttpSession();
         session.setAttribute(ForcePasswordChangeController.SESSION_ATTR_EMAIL, ADMIN_EMAIL);
-        String view = new ForcePasswordChangeController(app, ENCODER).changePassword(
+        String view = new ForcePasswordChangeController(app, ENCODER, Mockito.mock(UserSessionRevoker.class)).changePassword(
                 generated, "Chosen-By-The-Admin-42", "Chosen-By-The-Admin-42", session, new ExtendedModelMap());
         assertThat(view).isEqualTo("redirect:/login?passwordChanged");
         assertThat(signIn("Chosen-By-The-Admin-42").isAuthenticated()).isTrue();

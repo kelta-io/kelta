@@ -65,7 +65,10 @@ per-tenant keys.
 
 A JAR that fails signature, checksum or class loading is **quarantined**: the module records `QUARANTINED` with the
 reason, and its handlers throw a clear "module unavailable" error so a flow step fails attributably instead of
-silently succeeding. `GET /api/modules/{id}/health` reports whether the module is loaded on the answering pod.
+silently succeeding. Re-enabling a quarantined module (from the Modules page or `POST /api/modules/{id}/enable`)
+reloads it on every worker without a restart, re-verifying it first. If object storage or the database is briefly
+unreachable, the module is not quarantined: its actions refuse on that worker while the load is retried
+automatically with backoff. `GET /api/modules/{id}/health` reports whether the module is loaded on the answering pod.
 Stub mode (`KELTA_MODULES_STUB_MODE`) exists for development only.
 
 Uninstall unloads the module but keeps the collections and data it created; reinstalling skips collections that

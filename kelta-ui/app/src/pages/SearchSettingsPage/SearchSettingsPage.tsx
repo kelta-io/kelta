@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, LoadingSpinner, ErrorMessage } from '../../components'
+import { LoadingSpinner, ErrorMessage } from '../../components'
 import { cn } from '@/lib/utils'
 import type { SearchIndexStats, SearchIndexCollectionStats } from '@kelta/sdk'
 
@@ -16,7 +17,6 @@ export function SearchSettingsPage({
   const { t } = useI18n()
   const { keltaClient } = useApi()
   const queryClient = useQueryClient()
-  const { showToast } = useToast()
   const [reindexingCollection, setReindexingCollection] = useState<string | null>(null)
 
   const {
@@ -34,7 +34,7 @@ export function SearchSettingsPage({
       keltaClient.admin.searchReindex.reindex(collectionName),
     onSuccess: (data) => {
       const result = data as { message?: string; collection?: string }
-      showToast(result.message || t('searchSettings.reindexStarted'), 'success')
+      toast.success(result.message || t('searchSettings.reindexStarted'))
       setReindexingCollection(result.collection ?? null)
       // Poll for updated stats
       setTimeout(() => {
@@ -43,7 +43,7 @@ export function SearchSettingsPage({
       }, 10000)
     },
     onError: () => {
-      showToast(t('searchSettings.reindexError'), 'error')
+      toast.error(t('searchSettings.reindexError'))
     },
   })
 

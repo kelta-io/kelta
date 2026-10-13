@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApi } from '../../context/ApiContext'
-import { useToast } from '../../components'
 import { Button } from '@/components/ui/button'
 
 interface MfaPolicy {
@@ -24,7 +24,6 @@ const AVAILABLE_METHODS = [
 export function MfaPolicyPanel(): React.ReactElement {
   const queryClient = useQueryClient()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const { data: policy, isLoading } = useQuery({
     queryKey: ['mfa-policy'],
@@ -54,9 +53,9 @@ export function MfaPolicyPanel(): React.ReactElement {
       keltaClient.admin.mfa.updatePolicy(data as unknown as { mfaRequired: boolean }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mfa-policy'] })
-      showToast('MFA policy updated', 'success')
+      toast.success('MFA policy updated')
     },
-    onError: (err: Error) => showToast(err.message || 'Failed to update MFA policy', 'error'),
+    onError: (err: Error) => toast.error(err.message || 'Failed to update MFA policy'),
   })
 
   const handleMethodToggle = useCallback((method: string, checked: boolean) => {

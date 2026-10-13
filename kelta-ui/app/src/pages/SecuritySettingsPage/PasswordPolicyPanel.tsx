@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApi } from '../../context/ApiContext'
-import { useToast } from '../../components'
 import { Button } from '@/components/ui/button'
 
 interface PasswordPolicy {
@@ -37,7 +37,6 @@ const DEFAULTS: PasswordPolicy = {
 export function PasswordPolicyPanel(): React.ReactElement {
   const queryClient = useQueryClient()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const { data: policy, isLoading } = useQuery({
     queryKey: ['password-policy'],
@@ -58,9 +57,9 @@ export function PasswordPolicyPanel(): React.ReactElement {
       keltaClient.admin.passwordPolicy.update(data as unknown as Record<string, unknown>),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['password-policy'] })
-      showToast('Password policy updated', 'success')
+      toast.success('Password policy updated')
     },
-    onError: (err: Error) => showToast(err.message || 'Failed to update policy', 'error'),
+    onError: (err: Error) => toast.error(err.message || 'Failed to update policy'),
   })
 
   const handleChange = useCallback(

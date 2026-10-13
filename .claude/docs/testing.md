@@ -177,7 +177,11 @@ database contract.
 
 ### Organization
 - Co-located: `FileName.test.ts` alongside source
-- Coverage thresholds: 80% (branches, functions, lines, statements) for kelta-web
+- Coverage thresholds for kelta-web are a **ratchet**: `coverage.thresholds` in `kelta-web/vitest.config.ts`
+  holds the measured totals rounded down (branches, functions, lines, statements), so `npm run test:coverage`
+  fails on any regression. Raise a value when coverage improves; never lower one. The keys must sit
+  directly under `thresholds` — vitest 1.x silently ignores a nested `global` block (that is how an
+  advertised 80% gate once enforced nothing).
 
 ### Structure
 ```typescript

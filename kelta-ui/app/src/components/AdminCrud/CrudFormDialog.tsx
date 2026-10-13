@@ -12,6 +12,11 @@
  *
  * Test ids derive from `testIdPrefix`: `<p>-form-modal`, `<p>-form-close`,
  * `<p>-form-cancel`, `<p>-form-submit` (`submitTestId` overrides the last).
+ *
+ * An `aside` (e.g. a live preview) renders in a second column beside the
+ * fields, inside the form context so it can `useWatch` the values; the two
+ * columns scroll independently. Give such a dialog a fixed height and width
+ * through `className`.
  */
 
 import React, { useRef } from 'react'
@@ -53,6 +58,8 @@ export interface CrudFormDialogProps<TValues extends FieldValues> {
   cancelLabel?: string
   /** Extra classes for the dialog panel (width, max-height). */
   className?: string
+  /** Read-only side panel beside the fields (e.g. a live preview); may `useWatch` the form. */
+  aside?: React.ReactNode
   children: React.ReactNode
 }
 
@@ -96,6 +103,7 @@ function CrudFormDialogBody<TValues extends FieldValues>({
   submittingLabel,
   cancelLabel,
   className,
+  aside,
   children,
 }: CrudFormDialogProps<TValues>): React.ReactElement {
   const { t } = useI18n()
@@ -110,7 +118,11 @@ function CrudFormDialogBody<TValues extends FieldValues>({
     <DialogContent
       ref={contentRef}
       showCloseButton={false}
-      className={cn('max-h-[90vh] gap-0 overflow-y-auto p-0 sm:max-w-[480px]', className)}
+      className={cn(
+        'max-h-[90vh] gap-0 overflow-y-auto p-0 sm:max-w-[480px]',
+        aside != null && 'flex flex-col overflow-hidden',
+        className
+      )}
       data-testid={`${testIdPrefix}-form-modal`}
       {...(description ? {} : { 'aria-describedby': undefined })}
       onOpenAutoFocus={(e) => {
@@ -145,8 +157,21 @@ function CrudFormDialogBody<TValues extends FieldValues>({
 
       <FormProvider {...form}>
         <CrudFormStateContext.Provider value={{ isSubmitting }}>
-          <form noValidate onSubmit={form.handleSubmit(onSubmit)}>
-            <div className="flex flex-col gap-4 px-6 py-4">{children}</div>
+          <form
+            noValidate
+            onSubmit={form.handleSubmit(onSubmit)}
+            className={aside != null ? 'flex min-h-0 flex-1 flex-col' : undefined}
+          >
+            {aside != null ? (
+              <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+                <div className="flex flex-col gap-4 overflow-y-auto border-r border-border px-6 py-4">
+                  {children}
+                </div>
+                <div className="flex min-h-0 flex-col overflow-hidden">{aside}</div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4 px-6 py-4">{children}</div>
+            )}
             <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
               <Button
                 type="button"

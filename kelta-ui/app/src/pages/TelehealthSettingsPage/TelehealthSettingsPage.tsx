@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { ShieldCheck, Archive, Lock, Unlock } from 'lucide-react'
 import { useI18n } from '../../context/I18nContext'
-import { useToast } from '../../components/Toast'
 import { useSystemPermissions } from '../../hooks/useSystemPermissions'
 import { LoadingSpinner, ErrorMessage } from '../../components'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,7 +30,6 @@ export function TelehealthSettingsPage({
   testId?: string
 }): React.ReactElement {
   const { t, formatDate } = useI18n()
-  const { showToast } = useToast()
   const { hasPermission } = useSystemPermissions()
   const canManage = hasPermission('MANAGE_DATA')
 
@@ -53,8 +52,8 @@ export function TelehealthSettingsPage({
   const handleSave = () => {
     if (!current) return
     updateSettings.mutate(current, {
-      onSuccess: () => showToast(t('telehealth.archive.saveSuccess'), 'success'),
-      onError: () => showToast(t('telehealth.archive.saveError'), 'error'),
+      onSuccess: () => toast.success(t('telehealth.archive.saveSuccess')),
+      onError: () => toast.error(t('telehealth.archive.saveError')),
     })
   }
 
@@ -67,8 +66,8 @@ export function TelehealthSettingsPage({
     setLegalHold.mutate(
       { id: archive.id, enabled: enabling },
       {
-        onSuccess: () => showToast(t('telehealth.archive.legalHoldChanged'), 'success'),
-        onError: () => showToast(t('telehealth.archive.legalHoldError'), 'error'),
+        onSuccess: () => toast.success(t('telehealth.archive.legalHoldChanged')),
+        onError: () => toast.error(t('telehealth.archive.legalHoldError')),
       }
     )
   }

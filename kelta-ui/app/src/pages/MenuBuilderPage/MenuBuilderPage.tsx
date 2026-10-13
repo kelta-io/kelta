@@ -17,6 +17,7 @@
  */
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Home,
@@ -38,7 +39,7 @@ import {
 } from 'lucide-react'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import type { ApiClient } from '../../services/apiClient'
 import { cn } from '@/lib/utils'
 
@@ -1076,7 +1077,6 @@ export function MenuBuilderPage({
   const { apiClient, keltaClient } = useApi()
   const queryClient = useQueryClient()
   const { t, formatDate } = useI18n()
-  const { showToast } = useToast()
 
   // View mode: 'list' shows all menus, 'editor' shows the menu editor
   const [viewMode, setViewMode] = useState<'list' | 'editor'>(menuId ? 'editor' : 'list')
@@ -1130,7 +1130,7 @@ export function MenuBuilderPage({
     mutationFn: (data: Partial<UIMenu>) => createMenu(apiClient, data),
     onSuccess: (newMenu) => {
       queryClient.invalidateQueries({ queryKey: ['ui-menus'] })
-      showToast(t('success.created', { item: t('builder.menus.menu') }), 'success')
+      toast.success(t('success.created', { item: t('builder.menus.menu') }))
       handleCloseMenuForm()
       // Open the editor for the new menu
       setEditingMenuId(newMenu.id)
@@ -1138,7 +1138,7 @@ export function MenuBuilderPage({
       setViewMode('editor')
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -1149,12 +1149,12 @@ export function MenuBuilderPage({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ui-menus'] })
       queryClient.invalidateQueries({ queryKey: ['ui-menu', editingMenuId] })
-      showToast(t('success.updated', { item: t('builder.menus.menu') }), 'success')
+      toast.success(t('success.updated', { item: t('builder.menus.menu') }))
       setHasUnsavedChanges(false)
       handleCloseMenuForm()
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -1163,7 +1163,7 @@ export function MenuBuilderPage({
     mutationFn: (id: string) => deleteMenu(apiClient, id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ui-menus'] })
-      showToast(t('success.deleted', { item: t('builder.menus.menu') }), 'success')
+      toast.success(t('success.deleted', { item: t('builder.menus.menu') }))
       setDeleteDialogOpen(false)
       setMenuToDelete(null)
       if (editingMenuId === menuToDelete?.id) {
@@ -1172,7 +1172,7 @@ export function MenuBuilderPage({
       }
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -1232,9 +1232,9 @@ export function MenuBuilderPage({
       setHasUnsavedChanges(true)
       setDeleteDialogOpen(false)
       setItemToDelete(null)
-      showToast(t('success.deleted', { item: t('builder.menus.item') }), 'success')
+      toast.success(t('success.deleted', { item: t('builder.menus.item') }))
     }
-  }, [menuToDelete, itemToDelete, deleteMenuMutation, showToast, t])
+  }, [menuToDelete, itemToDelete, deleteMenuMutation, t])
 
   // Handle delete cancel
   const handleDeleteCancel = useCallback(() => {
@@ -1322,14 +1322,13 @@ export function MenuBuilderPage({
 
       setHasUnsavedChanges(true)
       handleCloseItemForm()
-      showToast(
+      toast.success(
         editingItem
           ? t('success.updated', { item: t('builder.menus.item') })
-          : t('success.created', { item: t('builder.menus.item') }),
-        'success'
+          : t('success.created', { item: t('builder.menus.item') })
       )
     },
-    [editingItem, parentItemId, menuItems.length, handleCloseItemForm, showToast, t]
+    [editingItem, parentItemId, menuItems.length, handleCloseItemForm, t]
   )
 
   // Handle reorder (drag-and-drop)

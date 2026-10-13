@@ -11,7 +11,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { z } from 'zod'
 import { I18nProvider } from '../../../context/I18nContext'
-import { ToastProvider } from '../../Toast'
+import { Toaster } from 'sonner'
 import { ConfirmDialog } from '../../ConfirmDialog'
 import {
   AdminCrudPage,
@@ -113,9 +113,10 @@ function renderHarness(api: Api) {
   render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
-        <ToastProvider>
+        <>
           <Harness api={api} />
-        </ToastProvider>
+          <Toaster />
+        </>
       </I18nProvider>
     </QueryClientProvider>
   )
@@ -383,5 +384,36 @@ describe('AdminCrudPage', () => {
     expect(screen.getByTestId('things-table')).toBeInTheDocument()
     expect(screen.getByText('All the things.')).toBeInTheDocument()
     expect(screen.queryByTestId('empty-state')).not.toBeInTheDocument()
+  })
+
+  it('keeps the header and toolbar mounted while the list loads or fails', async () => {
+    const toolbar = <input aria-label="Search things" defaultValue="alp" />
+    const { rerender } = renderPage({ toolbar, isLoading: true })
+    expect(screen.getByRole('heading', { name: 'Things' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Search things')).toHaveValue('alp')
+    expect(screen.getByTestId('loading-spinner-label')).toBeInTheDocument()
+    expect(screen.getByTestId('dialogs')).toBeInTheDocument()
+
+    rerender(
+      <I18nProvider>
+        <AdminCrudPage
+          {...base}
+          toolbar={toolbar}
+          error={new Error('boom')}
+          loadErrorMessage="Failed to load things."
+        >
+          <div data-testid="dialogs" />
+        </AdminCrudPage>
+      </I18nProvider>
+    )
+    expect(screen.getByText('Failed to load things.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Search things')).toHaveValue('alp')
+    expect(screen.queryByTestId('things-table')).not.toBeInTheDocument()
+  })
+
+  it('renders the title adornment beside the heading', () => {
+    renderPage({ titleAdornment: <span data-testid="scope-badge">Scoped</span> })
+    expect(screen.getByRole('heading', { name: 'Things' })).toBeInTheDocument()
+    expect(screen.getByTestId('scope-badge')).toBeInTheDocument()
   })
 })

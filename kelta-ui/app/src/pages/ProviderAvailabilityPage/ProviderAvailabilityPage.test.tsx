@@ -10,8 +10,13 @@ vi.mock('../../context/I18nContext', () => ({
   useI18n: vi.fn(() => ({ locale: 'en', t: (key: string) => key })),
 }))
 
-const showToast = vi.fn()
-vi.mock('../../components/Toast', () => ({ useToast: vi.fn(() => ({ showToast })) }))
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('sonner')>()),
+  toast: mockToast,
+}))
 
 const get = vi.fn()
 const put = vi.fn()
@@ -32,7 +37,7 @@ function renderPage() {
 
 describe('ProviderAvailabilityPage', () => {
   beforeEach(() => {
-    showToast.mockReset()
+    Object.values(mockToast).forEach((fn) => fn.mockReset())
     get.mockReset()
     put.mockReset()
     put.mockResolvedValue({})
@@ -72,7 +77,7 @@ describe('ProviderAvailabilityPage', () => {
       rules: [{ weekday: 1, startTime: '09:00', endTime: '13:00' }],
     })
     expect(JSON.stringify(body)).not.toContain('providerId')
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('availability.saved', 'success'))
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('availability.saved'))
   })
 
   it('disables save when a window ends before it starts', async () => {

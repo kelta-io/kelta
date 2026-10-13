@@ -1,5 +1,6 @@
 package io.kelta.auth.controller;
 
+import io.kelta.auth.session.UserSessionRevoker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -12,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 
 import jakarta.servlet.http.HttpSession;
 
+import java.util.List;
+
 @Controller
 public class ForcePasswordChangeController {
 
@@ -20,10 +23,13 @@ public class ForcePasswordChangeController {
 
     private final JdbcTemplate jdbcTemplate;
     private final PasswordEncoder passwordEncoder;
+    private final UserSessionRevoker sessionRevoker;
 
-    public ForcePasswordChangeController(JdbcTemplate jdbcTemplate, PasswordEncoder passwordEncoder) {
+    public ForcePasswordChangeController(JdbcTemplate jdbcTemplate, PasswordEncoder passwordEncoder,
+                                         UserSessionRevoker sessionRevoker) {
         this.jdbcTemplate = jdbcTemplate;
         this.passwordEncoder = passwordEncoder;
+        this.sessionRevoker = sessionRevoker;
     }
 
     @GetMapping("/change-password")
@@ -84,6 +90,9 @@ public class ForcePasswordChangeController {
         }
 
         // Update password and clear force flag for ALL tenant records with this email
+        List<String> userIds = jdbcTemplate.queryForList(
+                "SELECT id FROM platform_user WHERE (email = ? OR username = ?) AND status = 'ACTIVE'",
+                String.class, email, email);
         String newHash = passwordEncoder.encode(newPassword);
         jdbcTemplate.update(
                 "UPDATE user_credential SET password_hash = ?, password_changed_at = NOW(), " +
@@ -94,6 +103,10 @@ public class ForcePasswordChangeController {
 
         session.removeAttribute(SESSION_ATTR_EMAIL);
         log.info("Forced password change completed for user {}", email);
+        // Sessions and refresh tokens from before the change end; this browser signs in next.
+        for (String userId : userIds) {
+            sessionRevoker.signOutElsewhere(userId, session.getId());
+        }
 
         return "redirect:/login?passwordChanged";
     }

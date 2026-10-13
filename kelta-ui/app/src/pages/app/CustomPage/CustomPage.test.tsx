@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/context/I18nContext'
-import { ToastProvider } from '@/components/Toast'
+import { Toaster } from 'sonner'
 import { OfflineProvider, InMemoryOfflineStore } from '@/offline'
 import { CustomPage } from './CustomPage'
 import { componentRegistry } from '@/services/componentRegistry'
@@ -54,13 +54,14 @@ function renderAt(slug = 'my-page') {
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
-        <ToastProvider>
+        <>
           <MemoryRouter initialEntries={[`/test-tenant/app/p/${slug}`]}>
             <Routes>
               <Route path=":tenantSlug/app/p/:pageSlug" element={<CustomPage />} />
             </Routes>
           </MemoryRouter>
-        </ToastProvider>
+          <Toaster />
+        </>
       </I18nProvider>
     </QueryClientProvider>
   )

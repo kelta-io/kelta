@@ -12,6 +12,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
 import {
   Dialog,
@@ -26,7 +27,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useApi } from '@/context/ApiContext'
-import { useToast } from '@/components/Toast'
 import { FilterBuilder, type FilterExpression, type FieldOption } from '@/components/FilterBuilder'
 
 interface AssignmentRow {
@@ -75,7 +75,6 @@ export function AssignmentRulesEditor({
   fields,
 }: AssignmentRulesEditorProps): React.ReactElement {
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
 
   const [rows, setRows] = useState<AssignmentRow[]>([])
@@ -172,11 +171,11 @@ export function AssignmentRulesEditor({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['layoutAssignments', layoutId] })
-      showToast('Assignments saved', 'success')
+      toast.success('Assignments saved')
       onClose()
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to save assignments', 'error')
+      toast.error(err.message || 'Failed to save assignments')
     },
   })
 

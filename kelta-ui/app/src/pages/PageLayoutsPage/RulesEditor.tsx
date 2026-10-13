@@ -1,7 +1,7 @@
 /**
  * RulesEditor
  *
- * Modal editor for the layout-rules system collection. Authors compute,
+ * Dialog editor for the layout-rules system collection. Authors compute,
  * validate, default, and transform rules attached to a single page-layout.
  *
  * Notes:
@@ -17,6 +17,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { FormulaEvaluator, FormulaException } from '@kelta/formula'
 import { topologicalSort, type RuleNode } from '@kelta/components'
 import { useApi } from '../../context/ApiContext'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
+import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 
 const RULE_KIND_LABEL: Record<RuleKind, string> = {
@@ -193,6 +195,7 @@ export function RulesEditor({ layoutId, layoutName, fieldNames, onClose }: Rules
 
   const [draft, setDraft] = useState<DraftRule | null>(null)
   const [cycleError, setCycleError] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null)
 
   const saveMutation = useMutation({
     mutationFn: async (d: DraftRule) => {
@@ -303,34 +306,35 @@ export function RulesEditor({ layoutId, layoutName, fieldNames, onClose }: Rules
     (draft.kind !== 'VALIDATE' || !!draft.errorMessage.trim())
 
   return (
-    <div
-      className="fixed inset-0 z-[1010] flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      role="presentation"
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
     >
-      <div
-        className="flex max-h-[90vh] w-full max-w-[900px] flex-col overflow-hidden rounded-lg bg-background shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="rules-editor-title"
+      <DialogContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[900px]"
         data-testid="rules-editor-modal"
       >
         <div className="flex items-center justify-between border-b border-border p-6">
-          <h2 id="rules-editor-title" className="m-0 text-xl font-semibold text-foreground">
+          <DialogTitle className="m-0 text-xl font-semibold text-foreground">
             Client rules — {layoutName}
-          </h2>
-          <button
-            type="button"
-            className="cursor-pointer rounded border-none bg-transparent p-2 text-2xl leading-none text-muted-foreground"
-            onClick={onClose}
-            aria-label="Close"
-            data-testid="rules-editor-close"
-          >
-            &times;
-          </button>
+          </DialogTitle>
+          <DialogClose asChild>
+            <button
+              type="button"
+              className="cursor-pointer rounded border-none bg-transparent p-2 text-2xl leading-none text-muted-foreground"
+              aria-label="Close"
+              data-testid="rules-editor-close"
+            >
+              &times;
+            </button>
+          </DialogClose>
         </div>
 
-        <div className="grid flex-1 grid-cols-[300px_1fr] overflow-hidden">
+        <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] overflow-hidden">
           {/* Rule list */}
           <aside className="overflow-y-auto border-r border-border p-4">
             <div className="mb-2 flex items-center justify-between">
@@ -417,10 +421,7 @@ export function RulesEditor({ layoutId, layoutName, fieldNames, onClose }: Rules
                     type="button"
                     className="cursor-pointer rounded border border-destructive bg-transparent px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10"
                     onClick={() => {
-                      if (draft.id && confirm(`Delete rule "${draft.name}"?`)) {
-                        deleteMutation.mutate(draft.id)
-                        setDraft(null)
-                      }
+                      if (draft.id) setPendingDelete({ id: draft.id, name: draft.name })
                     }}
                     data-testid="rules-editor-delete"
                   >
@@ -453,8 +454,24 @@ export function RulesEditor({ layoutId, layoutName, fieldNames, onClose }: Rules
             )}
           </div>
         </div>
-      </div>
-    </div>
+
+        <ConfirmDialog
+          open={pendingDelete !== null}
+          title="Delete rule"
+          message={`Delete rule "${pendingDelete?.name ?? ''}"?`}
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          variant="danger"
+          onConfirm={() => {
+            if (pendingDelete) {
+              deleteMutation.mutate(pendingDelete.id)
+              setDraft(null)
+            }
+          }}
+          onCancel={() => setPendingDelete(null)}
+        />
+      </DialogContent>
+    </Dialog>
   )
 }
 

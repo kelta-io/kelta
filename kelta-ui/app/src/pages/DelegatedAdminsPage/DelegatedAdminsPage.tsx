@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { DelegatedAdminScope, SaveDelegatedAdminScopeRequest } from '@kelta/sdk'
 import { useApi } from '../../context/ApiContext'
 import { useI18n } from '../../context/I18nContext'
-import { useToast } from '../../components/Toast'
 import { cn } from '@/lib/utils'
 
 export interface DelegatedAdminsPageProps {
@@ -244,7 +244,6 @@ export function DelegatedAdminsPage({
   const queryClient = useQueryClient()
   const { t } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const [editing, setEditing] = useState<{ id?: string; form: ScopeForm } | null>(null)
   const [deleteId, setDeleteId] = useState<{ id: string; name: string } | null>(null)
@@ -295,23 +294,22 @@ export function DelegatedAdminsPage({
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['delegated-admin-scopes'] })
-      showToast(
-        variables.id ? t('delegatedAdmins.updateSuccess') : t('delegatedAdmins.createSuccess'),
-        'success'
+      toast.success(
+        variables.id ? t('delegatedAdmins.updateSuccess') : t('delegatedAdmins.createSuccess')
       )
       setEditing(null)
     },
-    onError: (err: Error) => showToast(err.message || t('errors.generic'), 'error'),
+    onError: (err: Error) => toast.error(err.message || t('errors.generic')),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => keltaClient.admin.delegatedAdminScopes.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['delegated-admin-scopes'] })
-      showToast(t('delegatedAdmins.deleteSuccess'), 'success')
+      toast.success(t('delegatedAdmins.deleteSuccess'))
       setDeleteId(null)
     },
-    onError: (err: Error) => showToast(err.message || t('errors.generic'), 'error'),
+    onError: (err: Error) => toast.error(err.message || t('errors.generic')),
   })
 
   const openCreate = () => setEditing({ form: { ...EMPTY_FORM } })

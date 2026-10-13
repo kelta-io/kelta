@@ -24,6 +24,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { Link, useNavigate } from 'react-router-dom'
 import { Plus, ExternalLink, Trash2, Check, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -50,7 +51,6 @@ import { useCollectionPermissions } from '@/hooks/useCollectionPermissions'
 import { useSystemPermissions } from '@/hooks/useSystemPermissions'
 import { useRecordMutation } from '@/hooks/useRecordMutation'
 import { useApi } from '@/context/ApiContext'
-import { useToast } from '@/components'
 import { extractIncluded } from '@/utils/jsonapi'
 import { buildLookupLabels } from '@/utils/lookupDisplayField'
 import { runBulkUpdate } from '@/utils/bulkUpdate'
@@ -285,7 +285,6 @@ export function RelatedList({
   // Record links stay in the stack this list renders in (admin `/resources` or end-user `/app/o`).
   const routes = useRecordRoutes(tenantSlug)
   const collectionStore = useCollectionStore()
-  const { showToast } = useToast()
   const { apiClient } = useApi()
 
   // Fetch schema for the related collection
@@ -397,7 +396,7 @@ export function RelatedList({
   const mutations = useRecordMutation({
     collectionName,
     onSuccess: refreshAfterMutation,
-    onError: (err) => showToast(err.message || 'Operation failed', 'error'),
+    onError: (err) => toast.error(err.message || 'Operation failed'),
   })
 
   // Use pre-loaded data if available, otherwise fall back to fetched data
@@ -498,17 +497,16 @@ export function RelatedList({
       const message = finalStatus
         ? `Bulk update ${finalStatus.toLowerCase()} — check the Bulk Jobs page for details`
         : 'Bulk update is still running — check the Bulk Jobs page for its result'
-      showToast(message, 'error')
+      toast.error(message)
       throw new Error(message)
     }
 
     if (errorRecords > 0) {
-      showToast(
-        `Updated ${successRecords} of ${ids.length} records — ${errorRecords} failed. Check the Bulk Jobs page for details.`,
-        'error'
+      toast.error(
+        `Updated ${successRecords} of ${ids.length} records — ${errorRecords} failed. Check the Bulk Jobs page for details.`
       )
     } else {
-      showToast(`Updated ${successRecords} of ${ids.length} records`, 'success')
+      toast.success(`Updated ${successRecords} of ${ids.length} records`)
     }
     refreshAfterMutation()
     setSelectedIds(new Set())

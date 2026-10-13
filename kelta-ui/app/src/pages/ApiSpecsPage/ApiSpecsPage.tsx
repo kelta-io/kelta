@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { BookOpen, FileJson, Globe2, Plus, Trash2 } from 'lucide-react'
@@ -7,7 +8,6 @@ import type { ApiSpecSummary, ApiSpecValidateResult, ImportApiSpecRequest } from
 import { useApi } from '../../context/ApiContext'
 import { getTenantSlug } from '../../context/TenantContext'
 import { useSystemPermissions } from '../../hooks/useSystemPermissions'
-import { useToast } from '../../components/Toast'
 import { LoadingSpinner, ErrorMessage } from '../../components'
 import { FileDropzone } from '../../components/FileDropzone/FileDropzone'
 import { Button } from '@/components/ui/button'
@@ -33,7 +33,6 @@ export interface ApiSpecsPageProps {
 export function ApiSpecsPage({ className }: ApiSpecsPageProps): React.ReactElement {
   const { keltaClient } = useApi()
   const { hasPermission } = useSystemPermissions()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
@@ -49,9 +48,9 @@ export function ApiSpecsPage({ className }: ApiSpecsPageProps): React.ReactEleme
     mutationFn: (id: string) => keltaClient.admin.apiSpecs.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-specs'] })
-      showToast('Spec deleted', 'success')
+      toast.success('Spec deleted')
     },
-    onError: () => showToast('Delete failed', 'error'),
+    onError: () => toast.error('Delete failed'),
   })
 
   if (specsQuery.isLoading) return <LoadingSpinner />
@@ -225,7 +224,6 @@ interface ImportSpecDialogProps {
 
 function ImportSpecDialog({ onClose, onImported }: ImportSpecDialogProps) {
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const [tab, setTab] = useState<'url' | 'paste' | 'file'>('url')
   const [name, setName] = useState('')
@@ -259,7 +257,7 @@ function ImportSpecDialog({ onClose, onImported }: ImportSpecDialogProps) {
 
   const submit = async () => {
     if (!name.trim()) {
-      showToast('Name is required', 'error')
+      toast.error('Name is required')
       return
     }
     setSubmitting(true)
@@ -280,14 +278,13 @@ function ImportSpecDialog({ onClose, onImported }: ImportSpecDialogProps) {
               rawFormat,
             }
       const result = await keltaClient.admin.apiSpecs.importSpec(request)
-      showToast(
-        `Imported '${result.spec.apiTitle ?? result.spec.name}' (${result.diff.added + result.diff.changed} operations)`,
-        'success'
+      toast.success(
+        `Imported '${result.spec.apiTitle ?? result.spec.name}' (${result.diff.added + result.diff.changed} operations)`
       )
       onImported()
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Import failed'
-      showToast(message, 'error')
+      toast.error(message)
     } finally {
       setSubmitting(false)
     }
@@ -379,7 +376,7 @@ function ImportSpecDialog({ onClose, onImported }: ImportSpecDialogProps) {
                 accept=".json,.yaml,.yml,application/json,application/yaml,text/yaml"
                 maxBytes={5_000_000}
                 onFile={handleFile}
-                onError={(msg) => showToast(msg, 'error')}
+                onError={(msg) => toast.error(msg)}
                 hint="OpenAPI 3.x JSON or YAML, up to 5 MB"
               />
               {raw && (

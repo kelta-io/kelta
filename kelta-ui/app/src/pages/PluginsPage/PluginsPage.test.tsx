@@ -25,7 +25,7 @@ import { setupAuthMocks } from '../../test/testUtils'
 import { PluginsPage } from './PluginsPage'
 import { PluginProvider } from '../../context/PluginContext'
 import { I18nProvider } from '../../context/I18nContext'
-import { ToastProvider } from '../../components/Toast'
+import { Toaster } from 'sonner'
 import { AuthProvider } from '../../context/AuthContext'
 import { ApiProvider } from '../../context/ApiContext'
 import type { Plugin } from '../../types/plugin'
@@ -80,7 +80,10 @@ function createWrapper(plugins: Plugin[] = []) {
             <AuthProvider>
               <ApiProvider>
                 <PluginProvider plugins={plugins}>
-                  <ToastProvider>{children}</ToastProvider>
+                  <>
+                    {children}
+                    <Toaster />
+                  </>
                 </PluginProvider>
               </ApiProvider>
             </AuthProvider>

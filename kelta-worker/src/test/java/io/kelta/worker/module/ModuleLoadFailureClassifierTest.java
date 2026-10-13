@@ -144,6 +144,24 @@ class ModuleLoadFailureClassifierTest {
             assertThat(ModuleLoadFailureClassifier.classify(Phase.LOAD, wrapped))
                     .isEqualTo(Kind.TRANSIENT);
         }
+
+        @Test
+        @DisplayName("onStartup timing out waiting on a platform dependency is transient")
+        void timeoutFromOnStartupIsTransient() {
+            RuntimeException wrapped = new RuntimeException("onStartup failed",
+                    new java.util.concurrent.TimeoutException("timed out after 10s"));
+            assertThat(ModuleLoadFailureClassifier.classify(Phase.LOAD, wrapped))
+                    .isEqualTo(Kind.TRANSIENT);
+        }
+
+        @Test
+        @DisplayName("a timeout never rescues a signature failure")
+        void timeoutDoesNotRescueSignatureFailure() {
+            ModuleSignatureException tampered = new ModuleSignatureException("checksum mismatch",
+                    new java.util.concurrent.TimeoutException("timed out"));
+            assertThat(ModuleLoadFailureClassifier.classify(Phase.LOAD, tampered))
+                    .isEqualTo(Kind.PERMANENT);
+        }
     }
 
     @Test

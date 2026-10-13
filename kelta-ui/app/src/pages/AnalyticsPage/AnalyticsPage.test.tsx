@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { BrowserRouter } from 'react-router-dom'
 import { I18nProvider } from '../../context/I18nContext'
-import { ToastProvider } from '../../components/Toast'
+import { Toaster } from 'sonner'
 import { AnalyticsPage } from './AnalyticsPage'
 
 // Mock URL.createObjectURL and revokeObjectURL for the export download flow
@@ -52,7 +52,10 @@ function createSimpleWrapper() {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <I18nProvider>
-            <ToastProvider>{children}</ToastProvider>
+            <>
+              {children}
+              <Toaster />
+            </>
           </I18nProvider>
         </BrowserRouter>
       </QueryClientProvider>

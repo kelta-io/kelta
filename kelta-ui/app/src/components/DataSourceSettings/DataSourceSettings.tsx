@@ -10,10 +10,10 @@
  * stored here). Saving PATCHes the collection's `adapterConfig`.
  */
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useApi } from '../../context/ApiContext'
 import { useI18n } from '../../context/I18nContext'
-import { useToast } from '../Toast'
 import { LoadingSpinner } from '../LoadingSpinner'
 import { ErrorMessage } from '../ErrorMessage'
 
@@ -87,7 +87,6 @@ function DataSourceForm({
   initialConfig: Record<string, string>
 }) {
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const { t } = useI18n()
   const queryClient = useQueryClient()
 
@@ -120,11 +119,11 @@ function DataSourceForm({
       return apiClient.patchResource(`/api/collections/${collectionId}`, { adapterConfig })
     },
     onSuccess: () => {
-      showToast(t('dataSource.saved'), 'success')
+      toast.success(t('dataSource.saved'))
       queryClient.invalidateQueries({ queryKey: ['collection-adapter-config', collectionId] })
       queryClient.invalidateQueries({ queryKey: ['collection', collectionId] })
     },
-    onError: (e: Error) => showToast(e.message || t('errors.generic'), 'error'),
+    onError: (e: Error) => toast.error(e.message || t('errors.generic')),
   })
 
   return (

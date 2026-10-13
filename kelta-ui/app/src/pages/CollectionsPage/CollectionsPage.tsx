@@ -13,12 +13,13 @@
  */
 
 import React, { useState, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { cn } from '@/lib/utils'
 
 /**
@@ -73,7 +74,6 @@ export function CollectionsPage({
   const queryClient = useQueryClient()
   const { t, formatDate } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   // Show system collections toggle
   const [showSystem, setShowSystem] = useState(false)
@@ -121,12 +121,12 @@ export function CollectionsPage({
     mutationFn: (id: string) => keltaClient.admin.collections.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['collections'] })
-      showToast(t('success.deleted', { item: t('collections.title') }), 'success')
+      toast.success(t('success.deleted', { item: t('collections.title') }))
       setDeleteDialogOpen(false)
       setCollectionToDelete(null)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 

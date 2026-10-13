@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApi } from '../../../context/ApiContext'
-import { useToast, LoadingSpinner } from '../../../components'
+import { LoadingSpinner } from '../../../components'
 import { unwrapCollection } from '../../../utils/jsonapi'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -94,7 +95,6 @@ function formatRelativeTime(dateStr: string | null): string {
 
 export function ExecutionsTab({ flowId, onViewExecution }: ExecutionsTabProps) {
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState<string>('All')
   const [showTestRuns, setShowTestRuns] = useState(false)
@@ -118,10 +118,10 @@ export function ExecutionsTab({ flowId, onViewExecution }: ExecutionsTabProps) {
       if (!resp.ok) throw new Error('Failed to cancel execution')
     },
     onSuccess: () => {
-      showToast('Execution cancelled', 'success')
+      toast.success('Execution cancelled')
       queryClient.invalidateQueries({ queryKey: ['flow-executions-tab', flowId] })
     },
-    onError: (err: Error) => showToast(err.message, 'error'),
+    onError: (err: Error) => toast.error(err.message),
   })
 
   const retryMutation = useMutation({
@@ -137,11 +137,11 @@ export function ExecutionsTab({ flowId, onViewExecution }: ExecutionsTabProps) {
       return (await resp.json()) as { executionId: string }
     },
     onSuccess: (result) => {
-      showToast('Retry started', 'success')
+      toast.success('Retry started')
       queryClient.invalidateQueries({ queryKey: ['flow-executions-tab', flowId] })
       onViewExecution(result.executionId)
     },
-    onError: (err: Error) => showToast(err.message, 'error'),
+    onError: (err: Error) => toast.error(err.message),
   })
 
   const executions = data || []

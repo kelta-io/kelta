@@ -28,7 +28,7 @@ public final class SessionPrincipalKeys {
     public static String of(Object principal) {
         if (principal instanceof KeltaUserDetails user
                 && user.getTenantId() != null && user.getId() != null) {
-            return user.getTenantId() + ":" + user.getId();
+            return forUser(user.getTenantId(), user.getId());
         }
         if (principal instanceof UserDetails user) {
             return user.getUsername();
@@ -40,6 +40,11 @@ public final class SessionPrincipalKeys {
             return named.getName();
         }
         return String.valueOf(principal);
+    }
+
+    /** The index key of a platform user's sessions. */
+    public static String forUser(String tenantId, String userId) {
+        return tenantId + ":" + userId;
     }
 
     /** The index key of the user signed in to {@code session}, or {@code null} when none is. */

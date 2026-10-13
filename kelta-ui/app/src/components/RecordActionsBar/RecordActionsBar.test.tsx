@@ -17,8 +17,12 @@ vi.mock('@/context/TenantContext', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/context/TenantContext')>()),
   getTenantSlug: () => 'acme',
 }))
-vi.mock('@/components', () => ({
-  useToast: () => ({ showToast: vi.fn() }),
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('sonner')>()),
+  toast: mockToast,
 }))
 
 // Render the dropdown's items inline so they are clickable in jsdom (Radix pointer capture),

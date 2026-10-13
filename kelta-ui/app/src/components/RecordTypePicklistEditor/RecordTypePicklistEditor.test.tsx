@@ -16,13 +16,13 @@ import { RecordTypePicklistEditor } from './RecordTypePicklistEditor'
 import type { RecordTypePicklistEditorProps } from './RecordTypePicklistEditor'
 import type { RecordType, FieldDefinition } from '../../types/collections'
 
-const { mockGetList, mockPostResource, mockPatchResource, mockDeleteResource, mockShowToast } =
+const { mockGetList, mockPostResource, mockPatchResource, mockDeleteResource, mockToast } =
   vi.hoisted(() => ({
     mockGetList: vi.fn(),
     mockPostResource: vi.fn(),
     mockPatchResource: vi.fn(),
     mockDeleteResource: vi.fn(),
-    mockShowToast: vi.fn(),
+    mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
   }))
 
 vi.mock('@/context/ApiContext', () => ({
@@ -68,8 +68,9 @@ vi.mock('@/context/I18nContext', () => ({
   })),
 }))
 
-vi.mock('../Toast', () => ({
-  useToast: vi.fn(() => ({ showToast: mockShowToast })),
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('sonner')>()),
+  toast: mockToast,
 }))
 
 // ---------------------------------------------------------------------------
@@ -335,7 +336,7 @@ describe('RecordTypePicklistEditor', () => {
       })
       expect(mockPatchResource).not.toHaveBeenCalled()
       expect(mockDeleteResource).not.toHaveBeenCalled()
-      expect(mockShowToast).toHaveBeenCalledWith('Picklist overrides saved successfully', 'success')
+      expect(mockToast.success).toHaveBeenCalledWith('Picklist overrides saved successfully')
     })
 
     it('stores a default with every value allowed as an override', async () => {
@@ -430,7 +431,7 @@ describe('RecordTypePicklistEditor', () => {
       await user.click(await screen.findByTestId('value-checkbox-field-pl-1-pending'))
       await user.click(screen.getByTestId('picklist-override-save'))
 
-      await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Value not allowed', 'error'))
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Value not allowed'))
       expect(onSaved).not.toHaveBeenCalled()
       expect(screen.getByTestId('picklist-override-modal')).toBeInTheDocument()
       expect(screen.getByTestId('picklist-override-save')).toBeEnabled()

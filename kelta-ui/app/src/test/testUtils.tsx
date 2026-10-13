@@ -13,7 +13,7 @@ import React from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '../context/I18nContext'
-import { ToastProvider } from '../components/Toast'
+import { Toaster } from 'sonner'
 import { ApiProvider } from '../context/ApiContext'
 import { AuthProvider } from '../context/AuthContext'
 import { PluginProvider } from '../context/PluginContext'
@@ -285,7 +285,8 @@ export function createTestWrapper() {
             <AuthProvider>
               <ApiProvider>
                 <PluginProvider>
-                  <ToastProvider>{children}</ToastProvider>
+                  {children}
+                  <Toaster />
                 </PluginProvider>
               </ApiProvider>
             </AuthProvider>
@@ -306,7 +307,8 @@ export function AuthWrapper({ children }: { children: React.ReactNode }) {
       <ApiProvider>
         <PluginProvider>
           <I18nProvider>
-            <ToastProvider>{children}</ToastProvider>
+            {children}
+            <Toaster />
           </I18nProvider>
         </PluginProvider>
       </ApiProvider>

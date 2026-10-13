@@ -1,5 +1,6 @@
 package io.kelta.auth.controller;
 
+import io.kelta.auth.session.UserSessionRevoker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -27,13 +28,14 @@ class ForcePasswordChangeControllerTest {
 
     @Mock private JdbcTemplate jdbcTemplate;
     @Mock private HttpSession session;
+    @Mock private UserSessionRevoker sessionRevoker;
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private ForcePasswordChangeController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new ForcePasswordChangeController(jdbcTemplate, passwordEncoder);
+        controller = new ForcePasswordChangeController(jdbcTemplate, passwordEncoder, sessionRevoker);
     }
 
     @Nested
@@ -113,6 +115,9 @@ class ForcePasswordChangeControllerTest {
             when(jdbcTemplate.queryForList(anyString(), eq("user@test.com"), eq("user@test.com")))
                     .thenReturn(List.of(Map.of("password_hash", storedHash, "user_id", "uid-1")));
             when(jdbcTemplate.update(anyString(), anyString(), eq("user@test.com"), eq("user@test.com"))).thenReturn(1);
+            when(jdbcTemplate.queryForList(contains("SELECT id FROM platform_user"), eq(String.class),
+                    eq("user@test.com"), eq("user@test.com"))).thenReturn(List.of("uid-1"));
+            when(session.getId()).thenReturn("session-1");
 
             Model model = new ConcurrentModel();
             String view = controller.changePassword("correct-password", "newpassword", "newpassword", session, model);
@@ -120,6 +125,19 @@ class ForcePasswordChangeControllerTest {
             assertThat(view).isEqualTo("redirect:/login?passwordChanged");
             verify(jdbcTemplate).update(anyString(), anyString(), eq("user@test.com"), eq("user@test.com"));
             verify(session).removeAttribute(ForcePasswordChangeController.SESSION_ATTR_EMAIL);
+            verify(sessionRevoker).signOutElsewhere("uid-1", "session-1");
+        }
+
+        @Test
+        void shouldNotSignAnyoneOutWhenTheChangeIsRejected() {
+            when(session.getAttribute(ForcePasswordChangeController.SESSION_ATTR_EMAIL)).thenReturn("user@test.com");
+            String storedHash = passwordEncoder.encode("correct-password");
+            when(jdbcTemplate.queryForList(anyString(), eq("user@test.com"), eq("user@test.com")))
+                    .thenReturn(List.of(Map.of("password_hash", storedHash, "user_id", "uid-1")));
+
+            controller.changePassword("wrong-password", "newpassword", "newpassword", session, new ConcurrentModel());
+
+            verifyNoInteractions(sessionRevoker);
         }
     }
 }

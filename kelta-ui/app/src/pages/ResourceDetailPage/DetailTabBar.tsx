@@ -8,6 +8,7 @@
  */
 
 import React, { useCallback, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { Link } from 'react-router-dom'
 import { Copy } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -19,7 +20,6 @@ import { useCollectionSchema } from '@/hooks/useCollectionSchema'
 import { useCollectionStore } from '@/context/CollectionStoreContext'
 import { parseDisplayColumns } from '@/utils/parseDisplayColumns'
 import { useI18n } from '@/context/I18nContext'
-import { useToast } from '@/components'
 import { cn } from '@/lib/utils'
 import type { LayoutRelatedListDto } from '@/hooks/usePageLayout'
 import type { Note, Attachment } from '@/hooks/useRecordContext'
@@ -214,7 +214,6 @@ export function DetailTabBar({
   onTabChange,
 }: DetailTabBarProps): React.ReactElement {
   const { t, formatDate } = useI18n()
-  const { showToast } = useToast()
 
   const sortedLists = useMemo(
     () => [...relatedLists].sort((a, b) => a.sortOrder - b.sortOrder),
@@ -243,9 +242,9 @@ export function DetailTabBar({
   const copyId = useCallback(() => {
     void navigator.clipboard
       .writeText(resource.id)
-      .then(() => showToast('Internal Id copied', 'success'))
-      .catch(() => showToast('Copy failed', 'error'))
-  }, [resource.id, showToast])
+      .then(() => toast.success('Internal Id copied'))
+      .catch(() => toast.error('Copy failed'))
+  }, [resource.id])
 
   const createdAt = (resource.created_at ?? resource.createdAt) as string | undefined
   const updatedAt = (resource.updated_at ?? resource.updatedAt) as string | undefined

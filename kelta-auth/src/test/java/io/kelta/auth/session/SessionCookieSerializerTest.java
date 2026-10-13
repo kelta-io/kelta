@@ -1,6 +1,7 @@
 package io.kelta.auth.session;
 
 import io.kelta.auth.config.CookieDomainResolver;
+import io.kelta.auth.config.CookieDomainResolver.SecureMode;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,9 +21,9 @@ class SessionCookieSerializerTest {
     private static final String NAME = "kelta_auth_session";
 
     @Test
-    @DisplayName("on a public host the cookie is Secure, HttpOnly, SameSite=None, host-only, browser-session")
-    void publicHost() {
-        String header = write(new SessionCookieSerializer(NAME, "None", new CookieDomainResolver()), "auth.kelta.io");
+    @DisplayName("behind a TLS-terminating proxy the cookie is Secure, HttpOnly, SameSite=None, host-only, browser-session")
+    void behindTlsProxy() {
+        String header = write(serializer("None"), "auth.kelta.io", "http", "https");
 
         assertThat(header).startsWith(NAME + "=")
                 .contains("; Path=/").contains("; Secure").contains("; HttpOnly").contains("; SameSite=None")
@@ -32,33 +33,58 @@ class SessionCookieSerializerTest {
     @Test
     @DisplayName("a customer custom domain gets the same cookie, scoped to that host")
     void customDomain() {
-        String header = write(new SessionCookieSerializer(NAME, "None", new CookieDomainResolver()), "login.example.org");
+        String header = write(serializer("None"), "login.example.org", "http", "https");
 
         assertThat(header).contains("; Secure").contains("; SameSite=None").doesNotContain("Domain=");
     }
 
     @Test
-    @DisplayName("on a loopback host (plain-http development) there is no Secure and so no SameSite=None")
-    void loopbackHost() {
-        String header = write(new SessionCookieSerializer(NAME, "None", new CookieDomainResolver()), "auth.localhost");
-
-        assertThat(header).contains("; HttpOnly").doesNotContain("Secure").doesNotContain("SameSite");
+    @DisplayName("TLS straight to the service is Secure too")
+    void directTls() {
+        assertThat(write(serializer("None"), "auth.example.org", "https", null))
+                .contains("; Secure").contains("; SameSite=None");
     }
 
     @Test
-    @DisplayName("Lax and Strict apply on loopback hosts too")
-    void laxOnLoopback() {
-        String header = write(new SessionCookieSerializer(NAME, "lax", new CookieDomainResolver()), "localhost");
+    @DisplayName("a plain-http install on a LAN host name gets no Secure, and SameSite=Lax in place of None")
+    void plainHttpLanHost() {
+        assertThat(write(serializer("None"), "kelta.lan", "http", null))
+                .contains("; HttpOnly").contains("; SameSite=Lax").doesNotContain("Secure");
+        assertThat(write(serializer("None"), "kelta.lan", "http", "http"))
+                .contains("; SameSite=Lax").doesNotContain("Secure");
+    }
 
-        assertThat(header).contains("; SameSite=Lax").doesNotContain("Secure");
+    @Test
+    @DisplayName("local development over http on a *.localhost host: no Secure, SameSite=Lax")
+    void loopbackHost() {
+        assertThat(write(serializer("None"), "auth.localhost", "http", null))
+                .contains("; HttpOnly").contains("; SameSite=Lax").doesNotContain("Secure");
+    }
+
+    @Test
+    @DisplayName("a configured Lax or Strict is kept without Secure")
+    void laxWithoutSecure() {
+        assertThat(write(serializer("lax"), "localhost", "http", null))
+                .contains("; SameSite=Lax").doesNotContain("Secure");
+        assertThat(write(serializer("strict"), "kelta.lan", "http", null))
+                .contains("; SameSite=Strict").doesNotContain("Secure");
     }
 
     @Test
     @DisplayName("a blank setting leaves SameSite off")
     void blankSameSite() {
-        String header = write(new SessionCookieSerializer(NAME, " ", new CookieDomainResolver()), "auth.kelta.io");
+        String header = write(serializer(" "), "auth.kelta.io", "http", "https");
 
         assertThat(header).contains("; Secure").doesNotContain("SameSite");
+    }
+
+    @Test
+    @DisplayName("cookie-secure=always and never override the scheme")
+    void overrides() {
+        assertThat(write(new SessionCookieSerializer(NAME, "None", new CookieDomainResolver(SecureMode.ALWAYS)),
+                "kelta.lan", "http", null)).contains("; Secure").contains("; SameSite=None");
+        assertThat(write(new SessionCookieSerializer(NAME, "None", new CookieDomainResolver(SecureMode.NEVER)),
+                "auth.kelta.io", "http", "https")).doesNotContain("Secure").contains("; SameSite=Lax");
     }
 
     @Test
@@ -80,9 +106,18 @@ class SessionCookieSerializerTest {
         assertThat(serializer.readCookieValues(request)).containsExactly("session-1");
     }
 
-    private static String write(SessionCookieSerializer serializer, String host) {
+    private static SessionCookieSerializer serializer(String sameSite) {
+        return new SessionCookieSerializer(NAME, sameSite, new CookieDomainResolver());
+    }
+
+    private static String write(SessionCookieSerializer serializer, String host, String scheme, String forwardedProto) {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/login");
         request.setServerName(host);
+        request.setScheme(scheme);
+        request.setSecure("https".equals(scheme));
+        if (forwardedProto != null) {
+            request.addHeader("X-Forwarded-Proto", forwardedProto);
+        }
         MockHttpServletResponse response = new MockHttpServletResponse();
         serializer.writeCookieValue(new CookieValue(request, response, "session-1"));
         return response.getHeader("Set-Cookie");

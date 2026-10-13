@@ -16,7 +16,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { AxiosInstance } from 'axios'
 import { I18nProvider } from '@/context/I18nContext'
-import { ToastProvider } from '@/components/Toast'
+import { Toaster } from 'sonner'
 import { CollectionStoreProvider } from '@/context/CollectionStoreContext'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ApiClient } from '@/services/apiClient'
@@ -97,7 +97,7 @@ function renderPage(nodes: RenderNode[], scope: BindingScope = {}) {
       <QueryClientProvider client={queryClient}>
         <CollectionStoreProvider>
           <I18nProvider>
-            <ToastProvider>
+            <>
               <MemoryRouter initialEntries={['/acme/app/p/orders']}>
                 <Routes>
                   <Route
@@ -113,7 +113,8 @@ function renderPage(nodes: RenderNode[], scope: BindingScope = {}) {
                   <Route path="*" element={<LocationProbe />} />
                 </Routes>
               </MemoryRouter>
-            </ToastProvider>
+              <Toaster />
+            </>
           </I18nProvider>
         </CollectionStoreProvider>
       </QueryClientProvider>

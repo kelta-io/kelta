@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { z } from 'zod'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog } from '../../components'
+import { ConfirmDialog } from '../../components'
 import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
 import {
   AdminCrudPage,
@@ -109,7 +110,6 @@ function RunPanel({
   onClose: () => void
 }): React.ReactElement {
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const [input, setInput] = useState('')
   const [result, setResult] = useState<AgentRunResult | null>(null)
 
@@ -117,7 +117,7 @@ function RunPanel({
     mutationFn: (text: string) =>
       apiClient.post<AgentRunResult>(`/api/ai/agents/${agent.id}/run`, { input: text }),
     onSuccess: (data) => setResult(data),
-    onError: (err: Error) => showToast(err.message || 'Run failed', 'error'),
+    onError: (err: Error) => toast.error(err.message || 'Run failed'),
   })
 
   return (

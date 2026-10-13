@@ -37,13 +37,16 @@ export default defineConfig({
         'packages/*/src/**/*.property.test.{ts,tsx}',
         'packages/*/src/**/index.ts',
       ],
+      // A ratchet, not a target: each value is the measured total rounded down,
+      // so CI passes today and fails on any regression. Raise them when coverage
+      // improves; never lower them. These must sit directly under `thresholds` —
+      // vitest 1.x silently ignores a nested `global` key, which is how an
+      // advertised 80% gate enforced nothing while lines sat at ~76%.
       thresholds: {
-        global: {
-          branches: 80,
-          functions: 80,
-          lines: 80,
-          statements: 80,
-        },
+        branches: 83,
+        functions: 55,
+        lines: 75,
+        statements: 75,
       },
     },
   },

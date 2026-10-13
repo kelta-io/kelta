@@ -13,6 +13,8 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ArrowLeft, ArrowRight, GripVertical, Plus, Save, Trash2 } from 'lucide-react'
 import { uuid } from '@/utils/uuid'
 import { Button } from '@/components/ui/button'
@@ -27,7 +29,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useApi } from '@/context/ApiContext'
-import { useToast } from '@/components/Toast'
 import { FilterBuilder, type FilterExpression, type FieldOption } from '@/components/FilterBuilder'
 
 export interface ListColumn {
@@ -73,7 +74,6 @@ export function LayoutEditorList({
   onBack,
 }: LayoutEditorListProps): React.ReactElement {
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
 
   const [columns, setColumns] = useState<ListColumn[]>(initialData.initialColumns)
@@ -235,17 +235,19 @@ export function LayoutEditorList({
       queryClient.invalidateQueries({ queryKey: ['pageLayouts'] })
       queryClient.invalidateQueries({ queryKey: ['pageLayout', initialData.layoutId] })
       setIsDirty(false)
-      showToast('Layout saved successfully', 'success')
+      toast.success('Layout saved successfully')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to save layout', 'error')
+      toast.error(err.message || 'Failed to save layout')
     },
   })
 
+  // Leaving with unsaved changes asks first.
+  const [confirmLeave, setConfirmLeave] = useState(false)
   const handleBack = useCallback(() => {
     if (isDirty) {
-      const ok = window.confirm('You have unsaved changes. Are you sure you want to leave?')
-      if (!ok) return
+      setConfirmLeave(true)
+      return
     }
     onBack()
   }, [isDirty, onBack])
@@ -475,6 +477,17 @@ export function LayoutEditorList({
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={confirmLeave}
+        title="Unsaved changes"
+        message="You have unsaved changes. Are you sure you want to leave?"
+        confirmLabel="Leave"
+        cancelLabel="Stay"
+        variant="danger"
+        onConfirm={onBack}
+        onCancel={() => setConfirmLeave(false)}
+      />
     </div>
   )
 }

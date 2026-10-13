@@ -36,8 +36,6 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabase;
-import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
-import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockServletContext;
 import org.springframework.security.core.session.SessionRegistry;
@@ -106,11 +104,7 @@ class SharedHttpSessionIntegrationTest {
 
     @BeforeAll
     static void sharedInfrastructure() throws Exception {
-        database = new EmbeddedDatabaseBuilder()
-                .setType(EmbeddedDatabaseType.H2)
-                .generateUniqueName(true)
-                .addScript("org/springframework/security/oauth2/server/authorization/oauth2-authorization-schema.sql")
-                .build();
+        database = PasswordChangeSignOutFlowTest.PasswordBeans.database();
         signingKey = new ImmutableJWKSet<>(new JWKSet(new RSAKeyGenerator(2048).keyID("shared").generate()));
     }
 
@@ -231,6 +225,40 @@ class SharedHttpSessionIntegrationTest {
     }
 
     @Test
+    @DisplayName("a password change on one pod ends the user's other sessions everywhere and revokes earlier refresh tokens")
+    void passwordChangeSignsOutEverywhereElse() throws Exception {
+        Pod podA = start();
+        Pod podB = start();
+        OidcSignOutFlowTest.Browser laptop = new OidcSignOutFlowTest.Browser();
+        String laptopRefresh = PasswordChangeSignOutFlowTest.signIn(podA.mvc, laptop, true, HOST)
+                .get("refresh_token").asString();
+        OidcSignOutFlowTest.Browser phone = new OidcSignOutFlowTest.Browser();
+        String phoneRefresh = PasswordChangeSignOutFlowTest.signIn(podB.mvc, phone, true, HOST)
+                .get("refresh_token").asString();
+        RedisIndexedSessionRepository store = podB.context.getBean(RedisIndexedSessionRepository.class);
+        String otherTenantSession = PasswordChangeSignOutFlowTest.PasswordBeans.otherTenantSession(store);
+        String userIndex = TENANT_ID + ":" + USER_ID;
+        assertThat(store.findByPrincipalName(userIndex)).containsOnlyKeys(laptop.sessionId(), phone.sessionId());
+
+        // The laptop changes the password through pod B.
+        MockHttpServletResponse changed = PasswordChangeSignOutFlowTest.changePassword(podB.mvc, laptop, HOST);
+        assertThat(changed.getStatus()).as("%s", changed.getContentAsString()).isEqualTo(200);
+
+        // Pod A no longer finds the phone's session; the laptop's survives; the other tenant's user is untouched.
+        RedisIndexedSessionRepository storeA = podA.context.getBean(RedisIndexedSessionRepository.class);
+        assertThat(storeA.findById(phone.sessionId())).isNull();
+        assertThat(storeA.findById(laptop.sessionId())).isNotNull();
+        assertThat(storeA.findById(otherTenantSession)).isNotNull();
+        assertThat(store.findByPrincipalName(userIndex)).containsOnlyKeys(laptop.sessionId());
+
+        // Refresh tokens issued before the change are refused on either pod.
+        assertThat(PasswordChangeSignOutFlowTest.refresh(podA.mvc, phoneRefresh, HOST).getContentAsString())
+                .contains("invalid_grant");
+        assertThat(PasswordChangeSignOutFlowTest.refresh(podB.mvc, laptopRefresh, HOST).getContentAsString())
+                .contains("invalid_grant");
+    }
+
+    @Test
     @DisplayName("a session cookie the store does not know (expired, or from before the store) starts a new sign-in")
     void unknownSessionCookieStartsOver() throws Exception {
         Pod pod = start();
@@ -331,7 +359,8 @@ class SharedHttpSessionIntegrationTest {
     }
 
     @Configuration
-    @Import({OidcSignOutFlowTest.ServerBeans.class, HttpSessionConfig.class})
+    @Import({OidcSignOutFlowTest.ServerBeans.class, HttpSessionConfig.class,
+            PasswordChangeSignOutFlowTest.PasswordBeans.class})
     @ImportAutoConfiguration({DataRedisAutoConfiguration.class, SessionAutoConfiguration.class,
             SessionDataRedisAutoConfiguration.class})
     @EnableConfigurationProperties(AuthProperties.class)

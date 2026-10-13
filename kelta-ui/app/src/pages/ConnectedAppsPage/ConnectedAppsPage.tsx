@@ -1,10 +1,11 @@
 import React, { useState, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useFormContext, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner } from '../../components'
+import { ConfirmDialog, LoadingSpinner } from '../../components'
 import type { CreateConnectedAppRequest } from '@kelta/sdk'
 import { cn } from '@/lib/utils'
 import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
@@ -286,7 +287,6 @@ export function ConnectedAppsPage({
   const queryClient = useQueryClient()
   const { formatDate } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const [tokensAppId, setTokensAppId] = useState<string | null>(null)
   const [tokensAppName, setTokensAppName] = useState('')
@@ -326,9 +326,9 @@ export function ConnectedAppsPage({
       keltaClient.admin.connectedApps.revokeToken(appId, tokenId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['connected-app-tokens', tokensAppId] })
-      showToast('Token revoked', 'success')
+      toast.success('Token revoked')
     },
-    onError: (err: Error) => showToast(err.message || 'Failed to revoke token', 'error'),
+    onError: (err: Error) => toast.error(err.message || 'Failed to revoke token'),
   })
 
   const crud = useAdminCrud<ConnectedApp, ConnectedAppFormData>({

@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { componentRegistry } from '../../services/componentRegistry'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,6 +17,9 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  ShieldAlert,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react'
 
 interface ModuleAction {
@@ -47,6 +51,11 @@ interface TenantModule {
   installedAt: string
   updatedAt: string
   actions: ModuleAction[]
+  /** Why the last load failed (QUARANTINED reason, or the transient error being retried). */
+  lastError?: string | null
+  lastErrorAt?: string | null
+  /** ACTIVE, but failing closed on a transient error and retrying with backoff. */
+  loadRetrying?: boolean
 }
 
 export interface ModulesPageProps {
@@ -83,6 +92,26 @@ function statusBadge(status: string) {
           Failed
         </span>
       )
+    case 'QUARANTINED':
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
+          <ShieldAlert size={12} />
+          Quarantined
+        </span>
+      )
+    case 'DEGRADED':
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+          <AlertTriangle size={12} />
+          Degraded
+        </span>
+      )
+    case 'STUB':
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+          Stub
+        </span>
+      )
     case 'INSTALLING':
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
@@ -102,7 +131,6 @@ function statusBadge(status: string) {
 export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): React.ReactElement {
   const { apiClient } = useApi()
   const queryClient = useQueryClient()
-  const { showToast } = useToast()
 
   const [isInstallOpen, setIsInstallOpen] = useState(false)
   const [manifestInput, setManifestInput] = useState('')
@@ -152,7 +180,7 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modules'] })
-      showToast('Module installed successfully', 'success')
+      toast.success('Module installed successfully')
       setIsInstallOpen(false)
       setManifestInput('')
       setSourceUrlInput('')
@@ -161,7 +189,7 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
       setSignatureInput('')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to install module', 'error')
+      toast.error(err.message || 'Failed to install module')
     },
   })
 
@@ -169,10 +197,10 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     mutationFn: (moduleId: string) => apiClient.post(`/api/modules/${moduleId}/enable`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modules'] })
-      showToast('Module enabled', 'success')
+      toast.success('Module enabled')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to enable module', 'error')
+      toast.error(err.message || 'Failed to enable module')
     },
   })
 
@@ -180,10 +208,10 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     mutationFn: (moduleId: string) => apiClient.post(`/api/modules/${moduleId}/disable`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modules'] })
-      showToast('Module disabled', 'success')
+      toast.success('Module disabled')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to disable module', 'error')
+      toast.error(err.message || 'Failed to disable module')
     },
   })
 
@@ -191,24 +219,24 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     mutationFn: (moduleId: string) => apiClient.delete(`/api/modules/${moduleId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modules'] })
-      showToast('Module uninstalled', 'success')
+      toast.success('Module uninstalled')
       setDeleteDialogOpen(false)
       setModuleToDelete(null)
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to uninstall module', 'error')
+      toast.error(err.message || 'Failed to uninstall module')
     },
   })
 
   const handleInstall = () => {
     if (!manifestInput.trim()) {
-      showToast('Manifest JSON is required', 'error')
+      toast.error('Manifest JSON is required')
       return
     }
     try {
       JSON.parse(manifestInput)
     } catch {
-      showToast('Manifest must be valid JSON', 'error')
+      toast.error('Manifest must be valid JSON')
       return
     }
     installMutation.mutate({
@@ -471,10 +499,32 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                       <h3 className="text-base font-medium text-gray-900">{mod.name}</h3>
                       <span className="text-xs text-gray-500">v{mod.version}</span>
                       {statusBadge(mod.status)}
+                      {mod.status === 'ACTIVE' && mod.loadRetrying && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800"
+                          data-testid={`module-retrying-${mod.moduleId}`}
+                        >
+                          <RefreshCw size={12} />
+                          Retrying load
+                        </span>
+                      )}
                     </div>
                     {mod.description && (
                       <p className="mt-0.5 text-sm text-gray-500">{mod.description}</p>
                     )}
+                    {mod.lastError &&
+                      (mod.status === 'QUARANTINED' ||
+                        (mod.status === 'ACTIVE' && mod.loadRetrying)) && (
+                        <p
+                          className="mt-0.5 text-xs text-red-700"
+                          data-testid={`module-last-error-${mod.moduleId}`}
+                        >
+                          {mod.status === 'QUARANTINED'
+                            ? 'Quarantined: '
+                            : 'Temporarily unavailable, retrying automatically: '}
+                          {mod.lastError}
+                        </p>
+                      )}
                     <p className="mt-0.5 text-xs text-gray-400">
                       {mod.actions.length} action{mod.actions.length !== 1 ? 's' : ''} &middot;
                       Installed {new Date(mod.installedAt).toLocaleDateString()}
@@ -483,6 +533,18 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {mod.status === 'ACTIVE' && mod.loadRetrying && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => enableMutation.mutate(mod.moduleId)}
+                      disabled={enableMutation.isPending}
+                      className="gap-1"
+                    >
+                      <RefreshCw size={14} />
+                      Retry now
+                    </Button>
+                  )}
                   {mod.status === 'ACTIVE' ? (
                     <Button
                       variant="outline"
@@ -503,7 +565,7 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                       className="gap-1"
                     >
                       <Power size={14} />
-                      Enable
+                      {mod.status === 'QUARANTINED' ? 'Re-enable' : 'Enable'}
                     </Button>
                   )}
                   <Button

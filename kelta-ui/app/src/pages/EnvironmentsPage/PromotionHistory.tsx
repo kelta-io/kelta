@@ -9,12 +9,13 @@
  */
 
 import React, { useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
 import { useAuth } from '../../context/AuthContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import {
   approvePromotion,
   executePromotion,
@@ -153,7 +154,6 @@ function PromotionDetailsModal({
   const { t, formatDate } = useI18n()
   const { apiClient } = useApi()
   const { user } = useAuth()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
   const [pendingRollback, setPendingRollback] = useState(false)
   const [pendingExecute, setPendingExecute] = useState(false)
@@ -166,33 +166,33 @@ function PromotionDetailsModal({
   const approveMutation = useMutation({
     mutationFn: () => approvePromotion(apiClient, promotion.id),
     onSuccess: () => {
-      showToast(t('environments.approvedToast'), 'success')
+      toast.success(t('environments.approvedToast'))
       invalidate()
     },
     onError: (mutationError: Error) => {
-      showToast(mutationError.message, 'error')
+      toast.error(mutationError.message)
     },
   })
 
   const executeMutation = useMutation({
     mutationFn: () => executePromotion(apiClient, promotion.id),
     onSuccess: () => {
-      showToast(t('environments.executeStartedToast'), 'success')
+      toast.success(t('environments.executeStartedToast'))
       invalidate()
     },
     onError: (mutationError: Error) => {
-      showToast(mutationError.message, 'error')
+      toast.error(mutationError.message)
     },
   })
 
   const rollbackMutation = useMutation({
     mutationFn: () => rollbackPromotion(apiClient, promotion.id),
     onSuccess: () => {
-      showToast(t('environments.rolledBackToast'), 'success')
+      toast.success(t('environments.rolledBackToast'))
       invalidate()
     },
     onError: (mutationError: Error) => {
-      showToast(mutationError.message, 'error')
+      toast.error(mutationError.message)
     },
   })
 

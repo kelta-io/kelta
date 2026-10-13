@@ -1,17 +1,12 @@
 import React, { useState, useCallback } from 'react'
+import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
 import { getTenantSlug } from '../../context/TenantContext'
 import { unwrapCollection, unwrapResource } from '../../utils/jsonapi'
-import {
-  useToast,
-  ConfirmDialog,
-  LoadingSpinner,
-  ErrorMessage,
-  ExecutionLogModal,
-} from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage, ExecutionLogModal } from '../../components'
 import type { LogColumn } from '../../components'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -53,7 +48,6 @@ export function FlowsPage({ testId = 'flows-page' }: FlowsPageProps): React.Reac
   const navigate = useNavigate()
   const { t, formatDate } = useI18n()
   const { apiClient, keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const [wizardOpen, setWizardOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -79,12 +73,12 @@ export function FlowsPage({ testId = 'flows-page' }: FlowsPageProps): React.Reac
     mutationFn: (id: string) => keltaClient.admin.flows.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flows'] })
-      showToast('Flow deleted successfully', 'success')
+      toast.success('Flow deleted successfully')
       setDeleteDialogOpen(false)
       setFlowToDelete(null)
     },
     onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
+      toast.error(err.message || 'An error occurred')
     },
   })
 
@@ -121,7 +115,7 @@ export function FlowsPage({ testId = 'flows-page' }: FlowsPageProps): React.Reac
       return unwrapResource<{ id: string }>(await resp.json())
     },
     onSuccess: (data) => {
-      showToast(t('flows.executionStarted'), 'success')
+      toast.success(t('flows.executionStarted'))
       setRunDialogOpen(false)
       if (execItemId) {
         queryClient.invalidateQueries({ queryKey: ['flow-executions', execItemId] })
@@ -131,7 +125,7 @@ export function FlowsPage({ testId = 'flows-page' }: FlowsPageProps): React.Reac
         navigate(`/${getTenantSlug()}/flows/${runFlowTarget.id}/design?executionId=${data.id}`)
       }
     },
-    onError: (err: Error) => showToast(err.message, 'error'),
+    onError: (err: Error) => toast.error(err.message),
   })
 
   const cancelMutation = useMutation({
@@ -142,10 +136,10 @@ export function FlowsPage({ testId = 'flows-page' }: FlowsPageProps): React.Reac
       if (!resp.ok) throw new Error(`Cancel failed: ${resp.statusText}`)
     },
     onSuccess: () => {
-      showToast(t('flows.executionCancelled'), 'success')
+      toast.success(t('flows.executionCancelled'))
       queryClient.invalidateQueries({ queryKey: ['flow-executions', execItemId] })
     },
-    onError: (err: Error) => showToast(err.message, 'error'),
+    onError: (err: Error) => toast.error(err.message),
   })
 
   const execColumns: LogColumn<FlowExecutionLog>[] = [

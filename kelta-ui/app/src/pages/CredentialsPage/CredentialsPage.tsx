@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from 'react'
+import { toast } from 'sonner'
+import { showToast } from '@/utils/toast'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Key, Plus, ShieldCheck, Trash2, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'
 import type {
@@ -10,7 +12,6 @@ import type {
 
 import { useApi } from '../../context/ApiContext'
 import { useSystemPermissions } from '../../hooks/useSystemPermissions'
-import { useToast } from '../../components/Toast'
 import { LoadingSpinner, ErrorMessage } from '../../components'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -81,7 +82,6 @@ function isObjectField(prop: SchemaProperty | undefined): boolean {
 export function CredentialsPage({ className }: CredentialsPageProps): React.ReactElement {
   const { keltaClient } = useApi()
   const { hasPermission } = useSystemPermissions()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
 
   const canManage = hasPermission('MANAGE_CREDENTIALS')
@@ -107,9 +107,9 @@ export function CredentialsPage({ className }: CredentialsPageProps): React.Reac
     mutationFn: (id: string) => keltaClient.admin.credentials.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['credentials'] })
-      showToast('Credential deleted', 'success')
+      toast.success('Credential deleted')
     },
-    onError: () => showToast('Delete failed', 'error'),
+    onError: () => toast.error('Delete failed'),
   })
 
   const testMutation = useMutation({
@@ -123,7 +123,7 @@ export function CredentialsPage({ className }: CredentialsPageProps): React.Reac
       )
       void id
     },
-    onError: () => showToast('Test failed', 'error'),
+    onError: () => toast.error('Test failed'),
   })
 
   const credentials = (credentialsQuery.data ?? []) as unknown as CredentialRecord[]
@@ -324,7 +324,6 @@ function CredentialDialog({
   onSaved,
 }: CredentialDialogProps): React.ReactElement {
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const [name, setName] = useState(credential?.name ?? '')
   const [displayName, setDisplayName] = useState(credential?.displayName ?? '')
@@ -463,11 +462,11 @@ function CredentialDialog({
 
   const submit = async () => {
     if (!name.trim()) {
-      showToast('Name is required', 'error')
+      toast.error('Name is required')
       return
     }
     if (!type) {
-      showToast('Pick a credential type', 'error')
+      toast.error('Pick a credential type')
       return
     }
     setSubmitting(true)
@@ -475,14 +474,14 @@ function CredentialDialog({
       const payload = buildPayload()
       if (mode === 'create') {
         await keltaClient.admin.credentials.create(payload)
-        showToast('Credential created', 'success')
+        toast.success('Credential created')
       } else if (credential) {
         await keltaClient.admin.credentials.update(credential.id, payload)
-        showToast('Credential updated', 'success')
+        toast.success('Credential updated')
       }
       onSaved()
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Save failed', 'error')
+      toast.error(e instanceof Error ? e.message : 'Save failed')
     } finally {
       setSubmitting(false)
     }

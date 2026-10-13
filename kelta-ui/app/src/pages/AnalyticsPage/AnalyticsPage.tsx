@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery } from '@tanstack/react-query'
 import { useApi } from '../../context/ApiContext'
-import { LoadingSpinner, ErrorMessage, useToast } from '../../components'
+import { LoadingSpinner, ErrorMessage } from '../../components'
 import { SupersetEmbed } from '../../components/SupersetEmbed'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, BarChart3, ExternalLink, FileDown, FileText, RefreshCw } from 'lucide-react'
@@ -25,7 +26,6 @@ export function AnalyticsPage({
   testId = 'analytics-page',
 }: AnalyticsPageProps): React.ReactElement {
   const { keltaClient, apiClient } = useApi()
-  const { showToast } = useToast()
   const [selectedDashboard, setSelectedDashboard] = useState<SupersetDashboard | null>(null)
   const [exportingKey, setExportingKey] = useState<string | null>(null)
   const supersetUrl = getSupersetUrl()
@@ -77,12 +77,12 @@ export function AnalyticsPage({
       } catch (err: unknown) {
         const message =
           err instanceof Error ? err.message : `Failed to export ${format.toUpperCase()}`
-        showToast(message, 'error')
+        toast.error(message)
       } finally {
         setExportingKey(null)
       }
     },
-    [apiClient, showToast]
+    [apiClient]
   )
 
   // Embedded dashboard view

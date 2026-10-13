@@ -8,13 +8,14 @@
  */
 
 import React, { useMemo } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 import { useApi } from '../../context/ApiContext'
 import { useTenant } from '../../context/TenantContext'
 import { useI18n } from '../../context/I18nContext'
-import { useToast, ConfirmDialog } from '../../components'
+import { ConfirmDialog } from '../../components'
 import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
 import {
   AdminCrudPage,
@@ -67,7 +68,6 @@ export function ProfilesPage({ testId = 'profiles-page' }: ProfilesPageProps): R
   const { formatDate } = useI18n()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { showToast } = useToast()
 
   const {
     data: profiles,
@@ -102,10 +102,10 @@ export function ProfilesPage({ testId = 'profiles-page' }: ProfilesPageProps): R
       apiClient.postResource<SecurityProfile>(`/api/profiles/${id}/clone`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profiles'] })
-      showToast('Profile cloned successfully', 'success')
+      toast.success('Profile cloned successfully')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to clone profile', 'error')
+      toast.error(err.message || 'Failed to clone profile')
     },
   })
 

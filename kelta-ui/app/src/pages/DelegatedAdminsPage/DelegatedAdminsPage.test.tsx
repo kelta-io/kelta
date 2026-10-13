@@ -33,7 +33,13 @@ vi.mock('../../context/ApiContext', () => ({
   }),
 }))
 
-vi.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: vi.fn() }) }))
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('sonner')>()),
+  toast: mockToast,
+}))
 
 const SCOPE: DelegatedAdminScope = {
   id: 'scope-1',

@@ -134,6 +134,71 @@ describe('ModulesPage', () => {
     })
   })
 
+  describe('Load failures', () => {
+    it('shows a quarantined module with its reason and a Re-enable action that reloads it', async () => {
+      const user = userEvent.setup()
+      mockAxios.get.mockResolvedValue({
+        data: [
+          {
+            ...mockModules[0],
+            status: 'QUARANTINED',
+            lastError: 'ModuleSignatureException: checksum mismatch',
+          },
+        ],
+      })
+      mockAxios.post.mockResolvedValue({ data: { status: 'enabled' } })
+      render(<ModulesPage />, { wrapper: createTestWrapper() })
+
+      await waitFor(() => expect(screen.getByText('Quarantined')).toBeInTheDocument())
+      expect(screen.getByTestId('module-last-error-mod-analytics')).toHaveTextContent(
+        'Quarantined: ModuleSignatureException: checksum mismatch'
+      )
+
+      await user.click(screen.getByRole('button', { name: /re-enable/i }))
+      await waitFor(() =>
+        expect(mockAxios.post).toHaveBeenCalledWith('/api/modules/mod-analytics/enable', {})
+      )
+    })
+
+    it('shows an ACTIVE module failing on a transient error as retrying, with Retry now', async () => {
+      const user = userEvent.setup()
+      mockAxios.get.mockResolvedValue({
+        data: [
+          {
+            ...mockModules[0],
+            loadRetrying: true,
+            lastError: 'SdkClientException: Connection refused',
+          },
+        ],
+      })
+      mockAxios.post.mockResolvedValue({ data: { status: 'enabled' } })
+      render(<ModulesPage />, { wrapper: createTestWrapper() })
+
+      await waitFor(() =>
+        expect(screen.getByTestId('module-retrying-mod-analytics')).toBeInTheDocument()
+      )
+      expect(screen.getByTestId('module-last-error-mod-analytics')).toHaveTextContent(
+        /retrying automatically: SdkClientException: Connection refused/
+      )
+
+      await user.click(screen.getByRole('button', { name: /retry now/i }))
+      await waitFor(() =>
+        expect(mockAxios.post).toHaveBeenCalledWith('/api/modules/mod-analytics/enable', {})
+      )
+    })
+
+    it('does not show a stale error on a healthy module', async () => {
+      mockAxios.get.mockResolvedValue({
+        data: [{ ...mockModules[0], loadRetrying: false, lastError: null }],
+      })
+      render(<ModulesPage />, { wrapper: createTestWrapper() })
+
+      await waitFor(() => expect(screen.getByText('Analytics Module')).toBeInTheDocument())
+      expect(screen.queryByTestId('module-last-error-mod-analytics')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /retry now/i })).not.toBeInTheDocument()
+    })
+  })
+
   describe('Install', () => {
     it('posts the JAR as multipart to /install-jar, which is the only path that runs code', async () => {
       // Before this, the form only ever called /api/modules/install with the manifest JSON, so

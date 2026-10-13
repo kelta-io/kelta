@@ -36,6 +36,8 @@ public class AuthProperties {
 
     private Session session = new Session();
 
+    private AuthorizationRetention authorizationRetention = new AuthorizationRetention();
+
     /**
      * Initial password for the Flyway baseline's platform admin ({@code admin@kelta.local}),
      * applied once by {@link BaselineAdminPasswordInitializer} while the account still carries
@@ -90,6 +92,12 @@ public class AuthProperties {
 
     public Session getSession() { return session; }
     public void setSession(Session session) { this.session = (session != null) ? session : new Session(); }
+
+    public AuthorizationRetention getAuthorizationRetention() { return authorizationRetention; }
+    public void setAuthorizationRetention(AuthorizationRetention authorizationRetention) {
+        this.authorizationRetention = (authorizationRetention != null)
+                ? authorizationRetention : new AuthorizationRetention();
+    }
 
     /**
      * Credential-carrying record for a single internal service caller. A blank
@@ -146,11 +154,19 @@ public class AuthProperties {
          * {@code SameSite} attribute of the session cookie: {@code None}, {@code Lax},
          * {@code Strict}, or blank for none. {@code None} lets an identity provider's
          * cross-site POST back to the SAML assertion consumer service carry the session that
-         * started the login. On a loopback host (plain-http local development) the cookie is
-         * sent without {@code Secure}, and {@code None} is then left off, since browsers
-         * reject {@code SameSite=None} without {@code Secure}.
+         * started the login. When the cookie is sent without {@code Secure} (see
+         * {@link #cookieSecure}) {@code None} becomes {@code Lax}, since browsers reject
+         * {@code SameSite=None} without {@code Secure}.
          */
         private String cookieSameSite = "None";
+        /**
+         * Whether the session cookie (and the {@code kelta_session} SSO cookie) is
+         * {@code Secure}: {@code auto} (the default) follows the scheme the browser used — the
+         * first {@code X-Forwarded-Proto} (or {@code Forwarded: proto=}) value when a proxy sent
+         * one, else the request's own scheme; {@code always}; or {@code never}.
+         * {@link CookieDomainResolver#secureForRequest}.
+         */
+        private String cookieSecure = "auto";
 
         public Duration getAuthenticatedTimeout() { return authenticatedTimeout; }
         public void setAuthenticatedTimeout(Duration authenticatedTimeout) {
@@ -162,6 +178,42 @@ public class AuthProperties {
 
         public String getCookieSameSite() { return cookieSameSite; }
         public void setCookieSameSite(String cookieSameSite) { this.cookieSameSite = cookieSameSite; }
+
+        public String getCookieSecure() { return cookieSecure; }
+        public void setCookieSecure(String cookieSecure) { this.cookieSecure = cookieSecure; }
+    }
+
+    /**
+     * Deleting {@code oauth2_authorization} rows whose tokens have all expired
+     * ({@code io.kelta.auth.service.AuthorizationRetentionSweep}). Spring Authorization Server
+     * never deletes a row itself.
+     */
+    public static class AuthorizationRetention {
+        /** Run the sweep at all. */
+        private boolean enabled = true;
+        /** Delay between the end of one sweep and the start of the next. */
+        private Duration interval = Duration.ofHours(1);
+        /** How long after its last token expired a row is kept. */
+        private Duration grace = Duration.ofDays(1);
+        /** Rows deleted per statement. */
+        private int batchSize = 500;
+        /** Statements per sweep; a larger backlog drains over several sweeps. */
+        private int maxBatches = 100;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+
+        public Duration getInterval() { return interval; }
+        public void setInterval(Duration interval) { this.interval = interval; }
+
+        public Duration getGrace() { return grace; }
+        public void setGrace(Duration grace) { this.grace = grace; }
+
+        public int getBatchSize() { return batchSize; }
+        public void setBatchSize(int batchSize) { this.batchSize = batchSize; }
+
+        public int getMaxBatches() { return maxBatches; }
+        public void setMaxBatches(int maxBatches) { this.maxBatches = maxBatches; }
     }
 
     /**

@@ -1,7 +1,8 @@
 import React, { useMemo, useState, useCallback } from 'react'
+import { toast } from 'sonner'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { useCollectionSchema } from '../../hooks/useCollectionSchema'
 import type { CollectionDefinition } from '@kelta/sdk'
 import { cn } from '@/lib/utils'
@@ -42,7 +43,6 @@ export function DeduplicationPage({
   testId = 'deduplication-page',
 }: DeduplicationPageProps): React.ReactElement {
   const { apiClient, keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const [collectionName, setCollectionName] = useState('')
   const [matchFields, setMatchFields] = useState<string[]>([])
@@ -80,10 +80,10 @@ export function DeduplicationPage({
       setResult(data)
       setMasterByGroup({})
       if (data.groups.length === 0) {
-        showToast('No duplicates found', 'success')
+        toast.success('No duplicates found')
       }
     },
-    onError: (err: Error) => showToast(err.message || 'Scan failed', 'error'),
+    onError: (err: Error) => toast.error(err.message || 'Scan failed'),
   })
 
   const mergeMutation = useMutation({
@@ -93,16 +93,15 @@ export function DeduplicationPage({
         duplicateIds,
       }),
     onSuccess: (data) => {
-      showToast(
-        `Merged ${data.deletedIds.length} record(s); re-parented ${data.reparentedRecords} related record(s)`,
-        'success'
+      toast.success(
+        `Merged ${data.deletedIds.length} record(s); re-parented ${data.reparentedRecords} related record(s)`
       )
       setPendingMerge(null)
       // Re-scan so the resolved group drops out of the list.
       scanMutation.mutate()
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Merge failed', 'error')
+      toast.error(err.message || 'Merge failed')
       setPendingMerge(null)
     },
   })
@@ -122,12 +121,12 @@ export function DeduplicationPage({
     (groupKey: string, group: DuplicateGroup) => {
       const masterId = masterByGroup[groupKey]
       if (!masterId) {
-        showToast('Choose a master record first', 'error')
+        toast.error('Choose a master record first')
         return
       }
       setPendingMerge({ groupKey, group })
     },
-    [masterByGroup, showToast]
+    [masterByGroup]
   )
 
   const handleMergeConfirm = useCallback(() => {

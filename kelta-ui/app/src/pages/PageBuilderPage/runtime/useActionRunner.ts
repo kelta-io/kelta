@@ -1,6 +1,6 @@
 /**
  * React binding for the action runtime (slice 2e §3.3). Assembles an {@link ActionRuntimeContext} from
- * app contexts (`apiClient`, `navigate`, `queryClient`, `showToast`) plus the page-level deps passed in
+ * app contexts (`apiClient`, `navigate`, `queryClient`) and the sonner `showToast` helper, plus the page-level deps passed in
  * (`tenantSlug`, `setVar`, `dataSourceQueryKey`), and returns a stable `run(actions, scope)`.
  *
  * `run` is a no-op when `actions` is empty/undefined. It wraps `executeActions` in a try/catch that fires
@@ -11,7 +11,7 @@ import { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useApi } from '@/context/ApiContext'
-import { useToast } from '@/components/Toast/Toast'
+import { showToast } from '@/utils/toast'
 import type { PageAction } from '../model/pageModel'
 import type { BindingScope } from '../model/bindingScope'
 import { executeActions, type ActionRuntimeContext } from './executeAction'
@@ -35,7 +35,6 @@ export function useActionRunner(opts: UseActionRunnerOptions = {}): UseActionRun
   const { apiClient } = useApi()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { showToast } = useToast()
   const runtime = usePageRuntime()
 
   const tenantSlug = opts.tenantSlug ?? runtime.tenantSlug
@@ -62,7 +61,7 @@ export function useActionRunner(opts: UseActionRunnerOptions = {}): UseActionRun
         showToast(message, 'error')
       }
     },
-    [apiClient, navigate, queryClient, showToast, setVar, dataSourceQueryKey, tenantSlug]
+    [apiClient, navigate, queryClient, setVar, dataSourceQueryKey, tenantSlug]
   )
 
   return { run }

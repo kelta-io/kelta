@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, useFormContext, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 import { Braces } from 'lucide-react'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, ExecutionLogModal } from '../../components'
+import { ConfirmDialog, ExecutionLogModal } from '../../components'
 import type { LogColumn } from '../../components'
 import type { CreateApprovalProcessRequest } from '@kelta/sdk'
 import { cn } from '@/lib/utils'
@@ -203,7 +204,6 @@ export function ApprovalProcessesPage({
   const queryClient = useQueryClient()
   const { t, formatDate } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const [instancesItemId, setInstancesItemId] = useState<string | null>(null)
   const [_instancesItemName, setInstancesItemName] = useState('')
@@ -267,10 +267,10 @@ export function ApprovalProcessesPage({
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['approval-instances'] })
-      showToast(t('approvals.approved'), 'success')
+      toast.success(t('approvals.approved'))
     },
     onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
+      toast.error(err.message || 'An error occurred')
     },
   })
 
@@ -283,10 +283,10 @@ export function ApprovalProcessesPage({
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['approval-instances'] })
-      showToast(t('approvals.rejected'), 'success')
+      toast.success(t('approvals.rejected'))
     },
     onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
+      toast.error(err.message || 'An error occurred')
     },
   })
 
@@ -299,10 +299,10 @@ export function ApprovalProcessesPage({
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['approval-instances'] })
-      showToast(t('approvals.recalled'), 'success')
+      toast.success(t('approvals.recalled'))
     },
     onError: (err: Error) => {
-      showToast(err.message || 'An error occurred', 'error')
+      toast.error(err.message || 'An error occurred')
     },
   })
 

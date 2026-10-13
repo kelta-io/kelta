@@ -11,6 +11,7 @@
  */
 
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import { toast } from 'sonner'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
@@ -18,7 +19,7 @@ import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
 import { useApi } from '../../context/ApiContext'
 import { useAuth } from '../../context/AuthContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { useRecentRecords } from '../../hooks/useRecentRecords'
 import { useFavorites } from '../../hooks/useFavorites'
 import { RecordHeader } from '../../components/RecordHeader/RecordHeader'
@@ -242,7 +243,6 @@ export function ResourceDetailPage({
   const queryClient = useQueryClient()
   const { t, formatDate, formatNumber } = useI18n()
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const { user } = useAuth()
   const userId = user?.id ?? 'anonymous'
   const { addRecentRecord } = useRecentRecords(userId)
@@ -339,11 +339,11 @@ export function ResourceDetailPage({
     onSuccess: () => {
       // The admin list reads the shared `collection-records` cache (record-stack convergence P8).
       queryClient.invalidateQueries({ queryKey: ['collection-records', collectionName] })
-      showToast(t('success.deleted', { item: t('resources.record') }), 'success')
+      toast.success(t('success.deleted', { item: t('resources.record') }))
       navigate(adminRoutes().list(collectionName))
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -406,11 +406,11 @@ export function ResourceDetailPage({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['record-shares', schema?.id, resourceId] })
-      showToast(t('sharing.shareCreated'), 'success')
+      toast.success(t('sharing.shareCreated'))
       setShareModalOpen(false)
     },
     onError: (err: Error) => {
-      showToast(err.message || t('errors.generic'), 'error')
+      toast.error(err.message || t('errors.generic'))
     },
   })
 
@@ -419,10 +419,10 @@ export function ResourceDetailPage({
     mutationFn: (shareId: string) => apiClient.deleteResource(`/api/record-shares/${shareId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['record-shares', schema?.id, resourceId] })
-      showToast(t('sharing.shareDeleted'), 'success')
+      toast.success(t('sharing.shareDeleted'))
     },
     onError: (err: Error) => {
-      showToast(err.message || t('errors.generic'), 'error')
+      toast.error(err.message || t('errors.generic'))
     },
   })
 

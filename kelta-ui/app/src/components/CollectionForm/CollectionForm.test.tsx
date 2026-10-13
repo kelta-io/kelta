@@ -18,13 +18,16 @@ import userEvent from '@testing-library/user-event'
 import { CollectionForm } from './CollectionForm'
 import type { Collection, CollectionFormData } from './CollectionForm'
 import { I18nProvider } from '../../context/I18nContext'
-import { ToastProvider } from '../Toast'
+import { Toaster } from 'sonner'
 
 // Wrapper component to provide required contexts
 function TestWrapper({ children }: { children: React.ReactNode }) {
   return (
     <I18nProvider>
-      <ToastProvider>{children}</ToastProvider>
+      <>
+        {children}
+        <Toaster />
+      </>
     </I18nProvider>
   )
 }

@@ -14,13 +14,13 @@
  */
 
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { Map, Save } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { FieldLabel } from '@/components/kelta'
 import { LoadingSpinner, ErrorMessage } from '@/components'
-import { useToast } from '@/components/Toast'
 import { useTenantSettings } from '@/hooks/useTenantSettings'
 
 export interface MapSettingsPageProps {
@@ -51,7 +51,6 @@ function MapSettingsForm({
   isSaving,
   testId,
 }: MapSettingsFormProps): React.ReactElement {
-  const { showToast } = useToast()
   const [token, setToken] = useState<string>(settings.map?.token ?? '')
   const [style, setStyle] = useState<string>(settings.map?.style ?? '')
 
@@ -64,9 +63,9 @@ function MapSettingsForm({
         ...settings,
         map: Object.keys(nextMap).length > 0 ? nextMap : undefined,
       })
-      showToast('Map settings saved', 'success')
+      toast.success('Map settings saved')
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Save failed', 'error')
+      toast.error(err instanceof Error ? err.message : 'Save failed')
     }
   }
 

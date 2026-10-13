@@ -13,12 +13,13 @@
  */
 
 import React, { useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
 import { useAuth } from '../../context/AuthContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { PromotionStatusBadge, PromotionItemsTable } from './PromotionHistory'
 import {
   approvePromotion,
@@ -77,7 +78,6 @@ export function PromotionWizard({ onClose }: PromotionWizardProps): React.ReactE
   const { t } = useI18n()
   const { apiClient } = useApi()
   const { user } = useAuth()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
 
   const [step, setStep] = useState<WizardStep>('select')
@@ -144,12 +144,12 @@ export function PromotionWizard({ onClose }: PromotionWizardProps): React.ReactE
   const approveMutation = useMutation({
     mutationFn: (id: string) => approvePromotion(apiClient, id),
     onSuccess: () => {
-      showToast(t('environments.approvedToast'), 'success')
+      toast.success(t('environments.approvedToast'))
       queryClient.invalidateQueries({ queryKey: ['promotion', promotionId] })
     },
     onError: (mutationError: Error) => {
       // 409 — the creator cannot approve their own promotion
-      showToast(mutationError.message, 'error')
+      toast.error(mutationError.message)
     },
   })
 
@@ -160,7 +160,7 @@ export function PromotionWizard({ onClose }: PromotionWizardProps): React.ReactE
       queryClient.invalidateQueries({ queryKey: ['promotion', promotionId] })
     },
     onError: (mutationError: Error) => {
-      showToast(mutationError.message, 'error')
+      toast.error(mutationError.message)
     },
   })
 

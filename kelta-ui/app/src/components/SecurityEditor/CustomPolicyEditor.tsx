@@ -9,11 +9,11 @@
  */
 
 import React, { useState, useCallback } from 'react'
+import { toast } from 'sonner'
 import { Plus, Trash2, Pencil, ToggleLeft, ToggleRight } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApi } from '@/context/ApiContext'
 import { useCollectionSummaries } from '@/hooks/useCollectionSummaries'
-import { useToast } from '@/components'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -101,7 +101,6 @@ export function CustomPolicyEditor({
 }: CustomPolicyEditorProps): React.ReactElement {
   const { apiClient } = useApi()
   const queryClient = useQueryClient()
-  const { showToast } = useToast()
   const { summaries: collections } = useCollectionSummaries()
 
   // Fetch existing rules
@@ -121,10 +120,10 @@ export function CustomPolicyEditor({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['custom-rules', profileId] })
-      showToast('Rule created successfully', 'success')
+      toast.success('Rule created successfully')
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to create rule', 'error')
+      toast.error(error.message || 'Failed to create rule')
     },
   })
 
@@ -135,10 +134,10 @@ export function CustomPolicyEditor({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['custom-rules', profileId] })
-      showToast('Rule updated successfully', 'success')
+      toast.success('Rule updated successfully')
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to update rule', 'error')
+      toast.error(error.message || 'Failed to update rule')
     },
   })
 
@@ -149,10 +148,10 @@ export function CustomPolicyEditor({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['custom-rules', profileId] })
-      showToast('Rule deleted', 'success')
+      toast.success('Rule deleted')
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to delete rule', 'error')
+      toast.error(error.message || 'Failed to delete rule')
     },
   })
 

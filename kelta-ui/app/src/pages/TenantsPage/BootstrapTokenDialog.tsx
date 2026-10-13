@@ -7,10 +7,10 @@
  */
 
 import React, { useCallback, useState } from 'react'
+import { toast } from 'sonner'
 import { useMutation } from '@tanstack/react-query'
 import type { TenantBootstrapTokenResponse } from '@kelta/sdk'
 import { useApi } from '../../context/ApiContext'
-import { useToast } from '../../components'
 
 const LIFETIMES = [
   { value: '1h', label: '1 hour' },
@@ -29,7 +29,6 @@ export function BootstrapTokenDialog({
   onClose,
 }: BootstrapTokenDialogProps): React.ReactElement {
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
   const [expiresIn, setExpiresIn] = useState('1h')
   const [minted, setMinted] = useState<TenantBootstrapTokenResponse | null>(null)
   const [copied, setCopied] = useState(false)
@@ -38,7 +37,7 @@ export function BootstrapTokenDialog({
     mutationFn: () => keltaClient.admin.tenants.bootstrapToken(tenant.id, { expiresIn }),
     onSuccess: (result) => setMinted(result),
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to mint the bootstrap token.', 'error')
+      toast.error(error.message || 'Failed to mint the bootstrap token.')
     },
   })
 

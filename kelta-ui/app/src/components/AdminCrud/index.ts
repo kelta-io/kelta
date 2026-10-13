@@ -17,4 +17,4 @@ export {
 } from './useCrudMutations'
 export { useAdminCrud } from './useAdminCrud'
 export { CrudNumberField, type CrudNumberFieldProps } from './CrudNumberField'
-export { useCrudFormState } from './crudFormState'
+export { useCrudFormState, CRUD_FIELD_LABEL_CLASS } from './crudFormState'

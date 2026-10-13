@@ -101,6 +101,24 @@ class SessionControllerTest {
             assertThat(cookie.getValue()).isEqualTo("session-abc");
             assertThat(cookie.isHttpOnly()).isTrue();
         }
+
+        @Test
+        @DisplayName("the SSO cookie is Secure when the browser used https (behind a TLS proxy), not over plain http")
+        void ssoCookieSecureFollowsTheScheme() {
+            var tokenInfo = new ExternalTokenValidator.ValidatedToken("user@test.com", "tenant-1", "John Doe", "sub-123", "https://accounts.google.com");
+            when(tokenValidator.validate("valid-token")).thenReturn(Optional.of(tokenInfo));
+            when(workerClient.findUserIdentity("user@test.com", "tenant-1")).thenReturn(Optional.empty());
+            when(sessionService.createSession(any(KeltaSession.class))).thenReturn("session-abc");
+
+            when(request.getHeader("X-Forwarded-Proto")).thenReturn("https");
+            controller.createSession("Bearer valid-token", "tenant-1", "acme", request, response);
+            when(request.getHeader("X-Forwarded-Proto")).thenReturn(null);
+            controller.createSession("Bearer valid-token", "tenant-1", "acme", request, response);
+
+            ArgumentCaptor<Cookie> cookies = ArgumentCaptor.forClass(Cookie.class);
+            verify(response, times(2)).addCookie(cookies.capture());
+            assertThat(cookies.getAllValues()).extracting(Cookie::getSecure).containsExactly(true, false);
+        }
     }
 
     @Nested

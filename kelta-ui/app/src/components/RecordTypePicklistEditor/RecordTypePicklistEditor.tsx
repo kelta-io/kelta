@@ -13,6 +13,7 @@
  */
 
 import React, { useState, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { useI18n } from '@/context/I18nContext'
@@ -23,7 +24,6 @@ import {
   parseAvailableValues,
   recordTypePicklistsUrl,
 } from '@/utils/recordTypePicklists'
-import { useToast } from '../Toast'
 import { LoadingSpinner } from '../LoadingSpinner'
 import { ErrorMessage } from '../ErrorMessage'
 import type {
@@ -91,7 +91,6 @@ export function RecordTypePicklistEditor({
   const { t } = useI18n()
   const { apiClient } = useApi()
   const queryClient = useQueryClient()
-  const { showToast } = useToast()
 
   const [isSaving, setIsSaving] = useState(false)
   // The admin's edits, by field id; a field without an entry shows its stored override.
@@ -277,12 +276,12 @@ export function RecordTypePicklistEditor({
       // Keep the dialog open: written fields now match their refetched rows, the failed ones
       // keep their draft so the admin can retry.
       const reason: unknown = failure.reason
-      showToast(reason instanceof Error ? reason.message : t('errors.generic'), 'error')
+      toast.error(reason instanceof Error ? reason.message : t('errors.generic'))
       return
     }
-    showToast(t('recordTypes.overrideSaved'), 'success')
+    toast.success(t('recordTypes.overrideSaved'))
     onSaved()
-  }, [drafts, fieldStates, recordType.id, apiClient, queryClient, showToast, t, onSaved])
+  }, [drafts, fieldStates, recordType.id, apiClient, queryClient, t, onSaved])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

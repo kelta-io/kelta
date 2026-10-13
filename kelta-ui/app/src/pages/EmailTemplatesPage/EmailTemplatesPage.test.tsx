@@ -1,7 +1,8 @@
 /**
- * EmailTemplatesPage Tests — list, empty state, opening the template builder
- * (create and edit) and delete. The builder's editor internals are covered by
- * the RichTextEditor / FieldExpressionPicker tests and the Playwright spec.
+ * EmailTemplatesPage Tests — list, empty state, the template editor (a
+ * CrudFormDialog with a live-preview aside: create, edit, validation, preview,
+ * update payload, Escape) and delete. The editor internals are covered by the
+ * RichTextEditor / FieldExpressionPicker tests and the Playwright spec.
  */
 
 import { render, screen, waitFor, within } from '@testing-library/react'
@@ -93,6 +94,58 @@ describe('EmailTemplatesPage', () => {
 
     expect(await screen.findByText('Name is required')).toBeInTheDocument()
     expect(screen.getByText('Subject is required')).toBeInTheDocument()
+    expect(mockAxios.post).not.toHaveBeenCalled()
+  })
+
+  it('previews the subject as it is typed', async () => {
+    const user = userEvent.setup()
+    mockLists([])
+    render(<EmailTemplatesPage />, { wrapper: createTestWrapper() })
+
+    await user.click(await screen.findByTestId('add-email-template-button'))
+    await user.type(await screen.findByTestId('email-template-subject-input'), 'Hi there')
+    expect(screen.getByTestId('email-template-preview-subject')).toHaveTextContent('Hi there')
+  })
+
+  it('saves edits with the full template payload', async () => {
+    const user = userEvent.setup()
+    mockLists([TEMPLATE])
+    mockAxios.patch.mockResolvedValueOnce({ data: TEMPLATE })
+    render(<EmailTemplatesPage />, { wrapper: createTestWrapper() })
+
+    await user.click(await screen.findByTestId('edit-button-0'))
+    const name = await screen.findByTestId('email-template-name-input')
+    await user.clear(name)
+    await user.type(name, 'Welcome v2')
+    await user.click(screen.getByTestId('email-template-form-submit'))
+
+    await waitFor(() => expect(mockAxios.patch).toHaveBeenCalled())
+    const [url, body] = mockAxios.patch.mock.calls[0]
+    expect(url).toBe('/api/email-templates/et-1')
+    expect(body.data.attributes).toEqual(
+      expect.objectContaining({
+        name: 'Welcome v2',
+        subject: 'Welcome aboard',
+        bodyHtml: '<p>Hello</p>',
+        active: true,
+      })
+    )
+    await waitFor(() =>
+      expect(screen.queryByTestId('email-template-form-modal')).not.toBeInTheDocument()
+    )
+  })
+
+  it('closes the editor on Escape without saving', async () => {
+    const user = userEvent.setup()
+    mockLists([])
+    render(<EmailTemplatesPage />, { wrapper: createTestWrapper() })
+
+    await user.click(await screen.findByTestId('add-email-template-button'))
+    await screen.findByTestId('email-template-form-modal')
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByTestId('email-template-form-modal')).not.toBeInTheDocument()
+    )
     expect(mockAxios.post).not.toHaveBeenCalled()
   })
 

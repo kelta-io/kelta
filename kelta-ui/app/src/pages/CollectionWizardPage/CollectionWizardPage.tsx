@@ -10,6 +10,7 @@
  */
 
 import React, { useState, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -29,7 +30,6 @@ import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
 
 import { useApi } from '../../context/ApiContext'
-import { useToast } from '../../components/Toast'
 import { LoadingSpinner } from '../../components'
 import { FieldEditor, type FieldDefinition } from '../../components/FieldEditor'
 import { useCollectionSummaries } from '../../hooks/useCollectionSummaries'
@@ -202,7 +202,6 @@ export function CollectionWizardPage({
   const navigate = useNavigate()
   const { t } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   // Wizard state
   const [currentStep, setCurrentStep] = useState(1)
@@ -445,7 +444,7 @@ export function CollectionWizardPage({
         })
       }
 
-      showToast(t('success.created', { item: 'Collection' }), 'success')
+      toast.success(t('success.created', { item: 'Collection' }))
       navigate(`/${getTenantSlug()}/collections/${collectionId}`)
     } catch (error: unknown) {
       console.error('Failed to create collection:', error)
@@ -466,11 +465,11 @@ export function CollectionWizardPage({
       } else if (error instanceof Error) {
         message = error.message
       }
-      showToast(message, 'error')
+      toast.error(message)
     } finally {
       setIsCreating(false)
     }
-  }, [keltaClient, basics, fields, profilePermissions, navigate, showToast, t])
+  }, [keltaClient, basics, fields, profilePermissions, navigate, t])
 
   // Check if any profile permissions are configured
   const hasAuthConfigured = useMemo(

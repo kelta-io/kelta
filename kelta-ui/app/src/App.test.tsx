@@ -186,16 +186,6 @@ vi.mock('./context/PluginContext', () => ({
   },
 }))
 
-// Mock the Toast components
-vi.mock('./components/Toast', () => ({
-  ToastProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useToast: () => ({
-    toasts: [],
-    addToast: vi.fn(),
-    removeToast: vi.fn(),
-  }),
-}))
-
 // Mock the LiveRegion components
 vi.mock('./components/LiveRegion', () => ({
   LiveRegionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
