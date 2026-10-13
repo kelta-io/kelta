@@ -19,7 +19,9 @@ const CI = !!process.env.CI;
 //    localhost is not a secure context, so crypto.subtle is undefined and the SPA's PKCE
 //    code_challenge (AuthContext) throws before it can redirect to kelta-auth. Only full
 //    Chromium honours this flag (not the default headless shell) — real-sign-in.spec.ts
-//    switches to channel "chromium" when it is set.
+//    switches to channel "chromium" when it is set. kelta-auth's session cookie is
+//    `Secure; SameSite=None` on non-loopback hosts, so a spec that posts a kelta-auth form
+//    on its container origin (portal-login.spec.ts) needs that origin listed too.
 const browserArgs = [
   process.env.E2E_BROWSER_HOST_RULES &&
     `--host-resolver-rules=${process.env.E2E_BROWSER_HOST_RULES}`,
