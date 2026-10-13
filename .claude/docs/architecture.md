@@ -67,10 +67,33 @@ Order values below are the live `getOrder()` returns from source (lower runs fir
 | 9000 | QueryBracketEncodingFilter | Percent-encode literal `[`/`]` in the query so Spring Cloud Gateway forwards the rest of it verbatim (see below) |
 
 Cross-cutting (off main path): `ObservabilityContextFilter (-90)`, `HttpBodyCaptureFilter
-(-80)`, `SystemCollectionResponseCacheFilter (-10)`, `RequestLoggingFilter (MAX)`. `?include=`
+(-80)`, `SystemCollectionResponseCaptureFilter (-10)` + `SystemCollectionResponseCacheFilter (10)`
+(the system-collection response cache, below), `RequestLoggingFilter (MAX)`. `?include=`
 resolution is done in the worker by `JsonApiIncludeResolver` (runtime-core `router` package), not a
 numbered filter; read-side record authorization and FLS of included resources are enforced in the
 worker (`CerbosRecordAuthorizationAdvice`, `CerbosFieldSecurityAdvice`), not the gateway.
+
+**System-collection response cache.** GETs of the hot metadata collections in
+`SystemCollectionResponseCacheFilter.CACHEABLE_COLLECTIONS` (ui-pages/menus, collections, fields,
+tenants, oidc-providers, picklists, layouts, list-views, profiles) are cached in the gateway
+(`GatewayCacheManager`, Caffeine, 10 min, 10k entries) under
+`<tenant>:<caller>:<path>[?<query>]`. Two filters, because of ordering:
+- **Lookup** (`SystemCollectionResponseCacheFilter`, 10) runs **after** `RouteAuthorizationFilter`
+  (0), so a hit is still authorized for its caller, and keys on the request as authorization
+  forwards it (the narrowed `/api/tenants` view). The `<caller>` segment is a SHA-256 of every
+  principal attribute the worker can decide on (tenant, user id, username, profile, groups,
+  `user_type`, connected app + scopes, geo country), or `anonymous` — the worker filters these
+  responses per caller (record authorization incl. `included[]`, FLS, record shares), so an entry
+  is only ever served to the caller it was fetched for. A miss records the key on the exchange.
+- **Capture** (`SystemCollectionResponseCaptureFilter`, -10) installs the response decorator: it
+  must sit before `NettyWriteResponseFilter` (-1), which writes the routed body to the response
+  of the exchange it received. It stores a 200 only when the lookup recorded a key, so a refused
+  or cache-served request is never stored.
+- Eviction: a POST/PUT/PATCH/DELETE on a cacheable collection (after authorization) and the NATS
+  listeners (`SystemCollectionRouteListener`, `LayoutCacheInvalidationListener`) evict by
+  collection name — `evictSystemCollectionResponses` matches `/api/<name>` anywhere in the key,
+  which covers every caller's entry. Pinned by `SystemCollectionResponseCacheChainTest` (real
+  `RouteAuthorizationFilter` in gateway order) and `SystemCollectionResponseCacheScenarioTest`.
 
 **Span body capture.** `HttpBodyCaptureFilter` (gateway) and `SpanBodyEnrichmentFilter` (worker)
 record `http.request.body` / `http.response.body` span attributes for JSON bodies only, after

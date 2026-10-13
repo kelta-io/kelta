@@ -75,7 +75,7 @@ public class GatewayCacheManager {
     private final Cache<String, TenantIpConfig> tenantIpConfigCache; // tenantId → IP allowlist config
     private final Cache<String, String> customDomainCache; // domain → tenantSlug
     private final Cache<String, String> guestProfileCache; // tenantId → guest profileId
-    private final Cache<String, byte[]> systemCollectionResponseCache; // tenantId:path → response body
+    private final Cache<String, byte[]> systemCollectionResponseCache; // tenantId:caller:path → response body
     private final WebClient webClient;
 
     public GatewayCacheManager(

@@ -23,7 +23,9 @@ Client Request
 
 Order values are the live `getOrder()` returns from each filter (lower runs first).
 Cross-cutting filters not on the main path: `ObservabilityContextFilter (-90)`,
-`HttpBodyCaptureFilter (-80)`, `SystemCollectionResponseCacheFilter (-10)`,
+`HttpBodyCaptureFilter (-80)`, `SystemCollectionResponseCaptureFilter (-10)` +
+`SystemCollectionResponseCacheFilter (10)` (system-collection response cache, keyed per caller and
+looked up after route authorization — see `.claude/docs/architecture.md`),
 `RequestLoggingFilter (Integer.MAX_VALUE)`. JSON:API `?include=` resolution is done by
 `IncludeResolver` (`jsonapi` package) during response processing — it is **not** a numbered
 filter. Response field-level security (stripping HIDDEN fields) is enforced in the
