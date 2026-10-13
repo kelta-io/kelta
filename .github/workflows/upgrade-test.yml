@@ -60,7 +60,8 @@ jobs:
       # CI-only literals. The first is applied once, on the release's first boot, with a forced
       # change to the second; HEAD must still accept the second after the upgrade.
       KELTA_BOOTSTRAP_ADMIN_PASSWORD: ci-bootstrap-admin-secret
-      ADMIN_PASSWORD: ci-upgrade-admin-secret
+      # Meets the default password policy (set through the forced change).
+      ADMIN_PASSWORD: ci-upgrade-Kp7-Wq3-Zt9
     steps:
       - name: Checkout code (full history + tags, for the release lookup)
         uses: actions/checkout@v6

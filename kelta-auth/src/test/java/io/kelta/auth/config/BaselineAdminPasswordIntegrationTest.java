@@ -6,7 +6,9 @@ import com.zaxxer.hikari.HikariDataSource;
 import io.kelta.auth.controller.ForcePasswordChangeController;
 import io.kelta.auth.controller.PasswordController;
 import io.kelta.auth.model.KeltaUserDetails;
+import io.kelta.auth.service.AuthDomainResolver;
 import io.kelta.auth.service.PasswordPolicyService;
+import io.kelta.auth.service.PasswordResetService;
 import io.kelta.auth.service.WorkerClient;
 import io.kelta.auth.service.KeltaUserDetailsService;
 import io.kelta.auth.session.UserSessionRevoker;
@@ -179,6 +181,23 @@ class BaselineAdminPasswordIntegrationTest {
                 .toList();
     }
 
+    private String latestHistoryHash() {
+        return admin.queryForObject("SELECT password_hash FROM password_history WHERE user_id = ? "
+                + "ORDER BY created_at DESC LIMIT 1", String.class, ADMIN_USER_ID);
+    }
+
+    /** The tenant password policy over the real schema (no dictionary file loaded here). */
+    private PasswordPolicyService policies() {
+        return new PasswordPolicyService(app, ENCODER, Mockito.mock(WorkerClient.class), new AuthProperties());
+    }
+
+    private PasswordController passwordController(UserSessionRevoker revoker) {
+        PasswordPolicyService policies = policies();
+        return new PasswordController(app, ENCODER, policies, revoker, new PasswordResetService(app, ENCODER,
+                policies, revoker, Mockito.mock(WorkerClient.class), Mockito.mock(AuthDomainResolver.class),
+                new AuthProperties(), Runnable::run));
+    }
+
     private List<ILoggingEvent> warnings() {
         return initializerEvents().stream().filter(e -> e.getLevel() == Level.WARN).toList();
     }
@@ -194,8 +213,7 @@ class BaselineAdminPasswordIntegrationTest {
     void passwordEndpointsOnPostgres() {
         boot("Initial-Value-1a2b3c");
         UserSessionRevoker revoker = Mockito.mock(UserSessionRevoker.class);
-        PasswordController controller = new PasswordController(app, ENCODER, Mockito.mock(WorkerClient.class),
-                Mockito.mock(PasswordPolicyService.class), revoker, new AuthProperties());
+        PasswordController controller = passwordController(revoker);
         KeltaUserDetails user = new KeltaUserDetails(ADMIN_USER_ID, ADMIN_EMAIL, PLATFORM_TENANT_ID, null,
                 null, "Admin", null, true, false, true);
         Authentication signedIn = UsernamePasswordAuthenticationToken.authenticated(user, null, user.getAuthorities());
@@ -211,7 +229,8 @@ class BaselineAdminPasswordIntegrationTest {
         assertThat(credential().get("force_change_on_login")).isEqualTo(false);
         Mockito.verify(revoker).signOutElsewhere(ADMIN_USER_ID, sessionId);
 
-        assertThat(controller.requestPasswordReset(new PasswordController.ResetRequestBody(ADMIN_EMAIL))
+        assertThat(controller.requestPasswordReset(new PasswordController.ResetRequestBody(ADMIN_EMAIL),
+                new MockHttpServletRequest("POST", "/auth/password/reset-request"))
                 .getStatusCode().value()).isEqualTo(200);
         String token = admin.queryForObject("SELECT reset_token FROM user_credential WHERE user_id = ?",
                 String.class, ADMIN_USER_ID);
@@ -221,6 +240,20 @@ class BaselineAdminPasswordIntegrationTest {
         assertThat(reset.getStatusCode().value()).as("%s", reset.getBody()).isEqualTo(200);
         assertThat(signIn("Reset-Value-7g8h9i").isAuthenticated()).isTrue();
         Mockito.verify(revoker).signOutElsewhere(ADMIN_USER_ID, null);
+        assertThat(latestHistoryHash()).as("the reset is recorded in the history")
+                .isEqualTo(credential().get("password_hash"));
+
+        // A password in the history is refused, and the token stays usable.
+        controller.requestPasswordReset(new PasswordController.ResetRequestBody(ADMIN_EMAIL),
+                new MockHttpServletRequest("POST", "/auth/password/reset-request"));
+        String again = admin.queryForObject("SELECT reset_token FROM user_credential WHERE user_id = ?",
+                String.class, ADMIN_USER_ID);
+        var reused = controller.resetPassword(new PasswordController.ResetPasswordRequest(again, "Changed-Value-4d5e6f"),
+                new MockHttpServletRequest("POST", "/auth/password/reset"));
+        assertThat(reused.getStatusCode().value()).isEqualTo(400);
+        assertThat(reused.getBody()).containsEntry("error", "Password was recently used");
+        assertThat(admin.queryForObject("SELECT reset_token FROM user_credential WHERE user_id = ?",
+                String.class, ADMIN_USER_ID)).isEqualTo(again);
     }
 
     @Test
@@ -260,7 +293,7 @@ class BaselineAdminPasswordIntegrationTest {
             assertThat(session.getAttribute(ForcePasswordChangeController.SESSION_ATTR_USER_ID)).isEqualTo(ADMIN_USER_ID);
             assertThat(session.getAttribute(ForcePasswordChangeController.SESSION_ATTR_TENANT_ID))
                     .isEqualTo(PLATFORM_TENANT_ID);
-            String view = new ForcePasswordChangeController(app, ENCODER, revoker).changePassword(
+            String view = new ForcePasswordChangeController(app, ENCODER, revoker, policies()).changePassword(
                     shared, "Chosen-In-Tenant-A-77", "Chosen-In-Tenant-A-77", session, new ExtendedModelMap());
 
             assertThat(view).isEqualTo("redirect:/login?passwordChanged");
@@ -272,9 +305,9 @@ class BaselineAdminPasswordIntegrationTest {
             Mockito.verify(revoker, Mockito.never()).signOutElsewhere(Mockito.eq(otherUser), Mockito.any());
 
             // Email-link reset: one token per account; using one resets only that account.
-            PasswordController passwords = new PasswordController(app, ENCODER, Mockito.mock(WorkerClient.class),
-                    Mockito.mock(PasswordPolicyService.class), revoker, new AuthProperties());
-            assertThat(passwords.requestPasswordReset(new PasswordController.ResetRequestBody(ADMIN_EMAIL))
+            PasswordController passwords = passwordController(revoker);
+            assertThat(passwords.requestPasswordReset(new PasswordController.ResetRequestBody(ADMIN_EMAIL),
+                    new MockHttpServletRequest("POST", "/auth/password/reset-request"))
                     .getStatusCode().value()).isEqualTo(200);
             String tokenA = admin.queryForObject("SELECT reset_token FROM user_credential WHERE user_id = ?",
                     String.class, ADMIN_USER_ID);
@@ -359,10 +392,10 @@ class BaselineAdminPasswordIntegrationTest {
         session.setAttribute(ForcePasswordChangeController.SESSION_ATTR_EMAIL, ADMIN_EMAIL);
         session.setAttribute(ForcePasswordChangeController.SESSION_ATTR_USER_ID, ADMIN_USER_ID);
         session.setAttribute(ForcePasswordChangeController.SESSION_ATTR_TENANT_ID, PLATFORM_TENANT_ID);
-        String view = new ForcePasswordChangeController(app, ENCODER, Mockito.mock(UserSessionRevoker.class)).changePassword(
-                generated, "Chosen-By-The-Admin-42", "Chosen-By-The-Admin-42", session, new ExtendedModelMap());
+        String view = new ForcePasswordChangeController(app, ENCODER, Mockito.mock(UserSessionRevoker.class), policies()).changePassword(
+                generated, "Chosen-By-The-Owner-42", "Chosen-By-The-Owner-42", session, new ExtendedModelMap());
         assertThat(view).isEqualTo("redirect:/login?passwordChanged");
-        assertThat(signIn("Chosen-By-The-Admin-42").isAuthenticated()).isTrue();
+        assertThat(signIn("Chosen-By-The-Owner-42").isAuthenticated()).isTrue();
         assertThatThrownBy(() -> signIn(generated)).isInstanceOf(BadCredentialsException.class);
 
         // Second boot: the hash is no longer the baseline, so nothing is printed.

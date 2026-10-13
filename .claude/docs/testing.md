@@ -64,7 +64,10 @@ with `password` any more. `KeltaStack` starts kelta-auth with `KELTA_BOOTSTRAP_A
 `AuthFixture.loginAsAdmin()` for the `default` tenant calls `ensurePlatformAdminPassword()`, which
 completes that change once per JVM through the real `/login` → `/change-password` form (CSRF token
 scraped from the page, cookies carried by hand) and from then on signs in with
-`AuthFixture.PLATFORM_ADMIN_PASSWORD`. There is **no** test-only switch that skips
+`AuthFixture.PLATFORM_ADMIN_PASSWORD`. `/change-password` applies the tenant password policy, so
+that value — and every password CI sets through `ci/admin-first-sign-in.sh` — must pass the default
+policy: no word from `common-passwords.txt`, nothing of the admin's name or email (`admin`,
+`system`). There is **no** test-only switch that skips
 `force_change_on_login`, and none should be added. Scenarios that seed their *own* users with a
 BCrypt(`password`) hash (`DelegatedAdminScenarioTest`, `UserPreferenceScenarioTest`, …) are
 unaffected. CI's compose stacks do the same with `ci/admin-first-sign-in.sh`: the `e2e` job sets

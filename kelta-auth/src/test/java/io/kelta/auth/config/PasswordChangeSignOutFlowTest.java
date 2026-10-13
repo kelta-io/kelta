@@ -2,7 +2,9 @@ package io.kelta.auth.config;
 
 import io.kelta.auth.controller.PasswordController;
 import io.kelta.auth.model.KeltaUserDetails;
+import io.kelta.auth.service.AuthDomainResolver;
 import io.kelta.auth.service.PasswordPolicyService;
+import io.kelta.auth.service.PasswordResetService;
 import io.kelta.auth.service.WorkerClient;
 import io.kelta.auth.session.InMemoryIndexedSessionRepository;
 import io.kelta.auth.session.UserSessionRevoker;
@@ -291,8 +293,11 @@ class PasswordChangeSignOutFlowTest {
         @Bean
         PasswordController passwordController(JdbcTemplate jdbcTemplate, PasswordEncoder passwordEncoder,
                                               UserSessionRevoker revoker, AuthProperties properties) {
-            return new PasswordController(jdbcTemplate, passwordEncoder, Mockito.mock(WorkerClient.class),
-                    Mockito.mock(PasswordPolicyService.class), revoker, properties);
+            PasswordPolicyService policies = Mockito.mock(PasswordPolicyService.class);
+            return new PasswordController(jdbcTemplate, passwordEncoder, policies, revoker,
+                    new PasswordResetService(jdbcTemplate, passwordEncoder, policies, revoker,
+                            Mockito.mock(WorkerClient.class), Mockito.mock(AuthDomainResolver.class), properties,
+                            Runnable::run));
         }
     }
 }

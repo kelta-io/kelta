@@ -1,10 +1,9 @@
 package io.kelta.auth.controller;
 
 import io.kelta.auth.TestFixtures;
-import io.kelta.auth.config.AuthProperties;
 import io.kelta.auth.model.KeltaUserDetails;
 import io.kelta.auth.service.PasswordPolicyService;
-import io.kelta.auth.service.WorkerClient;
+import io.kelta.auth.service.PasswordResetService;
 import io.kelta.auth.session.UserSessionRevoker;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -21,10 +20,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import java.util.HashMap;
-
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -44,7 +42,7 @@ class PasswordControllerTest {
     private PasswordEncoder passwordEncoder;
 
     @Mock
-    private WorkerClient workerClient;
+    private PasswordResetService resetService;
 
     @Mock
     private PasswordPolicyService policyService;
@@ -65,9 +63,7 @@ class PasswordControllerTest {
 
     @BeforeEach
     void setUp() {
-        AuthProperties props = new AuthProperties();
-        props.setUiBaseUrl("https://app.kelta.io");
-        controller = new PasswordController(jdbcTemplate, passwordEncoder, workerClient, policyService, sessionRevoker, props);
+        controller = new PasswordController(jdbcTemplate, passwordEncoder, policyService, sessionRevoker, resetService);
     }
 
     @Nested
@@ -183,41 +179,14 @@ class PasswordControllerTest {
     class RequestPasswordReset {
 
         @Test
-        @DisplayName("always returns success to prevent email enumeration")
+        @DisplayName("hands the address to the reset service and always answers the same")
         void alwaysReturnsSuccess() {
-            when(jdbcTemplate.queryForList(contains("FROM platform_user"), eq("nonexistent@test.com")))
-                    .thenReturn(List.of());
-
-            var request = new PasswordController.ResetRequestBody("nonexistent@test.com");
-            ResponseEntity<Map<String, String>> result = controller.requestPasswordReset(request);
+            var result = controller.requestPasswordReset(
+                    new PasswordController.ResetRequestBody("someone@test.com"), httpRequest);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-            verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
-            verifyNoInteractions(workerClient);
-        }
-
-        @Test
-        @DisplayName("the same address in two tenants: one token per user, each stored on that user only")
-        void oneTokenPerAccount() {
-            when(jdbcTemplate.queryForList(contains("FROM platform_user"), eq("shared@test.com")))
-                    .thenReturn(List.of(
-                            Map.of("id", "user-a", "tenant_id", "tenant-a", "first_name", "A", "tenant_name", "Tenant A"),
-                            Map.of("id", "user-b", "tenant_id", "tenant-b", "first_name", "B", "tenant_name", "Tenant B")));
-            when(jdbcTemplate.update(contains("reset_token = ?"), anyString(), any(Timestamp.class),
-                    any(Timestamp.class), anyString())).thenReturn(1);
-
-            controller.requestPasswordReset(new PasswordController.ResetRequestBody("shared@test.com"));
-
-            var tokens = org.mockito.ArgumentCaptor.forClass(Object.class);
-            verify(jdbcTemplate).update(contains("WHERE user_id = ?"), tokens.capture(), any(Timestamp.class),
-                    any(Timestamp.class), eq("user-a"));
-            verify(jdbcTemplate).update(contains("WHERE user_id = ?"), tokens.capture(), any(Timestamp.class),
-                    any(Timestamp.class), eq("user-b"));
-            assertThat(tokens.getAllValues()).doesNotHaveDuplicates();
-            verify(workerClient).sendTemplateEmail(eq("tenant-a"), eq("shared@test.com"), eq("user.password_reset"),
-                    anyMap(), eq("PASSWORD_RESET"), eq("user-a"));
-            verify(workerClient).sendTemplateEmail(eq("tenant-b"), eq("shared@test.com"), eq("user.password_reset"),
-                    anyMap(), eq("PASSWORD_RESET"), eq("user-b"));
+            assertThat(result.getBody()).containsEntry("status", "ok");
+            verify(resetService).requestReset("someone@test.com", httpRequest);
         }
     }
 
@@ -225,104 +194,41 @@ class PasswordControllerTest {
     @DisplayName("resetPassword")
     class ResetPassword {
 
-        @Test
-        @DisplayName("returns 400 for invalid token")
-        void returns400ForInvalidToken() {
-            when(jdbcTemplate.queryForList(contains("reset_token"), eq("bad-token")))
-                    .thenReturn(List.of());
+        @BeforeEach
+        void session() {
+            lenient().when(httpRequest.getSession(false)).thenReturn(httpSession);
+            lenient().when(httpSession.getId()).thenReturn("current-session");
+        }
 
-            var request = new PasswordController.ResetPasswordRequest("bad-token", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.resetPassword(request, httpRequest);
+        private ResponseEntity<Map<String, String>> reset(PasswordResetService.ResetResult result) {
+            when(resetService.reset("the-token", "a-new-pass-phrase", "current-session")).thenReturn(result);
+            return controller.resetPassword(
+                    new PasswordController.ResetPasswordRequest("the-token", "a-new-pass-phrase"), httpRequest);
+        }
+
+        @Test
+        @DisplayName("200 when the password was reset")
+        void done() {
+            assertThat(reset(new PasswordResetService.ResetResult.Done("tenant-a")).getStatusCode())
+                    .isEqualTo(HttpStatus.OK);
+        }
+
+        @Test
+        @DisplayName("400 for a token that is not live")
+        void invalidToken() {
+            var result = reset(new PasswordResetService.ResetResult.InvalidToken());
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
             assertThat(result.getBody().get("error")).contains("expired");
         }
 
         @Test
-        @DisplayName("returns 400 for expired token")
-        void returns400ForExpiredToken() {
-            when(jdbcTemplate.queryForList(contains("reset_token"), eq("expired-token")))
-                    .thenReturn(List.of(Map.of(
-                            "user_id", "user-1",
-                            "reset_token_expires_at", Timestamp.from(Instant.now().minusSeconds(3600))
-                    )));
-
-            var request = new PasswordController.ResetPasswordRequest("expired-token", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.resetPassword(request, httpRequest);
+        @DisplayName("400 with the policy's reasons for a password the tenant does not accept")
+        void rejected() {
+            var result = reset(new PasswordResetService.ResetResult.Rejected("Password is too common"));
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        }
-
-        @Test
-        @DisplayName("returns 400 (no NPE) when stored expires_at is NULL")
-        void returns400WhenExpiresAtNull() {
-            // A reset_token row with null expires_at is a DB invariant violation;
-            // we must treat it as invalid rather than NPE on the cast/.toInstant().
-            Map<String, Object> row = new HashMap<>();
-            row.put("user_id", "user-1");
-            row.put("reset_token_expires_at", null);
-            when(jdbcTemplate.queryForList(contains("reset_token"), eq("null-expires-token")))
-                    .thenReturn(List.of(row));
-
-            var request = new PasswordController.ResetPasswordRequest("null-expires-token", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.resetPassword(request, httpRequest);
-
-            assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-            assertThat(result.getBody().get("error")).contains("expired");
-            verify(jdbcTemplate, never()).update(contains("password_hash = ?"),
-                    any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("resets password with valid token")
-        void resetsPasswordWithValidToken() {
-            when(jdbcTemplate.queryForList(contains("reset_token"), eq("valid-token")))
-                    .thenReturn(List.of(Map.of(
-                            "user_id", "user-1",
-                            "reset_token_expires_at", Timestamp.from(Instant.now().plusSeconds(3600))
-                    )));
-            when(passwordEncoder.encode("newpassword123")).thenReturn("$2a$newhash");
-            when(jdbcTemplate.update(contains("password_hash = ?"), eq("$2a$newhash"), any(Timestamp.class),
-                    any(Timestamp.class), eq("user-1"), eq("valid-token"))).thenReturn(1);
-
-            var request = new PasswordController.ResetPasswordRequest("valid-token", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.resetPassword(request, httpRequest);
-
-            assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-            verify(jdbcTemplate).update(contains("WHERE user_id = ? AND reset_token = ?"),
-                    eq("$2a$newhash"), any(Timestamp.class), any(Timestamp.class), eq("user-1"), eq("valid-token"));
-            verify(sessionRevoker).signOutElsewhere("user-1", null);
-        }
-
-        @Test
-        @DisplayName("a token matching more than one credential resets nobody")
-        void ambiguousTokenIsRefused() {
-            Timestamp future = Timestamp.from(Instant.now().plusSeconds(3600));
-            when(jdbcTemplate.queryForList(contains("reset_token"), eq("dup-token")))
-                    .thenReturn(List.of(Map.of("user_id", "user-1", "reset_token_expires_at", future),
-                            Map.of("user_id", "user-2", "reset_token_expires_at", future)));
-
-            var result = controller.resetPassword(
-                    new PasswordController.ResetPasswordRequest("dup-token", "newpassword123"), httpRequest);
-
-            assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-            verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
-            verifyNoInteractions(sessionRevoker);
-        }
-
-        @Test
-        @DisplayName("a token used meanwhile (no row updated) is refused and signs nobody out")
-        void consumedTokenIsRefused() {
-            when(jdbcTemplate.queryForList(contains("reset_token"), eq("used-token")))
-                    .thenReturn(List.of(Map.of("user_id", "user-1",
-                            "reset_token_expires_at", Timestamp.from(Instant.now().plusSeconds(3600)))));
-            when(passwordEncoder.encode("newpassword123")).thenReturn("$2a$newhash");
-
-            var result = controller.resetPassword(
-                    new PasswordController.ResetPasswordRequest("used-token", "newpassword123"), httpRequest);
-
-            assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-            verifyNoInteractions(sessionRevoker);
+            assertThat(result.getBody()).containsEntry("error", "Password is too common");
         }
     }
 }

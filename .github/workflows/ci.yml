@@ -630,7 +630,9 @@ jobs:
       # (docker-compose.yml passes it through); "Complete platform admin first sign-in"
       # changes it to the second, which Playwright signs in with.
       KELTA_BOOTSTRAP_ADMIN_PASSWORD: ci-bootstrap-admin-secret
-      E2E_ADMIN_PASSWORD: ci-e2e-admin-secret
+      # Set through the forced change, so it must meet the default password policy (no dictionary
+      # word, nothing of the admin's name or email — kelta-auth PasswordPolicyService).
+      E2E_ADMIN_PASSWORD: ci-e2e-Kp7-Wq3-Zt9
     steps:
       # A baseline-regeneration dispatch builds and tests the target branch; on every other
       # event update_snapshots_ref is empty and checkout keeps its default (the PR merge ref).
@@ -1007,7 +1009,8 @@ jobs:
       COMPOSE_FILE: docker-compose.yml:docker-compose.build.yml:docker-compose.ci.yml:docker-compose.ci-build.yml
       BUILDX_BUILDER: kelta-ci
       KELTA_BOOTSTRAP_ADMIN_PASSWORD: ci-bootstrap-admin-secret
-      ADMIN_PASSWORD: ci-templates-admin-secret
+      # Meets the default password policy (set through the forced change).
+      ADMIN_PASSWORD: ci-templates-Kp7-Wq3-Zt9
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

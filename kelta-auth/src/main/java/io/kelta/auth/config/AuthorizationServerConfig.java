@@ -156,6 +156,12 @@ public class AuthorizationServerConfig {
                         .requestMatchers(
                                 "/login",
                                 "/change-password",
+                                // Signed-out password reset (PasswordResetService): the pages,
+                                // and the JSON endpoints for an external frontend.
+                                "/forgot-password",
+                                "/reset-password",
+                                "/auth/password/reset-request",
+                                "/auth/password/reset",
                                 "/mfa-challenge",
                                 "/mfa-challenge/recovery",
                                 "/mfa-setup",
@@ -237,7 +243,12 @@ public class AuthorizationServerConfig {
                                 "/portal/api/login/request", "/portal/api/login/verify",
                                 // Easy to miss: permitAll alone is not enough — without
                                 // a CSRF exemption this POST 403s for every caller.
-                                "/portal/api/signup")
+                                "/portal/api/signup",
+                                // JSON for a frontend without this server's session: the
+                                // request answers the same for any address and the reset needs
+                                // the emailed token; both are rate limited per IP. The
+                                // /forgot-password and /reset-password forms keep CSRF.
+                                "/auth/password/reset-request", "/auth/password/reset")
                 );
 
         // Enable federated OAuth2 login only when OIDC federation can run: FederationConfig

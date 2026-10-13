@@ -2,6 +2,7 @@ package io.kelta.auth.controller;
 
 import io.kelta.auth.TestFixtures;
 import io.kelta.auth.model.KeltaUserDetails;
+import io.kelta.auth.service.PasswordPolicyService;
 import io.kelta.auth.session.UserSessionRevoker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -21,6 +22,7 @@ import org.springframework.ui.Model;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -36,6 +38,7 @@ class ForcePasswordChangeControllerTest {
 
     @Mock private JdbcTemplate jdbcTemplate;
     @Mock private UserSessionRevoker sessionRevoker;
+    @Mock private PasswordPolicyService policyService;
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private ForcePasswordChangeController controller;
@@ -43,7 +46,9 @@ class ForcePasswordChangeControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new ForcePasswordChangeController(jdbcTemplate, passwordEncoder, sessionRevoker);
+        controller = new ForcePasswordChangeController(jdbcTemplate, passwordEncoder, sessionRevoker, policyService);
+        lenient().when(policyService.validatePassword(anyString(), any(), any(), anyString())).thenReturn(List.of());
+        lenient().when(policyService.checkHistory(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
         session = new MockHttpSession();
     }
 
@@ -57,7 +62,7 @@ class ForcePasswordChangeControllerTest {
     private void account(String currentPassword, boolean flagged) {
         when(jdbcTemplate.queryForList(contains("FROM platform_user"), eq(USER_ID), eq(TENANT_ID)))
                 .thenReturn(List.of(Map.of("password_hash", passwordEncoder.encode(currentPassword),
-                        "force_change_on_login", flagged)));
+                        "force_change_on_login", flagged, "email", EMAIL, "first_name", "Test", "last_name", "User")));
     }
 
     @Nested
@@ -116,11 +121,38 @@ class ForcePasswordChangeControllerTest {
         }
 
         @Test
-        void shouldRejectShortPassword() {
+        @DisplayName("a password the tenant's policy refuses is not set; the reasons are shown")
+        void shouldRejectAPolicyViolation() {
             pendingChange();
+            account("correct-password", true);
+            when(policyService.validatePassword("password123", EMAIL, "Test User", TENANT_ID))
+                    .thenReturn(List.of("Password is too common", "Password must contain at least one uppercase letter"));
             Model model = new ConcurrentModel();
-            assertThat(controller.changePassword("old", "short", "short", session, model)).isEqualTo("change-password");
-            assertThat(model.getAttribute("error")).isEqualTo("New password must be at least 8 characters.");
+
+            assertThat(controller.changePassword("correct-password", "password123", "password123", session, model))
+                    .isEqualTo("change-password");
+            assertThat(model.getAttribute("error"))
+                    .isEqualTo("Password is too common; Password must contain at least one uppercase letter");
+            verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
+            verify(policyService, never()).saveToHistory(any(), any(), any());
+            verifyNoInteractions(sessionRevoker);
+            assertThat(session.getAttribute(ForcePasswordChangeController.SESSION_ATTR_USER_ID))
+                    .as("still pending").isEqualTo(USER_ID);
+        }
+
+        @Test
+        @DisplayName("a recently used password is not set")
+        void shouldRejectARecentlyUsedPassword() {
+            pendingChange();
+            account("correct-password", true);
+            when(policyService.checkHistory(USER_ID, "an-old-passphrase", TENANT_ID))
+                    .thenReturn(Optional.of("Password was recently used"));
+            Model model = new ConcurrentModel();
+
+            assertThat(controller.changePassword("correct-password", "an-old-passphrase", "an-old-passphrase",
+                    session, model)).isEqualTo("change-password");
+            assertThat(model.getAttribute("error")).isEqualTo("Password was recently used");
+            verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
         }
 
         @Test
@@ -178,6 +210,9 @@ class ForcePasswordChangeControllerTest {
                     new ConcurrentModel());
 
             assertThat(view).isEqualTo("redirect:/login?passwordChanged");
+            verify(policyService).validatePassword("newpassword", EMAIL, "Test User", TENANT_ID);
+            verify(policyService).saveToHistory(eq(USER_ID), argThat(hash -> passwordEncoder.matches("newpassword", hash)),
+                    eq(TENANT_ID));
             verify(jdbcTemplate).update(argThat((String sql) -> sql.contains("WHERE user_id = ?")
                             && sql.contains("pu.tenant_id = ?") && sql.contains("force_change_on_login = true")),
                     anyString(), any(Timestamp.class), any(Timestamp.class), eq(USER_ID), eq(TENANT_ID));
