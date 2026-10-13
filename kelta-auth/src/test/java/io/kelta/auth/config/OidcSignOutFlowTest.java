@@ -11,6 +11,14 @@ import io.kelta.auth.model.KeltaUserDetails;
 import io.kelta.auth.service.AuthDomainResolver;
 import io.kelta.auth.service.PasswordPolicyService;
 import io.kelta.auth.service.WorkerClient;
+import io.kelta.auth.session.InMemoryIndexedSessionRepository;
+import io.kelta.auth.session.SerializedTypes;
+import io.kelta.auth.session.SessionAttributeSerializer;
+import io.kelta.auth.session.SessionCookieSerializer;
+import io.kelta.auth.session.SessionPrincipalIndexResolver;
+import io.kelta.auth.session.SignedInSessionTimeoutFilter;
+import io.kelta.auth.session.TenantScopedSessionRegistry;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,13 +26,13 @@ import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
 import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
@@ -48,8 +56,13 @@ import org.springframework.security.oauth2.server.authorization.settings.Authori
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.session.DelegatingIndexResolver;
+import org.springframework.session.MapSession;
+import org.springframework.session.web.http.CookieHttpSessionIdResolver;
+import org.springframework.session.web.http.SessionRepositoryFilter;
 import org.springframework.test.context.junit.jupiter.web.SpringJUnitWebConfig;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.cors.CorsConfiguration;
@@ -63,6 +76,7 @@ import javax.sql.DataSource;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Optional;
 import java.util.UUID;
@@ -86,16 +100,20 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * two instances did not compare equal, the ID token carried no {@code sid} while the end-session
  * endpoint still found the live session, and sign-out answered 400 ({@code invalid_token},
  * {@code sid}) without ending the session.
+ *
+ * <p>Sessions go through Spring Session's filter and the production cookie, value serializer,
+ * index and registry, over an in-memory store that keeps values serialized the way Redis does
+ * ({@link InMemoryIndexedSessionRepository}). The browser is a cookie jar ({@link Browser}).
  */
 @SpringJUnitWebConfig(OidcSignOutFlowTest.Config.class)
 @DisplayName("OIDC sign-out — full browser flow through the JDBC authorization store")
 class OidcSignOutFlowTest {
 
-    private static final String UI_ORIGIN = "http://app.example.test:8080";
-    private static final String TENANT_SLUG = "tenant-a";
-    private static final String CALLBACK = UI_ORIGIN + "/" + TENANT_SLUG + "/auth/callback";
-    private static final String USER = "user@example.test";
-    private static final String PASSWORD = "correct-horse-battery-staple";
+    static final String UI_ORIGIN = "http://app.example.test:8080";
+    static final String TENANT_SLUG = "tenant-a";
+    static final String CALLBACK = UI_ORIGIN + "/" + TENANT_SLUG + "/auth/callback";
+    static final String USER = "user@example.test";
+    static final String PASSWORD = "correct-horse-battery-staple";
 
     @Autowired
     private WebApplicationContext context;
@@ -103,30 +121,34 @@ class OidcSignOutFlowTest {
     @Autowired
     private SessionRegistry sessionRegistry;
 
+    @Autowired
+    private InMemoryIndexedSessionRepository sessions;
+
+    @Autowired
+    private SerializedTypes.Recording sessionSerializer;
+
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        mvc = Config.mockMvc(context);
     }
 
     @Test
     @DisplayName("the issued ID token carries the session's sid, and sign-out ends that session")
     void signOutEndsTheSessionThatSignedIn() throws Exception {
-        MockHttpSession session = new MockHttpSession();
-        String idToken = signIn(session);
-        String sessionId = session.getId();
+        Browser browser = new Browser();
+        String idToken = signIn(browser);
+        String sessionId = browser.sessionId();
 
         String target = UI_ORIGIN + "/" + TENANT_SLUG + "?logged_out=true";
-        MockHttpServletResponse response = mvc.perform(
+        MockHttpServletResponse response = browser.send(mvc,
                         get("/connect/logout?id_token_hint={idToken}&post_logout_redirect_uri={uri}",
-                                idToken, target)
-                                .session(session))
-                .andReturn().getResponse();
+                                idToken, target));
 
         assertThat(response.getStatus()).as("%s", response.getErrorMessage()).isEqualTo(302);
         assertThat(response.getRedirectedUrl()).isEqualTo(target);
-        assertThat(session.isInvalid()).isTrue();
+        assertThat(sessions.findById(sessionId)).as("session after sign-out").isNull();
         assertThat(SignedJWT.parse(idToken).getJWTClaimsSet().getStringClaim("sid"))
                 .as("sid claim of the issued ID token")
                 .isEqualTo(sha256(sessionId));
@@ -135,62 +157,85 @@ class OidcSignOutFlowTest {
     @Test
     @DisplayName("an ID token issued to another session of the same user is rejected")
     void idTokenFromAnotherSessionIsRejected() throws Exception {
-        MockHttpSession first = new MockHttpSession();
+        Browser first = new Browser();
         String firstIdToken = signIn(first);
-        MockHttpSession second = new MockHttpSession();
+        Browser second = new Browser();
         signIn(second);
 
-        MockHttpServletResponse response = mvc.perform(
+        MockHttpServletResponse response = second.send(mvc,
                         get("/connect/logout?id_token_hint={idToken}&post_logout_redirect_uri={uri}",
-                                firstIdToken, UI_ORIGIN + "/" + TENANT_SLUG + "?logged_out=true")
-                                .session(second))
-                .andReturn().getResponse();
+                                firstIdToken, UI_ORIGIN + "/" + TENANT_SLUG + "?logged_out=true"));
 
         assertThat(response.getStatus()).isEqualTo(400);
         assertThat(response.getErrorMessage()).contains("invalid_token").contains("sid");
-        assertThat(second.isInvalid()).isFalse();
+        assertThat(sessions.findById(second.sessionId())).isNotNull();
     }
 
     @Test
     @DisplayName("a session that signs in again silently gets an ID token naming itself, not a newer one")
     void silentReauthorizationNamesItsOwnSession() throws Exception {
-        MockHttpSession laptop = new MockHttpSession();
+        Browser laptop = new Browser();
         signIn(laptop);
-        MockHttpSession phone = new MockHttpSession();
+        Browser phone = new Browser();
         signIn(phone);
         // The registry orders sessions by a millisecond timestamp; keep the next request later.
         Thread.sleep(20);
         // A new tab on the laptop: kelta-auth still knows the session, so no login form.
         String idToken = authorize(laptop, false);
 
-        MockHttpServletResponse response = mvc.perform(
+        String laptopSession = laptop.sessionId();
+        MockHttpServletResponse response = laptop.send(mvc,
                         get("/connect/logout?id_token_hint={idToken}&post_logout_redirect_uri={uri}",
-                                idToken, UI_ORIGIN + "/" + TENANT_SLUG + "?logged_out=true")
-                                .session(laptop))
-                .andReturn().getResponse();
+                                idToken, UI_ORIGIN + "/" + TENANT_SLUG + "?logged_out=true"));
 
         assertThat(response.getStatus()).as("%s", response.getErrorMessage()).isEqualTo(302);
-        assertThat(laptop.isInvalid()).isTrue();
-        assertThat(phone.isInvalid()).isFalse();
+        assertThat(sessions.findById(laptopSession)).isNull();
+        assertThat(sessions.findById(phone.sessionId())).isNotNull();
     }
 
     @Test
     @DisplayName("each signed-in session is tracked once per user, not once per principal instance")
     void sessionsAreTrackedPerUser() throws Exception {
-        MockHttpSession first = new MockHttpSession();
+        Browser first = new Browser();
         signIn(first);
-        MockHttpSession second = new MockHttpSession();
+        Browser second = new Browser();
         signIn(second);
 
         KeltaUserDetails user = Config.user();
         assertThat(sessionRegistry.getAllSessions(user, false))
                 .extracting(info -> info.getSessionId())
-                .contains(first.getId(), second.getId());
+                .contains(first.sessionId(), second.sessionId());
+    }
+
+    @Test
+    @DisplayName("a session that has not signed in keeps the short idle timeout; signing in extends it")
+    void signingInExtendsTheIdleTimeout() throws Exception {
+        Browser browser = new Browser();
+        browser.send(mvc, get(URI.create(authorizeUrl("challenge"))).accept(MediaType.TEXT_HTML));
+        assertThat(sessions.storedMaxInactiveInterval(browser.sessionId()))
+                .as("before sign-in").isEqualTo(Config.DEFAULT_TIMEOUT);
+
+        signIn(browser);
+        assertThat(sessions.storedMaxInactiveInterval(browser.sessionId()))
+                .as("after sign-in").isEqualTo(Config.SIGNED_IN_TIMEOUT);
+    }
+
+    @Test
+    @DisplayName("every value the sign-in and sign-out flow stores is registered for native serialization")
+    void storedValuesAreRegisteredForNativeSerialization() throws Exception {
+        Browser browser = new Browser();
+        String idToken = signIn(browser);
+        browser.send(mvc, get("/connect/logout?id_token_hint={idToken}&post_logout_redirect_uri={uri}",
+                idToken, UI_ORIGIN + "/" + TENANT_SLUG + "?logged_out=true"));
+
+        assertThat(sessionSerializer.types()).isNotEmpty();
+        assertThat(SerializedTypes.missingSerializationHints(SerializedTypes.nativeHints(), sessionSerializer.types()))
+                .isEmpty();
     }
 
     /** Signs in with the login form; returns the issued ID token. */
-    private String signIn(MockHttpSession session) throws Exception {
-        return authorize(session, true);
+    private String signIn(Browser browser) throws Exception {
+        return authorize(browser, true);
     }
 
     /**
@@ -198,39 +243,25 @@ class OidcSignOutFlowTest {
      * jar; returns the issued ID token. The token request carries no session, as the SPA's
      * cross-origin token call does not.
      */
-    private String authorize(MockHttpSession session, boolean expectLoginForm) throws Exception {
+    private String authorize(Browser browser, boolean expectLoginForm) throws Exception {
         String verifier = UUID.randomUUID() + "-" + UUID.randomUUID();
-        String authorize = UriComponentsBuilder.fromPath("/oauth2/authorize")
-                .queryParam("response_type", "code")
-                .queryParam("client_id", "kelta-platform")
-                .queryParam("redirect_uri", CALLBACK)
-                .queryParam("scope", "openid profile email")
-                .queryParam("state", "state-1")
-                .queryParam("nonce", "nonce-1")
-                .queryParam("code_challenge", sha256(verifier))
-                .queryParam("code_challenge_method", "S256")
-                .encode().build().toUriString();
+        String authorize = authorizeUrl(sha256(verifier));
 
-        MockHttpServletResponse toCallback = mvc.perform(get(URI.create(authorize))
-                        .accept(MediaType.TEXT_HTML).session(session))
-                .andReturn().getResponse();
+        MockHttpServletResponse toCallback = browser.send(mvc, get(URI.create(authorize))
+                        .accept(MediaType.TEXT_HTML));
         if (expectLoginForm) {
             assertThat(toCallback.getStatus()).isEqualTo(302);
             assertThat(toCallback.getRedirectedUrl()).contains("/login");
 
-            MockHttpServletResponse loggedIn = mvc.perform(post("/login")
+            MockHttpServletResponse loggedIn = browser.send(mvc, post("/login")
                             .param("username", USER)
                             .param("password", PASSWORD)
-                            .with(csrf())
-                            .session(session))
-                    .andReturn().getResponse();
+                            .with(csrf()));
             assertThat(loggedIn.getStatus()).as("login").isEqualTo(302);
             String resumed = loggedIn.getRedirectedUrl();
             assertThat(resumed).contains("/oauth2/authorize");
 
-            toCallback = mvc.perform(get(URI.create(resumed))
-                            .accept(MediaType.TEXT_HTML).session(session))
-                    .andReturn().getResponse();
+            toCallback = browser.send(mvc, get(URI.create(resumed)).accept(MediaType.TEXT_HTML));
         }
         assertThat(toCallback.getStatus()).as("%s", toCallback.getErrorMessage()).isEqualTo(302);
         assertThat(toCallback.getRedirectedUrl()).startsWith(CALLBACK);
@@ -250,15 +281,134 @@ class OidcSignOutFlowTest {
                 .readTree(token.getContentAsString()).get("id_token").asString();
     }
 
-    private static String sha256(String value) throws Exception {
+    static String authorizeUrl(String codeChallenge) {
+        return UriComponentsBuilder.fromPath("/oauth2/authorize")
+                .queryParam("response_type", "code")
+                .queryParam("client_id", "kelta-platform")
+                .queryParam("redirect_uri", CALLBACK)
+                .queryParam("scope", "openid profile email")
+                .queryParam("state", "state-1")
+                .queryParam("nonce", "nonce-1")
+                .queryParam("code_challenge", codeChallenge)
+                .queryParam("code_challenge_method", "S256")
+                .encode().build().toUriString();
+    }
+
+    static String sha256(String value) throws Exception {
         byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.US_ASCII));
         return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
     }
 
+    /** A browser's cookie jar for the session cookie. */
+    static final class Browser {
+
+        private String cookie;
+
+        MockHttpServletResponse send(MockMvc mvc, MockHttpServletRequestBuilder request) throws Exception {
+            if (cookie != null) {
+                request.cookie(new Cookie(Config.COOKIE_NAME, cookie));
+            }
+            MockHttpServletResponse response = mvc.perform(request).andReturn().getResponse();
+            Cookie set = response.getCookie(Config.COOKIE_NAME);
+            if (set != null) {
+                cookie = set.getMaxAge() == 0 ? null : set.getValue();
+            }
+            return response;
+        }
+
+        String sessionId() {
+            assertThat(cookie).as("session cookie").isNotNull();
+            return new String(Base64.getDecoder().decode(cookie), StandardCharsets.UTF_8);
+        }
+    }
+
+    /**
+     * The server beans (filter chains, clients, JDBC authorization store) over an H2 database
+     * and an in-memory session store. {@link ServerBeans} alone is the part a test with another
+     * session store or database reuses.
+     */
+    @Configuration
+    @Import({ServerBeans.class, InMemorySessions.class})
+    static class Config {
+
+        static final String COOKIE_NAME = "kelta_auth_session";
+        static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(30);
+        static final Duration SIGNED_IN_TIMEOUT = Duration.ofHours(8);
+
+        /** A MockMvc with the session filters in front of Spring Security, as in the service. */
+        static MockMvc mockMvc(WebApplicationContext context) {
+            return MockMvcBuilders.webAppContextSetup(context)
+                    .addFilters(context.getBean(SessionRepositoryFilter.class),
+                            context.getBean(SignedInSessionTimeoutFilter.class))
+                    .apply(springSecurity())
+                    .build();
+        }
+
+        /** A fresh instance per lookup, as the JDBC user lookup returns one per login. */
+        static KeltaUserDetails user() {
+            return ServerBeans.user();
+        }
+
+        @Bean
+        DataSource dataSource() {
+            return new EmbeddedDatabaseBuilder()
+                    .setType(EmbeddedDatabaseType.H2)
+                    .generateUniqueName(true)
+                    .addScript("org/springframework/security/oauth2/server/authorization/oauth2-authorization-schema.sql")
+                    .build();
+        }
+
+        @Bean
+        JWKSource<SecurityContext> jwkSource() throws Exception {
+            return new ImmutableJWKSet<>(new JWKSet(new RSAKeyGenerator(2048).keyID("test").generate()));
+        }
+    }
+
+    /** The session store, cookie and registry the service uses, over an in-memory store. */
+    @Configuration
+    static class InMemorySessions {
+
+        @Bean
+        SerializedTypes.Recording sessionSerializer() {
+            return new SerializedTypes.Recording(new SessionAttributeSerializer(getClass().getClassLoader()));
+        }
+
+        @Bean
+        InMemoryIndexedSessionRepository sessionRepository(SerializedTypes.Recording serializer) {
+            return new InMemoryIndexedSessionRepository(
+                    new DelegatingIndexResolver<>(new SessionPrincipalIndexResolver()), serializer,
+                    Config.DEFAULT_TIMEOUT);
+        }
+
+        @Bean
+        SessionRegistry sessionRegistry(InMemoryIndexedSessionRepository sessions) {
+            return new TenantScopedSessionRegistry<>(sessions);
+        }
+
+        @Bean
+        SessionRepositoryFilter<MapSession> sessionRepositoryFilter(InMemoryIndexedSessionRepository sessions) {
+            CookieHttpSessionIdResolver cookies = new CookieHttpSessionIdResolver();
+            cookies.setCookieSerializer(new SessionCookieSerializer(Config.COOKIE_NAME, "None",
+                    new CookieDomainResolver()));
+            SessionRepositoryFilter<MapSession> filter = new SessionRepositoryFilter<>(sessions);
+            filter.setHttpSessionIdResolver(cookies);
+            return filter;
+        }
+
+        @Bean
+        SignedInSessionTimeoutFilter signedInSessionTimeoutFilter() {
+            return new SignedInSessionTimeoutFilter(Config.SIGNED_IN_TIMEOUT, Config.DEFAULT_TIMEOUT);
+        }
+    }
+
+    /**
+     * The authorization server as {@link AuthorizationServerConfig} builds it, needing a
+     * {@link DataSource}, a {@link JWKSource} and a {@link SessionRegistry} from elsewhere.
+     */
     @Configuration
     @EnableWebSecurity
     @EnableWebMvc
-    static class Config {
+    static class ServerBeans {
 
         private final AuthorizationServerConfig serverConfig = new AuthorizationServerConfig();
 
@@ -272,15 +422,6 @@ class OidcSignOutFlowTest {
         /** Encoded once so every {@link #user()} carries the same hash. */
         static final class PasswordHolder {
             static final String HASH = new AuthorizationServerConfig().passwordEncoder().encode(PASSWORD);
-        }
-
-        @Bean
-        DataSource dataSource() {
-            return new EmbeddedDatabaseBuilder()
-                    .setType(EmbeddedDatabaseType.H2)
-                    .generateUniqueName(true)
-                    .addScript("org/springframework/security/oauth2/server/authorization/oauth2-authorization-schema.sql")
-                    .build();
         }
 
         @Bean
@@ -316,18 +457,8 @@ class OidcSignOutFlowTest {
         }
 
         @Bean
-        SessionRegistry sessionRegistry() {
-            return serverConfig.sessionRegistry();
-        }
-
-        @Bean
         AuthorizationServerSettings authorizationServerSettings() {
             return AuthorizationServerSettings.builder().build();
-        }
-
-        @Bean
-        JWKSource<SecurityContext> jwkSource() throws Exception {
-            return new ImmutableJWKSet<>(new JWKSet(new RSAKeyGenerator(2048).keyID("test").generate()));
         }
 
         @Bean
@@ -377,9 +508,8 @@ class OidcSignOutFlowTest {
         @Bean
         @Order(1)
         SecurityFilterChain authorizationServerSecurityFilterChain(
-                HttpSecurity http, AuthDomainResolver resolver, RegisteredClientRepository clients,
-                SessionRegistry sessionRegistry) throws Exception {
-            return serverConfig.authorizationServerSecurityFilterChain(http, resolver, clients, sessionRegistry);
+                HttpSecurity http, AuthDomainResolver resolver, RegisteredClientRepository clients) throws Exception {
+            return serverConfig.authorizationServerSecurityFilterChain(http, resolver, clients);
         }
 
         @Bean

@@ -730,7 +730,7 @@ jobs:
           E2E_AUTH_BASE_URL=http://kelta-auth:8081
           E2E_AUTH_DIRECT_LOGIN_URL=http://kelta-auth:8081
           E2E_BROWSER_HOST_RULES=MAP auth.localhost kelta-auth
-          E2E_BROWSER_SECURE_ORIGINS=http://kelta-ui:8080
+          E2E_BROWSER_SECURE_ORIGINS=http://kelta-ui:8080,http://kelta-auth:8081
           E2E_REAL_SIGN_IN=true
           E2E_MAILPIT_URL=http://mailpit:8025
           E2E_EPHEMERAL_STACK=true

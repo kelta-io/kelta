@@ -13,6 +13,7 @@ import org.springframework.aot.hint.RuntimeHintsRegistrar;
 import org.springframework.aot.hint.TypeReference;
 import org.springframework.lang.Nullable;
 
+import java.io.Serializable;
 import java.util.List;
 
 /**
@@ -34,6 +35,7 @@ public class AuthRuntimeHints implements RuntimeHintsRegistrar {
         registerOAuth2DomainTypes(hints);
         registerJdkPolymorphicTypes(hints);
         registerSerialization(hints);
+        registerHttpSessionSerialization(hints);
         registerResources(hints);
         // SAML federation (FederationConfig) initializes OpenSAML at startup.
         new OpenSamlRuntimeHints().registerHints(hints, classLoader);
@@ -297,6 +299,98 @@ public class AuthRuntimeHints implements RuntimeHintsRegistrar {
                 "org.springframework.security.saml2.provider.service.authentication.logout.Saml2LogoutRequest"));
         hints.serialization().registerType(TypeReference.of(
                 "org.springframework.security.saml2.provider.service.registration.Saml2MessageBinding"));
+    }
+
+    /**
+     * Every class Java serialization writes for an HTTP session value, now that sessions are
+     * stored in Redis ({@code io.kelta.auth.session.SessionAttributeSerializer}). On top of
+     * Spring Session's own hints ({@code org.springframework.session.aot.hint}: the security
+     * context, username/password token, saved request, CSRF token, common JDK types).
+     * {@code SessionAttributeHintsTest} serializes one value of every kind the service keeps in a
+     * session and fails on any class missing here; an unregistered class makes that value
+     * unstorable in the native image (it is dropped with a warning, so the user signs in again).
+     *
+     * <p>An authentication exception the framework stores after a failed federated login is
+     * registered without its cause: a cause of another type makes that one value unstorable,
+     * which nothing reads back.
+     */
+    private void registerHttpSessionSerialization(RuntimeHints hints) {
+        // The principal and the factor authorities Spring Security 7 adds at sign-in.
+        for (Class<? extends Serializable> type : List.<Class<? extends Serializable>>of(
+                KeltaUserDetails.class,
+                org.springframework.security.core.authority.FactorGrantedAuthority.class,
+                org.springframework.security.authentication.AccountStatusException.class)) {
+            hints.serialization().registerType(type);
+        }
+        String[] frameworkTypes = {
+                // OIDC federation: the saved authorization request, and the login itself (held
+                // only until FederatedLoginSuccessHandler replaces it, or when it stops early).
+                "org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest",
+                "org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationResponseType",
+                "org.springframework.security.oauth2.core.AuthorizationGrantType",
+                "org.springframework.security.oauth2.core.AbstractOAuth2Token",
+                "org.springframework.security.oauth2.core.OAuth2Error",
+                "org.springframework.security.oauth2.core.oidc.OidcIdToken",
+                "org.springframework.security.oauth2.core.oidc.OidcUserInfo",
+                "org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser",
+                "org.springframework.security.oauth2.core.oidc.user.OidcUserAuthority",
+                "org.springframework.security.oauth2.core.user.DefaultOAuth2User",
+                "org.springframework.security.oauth2.core.user.OAuth2UserAuthority",
+                // SAML federation: the saved AuthnRequest, the login (until
+                // SamlFederatedLoginSuccessHandler replaces it), and a failed login.
+                "org.springframework.security.saml2.provider.service.authentication.AbstractSaml2AuthenticationRequest",
+                "org.springframework.security.saml2.provider.service.authentication.Saml2RedirectAuthenticationRequest",
+                "org.springframework.security.saml2.provider.service.authentication.Saml2PostAuthenticationRequest",
+                "org.springframework.security.saml2.provider.service.authentication.Saml2Authentication",
+                "org.springframework.security.saml2.provider.service.authentication.DefaultSaml2AuthenticatedPrincipal",
+                "org.springframework.security.saml2.provider.service.authentication.Saml2AuthenticationException",
+                "org.springframework.security.saml2.core.Saml2Error",
+                // Flash attributes (MFA error messages): SessionFlashMapManager.
+                "org.springframework.web.servlet.FlashMap",
+                "org.springframework.util.LinkedMultiValueMap",
+                "org.springframework.util.MultiValueMapAdapter"
+        };
+        for (String name : frameworkTypes) {
+            hints.serialization().registerType(TypeReference.of(name));
+        }
+        String[] jdkTypes = {
+                "java.lang.Boolean",
+                "java.lang.Enum",
+                "java.lang.String[]",
+                "java.lang.StackTraceElement[]",
+                "java.net.URL",
+                "java.net.URI",
+                "java.util.HashMap",
+                "java.util.LinkedHashMap",
+                "java.util.HashSet",
+                "java.util.LinkedHashSet",
+                "java.util.LinkedList",
+                "java.util.Arrays$ArrayList",
+                "java.util.concurrent.CopyOnWriteArrayList",
+                "java.util.Collections$UnmodifiableMap",
+                "java.util.Collections$UnmodifiableSortedMap",
+                "java.util.Collections$UnmodifiableSortedSet",
+                "java.util.Collections$EmptyMap",
+                "java.util.Collections$EmptySet",
+                "java.util.Collections$SingletonList",
+                "java.util.Collections$SingletonSet",
+                "java.util.Collections$SingletonMap",
+                // Written through writeReplace: the class itself is looked up when writing, the
+                // serial-proxy class when reading.
+                "java.time.Instant",
+                "java.time.Duration",
+                "java.time.Ser",
+                "java.util.ImmutableCollections$List12",
+                "java.util.ImmutableCollections$ListN",
+                "java.util.ImmutableCollections$Set12",
+                "java.util.ImmutableCollections$SetN",
+                "java.util.ImmutableCollections$Map1",
+                "java.util.ImmutableCollections$MapN",
+                "java.util.CollSer"
+        };
+        for (String name : jdkTypes) {
+            hints.serialization().registerType(TypeReference.of(name));
+        }
     }
 
     private void registerResources(RuntimeHints hints) {

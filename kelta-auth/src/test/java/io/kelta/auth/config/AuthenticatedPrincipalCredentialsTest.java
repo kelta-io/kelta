@@ -209,7 +209,7 @@ class AuthenticatedPrincipalCredentialsTest {
                     (KeltaUserDetails) securityContext.getAuthentication().getPrincipal();
             assertThat(sessionPrincipal.getPassword()).isNull();
 
-            String hash = OidcSignOutFlowTest.Config.PasswordHolder.HASH;
+            String hash = OidcSignOutFlowTest.ServerBeans.PasswordHolder.HASH;
             List<String> stored = jdbcTemplate.query("SELECT attributes FROM oauth2_authorization",
                     (rs, row) -> new String(rs.getBytes("attributes"), StandardCharsets.UTF_8));
             assertThat(stored).isNotEmpty().allSatisfy(attributes -> assertThat(attributes)

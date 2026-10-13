@@ -31,15 +31,24 @@ spring:
       host: ${SPRING_DATA_REDIS_HOST:${REDIS_HOST:localhost}}
       port: ${SPRING_DATA_REDIS_PORT:${REDIS_PORT:6379}}
 
+  # HTTP sessions are stored in Redis (Spring Session), shared by every replica and kept across
+  # restarts and rollouts — io.kelta.auth.session.HttpSessionConfig. The cookie and the
+  # signed-in timeout are under kelta.auth.session (server.servlet.session.cookie.* is not read).
   session:
-    store-type: redis
-    redis:
-      namespace: kelta:auth:session
-    timeout: 8h
-    cookie:
-      http-only: true
-      secure: true
-      same-site: strict
+    # Idle timeout of a session that has not signed in: login form, saved authorization request,
+    # MFA step, federation round trip. A signed-in session gets kelta.auth.session.authenticated-timeout.
+    timeout: ${KELTA_AUTH_SESSION_TIMEOUT:30m}
+    data:
+      redis:
+        # A literal, not ${...}: it selects auto-configuration through @ConditionalOnProperty,
+        # which the native image evaluates at build time. "indexed" is the store that can list a
+        # user's sessions, which the OIDC SessionRegistry needs.
+        repository-type: indexed
+        namespace: kelta:auth:session
+        # The indexed store learns that a session expired from Redis keyspace notifications and
+        # turns them on with CONFIG SET at startup. Set "none" where CONFIG is not permitted and
+        # set notify-keyspace-events to include "Egx" on the Redis server instead.
+        configure-action: ${KELTA_AUTH_SESSION_REDIS_CONFIGURE_ACTION:notify-keyspace-events}
 
   thymeleaf:
     cache: true
@@ -78,6 +87,15 @@ kelta:
     ui-base-url: ${UI_BASE_URL:http://localhost:5173}
     # CORS allowed origins
     cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+    session:
+      # Idle timeout once the session holds a signed-in user.
+      authenticated-timeout: ${KELTA_AUTH_SESSION_AUTHENTICATED_TIMEOUT:8h}
+      cookie-name: ${KELTA_AUTH_SESSION_COOKIE_NAME:kelta_auth_session}
+      # None | Lax | Strict | blank (attribute left off). None lets an identity provider's
+      # cross-site POST to the SAML assertion consumer service carry the session that started
+      # the sign-in; Lax or Strict break SP-initiated SAML sign-in. Loopback hosts (plain-http
+      # local development) get no Secure flag and therefore no SameSite=None.
+      cookie-same-site: ${KELTA_AUTH_SESSION_COOKIE_SAME_SITE:None}
     # Enable direct login endpoint for programmatic auth (e2e tests)
     direct-login:
       enabled: ${DIRECT_LOGIN_ENABLED:false}

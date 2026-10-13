@@ -110,14 +110,18 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- Redis for session management -->
+        <!-- Redis: SSO sessions, rate limits, and the HTTP session store -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+        <!-- Spring Session's Redis store. Spring Boot 4 ships the auto-configuration in this
+             starter (spring-boot-session-data-redis); spring-session-data-redis on its own
+             only puts the library on the classpath and leaves HTTP sessions in the servlet
+             container. See io.kelta.auth.session.HttpSessionConfig. -->
         <dependency>
-            <groupId>org.springframework.session</groupId>
-            <artifactId>spring-session-data-redis</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-session-data-redis</artifactId>
         </dependency>
 
         <!-- Thymeleaf for login page -->
