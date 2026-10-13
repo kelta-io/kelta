@@ -300,8 +300,8 @@ runtime/runtime-messaging-nats -am -B
 | Local stack, low-memory box | `make up-jvm` — JVM images instead of GraalVM native. `make up` builds 3 native images concurrently and needs ~24 GB allocated to Docker, else `cannot allocate memory` |
 
 Java tests: surefire runs `*Test`/`*Tests`/`*Properties` in parallel; failsafe runs
-`*IntegrationTest` only under `-Pintegration-tests`. Frontend coverage gate: 80% in
-`kelta-web`. **Run `/verify` and get it green before opening a PR.** Full pipeline detail:
+`*IntegrationTest` only under `-Pintegration-tests`. Frontend coverage gate in `kelta-web`:
+a ratchet at the measured totals (`vitest.config.ts` → `coverage.thresholds`; raise, never lower). **Run `/verify` and get it green before opening a PR.** Full pipeline detail:
 `.claude/docs/ci-cd.md`.
 
 ---

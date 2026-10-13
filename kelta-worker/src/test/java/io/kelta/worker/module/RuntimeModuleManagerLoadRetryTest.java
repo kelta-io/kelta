@@ -383,6 +383,64 @@ class RuntimeModuleManagerLoadRetryTest {
     }
 
     @Test
+    @DisplayName("enabling an ACTIVE module that is retrying on this pod retries now, not after the backoff")
+    void enableOfAnActiveModuleRetriesATransientFailureNow() throws Exception {
+        TenantModuleData row = module(checksum, TenantModuleData.STATUS_ACTIVE);
+        when(jarService.downloadJarToCache(S3_KEY)).thenThrow(storageDown()).thenReturn(jarUrl);
+        when(moduleStore.findByTenantAndModuleId(TENANT, MODULE_ID)).thenReturn(Optional.of(row));
+
+        manager.loadModule(TENANT, row);
+        assertThat(manager.podLoadState(TENANT, MODULE_ID))
+                .containsEntry("loadStateOnThisPod", "RETRYING");
+
+        // Storage is back; the admin presses "retry now" well inside the 30 s backoff.
+        clock.advance(Duration.ofSeconds(5));
+        manager.enableModule(TENANT, MODULE_ID);
+
+        verify(jarService, times(2)).downloadJarToCache(S3_KEY);
+        // No status write: the row was ACTIVE all along, and only the load outcome is recorded.
+        verify(moduleStore, never()).updateStatus(anyString(), anyString());
+        verify(moduleStore).recordLoadOutcome(ROW_ID, TenantModuleData.STATUS_ACTIVE, null);
+        assertThat(manager.podLoadState(TENANT, MODULE_ID))
+                .containsExactlyEntriesOf(Map.of("loadStateOnThisPod", "LOADED"));
+        assertThat(manager.pendingLoadRetries()).isZero();
+    }
+
+    @Test
+    @DisplayName("re-enabling a module quarantined for an integrity failure re-verifies and stays QUARANTINED")
+    void reEnableOfAnIntegrityFailureStaysQuarantined() throws Exception {
+        when(jarService.downloadJarToCache(S3_KEY)).thenReturn(jarUrl);
+        TenantModuleData tampered = module("not-the-checksum", TenantModuleData.STATUS_ACTIVE);
+        manager.loadModule(TENANT, tampered);
+        verify(moduleStore).recordLoadOutcome(eq(ROW_ID),
+                eq(TenantModuleData.STATUS_QUARANTINED), anyString());
+
+        // Nothing about the JAR changed; the admin re-enables anyway.
+        TenantModuleData stillTampered =
+                module("not-the-checksum", TenantModuleData.STATUS_QUARANTINED);
+        when(moduleStore.findByTenantAndModuleId(TENANT, MODULE_ID))
+                .thenReturn(Optional.of(stillTampered));
+        manager.enableModule(TENANT, MODULE_ID);
+
+        // The load re-ran and failed the checksum again: quarantined again, never a real handler.
+        verify(jarService, times(2)).downloadJarToCache(S3_KEY);
+        verify(moduleStore, times(2)).recordLoadOutcome(eq(ROW_ID),
+                eq(TenantModuleData.STATUS_QUARANTINED), anyString());
+        verify(moduleStore, never()).recordLoadOutcome(ROW_ID, TenantModuleData.STATUS_ACTIVE, null);
+        ActionHandler handler = handlerRegistry.getHandler(TENANT, WebhookTestModule.HANDLER_KEY)
+                .orElseThrow();
+        assertThatThrownBy(() -> handler.execute(ActionContext.builder().tenantId(TENANT).build()))
+                .isInstanceOf(ModuleUnavailableException.class);
+        assertThat(manager.podLoadState(TENANT, MODULE_ID))
+                .containsEntry("loadStateOnThisPod", "FAILED");
+
+        // And the retry scheduler never picks a permanent failure up on its own.
+        clock.advance(Duration.ofHours(2));
+        manager.retryPendingLoads();
+        verify(jarService, times(2)).downloadJarToCache(S3_KEY);
+    }
+
+    @Test
     @DisplayName("ensureLoaded leaves a healthy load alone")
     void ensureLoadedDoesNotChurnAHealthyModule() throws Exception {
         TenantModuleData row = module(checksum, TenantModuleData.STATUS_ACTIVE);

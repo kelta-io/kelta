@@ -1,0 +1,1 @@
+- 2026-10-12 fix(modules): Show why a module is QUARANTINED (and when an ACTIVE module is failing closed and retrying) on the admin Modules page and in `GET /api/modules`; Re-enable / Retry now reloads on every pod without a restart, and an enable of an ACTIVE module now retries a pending transient failure immediately (module-reenable-and-retry-now)

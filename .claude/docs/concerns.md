@@ -533,9 +533,12 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   pod, write only `last_error`/`load_attempts` (`ModuleStore.recordLoadError`) and retry
   (`ModuleLoadRetryScheduler`). Any new "mark it broken" path must ask whether a retry could fix it.
   Alert on `kelta_worker_module_load_retry_pending`.
-- **Rows quarantined before the transient-retry fix stay `QUARANTINED`** (open) — an old outage
-  quarantine is indistinguishable from a real one. Re-enable them
-  (`POST /api/modules/{moduleId}/enable`), which now reloads on running pods without a restart.
+- **Resolved — a `QUARANTINED` module needed a manual status flip and a restart.** Re-enable
+  (`POST /api/modules/{moduleId}/enable`, or **Re-enable** on the admin Modules page, which shows the
+  quarantine reason) reloads on every pod via the `ENABLED` NATS event; the load re-verifies, so an
+  integrity failure quarantines again. An `ACTIVE` module failing closed on a transient error shows
+  as **Retrying load** (`loadRetrying` in `GET /api/modules`) with a **Retry now** action. A row
+  quarantined by a pre-classifier outage is not auto-detected — its reason looks like any other.
 
 ### Gateway routing
 

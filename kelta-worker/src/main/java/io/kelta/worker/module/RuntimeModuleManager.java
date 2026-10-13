@@ -209,7 +209,13 @@ public class RuntimeModuleManager {
                 "Module '" + moduleId + "' not found for tenant " + tenantId));
 
         if (TenantModuleData.STATUS_ACTIVE.equals(module.status())) {
-            log.debug("Module '{}' already active for tenant {}", moduleId, tenantId);
+            // Already ACTIVE, but this pod may be failing closed and waiting out a transient-
+            // failure backoff. An enable is the admin asking for another try now, so re-run a
+            // failed load here; a healthy load is left alone (ensureLoaded is a no-op for it).
+            // Other pods get the same request from the ENABLED event the controller publishes.
+            log.debug("Module '{}' already active for tenant {}; retrying a failed load on this "
+                + "pod if there is one", moduleId, tenantId);
+            ensureLoaded(tenantId, module);
             return;
         }
 

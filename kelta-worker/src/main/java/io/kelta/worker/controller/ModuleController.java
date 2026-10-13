@@ -151,6 +151,13 @@ public class ModuleController {
 
     /**
      * Enables a module, registering its action handlers.
+     *
+     * <p>Also how an admin re-enables a {@code QUARANTINED} module, or asks a module that is
+     * {@code ACTIVE} but failing closed on a transient error to retry now rather than wait out its
+     * backoff. The load re-runs on this pod synchronously and on every other pod via the
+     * {@code ENABLED} NATS event, so no restart is needed. A re-enabled module is re-verified
+     * (checksum, signature) like any other load, so a module whose fault is still there is
+     * quarantined again — {@code moduleStatus} and {@code lastError} in the response say so.
      */
     @PostMapping("/{moduleId}/enable")
     public ResponseEntity<Map<String, Object>> enableModule(
@@ -167,6 +174,11 @@ public class ModuleController {
             Map<String, Object> attrs = new LinkedHashMap<>();
             attrs.put("status", "enabled");
             attrs.put("moduleId", moduleId);
+            // The outcome of the load on the pod that served this request.
+            module.ifPresent(m -> {
+                attrs.put("moduleStatus", m.status());
+                putLoadDiagnostics(attrs, m);
+            });
             return ResponseEntity.ok(JsonApiResponseBuilder.single("modules", moduleId, attrs));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
@@ -384,7 +396,38 @@ public class ModuleController {
         // Lets the admin UI decide which modules to fetch a bundle for, rather than probing
         // every installed module with a request that would 404 for most of them.
         map.put("uiBundlePath", uiBundlePath(m));
+        putLoadDiagnostics(map, m);
         return map;
+    }
+
+    /**
+     * Adds the persisted load diagnostics, so the admin UI can say why a module is
+     * {@code QUARANTINED} and show one that is {@code ACTIVE} but failing closed on a transient
+     * error ({@code loadRetrying}) instead of reporting it as healthy.
+     *
+     * <p>{@code loadRetrying} is derived, not stored: only a transient failure
+     * ({@code ModuleStore.recordLoadError}) leaves an {@code ACTIVE} row with a {@code last_error},
+     * and a successful load clears it. Loading is per pod, so this is the last pod to report.
+     */
+    private void putLoadDiagnostics(Map<String, Object> target, TenantModuleData m) {
+        Map<String, Object> diagnostics = runtimeModuleManager.loadDiagnostics(m.id());
+        Object lastError = diagnostics.get("lastError");
+        target.put("lastError", lastError);
+        target.put("lastErrorAt", isoInstant(diagnostics.get("lastErrorAt")));
+        target.put("lastLoadedAt", isoInstant(diagnostics.get("lastLoadedAt")));
+        target.put("loadAttempts", diagnostics.get("loadAttempts"));
+        target.put("loadRetrying",
+            TenantModuleData.STATUS_ACTIVE.equals(m.status()) && lastError != null);
+    }
+
+    private static String isoInstant(Object value) {
+        return switch (value) {
+            case null -> null;
+            case java.sql.Timestamp ts -> ts.toInstant().toString();
+            case java.time.OffsetDateTime odt -> odt.toInstant().toString();
+            case java.time.Instant instant -> instant.toString();
+            default -> value.toString();
+        };
     }
 
     /** The module's declared UI bundle path, or null when it ships no UI or has a bad manifest. */

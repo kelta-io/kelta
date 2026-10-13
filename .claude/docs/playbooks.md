@@ -318,8 +318,12 @@ and the module reports `QUARANTINED` with the reason in `tenant_module.last_erro
   `last_error` is recorded, and the pod retries with backoff (`kelta.modules.load-retry.*`, 30 s →
   10 min, never gives up). An `onStartup` that throws for any other reason is still the module's
   fault and quarantines — don't let a flaky external call in `onStartup` look like a bug.
-- Re-enabling a `QUARANTINED` module (`POST /api/modules/{moduleId}/enable`) re-runs the load on
-  every pod, without a restart.
+- Re-enabling a `QUARANTINED` module (`POST /api/modules/{moduleId}/enable`, or **Re-enable** on the
+  admin Modules page) re-runs the load on every pod, without a restart. The load re-verifies, so a
+  module whose fault is still there quarantines again; the response's `moduleStatus` / `lastError`
+  say so. The same call on an `ACTIVE` module that is retrying (**Retry now** in the UI) skips the
+  remaining backoff. `GET /api/modules` carries `lastError`, `lastErrorAt`, `loadAttempts` and a
+  derived `loadRetrying` (`ACTIVE` with a recorded error — only a transient failure leaves one).
 - `GET /api/modules/{id}/health` reports whether the module is loaded **on the pod that answered**,
   which is not the same as the stored status: loading is per-pod and driven by a fire-and-forget NATS
   event. `loadStateOnThisPod` distinguishes `LOADED` from `RETRYING` (with `nextLoadRetryAt`) and

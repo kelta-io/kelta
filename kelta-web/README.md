@@ -142,7 +142,7 @@ Plugin development toolkit for extending Kelta UIs.
 
 ```bash
 npm run build            # Build all packages
-npm run test:coverage    # Run tests with coverage (80% threshold)
+npm run test:coverage    # Run tests with coverage (ratchet thresholds in vitest.config.ts)
 npm run lint             # ESLint check
 npm run typecheck        # TypeScript validation
 npm run format:check     # Prettier check
@@ -162,7 +162,7 @@ Vitest with jsdom and Testing Library.
 
 ```bash
 npm run test             # Watch mode
-npm run test:coverage    # Coverage report (80% branch/function/line/statement threshold)
+npm run test:coverage    # Coverage report (fails below the ratchet thresholds in vitest.config.ts)
 ```
 
 ## Tech Stack

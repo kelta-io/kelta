@@ -70,7 +70,7 @@ All under `kelta-web/packages/cli/`:
 - `package.json` — deps: add `zod`, `yaml`, small table util (or hand-rolled), keep
   commander; `@kelta/sdk` moves from type-only to runtime dep.
 - `kelta-web/package.json` — root `build` gains cli; CI workflow `ci.yml` frontend job
-  already runs workspace-wide scripts, verify cli is included (coverage gate 80%).
+  already runs workspace-wide scripts, verify cli is included (coverage ratchet in `vitest.config.ts`).
 
 ## 6. Test plan
 

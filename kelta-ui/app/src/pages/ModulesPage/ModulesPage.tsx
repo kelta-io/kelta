@@ -17,6 +17,9 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  ShieldAlert,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react'
 
 interface ModuleAction {
@@ -48,6 +51,11 @@ interface TenantModule {
   installedAt: string
   updatedAt: string
   actions: ModuleAction[]
+  /** Why the last load failed (QUARANTINED reason, or the transient error being retried). */
+  lastError?: string | null
+  lastErrorAt?: string | null
+  /** ACTIVE, but failing closed on a transient error and retrying with backoff. */
+  loadRetrying?: boolean
 }
 
 export interface ModulesPageProps {
@@ -82,6 +90,26 @@ function statusBadge(status: string) {
         <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
           <XCircle size={12} />
           Failed
+        </span>
+      )
+    case 'QUARANTINED':
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
+          <ShieldAlert size={12} />
+          Quarantined
+        </span>
+      )
+    case 'DEGRADED':
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+          <AlertTriangle size={12} />
+          Degraded
+        </span>
+      )
+    case 'STUB':
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+          Stub
         </span>
       )
     case 'INSTALLING':
@@ -471,10 +499,32 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                       <h3 className="text-base font-medium text-gray-900">{mod.name}</h3>
                       <span className="text-xs text-gray-500">v{mod.version}</span>
                       {statusBadge(mod.status)}
+                      {mod.status === 'ACTIVE' && mod.loadRetrying && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800"
+                          data-testid={`module-retrying-${mod.moduleId}`}
+                        >
+                          <RefreshCw size={12} />
+                          Retrying load
+                        </span>
+                      )}
                     </div>
                     {mod.description && (
                       <p className="mt-0.5 text-sm text-gray-500">{mod.description}</p>
                     )}
+                    {mod.lastError &&
+                      (mod.status === 'QUARANTINED' ||
+                        (mod.status === 'ACTIVE' && mod.loadRetrying)) && (
+                        <p
+                          className="mt-0.5 text-xs text-red-700"
+                          data-testid={`module-last-error-${mod.moduleId}`}
+                        >
+                          {mod.status === 'QUARANTINED'
+                            ? 'Quarantined: '
+                            : 'Temporarily unavailable, retrying automatically: '}
+                          {mod.lastError}
+                        </p>
+                      )}
                     <p className="mt-0.5 text-xs text-gray-400">
                       {mod.actions.length} action{mod.actions.length !== 1 ? 's' : ''} &middot;
                       Installed {new Date(mod.installedAt).toLocaleDateString()}
@@ -483,6 +533,18 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {mod.status === 'ACTIVE' && mod.loadRetrying && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => enableMutation.mutate(mod.moduleId)}
+                      disabled={enableMutation.isPending}
+                      className="gap-1"
+                    >
+                      <RefreshCw size={14} />
+                      Retry now
+                    </Button>
+                  )}
                   {mod.status === 'ACTIVE' ? (
                     <Button
                       variant="outline"
@@ -503,7 +565,7 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                       className="gap-1"
                     >
                       <Power size={14} />
-                      Enable
+                      {mod.status === 'QUARANTINED' ? 'Re-enable' : 'Enable'}
                     </Button>
                   )}
                   <Button
