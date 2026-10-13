@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RulesEditor } from '../RulesEditor'
+import { I18nProvider } from '../../../context/I18nContext'
 
 const apiClientMock = {
   getList: vi.fn(),
@@ -17,7 +18,11 @@ vi.mock('../../../context/ApiContext', () => ({
 
 function renderWithProviders(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+  return render(
+    <QueryClientProvider client={qc}>
+      <I18nProvider>{ui}</I18nProvider>
+    </QueryClientProvider>
+  )
 }
 
 describe('RulesEditor', () => {
@@ -170,6 +175,46 @@ describe('RulesEditor', () => {
     expect(envelope.data.attributes.body.expression).toBe('IF(discount > 0.5, "Too high", "")')
     expect(envelope.data.attributes.body.message).toBe('Needs approval')
   })
-})
+  it('deletes a rule only after the confirm dialog is accepted', async () => {
+    apiClientMock.getList.mockResolvedValue([
+      {
+        id: 'r1',
+        layoutId: 'lay-1',
+        name: 'Line total',
+        description: null,
+        kind: 'COMPUTE',
+        active: true,
+        whenEvents: ['onChange'],
+        targetField: 'line_total',
+        dependsOn: null,
+        body: { formula: 'quantity * unit_price' },
+        sortOrder: 0,
+      },
+    ])
+    apiClientMock.delete.mockResolvedValue({})
+    const user = userEvent.setup()
+    renderWithProviders(
+      <RulesEditor layoutId="lay-1" layoutName="Edit" fieldNames={[]} onClose={() => {}} />
+    )
+    await user.click(await screen.findByTestId('rules-editor-rule-r1'))
+    await user.click(screen.getByTestId('rules-editor-delete'))
 
-import { afterEach } from 'vitest'
+    const confirm = await screen.findByTestId('confirm-dialog')
+    expect(confirm).toHaveTextContent('Delete rule "Line total"?')
+    expect(apiClientMock.delete).not.toHaveBeenCalled()
+
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(apiClientMock.delete).toHaveBeenCalledWith('/api/layout-rules/r1'))
+  })
+
+  it('closes from the close button', async () => {
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    renderWithProviders(
+      <RulesEditor layoutId="lay-1" layoutName="Edit" fieldNames={[]} onClose={onClose} />
+    )
+    expect(await screen.findByRole('dialog', { name: 'Client rules — Edit' })).toBeInTheDocument()
+    await user.click(screen.getByTestId('rules-editor-close'))
+    expect(onClose).toHaveBeenCalled()
+  })
+})

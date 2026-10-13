@@ -9,11 +9,7 @@
 import React from 'react'
 import { useController, useFormContext, type FieldPath, type FieldValues } from 'react-hook-form'
 import { Input } from '@/components/ui/input'
-import { useCrudFormState } from './crudFormState'
-
-/** Same uppercase-11px field label as the CrudFormFields controls (DESIGN.md). */
-const FIELD_LABEL_CLASS =
-  'text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground'
+import { CRUD_FIELD_LABEL_CLASS, useCrudFormState } from './crudFormState'
 
 /** Default coercion: empty input is 0; anything else that is not a finite number is ignored. */
 function parseNumberInput(raw: string): number | null {
@@ -73,7 +69,7 @@ export function CrudNumberField<TValues extends FieldValues = FieldValues>({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className={FIELD_LABEL_CLASS}>
+      <label htmlFor={id} className={CRUD_FIELD_LABEL_CLASS}>
         {label}
         {required && (
           <span className="ml-0.5 text-destructive" aria-hidden="true">

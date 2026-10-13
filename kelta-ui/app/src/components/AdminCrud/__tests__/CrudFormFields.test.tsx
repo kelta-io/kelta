@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, type Mock } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useFormContext, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 import { I18nProvider } from '../../../context/I18nContext'
 import { CrudFormDialog, CrudSelectField, CrudTextField } from '..'
@@ -162,5 +163,85 @@ describe('CrudTextField hint', () => {
 
     expect(await screen.findByText('Note is too long')).toHaveAttribute('id', 'f-note-error')
     expect(note).toHaveAttribute('aria-describedby', 'f-note-hint f-note-error')
+  })
+})
+
+describe('CrudSelectField onValueChange', () => {
+  it('reports the picked value after the form value changes', async () => {
+    const user = userEvent.setup()
+    const onValueChange = vi.fn()
+    render(
+      <I18nProvider>
+        <CrudFormDialog<Values>
+          open
+          onClose={() => {}}
+          title="Form"
+          schema={schema}
+          defaultValues={{ kind: '', note: '' }}
+          onSubmit={vi.fn()}
+          testIdPrefix="f"
+        >
+          <CrudSelectField<Values>
+            name="kind"
+            id="f-kind"
+            label="Kind"
+            options={[
+              { value: 'a', label: 'Alpha' },
+              { value: 'b', label: 'Beta' },
+            ]}
+            testId="f-kind-input"
+            onValueChange={onValueChange}
+          />
+        </CrudFormDialog>
+      </I18nProvider>
+    )
+    await user.selectOptions(screen.getByTestId('f-kind-input'), 'b')
+    expect(onValueChange).toHaveBeenCalledWith('b')
+    expect(screen.getByTestId('f-kind-input')).toHaveValue('b')
+  })
+})
+
+function NotePreview() {
+  const { control } = useFormContext<Values>()
+  const note = useWatch({ control, name: 'note' })
+  return <p data-testid="f-preview">Preview: {note}</p>
+}
+
+describe('CrudTextField trailing + CrudFormDialog aside', () => {
+  it('renders trailing content beside the control and an aside that watches the form', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(
+      <I18nProvider>
+        <CrudFormDialog<Values>
+          open
+          onClose={() => {}}
+          title="Form"
+          schema={schema}
+          defaultValues={{ kind: 'a', note: '' }}
+          onSubmit={onSubmit}
+          testIdPrefix="f"
+          aside={<NotePreview />}
+        >
+          <CrudTextField<Values>
+            name="note"
+            id="f-note"
+            label="Note"
+            testId="f-note-input"
+            trailing={<button type="button">Insert</button>}
+          />
+        </CrudFormDialog>
+      </I18nProvider>
+    )
+    const note = screen.getByTestId('f-note-input')
+    expect(note.parentElement?.parentElement).toContainElement(
+      screen.getByRole('button', { name: 'Insert' })
+    )
+    await user.type(note, 'hi')
+    expect(screen.getByTestId('f-preview')).toHaveTextContent('Preview: hi')
+
+    await user.click(screen.getByTestId('f-form-submit'))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(onSubmit.mock.calls[0][0]).toEqual({ kind: 'a', note: 'hi' })
   })
 })

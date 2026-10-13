@@ -2,9 +2,11 @@
  * UsersPage tests — the delegated (scoped) path routes all reads/writes through
  * `keltaClient.admin.delegated.*`, gates create/deactivate on the caller's summary,
  * and limits the create-form profile choices; the full-admin path uses `admin.users.*`.
+ * Also covers the AdminCrud shell (search toolbar survives a refetch) and the
+ * delegated-edit / portal-invite / status-confirm dialogs.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type { DelegatedAdminSummary } from '@kelta/sdk'
@@ -31,8 +33,13 @@ vi.mock('../../hooks/useDelegatedAdmin', () => ({
 
 vi.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: vi.fn() }) }))
 
+const sonnerToast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+vi.mock('sonner', () => ({ toast: sonnerToast }))
+
 const adminUsersList = vi.fn()
 const adminUsersCreate = vi.fn()
+const adminUsersDeactivate = vi.fn()
+const adminUsersInvitePortal = vi.fn()
 const profilesList = vi.fn()
 const delegatedUsersList = vi.fn()
 const delegatedUsersCreate = vi.fn()
@@ -46,7 +53,8 @@ vi.mock('../../context/ApiContext', () => ({
           list: adminUsersList,
           create: adminUsersCreate,
           activate: vi.fn(),
-          deactivate: vi.fn(),
+          deactivate: adminUsersDeactivate,
+          invitePortal: adminUsersInvitePortal,
         },
         profiles: { list: profilesList },
         delegated: {
@@ -132,6 +140,11 @@ describe('UsersPage', () => {
     ])
     delegatedUsersList.mockReset().mockResolvedValue([])
     delegatedUsersCreate.mockReset().mockResolvedValue(DELEGATED_USER)
+    delegatedUsersUpdate.mockReset().mockResolvedValue(DELEGATED_USER)
+    adminUsersDeactivate.mockReset().mockResolvedValue(undefined)
+    adminUsersInvitePortal.mockReset().mockResolvedValue({})
+    sonnerToast.success.mockReset()
+    sonnerToast.error.mockReset()
   })
 
   describe('delegated (scoped) mode', () => {
@@ -167,6 +180,36 @@ describe('UsersPage', () => {
       expect(optionLabels).toContain('Standard User')
       expect(optionLabels).not.toContain('Admin')
       expect(select.querySelectorAll('option[value="p1"]')).toHaveLength(1)
+    })
+
+    it('edits a user in the delegated dialog, sending only a changed profile', async () => {
+      renderPage()
+      fireEvent.click(await screen.findByText('Scoped User'))
+
+      const dialog = await screen.findByTestId('delegated-edit-form-modal')
+      expect(within(dialog).getByText('Edit User')).toBeInTheDocument()
+      expect(within(dialog).getByText('scoped@example.com')).toBeInTheDocument()
+      expect(within(dialog).getByLabelText('First Name')).toHaveValue('Scoped')
+
+      fireEvent.change(within(dialog).getByLabelText('First Name'), {
+        target: { value: 'Renamed' },
+      })
+      fireEvent.change(within(dialog).getByTestId('edit-profile-select'), {
+        target: { value: 'p1' },
+      })
+      fireEvent.click(within(dialog).getByTestId('delegated-edit-form-submit'))
+
+      await waitFor(() =>
+        expect(delegatedUsersUpdate).toHaveBeenCalledWith('du1', {
+          firstName: 'Renamed',
+          lastName: 'User',
+          username: 'scoped',
+          profileId: 'p1',
+        })
+      )
+      await waitFor(() =>
+        expect(screen.queryByTestId('delegated-edit-form-modal')).not.toBeInTheDocument()
+      )
     })
 
     it('hides the Deactivate action when canDeactivateUsers=false', async () => {
@@ -229,6 +272,64 @@ describe('UsersPage', () => {
         expect(adminUsersCreate).toHaveBeenCalledWith(
           expect.objectContaining({ email: 'new@example.com', profileId: 'p2' })
         )
+      )
+    })
+    it('keeps the search box mounted and filled while the next page of results loads', async () => {
+      renderPage()
+      expect(await screen.findByText('Full Listed')).toBeInTheDocument()
+
+      adminUsersList.mockReturnValue(new Promise(() => {}))
+      const search = screen.getByLabelText('Search users...')
+      fireEvent.change(search, { target: { value: 'ful' } })
+
+      expect(await screen.findByTestId('loading-spinner-label')).toBeInTheDocument()
+      expect(screen.getByLabelText('Search users...')).toBe(search)
+      expect(search).toHaveValue('ful')
+      expect(adminUsersList).toHaveBeenLastCalledWith('ful', undefined, 0, 20)
+    })
+
+    it('deactivates a user after the confirm dialog', async () => {
+      renderPage()
+      fireEvent.click(await screen.findByText('Deactivate'))
+
+      const confirm = await screen.findByTestId('confirm-dialog')
+      expect(confirm).toHaveTextContent('Are you sure you want to deactivate Full Listed?')
+      expect(adminUsersDeactivate).not.toHaveBeenCalled()
+
+      fireEvent.click(within(confirm).getByTestId('confirm-dialog-confirm'))
+      await waitFor(() => expect(adminUsersDeactivate).toHaveBeenCalledWith('au1'))
+      await waitFor(() =>
+        expect(sonnerToast.success).toHaveBeenCalledWith('User deactivated successfully')
+      )
+    })
+
+    it('validates and sends a portal invite', async () => {
+      renderPage()
+      await waitFor(() => expect(adminUsersList).toHaveBeenCalled())
+      fireEvent.click(screen.getByTestId('invite-portal-user'))
+
+      const dialog = await screen.findByTestId('portal-invite-form-modal')
+      fireEvent.click(within(dialog).getByTestId('portal-invite-form-submit'))
+      expect(await within(dialog).findByText('Email is required')).toBeInTheDocument()
+      expect(adminUsersInvitePortal).not.toHaveBeenCalled()
+
+      fireEvent.change(within(dialog).getByLabelText(/Email/), {
+        target: { value: 'portal@example.com' },
+      })
+      fireEvent.change(within(dialog).getByLabelText('First Name'), {
+        target: { value: 'Pat' },
+      })
+      fireEvent.click(within(dialog).getByTestId('portal-invite-form-submit'))
+
+      await waitFor(() =>
+        expect(adminUsersInvitePortal).toHaveBeenCalledWith({
+          email: 'portal@example.com',
+          firstName: 'Pat',
+          lastName: undefined,
+        })
+      )
+      await waitFor(() =>
+        expect(screen.queryByTestId('portal-invite-form-modal')).not.toBeInTheDocument()
       )
     })
   })
