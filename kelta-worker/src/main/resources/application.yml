@@ -137,7 +137,8 @@ kelta:
     # delete until an operator explicitly sets dry-run=false. Recommended arming:
     # leave dry-run on for a cycle, read the "WOULD delete" counts, then arm.
     # Only terminal executions (COMPLETED/FAILED/CANCELLED) are eligible; RUNNING
-    # and WAITING are never touched, so a parked Wait state is never collected.
+    # and WAITING are never deleted, so a parked Wait state is never collected
+    # (a stale RUNNING row is first failed by the reaper below).
     # Deleting an execution cascades to its step logs and pending-resume rows.
     # NOTE: purged executions disappear from the flow-run observability UI.
     retention:
@@ -150,6 +151,17 @@ kelta:
       # one enormous delete against a shared database.
       max-batches: ${FLOW_RETENTION_MAX_BATCHES:20}
       poll-interval-ms: ${FLOW_RETENTION_POLL_INTERVAL_MS:3600000}
+    # max-age-days is the default window: a flow's own `retentionDays` (flow.retention_days,
+    # 1-3650) replaces it for that flow's executions, shorter or longer.
+    #
+    # Stale-RUNNING reaper, run at the start of each retention cycle (same enabled/dry-run
+    # gates and batch-size x max-batches bound). An execution still RUNNING whose latest
+    # activity — newest step-log start/finish, its last checkpoint, or its start — is older
+    # than this many hours was abandoned by a worker that died mid-run; it is marked FAILED
+    # with error_code 'Abandoned' and a completion time, and then ages out like any other
+    # failure. WAITING executions are never touched. 0 disables the reaper.
+    # Metric: kelta_worker_flow_executions_abandoned.
+    stale-running-hours: ${FLOW_STALE_RUNNING_HOURS:24}
     # Step-log snapshot cap. The engine logs the whole flow state as each step's input and
     # output; a flow carrying a large payload through many steps writes it twice per step
     # (one tenant's ingest flows reached ~44 GB of flow_step_log at 60-day retention).

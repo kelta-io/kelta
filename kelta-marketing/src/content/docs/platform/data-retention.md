@@ -9,7 +9,7 @@ order: 80
 
 | Data | Policy |
 |---|---|
-| Flow runs and step logs, scheduled-job logs | terminal runs older than `FLOW_RETENTION_MAX_AGE_DAYS` (default 60); **dry-run by default** — arm with `FLOW_RETENTION_DRY_RUN=false`; `WAITING` runs are never pruned; metric `kelta_worker_flowlog_purged` |
+| Flow runs and step logs, scheduled-job logs | terminal runs older than their flow's `retentionDays`, else `FLOW_RETENTION_MAX_AGE_DAYS` (default 60; job logs always use it); **dry-run by default** — arm with `FLOW_RETENTION_DRY_RUN=false`; `WAITING` runs are never pruned; `RUNNING` runs with no activity for `FLOW_STALE_RUNNING_HOURS` (default 24) are failed as `Abandoned` first; metrics `kelta_worker_flowlog_purged`, `kelta_worker_flow_executions_abandoned` |
 | Request logs and traces (tenant monitoring) | per-tenant retention in Setup → Platform → Monitoring → Settings |
 | Presence and realtime events | ephemeral (minutes) |
 

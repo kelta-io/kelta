@@ -2196,6 +2196,43 @@ enum (unknown value → `DefaultValidationEngine` → JSON:API 400), `SELECT *` 
   export/apply`. Tests: `FlowEngineStepLoggingTest`, `FlowStepLoggingApiTest`,
   `JdbcFlowStoreStepLoggingTest`, `PackageRoundTripTest.flowStepLoggingRoundTrips`.
 
+### Flow execution retention: per-flow window and stale-RUNNING reaper (PLT-603)
+
+Execution history is pruned by `FlowLogRetentionSweep` (worker, `@Scheduled`, hourly by default,
+**dry-run by default**) through `FlowLogRetentionRepository`. One cycle, in order, each phase in
+its own try/catch and each bounded by `batch-size × max-batches` (`drain`):
+
+1. **Reap stale RUNNING** (`kelta.flow.stale-running-hours`, default 24, `0` disables). A
+   `RUNNING` execution whose last activity — `GREATEST(started_at, updated_at, MAX(step-log
+   started_at/completed_at))` — is older than the threshold becomes `FAILED`,
+   `flow_execution.error_code = 'Abandoned'` (V212), an error message naming the threshold, and
+   `completed_at = NOW()`. `updated_at` counts because the engine checkpoints the execution row
+   after every step even when `stepLogging = NONE` writes no step row. Rows are claimed `FOR
+   UPDATE SKIP LOCKED` and the outer `UPDATE` re-checks `status = 'RUNNING'`, so a concurrently
+   finished execution keeps its outcome. `WAITING` is never reaped. The engine's own
+   `completeExecution` is unconditional, so a run that was merely idle past the threshold and
+   then finishes overwrites the `FAILED`.
+2. **Purge executions**: a terminal (`COMPLETED|FAILED|CANCELLED`) execution is due when
+   `COALESCE(completed_at, started_at) < now − COALESCE(flow.retention_days, max-age-days) days`.
+   `flows.retentionDays` (`flow.retention_days`, V212, nullable `INTEGER`, CHECK `1..3650`) is a
+   **column**, as `step_logging` is (PLT-602): `/api/flows` validates it through the system
+   collection (`ValidationRules.forNumeric(1, 3650)` → 400 on 0, negative, fractional or
+   non-numeric), `kelta metadata export/apply` carries it via `SELECT *` / `mapRowToFields`, and
+   `kelta flows create|update --retention-days`, MCP `create_flow`/`update_flow` and the designer's
+   trigger sheet set it. The statement joins `flow` on its primary key (`flow_id` is a NOT NULL FK)
+   and locks only `FOR UPDATE OF e`; the cutoff is computed in SQL from one `now` parameter, so a
+   single statement covers every window. No new index: the age predicate was never index-backed
+   (it scans terminal rows by status), and the join is a PK lookup per candidate row. Deletes
+   cascade to `flow_step_log` / `flow_pending_resume`. A reaped execution enters this phase with
+   `completed_at` = reap time and ages out after its flow's window.
+3. **Purge job logs** (`job_execution_log`, no flow → always `max-age-days`).
+
+Execution reads (`GET /api/flows/executions/{id}`, `JdbcFlowStore.mapExecution`) return
+`errorCode`. Metrics: `kelta_worker_flowlog_purged`, `kelta_worker_flow_executions_abandoned`.
+Tests: `FlowLogRetentionSweepTest` (ordering, bounds, dry-run), `FlowLogRetentionRepositoryIntegrationTest`
+(real Postgres: shorter/longer windows, reaper cases, reaped → purged), `FlowLogRetentionScenarioTest`
+(harness), `FlowRetentionDaysApiTest`, `PackageRoundTripTest.flowRetentionDaysRoundTrips`.
+
 ## Where to Add New Code
 
 | What | Where |

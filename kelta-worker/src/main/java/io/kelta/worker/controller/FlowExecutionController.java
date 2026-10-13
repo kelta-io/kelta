@@ -438,6 +438,7 @@ public class FlowExecutionController {
         map.put("stepCount", exec.stepCount());
         map.put("durationMs", exec.durationMs());
         map.put("errorMessage", exec.errorMessage());
+        map.put("errorCode", exec.errorCode());
         map.put("isTest", exec.isTest());
         map.put("stateData", exec.stateData());
         map.put("initialInput", exec.initialInput());

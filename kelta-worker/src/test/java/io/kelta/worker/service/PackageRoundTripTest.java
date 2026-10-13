@@ -397,6 +397,27 @@ class PackageRoundTripTest {
                 .containsEntry("stepLogging", "ERRORS_ONLY");
     }
 
+    @Test
+    @DisplayName("a flow's retentionDays survives export → JSON → apply (PLT-603)")
+    void flowRetentionDaysRoundTrips() throws Exception {
+        when(exportRepository.findFlowsByIds(SOURCE, List.of("src-flow"))).thenReturn(List.of(
+                row("id", "src-flow", "name", "Every-15-minutes poll", "flow_type", "SCHEDULED",
+                        "active", true, "version", 1, "retention_days", 7,
+                        "definition", jsonb("{\"StartAt\":\"done\",\"States\":{\"done\":{\"Type\":\"Succeed\"}}}"))));
+
+        ObjectMapper http = new ObjectMapper();
+        String body = http.writeValueAsString(packageService.exportPackage(SOURCE, Map.of(), false));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> received = http.readValue(body, Map.class);
+
+        var report = importService.importPackage(TARGET, received,
+                PackageImportService.ImportOptions.defaults());
+
+        assertThat(report.failed()).as("%s", report.items()).isZero();
+        assertThat(written("flows")).containsEntry("name", "Every-15-minutes poll")
+                .containsEntry("retentionDays", 7);
+    }
+
     private static PGobject jsonb(String json) throws Exception {
         PGobject value = new PGobject();
         value.setType("jsonb");

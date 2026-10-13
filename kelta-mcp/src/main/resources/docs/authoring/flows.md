@@ -34,6 +34,9 @@ catalogue is on kelta.io:
 - `stepLogging` — which step-log rows a run writes: `FULL` (default),
   `ERRORS_ONLY` or `NONE`. See [Step logging](#step-logging). CLI
   `--step-logging`.
+- `retentionDays` — how many days a finished run and its step logs are
+  kept, 1-3650; empty uses the platform-wide window. See
+  [Run history retention](#run-history-retention). CLI `--retention-days`.
 
 ## Step logging
 
@@ -58,6 +61,25 @@ rows dominate database size. Set it with
 `kelta flows update <id> --step-logging ERRORS_ONLY` or
 `PATCH /api/flows/{id}` with `{"stepLogging": "ERRORS_ONLY"}`; an
 unknown value is a 400.
+
+## Run history retention
+
+A platform sweep deletes finished runs (`COMPLETED`, `FAILED`,
+`CANCELLED`) and their step logs once they are older than the retention
+window: 60 days by default, set by the operator. A flow's
+`retentionDays` replaces that window for its own runs, shorter or
+longer. A schedule that fires every few minutes rarely needs two months
+of history; `7` keeps a week. A flow without `retentionDays` uses the
+platform window. Set it with `kelta flows update <id> --retention-days 7`
+(`--retention-days default` clears it) or `PATCH /api/flows/{id}` with
+`{"retentionDays": 7}` (`null` clears it). Zero, negative or fractional
+values are a 400.
+
+`WAITING` runs are never deleted. A run left `RUNNING` with no step
+activity for 24 hours (its worker died mid-run) is marked `FAILED` with
+error code `Abandoned`, and then ages out like any other failure. The
+sweep and this reaper act only where the operator has armed retention;
+ask yours whether it is on.
 
 ## Definition skeleton
 

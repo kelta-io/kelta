@@ -73,6 +73,20 @@ started with, so a later edit never changes a run in flight.
 Terminal runs (`COMPLETED`, `FAILED`, `CANCELLED`) older than the retention window — 60 days by default — are
 eligible for pruning, together with their step logs and scheduled-job logs. `WAITING` runs are never pruned.
 
+A flow can set its own window with `retentionDays` (1-3650), shorter or longer than the platform's: a schedule that
+fires every few minutes rarely needs two months of history.
+
+```bash
+kelta flows update <flowId> --retention-days 7        # keep a week
+kelta flows update <flowId> --retention-days default  # back to the platform window
+```
+
+(`PATCH /api/flows/{id}` with `{"retentionDays": 7}`, or *Keep run history (days)* in the designer's trigger sheet;
+zero, negative or fractional values are a 400.)
+
+A run left `RUNNING` with no step activity for 24 hours — its worker died mid-run — is marked `FAILED` with error
+code `Abandoned` and a completion time, and then ages out like any other failed run.
+
 The pruning sweep ships **dry-run by default**: it logs what it would delete until the operator arms it
 (`FLOW_RETENTION_DRY_RUN=false`). Ask your operator which mode your deployment runs; until it is armed, history is
 kept indefinitely. See [Data retention](/docs/platform/data-retention/).

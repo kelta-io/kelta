@@ -42,6 +42,9 @@ public class UpdateFlowTool implements AdminTool {
                 "Step-log level: FULL (default; every step with input/output snapshots), ERRORS_ONLY "
                 + "(every step, snapshots only for a failed step — recommended for high-frequency or "
                 + "high-volume flows) or NONE (only a failed step's row)."));
+        properties.put("retentionDays", Schemas.integer(
+                "Days a finished run and its step logs are kept before the retention sweep deletes "
+                + "them (1-3650). 0 clears the override (the platform-wide window applies again).", 0, 3650));
 
         Tool tool = Tool.builder()
                 .name("update_flow")
@@ -68,8 +71,11 @@ public class UpdateFlowTool implements AdminTool {
                     if (args.get("active") instanceof Boolean b) attrs.put("active", b);
                     if (args.get("runAsUserId") instanceof String r) attrs.put("runAsUserId", r.isBlank() ? null : r);
                     if (args.get("stepLogging") instanceof String l && !l.isBlank()) attrs.put("stepLogging", l);
+                    if (args.get("retentionDays") instanceof Number days) {
+                        attrs.put("retentionDays", days.doubleValue() == 0 ? null : days);
+                    }
                     if (attrs.isEmpty()) {
-                        return error("Provide at least one of name, description, triggerConfig, definition, active, runAsUserId, stepLogging.");
+                        return error("Provide at least one of name, description, triggerConfig, definition, active, runAsUserId, stepLogging, retentionDays.");
                     }
 
                     Map<String, Object> body = Map.of("data", Map.of(

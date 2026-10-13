@@ -517,6 +517,7 @@ Create a flow (definition JSON is the state machine)
 - `--trigger-config <json>` — Trigger config as JSON, @file, or -
 - `--active` — Create the flow active (default: inactive)
 - `--step-logging <level>` — FULL (every step with snapshots) | ERRORS_ONLY (snapshots only for a failed step) | NONE (only a failed step) (default: FULL)
+- `--retention-days <days>` — Days a finished run and its step logs are kept, 1-3650 (default: the platform-wide window)
 
 ### `kelta flows update <flowId>`
 
@@ -525,6 +526,7 @@ Update a flow by id
 - `--active <bool>` — true|false
 - `--definition <json>` — Definition as JSON, @file, or -
 - `--step-logging <level>` — FULL (every step with snapshots) | ERRORS_ONLY (snapshots only for a failed step) | NONE (only a failed step)
+- `--retention-days <days>` — Days a finished run and its step logs are kept, 1-3650 (default: the platform-wide window); "default" clears the override
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
 ### `kelta flows delete <flowId>`

@@ -1217,7 +1217,7 @@ class FlowEngineTest {
             executions.put(id, new FlowExecutionData(
                 id, tenantId, flowId, FlowExecutionData.STATUS_RUNNING, startedBy,
                 triggerRecordId, initialInput != null ? initialInput : Map.of(),
-                null, null, 0, null, initialInput, isTest, Instant.now(), null));
+                null, null, null, 0, null, initialInput, isTest, Instant.now(), null));
             stepLogs.put(id, new ArrayList<>());
             return id;
         }
@@ -1235,7 +1235,7 @@ class FlowEngineTest {
                 executions.put(executionId, new FlowExecutionData(
                     existing.id(), existing.tenantId(), existing.flowId(), status,
                     existing.startedBy(), existing.triggerRecordId(), stateData,
-                    currentNodeId, existing.errorMessage(), stepCount, existing.durationMs(),
+                    currentNodeId, existing.errorMessage(), existing.errorCode(), stepCount, existing.durationMs(),
                     existing.initialInput(), existing.isTest(), existing.startedAt(), null));
             }
         }
@@ -1248,7 +1248,7 @@ class FlowEngineTest {
                 executions.put(executionId, new FlowExecutionData(
                     existing.id(), existing.tenantId(), existing.flowId(), status,
                     existing.startedBy(), existing.triggerRecordId(), stateData,
-                    existing.currentNodeId(), errorMessage, stepCount, durationMs,
+                    existing.currentNodeId(), errorMessage, null, stepCount, durationMs,
                     existing.initialInput(), existing.isTest(), existing.startedAt(), Instant.now()));
             }
         }
@@ -1261,7 +1261,7 @@ class FlowEngineTest {
                     existing.id(), existing.tenantId(), existing.flowId(),
                     FlowExecutionData.STATUS_CANCELLED,
                     existing.startedBy(), existing.triggerRecordId(), existing.stateData(),
-                    existing.currentNodeId(), null, existing.stepCount(), existing.durationMs(),
+                    existing.currentNodeId(), null, null, existing.stepCount(), existing.durationMs(),
                     existing.initialInput(), existing.isTest(), existing.startedAt(), Instant.now()));
             }
         }

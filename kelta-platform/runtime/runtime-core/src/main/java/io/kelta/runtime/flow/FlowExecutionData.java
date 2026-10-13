@@ -15,6 +15,8 @@ import java.util.Map;
  * @param stateData       current state data (JSON)
  * @param currentNodeId   the state currently being executed
  * @param errorMessage    error message if status is FAILED
+ * @param errorCode       machine-readable failure code, when one was recorded
+ *                        (e.g. {@code Abandoned} from the stale-RUNNING reaper)
  * @param stepCount       number of steps executed so far
  * @param durationMs      total execution duration in milliseconds
  * @param initialInput    the initial input data (JSON snapshot)
@@ -33,6 +35,7 @@ public record FlowExecutionData(
     Map<String, Object> stateData,
     String currentNodeId,
     String errorMessage,
+    String errorCode,
     int stepCount,
     Integer durationMs,
     Map<String, Object> initialInput,

@@ -1682,6 +1682,8 @@ export interface FlowDefinition {
   definition: string;
   /** Which step-log rows runs write; see {@link CreateFlowRequest.stepLogging}. */
   stepLogging?: 'FULL' | 'ERRORS_ONLY' | 'NONE';
+  /** Execution-history retention override; see {@link CreateFlowRequest.retentionDays}. */
+  retentionDays?: number | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -1722,6 +1724,11 @@ export interface CreateFlowRequest {
    * only for a failed step) or `NONE` (only a failed step's row).
    */
   stepLogging?: 'FULL' | 'ERRORS_ONLY' | 'NONE';
+  /**
+   * Days a finished execution and its step logs are kept (1-3650). `null` uses
+   * the platform-wide retention window.
+   */
+  retentionDays?: number | null;
 }
 
 // --- Scheduled Jobs (Phase 4 Stream E) ---

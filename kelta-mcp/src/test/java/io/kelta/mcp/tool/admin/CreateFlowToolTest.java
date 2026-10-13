@@ -123,4 +123,22 @@ class CreateFlowToolTest {
         wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/flows"))
                 .withRequestBody(matchingJsonPath("$.data.attributes.stepLogging", equalTo("ERRORS_ONLY"))));
     }
+
+    @Test
+    void passesRetentionDaysThrough() {
+        wm.stubFor(post(urlEqualTo("/api/flows"))
+                .willReturn(aResponse().withStatus(201).withBody("{\"data\":{\"id\":\"f4\"}}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("create_flow", Map.of(
+                        "name", "FrequentPoll",
+                        "flowType", "SCHEDULED",
+                        "retentionDays", 7,
+                        "definition", Map.of(
+                                "nodes", java.util.List.of(Map.of("type", "start")))), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/flows"))
+                .withRequestBody(matchingJsonPath("$.data.attributes.retentionDays", equalTo("7"))));
+    }
 }
