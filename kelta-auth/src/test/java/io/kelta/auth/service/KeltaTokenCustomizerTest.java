@@ -235,4 +235,55 @@ class KeltaTokenCustomizerTest {
         assertEquals("internal", claims.getClaim("auth_method"));
         assertNull(claims.getClaim("connected_app_id"));
     }
+
+    @Test
+    void customize_principalWithErasedCredentials_stillReportsInternalAuthMethod() {
+        KeltaUserDetails user = new KeltaUserDetails(
+                "user-1", "admin@test.com", "tenant-1", "profile-1",
+                "System Administrator", "Test Admin", "$2a$10$hash",
+                true, false, false
+        );
+        user.eraseCredentials();
+
+        assertEquals("internal", platformAccessTokenAuthMethod(user));
+    }
+
+    @Test
+    void customize_principalWithoutLocalPassword_reportsSsoAuthMethod() {
+        KeltaUserDetails user = new KeltaUserDetails(
+                "user-1", "admin@test.com", "tenant-1", "profile-1",
+                "System Administrator", "Test Admin", "",
+                true, false, false
+        );
+
+        assertEquals("sso", platformAccessTokenAuthMethod(user));
+    }
+
+    /** Customizes an authorization_code access token for the platform client; returns auth_method. */
+    private Object platformAccessTokenAuthMethod(KeltaUserDetails user) {
+        RegisteredClient registeredClient = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId("kelta-platform")
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri("http://localhost:5173/auth/callback")
+                .build();
+
+        when(context.getPrincipal()).thenReturn(authentication);
+        when(authentication.getPrincipal()).thenReturn(user);
+        when(context.getTokenType()).thenReturn(new OAuth2TokenType("access_token"));
+        when(context.getAuthorizationGrantType()).thenReturn(AuthorizationGrantType.AUTHORIZATION_CODE);
+        when(context.getRegisteredClient()).thenReturn(registeredClient);
+        when(jdbcTemplate.queryForList(
+                eq("SELECT id, tenant_id, scopes FROM connected_app WHERE client_id = ? AND active = true"),
+                eq("kelta-platform")
+        )).thenReturn(List.of());
+
+        JwtClaimsSet.Builder claimsBuilder = JwtClaimsSet.builder()
+                .issuer("http://localhost")
+                .subject("admin@test.com")
+                .issuedAt(Instant.now());
+        when(context.getClaims()).thenReturn(claimsBuilder);
+
+        customizer.customize(context);
+        return claimsBuilder.build().getClaim("auth_method");
+    }
 }

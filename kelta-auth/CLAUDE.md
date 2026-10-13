@@ -18,7 +18,13 @@ io.kelta.auth/
 ### Models
 - `KeltaUserDetails` — implements Spring `UserDetails`; 11-param constructor (adds `userType`
   INTERNAL|PORTAL) with a 10-param overload defaulting to INTERNAL. Serialized principals
-  round-trip through `KeltaUserDetailsMixin` — grow both together.
+  round-trip through `KeltaUserDetailsMixin` (its `@JsonCreator` is the static
+  `KeltaUserDetails.restore`) — grow both together. It is a `CredentialsContainer`:
+  `ProviderManager` erases the password hash after authentication, so `getPassword()` is
+  `null` (empty for federated/passwordless principals) on every principal in the session or the
+  authorization store — never read it after login. Whether the user signed in with a local
+  password is `hasLocalCredential()` (fixed at construction; drives the `auth_method` claim). The mixin never writes `passwordHash` and
+  reads stored rows that still carry it without keeping it.
 - `KeltaSession` — serializable session data `SessionService` stores in Redis (the servlet
   `HttpSession` is NOT in Redis — `spring.session.*` is inert, see `concerns.md`)
 - Both are plain classes (not records, not JPA entities)
