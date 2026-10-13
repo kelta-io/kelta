@@ -107,10 +107,18 @@ quickstart:
   - 'ci/admin-first-sign-in.sh'
 
 # Tenant templates — the "templates" job installs every examples/templates/*/ into one
-# fresh tenant of a HEAD-built stack and checks the seeded record counts.
+# fresh tenant of a HEAD-built stack and checks the seeded record counts. Each template's
+# install.sh drives the kelta CLI, whose `metadata apply`/`export` call /api/packages/*
+# (PackageController → PackageService → PackageImportService), so a change to either side
+# can break a template.
 templates:
   - 'examples/templates/**'
   - 'ci/templates-install-check.*'
+  - 'kelta-web/packages/cli/**'
+  - 'kelta-worker/src/main/java/io/kelta/worker/controller/PackageController.java'
+  - 'kelta-worker/src/main/java/io/kelta/worker/service/PackageService.java'
+  - 'kelta-worker/src/main/java/io/kelta/worker/service/PackageImportService.java'
+  - '.github/path-filters.yml'
 
 # Upgrade test — the "upgrade" job boots the newest release, seeds it, upgrades it to HEAD
 # on the same volumes and re-reads the data. Anything that can change what an upgrade does

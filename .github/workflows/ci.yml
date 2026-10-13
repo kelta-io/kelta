@@ -3,6 +3,11 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # Weekly backstop for the templates job alone: on a schedule the path filter is skipped,
+  # so every job gated on a filter output skips and only `templates` (which also accepts
+  # `schedule`) runs, alongside the unconditional worker-image-is-jvm check and the gate.
+  schedule:
+    - cron: '17 6 * * 1'
   workflow_dispatch:
     inputs:
       # Manual fallback for the e2e-tests/.update-snapshots marker (see the e2e job's
@@ -74,11 +79,11 @@ jobs:
           # paths-filter needs full history to diff against PR base
           fetch-depth: 0
 
-      # A baseline-regeneration dispatch runs the e2e job only: with no filter outputs
-      # every other job skips.
+      # A baseline-regeneration dispatch runs the e2e job only, and a scheduled run the
+      # templates job only: with no filter outputs every other job skips.
       - name: Filter paths
         id: filter
-        if: github.event_name != 'workflow_dispatch' || inputs.update_snapshots_ref == ''
+        if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.update_snapshots_ref == '')
         uses: dorny/paths-filter@v4
         with:
           filters: .github/path-filters.yml
@@ -998,7 +1003,9 @@ jobs:
   templates:
     name: Template Install Check
     needs: changes
-    if: needs.changes.outputs.templates == 'true' || needs.changes.outputs.workflows == 'true'
+    if: >-
+      needs.changes.outputs.templates == 'true' || needs.changes.outputs.workflows == 'true'
+      || github.event_name == 'schedule'
     runs-on: k8s-runner-integration
     timeout-minutes: 40
     concurrency:
