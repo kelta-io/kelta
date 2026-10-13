@@ -1,0 +1,1 @@
+- 2026-10-12 fix(platform): Validate outbound URLs for OpenAPI spec import, flow HTTP callouts and kelta-auth OIDC discovery through a shared runtime-core `OutboundHttpClient` (non-public addresses refused unless `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` lists them, redirects re-validated per hop, deadlines, body caps) (outbound-url-guard-shared)

@@ -305,10 +305,12 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
 
 ### Outbound requests to tenant-supplied URLs
 
-`OutboundUrlGuard` (worker) refuses non-public targets (loopback, RFC 1918, link-local/metadata,
-CGNAT, ULA, embedded-in-IPv6 forms) unless `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` lists them; the
-guarded fetch follows no redirects, has deadlines and caps the body. New code that fetches a
-tenant- or admin-supplied URL from inside the cluster should go through it.
+`OutboundUrlGuard` + `OutboundHttpClient` (runtime-core `io.kelta.runtime.outbound`) refuse
+non-public targets (loopback, RFC 1918, link-local/metadata, CGNAT, ULA, embedded-in-IPv6 forms)
+unless `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` lists them, re-validate every redirect hop, and bound
+each fetch with deadlines and a body cap. Used by OIDC discovery (worker and kelta-auth), OpenAPI
+spec import/validate and `HTTP_CALLOUT`. New code that fetches a tenant- or admin-supplied URL
+from inside the cluster should go through `OutboundHttpClient`.
 
 ### Data masking — v2 contexts (accepted)
 
@@ -797,6 +799,7 @@ One line each; full write-ups are in git history.
 **Security**
 - 2026-10-12 (span-body-redaction) — the gateway recorded JSON request/response bodies as span attributes unredacted; both gateway and worker now use the shared `SensitiveBodyRedactor` (runtime-jsonapi: secret-named keys at any depth, PAT/JWT-shaped values, redact before truncate, no content captured for non-JSON/invalid JSON or `credentials` paths). Bodies captured before the fix remain in trace storage until retention expires.
 - 2026-10-12 (auth-principal-erase-credentials) — erase credentials from the authenticated principal: `KeltaUserDetails` is a `CredentialsContainer`, so `ProviderManager` clears the password hash after authentication; `KeltaUserDetailsMixin` never writes it to the authorization store and reads stored rows that still carry it without keeping it. `auth_method` reads `hasLocalCredential()`, not the hash.
+- 2026-10-12 (outbound-url-guard-shared) — OpenAPI spec import/validate, flow `HTTP_CALLOUT` and kelta-auth's login-time OIDC discovery now fetch tenant-supplied URLs through the shared runtime-core `OutboundHttpClient`.
 - 2026-10-12 — child-resource routes verify parent ownership and apply top-level tenant visibility; get-by-id applies the shared-system-row restriction (`RecordTenantScope.findChild`/`visibleToTenant`).
 - PLT-260 (2026-09-17) — direct `queryEngine` callers read system collections across tenants; scoping moved into `PhysicalTableStorageAdapter.query()`.
 - PLT-354 (2026-10-05) — anonymous no-tenant reads returned several tenants' rows; now `WHERE FALSE` (`refusesAnonymousRead`).

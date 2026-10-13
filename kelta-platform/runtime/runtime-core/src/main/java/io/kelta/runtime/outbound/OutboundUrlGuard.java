@@ -1,7 +1,4 @@
-package io.kelta.worker.service;
-
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+package io.kelta.runtime.outbound;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -13,9 +10,11 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Decides whether the worker may fetch a URL that a tenant administrator supplied — the guard
+ * Decides whether a service may fetch a URL that a tenant administrator supplied — the guard
  * against server-side request forgery for any outbound call whose target comes from tenant
- * configuration rather than from the platform.
+ * configuration rather than from the platform. Plain Java: each service builds one from its
+ * {@value #ALLOWED_CIDRS_PROPERTY} property (env {@code KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS}),
+ * and fetches normally go through {@link OutboundHttpClient}, which applies it to every hop.
  *
  * <p>A URL passes when it is an absolute {@code http}/{@code https} URL without user-info, and
  * <em>every</em> address its host resolves to is publicly routable. Loopback, unspecified,
@@ -27,12 +26,11 @@ import java.util.Locale;
  * provider, say) lists those ranges in {@value #ALLOWED_CIDRS_PROPERTY} (comma-separated CIDRs or
  * bare addresses). Nothing is allowed by default.
  *
- * <p>Callers must also refuse redirects (a redirect to a private address would bypass this
- * check) and bound the request with timeouts and a response-size limit. The check resolves the
- * host itself, so a DNS answer that changes between the check and the request (rebinding) is not
- * covered; see {@code concerns.md}.
+ * <p>A caller that fetches without {@link OutboundHttpClient} must itself re-check every
+ * redirect hop (a redirect to a private address would bypass this check) and bound the request
+ * with timeouts and a response-size limit. The check resolves the host itself; see
+ * {@link OutboundHttpClient} for how that relates to the address the connection uses.
  */
-@Component
 public class OutboundUrlGuard {
 
     /** Comma-separated CIDRs (or bare addresses) that are reachable despite being non-public. */
@@ -40,12 +38,17 @@ public class OutboundUrlGuard {
 
     private final List<Cidr> allowedRanges;
 
-    public OutboundUrlGuard(@Value("${" + ALLOWED_CIDRS_PROPERTY + ":}") String allowedPrivateCidrs) {
+    /**
+     * @param allowedPrivateCidrs comma-separated CIDRs or bare addresses that are allowed even
+     *                            though they are not public; blank allows none
+     * @throws IllegalArgumentException when an entry is not an IP address or CIDR
+     */
+    public OutboundUrlGuard(String allowedPrivateCidrs) {
         this.allowedRanges = parseRanges(allowedPrivateCidrs);
     }
 
     /**
-     * Returns {@code url} as a {@link URI} when the worker may fetch it.
+     * Returns {@code url} as a {@link URI} when it may be fetched.
      *
      * @throws RejectedUrlException with a caller-safe reason when it may not
      */

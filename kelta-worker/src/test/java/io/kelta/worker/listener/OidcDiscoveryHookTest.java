@@ -1,8 +1,8 @@
 package io.kelta.worker.listener;
 
 import com.sun.net.httpserver.HttpServer;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import io.kelta.runtime.workflow.BeforeSaveResult;
-import io.kelta.worker.service.OutboundUrlGuard;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

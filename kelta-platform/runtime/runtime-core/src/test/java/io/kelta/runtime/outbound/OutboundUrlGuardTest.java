@@ -1,4 +1,4 @@
-package io.kelta.worker.service;
+package io.kelta.runtime.outbound;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

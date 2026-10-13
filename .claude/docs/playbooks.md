@@ -29,7 +29,7 @@ A handler that runs as a Task state in the Visual Flow Builder (e.g. `SendSlackM
    - `String getActionTypeKey()` → the action type (e.g. `"SEND_SLACK_MESSAGE"`).
    - `ActionResult execute(ActionContext context)` → read **static node config** from `context.actionConfigJson()` (parse with `ObjectMapper`) and **runtime-resolved values** from `context.resolvedData()` (the `$.input.*` envelope feeds this); do the work; return `ActionResult.success(map)` / `failure(...)`.
    - optional `validate(...)` and `getDescriptor()`.
-   - Collaborators are **constructed** (not field-injected) and pulled from `ModuleContext.getExtension(Type.class)` in the module. ⚠️ `RestTemplate` is **not** a registered extension — default it (`new RestTemplate()`) if null. Resolve secret refs (webhook URLs/keys) via the `CredentialResolverPort` extension. See `runtime-module-integration/CLAUDE.md` → Handler collaborators & config.
+   - Collaborators are **constructed** (not field-injected) and pulled from `ModuleContext.getExtension(Type.class)` in the module. A handler that calls a **tenant-configured URL** uses runtime-core's `OutboundHttpClient` with the `OutboundUrlGuard` extension (as `HttpCalloutActionHandler` does), not a bare HTTP client. ⚠️ `RestTemplate` is **not** a registered extension — default it (`new RestTemplate()`) if null. Resolve secret refs (webhook URLs/keys) via the `CredentialResolverPort` extension. See `runtime-module-integration/CLAUDE.md` → Handler collaborators & config.
 2. **Register it** (the step no agent guesses): in `runtime-module-integration/.../IntegrationModule.java`, construct your handler in `onStartup(ModuleContext)` and return it from `getActionHandlers()`. The module is wired as a `@Bean` in `kelta-worker/.../config/FlowConfig.java` (`integrationModule()`); `ModuleRegistry` calls `onStartup` then registers handlers into `ActionHandlerRegistry`.
    - ⚠️ Handlers are **NOT** `@Component`-scanned. The `ActionHandler` Javadoc that says "implement as a `@Component`" is **wrong** — a `@Component` handler silently never registers.
    - ⚠️ The `workflow_action_type` DB table is a **display catalog only**; its `handler_class` column is never read by Java. You do **not** need a migration for the handler to execute.
@@ -40,7 +40,7 @@ A handler that runs as a Task state in the Visual Flow Builder (e.g. `SendSlackM
 4. Write a `<Name>Params.tsx` config form in `kelta-ui/app/src/pages/FlowDesignerPage/components/properties/` (props: `{ parameters, onUpdate }`; ref `HttpCalloutParams.tsx`) and wire it into `TaskProperties.tsx` (switched on `resource`).
    - ⚠️ The `ActionHandlerDescriptor` SPI exists but the admin UI does **not** consume it for built-in handlers — the palette + params are hand-written. Skipping this step ships a handler that never appears in the builder.
 
-**Tests**: `<Name>ActionHandlerTest.java` co-located (JUnit 5 + Mockito, MockWebServer for outbound HTTP) + a Playwright e2e exercising the node.
+**Tests**: `<Name>ActionHandlerTest.java` co-located (JUnit 5 + Mockito, a loopback `HttpServer` for outbound HTTP) + a Playwright e2e exercising the node.
 **Docs**: bump the handler count + list in [`status.md`](status.md) (Visual Flow Builder row); [`integrations.md`](integrations.md) if it's a new external dependency.
 
 ---

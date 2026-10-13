@@ -614,6 +614,37 @@ FAILED SMS delivery, not a dead service.
 Per-tenant VAPID overrides could ride `TenantPushSettings` (as APNs/FCM overrides already
 do) but are platform-level in v1.
 
+## Outbound requests to tenant-supplied URLs
+
+Any fetch whose target comes from tenant or admin configuration goes through
+`io.kelta.runtime.outbound.OutboundHttpClient` (runtime-core, plain Java over
+`java.net.http.HttpClient`) with the service's `OutboundUrlGuard` bean (`OutboundConfig` in the
+worker and in kelta-auth, from `kelta.outbound.allowed-private-cidrs` =
+`${KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS:}`):
+
+- **Address check.** The URL must be absolute `http`/`https` without user-info, and **every**
+  address its host resolves to must be public — loopback, private, link-local (incl. the cloud
+  metadata address), CGNAT, ULA, multicast/reserved and IPv6-embedded forms are refused unless
+  allow-listed. Compose service names resolve to private addresses, so they are refused too.
+  A refused URL is never sent.
+- **Redirects.** Never automatic. A client with a hop limit follows `GET`/`HEAD` redirects by hand,
+  re-checking each `Location`; a hop to another origin drops `Authorization`/`Cookie`. Other
+  methods return the 3xx to the caller.
+- **Bounds.** One deadline covers all hops, headers and body; the body is read up to a cap and the
+  response is flagged truncated beyond it.
+
+| Fetcher | Connect / overall | Body cap | Redirects | On refusal |
+|---|---|---|---|---|
+| OIDC discovery — worker `OidcDiscoveryHook`, kelta-auth `OidcDiscoveryService` | 3 s / 5 s | 256 KB (over = error) | none | `discoveryStatus=blocked` (worker); no discovered endpoints (auth) |
+| OpenAPI spec `sourceUrl` — `ApiSpecService.fetchSpec` (`POST /api/api-specs/import`, `POST /api/api-specs/validate`) | 10 s / 30 s | 10 MB (over = 422) | 3, re-validated | 400 `sourceUrl refused: …` |
+| Flow `HTTP_CALLOUT` — `HttpCalloutActionHandler` | 10 s / 60 s | 1 MB read; `responseBody` keeps 50,000 chars, a truncated response is not parsed into `responseData` | 3 for `GET`, re-validated | step fails `HTTP callout refused: …` |
+
+`HTTP_CALLOUT` gets the guard as a `ModuleContext` extension (`FlowConfig.moduleRegistry()`);
+without one `IntegrationModule` uses a guard that allows no private range. A 4xx/5xx status fails
+the step, as before. Restricted headers the JDK client manages (`Host`, `Connection`,
+`Content-Length`, `Expect`, `Upgrade`) are dropped from node config. A flow that must call an
+in-cluster service needs that range in the allow-list.
+
 ## OIDC federation providers (`oidc-providers`)
 
 A tenant's external identity providers are rows of the `oidc-providers` system collection
@@ -639,9 +670,12 @@ host does not resolve, or the document names another issuer) or `blocked` (refus
 outbound URL guard); a failure **never blocks the save** — kelta-auth resolves endpoints itself at
 login time (overrides first, then its own discovery), and endpoints can be entered by hand. On an
 issuer change, endpoint values still equal to the previous discovery are replaced, or cleared if
-the new issuer cannot be discovered. The fetch goes through `OutboundUrlGuard` (non-public
+the new issuer cannot be discovered. The fetch goes through `OutboundHttpClient` (non-public
 addresses refused unless listed in `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS`), never follows
-redirects, and is bounded (3 s connect, 5 s overall, 256 KB).
+redirects, and is bounded (3 s connect, 5 s overall, 256 KB). kelta-auth's own login-time
+discovery (`OidcDiscoveryService`, 1 h cache) applies the same guard and limits, so a refused or
+failed issuer resolves to the stored overrides only — set the allow-list identically on both
+services. See [Outbound requests to tenant-supplied URLs](#outbound-requests-to-tenant-supplied-urls).
 
 ## Portal magic-link login (telehealth slice 1)
 

@@ -156,6 +156,7 @@ Standard Spring Security exceptions (`AuthenticationException` hierarchy). No cu
 | OAuth2 customization | `service/KeltaTokenCustomizer.java` |
 | User loading | `service/KeltaUserDetailsService.java` |
 | External IdP | `federation/DynamicClientRegistrationRepository.java` |
+| Fetching a tenant-supplied URL (runtime-core `OutboundHttpClient` + the `OutboundUrlGuard` bean from `config/OutboundConfig`) | `service/OidcDiscoveryService.java` |
 | MFA | `service/TotpService.java` + `controller/MfaController.java` |
 | Passwordless magic-link (portal users) | `controller/PortalLoginController.java` + `service/PortalLoginService.java` |
 | Worker HTTP client | `service/WorkerClient.java` |

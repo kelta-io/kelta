@@ -1,8 +1,9 @@
 package io.kelta.worker.listener;
 
+import io.kelta.runtime.outbound.OutboundHttpClient;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
-import io.kelta.worker.service.OutboundUrlGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -10,18 +11,11 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Runs OIDC Discovery when an OIDC provider is saved: fetches the issuer's
@@ -51,8 +45,8 @@ import java.util.concurrent.TimeoutException;
  * replaced, or cleared when the new issuer cannot be discovered.
  *
  * <p><b>Outbound safety.</b> The issuer is tenant-supplied, so the fetch goes through
- * {@link OutboundUrlGuard}, never follows redirects, has connect and overall deadlines, and reads
- * at most {@link #MAX_DOCUMENT_BYTES}. The document is read as a JSON tree (no reflective
+ * {@link OutboundHttpClient} with the shared {@link OutboundUrlGuard}: it never follows
+ * redirects, has connect and overall deadlines, and reads at most {@link #MAX_DOCUMENT_BYTES}. The document is read as a JSON tree (no reflective
  * binding, so nothing to register for the native image). Discovered values are stored only when
  * they are absolute http(s) URLs that fit their column.
  */
@@ -89,16 +83,12 @@ public class OidcDiscoveryHook implements BeforeSaveHook {
     }
 
     private final ObjectMapper objectMapper;
-    private final OutboundUrlGuard urlGuard;
-    private final HttpClient httpClient;
+    private final OutboundHttpClient httpClient;
 
     public OidcDiscoveryHook(ObjectMapper objectMapper, OutboundUrlGuard urlGuard) {
         this.objectMapper = objectMapper;
-        this.urlGuard = urlGuard;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build();
+        this.httpClient = new OutboundHttpClient(urlGuard, new OutboundHttpClient.Limits(
+                CONNECT_TIMEOUT, REQUEST_TIMEOUT, MAX_DOCUMENT_BYTES, 0));
     }
 
     @Override
@@ -161,20 +151,15 @@ public class OidcDiscoveryHook implements BeforeSaveHook {
                                       Map<String, Object> clearIfUndiscovered) {
         Map<String, Object> updates = new HashMap<>(clearIfUndiscovered);
 
-        URI url;
+        JsonNode document;
         try {
-            url = urlGuard.check(discoveryUrl(issuer));
+            document = fetch(discoveryUrl(issuer));
         } catch (OutboundUrlGuard.RejectedUrlException e) {
             log.warn("OIDC discovery not attempted for issuer {}: {}", issuer, e.getMessage());
             // A host that does not resolve is a failed discovery, not a refused one.
             updates.put(STATUS_FIELD, e.reason() == OutboundUrlGuard.Reason.UNRESOLVABLE
                     ? STATUS_ERROR : STATUS_BLOCKED);
             return BeforeSaveResult.withFieldUpdates(updates);
-        }
-
-        JsonNode document;
-        try {
-            document = fetch(url);
         } catch (DiscoveryFailure e) {
             log.warn("OIDC discovery failed for issuer {}: {}", issuer, e.getMessage());
             updates.put(STATUS_FIELD, STATUS_ERROR);
@@ -202,32 +187,19 @@ public class OidcDiscoveryHook implements BeforeSaveHook {
         return BeforeSaveResult.withFieldUpdates(updates);
     }
 
-    private JsonNode fetch(URI url) throws DiscoveryFailure {
-        HttpRequest request = HttpRequest.newBuilder(url)
-                .timeout(REQUEST_TIMEOUT)
-                .header("Accept", "application/json")
-                .GET()
-                .build();
-        CompletableFuture<HttpResponse<byte[]>> pending = httpClient.sendAsync(request,
-                HttpResponse.BodyHandlers.limiting(HttpResponse.BodyHandlers.ofByteArray(), MAX_DOCUMENT_BYTES));
-        HttpResponse<byte[]> response;
+    private JsonNode fetch(String url) throws DiscoveryFailure {
+        OutboundHttpClient.Response response;
         try {
             // One deadline for headers and body together, so a slow body cannot hold the save.
-            response = pending.get(REQUEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            pending.cancel(true);
-            throw new DiscoveryFailure("timed out after " + REQUEST_TIMEOUT.toSeconds() + "s");
-        } catch (InterruptedException e) {
-            pending.cancel(true);
-            Thread.currentThread().interrupt();
-            throw new DiscoveryFailure("interrupted");
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause() != null ? e.getCause() : e;
-            throw new DiscoveryFailure(cause.getClass().getSimpleName()
-                    + (cause.getMessage() != null ? ": " + cause.getMessage() : ""));
+            response = httpClient.get(url, Map.of("Accept", "application/json"));
+        } catch (OutboundHttpClient.OutboundRequestException e) {
+            throw new DiscoveryFailure(e.getMessage());
         }
         if (response.statusCode() != 200) {
             throw new DiscoveryFailure("HTTP " + response.statusCode());
+        }
+        if (response.truncated()) {
+            throw new DiscoveryFailure("the document exceeds " + MAX_DOCUMENT_BYTES + " bytes");
         }
         JsonNode document;
         try {

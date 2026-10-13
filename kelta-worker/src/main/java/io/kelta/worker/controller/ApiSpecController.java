@@ -137,7 +137,7 @@ public class ApiSpecController {
         try {
             String content = raw != null && !raw.isBlank()
                 ? raw
-                : fetch(url);
+                : specService.fetchSpec(url);
             ParsedSpec parsed = parser.parse(content);
             return ResponseEntity.ok(Map.of(
                 "ok", true,
@@ -296,24 +296,5 @@ public class ApiSpecController {
             "changed", result.diff().changed(),
             "removed", result.diff().removed()));
         return out;
-    }
-
-    private static String fetch(String url) throws Exception {
-        if (url == null || url.isBlank()) {
-            throw new IllegalArgumentException("Provide either 'raw' or 'sourceUrl'");
-        }
-        java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-            .connectTimeout(java.time.Duration.ofSeconds(10)).build();
-        java.net.http.HttpResponse<String> res = client.send(
-            java.net.http.HttpRequest.newBuilder()
-                .uri(java.net.URI.create(url))
-                .timeout(java.time.Duration.ofSeconds(10))
-                .header("Accept", "application/json, application/yaml, text/yaml")
-                .GET().build(),
-            java.net.http.HttpResponse.BodyHandlers.ofString());
-        if (res.statusCode() / 100 != 2) {
-            throw new IllegalStateException("HTTP " + res.statusCode());
-        }
-        return res.body();
     }
 }

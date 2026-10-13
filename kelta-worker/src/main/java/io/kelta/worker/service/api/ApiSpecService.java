@@ -5,6 +5,8 @@ import io.kelta.runtime.module.integration.api.ApiSpec;
 import io.kelta.runtime.module.integration.api.OpenApiParseException;
 import io.kelta.runtime.module.integration.api.OpenApiSpecParser;
 import io.kelta.runtime.module.integration.api.ParsedSpec;
+import io.kelta.runtime.outbound.OutboundHttpClient;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import io.kelta.worker.repository.ApiOperationRepository;
 import io.kelta.worker.repository.ApiOperationRepository.OperationSyncResult;
 import io.kelta.worker.repository.ApiSpecRepository;
@@ -13,13 +15,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -36,27 +35,41 @@ import java.util.UUID;
  *
  * Storage is wrapped in {@code TenantContext.callWithTenant(...)} so the V127
  * RLS policies engage on every read and write.
+ *
+ * <p>A {@code sourceUrl} is tenant-supplied, so it is fetched through {@link OutboundHttpClient}
+ * with the shared {@link OutboundUrlGuard}: non-public addresses are refused unless
+ * allow-listed, each redirect hop is re-validated (at most {@link #MAX_REDIRECTS}), and the fetch
+ * is bounded by {@link #FETCH_TIMEOUT} overall and {@link #MAX_SPEC_BYTES}.
  */
 @Service
 public class ApiSpecService {
 
     private static final Logger log = LoggerFactory.getLogger(ApiSpecService.class);
-    private static final Duration FETCH_TIMEOUT = Duration.ofSeconds(15);
+    static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    static final Duration FETCH_TIMEOUT = Duration.ofSeconds(30);
+    /** Large public APIs publish specs of several MB; anything above this is refused. */
+    static final int MAX_SPEC_BYTES = 10 * 1024 * 1024;
+    static final int MAX_REDIRECTS = 3;
+    private static final String SPEC_ACCEPT = "application/json, application/yaml, text/yaml";
 
     private final OpenApiSpecParser parser;
     private final ApiSpecRepository specRepository;
     private final ApiOperationRepository operationRepository;
     @SuppressWarnings("unused")
     private final ObjectMapper objectMapper;
+    private final OutboundHttpClient specFetcher;
 
     public ApiSpecService(OpenApiSpecParser parser,
                           ApiSpecRepository specRepository,
                           ApiOperationRepository operationRepository,
-                          ObjectMapper objectMapper) {
+                          ObjectMapper objectMapper,
+                          OutboundUrlGuard outboundUrlGuard) {
         this.parser = parser;
         this.specRepository = specRepository;
         this.operationRepository = operationRepository;
         this.objectMapper = objectMapper;
+        this.specFetcher = new OutboundHttpClient(outboundUrlGuard, new OutboundHttpClient.Limits(
+                CONNECT_TIMEOUT, FETCH_TIMEOUT, MAX_SPEC_BYTES, MAX_REDIRECTS));
     }
 
     /**
@@ -147,32 +160,45 @@ public class ApiSpecService {
                 throw new IllegalArgumentException(
                     "sourceUrl is required when sourceType=URL");
             }
-            try {
-                HttpClient client = HttpClient.newBuilder().connectTimeout(FETCH_TIMEOUT).build();
-                HttpResponse<String> res = client.send(
-                    HttpRequest.newBuilder()
-                        .uri(URI.create(req.sourceUrl()))
-                        .timeout(FETCH_TIMEOUT)
-                        .header("Accept", "application/json, application/yaml, text/yaml")
-                        .GET().build(),
-                    HttpResponse.BodyHandlers.ofString());
-                if (res.statusCode() / 100 != 2) {
-                    throw new OpenApiParseException(
-                        "Failed to fetch spec: HTTP " + res.statusCode());
-                }
-                return res.body();
-            } catch (OpenApiParseException e) {
-                throw e;
-            } catch (Exception e) {
-                throw new OpenApiParseException(
-                    "Failed to fetch spec from " + req.sourceUrl() + ": " + e.getMessage(), e);
-            }
+            return fetchSpec(req.sourceUrl());
         }
         if (req.raw() == null || req.raw().isBlank()) {
             throw new IllegalArgumentException(
                 "raw spec body is required when sourceType is INLINE_JSON or INLINE_YAML");
         }
         return req.raw();
+    }
+
+    /**
+     * Fetches a spec document from a tenant-supplied URL.
+     *
+     * @throws IllegalArgumentException when the URL may not be fetched (blank, not http(s),
+     *         carries credentials, does not resolve, or resolves — directly or through a
+     *         redirect — to a non-public address that is not allow-listed); nothing is sent
+     * @throws OpenApiParseException when the fetch fails, is not 2xx, or exceeds the size cap
+     */
+    public String fetchSpec(String sourceUrl) {
+        if (sourceUrl == null || sourceUrl.isBlank()) {
+            throw new IllegalArgumentException("Provide either 'raw' or 'sourceUrl'");
+        }
+        OutboundHttpClient.Response res;
+        try {
+            res = specFetcher.get(sourceUrl, Map.of("Accept", SPEC_ACCEPT));
+        } catch (OutboundUrlGuard.RejectedUrlException e) {
+            log.warn("Spec fetch refused for {}: {}", sourceUrl, e.getMessage());
+            throw new IllegalArgumentException("sourceUrl refused: " + e.getMessage());
+        } catch (OutboundHttpClient.OutboundRequestException e) {
+            throw new OpenApiParseException(
+                "Failed to fetch spec from " + sourceUrl + ": " + e.getMessage(), e);
+        }
+        if (!res.isSuccess()) {
+            throw new OpenApiParseException("Failed to fetch spec: HTTP " + res.statusCode());
+        }
+        if (res.truncated()) {
+            throw new OpenApiParseException(
+                "Failed to fetch spec: the document exceeds " + MAX_SPEC_BYTES + " bytes");
+        }
+        return res.bodyAsString();
     }
 
     private String detectFormat(String raw, String hint) {

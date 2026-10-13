@@ -1,10 +1,13 @@
 package io.kelta.auth.service;
 
+import io.kelta.runtime.outbound.OutboundHttpClient;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -18,20 +21,32 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>When overrides are present in the OIDC provider configuration,
  * they take precedence over discovered values.
+ *
+ * <p>The issuer is tenant-supplied, so the fetch goes through {@link OutboundHttpClient} with the
+ * service's {@link OutboundUrlGuard} (non-public addresses refused unless listed in
+ * {@code KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS}), follows no redirects, and is bounded by
+ * {@link #CONNECT_TIMEOUT}, {@link #REQUEST_TIMEOUT} overall and {@link #MAX_DOCUMENT_BYTES} —
+ * the same limits the worker applies when it discovers an issuer on save. A refused or failed
+ * discovery is cached like any other failure, so the endpoints fall back to the overrides.
+ * The document is read as a JSON tree (no reflective binding, nothing to register for the native
+ * image).
  */
 @Service
 public class OidcDiscoveryService {
 
     private static final Logger log = LoggerFactory.getLogger(OidcDiscoveryService.class);
     private static final Duration CACHE_TTL = Duration.ofHours(1);
+    static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(3);
+    static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
+    static final int MAX_DOCUMENT_BYTES = 256 * 1024;
 
-    private final RestClient restClient;
+    private final OutboundHttpClient httpClient;
+    private final ObjectMapper jsonMapper = JsonMapper.builder().build();
     private final Map<String, CachedDiscovery> cache = new ConcurrentHashMap<>();
 
-    public OidcDiscoveryService() {
-        this.restClient = RestClient.builder()
-                .defaultHeader("Accept", "application/json")
-                .build();
+    public OidcDiscoveryService(OutboundUrlGuard outboundUrlGuard) {
+        this.httpClient = new OutboundHttpClient(outboundUrlGuard, new OutboundHttpClient.Limits(
+                CONNECT_TIMEOUT, REQUEST_TIMEOUT, MAX_DOCUMENT_BYTES, 0));
     }
 
     /**
@@ -67,13 +82,10 @@ public class OidcDiscoveryService {
             String discoveryUrl = buildDiscoveryUrl(issuerUri);
             log.debug("Fetching OIDC Discovery from: {}", discoveryUrl);
 
-            JsonNode response = restClient.get()
-                    .uri(discoveryUrl)
-                    .retrieve()
-                    .body(JsonNode.class);
+            JsonNode response = fetch(discoveryUrl);
 
-            if (response == null) {
-                log.warn("Empty Discovery response from: {}", discoveryUrl);
+            if (response == null || !response.isObject()) {
+                log.warn("Discovery response from {} is not a JSON object", discoveryUrl);
                 cacheResult(issuerUri, Optional.empty());
                 return Optional.empty();
             }
@@ -92,11 +104,26 @@ public class OidcDiscoveryService {
             cacheResult(issuerUri, result);
             return result;
 
+        } catch (OutboundUrlGuard.RejectedUrlException e) {
+            log.warn("OIDC Discovery not attempted for issuer={}: {}", issuerUri, e.getMessage());
+            cacheResult(issuerUri, Optional.empty());
+            return Optional.empty();
         } catch (Exception e) {
             log.warn("OIDC Discovery failed for issuer={}: {}", issuerUri, e.getMessage());
             cacheResult(issuerUri, Optional.empty());
             return Optional.empty();
         }
+    }
+
+    private JsonNode fetch(String discoveryUrl) {
+        OutboundHttpClient.Response response = httpClient.get(discoveryUrl, Map.of("Accept", "application/json"));
+        if (response.statusCode() != 200) {
+            throw new IllegalStateException("HTTP " + response.statusCode());
+        }
+        if (response.truncated()) {
+            throw new IllegalStateException("the document exceeds " + MAX_DOCUMENT_BYTES + " bytes");
+        }
+        return jsonMapper.readTree(response.body());
     }
 
     /**

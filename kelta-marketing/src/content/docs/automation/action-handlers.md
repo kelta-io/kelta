@@ -122,6 +122,11 @@ The preferred way to call an external API. Two modes:
 
 Captures up to 50 KB of response body under `responseVariable`. Prefer `CALL_API`.
 
+The URL must be public: a host that resolves to a loopback, private or link-local address is
+refused unless the operator allow-lists that range (`KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS`).
+`GET` redirects are followed up to three hops, each checked the same way. The call times out
+after 60 seconds, reads at most 1 MB, and a 4xx/5xx response fails the step.
+
 ### `INVOKE_SCRIPT`
 
 ```json
