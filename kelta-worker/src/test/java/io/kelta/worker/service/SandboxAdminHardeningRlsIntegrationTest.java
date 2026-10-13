@@ -148,7 +148,7 @@ class SandboxAdminHardeningRlsIntegrationTest {
 
         return new SandboxProvisioningService(environmentRepository, environmentService, packageService,
                 packageImportService, queryEngine, collectionRegistry, mock(PlatformEventPublisher.class),
-                new tools.jackson.databind.ObjectMapper());
+                new tools.jackson.databind.ObjectMapper(), "", "");
     }
 
     @Test

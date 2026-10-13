@@ -26,6 +26,10 @@ export interface EnvironmentAttrs {
   adminUsername?: string;
   /** Returned once on sandbox creation — never shown again. */
   adminInitialPassword?: string;
+  /** Returned once on sandbox creation — the UI sign-in page of the sandbox tenant. */
+  signInUrl?: string;
+  /** Returned once on sandbox creation — the sandbox tenant's API base (`<host>/<slug>`). */
+  apiBaseUrl?: string;
 }
 
 export interface PromotionAttrs {
@@ -340,6 +344,8 @@ const sandboxCreate = defineCommand({
         `  Sandbox slug:   ${attrs.sandboxSlug ?? ''}`,
         `  Admin username: ${attrs.adminUsername ?? ''}`,
         `  Admin password: ${attrs.adminInitialPassword ?? ''}`,
+        ...(attrs.signInUrl ? [`  Sign-in URL:    ${attrs.signInUrl}`] : []),
+        ...(attrs.apiBaseUrl ? [`  API base URL:   ${attrs.apiBaseUrl}`] : []),
         '',
         'Log in with these credentials:',
         '  POST /auth/direct-login ' +

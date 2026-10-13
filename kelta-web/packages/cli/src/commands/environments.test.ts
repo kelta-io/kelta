@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { AxiosInstance } from 'axios';
+import type { CommandContext } from '../registry/types.js';
 import {
+  environmentCommands,
   parseItemSpec,
   runPromoteApprove,
   runPromoteCreate,
@@ -48,6 +50,41 @@ describe('sandbox ops', () => {
       data: { attributes: { name: 'dev', type: 'SANDBOX', description: 'd' } },
     });
     expect(env.id).toBe('env1');
+  });
+
+  it('sandbox create prints the sign-in and API URLs with the one-time credentials', async () => {
+    const post = vi.fn().mockResolvedValue({
+      status: 202,
+      data: {
+        data: {
+          id: 'env1',
+          attributes: {
+            status: 'CREATING',
+            sandboxSlug: 'acme--dev',
+            adminUsername: 'acme--dev-admin',
+            adminInitialPassword: 'S3cretOneTime',
+            signInUrl: 'https://console.example.test/acme--dev/login',
+            apiBaseUrl: 'https://gw.example.test/acme--dev',
+          },
+        },
+      },
+    });
+    const ctx = {
+      profile: { name: 'test' },
+      global: { raw: false, quiet: false, yes: true },
+      log: vi.fn(),
+      client: { getAxiosInstance: () => client({ post }) },
+    } as unknown as CommandContext;
+    const def = environmentCommands.find((c) => c.group === 'sandbox' && c.name === 'create')!;
+
+    const result = await def.handler(ctx, def.input.parse({ name: 'dev' }) as never);
+
+    const human = (result as { human: string }).human;
+    expect(human).toContain('Sandbox slug:   acme--dev');
+    expect(human).toContain('Admin username: acme--dev-admin');
+    expect(human).toContain('Admin password: S3cretOneTime');
+    expect(human).toContain('Sign-in URL:    https://console.example.test/acme--dev/login');
+    expect(human).toContain('API base URL:   https://gw.example.test/acme--dev');
   });
 
   it('throws on failure statuses', async () => {

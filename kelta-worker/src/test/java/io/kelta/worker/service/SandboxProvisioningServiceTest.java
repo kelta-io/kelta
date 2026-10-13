@@ -58,7 +58,8 @@ class SandboxProvisioningServiceTest {
 
         service = new SandboxProvisioningService(environmentRepository, environmentService,
                 packageService, packageImportService, queryEngine, collectionRegistry, eventPublisher,
-                new tools.jackson.databind.ObjectMapper());
+                new tools.jackson.databind.ObjectMapper(),
+                "https://console.example.test/", "https://gw.example.test");
     }
 
     private Map<String, Object> parentRow(String slug) {
@@ -152,6 +153,18 @@ class SandboxProvisioningServiceTest {
             assertThat(result.get("sandboxSlug")).isEqualTo("acme--dev");
             assertThat(result.get("adminUsername")).isEqualTo("acme--dev-admin");
             assertThat(result.get("adminInitialPassword")).isNotNull();
+        }
+
+        @Test
+        @DisplayName("returns the sandbox's sign-in and API URLs built from the configured base URLs")
+        void returnsSignInAndApiUrlsFromConfiguredHosts() {
+            happyPathSetup();
+
+            var result = service.createSandbox(PARENT, "dev", null, "SANDBOX", "admin");
+
+            assertThat(result)
+                    .containsEntry("signInUrl", "https://console.example.test/acme--dev/login")
+                    .containsEntry("apiBaseUrl", "https://gw.example.test/acme--dev");
         }
 
         @Test
