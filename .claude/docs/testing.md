@@ -224,6 +224,15 @@ act(() => release());
 await waitFor(() => expect(screen.getByTestId('submit')).toBeEnabled());
 ```
 
+**A resolved query is not yet a rendered one.** TanStack Query hands a finished fetch to its
+observers on a later macrotask (`notifyManager` schedules with `setTimeout(0)`), so awaiting the
+mocked request's promise and an empty `act()` does not guarantee the component has re-rendered
+with the data — under load the next interaction runs without it. Either wait for something the
+data visibly changes (`await waitFor(...)` on the DOM), or, when the data has no visible effect
+until a later action (validation rules that only fire on Save), seed it before rendering with
+`queryClient.setQueryData(<the hook's key>, data)` and assert the request separately
+(`ObjectFormPage.test.tsx` → `enforceOnClient`).
+
 ## End-to-end (Playwright)
 
 E2E specs live in `e2e-tests/` (see `e2e-tests/README.md` for setup, auth, and subsets).
@@ -268,11 +277,12 @@ opened on a `filter=` deep link (`gotoListWhere`) so a step sees only its own re
 both record stacks —
 `/resources/<collection>` and `/app/o/<collection>` — through the variant-aware page object
 `e2e-tests/pages/record-variant.page.ts` (`new RecordVariant(page, tenantSlug, 'admin' | 'enduser')`).
-It guards the convergence of the two stacks (unified-record slice 8). Persistence is asserted
-through the API (`DataFactory.queryRecords` / `getRecord`), not only the UI. A step where a
-stack differs from the target today is `test.fixme` with the gap named; removing the fixme is
-the signal that the gap is closed. A new record behavior that both stacks should share gets a
-step here rather than a stack-specific spec. Gated on `E2E_EPHEMERAL_STACK`.
+Both stacks are thin wrappers over the same cores (`RecordShell`, `RecordForm`, `RecordList`),
+so every step runs unchanged on both and none is `fixme`; a step that fails on one stack only is
+a bug in a wrapper or a variant branch of a core. Persistence is asserted through the API
+(`DataFactory.queryRecords` / `getRecord`), not only the UI. A new record behavior that both
+stacks should share gets a step here rather than a stack-specific spec. Gated on
+`E2E_EPHEMERAL_STACK`.
 
 ### Writing stable visual specs
 

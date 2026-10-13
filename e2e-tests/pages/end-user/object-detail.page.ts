@@ -5,7 +5,6 @@ export class ObjectDetailPage extends BasePage {
   readonly editButton: Locator;
   readonly deleteButton: Locator;
   readonly fieldValues: Locator;
-  readonly relatedRecords: Locator;
   readonly historyTab: Locator;
   readonly historyPanel: Locator;
   readonly versionRows: Locator;
@@ -14,7 +13,6 @@ export class ObjectDetailPage extends BasePage {
   readonly historyBackButton: Locator;
   readonly activityVersionLinks: Locator;
   readonly sectionNav: Locator;
-  readonly activityTimeline: Locator;
   readonly sectionNavActivity: Locator;
 
   constructor(
@@ -27,7 +25,6 @@ export class ObjectDetailPage extends BasePage {
     this.editButton = this.testId("edit-button");
     this.deleteButton = this.testId("delete-button");
     this.fieldValues = this.testId("field-values");
-    this.relatedRecords = this.testId("related-records");
     this.historyTab = this.testId("detail-tab-history");
     this.historyPanel = this.testId("record-history-panel");
     this.versionRows = this.testId("record-version-row");
@@ -36,13 +33,7 @@ export class ObjectDetailPage extends BasePage {
     this.historyBackButton = this.testId("history-back-button");
     this.activityVersionLinks = this.testId("activity-version-link");
     this.sectionNav = this.testId("record-section-nav");
-    this.activityTimeline = this.testId("activity-timeline");
     this.sectionNavActivity = this.testId("section-nav-activity");
-  }
-
-  /** Nav entry for a section anchor id (e.g. `record-section-<id>`). */
-  sectionNavEntry(anchorId: string): Locator {
-    return this.testId(`section-nav-${anchorId}`);
   }
 
   async goto(): Promise<void> {
@@ -60,10 +51,6 @@ export class ObjectDetailPage extends BasePage {
     // Delete is inside the "More actions" dropdown — open it first
     await this.page.getByRole("button", { name: /more actions/i }).click();
     await this.deleteButton.click();
-  }
-
-  async getFieldValue(name: string): Promise<string | null> {
-    return this.testId(`field-value-${name}`).textContent();
   }
 
   async openHistoryTab(): Promise<void> {

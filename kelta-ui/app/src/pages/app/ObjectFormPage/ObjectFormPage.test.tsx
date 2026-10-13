@@ -62,10 +62,11 @@ let mutationOptions: {
 } = {}
 /** `apiClient.getList` responses by URL prefix (default: an empty list). */
 let listResponses: Record<string, unknown[]> = {}
-const getList = vi.fn(async (url: string) => {
+const routeList = async (url: string): Promise<unknown[]> => {
   const prefix = Object.keys(listResponses).find((p) => url.startsWith(p))
   return prefix ? listResponses[prefix] : []
-})
+}
+const getList = vi.fn(routeList)
 
 vi.mock('@/context/ApiContext', () => ({
   useApi: () => ({ apiClient: { getList } }),
@@ -127,10 +128,18 @@ function LocationProbe() {
   return <div data-testid="location">{location.pathname}</div>
 }
 
-function renderAt(url: string) {
+interface RenderOptions {
+  /** UI locale (default: English). */
+  locale?: string
+  /** Seeds the query cache before the first render. */
+  seed?: (queryClient: QueryClient) => void
+}
+
+function renderAt(url: string, { locale, seed }: RenderOptions = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  seed?.(queryClient)
   const tree = () => (
-    <I18nProvider>
+    <I18nProvider initialLocale={locale}>
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={[url]}>
           <Routes>
@@ -160,7 +169,8 @@ beforeEach(() => {
   createMutate.mockReset()
   updateMutate.mockReset()
   showToast.mockReset()
-  getList.mockClear()
+  getList.mockReset()
+  getList.mockImplementation(routeList)
   mutationOptions = {}
 })
 
@@ -175,6 +185,16 @@ describe('ObjectFormPage (create)', () => {
     )
     expect(screen.getByText('New')).toBeInTheDocument()
     expect(screen.getByTestId('form-fields')).toBeInTheDocument()
+  })
+
+  it('translates the breadcrumb', () => {
+    renderAt('/acme/app/o/accounts/new', { locale: 'de' })
+    expect(screen.getByRole('link', { name: 'Startseite' })).toHaveAttribute(
+      'href',
+      '/acme/app/home'
+    )
+    expect(screen.getByText('Neu')).toBeInTheDocument()
+    expect(screen.queryByText('Home')).toBeNull()
   })
 
   it('prefills schema fields from query params and ignores unknown keys on save', () => {
@@ -277,29 +297,21 @@ describe('ObjectFormPage (create)', () => {
     expect(screen.getByTestId('field-error-name')).toHaveTextContent('Must be at most 3 characters')
   })
 
-  it('enforces collection validation rules marked enforceOnClient', async () => {
-    listResponses = {
-      '/api/validation-rules': [
-        {
-          id: 'vr-1',
-          collectionId: 'col-1',
-          name: 'qty-positive',
-          active: true,
-          errorConditionFormula: 'qty <= 0',
-          errorMessage: 'Quantity must be positive',
-          errorField: 'qty',
-          evaluateOn: 'CREATE_AND_UPDATE',
-          enforceOnClient: true,
-          severity: 'ERROR',
-        },
-      ],
-    }
-    fields = [
-      ...BASE_FIELDS,
-      { id: 'f-qty', name: 'qty', displayName: 'Qty', type: 'number', required: false },
-    ]
-    renderAt('/acme/app/o/accounts/new?name=Ada')
-    fireEvent.change(screen.getByTestId('field-qty'), { target: { value: '0' } })
+  const QTY_POSITIVE_RULE = {
+    id: 'vr-1',
+    collectionId: 'col-1',
+    name: 'qty-positive',
+    active: true,
+    errorConditionFormula: 'qty <= 0',
+    errorMessage: 'Quantity must be positive',
+    errorField: 'qty',
+    evaluateOn: 'CREATE_AND_UPDATE',
+    enforceOnClient: true,
+    severity: 'ERROR',
+  }
+
+  it("requests the collection's active client-enforced validation rules", async () => {
+    renderAt('/acme/app/o/accounts/new')
     await waitFor(() =>
       expect(getList).toHaveBeenCalledWith(
         expect.stringContaining(
@@ -307,16 +319,21 @@ describe('ObjectFormPage (create)', () => {
         )
       )
     )
-    // Wait for the rules request itself to resolve, then flush the render that hands the rules
-    // to the engine. A single act() tick raced the query under parallel test load, and Save then
-    // ran without the rule.
-    const rulesCall = getList.mock.calls.findIndex(([url]) =>
-      String(url).includes('/api/validation-rules')
-    )
-    await act(async () => {
-      await getList.mock.results[rulesCall].value
+  })
+
+  it('enforces collection validation rules marked enforceOnClient', () => {
+    // The rules are served from the form's query cache entry, so they are in place on the first
+    // render. (Waiting on the request instead raced react-query, which hands a resolved query to
+    // its observers on a later macrotask — under load Save could run before the rules arrived.)
+    fields = [
+      ...BASE_FIELDS,
+      { id: 'f-qty', name: 'qty', displayName: 'Qty', type: 'number', required: false },
+    ]
+    renderAt('/acme/app/o/accounts/new?name=Ada', {
+      seed: (queryClient) =>
+        queryClient.setQueryData(['client-validation-rules', 'col-1'], [QTY_POSITIVE_RULE]),
     })
-    await act(async () => {})
+    fireEvent.change(screen.getByTestId('field-qty'), { target: { value: '0' } })
 
     fireEvent.click(screen.getByTestId('save-button'))
     expect(screen.getByTestId('field-error-qty')).toHaveTextContent('Quantity must be positive')
@@ -348,6 +365,147 @@ describe('ObjectFormPage (create)', () => {
     expect(notes).toHaveValue('quiet')
     fireEvent.blur(notes)
     expect(notes).toHaveValue('QUIET')
+  })
+})
+
+describe('ObjectFormPage — record type picklist overrides', () => {
+  const STATUS: TestField = {
+    id: 'f-status',
+    name: 'status',
+    displayName: 'Status',
+    type: 'picklist',
+    required: false,
+  }
+  const TIER: TestField = {
+    id: 'f-tier',
+    name: 'tier',
+    displayName: 'Tier',
+    type: 'picklist',
+    required: false,
+  }
+  const picklistValues = (...values: string[]) =>
+    values.map((value, i) => ({
+      value,
+      label: value,
+      isActive: true,
+      isDefault: false,
+      sortOrder: i,
+    }))
+  const optionValues = (testId: string) =>
+    Array.from(screen.getByTestId(testId).querySelectorAll('option'))
+      .map((o) => o.getAttribute('value'))
+      .filter(Boolean)
+
+  beforeEach(() => {
+    fields = [...BASE_FIELDS, STATUS, TIER]
+    listResponses = {
+      '/api/record-types': [{ id: 'rt-1', name: 'Retail', isDefault: true }],
+      '/api/picklist-values?filter[picklistSourceId][eq]=f-status': picklistValues(
+        'open',
+        'pending',
+        'closed'
+      ),
+      '/api/picklist-values?filter[picklistSourceId][eq]=f-tier': picklistValues(
+        'gold',
+        'silver',
+        'bronze'
+      ),
+    }
+  })
+
+  it("pre-selects the record type's default value on create and saves it", async () => {
+    listResponses['/api/record-type-picklists'] = [
+      {
+        id: 'rtp-1',
+        recordTypeId: 'rt-1',
+        fieldId: 'f-status',
+        availableValues: '["open","closed"]',
+        defaultValue: 'closed',
+      },
+    ]
+    renderAt('/acme/app/o/accounts/new?name=Ada')
+
+    await waitFor(() => expect(screen.getByTestId('field-status')).toHaveValue('closed'))
+    expect(optionValues('field-status')).toEqual(['open', 'closed'])
+    fireEvent.click(screen.getByTestId('save-button'))
+    expect(createMutate).toHaveBeenCalledWith({
+      name: 'Ada',
+      status: 'closed',
+      recordTypeId: 'rt-1',
+    })
+  })
+
+  it("lets a prefill win over the record type's default", async () => {
+    listResponses['/api/record-type-picklists'] = [
+      {
+        id: 'rtp-1',
+        recordTypeId: 'rt-1',
+        fieldId: 'f-status',
+        availableValues: ['open', 'closed'],
+        defaultValue: 'closed',
+      },
+    ]
+    renderAt('/acme/app/o/accounts/new?name=Ada&status=open')
+    await waitFor(() => expect(optionValues('field-status')).toEqual(['open', 'closed']))
+    expect(screen.getByTestId('field-status')).toHaveValue('open')
+  })
+
+  it("keeps the user's choice when the record type's default arrives later", async () => {
+    let releaseOverrides: (rows: unknown[]) => void = () => {}
+    getList.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/record-type-picklists')) {
+        return new Promise<unknown[]>((resolve) => {
+          releaseOverrides = resolve
+        })
+      }
+      return routeList(url)
+    })
+    renderAt('/acme/app/o/accounts/new?name=Ada')
+    await waitFor(() => expect(optionValues('field-status')).toEqual(['open', 'pending', 'closed']))
+    fireEvent.change(screen.getByTestId('field-status'), { target: { value: 'pending' } })
+
+    await act(async () => {
+      releaseOverrides([
+        {
+          id: 'rtp-1',
+          recordTypeId: 'rt-1',
+          fieldId: 'f-status',
+          availableValues: ['pending', 'closed'],
+          defaultValue: 'closed',
+        },
+      ])
+    })
+    await waitFor(() => expect(optionValues('field-status')).toEqual(['pending', 'closed']))
+    expect(screen.getByTestId('field-status')).toHaveValue('pending')
+  })
+
+  it('warns about malformed availableValues and falls back to the full picklist for that field only', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    listResponses['/api/record-type-picklists'] = [
+      {
+        id: 'rtp-bad',
+        recordTypeId: 'rt-1',
+        fieldId: 'f-status',
+        availableValues: 'open, closed',
+        defaultValue: 'closed',
+      },
+      {
+        id: 'rtp-ok',
+        recordTypeId: 'rt-1',
+        fieldId: 'f-tier',
+        availableValues: '["gold","silver"]',
+      },
+    ]
+    renderAt('/acme/app/o/accounts/new?name=Ada')
+
+    // The well-formed override still applies…
+    await waitFor(() => expect(optionValues('field-tier')).toEqual(['gold', 'silver']))
+    // …the malformed one shows the field's whole picklist (its default still applies)…
+    expect(optionValues('field-status')).toEqual(['open', 'pending', 'closed'])
+    expect(screen.getByTestId('field-status')).toHaveValue('closed')
+    // …and the misconfiguration is reported rather than swallowed.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('rtp-bad'))
+    warn.mockRestore()
   })
 })
 

@@ -62,4 +62,21 @@ describe('useCollectionPermissions', () => {
       canDelete: true,
     })
   })
+  it('defaults to all-permitted for a collection the response does not list', async () => {
+    const { queryClient, result } = setup()
+    act(() => {
+      queryClient.setQueryData(MY_PERMISSIONS_QUERY_KEY, {
+        systemPermissions: {},
+        objectPermissions: {},
+        fieldPermissions: {},
+      })
+    })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.permissions).toEqual({
+      canCreate: true,
+      canRead: true,
+      canEdit: true,
+      canDelete: true,
+    })
+  })
 })

@@ -63,6 +63,7 @@ import { RecordNotFoundState } from './RecordNotFoundState'
 import { classifyRecordLoad } from './recordLoadOutcome'
 import { RecordDetailBody } from '@/components/record/RecordDetailBody'
 import { RecordSectionNav } from '@/components/record/RecordSectionNav'
+import { useInlineFieldCommit } from '@/components/record/useInlineFieldCommit'
 import { resolveSectionNavItems } from '@/components/LayoutFieldSections/sectionNavItems'
 import { ActivityTimeline } from '@/components/ActivityTimeline/ActivityTimeline'
 import {
@@ -455,30 +456,35 @@ export function ObjectDetailPage(): React.ReactElement {
     collectionName: collectionName || '',
   })
 
-  // In-place inline field edit (unified record experience, slice 2): partial PATCH of one field.
-  // Sends the record's ETag as If-Match (slice 5) so a concurrent edit → 409, surfaced as a
+  // In-place inline field edit (unified record experience, slice 2): partial PATCH of one field
+  // with the record's ETag as If-Match (slice 5), so a concurrent edit → 409, surfaced as a
   // "changed elsewhere" message + a reload rather than silently overwriting the other change.
-  const handleFieldCommit = useCallback(
-    async (fieldName: string, value: unknown): Promise<void> => {
+  // Commits run one at a time and each sends the version the previous one left behind.
+  const writeField = useCallback(
+    async (fieldName: string, value: unknown, ifMatch: string | undefined): Promise<void> => {
       if (!recordId) return
-      try {
-        await mutations.patch.mutateAsync({
-          id: recordId,
-          data: { [fieldName]: value },
-          ifMatch: etag,
-        })
-      } catch (err) {
-        if ((err as { status?: number })?.status === 409) {
-          announce('This record was changed elsewhere; reloading the latest version')
-          refetchRecord()
-        }
-        throw err
-      }
+      await mutations.patch.mutateAsync({ id: recordId, data: { [fieldName]: value }, ifMatch })
+    },
+    [recordId, mutations.patch]
+  )
+  const onFieldCommitted = useCallback(
+    (fieldName: string) => {
       invalidateRecordContext()
       announce(`${fieldName} updated`)
     },
-    [recordId, mutations.patch, etag, refetchRecord, invalidateRecordContext, announce]
+    [invalidateRecordContext, announce]
   )
+  const onFieldConflict = useCallback(
+    () => announce('This record was changed elsewhere; reloading the latest version'),
+    [announce]
+  )
+  const handleFieldCommit = useInlineFieldCommit({
+    etag,
+    write: writeField,
+    refresh: refetchRecord,
+    onCommitted: onFieldCommitted,
+    onConflict: onFieldConflict,
+  })
 
   // Collection label
   const collectionLabel =
@@ -776,7 +782,7 @@ export function ObjectDetailPage(): React.ReactElement {
           <>
             <Crumb
               trail={[
-                { label: 'Home', to: `${basePath}/home` },
+                { label: t('navigation.home'), to: `${basePath}/home` },
                 { label: collectionLabel, to: routes.list(collectionName ?? '') },
                 { label: recordTitle },
               ]}

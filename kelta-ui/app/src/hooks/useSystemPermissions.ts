@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../context'
 import { useApi } from '../context/ApiContext'
-import type { ObjectPermissions } from './useObjectPermissions'
+import type { ObjectPermissions } from './useCollectionPermissions'
 
 /**
  * System-level permission flags for the current user.

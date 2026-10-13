@@ -73,10 +73,14 @@ vi.mock('sonner', () => ({
   }),
 }))
 
+const { getList } = vi.hoisted(() => ({
+  getList: vi.fn<(url: string) => Promise<unknown[]>>(async () => []),
+}))
+
 vi.mock('@/context/ApiContext', () => ({
   useApi: () => ({
     apiClient: {
-      getList: vi.fn(async () => []),
+      getList,
       get: vi.fn(async () => ({})),
       postResource: vi.fn(async () => ({ id: 'pref-1' })),
       patchResource: vi.fn(async () => ({})),
@@ -170,6 +174,7 @@ describe('useRecordListModel', () => {
     bulkDelete.mockReset().mockResolvedValue(undefined)
     toastSuccess.mockReset()
     toastError.mockReset()
+    getList.mockClear()
   })
 
   it('leads the column chooser and the default columns with the id column, only with idColumn', () => {
@@ -202,11 +207,16 @@ describe('useRecordListModel', () => {
   it('toasts and announces a delete, and keeps the selection when a bulk delete fails', async () => {
     const { result } = renderModel({})
 
+    // The delete settles in a promise callback outside act(): the toast fires synchronously with
+    // the state updates, but the re-render that clears them lands later — so the state is
+    // asserted inside the wait, not after it.
     act(() => result.current.model.requestDelete({ id: 'r-1' }))
     act(() => result.current.model.confirmDelete())
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Record deleted'))
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledWith('Record deleted')
+      expect(result.current.model.deleteTarget).toBeNull()
+    })
     expect(removeRecord).toHaveBeenCalledWith('r-1')
-    expect(result.current.model.deleteTarget).toBeNull()
 
     bulkDelete.mockRejectedValueOnce(new Error('Not allowed'))
     act(() => result.current.model.setSelectedIds(new Set(['r-1', 'r-2'])))
@@ -216,8 +226,10 @@ describe('useRecordListModel', () => {
     expect(result.current.model.selectedIds.size).toBe(2)
 
     act(() => result.current.model.confirmBulkDelete())
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('2 records deleted'))
-    expect(result.current.model.selectedIds.size).toBe(0)
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledWith('2 records deleted')
+      expect(result.current.model.selectedIds.size).toBe(0)
+    })
   })
 
   it('includes the visible lookup columns by field name and labels them by the target display field', () => {
@@ -319,5 +331,28 @@ describe('useRecordListModel', () => {
     expect(result.current.model.params.filters).toEqual([])
     // a filter change returns to page 1
     expect(result.current.model.params.page).toBe(1)
+  })
+  /** The `user-ui-preferences` pref types the list asked the server for. */
+  const preferenceTypesFetched = () =>
+    getList.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.startsWith('/api/user-ui-preferences'))
+      .map((url) => decodeURIComponent(/filter\[prefType\]\[eq\]=([^&]*)/.exec(url)?.[1] ?? ''))
+
+  it('fetches no saved-view preferences when the savedViews feature is off', async () => {
+    renderModel({ sharedViews: true, altViews: true })
+    await act(async () => {})
+    expect(preferenceTypesFetched()).toEqual([])
+  })
+
+  it('fetches the personal views with savedViews, and the renderer overrides only with shared views too', async () => {
+    renderModel({ savedViews: true })
+    await waitFor(() => expect(preferenceTypesFetched()).toEqual(['list-view']))
+
+    getList.mockClear()
+    renderModel({ savedViews: true, sharedViews: true })
+    await waitFor(() =>
+      expect(preferenceTypesFetched().sort()).toEqual(['list-view', 'list-view-type'])
+    )
   })
 })

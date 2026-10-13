@@ -50,7 +50,6 @@
     "previous": "Anterior",
     "clear": "Limpiar",
     "select": "Seleccionar",
-    "selected": "seleccionado",
     "selectAll": "Seleccionar todo",
     "deselectAll": "Deseleccionar todo",
     "noResults": "No se encontraron resultados",
@@ -78,7 +77,8 @@
     "picklists": "Listas de seleccion",
     "pages": "Paginas",
     "menus": "Menus",
-    "plugins": "Plugins"
+    "plugins": "Plugins",
+    "home": "Inicio"
   },
   "collections": {
     "title": "Colecciones",
@@ -191,9 +191,7 @@
       "prefix": "Prefijo",
       "padding": "Relleno",
       "currencyCode": "Codigo de moneda predeterminado",
-      "precision": "Precision decimal",
-      "latitude": "Latitud",
-      "longitude": "Longitud"
+      "precision": "Precision decimal"
     }
   },
   "authorization": {
@@ -498,16 +496,7 @@
     "deleteRecord": "Eliminar registro",
     "viewRecord": "Ver registro",
     "record": "Registro",
-    "exportSelected": "Exportar",
-    "exportOptions": "Opciones de exportacion",
-    "exportSelectedLabel": "Exportar {{count}} seleccionados",
-    "exportAllVisible": "Exportar todos los visibles ({{count}})",
-    "exportToCSV": "Exportar a CSV",
-    "exportToJSON": "Exportar a JSON",
-    "exportSuccess": "Se exportaron correctamente {{count}} registros como {{format}}",
-    "bulkDelete": "Eliminar seleccionados",
     "confirmDelete": "Esta seguro de que desea eliminar este registro?",
-    "confirmBulkDelete": "Esta seguro de que desea eliminar {{count}} registros?",
     "cloneRecord": "Clonar {{collection}}",
     "cloningFrom": "Clonando desde registro",
     "viewSource": "Ver origen"
@@ -1010,13 +999,6 @@
     "hoursAgo": "hace {{count}}h",
     "daysAgo": "hace {{count}}d"
   },
-  "listViews": {
-    "savedSuccessfully": "Vista guardada correctamente",
-    "deletedSuccessfully": "Vista eliminada"
-  },
-  "inlineEdit": {
-    "clickToEdit": "Haga clic para editar"
-  },
   "summaryStats": {
     "recordCount": "{{count}} registros",
     "filteredCount": "{{count}} filtrados",
@@ -1087,5 +1069,10 @@
     "saved": "Perfil guardado",
     "saveFailed": "No se pudo guardar tu perfil",
     "loadFailed": "No se pudo cargar tu perfil"
+  },
+  "recordForm": {
+    "breadcrumbNew": "Nuevo",
+    "breadcrumbEdit": "Editar",
+    "breadcrumbClone": "Clonar"
   }
 }

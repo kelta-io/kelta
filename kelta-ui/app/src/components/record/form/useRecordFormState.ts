@@ -65,6 +65,12 @@ export interface UseRecordFormStateOptions {
   validationRules?: CollectionValidationRule[]
   /** The record's ETag at load (edit mode); read once on mount and sent as `If-Match`. */
   etag?: string
+  /**
+   * Create only: the selected record type's picklist defaults (`useRecordFormModel`). Applied
+   * over `initialData` at mount and, as they load or the record type changes, to every field
+   * the user has not changed since the last default was applied.
+   */
+  recordTypeDefaults?: Record<string, unknown>
 }
 
 export interface RecordFormState {
@@ -85,6 +91,39 @@ export interface RecordFormState {
   dismissConflict: () => void
 }
 
+const NO_DEFAULTS: Record<string, unknown> = {}
+
+/**
+ * Move each field still holding the value it was given — the previous record-type default, else
+ * its initial value — to the new record type's default (else back to its initial value). A field
+ * the user changed keeps their value.
+ */
+function reapplyRecordTypeDefaults(
+  values: Record<string, unknown>,
+  initialData: Record<string, unknown>,
+  previous: Record<string, unknown>,
+  next: Record<string, unknown>
+): Record<string, unknown> {
+  let result = values
+  for (const name of new Set([...Object.keys(previous), ...Object.keys(next)])) {
+    const given = name in previous ? previous[name] : initialData[name]
+    if (!sameValue(values[name], given)) continue
+    const target = name in next ? next[name] : initialData[name]
+    if (sameValue(values[name], target)) continue
+    if (result === values) result = { ...values }
+    result[name] = target
+  }
+  return result
+}
+
+/** Value equality for form values (multi-picklist values are arrays). */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => v === b[i])
+  }
+  return a === b
+}
+
 export function useRecordFormState({
   isNew,
   initialData,
@@ -98,11 +137,24 @@ export function useRecordFormState({
   selectedRecordTypeId,
   validationRules,
   etag,
+  recordTypeDefaults = NO_DEFAULTS,
 }: UseRecordFormStateOptions): RecordFormState {
   const navigate = useNavigate()
   const { showToast } = useToast()
   const { t } = useI18n()
-  const [formData, setFormData] = useState<Record<string, unknown>>(initialData)
+  const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
+    ...initialData,
+    ...recordTypeDefaults,
+  }))
+  // Record-type defaults arrive after mount (the type's overrides load asynchronously) and
+  // change with the record type. Adjusted during render (derived state), not in an effect.
+  const [appliedDefaults, setAppliedDefaults] = useState(recordTypeDefaults)
+  if (appliedDefaults !== recordTypeDefaults) {
+    setAppliedDefaults(recordTypeDefaults)
+    setFormData((prev) =>
+      reapplyRecordTypeDefaults(prev, initialData, appliedDefaults, recordTypeDefaults)
+    )
+  }
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   // The version this form's values were loaded from. Pinned at mount (like `formData`): if a
   // background refetch moved it while the user still edits the old values, the update would

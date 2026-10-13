@@ -31,11 +31,19 @@ function storageKey(collectionName: string): string {
   return `kelta_view_type_${collectionName}`
 }
 
-export function useViewTypeOverrides(collectionName: string): UseViewTypeOverridesReturn {
+export interface UseViewTypeOverridesOptions {
+  /** False when the list shows no shared views: nothing is fetched. Default true. */
+  enabled?: boolean
+}
+
+export function useViewTypeOverrides(
+  collectionName: string,
+  { enabled = true }: UseViewTypeOverridesOptions = {}
+): UseViewTypeOverridesReturn {
   const pref = usePreferenceValue<Record<string, ViewTypeOverride>>(
     'list-view-type',
     collectionName,
-    { localKey: storageKey(collectionName) }
+    { localKey: storageKey(collectionName), enabled }
   )
   const stored = pref.value
   const prefSave = pref.save

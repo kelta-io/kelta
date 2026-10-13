@@ -49,22 +49,33 @@ function writeLocal(localKey: string | undefined, value: unknown): void {
   }
 }
 
+export interface PreferenceValueOptions {
+  /** localStorage key: warm cache, offline fallback and one-time migration source. */
+  localKey?: string
+  /**
+   * False when the caller has no use for the preference (e.g. the feature it backs is off):
+   * nothing is fetched or read, the value is null and `isLoaded` true. Default true.
+   */
+  enabled?: boolean
+}
+
 export function usePreferenceValue<T>(
   prefType: string,
   prefKey: string,
-  options?: { localKey?: string }
+  options?: PreferenceValueOptions
 ): PreferenceValue<T> {
   const { apiClient } = useApi()
   const { identity, isLoading: identityLoading } = useMyIdentity()
   const queryClient = useQueryClient()
   const localKey = options?.localKey
+  const enabled = options?.enabled ?? true
   const userId = identity?.userId
   const rowIdRef = useRef<string | null>(null)
 
   const queryKey = ['user-preference', userId, prefType, prefKey]
   const { data, isSuccess } = useQuery({
     queryKey,
-    enabled: !!userId,
+    enabled: enabled && !!userId,
     staleTime: 5 * 60 * 1000,
     queryFn: async (): Promise<{ row: PreferenceRow | null }> => {
       try {
@@ -121,6 +132,8 @@ export function usePreferenceValue<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [apiClient, queryClient, userId, prefType, prefKey, localKey]
   )
+
+  if (!enabled) return { value: null, isLoaded: true, save }
 
   const serverValue = data?.row ? (data.row.value as T) : null
   const identitySettled = !identityLoading && !userId

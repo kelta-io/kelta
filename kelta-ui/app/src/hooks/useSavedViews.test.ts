@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { useSavedViews, type SavedView } from './useSavedViews'
+import { usePreferenceValue } from './usePreferenceStore'
 
 let mockPref: { value: unknown; isLoaded: boolean; save: ReturnType<typeof vi.fn> }
 vi.mock('./usePreferenceStore', () => ({
@@ -88,5 +89,20 @@ describe('useSavedViews (server-backed)', () => {
     mockPref = { value: null, isLoaded: false, save: vi.fn() }
     const { result } = renderHook(() => useSavedViews('orders'))
     expect(result.current.views.map((v) => v.id)).toEqual(['local'])
+  })
+  it('when disabled, passes that to the preference store and never migrates local views to it', async () => {
+    localStorage.setItem('kelta_views_orders', JSON.stringify([view({ id: 'legacy' })]))
+    // A disabled preference reports loaded with no value — exactly the migration trigger.
+    mockPref = { value: null, isLoaded: true, save: vi.fn() }
+
+    renderHook(() => useSavedViews('orders', { enabled: false }))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(vi.mocked(usePreferenceValue)).toHaveBeenLastCalledWith('list-view', 'orders', {
+      localKey: 'kelta_views_orders',
+      enabled: false,
+    })
+    expect(mockPref.save).not.toHaveBeenCalled()
   })
 })

@@ -15,12 +15,7 @@ import { buildSortParam } from './listUrlState'
 import { orderFieldsByView } from './listViewMapping'
 
 /** Audit fields every collection carries; never offered as list columns or mass-edit targets. */
-export const SYSTEM_AUDIT_FIELDS: readonly string[] = [
-  'createdAt',
-  'updatedAt',
-  'createdBy',
-  'updatedBy',
-]
+const SYSTEM_AUDIT_FIELDS: readonly string[] = ['createdAt', 'updatedAt', 'createdBy', 'updatedBy']
 
 /**
  * The record id as a choosable list column (`RecordListFeatures.idColumn`). Not a schema field:
@@ -36,7 +31,7 @@ export const RECORD_ID_COLUMN: FieldDefinition = {
 }
 
 /** Columns shown when neither the column chooser nor the active view names any. */
-export const DEFAULT_VISIBLE_COLUMN_COUNT = 6
+const DEFAULT_VISIBLE_COLUMN_COUNT = 6
 
 /** The page size the list URL omits (`listUrlState` reads a missing `pageSize` as this). */
 export const DEFAULT_PAGE_SIZE = 25

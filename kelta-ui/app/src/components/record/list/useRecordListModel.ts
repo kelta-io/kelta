@@ -31,8 +31,7 @@ import type { CollectionSchema, FieldDefinition } from '@/hooks/useCollectionSch
 import { useCollectionRecords } from '@/hooks/useCollectionRecords'
 import type { CollectionRecord, FilterCondition } from '@/hooks/useCollectionRecords'
 import { useRecordMutation } from '@/hooks/useRecordMutation'
-import { useCollectionPermissions } from '@/hooks/useCollectionPermissions'
-import type { ObjectPermissions } from '@/hooks/useObjectPermissions'
+import { useCollectionPermissions, type ObjectPermissions } from '@/hooks/useCollectionPermissions'
 import { useSystemPermissions } from '@/hooks/useSystemPermissions'
 import { usePicklistDisplayMaps, type PicklistDisplayMaps } from '@/hooks/usePicklistOptions'
 import { isStaleWriteError } from '@/services/apiClient'
@@ -94,7 +93,7 @@ export interface RecordListFeatures {
   summaryStats: boolean
 }
 
-export const NO_LIST_FEATURES: RecordListFeatures = {
+const NO_LIST_FEATURES: RecordListFeatures = {
   savedViews: false,
   sharedViews: false,
   columnChooser: false,
