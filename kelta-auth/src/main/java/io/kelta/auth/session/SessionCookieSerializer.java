@@ -9,14 +9,15 @@ import java.util.List;
 
 /**
  * Writes the HTTP session cookie: {@code HttpOnly}, path {@code /}, no {@code Max-Age} (it ends
- * with the browser session; the server-side session has its own idle timeout), and
- * {@code Secure} plus the configured {@code SameSite} on every host except loopback.
+ * with the browser session; the server-side session has its own idle timeout), {@code Secure}
+ * when the browser reached the service over https, and the configured {@code SameSite}.
  *
  * <p>{@code Secure} follows {@link CookieDomainResolver#secureForRequest}, the rule the SSO
- * cookie already uses: TLS ends at the ingress, so the request itself is plain http even in
- * production. Loopback hosts serve local development over plain http, so there the cookie is
- * not {@code Secure}, and {@code SameSite=None} is left off because browsers reject it without
- * {@code Secure}.
+ * cookie uses too: the scheme the browser used (a TLS-terminating proxy's
+ * {@code X-Forwarded-Proto}, else the request's own), or a fixed choice from
+ * {@code kelta.auth.session.cookie-secure}. Without {@code Secure}, a configured
+ * {@code SameSite=None} is written as {@code Lax}, because browsers reject {@code None} without
+ * {@code Secure}; SP-initiated SAML sign-in, which needs {@code None}, therefore needs https.
  *
  * <p>The cookie has no {@code Domain}: only the host that serves the sign-in pages reads it, and
  * a parent-domain cookie would hand the session id to every sibling host.
@@ -26,20 +27,20 @@ public final class SessionCookieSerializer implements CookieSerializer {
     private static final List<String> SAME_SITE_VALUES = List.of("Strict", "Lax", "None");
 
     private final DefaultCookieSerializer secureCookie;
-    private final DefaultCookieSerializer loopbackCookie;
+    private final DefaultCookieSerializer plainHttpCookie;
     private final CookieDomainResolver hosts;
 
     public SessionCookieSerializer(String cookieName, String sameSite, CookieDomainResolver hosts) {
         String value = sameSiteValue(sameSite);
         this.secureCookie = cookie(cookieName, true, value);
-        this.loopbackCookie = cookie(cookieName, false, "None".equals(value) ? null : value);
+        this.plainHttpCookie = cookie(cookieName, false, "None".equals(value) ? "Lax" : value);
         this.hosts = hosts;
     }
 
     @Override
     public void writeCookieValue(CookieValue cookieValue) {
         boolean secure = hosts.secureForRequest(cookieValue.getRequest());
-        (secure ? secureCookie : loopbackCookie).writeCookieValue(cookieValue);
+        (secure ? secureCookie : plainHttpCookie).writeCookieValue(cookieValue);
     }
 
     @Override

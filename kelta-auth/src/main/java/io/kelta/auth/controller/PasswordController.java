@@ -1,21 +1,25 @@
 package io.kelta.auth.controller;
 
 import io.kelta.auth.config.AuthProperties;
+import io.kelta.auth.model.KeltaUserDetails;
 import io.kelta.auth.service.PasswordPolicyService;
 import io.kelta.auth.service.WorkerClient;
+import io.kelta.auth.session.UserSessionRevoker;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -32,17 +36,20 @@ public class PasswordController {
     private final PasswordEncoder passwordEncoder;
     private final WorkerClient workerClient;
     private final PasswordPolicyService policyService;
+    private final UserSessionRevoker sessionRevoker;
     private final String uiBaseUrl;
 
     public PasswordController(JdbcTemplate jdbcTemplate,
                               PasswordEncoder passwordEncoder,
                               WorkerClient workerClient,
                               PasswordPolicyService policyService,
+                              UserSessionRevoker sessionRevoker,
                               AuthProperties authProperties) {
         this.jdbcTemplate = jdbcTemplate;
         this.passwordEncoder = passwordEncoder;
         this.workerClient = workerClient;
         this.policyService = policyService;
+        this.sessionRevoker = sessionRevoker;
         this.uiBaseUrl = authProperties.getUiBaseUrl();
     }
 
@@ -60,57 +67,45 @@ public class PasswordController {
             @NotBlank @Size(min = 8, max = 128) String newPassword
     ) {}
 
+    /** The signed-in user's account and current password hash. */
+    private static final String ACCOUNT_SELECT =
+            "SELECT pu.id, pu.tenant_id, pu.email, pu.first_name, pu.last_name, uc.password_hash "
+                    + "FROM platform_user pu JOIN user_credential uc ON uc.user_id = pu.id ";
+
+    private record Account(String userId, String tenantId, String email, String displayName, String passwordHash) {}
+
     @PostMapping("/change")
     public ResponseEntity<Map<String, String>> changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
-            Authentication authentication) {
+            Authentication authentication,
+            HttpServletRequest httpRequest) {
 
-        String email = authentication.getName();
-
-        // Verify current password. If no user/credential row matches the
-        // authenticated principal — shouldn't happen in normal flows but can if
-        // the account was deleted mid-session — return the same generic error
-        // as a wrong password rather than bubbling an unchecked 500.
-        String currentHash;
-        try {
-            currentHash = jdbcTemplate.queryForObject(
-                    "SELECT uc.password_hash FROM user_credential uc " +
-                            "JOIN platform_user pu ON pu.id = uc.user_id " +
-                            "WHERE pu.email = ?",
-                    String.class, email
-            );
-        } catch (EmptyResultDataAccessException e) {
-            log.warn("Password change attempted for unknown email: {}", email);
+        // If no account matches the authenticated principal — shouldn't happen in normal flows
+        // but can if the account was deleted mid-session — return the same generic error as a
+        // wrong password rather than bubbling an unchecked 500.
+        Optional<Account> found = findAccount(authentication);
+        if (found.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Current password is incorrect"));
         }
+        Account account = found.get();
 
-        if (currentHash == null || !passwordEncoder.matches(request.currentPassword(), currentHash)) {
+        if (account.passwordHash() == null
+                || !passwordEncoder.matches(request.currentPassword(), account.passwordHash())) {
             return ResponseEntity.badRequest().body(Map.of("error", "Current password is incorrect"));
         }
-
-        // Look up user details for policy validation
-        var userInfo = jdbcTemplate.queryForList(
-                "SELECT pu.id, pu.tenant_id, pu.first_name, pu.last_name FROM platform_user pu WHERE pu.email = ?",
-                email
-        );
-        String userId = userInfo.isEmpty() ? null : (String) userInfo.get(0).get("id");
-        String tenantId = userInfo.isEmpty() ? null : (String) userInfo.get(0).get("tenant_id");
-        String displayName = userInfo.isEmpty() ? "" :
-                ((String) userInfo.get(0).getOrDefault("first_name", "")) + " " +
-                ((String) userInfo.get(0).getOrDefault("last_name", ""));
 
         // Validate against password policy
-        List<String> violations = policyService.validatePassword(request.newPassword(), email, displayName.trim(), tenantId);
+        List<String> violations = policyService.validatePassword(
+                request.newPassword(), account.email(), account.displayName(), account.tenantId());
         if (!violations.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", String.join("; ", violations)));
         }
 
         // Check password history
-        if (userId != null) {
-            Optional<String> historyViolation = policyService.checkHistory(userId, request.newPassword(), tenantId);
-            if (historyViolation.isPresent()) {
-                return ResponseEntity.badRequest().body(Map.of("error", historyViolation.get()));
-            }
+        Optional<String> historyViolation =
+                policyService.checkHistory(account.userId(), request.newPassword(), account.tenantId());
+        if (historyViolation.isPresent()) {
+            return ResponseEntity.badRequest().body(Map.of("error", historyViolation.get()));
         }
 
         // Update password
@@ -118,18 +113,56 @@ public class PasswordController {
         jdbcTemplate.update(
                 "UPDATE user_credential SET password_hash = ?, password_changed_at = ?, " +
                         "force_change_on_login = false, updated_at = ? " +
-                        "WHERE user_id = (SELECT id FROM platform_user WHERE email = ?)",
-                newHash, Instant.now(), Instant.now(), email
+                        "WHERE user_id = ?",
+                newHash, now(), now(), account.userId()
         );
 
-        // Save to password history
-        if (userId != null) {
-            policyService.saveToHistory(userId, newHash, tenantId);
-        }
+        policyService.saveToHistory(account.userId(), newHash, account.tenantId());
 
-        log.info("Password changed for user {}", email);
-        if (userId != null) sendPasswordChangedEmail(userId);
+        log.info("Password changed for user {} (tenant {})", account.userId(), account.tenantId());
+        // Every other device signs in again with the new password; this session stays signed in.
+        sessionRevoker.signOutElsewhere(account.userId(), currentSessionId(httpRequest));
+        sendPasswordChangedEmail(account.userId());
         return ResponseEntity.ok(Map.of("status", "ok"));
+    }
+
+    /**
+     * The signed-in user's account: by tenant and user id when the principal is a platform user
+     * (an email address can belong to users in several tenants), else by login name when exactly
+     * one account has it.
+     */
+    private Optional<Account> findAccount(Authentication authentication) {
+        List<Map<String, Object>> rows;
+        if (authentication.getPrincipal() instanceof KeltaUserDetails user
+                && user.getId() != null && user.getTenantId() != null) {
+            rows = jdbcTemplate.queryForList(ACCOUNT_SELECT + "WHERE pu.id = ? AND pu.tenant_id = ?",
+                    user.getId(), user.getTenantId());
+        } else {
+            rows = jdbcTemplate.queryForList(ACCOUNT_SELECT + "WHERE pu.email = ?", authentication.getName());
+        }
+        if (rows.size() != 1) {
+            log.warn("Password change: {} accounts match the signed-in principal", rows.size());
+            return Optional.empty();
+        }
+        Map<String, Object> row = rows.getFirst();
+        String firstName = row.get("first_name") instanceof String value ? value : "";
+        String lastName = row.get("last_name") instanceof String value ? value : "";
+        return Optional.of(new Account((String) row.get("id"), (String) row.get("tenant_id"),
+                (String) row.get("email"), (firstName + " " + lastName).trim(), (String) row.get("password_hash")));
+    }
+
+    /**
+     * The current time as a JDBC timestamp. The PostgreSQL driver cannot bind a
+     * {@code java.time.Instant} ("Can't infer the SQL type"), so every timestamp parameter goes
+     * through {@link Timestamp}.
+     */
+    private static Timestamp now() {
+        return Timestamp.from(Instant.now());
+    }
+
+    private static String currentSessionId(HttpServletRequest request) {
+        HttpSession session = request == null ? null : request.getSession(false);
+        return session == null ? null : session.getId();
     }
 
     @PostMapping("/reset-request")
@@ -150,7 +183,7 @@ public class PasswordController {
         int updated = jdbcTemplate.update(
                 "UPDATE user_credential SET reset_token = ?, reset_token_expires_at = ?, updated_at = ? " +
                         "WHERE user_id = (SELECT id FROM platform_user WHERE email = ? AND status = 'ACTIVE')",
-                resetToken, expiresAt, Instant.now(), request.email()
+                resetToken, Timestamp.from(expiresAt), now(), request.email()
         );
 
         // Always return success to prevent email enumeration
@@ -165,7 +198,8 @@ public class PasswordController {
 
     @PostMapping("/reset")
     public ResponseEntity<Map<String, String>> resetPassword(
-            @Valid @RequestBody ResetPasswordRequest request) {
+            @Valid @RequestBody ResetPasswordRequest request,
+            HttpServletRequest httpRequest) {
 
         // Validate reset token
         var results = jdbcTemplate.queryForList(
@@ -201,10 +235,11 @@ public class PasswordController {
                         "reset_token = NULL, reset_token_expires_at = NULL, " +
                         "force_change_on_login = false, failed_attempts = 0, locked_until = NULL, " +
                         "updated_at = ? WHERE user_id = ?",
-                newHash, Instant.now(), Instant.now(), userId
+                newHash, now(), now(), userId
         );
 
         log.info("Password reset completed for user_id {}", userId);
+        sessionRevoker.signOutElsewhere(userId, currentSessionId(httpRequest));
         sendPasswordChangedEmail(userId);
         return ResponseEntity.ok(Map.of("status", "ok"));
     }

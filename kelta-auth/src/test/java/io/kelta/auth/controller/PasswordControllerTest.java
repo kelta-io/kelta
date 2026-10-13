@@ -1,8 +1,13 @@
 package io.kelta.auth.controller;
 
+import io.kelta.auth.TestFixtures;
 import io.kelta.auth.config.AuthProperties;
+import io.kelta.auth.model.KeltaUserDetails;
 import io.kelta.auth.service.PasswordPolicyService;
 import io.kelta.auth.service.WorkerClient;
+import io.kelta.auth.session.UserSessionRevoker;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -10,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -48,62 +52,87 @@ class PasswordControllerTest {
     @Mock
     private Authentication authentication;
 
+    @Mock
+    private UserSessionRevoker sessionRevoker;
+
+    @Mock
+    private HttpServletRequest httpRequest;
+
+    @Mock
+    private HttpSession httpSession;
+
     private PasswordController controller;
 
     @BeforeEach
     void setUp() {
         AuthProperties props = new AuthProperties();
         props.setUiBaseUrl("https://app.kelta.io");
-        controller = new PasswordController(jdbcTemplate, passwordEncoder, workerClient, policyService, props);
+        controller = new PasswordController(jdbcTemplate, passwordEncoder, workerClient, policyService, sessionRevoker, props);
     }
 
     @Nested
     @DisplayName("changePassword")
     class ChangePassword {
 
+        private final KeltaUserDetails user = TestFixtures.userDetails();
+
+        @BeforeEach
+        void signedIn() {
+            lenient().when(authentication.getPrincipal()).thenReturn(user);
+            lenient().when(httpRequest.getSession(false)).thenReturn(httpSession);
+            lenient().when(httpSession.getId()).thenReturn("current-session");
+        }
+
+        private void account(String hash) {
+            Map<String, Object> row = new HashMap<>();
+            row.put("id", user.getId());
+            row.put("tenant_id", user.getTenantId());
+            row.put("email", user.getEmail());
+            row.put("first_name", "John");
+            row.put("last_name", "Doe");
+            row.put("password_hash", hash);
+            when(jdbcTemplate.queryForList(contains("WHERE pu.id = ? AND pu.tenant_id = ?"),
+                    eq(user.getId()), eq(user.getTenantId()))).thenReturn(List.of(row));
+        }
+
         @Test
         @DisplayName("returns 400 when current password is incorrect")
         void returns400WhenCurrentPasswordIncorrect() {
-            when(authentication.getName()).thenReturn("user@test.com");
-            when(jdbcTemplate.queryForObject(contains("password_hash"), eq(String.class), eq("user@test.com")))
-                    .thenReturn("$2a$hashed");
+            account("$2a$hashed");
             when(passwordEncoder.matches("wrong", "$2a$hashed")).thenReturn(false);
 
             var request = new PasswordController.ChangePasswordRequest("wrong", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.changePassword(request, authentication);
+            ResponseEntity<Map<String, String>> result = controller.changePassword(request, authentication, httpRequest);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
             assertThat(result.getBody().get("error")).contains("incorrect");
+            verifyNoInteractions(sessionRevoker);
         }
 
         @Test
         @DisplayName("returns 400 when new password violates policy")
         void returns400WhenPolicyViolation() {
-            when(authentication.getName()).thenReturn("user@test.com");
-            when(jdbcTemplate.queryForObject(contains("password_hash"), eq(String.class), eq("user@test.com")))
-                    .thenReturn("$2a$hashed");
+            account("$2a$hashed");
             when(passwordEncoder.matches("current123", "$2a$hashed")).thenReturn(true);
-            when(jdbcTemplate.queryForList(contains("platform_user"), eq("user@test.com")))
-                    .thenReturn(List.of(Map.of("id", "user-1", "tenant_id", "t1", "first_name", "John", "last_name", "Doe")));
-            when(policyService.validatePassword(eq("weak"), eq("user@test.com"), anyString(), eq("t1")))
+            when(policyService.validatePassword(eq("weak"), eq(user.getEmail()), eq("John Doe"), eq(user.getTenantId())))
                     .thenReturn(List.of("Password too short"));
 
             var request = new PasswordController.ChangePasswordRequest("current123", "weak");
-            ResponseEntity<Map<String, String>> result = controller.changePassword(request, authentication);
+            ResponseEntity<Map<String, String>> result = controller.changePassword(request, authentication, httpRequest);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
             assertThat(result.getBody().get("error")).contains("Password too short");
+            verifyNoInteractions(sessionRevoker);
         }
 
         @Test
-        @DisplayName("returns 400 when the user's credential row is missing (EmptyResult)")
-        void returns400WhenCredentialRowMissing() {
-            when(authentication.getName()).thenReturn("ghost@test.com");
-            when(jdbcTemplate.queryForObject(contains("password_hash"), eq(String.class), eq("ghost@test.com")))
-                    .thenThrow(new EmptyResultDataAccessException(1));
+        @DisplayName("returns 400 when the user's account is missing")
+        void returns400WhenAccountMissing() {
+            when(jdbcTemplate.queryForList(contains("WHERE pu.id = ? AND pu.tenant_id = ?"),
+                    eq(user.getId()), eq(user.getTenantId()))).thenReturn(List.of());
 
             var request = new PasswordController.ChangePasswordRequest("anything", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.changePassword(request, authentication);
+            ResponseEntity<Map<String, String>> result = controller.changePassword(request, authentication, httpRequest);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
             // Same generic message as a wrong password — don't leak account existence.
@@ -113,26 +142,39 @@ class PasswordControllerTest {
         }
 
         @Test
-        @DisplayName("changes password successfully")
-        void changesPasswordSuccessfully() {
+        @DisplayName("a principal that is not a platform user is matched by login name only when one account has it")
+        void ambiguousLoginNameIsRefused() {
+            when(authentication.getPrincipal()).thenReturn("user@test.com");
             when(authentication.getName()).thenReturn("user@test.com");
-            when(jdbcTemplate.queryForObject(contains("password_hash"), eq(String.class), eq("user@test.com")))
-                    .thenReturn("$2a$hashed");
+            when(jdbcTemplate.queryForList(contains("WHERE pu.email = ?"), eq("user@test.com")))
+                    .thenReturn(List.of(Map.of("id", "u1"), Map.of("id", "u2")));
+
+            var request = new PasswordController.ChangePasswordRequest("anything", "newpassword123");
+            ResponseEntity<Map<String, String>> result = controller.changePassword(request, authentication, httpRequest);
+
+            assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            verify(jdbcTemplate, never()).update(anyString(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("changes the signed-in user's password and signs them out everywhere else")
+        void changesPasswordSuccessfully() {
+            account("$2a$hashed");
             when(passwordEncoder.matches("current123", "$2a$hashed")).thenReturn(true);
-            when(jdbcTemplate.queryForList(contains("platform_user"), eq("user@test.com")))
-                    .thenReturn(List.of(Map.of("id", "user-1", "tenant_id", "t1", "first_name", "John", "last_name", "Doe")));
             when(policyService.validatePassword(anyString(), anyString(), anyString(), anyString()))
                     .thenReturn(List.of());
-            when(policyService.checkHistory("user-1", "newpassword123", "t1"))
+            when(policyService.checkHistory(user.getId(), "newpassword123", user.getTenantId()))
                     .thenReturn(Optional.empty());
             when(passwordEncoder.encode("newpassword123")).thenReturn("$2a$newhash");
 
             var request = new PasswordController.ChangePasswordRequest("current123", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.changePassword(request, authentication);
+            ResponseEntity<Map<String, String>> result = controller.changePassword(request, authentication, httpRequest);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-            verify(jdbcTemplate).update(contains("UPDATE user_credential SET password_hash"),
-                    eq("$2a$newhash"), any(Instant.class), any(Instant.class), eq("user@test.com"));
+            verify(jdbcTemplate).update(contains("WHERE user_id = ?"),
+                    eq("$2a$newhash"), any(Timestamp.class), any(Timestamp.class), eq(user.getId()));
+            verify(policyService).saveToHistory(user.getId(), "$2a$newhash", user.getTenantId());
+            verify(sessionRevoker).signOutElsewhere(user.getId(), "current-session");
         }
     }
 
@@ -164,7 +206,7 @@ class PasswordControllerTest {
                     .thenReturn(List.of());
 
             var request = new PasswordController.ResetPasswordRequest("bad-token", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.resetPassword(request);
+            ResponseEntity<Map<String, String>> result = controller.resetPassword(request, httpRequest);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
             assertThat(result.getBody().get("error")).contains("expired");
@@ -180,7 +222,7 @@ class PasswordControllerTest {
                     )));
 
             var request = new PasswordController.ResetPasswordRequest("expired-token", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.resetPassword(request);
+            ResponseEntity<Map<String, String>> result = controller.resetPassword(request, httpRequest);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         }
@@ -197,7 +239,7 @@ class PasswordControllerTest {
                     .thenReturn(List.of(row));
 
             var request = new PasswordController.ResetPasswordRequest("null-expires-token", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.resetPassword(request);
+            ResponseEntity<Map<String, String>> result = controller.resetPassword(request, httpRequest);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
             assertThat(result.getBody().get("error")).contains("expired");
@@ -216,11 +258,12 @@ class PasswordControllerTest {
             when(passwordEncoder.encode("newpassword123")).thenReturn("$2a$newhash");
 
             var request = new PasswordController.ResetPasswordRequest("valid-token", "newpassword123");
-            ResponseEntity<Map<String, String>> result = controller.resetPassword(request);
+            ResponseEntity<Map<String, String>> result = controller.resetPassword(request, httpRequest);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
             verify(jdbcTemplate).update(contains("password_hash = ?"),
-                    eq("$2a$newhash"), any(Instant.class), any(Instant.class), eq("user-1"));
+                    eq("$2a$newhash"), any(Timestamp.class), any(Timestamp.class), eq("user-1"));
+            verify(sessionRevoker).signOutElsewhere("user-1", null);
         }
     }
 }

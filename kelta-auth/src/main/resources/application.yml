@@ -2,6 +2,13 @@ server:
   port: ${SERVER_PORT:8080}
 
 spring:
+  web:
+    error:
+      # Errors are rendered by io.kelta.auth.controller.AuthErrorController (an HTML page for
+      # browsers, JSON otherwise); never Spring Boot's whitelabel page. A literal: it gates
+      # auto-configuration, which the native image evaluates at build time.
+      whitelabel:
+        enabled: false
   threads:
     virtual:
       enabled: true
@@ -93,9 +100,26 @@ kelta:
       cookie-name: ${KELTA_AUTH_SESSION_COOKIE_NAME:kelta_auth_session}
       # None | Lax | Strict | blank (attribute left off). None lets an identity provider's
       # cross-site POST to the SAML assertion consumer service carry the session that started
-      # the sign-in; Lax or Strict break SP-initiated SAML sign-in. Loopback hosts (plain-http
-      # local development) get no Secure flag and therefore no SameSite=None.
+      # the sign-in; Lax or Strict break SP-initiated SAML sign-in. A cookie sent without Secure
+      # (below) gets Lax in place of None, which browsers reject without Secure.
       cookie-same-site: ${KELTA_AUTH_SESSION_COOKIE_SAME_SITE:None}
+      # auto | always | never — Secure on the session cookie and the kelta_session SSO cookie.
+      # auto follows the scheme the browser used: X-Forwarded-Proto (or Forwarded: proto=) from
+      # a TLS-terminating proxy, else the request's own scheme. So https behind an ingress gets
+      # Secure, plain-http local development and plain-http LAN installs do not (a browser drops
+      # a Secure cookie set over http). Set always behind a proxy that terminates TLS without
+      # sending X-Forwarded-Proto.
+      cookie-secure: ${KELTA_AUTH_SESSION_COOKIE_SECURE:auto}
+    # Deletes oauth2_authorization rows whose every token (authorization code, access, refresh,
+    # OIDC ID token, device and user code) expired more than `grace` ago — Spring Authorization
+    # Server never deletes them (io.kelta.auth.service.AuthorizationRetentionSweep). Batched
+    # LIMIT ... FOR UPDATE SKIP LOCKED deletes, so replicas sweeping at once do not block each other.
+    authorization-retention:
+      enabled: ${KELTA_AUTH_AUTHORIZATION_RETENTION_ENABLED:true}
+      interval: ${KELTA_AUTH_AUTHORIZATION_RETENTION_INTERVAL:1h}
+      grace: ${KELTA_AUTH_AUTHORIZATION_RETENTION_GRACE:1d}
+      batch-size: ${KELTA_AUTH_AUTHORIZATION_RETENTION_BATCH_SIZE:500}
+      max-batches: ${KELTA_AUTH_AUTHORIZATION_RETENTION_MAX_BATCHES:100}
     # Enable direct login endpoint for programmatic auth (e2e tests)
     direct-login:
       enabled: ${DIRECT_LOGIN_ENABLED:false}

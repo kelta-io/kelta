@@ -11,7 +11,8 @@ io.kelta.auth/
   federation/      ← External IdP brokering (dynamic client registration, user mapping)
   model/           ← KeltaUserDetails, KeltaSession, KeltaUserDetailsMixin
   service/         ← Business logic (token customizer, user details, TOTP, session, worker client, etc.)
-  session/         ← HTTP sessions in Redis: HttpSessionConfig, value serializer, cookie, index, OIDC SessionRegistry
+  session/         ← HTTP sessions in Redis: HttpSessionConfig, value serializer, cookie, index, OIDC SessionRegistry,
+                     UserSessionRevoker (sign-out elsewhere after a password change)
 ```
 
 ## Key Patterns
@@ -99,21 +100,48 @@ auto-configuration lives in that module), so every replica sees every session an
 rollout signs nobody out. Settings: `spring.session.*` in `application.yml` (indexed repository —
 a literal, it gates auto-configuration at native build time — namespace `kelta:auth:session`,
 30-minute idle timeout before sign-in) and `kelta.auth.session.*` (8-hour idle timeout once signed
-in, cookie name `kelta_auth_session`, `SameSite`). `session/`:
+in, cookie name `kelta_auth_session`, `SameSite`, `cookie-secure`). `session/`:
 - `SessionAttributeSerializer` — Java serialization of each session value, read through a
   JDK/Spring/platform class allowlist. A value that cannot be written is left out, one that cannot
   be read (classes changed in a release) reads as absent — never a failed request.
 - `SessionCookieSerializer` — `HttpOnly`, path `/`, browser-session lifetime, no `Domain`;
-  `Secure` + `SameSite` except on loopback hosts (`CookieDomainResolver.secureForRequest`).
+  `Secure` when the browser used https, else not, with `SameSite=None` written as `Lax`
+  (browsers reject `None` without `Secure`). `CookieDomainResolver.secureForRequest` decides it for
+  this cookie and the `kelta_session` SSO cookie: `kelta.auth.session.cookie-secure`
+  (`KELTA_AUTH_SESSION_COOKIE_SECURE`) `auto` = first `X-Forwarded-Proto` (or `Forwarded: proto=`)
+  value, else `request.isSecure()` — production behind the TLS-terminating ingress is `Secure`,
+  `http://*.localhost` and a plain-http LAN install are not; `always` / `never` override (`always`
+  behind a proxy that terminates TLS without sending the header). The host name plays no part.
   `SameSite=None` is what lets a SAML IdP's cross-site POST carry the session that started the
-  sign-in.
+  sign-in, so SP-initiated SAML needs https.
 - `SessionPrincipalIndexResolver` / `TenantScopedSessionRegistry` — the per-user index and the
   OIDC registry over it (see Sign-out above).
 - `SignedInSessionTimeoutFilter` — the long timeout only once the session holds a signed-in user.
+- `UserSessionRevoker` — after a successful password change (`PasswordController` change and
+  email-link reset, `ForcePasswordChangeController`) ends every other session of the user (index
+  key tenant + user id; the session the change was made in is kept) and deletes the user's
+  `oauth2_authorization` rows, so earlier refresh tokens answer `invalid_grant`. Those rows carry
+  only the email as `principal_name`, so it reads candidates back through the authorization
+  service and deletes only rows whose stored `KeltaUserDetails` has the same tenant + id. Never
+  fails the request (the password is already changed); failures log at ERROR. A new
+  password-changing path must call it. Tests: `PasswordChangeSignOutFlowTest`,
+  `SharedHttpSessionIntegrationTest` (Redis), `UserSessionRevokerTest`.
 - **Native image**: every class written for a session value needs a serialization hint
   (`AuthRuntimeHints.registerHttpSessionSerialization`, on top of Spring Session's own). A new
   session attribute type gets a sample in the test `SessionAttributeSamples`;
   `SessionAttributeHintsTest` fails until it is hinted.
+
+### `oauth2_authorization` retention
+Spring Authorization Server never deletes a row. `service/AuthorizationRetentionSweep`
+(`@Scheduled`, `config/SchedulingConfig` turns scheduling on) deletes rows that hold at least one
+token and whose every token (code, access, OIDC ID, refresh, device, user code) expired before
+`now - grace`; a token without an expiry keeps the row, and a row with no token (pending consent)
+is kept. Settings `kelta.auth.authorization-retention.*` (`enabled`, `interval` 1h, `grace` 1d,
+`batch-size` 500, `max-batches` 100; first run 5 min after start). Every replica runs it — there is
+no cluster lock in this service (nor ShedLock anywhere in the repo): each statement is
+`DELETE … WHERE id IN (SELECT … LIMIT ? FOR UPDATE SKIP LOCKED)`, so concurrent sweeps take
+disjoint rows. The table has no RLS. Tests: `AuthorizationRetentionSweepTest`,
+`AuthorizationRetentionIntegrationTest` (real migrated schema, concurrent sweeps).
 
 ### First-boot platform admin password
 `config/BaselineAdminPasswordInitializer` (`ApplicationRunner`) replaces the Flyway baseline's
@@ -176,6 +204,21 @@ plain surefire here and skip without Docker.
 ### Error Handling
 Standard Spring Security exceptions (`AuthenticationException` hierarchy). No custom exception classes in this service.
 
+Error responses (`controller/`):
+- `HtmlErrorPageResolver` (a `HandlerExceptionResolver`, ahead of MVC's) — an exception from a page
+  handler (`@Controller` method that is not `@ResponseBody`/`ResponseEntity`) renders
+  `templates/error.html` with the exception's status. JSON endpoints fall through to runtime-core's
+  `GlobalExceptionHandler` (JSON:API errors), unchanged. Page controllers must not rely on local
+  `@ExceptionHandler` methods — this resolver answers first.
+- `AuthErrorController` (`/error`, replaces Boot's `BasicErrorController`;
+  `spring.web.error.whitelabel.enabled: false`) — errors outside a handler. HTML when the failed
+  response was already `text/html` or `Accept` puts `text/html` ahead of JSON; otherwise Boot's
+  JSON shape (`timestamp`, `status`, `error`, `path`) plus `requestId`, always as
+  `application/json`.
+- `ErrorPages` — the rule and the page model: strings only (`status`, `title`, `message`,
+  `requestId`), never the exception message or a stack trace; the request id is in the log line.
+  Tests: `AuthErrorHandlingTest`.
+
 ## When Adding a New Auth Flow
 
 1. Add a `@Controller` in `controller/` for the page/form handling
@@ -209,6 +252,11 @@ mvn test -f kelta-auth/pom.xml -Dtest=LoginControllerTest           # Single cla
 mvn test -f kelta-auth/pom.xml -Dtest=LoginControllerTest#shouldRenderLoginPage  # Single method
 mvn test -f kelta-auth/pom.xml -Dtest="*Mfa*"                       # Pattern match
 ```
+
+Unit and flow tests run on H2, which binds a `java.time.Instant` JDBC parameter that the PostgreSQL
+driver rejects ("Can't infer the SQL type") — bind `java.sql.Timestamp`, and cover new SQL with a
+Testcontainers test on the migrated schema (`BaselineAdminPasswordIntegrationTest`,
+`AuthorizationRetentionIntegrationTest`).
 
 ## Test Fixtures
 

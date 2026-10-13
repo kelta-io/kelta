@@ -1266,6 +1266,17 @@ the pending authorize URL in a hidden `authorize_url` field and
 same-origin `/oauth2/authorize?…` only — landing on a fresh form that says the page expired,
 instead of a dead-end 403.
 
+**Password change signs the user out elsewhere.** A successful change in kelta-auth
+(`/auth/password/change`, the email-link `/auth/password/reset`, the forced `/change-password`)
+calls `session/UserSessionRevoker`: every other HTTP session of that tenant's user ends (looked up
+in the per-user session index, tenant + user id — the session the change was made in stays signed
+in) and every `oauth2_authorization` row whose stored principal is that user is deleted, so each
+refresh token issued before the change answers `invalid_grant` (terminal for the SPA, above). A
+browser still signed in to kelta-auth gets new tokens without a login form; every other device signs
+in again. Access tokens (JWTs) run to their expiry. Same-email users of other tenants are untouched.
+Tests: `PasswordChangeSignOutFlowTest` (in-memory store), `SharedHttpSessionIntegrationTest`
+(Redis, two pods).
+
 ### Component layering — admin app vs. plugin library
 
 `kelta-ui/app/src/components/` and `kelta-web/packages/components/src/` have grown overlapping families of components (data tables, filter builders, field renderers, forms). The rule (see `conventions.md` → Component reuse, decided 2026-10-12): **the canonical variants live in `kelta-ui/app`** (`AdminDataTable`, `ObjectDataTable`/`ListShell`, `FilterBuilder`, `fieldControl`, `RelatedList`, `RecordShell`) — reuse or extend them, never fork another. `@kelta/components`' `DataTable`/`FilterBuilder` are deprecated; a component moves into the library only when a plugin or module needs it, and then only one copy exists. Consult `conventions.md` before adding a new shared list/form/filter component on either side.
@@ -1985,8 +1996,9 @@ platform session) replaces it on boot:
    KELTA_BOOTSTRAP_ADMIN_PASSWORD" without the value.
 
 The admin then signs in, `KeltaUserDetails.isCredentialsNonExpired()` is false, and form login
-redirects to `/change-password` (`ForcePasswordChangeController`); `/auth/direct-login` answers
-403 `credentials_expired`. Covered by `BaselineAdminPasswordInitializerTest` (unit, incl. the
+redirects to `/change-password` (`ForcePasswordChangeController`, which also ends the account's other
+sessions and authorizations — see "Password change signs the user out elsewhere");
+`/auth/direct-login` answers 403 `credentials_expired`. Covered by `BaselineAdminPasswordInitializerTest` (unit, incl. the
 0-row path) and `BaselineAdminPasswordIntegrationTest` (Testcontainers, real migrations).
 
 ### Scheduled flow cron handling
