@@ -474,6 +474,18 @@ Update a dashboard by id
 
 Delete a dashboard **(destructive — needs --yes off-TTY)**
 
+### `kelta dashboards validate <dashboard>`
+
+Validate a dashboard's widget configs (read-only; prints the API response as-is)
+
+- `--data <json>` — Body as JSON, @file, or - — e.g. {"components":[...]} to validate unsaved widgets
+
+### `kelta dashboards data <dashboard>`
+
+Execute a dashboard's widgets and print their data (read-only; API response as-is)
+
+- `--data <json>` — Runtime parameters as JSON, @file, or - (e.g. {"timeRange":"LAST_30_DAYS"})
+
 ## reports
 
 ### `kelta reports list`
