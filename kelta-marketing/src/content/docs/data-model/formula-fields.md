@@ -78,3 +78,6 @@ on read:
 `aggregateFunction` is `COUNT`, `SUM`, `AVG`, `MIN` or `MAX`; `aggregateField` is omitted for `COUNT`. The
 optional `filter` is an equality filter on child rows. The console's field editor offers a picker for the child
 collection and field.
+
+A validation rule that names a roll-up field sees it computed from the child rows at write time, which is how a rule
+tests related records: see [Rules over related records](/docs/data-model/validation-rules/#rules-over-related-records).

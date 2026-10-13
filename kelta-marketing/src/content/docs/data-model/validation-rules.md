@@ -49,6 +49,48 @@ kelta validation-rules create invoices \
 Rules are managed under a collection's **Validation rules** tab, with `kelta validation-rules`, or MCP
 `create_validation_rule` / `update_validation_rule` / `delete_validation_rule`.
 
+## Rules over related records
+
+A formula sees only the record being written, but a [roll-up summary field](/docs/data-model/formula-fields/#roll-up-summary-fields)
+brings child records into it. When an active rule names a `ROLLUP_SUMMARY` field of its collection, the platform
+computes that roll-up from the child rows at write time — one aggregate query per roll-up, however many children
+there are — and the rule sees the result. A value for the roll-up sent in the request body is ignored, so a client
+cannot bypass the rule by supplying its own count. Rules that name no roll-up field cost nothing extra.
+
+**Example: a project cannot close while it has open tasks.** `tasks` has a master-detail field `project` pointing
+at `projects` and a `status` field. Add a filtered `COUNT` roll-up to `projects`:
+
+```json
+{
+  "name": "openTasks",
+  "type": "ROLLUP_SUMMARY",
+  "fieldTypeConfig": {
+    "childCollection": "tasks",
+    "foreignKeyField": "project",
+    "aggregateFunction": "COUNT",
+    "filter": { "status": "open" }
+  }
+}
+```
+
+Then the rule:
+
+```bash
+kelta validation-rules create projects \
+  --name "No close with open tasks" \
+  --formula 'AND(state = "closed", openTasks > 0)' \
+  --message "Close or cancel the open tasks first" \
+  --error-field state
+```
+
+Setting a project's `state` to `closed` while one of its tasks has `status` `open` answers `400 VALIDATION_FAILED`
+with that message and `source.pointer: /data/attributes/state`. With no tasks, or only tasks in other statuses, the
+update goes through. The roll-up `filter` is an equality match on child fields; use `SUM`, `MIN`, `MAX` or `AVG`
+the same way (for example "an order's line total cannot exceed its credit limit").
+
+The roll-up is read when the parent is written, not locked: a task created at the same moment the project closes is
+not seen by that check.
+
 ## Immutable fields
 
 A field can be declared immutable. An update that would change it fails loudly with `VALIDATION_FAILED`
