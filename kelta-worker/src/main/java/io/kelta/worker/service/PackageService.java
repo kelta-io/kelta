@@ -19,10 +19,22 @@ public class PackageService {
     /** Option keys naming the ids to export; none present means "the whole tenant". */
     private static final List<String> ID_OPTION_KEYS = List.of(
             "collectionIds", "uiPageIds", "uiMenuIds", "flowIds", "pageLayoutIds",
-            "validationRuleIds", "globalPicklistIds");
+            "validationRuleIds", "globalPicklistIds", "listViewIds", "dashboardIds");
 
-    /** Collection API names whose collections and dependents (rules, layouts, flows, picklists) to export. */
+    /** Collection API names whose collections and dependents (rules, layouts, flows, picklists, views) to export. */
     private static final String COLLECTION_NAMES_OPTION = "collectionNames";
+
+    /** Package types to leave out of an export, each emptying the id list that selects it. */
+    private static final String EXCLUDE_TYPES_OPTION = "excludeTypes";
+
+    private static final Map<String, String> ID_OPTION_BY_EXCLUDABLE_TYPE = Map.of(
+            "LIST_VIEW", "listViewIds",
+            "DASHBOARD", "dashboardIds",
+            "FLOW", "flowIds",
+            "PAGE_LAYOUT", "pageLayoutIds",
+            "VALIDATION_RULE", "validationRuleIds",
+            "UI_PAGE", "uiPageIds",
+            "UI_MENU", "uiMenuIds");
 
     private static final String DEFAULT_VERSION = "1.0.0";
     private static final String DEFAULT_NAME = "metadata";
@@ -59,6 +71,8 @@ public class PackageService {
         options.put("pageLayoutIds", repository.findAllIds("page_layout", tenantId));
         options.put("validationRuleIds", repository.findAllIds("validation_rule", tenantId));
         options.put("globalPicklistIds", repository.findAllIds("global_picklist", tenantId));
+        options.put("listViewIds", repository.findAllIds("list_view", tenantId));
+        options.put("dashboardIds", repository.findAllIds("dashboard", tenantId));
         return options;
     }
 
@@ -72,7 +86,8 @@ public class PackageService {
      * export} case) means the whole tenant, and name/version fall back to the
      * tenant slug and {@value #DEFAULT_VERSION}. An explicit (even empty) id
      * list is respected as-is; {@code collectionNames} scopes the export to those
-     * collections and what hangs off them.
+     * collections and what hangs off them; {@code excludeTypes} (e.g. {@code ["DASHBOARD"]})
+     * drops whole item types. Seed records are never exported.
      */
     public Map<String, Object> resolveExportOptions(String tenantId, Map<String, Object> options) {
         String name = blankToNull((String) options.get("name"));
@@ -93,6 +108,15 @@ public class PackageService {
         if (options.containsKey(COLLECTION_NAMES_OPTION)) {
             addCollectionDependents(tenantId, getStringList(options, COLLECTION_NAMES_OPTION), resolved);
         }
+        for (String type : getStringList(options, EXCLUDE_TYPES_OPTION)) {
+            String idOption = ID_OPTION_BY_EXCLUDABLE_TYPE.get(type.toUpperCase(Locale.ROOT));
+            if (idOption == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot exclude type '" + type
+                        + "'; excludable types: " + String.join(", ", new TreeSet<>(ID_OPTION_BY_EXCLUDABLE_TYPE.keySet())));
+            }
+            resolved.put(idOption, List.of());
+        }
+        resolved.remove(EXCLUDE_TYPES_OPTION);
         resolved.put("name", name);
         resolved.put("version", version);
         return resolved;
@@ -101,9 +125,9 @@ public class PackageService {
     /**
      * Resolves {@code collectionNames} to ids (unioned with any explicit
      * {@code collectionIds}) and fills each dependent id list the caller did not
-     * pass: the collections' validation rules and page layouts, the flows they
-     * trigger, and the global picklists their fields are bound to. UI pages and
-     * menus are never pulled in implicitly.
+     * pass: the collections' validation rules, page layouts and list views, the flows
+     * they trigger, the global picklists their fields are bound to, and the dashboards
+     * with a widget on one of them. UI pages and menus are never pulled in implicitly.
      */
     private void addCollectionDependents(String tenantId, List<String> names, Map<String, Object> resolved) {
         List<String> distinctNames = names.stream().distinct().toList();
@@ -133,6 +157,10 @@ public class PackageService {
                 k -> repository.findFlowIdsByTriggerCollections(tenantId, distinctNames));
         resolved.computeIfAbsent("globalPicklistIds",
                 k -> repository.findGlobalPicklistIdsReferencedByCollections(tenantId, namedIds));
+        resolved.computeIfAbsent("listViewIds",
+                k -> repository.findListViewIdsByCollectionIds(tenantId, namedIds));
+        resolved.computeIfAbsent("dashboardIds",
+                k -> repository.findDashboardIdsByComponentCollections(tenantId, distinctNames));
     }
 
     @SuppressWarnings("unchecked")
@@ -150,6 +178,8 @@ public class PackageService {
         List<String> pageLayoutIds = getStringList(options, "pageLayoutIds");
         List<String> validationRuleIds = getStringList(options, "validationRuleIds");
         List<String> globalPicklistIds = getStringList(options, "globalPicklistIds");
+        List<String> listViewIds = getStringList(options, "listViewIds");
+        List<String> dashboardIds = getStringList(options, "dashboardIds");
 
         Map<String, Object> pkg = new LinkedHashMap<>();
         pkg.put("formatVersion", 2);
@@ -233,6 +263,11 @@ public class PackageService {
         for (var mi : menuItems) {
             items.add(buildItem("UI_MENU_ITEM", mi));
         }
+
+        for (var lv : repository.findListViewsByIds(tenantId, listViewIds)) {
+            items.add(buildItem("LIST_VIEW", lv));
+        }
+        items.addAll(dashboardItems(tenantId, dashboardIds));
 
         pkg.put("items", items);
 
@@ -408,6 +443,55 @@ public class PackageService {
         return result;
     }
 
+    /**
+     * Dashboards export as the {@code PUT /api/dashboards/{name}/tree} document (name, grid
+     * settings, widgets matched on title) — what {@code kelta dashboards apply} takes and what
+     * the importer hands to {@link DashboardTreeService#applyTree}. {@code runningUserId} is a
+     * source-tenant user and a widget's {@code reportId} a source-tenant report, so neither is
+     * carried; a widget without a title gets one, since the tree matches widgets on it.
+     */
+    private List<Map<String, Object>> dashboardItems(String tenantId, List<String> dashboardIds) {
+        Map<String, List<Map<String, Object>>> componentsByDashboard = new HashMap<>();
+        for (var row : repository.findDashboardComponentsByDashboardIds(tenantId, dashboardIds)) {
+            List<Map<String, Object>> components = componentsByDashboard
+                    .computeIfAbsent((String) row.get("dashboard_id"), k -> new ArrayList<>());
+            Map<String, Object> component = new LinkedHashMap<>();
+            component.put("title", row.get("title") != null
+                    ? row.get("title") : row.get("component_type") + " " + (components.size() + 1));
+            component.put("componentType", row.get("component_type"));
+            component.put("columnPosition", row.get("column_position"));
+            component.put("rowPosition", row.get("row_position"));
+            putIfPresent(component, "columnSpan", row.get("column_span"));
+            putIfPresent(component, "rowSpan", row.get("row_span"));
+            Object config = jsonColumnValue(row.get("config"));
+            component.put("config", config != null ? config : Map.of());
+            components.add(component);
+        }
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (var row : repository.findDashboardsByIds(tenantId, dashboardIds)) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("name", row.get("name"));
+            putIfPresent(data, "description", row.get("description"));
+            putIfPresent(data, "accessLevel", row.get("access_level"));
+            putIfPresent(data, "columnCount", row.get("column_count"));
+            putIfPresent(data, "dynamic", row.get("is_dynamic"));
+            data.put("components", componentsByDashboard.getOrDefault((String) row.get("id"), List.of()));
+
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("type", "DASHBOARD");
+            item.put("data", data);
+            items.add(item);
+        }
+        return items;
+    }
+
+    private static void putIfPresent(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
+    }
+
     private Map<String, Object> buildItem(String type, Map<String, Object> data) {
         Map<String, Object> cleanData = new LinkedHashMap<>(data);
         // Remove tenant-bound and user-bound values: ids are remapped on import,
@@ -470,6 +554,9 @@ public class PackageService {
             case "PAGE_LAYOUT", "LAYOUT_SECTION", "LAYOUT_FIELD", "LAYOUT_RELATED_LIST" -> "layout";
             case "VALIDATION_RULE" -> "validation-rule";
             case "GLOBAL_PICKLIST", "PICKLIST_VALUE" -> "picklist";
+            case "LIST_VIEW" -> "list-view";
+            case "DASHBOARD" -> "dashboard";
+            case "RECORD" -> "record";
             default -> type.toLowerCase();
         };
     }

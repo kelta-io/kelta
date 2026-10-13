@@ -1,14 +1,22 @@
 package io.kelta.worker.service;
 
 import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.CollectionDefinitionBuilder;
+import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.query.FilterCondition;
+import io.kelta.runtime.query.Pagination;
 import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.query.QueryRequest;
+import io.kelta.runtime.query.QueryResult;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
+import org.mockito.InOrder;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.*;
@@ -31,6 +39,8 @@ class PackageImportServiceTest {
     private CollectionRegistry collectionRegistry;
     private PackageRepository repository;
     private JdbcTemplate jdbcTemplate;
+    private DashboardTreeService dashboardTreeService;
+    private PlatformTransactionManager transactionManager;
     private PackageImportService service;
 
     @BeforeEach
@@ -48,8 +58,13 @@ class PackageImportServiceTest {
         // Target-tenant seed queries all default to empty (fresh tenant).
         when(jdbcTemplate.queryForList(anyString(), any(Object.class))).thenReturn(List.of());
 
+        dashboardTreeService = mock(DashboardTreeService.class);
+        transactionManager = mock(PlatformTransactionManager.class);
         service = new PackageImportService(queryEngine, collectionRegistry, repository,
-                new ObjectMapper(), new JdbcUserIdResolver(jdbcTemplate));
+                new ObjectMapper(), new JdbcUserIdResolver(jdbcTemplate), dashboardTreeService,
+                new DashboardComponentValidator(collectionRegistry, mock(CollectionLifecycleManager.class),
+                        queryEngine),
+                transactionManager);
     }
 
     // ------------------------------------------------------------------
@@ -1066,6 +1081,289 @@ class PackageImportServiceTest {
         assertThat(PackageImportService.naturalKeyFor("UI_MENU_ITEM",
                 Map.of("menu_name", "main", "parent_label", "Sales", "label", "Orders")))
                 .isEqualTo("main:Sales:Orders");
+        assertThat(PackageImportService.naturalKeyFor("LIST_VIEW",
+                Map.of("collection_name", "accounts", "name", "All accounts")))
+                .isEqualTo("accounts:All accounts");
+        assertThat(PackageImportService.naturalKeyFor("DASHBOARD", Map.of("name", "Sales")))
+                .isEqualTo("Sales");
+    }
+
+    // ------------------------------------------------------------------
+    // List views, dashboards and seed records (KLT-585)
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("list views, dashboards and the records section")
+    class ViewsDashboardsAndRecords {
+
+        private final CollectionDefinition accounts = new CollectionDefinitionBuilder()
+                .name("accounts")
+                .displayName("Accounts")
+                .addField(FieldDefinition.string("name"))
+                .addField(FieldDefinition.string("industry"))
+                .build();
+
+        private final CollectionDefinition contacts = new CollectionDefinitionBuilder()
+                .name("contacts")
+                .displayName("Contacts")
+                .addField(FieldDefinition.string("email"))
+                .addField(FieldDefinition.string("account"))
+                .build();
+
+        @BeforeEach
+        void registerUserCollections() {
+            when(collectionRegistry.get("accounts")).thenReturn(accounts);
+            when(collectionRegistry.get("contacts")).thenReturn(contacts);
+            when(queryEngine.executeQuery(any(), any())).thenReturn(QueryResult.empty(new Pagination(1, 1)));
+            when(queryEngine.create(any(), anyMap())).thenAnswer(inv ->
+                    Map.of("id", "tgt-" + inv.<CollectionDefinition>getArgument(0).name()));
+            when(dashboardTreeService.applyTree(anyString(), anyMap())).thenAnswer(inv ->
+                    new DashboardTreeService.ApplyResult("tgt-dash", inv.getArgument(0),
+                            new DashboardTreeService.TreeCounts(2, 0, 0, 0)));
+        }
+
+        private Map<String, Object> listViewData() {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("id", "src-lv");
+            data.put("collection_id", "src-accounts");
+            data.put("collection_name", "accounts");
+            data.put("name", "All accounts");
+            data.put("visibility", "PUBLIC");
+            data.put("columns", List.of("name", "industry"));
+            data.put("filters", List.of());
+            data.put("row_limit", 25);
+            return data;
+        }
+
+        private Map<String, Object> dashboardData(Map<String, Object> config) {
+            Map<String, Object> component = new LinkedHashMap<>();
+            component.put("title", "Accounts");
+            component.put("componentType", "metric");
+            component.put("columnPosition", 1);
+            component.put("rowPosition", 1);
+            component.put("config", config);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("name", "Sales");
+            data.put("columnCount", 3);
+            data.put("components", List.of(component));
+            return data;
+        }
+
+        private Map<String, Object> accountSeeds() {
+            Map<String, Object> section = new LinkedHashMap<>();
+            section.put("collection", "accounts");
+            section.put("key", List.of("name"));
+            section.put("rows", List.of(
+                    mapOf("name", "Acme", "industry", "Tech"),
+                    mapOf("name", "Globex", "industry", "Energy")));
+            return section;
+        }
+
+        @SafeVarargs
+        private Map<String, Object> pkgWithRecords(List<Map<String, Object>> records,
+                                                   Map<String, Object>... items) {
+            Map<String, Object> pkg = pkg(items);
+            pkg.put("records", records);
+            return pkg;
+        }
+
+        private org.mockito.ArgumentMatcher<CollectionDefinition> named(String name) {
+            return def -> def != null && name.equals(def.name());
+        }
+
+        @Test
+        @DisplayName("TYPE_ORDER runs collections before list views/dashboards before records, whatever the package order")
+        void collectionsBeforeViewsAndDashboardsBeforeRecords() {
+            List<String> order = PackageImportService.supportedTypes();
+            assertThat(order).containsSubsequence(
+                    "COLLECTION", "GLOBAL_PICKLIST", "FIELD", "PICKLIST_VALUE", "LIST_VIEW", "DASHBOARD", "RECORD");
+            assertThat(order.getLast()).isEqualTo("RECORD");
+
+            var report = service.importPackage(TENANT, pkgWithRecords(List.of(accountSeeds()),
+                            item("DASHBOARD", dashboardData(Map.of())),
+                            item("LIST_VIEW", listViewData()),
+                            item("COLLECTION", collectionData("accounts"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).as("%s", report.items()).isZero();
+            assertThat(report.items()).extracting(PackageImportService.ItemResult::type)
+                    .containsExactly("COLLECTION", "LIST_VIEW", "DASHBOARD", "RECORD", "RECORD");
+            InOrder order2 = inOrder(queryEngine, dashboardTreeService);
+            order2.verify(queryEngine).create(argThat(named("collections")), anyMap());
+            order2.verify(queryEngine).create(argThat(named("list-views")), anyMap());
+            order2.verify(dashboardTreeService).applyTree(eq("Sales"), anyMap());
+            order2.verify(queryEngine, times(2)).create(argThat(named("accounts")), anyMap());
+        }
+
+        @Test
+        @DisplayName("applying the same list view + dashboard twice reports them unchanged and creates nothing new")
+        @SuppressWarnings("unchecked")
+        void secondApplyLeavesViewsAndDashboardsUnchanged() {
+            seedCollections(Map.of("accounts", "tgt-accounts"));
+            var pkg = pkg(item("LIST_VIEW", listViewData()), item("DASHBOARD", dashboardData(Map.of())));
+
+            var first = service.importPackage(TENANT, pkg, PackageImportService.ImportOptions.defaults());
+
+            assertThat(first.created()).as("%s", first.items()).isEqualTo(2);
+            ArgumentCaptor<Map<String, Object>> view = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(argThat(named("list-views")), view.capture());
+            assertThat(view.getValue())
+                    .containsEntry("collectionId", "tgt-accounts")
+                    .containsEntry("name", "All accounts")
+                    .containsEntry("columns", List.of("name", "industry"))
+                    .containsEntry("rowLimit", 25)
+                    .doesNotContainKey("id");
+            ArgumentCaptor<Map<String, Object>> tree = ArgumentCaptor.forClass(Map.class);
+            verify(dashboardTreeService).applyTree(eq("Sales"), tree.capture());
+            assertThat(tree.getValue()).containsEntry("columnCount", 3).doesNotContainKey("name");
+            assertThat((List<?>) tree.getValue().get("components")).hasSize(1);
+
+            // The target as the seed queries now read it: the rows the first apply created.
+            when(jdbcTemplate.queryForList(contains("FROM list_view lv"), eq(TENANT))).thenReturn(List.of(
+                    Map.of("id", "tgt-list-views", "name", "All accounts", "coll", "accounts")));
+            when(jdbcTemplate.queryForList(contains("FROM dashboard WHERE"), eq(TENANT))).thenReturn(List.of(
+                    Map.of("id", "tgt-dash", "name", "Sales")));
+
+            var second = service.importPackage(TENANT, pkg, PackageImportService.ImportOptions.defaults());
+
+            assertThat(second.failed()).as("%s", second.items()).isZero();
+            assertThat(second.created()).isZero();
+            assertThat(second.skipped()).isEqualTo(2);
+            assertThat(second.items()).extracting(PackageImportService.ItemResult::resourceId)
+                    .containsExactly("tgt-list-views", "tgt-dash");
+            verify(queryEngine, times(1)).create(argThat(named("list-views")), anyMap());
+            verify(dashboardTreeService, times(1)).applyTree(anyString(), anyMap());
+
+            var overwrite = service.importPackage(TENANT, pkg, new PackageImportService.ImportOptions(
+                    PackageImportService.ConflictMode.OVERWRITE, false, null, null, null));
+
+            assertThat(overwrite.updated()).as("%s", overwrite.items()).isEqualTo(2);
+            verify(queryEngine).update(argThat(named("list-views")), eq("tgt-list-views"), anyMap());
+            verify(queryEngine, times(1)).create(argThat(named("list-views")), anyMap());
+        }
+
+        @Test
+        @DisplayName("an invalid widget config fails the dashboard with the validator's message, writing nothing")
+        void invalidWidgetConfigFailsTheDashboard() {
+            var report = service.importPackage(TENANT,
+                    pkg(item("DASHBOARD", dashboardData(Map.of("collectionName", "nope")))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isEqualTo(1);
+            var failed = report.items().get(0);
+            assertThat(failed.type()).isEqualTo("DASHBOARD");
+            assertThat(failed.naturalKey()).isEqualTo("Sales");
+            assertThat(failed.error())
+                    .isEqualTo("Dashboard 'Sales' has invalid widget config: component 'Accounts' "
+                            + "config/collectionName: Unknown collection 'nope'");
+            verify(dashboardTreeService, never()).applyTree(anyString(), anyMap());
+            verify(transactionManager, never()).getTransaction(any());
+        }
+
+        @Test
+        @DisplayName("seed rows go through one atomic batch; a second apply skips rows whose key already exists")
+        void secondApplySkipsExistingSeedRows() {
+            var pkg = pkgWithRecords(List.of(accountSeeds()));
+
+            var first = service.importPackage(TENANT, pkg, PackageImportService.ImportOptions.defaults());
+
+            assertThat(first.created()).as("%s", first.items()).isEqualTo(2);
+            assertThat(first.items()).extracting(PackageImportService.ItemResult::naturalKey)
+                    .containsExactly("accounts:name=Acme", "accounts:name=Globex");
+            verify(queryEngine, times(2)).create(argThat(named("accounts")), anyMap());
+            verify(transactionManager, times(1)).getTransaction(any());
+            verify(transactionManager, times(1)).commit(any());
+
+            // Both rows now exist: the key lookup finds them.
+            when(queryEngine.executeQuery(eq(accounts), any())).thenAnswer(inv -> {
+                QueryRequest request = inv.getArgument(1);
+                Object name = request.filters().get(0).value();
+                return QueryResult.of(List.of(Map.of("id", "rec-" + name)), 1, new Pagination(1, 1));
+            });
+
+            var second = service.importPackage(TENANT, pkg, PackageImportService.ImportOptions.defaults());
+
+            assertThat(second.failed()).as("%s", second.items()).isZero();
+            assertThat(second.created()).isZero();
+            assertThat(second.skipped()).isEqualTo(2);
+            assertThat(second.items()).extracting(PackageImportService.ItemResult::resourceId)
+                    .containsExactly("rec-Acme", "rec-Globex");
+            verify(queryEngine, times(2)).create(argThat(named("accounts")), anyMap());
+            verify(transactionManager, times(1)).getTransaction(any());
+            verify(queryEngine, atLeastOnce()).executeQuery(eq(accounts), argThat(r ->
+                    r.filters().equals(List.of(FilterCondition.eq("name", "Acme")))));
+        }
+
+        @Test
+        @DisplayName("a failing row rolls the whole section back and fails every row it would have written")
+        void failingRowRollsBackTheSection() {
+            doAnswer(inv -> {
+                Map<String, Object> row = inv.getArgument(1);
+                if ("Globex".equals(row.get("name"))) {
+                    throw new IllegalStateException("duplicate key value violates unique constraint");
+                }
+                return Map.of("id", "rec-1");
+            }).when(queryEngine).create(argThat(named("accounts")), anyMap());
+
+            var report = service.importPackage(TENANT, pkgWithRecords(List.of(accountSeeds())),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isEqualTo(2);
+            assertThat(report.created()).isZero();
+            assertThat(report.items()).allSatisfy(item -> assertThat(item.error())
+                    .contains("accounts:name=Globex").contains("unique constraint"));
+            verify(transactionManager).rollback(any());
+            verify(transactionManager, never()).commit(any());
+        }
+
+        @Test
+        @DisplayName("a reference field's value is resolved to the parent record's id by the declared field")
+        @SuppressWarnings("unchecked")
+        void resolvesReferencesByNaturalKey() {
+            when(queryEngine.executeQuery(eq(accounts), any())).thenReturn(
+                    QueryResult.of(List.of(Map.of("id", "rec-acme")), 1, new Pagination(1, 2)));
+            Map<String, Object> section = new LinkedHashMap<>();
+            section.put("collection", "contacts");
+            section.put("key", List.of("email"));
+            section.put("references", Map.of("account", Map.of("collection", "accounts", "field", "name")));
+            section.put("rows", List.of(mapOf("email", "ada@acme.io", "account", "Acme")));
+
+            var report = service.importPackage(TENANT, pkgWithRecords(List.of(section)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.created()).as("%s", report.items()).isEqualTo(1);
+            ArgumentCaptor<Map<String, Object>> written = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(argThat(named("contacts")), written.capture());
+            assertThat(written.getValue()).containsEntry("account", "rec-acme").containsEntry("email", "ada@acme.io");
+            verify(queryEngine).executeQuery(eq(accounts), argThat(r ->
+                    r.filters().equals(List.of(FilterCondition.eq("name", "Acme")))));
+        }
+
+        @Test
+        @DisplayName("a dry run reports seed rows and dashboards without writing or opening a transaction")
+        void dryRunWritesNothing() {
+            var report = service.importPackage(TENANT, pkgWithRecords(List.of(accountSeeds()),
+                            item("DASHBOARD", dashboardData(Map.of()))),
+                    new PackageImportService.ImportOptions(
+                            PackageImportService.ConflictMode.SKIP, true, null, null, null));
+
+            assertThat(report.created()).as("%s", report.items()).isEqualTo(3);
+            verify(queryEngine, never()).create(any(), anyMap());
+            verify(dashboardTreeService, never()).applyTree(anyString(), anyMap());
+            verify(transactionManager, never()).getTransaction(any());
+        }
+
+        @Test
+        @DisplayName("a malformed records section fails with a message naming it")
+        void malformedSectionFails() {
+            var report = service.importPackage(TENANT,
+                    pkgWithRecords(List.of(Map.of("collection", "accounts", "rows", List.of()))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isEqualTo(1);
+            assertThat(report.items().get(0).error())
+                    .isEqualTo("records[0].key must be a non-empty array of field names");
+        }
     }
 
     /** {@link Map#of} rejects nulls; several fixtures need a null parent label. */

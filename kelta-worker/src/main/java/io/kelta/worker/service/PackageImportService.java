@@ -1,15 +1,27 @@
 package io.kelta.worker.service;
 
+import io.kelta.jsonapi.AtomicOperation;
+import io.kelta.jsonapi.AtomicResult;
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.OwnerScope;
+import io.kelta.runtime.query.FilterCondition;
+import io.kelta.runtime.query.Pagination;
 import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.query.QueryRequest;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.router.AtomicOperationExecutor;
+import io.kelta.runtime.router.AtomicOperationExecutor.AtomicOperationException;
 import io.kelta.runtime.router.UserIdResolver;
+import io.kelta.runtime.workflow.BeforeSaveResult;
 import io.kelta.worker.repository.PackageRepository;
+import io.kelta.worker.service.DashboardTreeService.TreeValidationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.sql.Timestamp;
@@ -27,6 +39,14 @@ import java.util.*;
  * {@code kelta.config.*} NATS broadcasts all fire (the
  * {@code ExternalEntityMaterializer} pattern). Legacy authz tables
  * (role/policy/route_policy/field_policy) were dropped in V47 and are never imported.
+ *
+ * <p>List views upsert on (collection name, view name) like any other collection child.
+ * Dashboards carry their widgets inline (the {@code PUT /api/dashboards/{name}/tree}
+ * document) and are applied through {@link DashboardTreeService#applyTree} — the path
+ * {@code kelta dashboards apply} uses — after every widget config has passed
+ * {@link DashboardComponentValidator}. The optional top-level {@code records} section seeds
+ * user-collection rows last, one {@link AtomicOperationExecutor} batch per section (the
+ * {@code records bulk} path); a row whose key fields match an existing record is skipped.
  *
  * <p>Cross-tenant references are resolved by <b>natural key</b> (names), never
  * by source UUID: a field's {@code reference_collection_id} is re-pointed at
@@ -53,7 +73,11 @@ public class PackageImportService {
     private static final List<String> TYPE_ORDER = List.of(
             "COLLECTION", "GLOBAL_PICKLIST", "FIELD", "PICKLIST_VALUE",
             "VALIDATION_RULE", "PAGE_LAYOUT", "LAYOUT_SECTION", "LAYOUT_FIELD",
-            "LAYOUT_RELATED_LIST", "FLOW", "UI_PAGE", "UI_MENU", "UI_MENU_ITEM");
+            "LAYOUT_RELATED_LIST", "FLOW", "UI_PAGE", "UI_MENU", "UI_MENU_ITEM",
+            "LIST_VIEW", "DASHBOARD", "RECORD");
+
+    /** Seed rows: the package's top-level {@code records} section, never an {@code items} entry. */
+    static final String RECORD = "RECORD";
 
     /** Package type → system collection name (QueryEngine import path). */
     private static final Map<String, String> SYSTEM_COLLECTION_BY_TYPE = Map.ofEntries(
@@ -69,7 +93,13 @@ public class PackageImportService {
             Map.entry("FLOW", "flows"),
             Map.entry("UI_PAGE", "ui-pages"),
             Map.entry("UI_MENU", "ui-menus"),
-            Map.entry("UI_MENU_ITEM", "ui-menu-items"));
+            Map.entry("UI_MENU_ITEM", "ui-menu-items"),
+            Map.entry("LIST_VIEW", "list-views"),
+            Map.entry("DASHBOARD", "dashboards"));
+
+    /** Dashboard-tree document keys a DASHBOARD item may carry besides its name. */
+    private static final List<String> DASHBOARD_TREE_KEYS =
+            List.of("description", "accessLevel", "columnCount", "dynamic");
 
     private static final Set<String> AUDIT_FIELD_NAMES =
             Set.of("id", "createdAt", "updatedAt", "createdBy", "updatedBy");
@@ -112,17 +142,28 @@ public class PackageImportService {
     private final PackageRepository repository;
     private final ObjectMapper objectMapper;
     private final UserIdResolver userIdResolver;
+    private final DashboardTreeService dashboardTreeService;
+    private final DashboardComponentValidator componentValidator;
+    private final AtomicOperationExecutor atomicExecutor;
+    private final TransactionTemplate transactionTemplate;
 
     public PackageImportService(QueryEngine queryEngine,
                                 CollectionRegistry collectionRegistry,
                                 PackageRepository repository,
                                 ObjectMapper objectMapper,
-                                UserIdResolver userIdResolver) {
+                                UserIdResolver userIdResolver,
+                                DashboardTreeService dashboardTreeService,
+                                DashboardComponentValidator componentValidator,
+                                PlatformTransactionManager transactionManager) {
         this.queryEngine = queryEngine;
         this.collectionRegistry = collectionRegistry;
         this.repository = repository;
         this.objectMapper = objectMapper;
         this.userIdResolver = userIdResolver;
+        this.dashboardTreeService = dashboardTreeService;
+        this.componentValidator = componentValidator;
+        this.atomicExecutor = new AtomicOperationExecutor(queryEngine, collectionRegistry);
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     @SuppressWarnings("unchecked")
@@ -140,6 +181,9 @@ public class PackageImportService {
 
         List<ItemResult> results = new ArrayList<>();
         for (String type : TYPE_ORDER) {
+            if (RECORD.equals(type)) {
+                continue; // seeded after the second pass below, once ownership is in place
+            }
             for (var item : byType.getOrDefault(type, List.of())) {
                 Map<String, Object> data = (Map<String, Object>) item.get("data");
                 String naturalKey = naturalKeyFor(type, data);
@@ -156,6 +200,7 @@ public class PackageImportService {
         }
 
         patchDisplayFields(ctx, byType.getOrDefault("COLLECTION", List.of()), options);
+        results.addAll(importRecords(ctx, pkg.get("records")));
 
         int created = 0, updated = 0, skipped = 0, failed = 0;
         for (var r : results) {
@@ -265,16 +310,24 @@ public class PackageImportService {
             case "UI_PAGE" -> importUiPage(ctx, naturalKey, data);
             case "UI_MENU" -> importSimpleByName(ctx, "UI_MENU", naturalKey, data, ctx.menuIdByName);
             case "UI_MENU_ITEM" -> importUiMenuItem(ctx, naturalKey, data);
+            case "LIST_VIEW" -> importListView(ctx, naturalKey, data);
+            case "DASHBOARD" -> importDashboard(ctx, naturalKey, data);
             default -> new ItemResult(type, naturalKey, "SKIPPED", "Unsupported item type");
         };
     }
 
-    /** Package types this importer understands, referenced types first. */
+    /**
+     * Package types this importer understands, referenced types first. {@code RECORD} is the
+     * {@code records} section, applied last; it is never an {@code items} entry.
+     */
     public static List<String> supportedTypes() {
         return TYPE_ORDER;
     }
 
-    /** System collection a package type is written to, or {@code null} if unsupported. */
+    /**
+     * System collection a package type is written to, or {@code null} for an unsupported type
+     * and for {@code RECORD} (seed rows go to the user collection each section names).
+     */
     public static String systemCollectionFor(String type) {
         return SYSTEM_COLLECTION_BY_TYPE.get(type);
     }
@@ -289,7 +342,8 @@ public class PackageImportService {
                         : data.get("field_collection_name") + "." + data.get("field_name");
                 yield source + ":" + data.get("value");
             }
-            case "VALIDATION_RULE", "PAGE_LAYOUT" -> data.get("collection_name") + ":" + data.get("name");
+            case "VALIDATION_RULE", "PAGE_LAYOUT", "LIST_VIEW" ->
+                    data.get("collection_name") + ":" + data.get("name");
             case "LAYOUT_SECTION" -> data.get("collection_name") + ":" + data.get("layout_name")
                     + ":" + data.get("sort_order");
             case "LAYOUT_FIELD" -> data.get("collection_name") + ":" + data.get("layout_name")
@@ -553,6 +607,322 @@ public class PackageImportService {
         });
     }
 
+    /**
+     * A list view is keyed on (collection name, view name) — the key {@code kelta list-views
+     * apply} and the MCP {@code apply_listview} tool upsert on. Views on a platform system
+     * collection (e.g. {@code users}) resolve to that global collection.
+     */
+    private ItemResult importListView(ImportContext ctx, String key, Map<String, Object> data) {
+        CollectionDefinition def = systemDef("LIST_VIEW");
+        Map<String, Object> mapped = mapRowToFields(def, data);
+        mapped.put("collectionId", ctx.requireReferenceCollection((String) data.get("collection_name")));
+        String existingId = ctx.listViewIdByKey.get(key);
+        return upsertViaEngine(ctx, "LIST_VIEW", key, def, existingId, mapped,
+                id -> ctx.listViewIdByKey.put(key, id));
+    }
+
+    /**
+     * A dashboard is keyed on its name and carries its widgets inline. Every widget config is
+     * checked by {@link DashboardComponentValidator} before anything is written, then the
+     * whole tree is applied in one transaction through {@link DashboardTreeService#applyTree}
+     * (widgets matched on title; under OVERWRITE a widget missing from the item is removed).
+     */
+    @SuppressWarnings("unchecked")
+    private ItemResult importDashboard(ImportContext ctx, String name, Map<String, Object> data) {
+        Object rawComponents = data.getOrDefault("components", List.of());
+        if (!(rawComponents instanceof List<?> components)) {
+            throw new IllegalArgumentException("Dashboard '" + name + "': 'components' must be an array");
+        }
+        validateComponents(ctx, name, (List<Object>) components);
+
+        String existingId = ctx.dashboardIdByName.get(name);
+        if (existingId != null && ctx.options.conflictMode() == ConflictMode.SKIP) {
+            return new ItemResult("DASHBOARD", name, "SKIPPED", null, existingId);
+        }
+        String action = existingId == null ? "CREATED" : "UPDATED";
+        if (ctx.options.dryRun()) {
+            String id = existingId != null ? existingId : "dry-run:" + UUID.randomUUID();
+            ctx.dashboardIdByName.put(name, id);
+            return new ItemResult("DASHBOARD", name, action, null, id);
+        }
+
+        Map<String, Object> tree = new LinkedHashMap<>();
+        for (String key : DASHBOARD_TREE_KEYS) {
+            if (data.get(key) != null) {
+                tree.put(key, data.get(key));
+            }
+        }
+        tree.put("components", components);
+        DashboardTreeService.ApplyResult applied;
+        try {
+            applied = transactionTemplate.execute(status -> dashboardTreeService.applyTree(name, tree));
+        } catch (TreeValidationException e) {
+            throw new IllegalArgumentException("Dashboard '" + name + "': " + e.errors().stream()
+                    .map(error -> error.pointer() + " " + error.detail())
+                    .reduce((a, b) -> a + "; " + b).orElse(e.getMessage()));
+        }
+        ctx.dashboardIdByName.put(name, applied.dashboardId());
+        return new ItemResult("DASHBOARD", name, action, null, applied.dashboardId());
+    }
+
+    /**
+     * Fails the dashboard with every validation message when a widget is invalid. A dry run
+     * does not check widgets on a collection the same dry run would create — it is not in the
+     * target yet, so the validator could only call it unknown.
+     */
+    @SuppressWarnings("unchecked")
+    private void validateComponents(ImportContext ctx, String dashboardName, List<Object> components) {
+        List<String> problems = new ArrayList<>();
+        for (Object raw : components) {
+            if (!(raw instanceof Map<?, ?> rawComponent)) {
+                continue; // applyTree reports the malformed entry with its pointer
+            }
+            Map<String, Object> component = (Map<String, Object>) rawComponent;
+            Object config = component.get("config");
+            Object collectionName = config instanceof Map<?, ?> c ? c.get("collectionName") : null;
+            if (ctx.options.dryRun() && collectionName != null && String.valueOf(
+                    ctx.collectionIdByName().get(String.valueOf(collectionName))).startsWith("dry-run:")) {
+                continue;
+            }
+            for (BeforeSaveResult.ValidationError error : componentValidator.validate(component)) {
+                problems.add("component '" + component.get("title") + "' " + error.field()
+                        + ": " + error.message());
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException("Dashboard '" + dashboardName + "' has invalid widget config: "
+                    + String.join("; ", problems));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Seed records (the package's top-level "records" section)
+    // ------------------------------------------------------------------
+
+    /**
+     * One section of the {@code records} array: rows to seed into {@code collection}, identified
+     * by the {@code key} fields. {@code references} maps a reference field to the parent
+     * collection + field its row value names, resolved to the parent record's id.
+     */
+    private record RecordSection(String collection, List<String> key,
+                                 Map<String, Map<String, Object>> references,
+                                 List<Map<String, Object>> rows) {}
+
+    /** A row about to be inserted: its natural key, the attributes to write, and its result slot. */
+    private record PendingRow(String naturalKey, Map<String, Object> attributes, int resultIndex) {}
+
+    /**
+     * Seeds every {@code records} section in package order. Rows whose key fields match an
+     * existing record are SKIPPED; the remaining rows of a section are inserted as one
+     * {@link AtomicOperationExecutor} batch in its own transaction, so a section writes all of
+     * its new rows or none. Seed rows are insert-only: OVERWRITE never updates a record.
+     */
+    private List<ItemResult> importRecords(ImportContext ctx, Object rawSections) {
+        if (rawSections == null) {
+            return List.of();
+        }
+        if (!(rawSections instanceof List<?> sections)) {
+            return List.of(new ItemResult(RECORD, "records", "FAILED", "'records' must be an array"));
+        }
+        List<ItemResult> results = new ArrayList<>();
+        for (int i = 0; i < sections.size(); i++) {
+            RecordSection section;
+            try {
+                section = parseSection(sections.get(i), i);
+            } catch (IllegalArgumentException e) {
+                results.add(new ItemResult(RECORD, "records[" + i + "]", "FAILED", e.getMessage()));
+                continue;
+            }
+            results.addAll(importSection(ctx, section));
+        }
+        return results;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static RecordSection parseSection(Object raw, int index) {
+        String where = "records[" + index + "]";
+        if (!(raw instanceof Map<?, ?> map)) {
+            throw new IllegalArgumentException(where + " must be an object");
+        }
+        if (!(map.get("collection") instanceof String collection) || collection.isBlank()) {
+            throw new IllegalArgumentException(where + ".collection is required");
+        }
+        if (!(map.get("key") instanceof List<?> key) || key.isEmpty()
+                || !key.stream().allMatch(k -> k instanceof String s && !s.isBlank())) {
+            throw new IllegalArgumentException(where + ".key must be a non-empty array of field names");
+        }
+        if (!(map.get("rows") instanceof List<?> rows)
+                || !rows.stream().allMatch(r -> r instanceof Map<?, ?>)) {
+            throw new IllegalArgumentException(where + ".rows must be an array of objects");
+        }
+        Map<String, Map<String, Object>> references = new LinkedHashMap<>();
+        Object rawRefs = map.get("references");
+        if (rawRefs != null) {
+            if (!(rawRefs instanceof Map<?, ?> refs)) {
+                throw new IllegalArgumentException(where + ".references must be an object");
+            }
+            for (var entry : refs.entrySet()) {
+                if (!(entry.getValue() instanceof Map<?, ?> target)
+                        || !(target.get("collection") instanceof String)
+                        || !(target.get("field") instanceof String)) {
+                    throw new IllegalArgumentException(where + ".references." + entry.getKey()
+                            + " must be {\"collection\": ..., \"field\": ...}");
+                }
+                references.put(String.valueOf(entry.getKey()), (Map<String, Object>) target);
+            }
+        }
+        return new RecordSection(collection, (List<String>) key, references,
+                (List<Map<String, Object>>) rows);
+    }
+
+    private List<ItemResult> importSection(ImportContext ctx, RecordSection section) {
+        CollectionDefinition def = collectionRegistry.get(section.collection());
+        boolean pendingCollection = def == null && ctx.options.dryRun()
+                && ctx.collectionIdByName().containsKey(section.collection());
+
+        List<ItemResult> results = new ArrayList<>();
+        List<PendingRow> pending = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        String sectionError = null;
+        for (Map<String, Object> row : section.rows()) {
+            String naturalKey = recordKey(section, row);
+            if (!included(RECORD, naturalKey, ctx.options)) {
+                continue;
+            }
+            if (!seen.add(naturalKey)) {
+                results.add(new ItemResult(RECORD, naturalKey, "SKIPPED", "Duplicate key in package"));
+                continue;
+            }
+            try {
+                if (def == null && !pendingCollection) {
+                    throw new IllegalStateException("Collection not found in target: " + section.collection());
+                }
+                Map<String, Object> attributes = resolveReferences(ctx, section, row);
+                for (String keyField : section.key()) {
+                    if (attributes.get(keyField) == null) {
+                        throw new IllegalArgumentException("Key field '" + keyField + "' is missing");
+                    }
+                }
+                String existingId = def == null ? null : findExistingRecord(def, section.key(), attributes);
+                if (existingId != null) {
+                    results.add(new ItemResult(RECORD, naturalKey, "SKIPPED", null, existingId));
+                    continue;
+                }
+                pending.add(new PendingRow(naturalKey, attributes, results.size()));
+                results.add(null);
+            } catch (RuntimeException e) {
+                sectionError = naturalKey + ": " + e.getMessage();
+                results.add(new ItemResult(RECORD, naturalKey, "FAILED", e.getMessage()));
+            }
+        }
+
+        if (sectionError != null) {
+            failPending(results, pending, "Section '" + section.collection() + "' not applied — " + sectionError);
+        } else if (ctx.options.dryRun()) {
+            for (PendingRow row : pending) {
+                String id = "dry-run:" + UUID.randomUUID();
+                ctx.dryRunRecords.add(Map.entry(section.collection(), withId(row.attributes(), id)));
+                results.set(row.resultIndex(), new ItemResult(RECORD, row.naturalKey(), "CREATED", null, id));
+            }
+        } else if (!pending.isEmpty()) {
+            insertSection(section, pending, results);
+        }
+        return results.stream().filter(Objects::nonNull).toList();
+    }
+
+    private void insertSection(RecordSection section, List<PendingRow> pending, List<ItemResult> results) {
+        List<AtomicOperation> operations = pending.stream()
+                .map(row -> new AtomicOperation("add", null, new AtomicOperation.ResourceData(
+                        section.collection(), null, null, row.attributes(), null)))
+                .toList();
+        String actingUserId = CallerContext.current().map(CallerContext::userId).orElse(null);
+        try {
+            List<AtomicResult> written = transactionTemplate.execute(
+                    status -> atomicExecutor.execute(operations, actingUserId));
+            for (int i = 0; i < pending.size(); i++) {
+                PendingRow row = pending.get(i);
+                results.set(row.resultIndex(), new ItemResult(RECORD, row.naturalKey(), "CREATED", null,
+                        written.get(i).data().id()));
+            }
+        } catch (AtomicOperationException e) {
+            int failedIndex = e.getOperationIndex();
+            String failedKey = failedIndex >= 0 && failedIndex < pending.size()
+                    ? pending.get(failedIndex).naturalKey() : section.collection();
+            log.warn("Seed records for '{}' rolled back at {}: {}", section.collection(), failedKey, e.getMessage());
+            failPending(results, pending, "Section '" + section.collection() + "' rolled back — "
+                    + failedKey + ": " + e.getMessage());
+        }
+    }
+
+    private static void failPending(List<ItemResult> results, List<PendingRow> pending, String message) {
+        for (PendingRow row : pending) {
+            results.set(row.resultIndex(), new ItemResult(RECORD, row.naturalKey(), "FAILED", message));
+        }
+    }
+
+    /** {@code <collection>:<keyField>=<value>,...} — the row's identity in the import report. */
+    private static String recordKey(RecordSection section, Map<String, Object> row) {
+        StringJoiner key = new StringJoiner(",", section.collection() + ":", "");
+        for (String field : section.key()) {
+            key.add(field + "=" + row.get(field));
+        }
+        return key.toString();
+    }
+
+    /** Copies the row, replacing each declared reference value with the parent record's id. */
+    private Map<String, Object> resolveReferences(ImportContext ctx, RecordSection section,
+                                                  Map<String, Object> row) {
+        Map<String, Object> attributes = new LinkedHashMap<>(row);
+        section.references().forEach((field, target) -> {
+            Object value = row.get(field);
+            if (value != null) {
+                attributes.put(field, resolveReference(ctx, field, String.valueOf(target.get("collection")),
+                        String.valueOf(target.get("field")), value));
+            }
+        });
+        return attributes;
+    }
+
+    private String resolveReference(ImportContext ctx, String field, String parentCollection,
+                                    String parentField, Object value) {
+        CollectionDefinition parent = collectionRegistry.get(parentCollection);
+        if (parent != null) {
+            var matches = queryEngine.executeQuery(parent, new QueryRequest(new Pagination(1, 2),
+                    List.of(), List.of("id"), List.of(FilterCondition.eq(parentField, value)))).data();
+            if (matches.size() > 1) {
+                throw new IllegalStateException("Reference " + field + "='" + value + "' matches more than one "
+                        + parentCollection + " record by " + parentField);
+            }
+            if (matches.size() == 1) {
+                return String.valueOf(matches.get(0).get("id"));
+            }
+        }
+        // A dry run has not written the parent rows an earlier section would create.
+        for (var seeded : ctx.dryRunRecords) {
+            if (seeded.getKey().equals(parentCollection)
+                    && Objects.equals(String.valueOf(seeded.getValue().get(parentField)), String.valueOf(value))) {
+                return String.valueOf(seeded.getValue().get("id"));
+            }
+        }
+        throw new IllegalStateException("Reference " + field + "='" + value + "' not found in "
+                + parentCollection + "." + parentField);
+    }
+
+    private String findExistingRecord(CollectionDefinition def, List<String> key, Map<String, Object> attributes) {
+        List<FilterCondition> filters = key.stream()
+                .map(field -> FilterCondition.eq(field, attributes.get(field)))
+                .toList();
+        var matches = queryEngine.executeQuery(def,
+                new QueryRequest(new Pagination(1, 1), List.of(), List.of("id"), filters)).data();
+        return matches.isEmpty() ? null : String.valueOf(matches.get(0).get("id"));
+    }
+
+    private static Map<String, Object> withId(Map<String, Object> attributes, String id) {
+        Map<String, Object> copy = new LinkedHashMap<>(attributes);
+        copy.put("id", id);
+        return copy;
+    }
+
     private ItemResult upsertViaEngine(ImportContext ctx, String type, String key,
                                        CollectionDefinition def, String existingId,
                                        Map<String, Object> mapped,
@@ -756,6 +1126,10 @@ public class PackageImportService {
         final Map<String, String> menuItemIdByKey = new HashMap<>();
         /** Source menu-item id → target id, filled as this import runs (parent remap). */
         final Map<String, String> menuItemIdBySourceId = new HashMap<>();
+        final Map<String, String> listViewIdByKey = new HashMap<>();
+        final Map<String, String> dashboardIdByName = new HashMap<>();
+        /** Rows a dry run would seed (collection → attributes + placeholder id), for reference lookups. */
+        final List<Map.Entry<String, Map<String, Object>>> dryRunRecords = new ArrayList<>();
 
         private String defaultUserId;
 
@@ -843,6 +1217,12 @@ public class PackageImportService {
                             r.get("menu_name") + ":" + blankIfNull(r.get("parent_label"))
                                     + ":" + r.get("label"),
                             (String) r.get("id")));
+            jdbc.queryForList(
+                    "SELECT lv.id, lv.name, c.name AS coll FROM list_view lv " +
+                            "JOIN collection c ON lv.collection_id = c.id WHERE lv.tenant_id = ?", tenantId)
+                    .forEach(r -> listViewIdByKey.put(r.get("coll") + ":" + r.get("name"), (String) r.get("id")));
+            jdbc.queryForList("SELECT id, name FROM dashboard WHERE tenant_id = ?", tenantId)
+                    .forEach(r -> dashboardIdByName.putIfAbsent((String) r.get("name"), (String) r.get("id")));
         }
 
         Map<String, String> collectionIdByName() {

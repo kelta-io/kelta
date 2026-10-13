@@ -727,7 +727,8 @@ Export this tenant's metadata as a package file
 
 - `-n, --name <name>` — Package name (default: the tenant slug)
 - `-v, --version <version>` — Package version (default: 1.0.0)
-- `--collections <list>` — Collection names, comma-separated: export only these, with their validation rules, page layouts, record-triggered flows and global picklists (default: the whole tenant)
+- `--collections <list>` — Collection names, comma-separated: export only these, with their validation rules, page layouts, list views, record-triggered flows, global picklists and the dashboards with a widget on them (default: the whole tenant)
+- `--exclude <types>` — Item types to leave out, comma-separated: list-view, dashboard, flow, page-layout, validation-rule, ui-page, ui-menu (list views and dashboards are exported by default; seed records never are)
 - `-o, --out <file>` — Output file (default: the name the server returns)
 
 ### `kelta metadata diff <file>`
@@ -736,10 +737,10 @@ Preview the changes a package file would make (no writes)
 
 ### `kelta metadata apply <file>`
 
-Apply a package file to this tenant **(destructive — needs --yes off-TTY)**
+Apply a package file to this tenant (metadata items, then its seed records section) **(destructive — needs --yes off-TTY)**
 
 - `--dry-run` — Validate without writing
-- `--conflict <mode>` — On an item that already exists: skip (default) or overwrite (default: "skip")
+- `--conflict <mode>` — On an item that already exists: skip (default) or overwrite (seed records are always skipped) (default: "skip")
 
 ## sandbox
 

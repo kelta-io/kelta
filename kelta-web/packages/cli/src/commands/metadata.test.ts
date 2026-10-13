@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AxiosInstance } from 'axios';
 import type { CommandContext } from '../registry/types.js';
-import { metadataCommands, runApply, runDiff, runExport } from './metadata.js';
+import {
+  metadataCommands,
+  runApply,
+  runDiff,
+  runExport,
+  summarizeApply,
+  toPackageType,
+} from './metadata.js';
 
 let dir: string;
 
@@ -65,6 +72,31 @@ describe('runExport', () => {
       { collectionNames: ['sites', 'inspections'] },
       expect.objectContaining({ responseType: 'arraybuffer' })
     );
+  });
+
+  it('`kelta metadata export --exclude list-views,dashboards` posts excludeTypes', async () => {
+    const post = vi
+      .fn()
+      .mockResolvedValue({ status: 200, data: new Uint8Array([123]).buffer, headers: {} });
+    const out = join(dir, 'no-views.json');
+    const def = metadataCommands.find((c) => c.name === 'export');
+    if (!def) throw new Error('no export command');
+    const ctx = { client: { getAxiosInstance: () => client(post) } } as unknown as CommandContext;
+
+    await def.handler(ctx, def.input.parse({ exclude: 'list-views,dashboards', out }) as never);
+
+    expect(post).toHaveBeenCalledWith(
+      '/api/packages/export',
+      { excludeTypes: ['LIST_VIEW', 'DASHBOARD'] },
+      expect.objectContaining({ responseType: 'arraybuffer' })
+    );
+  });
+
+  it('maps CLI type names onto package item types', () => {
+    expect(toPackageType('list-view')).toBe('LIST_VIEW');
+    expect(toPackageType(' Dashboards ')).toBe('DASHBOARD');
+    expect(toPackageType('page_layout')).toBe('PAGE_LAYOUT');
+    expect(toPackageType('validation-rules')).toBe('VALIDATION_RULE');
   });
 
   it('names the file from the response Content-Disposition', async () => {
@@ -160,5 +192,43 @@ describe('runDiff / runApply', () => {
     writeFileSync(file, '{}');
     const post = vi.fn().mockResolvedValue({ status: 400, data: { error: 'bad package' } });
     await expect(runApply(client(post), file, {})).rejects.toThrow(/bad package/);
+  });
+});
+
+describe('kelta metadata apply summary', () => {
+  it('counts list views, dashboards and seed records per type', async () => {
+    const file = join(dir, 'pkg.json');
+    writeFileSync(file, '{}');
+    const result = {
+      success: true,
+      created: 3,
+      updated: 0,
+      skipped: 3,
+      failed: 0,
+      items: [
+        { type: 'COLLECTION', naturalKey: 'accounts', action: 'SKIPPED' },
+        { type: 'LIST_VIEW', naturalKey: 'accounts:All accounts', action: 'CREATED' },
+        { type: 'DASHBOARD', naturalKey: 'Sales', action: 'CREATED' },
+        { type: 'RECORD', naturalKey: 'accounts:name=Acme', action: 'CREATED' },
+        { type: 'RECORD', naturalKey: 'accounts:name=Globex', action: 'SKIPPED' },
+        { type: 'RECORD', naturalKey: 'accounts:name=Initech', action: 'SKIPPED' },
+      ],
+    };
+    const post = vi.fn().mockResolvedValue({ status: 200, data: result });
+    const def = metadataCommands.find((c) => c.name === 'apply');
+    if (!def) throw new Error('no apply command');
+    const ctx = { client: { getAxiosInstance: () => client(post) } } as unknown as CommandContext;
+
+    const out = await def.handler(ctx, def.input.parse({ file }) as never);
+
+    expect(out.data).toEqual(result);
+    expect(out.message).toBe(
+      'created=3 updated=0 skipped=3 failed=0 — COLLECTION: 1 skipped; LIST_VIEW: 1 created; ' +
+        'DASHBOARD: 1 created; RECORD: 1 created, 2 skipped'
+    );
+  });
+
+  it('falls back to the totals when the response carries no items', () => {
+    expect(summarizeApply({ created: 1 })).toBe('created=1 updated=0 skipped=0 failed=0');
   });
 });

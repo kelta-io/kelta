@@ -9,6 +9,8 @@ export interface ExportOptions {
   version?: string;
   /** Collection API names; the server adds their rules, layouts, triggered flows and picklists. */
   collections?: string[];
+  /** Package item types to leave out, e.g. ['LIST_VIEW', 'DASHBOARD']. */
+  exclude?: string[];
   output?: string;
 }
 
@@ -17,14 +19,16 @@ export type ConflictMode = 'skip' | 'overwrite';
 /**
  * Export this tenant's metadata as a package file (GitOps-friendly).
  * POST /api/packages/export → write the returned package JSON to disk.
- * Name, version and collections are sent only when given; an empty body means
- * "the whole tenant, named after it" and is the default. Returns the path written.
+ * Name, version, collections and excluded types are sent only when given; an empty
+ * body means "the whole tenant, named after it" (list views and dashboards included,
+ * seed records never) and is the default. Returns the path written.
  */
 export async function runExport(client: AxiosInstance, opts: ExportOptions): Promise<string> {
   const body: Record<string, unknown> = {};
   if (opts.name) body.name = opts.name;
   if (opts.version) body.version = opts.version;
   if (opts.collections?.length) body.collectionNames = opts.collections;
+  if (opts.exclude?.length) body.excludeTypes = opts.exclude;
   const res = await client.post('/api/packages/export', body, { responseType: 'arraybuffer' });
   if (res.status !== 200) {
     throw new Error(`Export failed (status ${String(res.status)})`);
@@ -60,6 +64,45 @@ export async function runApply(
   return res.data as unknown;
 }
 
+/** `list-views` / `dashboard` / `page_layout` → the server's package type name (LIST_VIEW, …). */
+export function toPackageType(name: string): string {
+  return name.trim().toUpperCase().replace(/-/g, '_').replace(/S$/, '');
+}
+
+interface ApplyItem {
+  type?: string;
+  action?: string;
+}
+
+/**
+ * One-line apply summary with per-type counts, e.g.
+ * `created=3 updated=0 skipped=2 failed=0 — COLLECTION: 1 created; RECORD: 2 created, 2 skipped`.
+ */
+export function summarizeApply(result: unknown): string {
+  const body = (result ?? {}) as Record<string, unknown>;
+  const totals = ['created', 'updated', 'skipped', 'failed']
+    .map((key) => `${key}=${String(body[key] ?? 0)}`)
+    .join(' ');
+  const byType = new Map<string, Map<string, number>>();
+  for (const item of (Array.isArray(body.items) ? body.items : []) as ApplyItem[]) {
+    if (!item.type || !item.action) continue;
+    const actions = byType.get(item.type) ?? new Map<string, number>();
+    actions.set(item.action, (actions.get(item.action) ?? 0) + 1);
+    byType.set(item.type, actions);
+  }
+  if (byType.size === 0) return totals;
+  const perType = [...byType.entries()]
+    .map(
+      ([type, actions]) =>
+        `${type}: ` +
+        [...actions.entries()]
+          .map(([action, count]) => `${String(count)} ${action.toLowerCase()}`)
+          .join(', ')
+    )
+    .join('; ');
+  return `${totals} — ${perType}`;
+}
+
 /** Upload a package file as multipart {@code file=...} and return the response. */
 async function uploadPackage(client: AxiosInstance, url: string, file: string) {
   const buffer = readFileSync(file);
@@ -88,7 +131,15 @@ const exportCommand = defineCommand({
       flag: '--collections <list>',
       description:
         'Collection names, comma-separated: export only these, with their validation rules, ' +
-        'page layouts, record-triggered flows and global picklists (default: the whole tenant)',
+        'page layouts, list views, record-triggered flows, global picklists and the dashboards ' +
+        'with a widget on them (default: the whole tenant)',
+    },
+    {
+      flag: '--exclude <types>',
+      description:
+        'Item types to leave out, comma-separated: list-view, dashboard, flow, page-layout, ' +
+        'validation-rule, ui-page, ui-menu (list views and dashboards are exported by default; ' +
+        'seed records never are)',
     },
     { flag: '-o, --out <file>', description: 'Output file (default: the name the server returns)' },
   ],
@@ -96,6 +147,7 @@ const exportCommand = defineCommand({
     name: z.string().min(1).optional(),
     version: z.string().min(1).optional(),
     collections: z.string().min(1).optional(),
+    exclude: z.string().min(1).optional(),
     out: z.string().optional(),
   }),
   handler: async (ctx, input) => {
@@ -103,6 +155,7 @@ const exportCommand = defineCommand({
       name: input.name,
       version: input.version,
       collections: input.collections ? parseList(input.collections) : undefined,
+      exclude: input.exclude ? parseList(input.exclude).map(toPackageType) : undefined,
       output: input.out,
     });
     return { data: { file: path }, message: `Exported package to ${path}` };
@@ -124,14 +177,15 @@ const diff = defineCommand({
 const apply = defineCommand({
   group: 'metadata',
   name: 'apply',
-  summary: 'Apply a package file to this tenant',
+  summary: 'Apply a package file to this tenant (metadata items, then its seed records section)',
   dangerous: (input) => !input.dryRun,
   positionals: [{ name: 'file', description: 'Package file', required: true }],
   options: [
     { flag: '--dry-run', description: 'Validate without writing' },
     {
       flag: '--conflict <mode>',
-      description: 'On an item that already exists: skip (default) or overwrite',
+      description:
+        'On an item that already exists: skip (default) or overwrite (seed records are always skipped)',
       default: 'skip',
     },
   ],
@@ -145,7 +199,7 @@ const apply = defineCommand({
       dryRun: input.dryRun,
       conflict: input.conflict,
     });
-    return { data: result };
+    return { data: result, message: summarizeApply(result) };
   },
 });
 

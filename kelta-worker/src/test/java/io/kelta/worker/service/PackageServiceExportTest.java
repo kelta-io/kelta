@@ -279,6 +279,18 @@ class PackageServiceExportTest {
                 .thenReturn(List.of("f-insp"));
         when(repository.findGlobalPicklistIdsReferencedByCollections(TENANT, appIds))
                 .thenReturn(List.of("gp-status"));
+        when(repository.findListViewIdsByCollectionIds(TENANT, appIds)).thenReturn(List.of("lv-sites"));
+        when(repository.findDashboardIdsByComponentCollections(TENANT, List.of("sites", "inspections")))
+                .thenReturn(List.of("d-insp"));
+        when(repository.findListViewsByIds(TENANT, List.of("lv-sites"))).thenReturn(List.of(
+                row("id", "lv-sites", "name", "All sites", "collection_name", "sites",
+                        "columns", List.of("grade"))));
+        when(repository.findDashboardsByIds(TENANT, List.of("d-insp"))).thenReturn(List.of(
+                row("id", "d-insp", "name", "Inspection health", "column_count", 3)));
+        when(repository.findDashboardComponentsByDashboardIds(TENANT, List.of("d-insp"))).thenReturn(List.of(
+                row("id", "dc1", "dashboard_id", "d-insp", "component_type", "metric", "title", "Open",
+                        "column_position", 1, "row_position", 1, "config",
+                        Map.of("collectionName", "inspections"))));
 
         when(repository.findCollectionsByIds(eq(TENANT), anyList())).thenAnswer(inv -> {
             List<String> ids = inv.getArgument(1);
@@ -353,7 +365,8 @@ class PackageServiceExportTest {
                 "VALIDATION_RULE:require_site",
                 "PAGE_LAYOUT:Site Layout", "LAYOUT_SECTION:Details", "LAYOUT_FIELD:grade",
                 "LAYOUT_RELATED_LIST:inspections",
-                "FLOW:notify_on_inspection");
+                "FLOW:notify_on_inspection",
+                "LIST_VIEW:All sites", "DASHBOARD:Inspection health");
         assertThat(typedNames(pkg)).doesNotContain(
                 "COLLECTION:leads", "PAGE_LAYOUT:Lead Layout", "VALIDATION_RULE:require_email",
                 "FLOW:assign_lead", "UI_PAGE:home", "UI_MENU:main");
@@ -468,6 +481,8 @@ class PackageServiceExportTest {
         when(repository.findAllIds("page_layout", TENANT)).thenReturn(List.of("pl1"));
         when(repository.findAllIds("validation_rule", TENANT)).thenReturn(List.of("vr1"));
         when(repository.findAllIds("global_picklist", TENANT)).thenReturn(List.of("gp1"));
+        when(repository.findAllIds("list_view", TENANT)).thenReturn(List.of("lv1"));
+        when(repository.findAllIds("dashboard", TENANT)).thenReturn(List.of("d1"));
 
         var options = service.exportAllOptions(TENANT, "sandbox-clone", "1.0.0");
 
@@ -482,9 +497,84 @@ class PackageServiceExportTest {
                 .containsEntry("pageLayoutIds", List.of("pl1"))
                 .containsEntry("validationRuleIds", List.of("vr1"))
                 .containsEntry("globalPicklistIds", List.of("gp1"))
+                .containsEntry("listViewIds", List.of("lv1"))
+                .containsEntry("dashboardIds", List.of("d1"))
                 .doesNotContainKey("roleIds")
                 .doesNotContainKey("policyIds");
         verify(repository, never()).findAllIds("role", TENANT);
         verify(repository, never()).findAllIds("policy", TENANT);
+    }
+
+    @Test
+    @DisplayName("exports list views with their collection name and dashboards as tree documents, never seed records")
+    @SuppressWarnings("unchecked")
+    void exportsListViewsAndDashboardTrees() throws Exception {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.of("acme"));
+        when(repository.findListViewsByIds(TENANT, List.of("lv1"))).thenReturn(List.of(
+                row("id", "lv1", "collection_id", "c1", "collection_name", "orders", "name", "Open",
+                        "columns", jsonb("[\"status\"]"), "created_by", "u-9", "tenant_id", TENANT)));
+        when(repository.findDashboardsByIds(TENANT, List.of("d1"))).thenReturn(List.of(
+                row("id", "d1", "name", "Ops", "access_level", "PUBLIC", "is_dynamic", true,
+                        "running_user_id", "u-9", "column_count", 4, "tenant_id", TENANT)));
+        when(repository.findDashboardComponentsByDashboardIds(TENANT, List.of("d1"))).thenReturn(List.of(
+                row("id", "dc1", "dashboard_id", "d1", "report_id", "r-1", "component_type", "metric",
+                        "title", "Open orders", "column_position", 1, "row_position", 1, "column_span", 2,
+                        "row_span", 1, "sort_order", 0,
+                        "config", jsonb("{\"collectionName\":\"orders\",\"aggregate\":\"COUNT\"}")),
+                row("id", "dc2", "dashboard_id", "d1", "component_type", "table", "title", null,
+                        "column_position", 3, "row_position", 1, "sort_order", 1, "config", null)));
+
+        var pkg = service.exportPackage(TENANT,
+                Map.of("listViewIds", List.of("lv1"), "dashboardIds", List.of("d1")), false);
+
+        assertThat(pkg).doesNotContainKey("records");
+        var items = (List<Map<String, Object>>) pkg.get("items");
+        assertThat(items).extracting(i -> i.get("type")).containsExactly("LIST_VIEW", "DASHBOARD");
+        assertThat((Map<String, Object>) items.get(0).get("data"))
+                .containsEntry("collection_name", "orders")
+                .containsEntry("columns", List.of("status"))
+                .doesNotContainKeys("created_by", "tenant_id");
+        var dashboard = (Map<String, Object>) items.get(1).get("data");
+        assertThat(dashboard)
+                .containsEntry("name", "Ops")
+                .containsEntry("accessLevel", "PUBLIC")
+                .containsEntry("dynamic", true)
+                .containsEntry("columnCount", 4)
+                .doesNotContainKeys("runningUserId", "id", "tenant_id");
+        assertThat((List<Map<String, Object>>) dashboard.get("components")).containsExactly(
+                Map.of("title", "Open orders", "componentType", "metric", "columnPosition", 1,
+                        "rowPosition", 1, "columnSpan", 2, "rowSpan", 1,
+                        "config", Map.of("collectionName", "orders", "aggregate", "COUNT")),
+                Map.of("title", "table 2", "componentType", "table", "columnPosition", 3,
+                        "rowPosition", 1, "config", Map.of()));
+    }
+
+    @Test
+    @DisplayName("excludeTypes drops list views and dashboards from a whole-tenant export")
+    void excludeTypesDropsThem() {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.of("acme"));
+        when(repository.findAllIds("list_view", TENANT)).thenReturn(List.of("lv1"));
+        when(repository.findAllIds("dashboard", TENANT)).thenReturn(List.of("d1"));
+        when(repository.findAllIds("flow", TENANT)).thenReturn(List.of("f1"));
+
+        var options = service.resolveExportOptions(TENANT,
+                Map.of("excludeTypes", List.of("list_view", "DASHBOARD")));
+
+        assertThat(options)
+                .containsEntry("listViewIds", List.of())
+                .containsEntry("dashboardIds", List.of())
+                .containsEntry("flowIds", List.of("f1"))
+                .doesNotContainKey("excludeTypes");
+    }
+
+    @Test
+    @DisplayName("an excludeTypes entry that is not an excludable type is a 400 naming it")
+    void unknownExcludeTypeIsBadRequest() {
+        assertThatThrownBy(() -> service.resolveExportOptions(TENANT,
+                Map.of("excludeTypes", List.of("COLLECTION"))))
+                .isInstanceOfSatisfying(ResponseStatusException.class, e -> {
+                    assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(e.getReason()).contains("COLLECTION").contains("LIST_VIEW");
+                });
     }
 }

@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -212,6 +212,37 @@ test.describe("kelta CLI smoke", () => {
 
     const applied = runCli(["metadata", "apply", file, "--dry-run", "--output", "json"]);
     expect(applied.status, applied.stderr).toBe(0);
+  });
+
+  // KLT-585: list views and dashboards are package item types, seed records are never
+  // exported, and `--exclude` leaves whole item types out. Read-only — nothing is applied.
+  test("metadata export never carries seed records and --exclude drops list views and dashboards", () => {
+    const readPackage = (file: string) =>
+      JSON.parse(readFileSync(file, "utf-8")) as {
+        items: Array<{ type: string }>;
+        records?: unknown;
+      };
+
+    const full = path.join(configDir, "metadata-full.json");
+    const exported = runCli(["metadata", "export", "--out", full]);
+    expect(exported.status, exported.stderr).toBe(0);
+    const pkg = readPackage(full);
+    expect(pkg).not.toHaveProperty("records");
+    expect(pkg.items.map((item) => item.type)).not.toContain("RECORD");
+
+    const trimmed = path.join(configDir, "metadata-no-views.json");
+    const excluded = runCli([
+      "metadata",
+      "export",
+      "--exclude",
+      "list-view,dashboard",
+      "--out",
+      trimmed,
+    ]);
+    expect(excluded.status, excluded.stderr).toBe(0);
+    const types = readPackage(trimmed).items.map((item) => item.type);
+    expect(types).not.toContain("LIST_VIEW");
+    expect(types).not.toContain("DASHBOARD");
   });
 
   test("missing auth fails with the machine-readable error contract and exit 3", () => {
