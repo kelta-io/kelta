@@ -146,6 +146,14 @@ kelta:
       # one enormous delete against a shared database.
       max-batches: ${FLOW_RETENTION_MAX_BATCHES:20}
       poll-interval-ms: ${FLOW_RETENTION_POLL_INTERVAL_MS:3600000}
+    # Step-log snapshot cap. The engine logs the whole flow state as each step's input and
+    # output; a flow carrying a large payload through many steps writes it twice per step
+    # (one tenant's ingest flows reached ~44 GB of flow_step_log at 60-day retention).
+    # Above this many bytes of JSON the persisted snapshot becomes a marker
+    # {_truncated, bytes, maxBytes, keys}; the running flow keeps its full state.
+    # 0 disables the cap. Metrics: kelta_flow_step_log_bytes, kelta_flow_step_log_snapshots_truncated.
+    step-log:
+      max-snapshot-bytes: ${FLOW_STEP_LOG_MAX_SNAPSHOT_BYTES:65536}
   email:
     from-address: ${EMAIL_FROM_ADDRESS:noreply@kelta.io}
     from-name: ${EMAIL_FROM_NAME:Kelta Platform}
