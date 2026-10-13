@@ -88,8 +88,8 @@ class InternalEmailControllerTest {
     @Test
     @DisplayName("Should send invite via user_invite template with substituted vars")
     void shouldSendInvite() {
-        when(jdbcTemplate.queryForList("SELECT name FROM tenant WHERE id = ?", "t1"))
-                .thenReturn(List.of(Map.of("name", "Acme Inc")));
+        when(jdbcTemplate.queryForList("SELECT name, slug FROM tenant WHERE id = ?", "t1"))
+                .thenReturn(List.of(Map.of("name", "Acme Inc", "slug", "acme")));
         when(emailService.sendByName(
                 eq("t1"), eq("invitee@test.com"), eq("user_invite"),
                 anyMap(), eq("USER_INVITE"), eq("tok-abc")))
@@ -108,15 +108,15 @@ class InternalEmailControllerTest {
         verify(emailService).sendByName(eq("t1"), eq("invitee@test.com"), eq("user_invite"),
                 captor.capture(), eq("USER_INVITE"), eq("tok-abc"));
         assertThat(captor.getValue()).containsEntry("tenantName", "Acme Inc");
-        assertThat(captor.getValue().get("inviteLink").toString())
-                .startsWith("https://app.kelta.io/accept-invite?token=tok-abc")
-                .contains("email=invitee%40test.com");
+        assertThat(captor.getValue().get("inviteLink"))
+                .as("the tenant's app — the user signs in with their identity provider")
+                .isEqualTo("https://app.kelta.io/acme/app");
     }
 
     @Test
     @DisplayName("Should fall back to 'Kelta' when tenant name lookup is empty")
     void shouldFallBackToDefaultTenantName() {
-        when(jdbcTemplate.queryForList("SELECT name FROM tenant WHERE id = ?", "t-unknown"))
+        when(jdbcTemplate.queryForList("SELECT name, slug FROM tenant WHERE id = ?", "t-unknown"))
                 .thenReturn(List.of());
         when(emailService.sendByName(any(), any(), any(), any(), any(), any()))
                 .thenReturn(Optional.of("log-100"));
@@ -135,7 +135,7 @@ class InternalEmailControllerTest {
     @Test
     @DisplayName("Should return 404 when user_invite template cannot be resolved")
     void shouldReturn404WhenTemplateMissing() {
-        when(jdbcTemplate.queryForList("SELECT name FROM tenant WHERE id = ?", "t1"))
+        when(jdbcTemplate.queryForList("SELECT name, slug FROM tenant WHERE id = ?", "t1"))
                 .thenReturn(List.of(Map.of("name", "Acme")));
         when(emailService.sendByName(any(), any(), eq("user_invite"), any(), any(), any()))
                 .thenReturn(Optional.empty());

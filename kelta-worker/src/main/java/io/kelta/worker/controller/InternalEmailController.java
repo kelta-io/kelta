@@ -35,17 +35,22 @@ public class InternalEmailController {
     private final EmailService emailService;
     private final JdbcTemplate jdbcTemplate;
     private final String internalToken;
-    private final String externalBaseUrl;
+    private final String appBaseUrl;
 
+    /**
+     * {@code appBaseUrl} is the end-user app's host (https://app.kelta.io), the same setting the
+     * support-mailbox emails link to; it falls back to {@code kelta.external-base-url} for local
+     * single-host setups.
+     */
     public InternalEmailController(
             EmailService emailService,
             JdbcTemplate jdbcTemplate,
             @Value("${kelta.internal.token:}") String internalToken,
-            @Value("${kelta.external-base-url:}") String externalBaseUrl) {
+            @Value("${kelta.mailbox.app-base-url:${kelta.external-base-url:}}") String appBaseUrl) {
         this.emailService = emailService;
         this.jdbcTemplate = jdbcTemplate;
         this.internalToken = internalToken;
-        this.externalBaseUrl = externalBaseUrl == null ? "" : externalBaseUrl;
+        this.appBaseUrl = appBaseUrl == null ? "" : appBaseUrl.trim().replaceAll("/+$", "");
     }
 
     public record SendEmailRequest(
@@ -112,13 +117,18 @@ public class InternalEmailController {
     }
 
     /**
-     * Sends a user-invitation email using the {@code user_invite} system template.
+     * Sends a user-invitation email using the {@code user_invite} system template — kelta-auth's
+     * notice to a user it just provisioned at their first single sign-on.
      *
      * <p>Resolves the template via {@link io.kelta.worker.repository.EmailRepository#findTemplateByName}
      * (tenant override → {@code system} default seeded in V141), substitutes
      * {@code ${inviteLink}} and {@code ${tenantName}}, and queues delivery through
      * {@link EmailService}. Tenant SMTP credentials apply when configured; otherwise
      * the platform default SMTP is used.
+     *
+     * <p>The user signs in with their identity provider and has no password to set, so
+     * {@code ${inviteLink}} is the tenant's app ({@code <app-base-url>/<slug>/app}), which starts
+     * that sign-in. {@code inviteToken} only identifies the send in the email log.
      */
     @PostMapping("/invite")
     public ResponseEntity<Map<String, String>> sendInvite(
@@ -128,11 +138,10 @@ public class InternalEmailController {
         ResponseEntity<Map<String, String>> denial = checkInternalToken(token);
         if (denial != null) return denial;
 
-        String tenantName = lookupTenantName(request.tenantId());
-        String inviteLink = buildInviteLink(request.inviteToken(), request.email());
+        Tenant tenant = lookupTenant(request.tenantId());
         Map<String, Object> vars = Map.of(
-                "inviteLink", inviteLink,
-                "tenantName", tenantName);
+                "inviteLink", appLink(tenant.slug()),
+                "tenantName", tenant.name());
 
         return emailService.sendByName(
                 request.tenantId(), request.email(), "user_invite",
@@ -142,25 +151,27 @@ public class InternalEmailController {
                         .body(Map.of("error", "Template not found: user_invite")));
     }
 
-    private String lookupTenantName(String tenantId) {
+    private record Tenant(String name, String slug) {}
+
+    private Tenant lookupTenant(String tenantId) {
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    "SELECT name FROM tenant WHERE id = ?", tenantId);
+                    "SELECT name, slug FROM tenant WHERE id = ?", tenantId);
             if (!rows.isEmpty()) {
                 Object name = rows.get(0).get("name");
-                if (name instanceof String s && !s.isBlank()) return s;
+                Object slug = rows.get(0).get("slug");
+                return new Tenant(name instanceof String s && !s.isBlank() ? s : "Kelta",
+                        slug instanceof String s && !s.isBlank() ? s : null);
             }
         } catch (Exception e) {
-            log.warn("Failed to look up tenant name for {}: {}", tenantId, e.getMessage());
+            log.warn("Failed to look up tenant {}: {}", tenantId, e.getMessage());
         }
-        return "Kelta";
+        return new Tenant("Kelta", null);
     }
 
-    private String buildInviteLink(String inviteToken, String email) {
-        String base = externalBaseUrl == null ? "" : externalBaseUrl;
-        return base + "/accept-invite?token="
-                + URLEncoder.encode(inviteToken, StandardCharsets.UTF_8)
-                + "&email=" + URLEncoder.encode(email, StandardCharsets.UTF_8);
+    /** The tenant's end-user app, or the app host alone when the tenant is unknown. */
+    private String appLink(String slug) {
+        return slug == null ? appBaseUrl + "/" : appBaseUrl + "/" + URLEncoder.encode(slug, StandardCharsets.UTF_8) + "/app";
     }
 
     private ResponseEntity<Map<String, String>> checkInternalToken(String token) {

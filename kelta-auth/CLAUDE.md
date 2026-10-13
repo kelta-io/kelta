@@ -199,8 +199,11 @@ Rules:
 - A password the policy refuses leaves the token usable; a reset clears the force-change flag and
   any lockout and ends the user's other sessions (`UserSessionRevoker`).
 - Rate limited per IP (`kelta.auth.rate-limit.password-reset-paths`, below).
-- Worker invites (`UserInviteService`) write the same `reset_token` column (7 days,
-  `force_change_on_login = true`), so an invite token also works on `/reset-password`.
+- Invites: the worker's `UserInviteService` writes the same `reset_token` column (7 days,
+  `force_change_on_login = true`, empty `password_hash`) and mails `<kelta.auth.issuer-uri>/reset-password?token=…`
+  — the configured issuer, never a request host, and the token only. For an account with no
+  password yet (`PasswordResetService.describe` → `TokenInfo.firstPassword`) the page reads "Set your
+  password" / "Set Password"; otherwise "Choose a new password" / "Reset Password".
 Tests: `PasswordResetFlowTest` (real chains, session filter, rate limit, real policy and
 templates), `PasswordResetServiceTest`, `BaselineAdminPasswordIntegrationTest` (Postgres, history),
 e2e `tests/auth/forgot-password.spec.ts` (Mailpit).

@@ -419,7 +419,7 @@ class TenantProvisioningHookTest {
                     .thenReturn(Optional.of("log-1"));
             TenantProvisioningHook realInviteHook = new TenantProvisioningHook(jdbcTemplate, AUTH_ISSUER,
                     cerbosPolicySyncService,
-                    new UserInviteService(jdbcTemplate, emailService, "https://ui.example.com"));
+                    new UserInviteService(jdbcTemplate, emailService, AUTH_ISSUER));
             String email = "owner@example.com";
             stubProvisioning(email);
             when(jdbcTemplate.queryForList(contains("FROM platform_user pu JOIN tenant t"), anyString(), eq(TENANT_ID)))

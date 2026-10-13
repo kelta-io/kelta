@@ -222,7 +222,8 @@ class PasswordResetFlowTest {
         assertThat(form.getModelAndView().getModel()).containsEntry("token", token).doesNotContainKey("invalid");
         assertThat(form.getResponse().getContentAsString())
                 .contains("value=\"" + token + "\"").contains("name=\"_csrf\"")
-                .contains("<meta name=\"referrer\" content=\"same-origin\">");
+                .contains("<meta name=\"referrer\" content=\"same-origin\">")
+                .contains("Choose a new password").contains("Reset Password");
         assertThat(mvc.perform(get("/reset-password").param("token", "not-a-token")).andReturn()
                 .getModelAndView().getModel()).containsEntry("invalid", true);
 
@@ -254,6 +255,26 @@ class PasswordResetFlowTest {
                     .contains("<meta name=\"referrer\" content=\"same-origin\">")
                     .doesNotContain("content=\"no-referrer\"");
         }
+    }
+
+    @Test
+    @DisplayName("an invite link (an account with no password yet) opens the page worded for a first password")
+    void inviteLinkSetsAFirstPassword() throws Exception {
+        // As kelta-worker's UserInviteService leaves an invited user: no usable password, flagged.
+        jdbc.update("UPDATE user_credential SET password_hash = '', force_change_on_login = true, "
+                + "reset_token = 'invite-token', reset_token_expires_at = ? WHERE user_id = ?",
+                java.sql.Timestamp.from(java.time.Instant.now().plusSeconds(3600)), USER_ID);
+
+        MvcResult form = mvc.perform(get("/reset-password").param("token", "invite-token")).andReturn();
+        assertThat(form.getModelAndView().getModel()).containsEntry("firstPassword", true);
+        assertThat(form.getResponse().getContentAsString()).contains("Set your password").contains("Set Password");
+
+        MvcResult done = mvc.perform(post("/reset-password").with(csrf()).param("token", "invite-token")
+                .param("newPassword", STRONG).param("confirmPassword", STRONG)).andReturn();
+        assertThat(done.getResponse().getContentAsString()).contains("Your password is set. Sign in with it.");
+        assertThat(encoder.matches(STRONG, passwordHash(USER_ID))).isTrue();
+        assertThat(jdbc.queryForObject("SELECT force_change_on_login FROM user_credential WHERE user_id = ?",
+                Boolean.class, USER_ID)).isFalse();
     }
 
     @Test
