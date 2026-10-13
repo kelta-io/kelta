@@ -1,9 +1,9 @@
 # 2e — Events & actions
 
 > **Slice:** 2e (FE). **Axis:** Logic & events.
-> **Parent:** [`../page-builder-parity.md`](../page-builder-parity.md). This child spec **extends, never
-> contradicts** the parent's [The shared model](../page-builder-parity.md#the-shared-model) (the
-> `PageAction` union + `EventHandlers`) and [Reuse Map](../page-builder-parity.md#reuse-map) (flow
+> **Parent:** [`../page-builder-parity.md`](../../page-builder-parity.md). This child spec **extends, never
+> contradicts** the parent's [The shared model](../../page-builder-parity.md#the-shared-model) (the
+> `PageAction` union + `EventHandlers`) and [Reuse Map](../../page-builder-parity.md#reuse-map) (flow
 > execute/poll endpoints, JSON:API create/update). It consumes the types defined once in
 > [`2a-widget-registry.md`](./2a-widget-registry.md#31-modelpagemodelts--v2-model-matches-parent-the-shared-model)
 > (`PageAction`, `EventHandlers`, `Binding`, `PropValue`, `PageComponent`) — **2e does not redefine them**;
@@ -75,9 +75,9 @@ event model and no action runtime** — clicking a button does nothing beyond fo
 
 ### Parent-doc sections this conforms to
 
-- [The shared model → `PageAction` / `EventHandlers`](../page-builder-parity.md#the-shared-model) — the union
+- [The shared model → `PageAction` / `EventHandlers`](../../page-builder-parity.md#the-shared-model) — the union
   is reproduced **verbatim** in §3.1; 2e adds no new action kinds.
-- [Reuse Map](../page-builder-parity.md#reuse-map) rows: *Run a flow from an event*
+- [Reuse Map](../../page-builder-parity.md#reuse-map) rows: *Run a flow from an event*
   (`POST /api/flows/{flowId}/execute` → poll `GET /api/flows/executions/{id}`), *Create/update record from an
   event* (JSON:API `POST`/`PATCH`), *Variable insertion* / *Expression picker* (input-mapping value editor).
 - [`2d` binding resolution](./2a-widget-registry.md) — action values may be `{$bind}` and resolve against the

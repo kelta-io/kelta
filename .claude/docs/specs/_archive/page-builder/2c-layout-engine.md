@@ -1,9 +1,9 @@
 # 2c — Layout engine + dnd-kit canvas
 
 > **Slice:** 2c (FE — the **Layout & grid** axis). **Parent:**
-> [`../page-builder-parity.md`](../page-builder-parity.md). This child spec **extends, never
-> contradicts** the parent's [The shared model](../page-builder-parity.md#the-shared-model),
-> [Inspector + canvas](../page-builder-parity.md#inspector--canvas), and the **Key architecture
+> [`../page-builder-parity.md`](../../page-builder-parity.md). This child spec **extends, never
+> contradicts** the parent's [The shared model](../../page-builder-parity.md#the-shared-model),
+> [Inspector + canvas](../../page-builder-parity.md#inspector--canvas), and the **Key architecture
 > decision: DnD = `@dnd-kit`** (parent §"Key architecture decisions"). It **consumes** the contracts
 > defined in [`2a-widget-registry.md`](./2a-widget-registry.md): `WidgetDescriptor` / `PropFieldSchema`
 > / `WidgetRenderProps` (`widgets/types.ts`), the `widgetRegistry` singleton + plugin shim, the shared
@@ -1081,7 +1081,7 @@ delta (`+40px`) → **no** `setSpan` (rounds to 0). Persists only `span` (no px)
 
 **N/A — FE-only, no DB write path.** No new server constraint is exercised (the tree round-trips through the
 existing `config` JSON pass-through unchanged), so the DB-constraint integration guard
-([real-DB guard](../../testing.md#real-db-guard-for-constraint-bearing-writes)) does not apply here.
+([real-DB guard](../../../testing.md#real-db-guard-for-constraint-bearing-writes)) does not apply here.
 
 ---
 

@@ -28,17 +28,17 @@ every child references it.
 | Slice | Child spec | Axis |
 |-------|-----------|------|
 | 0 — This spec + doc wiring | (this file) | foundation (docs) |
-| 1 — Portal billing (Stripe) | `1-portal-billing.md` | **backend, security** (two PRs: core+webhook, portal surface+enforcement) |
-| 2 — Flow-log retention | `2-flow-log-retention.md` | backend (ops hardening) |
-| 3 — Watch/target model | `3-watch-model.md` | backend (collections, tables) |
-| 4 — Availability matcher + alert fanout | `4-availability-matcher.md` | backend (NATS, hot path) |
-| 5 — Portal member surface | `5-portal-member-surface.md` | **backend + auth, security** (self-signup, watch API) |
-| 6 — Web Push (VAPID) | `6-web-push.md` | backend (notification channel) |
-| 7 — Public-traffic hardening | `7-public-traffic-hardening.md` | **gateway + edge, security** |
-| 8 — Analytics capture | `8-analytics-capture.md` | backend (capture + retention) |
-| 9 — Win tracking + live ticker | `9-win-tracking.md` | backend (collection, member API) |
-| 11 — SEO page generation | `11-seo-page-generation.md` | backend (collection, nightly sweep) |
-| 10 — SMS alert channel (Twilio) | `10-sms-channel.md` | backend (notification channel) |
+| 1 — Portal billing (Stripe) | [`1-portal-billing.md`](../_archive/consumer-alerting/1-portal-billing.md) | **backend, security** (two PRs: core+webhook, portal surface+enforcement) |
+| 2 — Flow-log retention | [`2-flow-log-retention.md`](../_archive/consumer-alerting/2-flow-log-retention.md) | backend (ops hardening) |
+| 3 — Watch/target model | [`3-watch-model.md`](../_archive/consumer-alerting/3-watch-model.md) | backend (collections, tables) |
+| 4 — Availability matcher + alert fanout | [`4-availability-matcher.md`](../_archive/consumer-alerting/4-availability-matcher.md) | backend (NATS, hot path) |
+| 5 — Portal member surface | [`5-portal-member-surface.md`](../_archive/consumer-alerting/5-portal-member-surface.md) | **backend + auth, security** (self-signup, watch API) |
+| 6 — Web Push (VAPID) | [`6-web-push.md`](../_archive/consumer-alerting/6-web-push.md) | backend (notification channel) |
+| 7 — Public-traffic hardening | [`7-public-traffic-hardening.md`](../_archive/consumer-alerting/7-public-traffic-hardening.md) | **gateway + edge, security** |
+| 8 — Analytics capture | [`8-analytics-capture.md`](../_archive/consumer-alerting/8-analytics-capture.md) | backend (capture + retention) |
+| 9 — Win tracking + live ticker | [`9-win-tracking.md`](../_archive/consumer-alerting/9-win-tracking.md) | backend (collection, member API) |
+| 11 — SEO page generation | [`11-seo-page-generation.md`](../_archive/consumer-alerting/11-seo-page-generation.md) | backend (collection, nightly sweep) |
+| 10 — SMS alert channel (Twilio) | [`10-sms-channel.md`](../_archive/consumer-alerting/10-sms-channel.md) | backend (notification channel) |
 
 External tracks (contracts owned here, code outside this repo): an **availability poller**
 (separate service; see [Poller contract](#poller-contract)) and a **consumer frontend**

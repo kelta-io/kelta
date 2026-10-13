@@ -2,7 +2,7 @@
 
 > **Status:** parent planning spec. This is the authoritative shared contract for the page-builder
 > parity effort. Each slice in the [Slice plan](#slice-plan) is expanded into its own detailed
-> feature spec under [`page-builder/`](./page-builder/). Child specs **extend, never contradict**
+> feature spec under [`_archive/page-builder/`](./_archive/page-builder/). Child specs **extend, never contradict**
 > the [Reuse Map](#reuse-map), [shared model](#the-shared-model), [widget registry](#widget-registry),
 > and [config-JSON v2 schema](#page-level-config-v2) below.
 >
@@ -12,22 +12,22 @@
 ## How to use this document
 
 This parent spec defines the cross-cutting architecture once. The child specs in
-[`./page-builder/`](./page-builder/) each cover one PR-sized slice with acceptance criteria, UI
+[`./_archive/page-builder/`](./_archive/page-builder/) each cover one PR-sized slice with acceptance criteria, UI
 samples, exact contracts, DB migrations (or an explicit "none"), and file-by-file code changes —
 per the [Child-spec template](#child-spec-template). Read this parent first; every child references
 it.
 
 | Slice | Child spec | Axis |
 |-------|-----------|------|
-| 1g — Render contract v2 | [page-builder/1g-render-contract-v2.md](./page-builder/1g-render-contract-v2.md) | foundation (backend) |
-| 2a — Widget registry + shared render | [page-builder/2a-widget-registry.md](./page-builder/2a-widget-registry.md) | foundation (FE) |
-| 2b — Schema-driven inspector + palette | [page-builder/2b-inspector-palette.md](./page-builder/2b-inspector-palette.md) | foundation (FE) |
-| 2c — Layout engine + dnd-kit canvas | [page-builder/2c-layout-engine.md](./page-builder/2c-layout-engine.md) | **Layout & grid** |
-| 2d — Data binding & expressions | [page-builder/2d-binding-expressions.md](./page-builder/2d-binding-expressions.md) | **Data binding** |
-| 2e — Events & actions | [page-builder/2e-events-actions.md](./page-builder/2e-events-actions.md) | **Logic & events** |
-| 2f — Typed form widgets | [page-builder/2f-typed-forms.md](./page-builder/2f-typed-forms.md) | **Widgets/typed forms** |
-| 2g — Widget breadth | [page-builder/2g-widget-breadth.md](./page-builder/2g-widget-breadth.md) | **Widgets** |
-| 1h — Per-page authz (optional) | [page-builder/1h-per-page-authz.md](./page-builder/1h-per-page-authz.md) | backend |
+| 1g — Render contract v2 | [_archive/page-builder/1g-render-contract-v2.md](./_archive/page-builder/1g-render-contract-v2.md) | foundation (backend) |
+| 2a — Widget registry + shared render | [_archive/page-builder/2a-widget-registry.md](./_archive/page-builder/2a-widget-registry.md) | foundation (FE) |
+| 2b — Schema-driven inspector + palette | [_archive/page-builder/2b-inspector-palette.md](./_archive/page-builder/2b-inspector-palette.md) | foundation (FE) |
+| 2c — Layout engine + dnd-kit canvas | [_archive/page-builder/2c-layout-engine.md](./_archive/page-builder/2c-layout-engine.md) | **Layout & grid** |
+| 2d — Data binding & expressions | [_archive/page-builder/2d-binding-expressions.md](./_archive/page-builder/2d-binding-expressions.md) | **Data binding** |
+| 2e — Events & actions | [_archive/page-builder/2e-events-actions.md](./_archive/page-builder/2e-events-actions.md) | **Logic & events** |
+| 2f — Typed form widgets | [_archive/page-builder/2f-typed-forms.md](./_archive/page-builder/2f-typed-forms.md) | **Widgets/typed forms** |
+| 2g — Widget breadth | [_archive/page-builder/2g-widget-breadth.md](./_archive/page-builder/2g-widget-breadth.md) | **Widgets** |
+| 1h — Per-page authz (optional) | [_archive/page-builder/1h-per-page-authz.md](./_archive/page-builder/1h-per-page-authz.md) | backend |
 
 ## Context
 

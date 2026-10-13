@@ -1,10 +1,10 @@
 # 2b — Schema-driven inspector + palette
 
 > **Slice:** 2b (FE foundation). **Axis:** foundation.
-> **Parent:** [`../page-builder-parity.md`](../page-builder-parity.md). This child spec **extends, never
-> contradicts** the parent's [Widget registry](../page-builder-parity.md#widget-registry),
-> [Inspector + canvas](../page-builder-parity.md#inspector--canvas), and
-> [Child-spec template](../page-builder-parity.md#child-spec-template) sections.
+> **Parent:** [`../page-builder-parity.md`](../../page-builder-parity.md). This child spec **extends, never
+> contradicts** the parent's [Widget registry](../../page-builder-parity.md#widget-registry),
+> [Inspector + canvas](../../page-builder-parity.md#inspector--canvas), and
+> [Child-spec template](../../page-builder-parity.md#child-spec-template) sections.
 > **Builds on:** [`2a-widget-registry.md`](./2a-widget-registry.md) — consumes the `WidgetDescriptor`,
 > `PropFieldSchema`, `PropFieldKind`, `WidgetCategory`, and `widgetRegistry` defined there. The
 > `model/pageModel.ts` types (`PageComponent`/`Binding`/`PropValue`/`PageAction`/`EventHandlers`) are
@@ -65,12 +65,12 @@ registry:
 
 ### Parent-doc sections this conforms to
 
-- [Widget registry](../page-builder-parity.md#widget-registry) — `PropFieldKind` enumeration,
+- [Widget registry](../../page-builder-parity.md#widget-registry) — `PropFieldKind` enumeration,
   `PropFieldSchema` shape, `listByCategory`.
-- [Inspector + canvas](../page-builder-parity.md#inspector--canvas) — "schema-driven property editor
+- [Inspector + canvas](../../page-builder-parity.md#inspector--canvas) — "schema-driven property editor
   looping over `descriptor.propSchema`, grouped by `group`", "each `bindable` field wraps in
   `BindableField`", "`EventListField` edits `PageAction[]` (add/remove/reorder)".
-- [Reuse Map](../page-builder-parity.md#reuse-map) — `FieldExpressionPicker`, `VariablePicker`,
+- [Reuse Map](../../page-builder-parity.md#reuse-map) — `FieldExpressionPicker`, `VariablePicker`,
   `useCollectionSchema`, `CollectionStoreContext`.
 
 ### Acceptance criteria

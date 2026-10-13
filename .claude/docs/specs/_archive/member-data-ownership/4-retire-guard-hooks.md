@@ -1,6 +1,6 @@
 # Slice 4 — Retire the Bespoke Owner-Guard Hooks
 
-> Parent: [`README.md`](README.md). Depends on slice 2. **Security — never auto-merged.**
+> Parent: [`README.md`](../../member-data-ownership/README.md). Depends on slice 2. **Security — never auto-merged.**
 
 > **Delivered (KLT-380, 2026-10-10).** The seven hooks, `OwnerGuardCaller` and their tests are
 > deleted; the four system collections declare ownership in `SystemCollectionDefinitions`

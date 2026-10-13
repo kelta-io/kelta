@@ -1,9 +1,9 @@
 # Slice 1g — Render contract v2
 
-> Child spec of [page-builder-parity.md](../page-builder-parity.md). Extends, never contradicts, the
-> parent's [Backend changes (pass-through only)](../page-builder-parity.md#backend-changes-small--pass-through-only),
-> [Page-level config (v2)](../page-builder-parity.md#page-level-config-v2), and
-> [Child-spec template](../page-builder-parity.md#child-spec-template).
+> Child spec of [page-builder-parity.md](../../page-builder-parity.md). Extends, never contradicts, the
+> parent's [Backend changes (pass-through only)](../../page-builder-parity.md#backend-changes-small--pass-through-only),
+> [Page-level config (v2)](../../page-builder-parity.md#page-level-config-v2), and
+> [Child-spec template](../../page-builder-parity.md#child-spec-template).
 >
 > Source-verified against the codebase on 2026-06-22 (Flyway head **V146**, next **V147**). Current
 > `PageRenderService.CONTRACT_VERSION = "1.0"`. If code and this doc disagree, trust the code and fix
@@ -26,7 +26,7 @@ wrapper**.
 
 **In scope**
 - New `PageRenderContract` Java record shape (7 fields, per parent
-  [Backend changes](../page-builder-parity.md#backend-changes-small--pass-through-only)).
+  [Backend changes](../../page-builder-parity.md#backend-changes-small--pass-through-only)).
 - `PageRenderService.render()` parsing the page's `config` once and projecting it into
   `{ variables, dataSources, tree }`, where `tree` is the whole parsed `config` map, `variables` =
   `config.variables` (else `[]`), and `dataSources` = `config.dataSources` (else `[]`). Null-safe.
@@ -46,7 +46,7 @@ wrapper**.
   user record to resolve `{{record.name}}` or to execute a `dataSource` query. Doing so would fetch data
   **outside** the JSON:API path and leak Cerbos/FLS read-denied fields. The contract round-trips the
   `config` JSON untouched; `$bind` is never parsed server-side. (Parent
-  [Key architecture decisions](../page-builder-parity.md#key-architecture-decisions-verified-against-the-code).)
+  [Key architecture decisions](../../page-builder-parity.md#key-architecture-decisions-verified-against-the-code).)
 - **NO DB migration / no schema change.** Everything new nests inside the existing `ui-pages.config`
   JSON column (§4).
 - **NO data migration of existing v1 pages.** v1 pages are handled by a runtime fallback, not rewritten.
@@ -277,7 +277,7 @@ interface PageRenderContract {
 ```
 
 `PageVariable` / `PageDataSource` are the parent's
-[Page-level config (v2)](../page-builder-parity.md#page-level-config-v2) types
+[Page-level config (v2)](../../page-builder-parity.md#page-level-config-v2) types
 (`pageConfig.ts`). For 1g, importing them (or typing the two arrays as those interfaces) is sufficient;
 this slice does **not** wire them into rendering — it only stops them from being dropped on the floor.
 `tree.components` continues to drive `PageTreeRenderer`, so runtime output is unchanged.
@@ -469,7 +469,7 @@ for this pass-through slice.
 `gatewayClientWithToken(token)`, `waitForStatus(...)` before the first call). The mocked worker unit
 tests prove the *parsing* matrix but run with no DB — they cannot catch a worker-side `config` JSON
 serialization drop on the round-trip through real Postgres. Per the project's
-[DB-constraint / serialization test-gap convention](../../testing.md#real-db-guard-for-constraint-bearing-writes)
+[DB-constraint / serialization test-gap convention](../../../testing.md#real-db-guard-for-constraint-bearing-writes)
 (mocked-QueryEngine tests can't see persistence drift), this slice adds **exactly one** real-DB
 round-trip:
 

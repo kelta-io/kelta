@@ -1,9 +1,9 @@
 # 2f — Typed form widgets
 
 > **Slice:** 2f (FE). **Axis:** Widgets / typed forms.
-> **Parent:** [`../page-builder-parity.md`](../page-builder-parity.md). This child spec **extends, never
-> contradicts** the parent's [Reuse Map](../page-builder-parity.md#reuse-map) (ResourceForm / typed inputs /
-> FieldType rows) and [Widget registry](../page-builder-parity.md#widget-registry) (Input widgets row).
+> **Parent:** [`../page-builder-parity.md`](../../page-builder-parity.md). This child spec **extends, never
+> contradicts** the parent's [Reuse Map](../../page-builder-parity.md#reuse-map) (ResourceForm / typed inputs /
+> FieldType rows) and [Widget registry](../../page-builder-parity.md#widget-registry) (Input widgets row).
 > **Depends on:** **2a** (the `WidgetDescriptor`/`PropFieldSchema`/`PageComponent` v2 contract, the
 > `widgetRegistry`, the shared `RenderTree`, and the `form`/`table` builtins that moved out of
 > `PageTreeRenderer`) and, for default values, **2d** (`{ $bind }` → `resolveBindings`/`bindingScope`).
@@ -74,7 +74,7 @@ All new widgets register in `widgets/builtins/` and are resolved through the sin
 
 **Category — `input`.** The `form` widget (→ `ResourceForm`) **and** all eight standalone inputs are
 `WidgetDescriptor.category: 'input'`, consistent with 2a (where `form`'s category was **fixed to `input` and
-not moved later**) and the parent [Widget registry](../page-builder-parity.md#widget-registry) Input row. The
+not moved later**) and the parent [Widget registry](../../page-builder-parity.md#widget-registry) Input row. The
 `input` category is therefore already **non-empty from 2a** (the placeholder `form` builtin shipped under it);
 2f only populates it with the typed controls. `widgetRegistry.listByCategory('input')` returns `form` + the
 eight inputs (§6.4).
@@ -483,7 +483,7 @@ wired in §3.1/§5.6.
 
 ### 3.5 Default-value resolution (depends on 2d) — resolved-node invariant
 
-**2f descriptors honor the 2a [resolved-node invariant](../page-builder-parity.md#widget-registry) and do NOT
+**2f descriptors honor the 2a [resolved-node invariant](../../page-builder-parity.md#widget-registry) and do NOT
 call `resolveBindings` themselves.** Per that invariant, `WidgetRenderProps.node.props` handed to a
 descriptor's `Render` is **always fully binding-resolved** by `renderNode` (`widgets/renderTree.tsx`) before
 `Render` runs — in 2a via the identity no-op, in 2d via the real `resolveBindings(node.props, scope)`. So

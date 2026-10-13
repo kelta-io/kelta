@@ -1,9 +1,9 @@
 # 2g — Widget breadth
 
 > **Slice:** 2g (FE). **Axis:** Widgets.
-> **Parent:** [`../page-builder-parity.md`](../page-builder-parity.md). This child spec **extends, never
-> contradicts** the parent's [Widget registry](../page-builder-parity.md#widget-registry) (the v1 widget
-> set) and [Reuse Map](../page-builder-parity.md#reuse-map). The `WidgetDescriptor` / `PropFieldSchema` /
+> **Parent:** [`../page-builder-parity.md`](../../page-builder-parity.md). This child spec **extends, never
+> contradicts** the parent's [Widget registry](../../page-builder-parity.md#widget-registry) (the v1 widget
+> set) and [Reuse Map](../../page-builder-parity.md#reuse-map). The `WidgetDescriptor` / `PropFieldSchema` /
 > `WidgetRenderProps` / `PageComponent` v2 / `Binding` / `PropValue` types are **defined once in 2a**
 > ([`./2a-widget-registry.md`](./2a-widget-registry.md) §3.2) — this slice consumes them and adds new
 > built-in descriptors only.
@@ -847,7 +847,7 @@ These widgets declare `bindable: true` on the relevant `propSchema` entries (cha
 > **Resolved-node invariant (per 2a).** Every 2g descriptor `Render` receives props that are **already
 > resolved** by the time it runs — `chart`'s `dataView`/bound `series`, and `nav`/`tabs`' bound props all
 > arrive as their final array/string values, never as live `Binding` objects, exactly per the parent's
-> authoritative [resolved-node invariant](../page-builder-parity.md#widget-registry) (`renderTree.tsx`)
+> authoritative [resolved-node invariant](../../page-builder-parity.md#widget-registry) (`renderTree.tsx`)
 > and 2a §3.4's `renderNode`. The parent states descriptors **must not** call `resolveBindings`
 > themselves (the sole exception is `list`/`repeater` re-resolving children under each per-row `item`
 > scope — **none of the 2g widgets are that exception**). **So 2g descriptors do NOT call
@@ -888,7 +888,7 @@ by 2a's `renderNode`; 2g consumes it).
 `link.href` and `image.src` accept author- and **data-controlled** URLs: both props are `bindable: true`,
 so a `{ $bind }` (resolved by 2d before `Render`) can evaluate to a hostile `javascript:` or `data:` URL.
 Rendering such a value straight into an `<a href>` / `<img src>` is an XSS / data-exfiltration vector.
-Per the parent's [Security — binding & action output safety](../page-builder-parity.md#security--binding--action-output-safety),
+Per the parent's [Security — binding & action output safety](../../page-builder-parity.md#security--binding--action-output-safety),
 both props are passed through a shared **scheme allow-list** — `{ http, https, mailto, tel, relative }` —
 **before render**, rejecting everything else (notably `javascript:` and `data:`). This is the **same
 allow-list 2e applies** to its `navigate`/`openUrl` action targets; 2g and 2e share one `safeUrl` helper
@@ -926,7 +926,7 @@ export function safeUrl(url: string): string {
 
 ### 3.10 i18n (new widget strings + empty states)
 
-Per the parent's [i18n](../page-builder-parity.md#i18n) rule, **every new user-facing string this slice
+Per the parent's [i18n](../../page-builder-parity.md#i18n) rule, **every new user-facing string this slice
 introduces goes through `useI18n`/`t()` with `builder.*` keys** — the builder is fully `useI18n`-driven;
 do not hardcode the English literals shown in the §3 code (they are illustrative). The 2g surface strings
 are the widget **empty states**, plus the new inspector labels (rendered by 2b from `propSchema.label`,

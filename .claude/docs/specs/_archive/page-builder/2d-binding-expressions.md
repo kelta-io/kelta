@@ -1,9 +1,9 @@
 # Slice 2d — Data binding & expressions
 
-> Child spec of [page-builder-parity.md](../page-builder-parity.md). **Extends, never contradicts**
-> the parent's [The shared model](../page-builder-parity.md#the-shared-model) (bindings/scope),
-> [Page-level config (v2)](../page-builder-parity.md#page-level-config-v2), and
-> [Widget registry](../page-builder-parity.md#widget-registry). Consumes the types defined once in
+> Child spec of [page-builder-parity.md](../../page-builder-parity.md). **Extends, never contradicts**
+> the parent's [The shared model](../../page-builder-parity.md#the-shared-model) (bindings/scope),
+> [Page-level config (v2)](../../page-builder-parity.md#page-level-config-v2), and
+> [Widget registry](../../page-builder-parity.md#widget-registry). Consumes the types defined once in
 > [2a — Widget registry](./2a-widget-registry.md) (`WidgetDescriptor`, `WidgetRenderProps`,
 > `PageComponent`, `Binding`, `PropValue`, `RenderTree`/`renderNode`) and the render-contract siblings
 > surfaced by [1g — Render contract v2](./1g-render-contract-v2.md) (`variables` / `dataSources`).
@@ -971,7 +971,7 @@ suite above pre-merge.
 
 > **DB-constraint test-gap guard:** N/A — this slice adds no write path, DDL, or constraint. It is a
 > read/render concern; the on-load fetch is a plain authorized GET. The
-> [guard](../../testing.md#real-db-guard-for-constraint-bearing-writes)
+> [guard](../../../testing.md#real-db-guard-for-constraint-bearing-writes)
 > applies to constraint-bearing writes, which this is not.
 
 ---

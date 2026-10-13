@@ -69,7 +69,7 @@ io.kelta.auth/
    "no tenant context in session" (`KeltaUserDetailsService`). The 15-min access
    token exists solely for the CLI to mint a PAT (`POST /api/me/tokens`) and is
    then discarded. Registered by `ConnectedAppRegistrar.registerCliClient()`.
-   Spec: `specs/kelta-cli/2-browser-login.md`.
+   Spec: `specs/_archive/kelta-cli/2-browser-login.md`.
 8. Sign-out: the SPA routes through `/logout/saml2/initiate` (SAML SLO, else a
    passthrough) to the OIDC end-session endpoint `/connect/logout` with
    `id_token_hint` and `post_logout_redirect_uri={ui-origin}/{tenant-slug}?logged_out=true`.
