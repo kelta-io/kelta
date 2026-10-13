@@ -51,7 +51,8 @@ import { useSystemPermissions } from '@/hooks/useSystemPermissions'
 import { useRecordMutation } from '@/hooks/useRecordMutation'
 import { useApi } from '@/context/ApiContext'
 import { useToast } from '@/components'
-import { buildIncludedDisplayMap, extractIncluded } from '@/utils/jsonapi'
+import { extractIncluded } from '@/utils/jsonapi'
+import { buildLookupLabels } from '@/utils/lookupDisplayField'
 import { runBulkUpdate } from '@/utils/bulkUpdate'
 import { useCollectionStore } from '@/context/CollectionStoreContext'
 import { useRecordRoutes } from '@/context/RecordStackContext'
@@ -406,24 +407,12 @@ export function RelatedList({
   const effectiveRawResponse = hasPreloadedData ? includedData : rawResponse
 
   // Build lookup display map from included resources using centralized collection store
-  const lookupDisplayMap = useMemo(() => {
-    if (!effectiveRawResponse || referenceFields.length === 0) return undefined
-
-    const map: Record<string, Record<string, string>> = {}
-
-    referenceFields.forEach((field) => {
-      const targetType = field.referenceTarget!
-      const refSchema = collectionStore.getCollectionByName(targetType)
-      const displayField = refSchema?.displayFieldName || 'name'
-
-      const fieldMap = buildIncludedDisplayMap(effectiveRawResponse, targetType, displayField)
-      if (Object.keys(fieldMap).length > 0) {
-        map[field.name] = fieldMap
-      }
-    })
-
-    return Object.keys(map).length > 0 ? map : undefined
-  }, [effectiveRawResponse, referenceFields, collectionStore])
+  // (labelled by the shared rule — the same text the record list and detail page show).
+  const lookupDisplayMap = useMemo(
+    () =>
+      buildLookupLabels(effectiveRawResponse, referenceFields, collectionStore.getCollectionByName),
+    [effectiveRawResponse, referenceFields, collectionStore]
+  )
 
   // Display name for the related collection
   const displayLabel =

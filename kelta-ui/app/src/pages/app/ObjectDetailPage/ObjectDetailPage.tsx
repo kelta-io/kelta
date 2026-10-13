@@ -52,6 +52,7 @@ import { useRecord } from '@/hooks/useRecord'
 import { useRecordMutation } from '@/hooks/useRecordMutation'
 import { useCollectionPermissions } from '@/hooks/useCollectionPermissions'
 import { buildIncludedDisplayMap } from '@/utils/jsonapi'
+import { buildLookupLabels } from '@/utils/lookupDisplayField'
 import { FieldRenderer } from '@/components/FieldRenderer'
 import { InsufficientPrivileges } from '@/components/InsufficientPrivileges'
 import { DetailTabBar, HISTORY_TAB } from '@/pages/ResourceDetailPage/DetailTabBar'
@@ -409,18 +410,9 @@ export function ObjectDetailPage(): React.ReactElement {
   const lookupDisplayMap = useMemo(() => {
     if (!rawResponse) return undefined
 
-    const map: Record<string, Record<string, string>> = {}
-
-    referenceFields.forEach((field) => {
-      const targetType = field.referenceTarget!
-      const refSchema = collectionStore.getCollectionByName(targetType)
-      const displayField = refSchema?.displayFieldName || 'name'
-
-      const fieldMap = buildIncludedDisplayMap(rawResponse, targetType, displayField)
-      if (Object.keys(fieldMap).length > 0) {
-        map[field.name] = fieldMap
-      }
-    })
+    const map: Record<string, Record<string, string>> = {
+      ...buildLookupLabels(rawResponse, referenceFields, collectionStore.getCollectionByName),
+    }
 
     // Build display map for system audit fields (created_by, updated_by → users)
     // Both camelCase (system collections) and snake_case (tenant collections) keys

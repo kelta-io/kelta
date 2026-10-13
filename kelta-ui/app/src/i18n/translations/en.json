@@ -1838,6 +1838,18 @@
     "noGrouping": "No grouping",
     "groupsPageOnly": "Groups reflect this page only"
   },
+  "listFilter": {
+    "title": "Filter records",
+    "toggle": "Filter",
+    "apply": "Apply",
+    "clear": "Clear all",
+    "allMatch": "Records must match all conditions."
+  },
+  "listDelete": {
+    "deleted": "Record deleted",
+    "bulkDeleted": "{{count}} records deleted",
+    "failed": "Delete failed: {{message}}"
+  },
   "massEdit": {
     "success": "Updated {{success}} of {{total}} records",
     "partial": "Updated {{success}} of {{total}} records — {{failed}} failed. Check the Bulk Jobs page for details.",

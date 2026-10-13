@@ -1,1088 +1,360 @@
 /**
- * ResourceListPage Tests
- *
- * Tests for the ResourceListPage component including:
- * - Paginated data table display (Requirement 11.2)
- * - FilterBuilder integration (Requirements 11.3, 11.4, 11.5)
- * - Column sorting and selection
- * - Bulk selection (Requirement 11.11)
+ * ResourceListPage — the admin wrapper over the `RecordList` core (record-stack convergence
+ * P10). Covers what the wrapper maps — the route's collection, the admin frame and header, the
+ * admin feature set and the permissions each feature needs, URL-as-state, admin record routes,
+ * the permission gate's way back, a fresh list on another collection — plus the shared table's
+ * selection and accessibility contract as the admin page renders it. The core's behaviour is in
+ * `components/record/list/`; the real data layer end to end is `ResourceListPage.dataLayer`.
  */
-
 import React from 'react'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import {
-  createTestWrapper,
-  setupAuthMocks,
-  AuthWrapper,
-  mockAxios,
-  resetMockAxios,
-  createAxiosError,
-} from '../../test/testUtils'
+import { I18nProvider } from '@/context/I18nContext'
+import { LiveRegionProvider } from '@/components/LiveRegion'
+import { MY_PERMISSIONS_QUERY_KEY } from '@/hooks/useSystemPermissions'
 import { ResourceListPage } from './ResourceListPage'
-import type { CollectionSchema, Resource } from './ResourceListPage'
-import { escapeCSVValue, recordsToCSV, recordsToJSON } from './ResourceListPage'
-import { recordRoutes } from '../../utils/recordRoutes'
-import { getTenantSlug } from '../../context/TenantContext'
 
-// Mock useNavigate
-const mockNavigate = vi.fn()
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom')
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  }
-})
-
-// Test data
-const mockSchema: CollectionSchema = {
-  id: 'col-1',
-  name: 'users',
-  displayName: 'Users',
-  fields: [
-    { id: 'f1', name: 'name', displayName: 'Name', type: 'string', required: true },
-    { id: 'f2', name: 'email', displayName: 'Email', type: 'string', required: true },
-    { id: 'f3', name: 'age', displayName: 'Age', type: 'number', required: false },
-    { id: 'f4', name: 'active', displayName: 'Active', type: 'boolean', required: false },
-    { id: 'f5', name: 'createdAt', displayName: 'Created At', type: 'datetime', required: false },
-  ],
-}
-
-const mockResources: Resource[] = [
+const FIELDS = [
+  { id: 'f-title', name: 'title', displayName: 'Title', type: 'string', required: false },
   {
-    id: 'r1',
-    name: 'John Doe',
-    email: 'john@example.com',
-    age: 30,
-    active: true,
-    createdAt: '2024-01-15T10:00:00Z',
+    id: 'f-status',
+    name: 'status',
+    displayName: 'Status',
+    type: 'picklist',
+    required: false,
+    enumValues: ['open', 'done'],
   },
-  {
-    id: 'r2',
-    name: 'Jane Smith',
-    email: 'jane@example.com',
-    age: 25,
-    active: false,
-    createdAt: '2024-01-16T11:00:00Z',
-  },
-  {
-    id: 'r3',
-    name: 'Bob Wilson',
-    email: 'bob@example.com',
-    age: 35,
-    active: true,
-    createdAt: '2024-01-17T12:00:00Z',
-  },
+  { id: 'f-amount', name: 'amount', displayName: 'Amount', type: 'number', required: false },
+]
+const RECORDS = [
+  { id: 'r-1', title: 'First', status: 'open', amount: 2 },
+  { id: 'r-2', title: 'Second', status: 'done', amount: 5 },
+  { id: 'r-3', title: 'Third', status: 'open', amount: 1 },
 ]
 
-const mockPaginatedResponse = {
-  data: mockResources,
-  total: 3,
-  page: 1,
-  pageSize: 25,
-}
+let manageData = true
+let schemaError: Error | null = null
+let records: typeof RECORDS = RECORDS
 
-/** The schema as the worker serves it: the collection resource with its fields included. */
-function schemaResponse(schema: CollectionSchema = mockSchema) {
-  return {
-    data: {
-      type: 'collections',
-      id: schema.id,
-      attributes: { name: schema.name, displayName: schema.displayName },
+vi.mock('@/context/TenantContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/context/TenantContext')>()),
+  getTenantSlug: () => 'acme',
+}))
+vi.mock('@/context/ApiContext', () => ({
+  useApi: () => ({
+    apiClient: {
+      getList: vi.fn(async () => []),
+      get: vi.fn(async () => ({})),
+      postResource: vi.fn(async () => ({ id: 'pref-1' })),
+      patchResource: vi.fn(async () => ({})),
     },
-    included: schema.fields.map((field, index) => ({
-      type: 'fields',
-      id: field.id,
-      attributes: { ...field, fieldOrder: index },
-    })),
-  }
-}
-
-// Helper to create query client
-function createTestQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        gcTime: 0,
-      },
-    },
-  })
-}
-
-// Helper to set up standard Axios mocks for ResourceListPage tests
-function setupResourceListHandlers() {
-  mockAxios.get.mockImplementation((url: string) => {
-    if (url === '/api/collections') {
-      return Promise.resolve({
-        data: {
-          content: [mockSchema],
-          totalElements: 1,
-          totalPages: 1,
-          size: 1000,
-          number: 0,
+    keltaClient: { getAxiosInstance: () => ({ get: vi.fn(async () => ({ data: {} })) }) },
+  }),
+}))
+vi.mock('@/hooks/useMyIdentity', () => ({
+  useMyIdentity: () => ({ identity: { userId: 'user-1' }, isLoading: false }),
+}))
+vi.mock('@/hooks/useCollectionSchema', () => ({
+  useCollectionSchema: (name: string) => ({
+    schema: schemaError
+      ? undefined
+      : {
+          id: `col-${name}`,
+          name,
+          displayName: name === 'tasks' ? 'Tasks' : 'Projects',
+          displayFieldName: 'title',
         },
-      })
-    }
-    if (url.startsWith('/api/collections/')) {
-      return Promise.resolve({ data: schemaResponse() })
-    }
-    if (url.startsWith('/api/users')) {
-      return Promise.resolve({ data: mockPaginatedResponse })
-    }
-    return Promise.reject(createAxiosError(404))
-  })
-}
+    fields: schemaError ? [] : FIELDS,
+    isLoading: false,
+    error: schemaError,
+  }),
+}))
+vi.mock('@/hooks/useCollectionRecords', () => ({
+  useCollectionRecords: () => ({
+    data: records,
+    total: records.length,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+    rawResponse: undefined,
+  }),
+}))
+vi.mock('@/hooks/useRecordMutation', () => ({
+  useRecordMutation: () => ({
+    patch: { mutateAsync: vi.fn(), isPending: false },
+    remove: { mutateAsync: vi.fn(), isPending: false },
+    bulkDelete: { mutateAsync: vi.fn(), isPending: false },
+  }),
+}))
+vi.mock('@/hooks/useSystemPermissions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/useSystemPermissions')>()),
+  useSystemPermissions: () => ({ hasPermission: () => manageData, isLoading: false }),
+}))
+vi.mock('@/hooks/usePicklistOptions', () => ({
+  usePicklistOptions: () => ({ options: ['open', 'done'], isLoading: false }),
+  usePicklistDisplayMap: () => ({ displayMap: new Map(), isLoading: false }),
+  usePicklistDisplayMaps: () => ({ displayMaps: {}, isLoading: false }),
+}))
+vi.mock('@/context/CollectionStoreContext', () => ({
+  useCollectionStore: () => ({ getCollectionByName: () => undefined, collections: [] }),
+}))
+// Render the shadcn DropdownMenu inline so menu items are visible/clickable in jsdom.
+vi.mock('@/components/ui/dropdown-menu', () => ({
+  DropdownMenu: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ children }: React.PropsWithChildren<{ asChild?: boolean }>) => (
+    <div>{children}</div>
+  ),
+  DropdownMenuContent: ({
+    children,
+    ...props
+  }: React.PropsWithChildren<Record<string, unknown>>) => <div {...props}>{children}</div>,
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    ...props
+  }: React.PropsWithChildren<{ onClick?: () => void } & Record<string, unknown>>) => (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus
+    <div role="menuitem" onClick={onClick} {...props}>
+      {children}
+    </div>
+  ),
+  DropdownMenuSeparator: () => <hr />,
+  DropdownMenuLabel: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DropdownMenuCheckboxItem: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}))
 
-// Helper to render with providers and routing
-function renderWithProviders(ui: React.ReactElement, { route = '/resources/users' } = {}) {
-  const queryClient = createTestQueryClient()
-  createTestWrapper()
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[route]}>
-        <AuthWrapper>
-          <Routes>
-            <Route path="/resources/:collection" element={ui} />
-          </Routes>
-        </AuthWrapper>
-      </MemoryRouter>
-    </QueryClientProvider>
+/** Shows the current URL and navigates elsewhere, as the admin sidebar would. */
+function RouterProbe() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  return (
+    <>
+      <div data-testid="location">{location.pathname + location.search}</div>
+      <button type="button" onClick={() => navigate('/acme/resources/tasks')}>
+        go to tasks
+      </button>
+    </>
   )
 }
 
-describe('ResourceListPage', () => {
-  let cleanupAuthMocks: () => void
+type Perms = { canRead: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean }
+const ALL: Perms = { canRead: true, canCreate: true, canEdit: true, canDelete: true }
 
+function renderPage(url = '/acme/resources/projects', projects: Perms = ALL) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  qc.setQueryData(MY_PERMISSIONS_QUERY_KEY, {
+    systemPermissions: {},
+    objectPermissions: { projects, tasks: ALL },
+    fieldPermissions: {},
+  })
+  return render(
+    <I18nProvider>
+      <LiveRegionProvider>
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={[url]}>
+            <Routes>
+              <Route path="/:tenantSlug/resources/:collection" element={<ResourceListPage />} />
+              <Route path="*" element={null} />
+            </Routes>
+            <RouterProbe />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </LiveRegionProvider>
+    </I18nProvider>
+  )
+}
+
+const location = () => screen.getByTestId('location')
+
+describe('ResourceListPage', () => {
   beforeEach(() => {
+    manageData = true
+    schemaError = null
+    records = RECORDS
+    localStorage.clear()
     // jsdom has no scrollIntoView; the shared table scrolls the focused row into view.
     Element.prototype.scrollIntoView = vi.fn()
-    cleanupAuthMocks = setupAuthMocks()
-    resetMockAxios()
-    vi.clearAllMocks()
-    mockNavigate.mockClear()
   })
 
-  afterEach(() => {
-    cleanupAuthMocks()
-    vi.restoreAllMocks()
+  it('renders the collection in the admin frame with the admin header in place of the toolbar heading', async () => {
+    renderPage()
+
+    expect(await screen.findByTestId('data-table')).toBeInTheDocument()
+    expect(screen.getByTestId('resource-list-page')).toHaveAttribute('data-variant', 'admin')
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(within(crumbs).getByRole('link', { name: 'Resource Browser' })).toHaveAttribute(
+      'href',
+      '/acme/resources'
+    )
+    expect(screen.getByRole('heading', { level: 1, name: 'Projects' })).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    expect(screen.queryByTestId('new-record-button')).toBeNull()
   })
 
-  describe('collection-schema cache entry', () => {
-    it('caches the full shared schema shape (trackHistory, displayFieldName)', async () => {
-      // A narrower page-local schema under this shared key hid the record History tab
-      // (trackHistory) and display-field titles on every page read after this one.
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url === '/api/collections') {
-          return Promise.resolve({
-            data: { content: [mockSchema], totalElements: 1, totalPages: 1, size: 1000, number: 0 },
-          })
-        }
-        if (url.startsWith('/api/collections/')) {
-          return Promise.resolve({
-            data: {
-              data: {
-                type: 'collections',
-                id: 'col-1',
-                attributes: {
-                  name: 'users',
-                  displayName: 'Users',
-                  trackHistory: true,
-                  displayFieldId: 'f1',
-                },
-              },
-              included: [
-                {
-                  type: 'fields',
-                  id: 'f1',
-                  attributes: { name: 'name', displayName: 'Name', type: 'string', required: true },
-                },
-              ],
-            },
-          })
-        }
-        if (url.startsWith('/api/users')) {
-          return Promise.resolve({ data: mockPaginatedResponse })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-      const queryClient = createTestQueryClient()
-      createTestWrapper()
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter initialEntries={['/resources/users']}>
-            <AuthWrapper>
-              <Routes>
-                <Route path="/resources/:collection" element={<ResourceListPage />} />
-              </Routes>
-            </AuthWrapper>
-          </MemoryRouter>
-        </QueryClientProvider>
-      )
+  it('turns on the admin feature set', async () => {
+    renderPage()
 
-      await waitFor(() =>
-        expect(queryClient.getQueryData(['collection-schema', 'users'])).toMatchObject({
-          name: 'users',
-          trackHistory: true,
-          displayFieldName: 'name',
-        })
-      )
-    })
+    expect(await screen.findByTestId('data-table')).toBeInTheDocument()
+    for (const id of [
+      'view-selector',
+      'column-chooser-trigger',
+      'view-type-trigger',
+      'filter-toggle',
+      'summary-stats-bar',
+    ]) {
+      expect(screen.getByTestId(id)).toBeInTheDocument()
+    }
+    for (const id of ['density-toggle', 'group-by-trigger', 'quick-actions']) {
+      expect(screen.queryByTestId(id)).toBeNull()
+    }
+    expect(screen.getByText('Export as CSV')).toBeInTheDocument()
+    expect(screen.getByText('Export as JSON')).toBeInTheDocument()
+    expect(screen.getByText('Import CSV')).toBeInTheDocument()
+    // the id column leads the default columns; inline edit needs no toggle
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent?.trim())
+    expect(headers.slice(1, 3)).toEqual(['ID', 'Title'])
+    expect(screen.getAllByTestId('inline-field-title')).toHaveLength(3)
   })
 
-  describe('?filter= deep link', () => {
-    // A related list's "View All" on the admin detail page links here with the shared list URL
-    // filter format (record-stack convergence P7); the list must open already filtered.
-    it('applies the URL filter to the records request', async () => {
-      setupResourceListHandlers()
-      const filter = JSON.stringify([
-        { id: 'parent', field: 'organizationId', operator: 'equals', value: 'org-456' },
-      ])
-      const queryClient = createTestQueryClient()
-      createTestWrapper()
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter initialEntries={[`/resources/users?filter=${encodeURIComponent(filter)}`]}>
-            <AuthWrapper>
-              <Routes>
-                <Route path="/resources/:collection" element={<ResourceListPage />} />
-              </Routes>
-            </AuthWrapper>
-          </MemoryRouter>
-        </QueryClientProvider>
-      )
+  it('offers the alternate views', async () => {
+    renderPage()
 
-      await waitFor(() => {
-        const recordUrls = mockAxios.get.mock.calls
-          .map(([url]) => String(url))
-          .filter((url) => url.startsWith('/api/users?'))
-        expect(recordUrls.length).toBeGreaterThan(0)
-        const params = new URLSearchParams(recordUrls[0].split('?')[1])
-        expect(params.get('filter[organizationId][eq]')).toBe('org-456')
-      })
-    })
+    fireEvent.click(await screen.findByTestId('view-type-kanban'))
+
+    expect(await screen.findByTestId('kanban-board')).toBeInTheDocument()
+    expect(location()).toHaveTextContent('/acme/resources/projects')
   })
 
-  describe('Export Utility Functions - Requirement 11.12', () => {
-    describe('escapeCSVValue', () => {
-      it('should return empty string for null or undefined', () => {
-        expect(escapeCSVValue(null)).toBe('')
-        expect(escapeCSVValue(undefined)).toBe('')
-      })
+  it('offers mass edit with edit permission and MANAGE_DATA only', async () => {
+    const { unmount } = renderPage()
+    fireEvent.click(await screen.findByLabelText('Select row r-1'))
+    expect(screen.getByTestId('mass-edit-button')).toBeInTheDocument()
+    unmount()
 
-      it('should convert numbers to strings', () => {
-        expect(escapeCSVValue(42)).toBe('42')
-        expect(escapeCSVValue(3.14)).toBe('3.14')
-      })
+    manageData = false
+    const second = renderPage()
+    fireEvent.click(await screen.findByLabelText('Select row r-1'))
+    expect(screen.getByText('1 record selected')).toBeInTheDocument()
+    expect(screen.queryByTestId('mass-edit-button')).toBeNull()
+    second.unmount()
 
-      it('should convert booleans to strings', () => {
-        expect(escapeCSVValue(true)).toBe('true')
-        expect(escapeCSVValue(false)).toBe('false')
-      })
-
-      it('should return simple strings unchanged', () => {
-        expect(escapeCSVValue('hello')).toBe('hello')
-        expect(escapeCSVValue('world')).toBe('world')
-      })
-
-      it('should quote strings containing commas', () => {
-        expect(escapeCSVValue('hello, world')).toBe('"hello, world"')
-      })
-
-      it('should quote strings containing newlines', () => {
-        expect(escapeCSVValue('hello\nworld')).toBe('"hello\nworld"')
-        expect(escapeCSVValue('hello\rworld')).toBe('"hello\rworld"')
-      })
-
-      it('should escape double quotes by doubling them', () => {
-        expect(escapeCSVValue('say "hello"')).toBe('"say ""hello"""')
-      })
-
-      it('should handle strings with multiple special characters', () => {
-        expect(escapeCSVValue('hello, "world"\ntest')).toBe('"hello, ""world""\ntest"')
-      })
-
-      it('should stringify objects to JSON and quote if needed', () => {
-        // Objects get stringified to JSON, and since JSON contains quotes, it gets quoted
-        expect(escapeCSVValue({ key: 'value' })).toBe('"{""key"":""value""}"')
-      })
-
-      it('should stringify arrays to JSON and quote if needed', () => {
-        // Arrays get stringified to JSON, and since JSON contains brackets, it gets quoted
-        expect(escapeCSVValue([1, 2, 3])).toBe('"[1,2,3]"')
-      })
-    })
-
-    describe('recordsToCSV', () => {
-      const testFields = [
-        { id: 'f1', name: 'name', displayName: 'Name', type: 'string' as const, required: true },
-        { id: 'f2', name: 'email', displayName: 'Email', type: 'string' as const, required: true },
-      ]
-
-      const testRecords: Resource[] = [
-        { id: 'r1', name: 'John Doe', email: 'john@example.com' },
-        { id: 'r2', name: 'Jane Smith', email: 'jane@example.com' },
-      ]
-
-      it('should generate CSV with headers from field display names', () => {
-        const csv = recordsToCSV(testRecords, testFields, true)
-        const lines = csv.split('\n')
-        expect(lines[0]).toBe('id,Name,Email')
-      })
-
-      it('should include id column when includeId is true', () => {
-        const csv = recordsToCSV(testRecords, testFields, true)
-        const lines = csv.split('\n')
-        expect(lines[1]).toBe('r1,John Doe,john@example.com')
-      })
-
-      it('should exclude id column when includeId is false', () => {
-        const csv = recordsToCSV(testRecords, testFields, false)
-        const lines = csv.split('\n')
-        expect(lines[0]).toBe('Name,Email')
-        expect(lines[1]).toBe('John Doe,john@example.com')
-      })
-
-      it('should handle empty records array', () => {
-        const csv = recordsToCSV([], testFields, true)
-        const lines = csv.split('\n')
-        expect(lines.length).toBe(1)
-        expect(lines[0]).toBe('id,Name,Email')
-      })
-
-      it('should handle records with special characters', () => {
-        const recordsWithSpecialChars: Resource[] = [
-          { id: 'r1', name: 'John, Jr.', email: 'john@example.com' },
-        ]
-        const csv = recordsToCSV(recordsWithSpecialChars, testFields, true)
-        const lines = csv.split('\n')
-        expect(lines[1]).toBe('r1,"John, Jr.",john@example.com')
-      })
-
-      it('should handle null/undefined field values', () => {
-        const recordsWithNulls: Resource[] = [{ id: 'r1', name: null, email: undefined }]
-        const csv = recordsToCSV(recordsWithNulls as Resource[], testFields, true)
-        const lines = csv.split('\n')
-        expect(lines[1]).toBe('r1,,')
-      })
-
-      it('should use field name when displayName is not provided', () => {
-        const fieldsWithoutDisplayName = [
-          { id: 'f1', name: 'name', type: 'string' as const, required: true },
-        ]
-        const csv = recordsToCSV(testRecords, fieldsWithoutDisplayName, false)
-        const lines = csv.split('\n')
-        expect(lines[0]).toBe('name')
-      })
-    })
-
-    describe('recordsToJSON', () => {
-      const testRecords: Resource[] = [
-        { id: 'r1', name: 'John Doe', email: 'john@example.com' },
-        { id: 'r2', name: 'Jane Smith', email: 'jane@example.com' },
-      ]
-
-      it('should generate valid JSON', () => {
-        const json = recordsToJSON(testRecords)
-        const parsed = JSON.parse(json)
-        expect(parsed).toEqual(testRecords)
-      })
-
-      it('should format JSON with indentation', () => {
-        const json = recordsToJSON(testRecords)
-        expect(json).toContain('\n')
-        expect(json).toContain('  ')
-      })
-
-      it('should handle empty records array', () => {
-        const json = recordsToJSON([])
-        expect(JSON.parse(json)).toEqual([])
-      })
-
-      it('should preserve all record properties', () => {
-        const recordsWithManyProps: Resource[] = [
-          { id: 'r1', name: 'Test', count: 42, active: true, data: { nested: 'value' } },
-        ]
-        const json = recordsToJSON(recordsWithManyProps)
-        const parsed = JSON.parse(json)
-        expect(parsed[0]).toEqual(recordsWithManyProps[0])
-      })
-    })
+    manageData = true
+    renderPage('/acme/resources/projects', { ...ALL, canEdit: false })
+    fireEvent.click(await screen.findByLabelText('Select row r-1'))
+    expect(screen.queryByTestId('mass-edit-button')).toBeNull()
+    // and no cell editor without edit permission
+    expect(screen.queryByTestId('inline-field-title')).toBeNull()
   })
 
-  describe('Loading and Error States', () => {
-    it('should display loading spinner while fetching schema', async () => {
-      // Mock a delayed response that never resolves during the assertion
-      mockAxios.get.mockImplementation(() => new Promise(() => {}))
+  it('hides Create Record and Import without create permission', async () => {
+    renderPage('/acme/resources/projects', { ...ALL, canCreate: false })
 
-      renderWithProviders(<ResourceListPage />)
-
-      expect(screen.getByTestId('loading-spinner')).toBeInTheDocument()
-    })
-
-    it('should display error message when schema fetch fails', async () => {
-      mockAxios.get.mockRejectedValue(createAxiosError(500))
-
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('error-message')).toBeInTheDocument()
-      })
-    })
+    expect(await screen.findByTestId('data-table')).toBeInTheDocument()
+    expect(screen.queryByTestId('create-record-button')).toBeNull()
+    expect(screen.queryByText('Import CSV')).toBeNull()
+    expect(screen.getByText('Export as CSV')).toBeInTheDocument()
   })
 
-  describe('Data Table Display - Requirement 11.2', () => {
-    beforeEach(() => {
-      setupResourceListHandlers()
-    })
+  it('opens the create form in the admin stack', async () => {
+    renderPage()
 
-    it('should display paginated data table with records', async () => {
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      // Check that records are displayed
-      expect(screen.getByText('John Doe')).toBeInTheDocument()
-      expect(screen.getByText('Jane Smith')).toBeInTheDocument()
-      expect(screen.getByText('Bob Wilson')).toBeInTheDocument()
-    })
-
-    it('should display collection name in header', async () => {
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByRole('heading', { name: 'Users' })).toBeInTheDocument()
-      })
-    })
-
-    it('should display pagination controls', async () => {
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('pagination')).toBeInTheDocument()
-      })
-
-      expect(screen.getByTestId('prev-page-button')).toBeInTheDocument()
-      expect(screen.getByTestId('next-page-button')).toBeInTheDocument()
-      expect(screen.getByTestId('page-size-select')).toBeInTheDocument()
-      expect(screen.getByTestId('total-count')).toHaveTextContent('3 total records')
-    })
-
-    it('should display empty state when no records', async () => {
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url === '/api/collections') {
-          return Promise.resolve({
-            data: {
-              content: [mockSchema],
-              totalElements: 1,
-              totalPages: 1,
-              size: 1000,
-              number: 0,
-            },
-          })
-        }
-        if (url.startsWith('/api/collections/')) {
-          return Promise.resolve({ data: schemaResponse() })
-        }
-        if (url.startsWith('/api/users')) {
-          return Promise.resolve({ data: { data: [], total: 0, page: 1, pageSize: 25 } })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('empty-state')).toBeInTheDocument()
-      })
-    })
+    fireEvent.click(await screen.findByTestId('create-record-button'))
+    expect(location()).toHaveTextContent('/acme/resources/projects/new')
   })
 
-  describe('Column Sorting', () => {
-    beforeEach(() => {
-      setupResourceListHandlers()
-    })
+  it('opens a record in the admin stack from its row', async () => {
+    renderPage()
 
-    it('should sort by column when header is clicked', async () => {
-      userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      // Click on Name header to sort
-      const nameHeader = screen.getByRole('columnheader', { name: 'Name' })
-
-      // Initially should be 'none'
-      expect(nameHeader).toHaveAttribute('aria-sort', 'none')
-
-      // Use fireEvent for more direct click
-      fireEvent.click(nameHeader)
-
-      // After click, should be ascending (wait for state update)
-      await waitFor(() => {
-        expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
-          'aria-sort',
-          'ascending'
-        )
-      })
-    })
-
-    it('should toggle sort direction on subsequent clicks', async () => {
-      userEvent.setup()
-
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      const nameHeader = screen.getByRole('columnheader', { name: 'Name' })
-
-      // First click - ascending
-      fireEvent.click(nameHeader)
-      await waitFor(() => {
-        expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
-          'aria-sort',
-          'ascending'
-        )
-      })
-
-      // Second click - descending
-      fireEvent.click(screen.getByRole('columnheader', { name: 'Name' }))
-      await waitFor(() => {
-        expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
-          'aria-sort',
-          'descending'
-        )
-      })
-
-      // Third click - back to none (removes sort)
-      fireEvent.click(screen.getByRole('columnheader', { name: 'Name' }))
-      await waitFor(() => {
-        expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
-          'aria-sort',
-          'none'
-        )
-      })
-    })
+    fireEvent.click(await screen.findByText('Second'))
+    expect(location()).toHaveTextContent('/acme/resources/projects/r-2')
   })
 
-  describe('Filter Builder - Requirements 11.3, 11.4, 11.5', () => {
-    beforeEach(() => {
-      setupResourceListHandlers()
-    })
+  it('opens the edit form in the admin stack from the row actions', async () => {
+    renderPage()
 
-    it('should toggle filter builder visibility', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('filter-toggle')).toBeInTheDocument()
-      })
-
-      // Filter builder should be hidden initially
-      expect(screen.queryByTestId('filter-builder')).not.toBeInTheDocument()
-
-      // Click to show filter builder
-      await user.click(screen.getByTestId('filter-toggle'))
-      expect(screen.getByTestId('filter-builder')).toBeInTheDocument()
-
-      // Click to hide filter builder
-      await user.click(screen.getByTestId('filter-toggle'))
-      expect(screen.queryByTestId('filter-builder')).not.toBeInTheDocument()
-    })
-
-    it('should add filter condition - Requirement 11.4', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('filter-toggle')).toBeInTheDocument()
-      })
-
-      // Open filter builder
-      await user.click(screen.getByTestId('filter-toggle'))
-
-      // Add a filter
-      await user.click(screen.getByTestId('add-filter-button'))
-
-      // Verify filter row is added
-      await waitFor(() => {
-        const filterRows = screen.getAllByTestId(/^filter-row-/)
-        expect(filterRows.length).toBe(1)
-      })
-    })
-
-    it('should support multiple filter conditions - Requirement 11.4', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('filter-toggle')).toBeInTheDocument()
-      })
-
-      // Open filter builder
-      await user.click(screen.getByTestId('filter-toggle'))
-
-      // Add multiple filters
-      await user.click(screen.getByTestId('add-filter-button'))
-      await user.click(screen.getByTestId('add-filter-button'))
-      await user.click(screen.getByTestId('add-filter-button'))
-
-      // Verify multiple filter rows
-      await waitFor(() => {
-        const filterRows = screen.getAllByTestId(/^filter-row-/)
-        expect(filterRows.length).toBe(3)
-      })
-    })
-
-    it('should support filter operators - Requirement 11.5', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('filter-toggle')).toBeInTheDocument()
-      })
-
-      // Open filter builder and add filter
-      await user.click(screen.getByTestId('filter-toggle'))
-      await user.click(screen.getByTestId('add-filter-button'))
-
-      // Get the operator select
-      const operatorSelects = screen.getAllByRole('combobox')
-      const operatorSelect = operatorSelects.find(
-        (select) => select.getAttribute('aria-label') === 'Filter operator'
-      )
-
-      expect(operatorSelect).toBeInTheDocument()
-
-      // Verify operators are available
-      const options = within(operatorSelect!).getAllByRole('option')
-      const operatorValues = options.map((opt) => opt.getAttribute('value'))
-
-      expect(operatorValues).toContain('equals')
-      expect(operatorValues).toContain('contains')
-      expect(operatorValues).toContain('greater_than')
-      expect(operatorValues).toContain('less_than')
-    })
-
-    it('should remove filter condition', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('filter-toggle')).toBeInTheDocument()
-      })
-
-      // Open filter builder and add filter
-      await user.click(screen.getByTestId('filter-toggle'))
-      await user.click(screen.getByTestId('add-filter-button'))
-
-      // Verify filter exists
-      let filterRows = screen.getAllByTestId(/^filter-row-/)
-      expect(filterRows.length).toBe(1)
-
-      // Remove the filter
-      const removeButton = screen.getAllByTestId(/^remove-filter-/)[0]
-      await user.click(removeButton)
-
-      // Verify filter is removed
-      filterRows = screen.queryAllByTestId(/^filter-row-/)
-      expect(filterRows.length).toBe(0)
-    })
+    const row = (await screen.findByText('First')).closest('tr') as HTMLElement
+    fireEvent.click(within(row).getByRole('menuitem', { name: /Edit/ }))
+    expect(location()).toHaveTextContent('/acme/resources/projects/r-1/edit')
   })
 
-  describe('Column Selection', () => {
-    beforeEach(() => {
-      setupResourceListHandlers()
-    })
+  it('keeps the list state in the URL', async () => {
+    renderPage('/acme/resources/projects?pageSize=50')
 
-    it('should toggle column selector dropdown', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
+    fireEvent.click(await screen.findByRole('columnheader', { name: /Title/ }))
 
-      await waitFor(() => {
-        expect(screen.getByTestId('column-selector-button')).toBeInTheDocument()
-      })
-
-      // Dropdown should be hidden initially
-      expect(screen.queryByTestId('column-dropdown')).not.toBeInTheDocument()
-
-      // Click to show dropdown
-      await user.click(screen.getByTestId('column-selector-button'))
-      expect(screen.getByTestId('column-dropdown')).toBeInTheDocument()
-    })
-
-    it('should toggle column visibility', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      // Open column selector
-      await user.click(screen.getByTestId('column-selector-button'))
-
-      // Find the checkbox for a column and toggle it
-      const dropdown = screen.getByTestId('column-dropdown')
-      const checkboxes = within(dropdown).getAllByRole('checkbox')
-
-      // Toggle a checkbox
-      const initialChecked = (checkboxes[0] as HTMLInputElement).checked
-      await user.click(checkboxes[0])
-
-      expect((checkboxes[0] as HTMLInputElement).checked).toBe(!initialChecked)
-    })
+    expect(location()).toHaveTextContent('/acme/resources/projects?pageSize=50&sort=title')
   })
 
-  describe('Bulk Selection - Requirement 11.11', () => {
-    beforeEach(() => {
-      setupResourceListHandlers()
-    })
+  it('sends the permission gate back to the Resource Browser', async () => {
+    renderPage('/acme/resources/projects', { ...ALL, canRead: false })
 
-    it('should select individual rows', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      // Select first row
-      const checkbox = screen.getByRole('checkbox', { name: 'Select row r1' })
-      await user.click(checkbox)
-
-      expect(checkbox).toBeChecked()
-
-      // Bulk actions should appear
-      expect(screen.getByTestId('bulk-actions')).toBeInTheDocument()
-    })
-
-    it('should select all rows with select all checkbox', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      // Click select all
-      const selectAllCheckbox = screen.getByRole('checkbox', {
-        name: /select all rows|deselect all rows/i,
-      })
-      await user.click(selectAllCheckbox)
-
-      // All row checkboxes should be checked
-      const rowCheckboxes = screen.getAllByRole('checkbox', { name: /^Select row / })
-      rowCheckboxes.forEach((checkbox) => {
-        expect(checkbox).toBeChecked()
-      })
-
-      // Bulk actions should show correct count
-      expect(screen.getByTestId('bulk-actions')).toHaveTextContent('3')
-    })
-
-    it('should deselect all rows when select all is clicked again', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      const selectAllCheckbox = screen.getByRole('checkbox', {
-        name: /select all rows|deselect all rows/i,
-      })
-
-      // Select all
-      await user.click(selectAllCheckbox)
-
-      // Deselect all
-      await user.click(selectAllCheckbox)
-
-      // All row checkboxes should be unchecked
-      const rowCheckboxes = screen.getAllByRole('checkbox', { name: /^Select row / })
-      rowCheckboxes.forEach((checkbox) => {
-        expect(checkbox).not.toBeChecked()
-      })
-
-      // Bulk actions should be hidden
-      expect(screen.queryByTestId('bulk-actions')).not.toBeInTheDocument()
-    })
-
-    it('should show bulk delete button when rows are selected', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      // Select a row
-      await user.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
-
-      // Bulk delete button should be visible
-      expect(screen.getByTestId('bulk-delete-button')).toBeInTheDocument()
-    })
+    expect(await screen.findByText('Insufficient privileges')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Go Back' }))
+    expect(location()).toHaveTextContent('/acme/resources')
   })
 
-  describe('Export Functionality - Requirement 11.12', () => {
-    beforeEach(() => {
-      setupResourceListHandlers()
-    })
+  it('shows a schema error with a retry in place of the list', async () => {
+    schemaError = new Error('Collection not found')
+    renderPage()
 
-    it('should show export button when rows are selected', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      // Select a row
-      await user.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
-
-      // Export button should be visible
-      expect(screen.getByTestId('export-button')).toBeInTheDocument()
-    })
-
-    it('should toggle export dropdown when export button is clicked', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      // Select a row
-      await user.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
-
-      // Export dropdown should be hidden initially
-      expect(screen.queryByTestId('export-dropdown')).not.toBeInTheDocument()
-
-      // Click export button to show dropdown
-      await user.click(screen.getByTestId('export-button'))
-      expect(screen.getByTestId('export-dropdown')).toBeInTheDocument()
-
-      // Click export button again to hide dropdown
-      await user.click(screen.getByTestId('export-button'))
-      expect(screen.queryByTestId('export-dropdown')).not.toBeInTheDocument()
-    })
-
-    it('should display export options for selected and all visible records', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      // Select a row
-      await user.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
-
-      // Open export dropdown
-      await user.click(screen.getByTestId('export-button'))
-
-      // Verify export options are present
-      expect(screen.getByTestId('export-selected-csv')).toBeInTheDocument()
-      expect(screen.getByTestId('export-selected-json')).toBeInTheDocument()
-      expect(screen.getByTestId('export-all-csv')).toBeInTheDocument()
-      expect(screen.getByTestId('export-all-json')).toBeInTheDocument()
-    })
-
-    it('should have proper ARIA attributes on export dropdown', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      // Select a row
-      await user.click(screen.getByRole('checkbox', { name: 'Select row r1' }))
-
-      // Check export button ARIA attributes
-      const exportButton = screen.getByTestId('export-button')
-      expect(exportButton).toHaveAttribute('aria-expanded', 'false')
-      expect(exportButton).toHaveAttribute('aria-haspopup', 'menu')
-
-      // Open dropdown
-      await user.click(exportButton)
-      expect(exportButton).toHaveAttribute('aria-expanded', 'true')
-
-      // Check dropdown ARIA attributes
-      const dropdown = screen.getByTestId('export-dropdown')
-      expect(dropdown).toHaveAttribute('role', 'menu')
-
-      // Check menu items have proper role
-      const csvOption = screen.getByTestId('export-selected-csv')
-      expect(csvOption).toHaveAttribute('role', 'menuitem')
-    })
+    expect(await screen.findByText('Collection not found')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.queryByTestId('data-table')).toBeNull()
   })
 
-  describe('Navigation', () => {
-    beforeEach(() => {
-      setupResourceListHandlers()
-    })
+  it('says so when the collection has no records', async () => {
+    records = []
+    renderPage()
 
-    it('should navigate to create page when create button is clicked', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('create-record-button')).toBeInTheDocument()
-      })
-
-      await user.click(screen.getByTestId('create-record-button'))
-
-      expect(mockNavigate).toHaveBeenCalledWith(recordRoutes('admin', getTenantSlug()).new('users'))
-    })
-
-    it('should navigate to detail page when row is clicked', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await user.click(await screen.findByText('John Doe'))
-
-      expect(mockNavigate).toHaveBeenCalledWith(
-        recordRoutes('admin', getTenantSlug()).detail('users', 'r1')
-      )
-    })
-
-    it('should navigate to edit page when edit button is clicked', async () => {
-      const user = userEvent.setup()
-      renderWithProviders(<ResourceListPage />)
-
-      await screen.findByText('John Doe')
-      // Row actions menu (shared ObjectDataTable) → Edit
-      await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0])
-      await user.click(await screen.findByRole('menuitem', { name: /Edit/ }))
-
-      expect(mockNavigate).toHaveBeenCalledWith(
-        recordRoutes('admin', getTenantSlug()).edit('users', 'r1')
-      )
-    })
+    expect(await screen.findByText('No records found.')).toBeInTheDocument()
+    expect(screen.queryByTestId('summary-stats-bar')).toBeNull()
+    expect(screen.queryByTestId('pagination')).toBeNull()
   })
 
-  describe('Pagination', () => {
-    beforeEach(() => {
-      mockAxios.get.mockImplementation((url: string) => {
-        if (url === '/api/collections') {
-          return Promise.resolve({
-            data: {
-              content: [mockSchema],
-              totalElements: 1,
-              totalPages: 1,
-              size: 1000,
-              number: 0,
-            },
-          })
-        }
-        if (url.startsWith('/api/collections/')) {
-          return Promise.resolve({ data: schemaResponse() })
-        }
-        if (url.startsWith('/api/users')) {
-          return Promise.resolve({ data: { ...mockPaginatedResponse, total: 100 } })
-        }
-        return Promise.reject(createAxiosError(404))
-      })
-    })
+  it('starts fresh on another collection (the route element is reused)', async () => {
+    renderPage('/acme/resources/projects?sort=-title')
+    fireEvent.click(await screen.findByLabelText('Select row r-1'))
+    expect(screen.getByText('1 record selected')).toBeInTheDocument()
 
-    it('should change page when next button is clicked', async () => {
-      const user = userEvent.setup()
+    fireEvent.click(screen.getByRole('button', { name: 'go to tasks' }))
 
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('next-page-button')).toBeInTheDocument()
-      })
-
-      await user.click(screen.getByTestId('next-page-button'))
-
-      // Verify page changed by checking if the button is still enabled
-      await waitFor(() => {
-        expect(screen.getByTestId('next-page-button')).toBeInTheDocument()
-      })
-    })
-
-    it('should change page size when select is changed', async () => {
-      const user = userEvent.setup()
-
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('page-size-select')).toBeInTheDocument()
-      })
-
-      await user.selectOptions(screen.getByTestId('page-size-select'), '50')
-
-      // Verify page size changed
-      await waitFor(() => {
-        expect(screen.getByTestId('page-size-select')).toHaveValue('50')
-      })
-    })
-
-    it('should disable previous button on first page', async () => {
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('prev-page-button')).toBeInTheDocument()
-      })
-
-      expect(screen.getByTestId('prev-page-button')).toBeDisabled()
-    })
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tasks' })).toBeInTheDocument()
+    expect(screen.queryByText('1 record selected')).toBeNull()
+    await waitFor(() => expect(location()).toHaveTextContent(/^\/acme\/resources\/tasks$/))
   })
 
-  describe('Accessibility', () => {
-    beforeEach(() => {
-      setupResourceListHandlers()
+  describe('the shared table as the admin list renders it', () => {
+    it('selects every row and clears the selection again from the header checkbox', async () => {
+      renderPage()
+
+      fireEvent.click(await screen.findByRole('checkbox', { name: 'Select all rows' }))
+      for (const box of screen.getAllByRole('checkbox', { name: /^Select row / })) {
+        expect(box).toBeChecked()
+      }
+      expect(screen.getByText('3 records selected')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Deselect all rows' }))
+      for (const box of screen.getAllByRole('checkbox', { name: /^Select row / })) {
+        expect(box).not.toBeChecked()
+      }
+      expect(screen.queryByText(/records? selected/)).toBeNull()
     })
 
-    it('should have proper ARIA attributes on table', async () => {
-      renderWithProviders(<ResourceListPage />)
+    it('labels the grid, its sortable headers and its checkboxes', async () => {
+      renderPage()
 
-      await waitFor(() => {
-        expect(screen.getByTestId('resources-table')).toBeInTheDocument()
-      })
-
-      const table = within(screen.getByTestId('resources-table')).getByRole('grid')
-      expect(table).toHaveAttribute('aria-label')
-    })
-
-    it('should have proper ARIA attributes on sortable headers', async () => {
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(screen.getByRole('columnheader', { name: 'Name' })).toBeInTheDocument()
-      })
-
-      const header = screen.getByRole('columnheader', { name: 'Name' })
-      expect(header).toHaveAttribute('aria-sort')
+      expect(await screen.findByRole('grid')).toHaveAttribute('aria-label', 'projects records')
+      const header = screen.getByRole('columnheader', { name: /Title/ })
+      expect(header).toHaveAttribute('aria-sort', 'none')
       expect(header).toHaveAttribute('tabindex', '0')
-    })
-
-    it('should have proper labels on checkboxes', async () => {
-      renderWithProviders(<ResourceListPage />)
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole('checkbox', { name: /select all rows|deselect all rows/i })
-        ).toBeInTheDocument()
-      })
-
-      const selectAllCheckbox = screen.getByRole('checkbox', {
-        name: /select all rows|deselect all rows/i,
-      })
-      expect(selectAllCheckbox).toHaveAttribute('aria-label')
+      fireEvent.click(header)
+      expect(screen.getByRole('columnheader', { name: /Title/ })).toHaveAttribute(
+        'aria-sort',
+        'ascending'
+      )
+      expect(screen.getByRole('checkbox', { name: 'Select row r-1' })).toBeInTheDocument()
     })
   })
 })

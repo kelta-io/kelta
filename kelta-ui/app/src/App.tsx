@@ -48,6 +48,7 @@ import { useGlobalShortcuts } from './hooks/useGlobalShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { KeyboardShortcutsHelp } from './components/KeyboardShortcutsHelp/KeyboardShortcutsHelp'
 import { ToastProvider } from './components/Toast'
+import { Toaster } from './components/ui/sonner'
 import { LiveRegionProvider } from './components/LiveRegion'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { RequirePermission } from './components/RequirePermission/RequirePermission'
@@ -641,7 +642,7 @@ function AdminPageRoute({
  * 5. ThemeProvider - Theme state and CSS custom properties
  * 6. I18nProvider - Internationalization
  * 7. PluginProvider - Plugin system
- * 8. ToastProvider - Toast notifications
+ * 8. ToastProvider - Toast notifications (plus the `sonner` <Toaster /> viewport)
  * 9. LiveRegionProvider - Screen reader announcements
  */
 /**
@@ -699,6 +700,7 @@ function TenantScopedApp({ plugins = [] }: { plugins?: Plugin[] }): React.ReactE
                           <TenantRoutes />
                           <AiChatPanel baseUrl={apiClientBaseUrl} />
                           <AiChatTrigger />
+                          <Toaster />
                         </LiveRegionProvider>
                       </ToastProvider>
                     </AiChatProvider>

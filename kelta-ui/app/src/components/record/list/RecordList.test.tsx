@@ -133,6 +133,9 @@ const ALL_FEATURES: RecordListFeatures = {
   export: true,
   quickActions: true,
   inlineEdit: true,
+  filterBuilder: true,
+  idColumn: true,
+  summaryStats: true,
 }
 
 function LocationProbe() {
@@ -207,6 +210,8 @@ describe('RecordList', () => {
       'group-by-trigger',
       'view-type-trigger',
       'quick-actions',
+      'filter-toggle',
+      'summary-stats-bar',
     ]) {
       expect(screen.queryByTestId(id)).toBeNull()
     }
@@ -225,6 +230,8 @@ describe('RecordList', () => {
       'group-by-trigger',
       'view-type-trigger',
       'quick-actions',
+      'filter-toggle',
+      'summary-stats-bar',
     ]) {
       expect(screen.getByTestId(id)).toBeInTheDocument()
     }

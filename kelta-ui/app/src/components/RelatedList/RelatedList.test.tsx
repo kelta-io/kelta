@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RelatedList } from './RelatedList'
 import { RecordStackProvider } from '@/context/RecordStackContext'
+import { useCollectionStore } from '@/context/CollectionStoreContext'
 import type { RecordStackVariant } from '@/utils/recordRoutes'
 
 // Mock API context
@@ -815,6 +816,83 @@ describe('RelatedList', () => {
         expect(screen.getByTestId('mass-edit-error').textContent).toContain('is required')
       )
       expect(mockPost).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('lookup labels', () => {
+    it("labels a lookup cell by the target's label field when the target has no display field", async () => {
+      // `people` has no configured display field and no `name` field: the shared rule
+      // (resolveLookupDisplayField) falls back to its first string field, not a missing `name`.
+      const storeMock = vi.mocked(useCollectionStore)
+      const defaultStore = storeMock.getMockImplementation()
+      onTestFinished(() => {
+        if (defaultStore) storeMock.mockImplementation(defaultStore)
+      })
+      storeMock.mockReturnValue({
+        isLoading: false,
+        collections: [],
+        getCollectionByName: (name: string) =>
+          name === 'people'
+            ? ({
+                id: 'col-people',
+                name: 'people',
+                displayName: 'People',
+                fields: [
+                  { id: 'p-f1', name: 'age', type: 'number', required: false },
+                  { id: 'p-f2', name: 'fullName', type: 'string', required: false },
+                ],
+              } as never)
+            : undefined,
+        getCollectionById: () => undefined,
+        getFieldById: () => undefined,
+      })
+      mockGet.mockResolvedValueOnce({
+        data: {
+          id: 'col-1',
+          type: 'collections',
+          attributes: { name: 'contacts', displayName: 'Contacts' },
+        },
+        included: [
+          {
+            id: 'f-0',
+            type: 'fields',
+            attributes: { name: 'title', type: 'STRING', active: true, fieldOrder: 0 },
+          },
+          {
+            id: 'f-1',
+            type: 'fields',
+            attributes: {
+              name: 'owner',
+              type: 'LOOKUP',
+              referenceTarget: 'people',
+              active: true,
+              fieldOrder: 1,
+            },
+          },
+        ],
+      })
+      mockGet.mockResolvedValueOnce({
+        data: [{ id: 'rec-1', accountId: 'rec-123', title: 'Eng', owner: 'p-1' }],
+        included: [
+          { type: 'people', id: 'p-1', attributes: { age: 36, fullName: 'Ada Lovelace' } },
+        ],
+        metadata: { totalCount: 1, currentPage: 1, pageSize: 5, totalPages: 1 },
+      })
+
+      render(
+        <TestWrapper>
+          <RelatedList
+            collectionName="contacts"
+            foreignKeyField="accountId"
+            parentRecordId="rec-123"
+            tenantSlug="test-tenant"
+            displayColumns={['title', 'owner']}
+          />
+        </TestWrapper>
+      )
+
+      expect(await screen.findByText('Ada Lovelace')).toBeDefined()
+      expect(screen.queryByText('p-1')).toBeNull()
     })
   })
 

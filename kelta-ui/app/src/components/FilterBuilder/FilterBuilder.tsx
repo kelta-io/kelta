@@ -64,7 +64,8 @@ const OPERATOR_LABELS: Record<FilterOperator, string> = {
   is_not_null: 'is not empty',
 }
 
-const OPERATORS = Object.keys(OPERATOR_LABELS) as FilterOperator[]
+/** Every operator, in menu order (the default offer). */
+const ALL_OPERATORS = Object.keys(OPERATOR_LABELS) as FilterOperator[]
 
 function opTakesValue(op: FilterOperator): boolean {
   return op !== 'is_null' && op !== 'is_not_null'
@@ -76,6 +77,16 @@ export interface FilterBuilderProps {
   fields: FieldOption[]
   /** Optional id prefix to namespace input ids. */
   idPrefix?: string
+  /**
+   * The operators offered (default: all). A consumer whose filter grammar has no equivalent for
+   * some operator passes the subset it can express.
+   */
+  operators?: readonly FilterOperator[]
+  /**
+   * Offer the ALL / ANY switch (default true). A consumer that can only AND its clauses passes
+   * false; the expression it receives then always has `logic: 'AND'`.
+   */
+  allowOr?: boolean
 }
 
 export function FilterBuilder({
@@ -83,6 +94,8 @@ export function FilterBuilder({
   onChange,
   fields,
   idPrefix = 'filter',
+  operators = ALL_OPERATORS,
+  allowOr = true,
 }: FilterBuilderProps): React.ReactElement {
   const expr: FilterExpression = useMemo(() => value ?? { logic: 'AND', filters: [] }, [value])
 
@@ -126,7 +139,7 @@ export function FilterBuilder({
 
   return (
     <div className="flex flex-col gap-2" data-testid="filter-builder">
-      {expr.filters.length > 1 && (
+      {allowOr && expr.filters.length > 1 && (
         <div className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Match</span>
           <Select value={expr.logic} onValueChange={(v) => setLogic(v as 'AND' | 'OR')}>
@@ -174,7 +187,7 @@ export function FilterBuilder({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {OPERATORS.map((op) => (
+              {operators.map((op) => (
                 <SelectItem key={op} value={op}>
                   {OPERATOR_LABELS[op]}
                 </SelectItem>

@@ -261,8 +261,11 @@ navigation.
 
 `e2e-tests/tests/journeys/record-parity.spec.ts` runs one record journey (create → land on
 the record → values persisted → edit → clear an optional field → required-field error →
-cancel → list → delete, plus a 409 concurrent-edit case and a related-list / lookup-link step
-that asserts both links stay in the stack's URL space) against both record stacks —
+cancel → list → delete, plus a 409 concurrent-edit case, a related-list / lookup-link step
+that asserts both links stay in the stack's URL space, and the shared list core's filter builder
+(AND of two mapped conditions, kept in `filter=`), kanban view switch and inline cell edit —
+opened on a `filter=` deep link (`gotoListWhere`) so a step sees only its own records) against
+both record stacks —
 `/resources/<collection>` and `/app/o/<collection>` — through the variant-aware page object
 `e2e-tests/pages/record-variant.page.ts` (`new RecordVariant(page, tenantSlug, 'admin' | 'enduser')`).
 It guards the convergence of the two stacks (unified-record slice 8). Persistence is asserted

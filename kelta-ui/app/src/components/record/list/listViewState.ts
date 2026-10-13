@@ -7,6 +7,7 @@
  * them the same way, and so they are unit-testable without rendering a page.
  */
 import type { FilterCondition, SortState } from '@/hooks/useCollectionRecords'
+import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { SavedView, SavedViewDensity } from '@/hooks/useSavedViews'
 import { getFieldControl } from '@/components/fieldControl'
 import { monthRange } from '@/components/CalendarMonthView'
@@ -20,6 +21,19 @@ export const SYSTEM_AUDIT_FIELDS: readonly string[] = [
   'createdBy',
   'updatedBy',
 ]
+
+/**
+ * The record id as a choosable list column (`RecordListFeatures.idColumn`). Not a schema field:
+ * it is offered first in the column chooser (so the default columns start with it) and typed as
+ * a server-computed value, so it renders monospace and is never inline-edited.
+ */
+export const RECORD_ID_COLUMN: FieldDefinition = {
+  id: '__record-id',
+  name: 'id',
+  displayName: 'ID',
+  type: 'auto_number',
+  required: false,
+}
 
 /** Columns shown when neither the column chooser nor the active view names any. */
 export const DEFAULT_VISIBLE_COLUMN_COUNT = 6
