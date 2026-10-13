@@ -64,6 +64,11 @@ import java.util.TreeMap;
  * {@link #REQUEST_DEADLINE} overall ({@code Api.Timeout} on expiry or transport failure), and at
  * most {@value #MAX_RESPONSE_BYTES} bytes of the response are read — a larger response keeps its
  * truncated {@code responseBody} and is not parsed into {@code responseData}.
+ *
+ * <p><b>No secret in the result.</b> The result lands in flow state and in persisted step-log
+ * snapshots, so every value a credential injects (query parameter, API-key header,
+ * {@code Authorization}) is masked by {@link CredentialInjection} in the returned {@code url},
+ * the response body and data, and every error message. The request sent upstream is unchanged.
  */
 public class CallApiActionHandler implements ActionHandler {
 
@@ -119,6 +124,7 @@ public class CallApiActionHandler implements ActionHandler {
 
     @Override
     public ActionResult execute(ActionContext context) {
+        CredentialInjection injection = new CredentialInjection();
         try {
             Map<String, Object> config = objectMapper.readValue(
                 context.actionConfigJson(), new TypeReference<>() {});
@@ -144,7 +150,9 @@ public class CallApiActionHandler implements ActionHandler {
                 ResolvedCredential cred = credentialResolver.resolve(
                     context.tenantId(), credentialRef,
                     "CALL_API:" + (request.url == null ? "raw" : request.url));
-                applyAuth(request, cred);
+                applyAuth(cred, injection);
+                request.headers.putAll(injection.headers());
+                request.url = appendQuery(request.url, injection.queryParams());
             }
 
             // Idempotency: compute key, look up cache, attach upstream header
@@ -156,14 +164,14 @@ public class CallApiActionHandler implements ActionHandler {
                     log.info("CALL_API idempotency hit for key {} — replaying cached {}",
                         idempotency.key, cached.get().statusCode());
                     return success(request, cached.get().statusCode(),
-                        cached.get().responseBody(), false, config, stateData);
+                        cached.get().responseBody(), false, config, stateData, injection);
                 }
                 request.headers.put("Idempotency-Key", idempotency.key);
             }
             request.headers.putIfAbsent("Accept", DEFAULT_ACCEPT);
 
             log.info("CALL_API: method={} url={} mode={} workflowRule={}",
-                request.method, request.url, mode, context.workflowRuleId());
+                request.method, injection.redactUrl(request.url), mode, context.workflowRuleId());
 
             OutboundHttpClient.Response response;
             try {
@@ -172,22 +180,25 @@ public class CallApiActionHandler implements ActionHandler {
                     request.body == null ? null : request.body.getBytes(StandardCharsets.UTF_8)));
             } catch (OutboundUrlGuard.RejectedUrlException e) {
                 log.warn("CALL_API refused: url={} workflowRule={} reason={}",
-                    request.url, context.workflowRuleId(), e.getMessage());
-                return ActionResult.failure("Api.Refused: " + e.getMessage());
+                    injection.redactUrl(request.url), context.workflowRuleId(),
+                    injection.redact(e.getMessage()));
+                return failure("Api.Refused: " + e.getMessage(), injection);
             } catch (OutboundHttpClient.OutboundRequestException e) {
-                return ActionResult.failure("Api.Timeout: " + e.getMessage());
+                return failure("Api.Timeout: " + e.getMessage(), injection);
             }
 
             int status = response.statusCode();
             String body = response.body().length == 0 && !response.truncated()
-                ? null : response.bodyAsString();
+                ? null : injection.redact(response.bodyAsString());
             if (status >= 400 && status < 500) {
-                return ActionResult.failure(
-                    "Api.HttpClientError: " + status + " — " + truncate(body == null ? "" : body));
+                return failure(
+                    "Api.HttpClientError: " + status + " — " + truncate(body == null ? "" : body),
+                    injection);
             }
             if (status >= 500) {
-                return ActionResult.failure(
-                    "Api.HttpServerError: " + status + " — " + truncate(body == null ? "" : body));
+                return failure(
+                    "Api.HttpServerError: " + status + " — " + truncate(body == null ? "" : body),
+                    injection);
             }
 
             if (idempotency != null && idempotencyStore != null && status / 100 == 2) {
@@ -196,15 +207,22 @@ public class CallApiActionHandler implements ActionHandler {
                     status, body, idempotency.ttl);
             }
 
-            return success(request, status, body, response.truncated(), config, stateData);
+            return success(request, status, body, response.truncated(), config, stateData,
+                injection);
         } catch (PayloadMapperException e) {
-            return ActionResult.failure("Mapper.Failure: " + e.getMessage());
+            return failure("Mapper.Failure: " + e.getMessage(), injection);
         } catch (CredentialFailure e) {
-            return ActionResult.failure(e.code + ": " + e.getMessage());
+            return failure(e.code + ": " + e.getMessage(), injection);
         } catch (Exception e) {
-            log.error("CALL_API failed: {}", e.getMessage(), e);
-            return ActionResult.failure("Api.Unexpected: " + e.getMessage());
+            String message = injection.redact(e.getMessage());
+            log.error("CALL_API failed: {}: {}", e.getClass().getSimpleName(), message);
+            return ActionResult.failure("Api.Unexpected: " + message);
         }
+    }
+
+    /** Every failure message passes through here: it is persisted in step logs. */
+    private static ActionResult failure(String message, CredentialInjection injection) {
+        return ActionResult.failure(injection.redact(message));
     }
 
     @Override
@@ -356,13 +374,17 @@ public class CallApiActionHandler implements ActionHandler {
     // Auth application
     // -----------------------------------------------------------------------
 
-    private void applyAuth(ResolvedRequest request, ResolvedCredential cred) {
+    /**
+     * Credential types inject only through {@link CredentialInjection}, so every value they add
+     * is redacted from what the step returns.
+     */
+    private void applyAuth(ResolvedCredential cred, CredentialInjection injection) {
         switch (cred.type()) {
-            case "api_key" -> applyApiKey(request, cred);
+            case "api_key" -> applyApiKey(cred, injection);
             case "bearer_token" -> {
                 Object token = cred.secret("token");
                 if (token != null) {
-                    request.headers.put("Authorization", "Bearer " + token);
+                    injection.header("Authorization", "Bearer " + token, token);
                 }
             }
             case "basic_auth" -> {
@@ -371,7 +393,7 @@ public class CallApiActionHandler implements ActionHandler {
                 if (u != null && p != null) {
                     String encoded = Base64.getEncoder().encodeToString(
                         (u + ":" + p).getBytes(StandardCharsets.UTF_8));
-                    request.headers.put("Authorization", "Basic " + encoded);
+                    injection.header("Authorization", "Basic " + encoded, encoded, u, p);
                 }
             }
             case "oauth2_client_credentials", "oauth2_authorization_code" -> {
@@ -384,7 +406,7 @@ public class CallApiActionHandler implements ActionHandler {
                     throw new CredentialFailure("Credential.NoAccessToken",
                         "OAuth credential has no current access token");
                 }
-                request.headers.put("Authorization", "Bearer " + accessToken);
+                injection.header("Authorization", "Bearer " + accessToken, accessToken);
             }
             default -> {
                 // SMTP / custom — credential isn't useful to a plain HTTP step.
@@ -393,8 +415,7 @@ public class CallApiActionHandler implements ActionHandler {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private void applyApiKey(ResolvedRequest request, ResolvedCredential cred) {
+    private void applyApiKey(ResolvedCredential cred, CredentialInjection injection) {
         String headerName = (String) cred.metadata("headerName");
         String location = (String) cred.metadata("location");
         String prefix = (String) cred.metadata("prefix");
@@ -402,9 +423,9 @@ public class CallApiActionHandler implements ActionHandler {
         if (value == null || headerName == null) return;
         String composed = (prefix == null ? "" : prefix) + value;
         if ("query".equalsIgnoreCase(location)) {
-            request.url = appendQuery(request.url, Map.of(headerName, (Object) composed));
+            injection.queryParam(headerName, composed);
         } else {
-            request.headers.put(headerName, composed);
+            injection.header(headerName, composed, value);
         }
     }
 
@@ -464,10 +485,12 @@ public class CallApiActionHandler implements ActionHandler {
     private ActionResult success(ResolvedRequest request, int status, String body,
                                   boolean truncated,
                                   Map<String, Object> config,
-                                  Map<String, Object> stateData) {
+                                  Map<String, Object> stateData,
+                                  CredentialInjection injection) {
+        body = injection.redact(body);
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("statusCode", status);
-        output.put("url", request.url);
+        output.put("url", injection.redactUrl(request.url));
         output.put("method", request.method);
         if (body != null) {
             output.put("responseBody", truncated ? truncateAlways(body) : truncate(body));
