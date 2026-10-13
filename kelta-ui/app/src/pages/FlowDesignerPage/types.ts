@@ -286,6 +286,8 @@ export interface Flow {
   runAsUserId?: string | null
   /** Which step-log rows runs write; absent on older payloads means FULL. */
   stepLogging?: StepLogging
+  /** Days finished runs are kept; null/absent = the platform-wide window. */
+  retentionDays?: number | null
   createdBy: string
   createdAt: string
   updatedAt: string

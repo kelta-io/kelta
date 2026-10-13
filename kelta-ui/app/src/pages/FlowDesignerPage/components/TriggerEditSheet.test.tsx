@@ -137,3 +137,40 @@ describe('TriggerEditSheet step logging', () => {
     )
   })
 })
+
+describe('TriggerEditSheet retention days', () => {
+  beforeEach(() => update.mockClear())
+
+  it('is empty for a flow on the platform default and saves null', async () => {
+    renderSheet(FLOW)
+
+    expect(screen.getByTestId('flow-retention-days-input')).toHaveValue(null)
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    expect(update).toHaveBeenCalledWith('flow-1', expect.objectContaining({ retentionDays: null }))
+  })
+
+  it("starts from the flow's stored value and saves a new one", async () => {
+    renderSheet({ ...FLOW, retentionDays: 30 })
+
+    const input = screen.getByTestId('flow-retention-days-input')
+    expect(input).toHaveValue(30)
+    await userEvent.clear(input)
+    await userEvent.type(input, '7')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    expect(update).toHaveBeenCalledWith('flow-1', expect.objectContaining({ retentionDays: 7 }))
+  })
+
+  it.each(['0', '3651'])('blocks saving %s', async (value) => {
+    renderSheet(FLOW)
+
+    await userEvent.type(screen.getByTestId('flow-retention-days-input'), value)
+
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByText(/whole number of days from 1 to 3650/i)).toBeInTheDocument()
+    expect(update).not.toHaveBeenCalled()
+  })
+})

@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -27,6 +28,17 @@ const STEP_LOGGING_LABELS: Record<StepLogging, string> = {
   FULL: 'Full — every step with input and output (default)',
   ERRORS_ONLY: 'Errors only — every step, snapshots for failures',
   NONE: 'None — only the failing step',
+}
+
+const MAX_RETENTION_DAYS = 3650
+
+/** Empty input = the platform-wide window (null); otherwise a whole number of days in range. */
+function parseRetentionDays(value: string): number | null | undefined {
+  const trimmed = value.trim()
+  if (trimmed === '') return null
+  if (!/^\d+$/.test(trimmed)) return undefined
+  const days = Number(trimmed)
+  return days >= 1 && days <= MAX_RETENTION_DAYS ? days : undefined
 }
 
 interface TriggerEditSheetProps {
@@ -54,6 +66,7 @@ export function TriggerEditSheet({ open, onOpenChange, flow }: TriggerEditSheetP
   const [config, setConfig] = useState<Partial<TriggerConfig>>({})
   const [runAsUserId, setRunAsUserId] = useState<string>(RUN_AS_OWNER)
   const [stepLogging, setStepLogging] = useState<StepLogging>('FULL')
+  const [retentionDays, setRetentionDays] = useState('')
   const [initialized, setInitialized] = useState(false)
 
   // Reset config when sheet opens
@@ -61,6 +74,7 @@ export function TriggerEditSheet({ open, onOpenChange, flow }: TriggerEditSheetP
     setConfig(initialConfig)
     setRunAsUserId(flow.runAsUserId ?? RUN_AS_OWNER)
     setStepLogging(flow.stepLogging ?? 'FULL')
+    setRetentionDays(flow.retentionDays != null ? String(flow.retentionDays) : '')
     setInitialized(true)
   }
   if (!open && initialized) {
@@ -80,6 +94,9 @@ export function TriggerEditSheet({ open, onOpenChange, flow }: TriggerEditSheetP
       : []
   }, [usersData])
 
+  const parsedRetentionDays = parseRetentionDays(retentionDays)
+  const retentionInvalid = parsedRetentionDays === undefined
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       // Only send mutable fields; JSON-type fields must be objects (not strings)
@@ -97,6 +114,7 @@ export function TriggerEditSheet({ open, onOpenChange, flow }: TriggerEditSheetP
         triggerConfig: config,
         runAsUserId: runAsUserId === RUN_AS_OWNER ? null : runAsUserId,
         stepLogging,
+        retentionDays: parsedRetentionDays ?? null,
       })
     },
     onSuccess: () => {
@@ -167,13 +185,39 @@ export function TriggerEditSheet({ open, onOpenChange, flow }: TriggerEditSheetP
               flows; failed steps keep their full input and output at every level.
             </p>
           </div>
+
+          <div className="space-y-1.5 border-t border-border pt-4">
+            <Label htmlFor="flow-retention-days">Keep run history (days)</Label>
+            <Input
+              id="flow-retention-days"
+              data-testid="flow-retention-days-input"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={MAX_RETENTION_DAYS}
+              step={1}
+              placeholder="Platform default"
+              value={retentionDays}
+              onChange={(e) => setRetentionDays(e.target.value)}
+              aria-invalid={retentionInvalid}
+              aria-describedby="flow-retention-days-help"
+            />
+            <p id="flow-retention-days-help" className="text-xs text-muted-foreground">
+              {retentionInvalid
+                ? `Enter a whole number of days from 1 to ${MAX_RETENTION_DAYS}, or leave it empty.`
+                : 'How long finished runs and their step logs are kept. Leave empty for the platform default (60 days unless your operator changed it).'}
+            </p>
+          </div>
         </div>
 
         <SheetFooter className="px-4 pb-4">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+          <Button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending || retentionInvalid}
+          >
             {saveMutation.isPending ? 'Saving...' : 'Save'}
           </Button>
         </SheetFooter>

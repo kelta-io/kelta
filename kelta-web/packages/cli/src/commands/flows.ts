@@ -21,6 +21,30 @@ const stepLoggingInput = z.preprocess(
   z.enum(STEP_LOGGING_LEVELS).optional()
 );
 
+const RETENTION_DAYS_OPTION = {
+  flag: '--retention-days <days>',
+  description:
+    'Days a finished run and its step logs are kept, 1-3650 (default: the platform-wide window)',
+};
+
+/**
+ * `--retention-days`: a whole number of days, 1-3650. On update, `default` clears the
+ * override (sends null) so the platform-wide window applies again.
+ */
+function retentionDaysInput(allowDefault: boolean) {
+  return z.preprocess(
+    (value) => {
+      if (typeof value !== 'string') return value;
+      const trimmed = value.trim();
+      if (allowDefault && trimmed.toLowerCase() === 'default') return null;
+      return /^-?\d+$/.test(trimmed) ? Number(trimmed) : trimmed;
+    },
+    allowDefault
+      ? z.number().int().min(1).max(3650).nullable().optional()
+      : z.number().int().min(1).max(3650).optional()
+  );
+}
+
 interface ExecutionBody {
   data?: { id?: string; attributes?: { status?: string } };
 }
@@ -43,6 +67,7 @@ const list = defineCommand({
         { key: 'flowType', header: 'TYPE' },
         { key: 'active', header: 'ACTIVE' },
         { key: 'stepLogging', header: 'STEP LOGGING' },
+        { key: 'retentionDays', header: 'RETENTION DAYS' },
       ],
     };
   },
@@ -75,6 +100,7 @@ const create = defineCommand({
     { flag: '--trigger-config <json>', description: 'Trigger config as JSON, @file, or -' },
     { flag: '--active', description: 'Create the flow active (default: inactive)' },
     { ...STEP_LOGGING_OPTION, description: `${STEP_LOGGING_OPTION.description} (default: FULL)` },
+    RETENTION_DAYS_OPTION,
   ],
   input: z.object({
     name: z.string().min(1),
@@ -84,6 +110,7 @@ const create = defineCommand({
     triggerConfig: z.string().optional(),
     active: z.boolean().default(false),
     stepLogging: stepLoggingInput,
+    retentionDays: retentionDaysInput(false),
   }),
   handler: async (ctx, input) => {
     const attributes: Record<string, unknown> = {
@@ -95,6 +122,7 @@ const create = defineCommand({
     if (input.description) attributes.description = input.description;
     if (input.triggerConfig) attributes.triggerConfig = readDataArgument(input.triggerConfig);
     if (input.stepLogging) attributes.stepLogging = input.stepLogging;
+    if (input.retentionDays !== undefined) attributes.retentionDays = input.retentionDays;
     const response = await ctx.client
       .getAxiosInstance()
       .post<{ data?: { id?: string } }>('/api/flows', {
@@ -117,6 +145,10 @@ const update = defineCommand({
     { flag: '--active <bool>', description: 'true|false' },
     { flag: '--definition <json>', description: 'Definition as JSON, @file, or -' },
     STEP_LOGGING_OPTION,
+    {
+      flag: '--retention-days <days>',
+      description: `${RETENTION_DAYS_OPTION.description}; "default" clears the override`,
+    },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
   input: z.object({
@@ -124,6 +156,7 @@ const update = defineCommand({
     active: z.enum(['true', 'false']).optional(),
     definition: z.string().optional(),
     stepLogging: stepLoggingInput,
+    retentionDays: retentionDaysInput(true),
     data: z.string().optional(),
   }),
   handler: async (ctx, input) => {
@@ -131,6 +164,7 @@ const update = defineCommand({
     if (input.active !== undefined) attributes.active = input.active === 'true';
     if (input.definition) attributes.definition = readDataArgument(input.definition);
     if (input.stepLogging) attributes.stepLogging = input.stepLogging;
+    if (input.retentionDays !== undefined) attributes.retentionDays = input.retentionDays;
     if (input.data) Object.assign(attributes, readDataArgument(input.data));
     const response = await ctx.client
       .getAxiosInstance()

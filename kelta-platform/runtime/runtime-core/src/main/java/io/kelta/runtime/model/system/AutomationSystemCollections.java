@@ -3,6 +3,7 @@ package io.kelta.runtime.model.system;
 import io.kelta.runtime.flow.FlowStepLogging;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.model.ValidationRules;
 
 import java.util.List;
 
@@ -77,6 +78,10 @@ public final class AutomationSystemCollections {
                 .withDescription("Which step-log rows runs write: FULL (every step with input/output "
                     + "snapshots), ERRORS_ONLY (every step, snapshots only for a failed step) or NONE "
                     + "(only a failed step)."))
+            .addField(FieldDefinition.integer("retentionDays").withColumnName("retention_days")
+                .withValidation(ValidationRules.forNumeric(1.0, 3650.0))
+                .withDescription("Days a finished execution and its step logs are kept before the "
+                    + "retention sweep deletes them; empty uses the platform-wide window."))
             .build();
     }
 

@@ -102,7 +102,7 @@ public class JdbcFlowStore implements FlowStore {
     public Optional<FlowExecutionData> loadExecution(String executionId) {
         List<FlowExecutionData> results = jdbcTemplate.query("""
             SELECT id, tenant_id, flow_id, status, started_by, trigger_record_id,
-                   state_data, current_node_id, error_message, step_count, duration_ms,
+                   state_data, current_node_id, error_message, error_code, step_count, duration_ms,
                    initial_input, is_test, started_at, completed_at
             FROM flow_execution
             WHERE id = ?
@@ -256,7 +256,7 @@ public class JdbcFlowStore implements FlowStore {
     public List<FlowExecutionData> findExecutionsByFlow(String flowId, int limit, int offset) {
         return jdbcTemplate.query("""
             SELECT id, tenant_id, flow_id, status, started_by, trigger_record_id,
-                   state_data, current_node_id, error_message, step_count, duration_ms,
+                   state_data, current_node_id, error_message, error_code, step_count, duration_ms,
                    initial_input, is_test, started_at, completed_at
             FROM flow_execution
             WHERE flow_id = ?
@@ -271,7 +271,7 @@ public class JdbcFlowStore implements FlowStore {
     public List<FlowExecutionData> findWaitingExecutions() {
         return jdbcTemplate.query("""
             SELECT id, tenant_id, flow_id, status, started_by, trigger_record_id,
-                   state_data, current_node_id, error_message, step_count, duration_ms,
+                   state_data, current_node_id, error_message, error_code, step_count, duration_ms,
                    initial_input, is_test, started_at, completed_at
             FROM flow_execution
             WHERE status = ?
@@ -374,6 +374,7 @@ public class JdbcFlowStore implements FlowStore {
             fromJson(rs.getString("state_data")),
             rs.getString("current_node_id"),
             rs.getString("error_message"),
+            rs.getString("error_code"),
             rs.getInt("step_count"),
             rs.getObject("duration_ms") != null ? rs.getInt("duration_ms") : null,
             fromJson(rs.getString("initial_input")),

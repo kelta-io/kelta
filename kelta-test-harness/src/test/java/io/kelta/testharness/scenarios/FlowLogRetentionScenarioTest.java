@@ -28,6 +28,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       the cascade, the sweep silently leaves orphans.</li>
  *   <li>The terminal-status filter really spares {@code WAITING} rows. A parked
  *       Wait can sit for months, and collecting one strands a live flow.</li>
+ *   <li>A flow's {@code retention_days} replaces the global window for its own
+ *       executions only (PLT-603); the {@code make_interval} arithmetic and the
+ *       {@code FOR UPDATE OF e} over a join are runtime-only SQL too.</li>
  *   <li>{@code COALESCE(completed_at, started_at)} ages out a terminal row whose
  *       {@code completed_at} is NULL — otherwise it leaks forever, which is the
  *       exact bug this sweep exists to prevent.</li>
@@ -45,20 +48,27 @@ class FlowLogRetentionScenarioTest extends ScenarioBase {
     private static final String DELETE_EXECUTIONS = """
             DELETE FROM flow_execution
              WHERE id IN (
-                   SELECT id FROM flow_execution
-                    WHERE status IN ('COMPLETED', 'FAILED', 'CANCELLED')
-                      AND COALESCE(completed_at, started_at) < ?
-                    ORDER BY COALESCE(completed_at, started_at)
+                   SELECT e.id FROM flow_execution e
+                     JOIN flow f ON f.id = e.flow_id
+                    WHERE e.status IN ('COMPLETED', 'FAILED', 'CANCELLED')
+                      AND COALESCE(e.completed_at, e.started_at)
+                          < CAST(? AS timestamptz) - make_interval(days => COALESCE(f.retention_days, ?))
+                    ORDER BY COALESCE(e.completed_at, e.started_at)
                     LIMIT ?
-                    FOR UPDATE SKIP LOCKED)
+                    FOR UPDATE OF e SKIP LOCKED)
             """;
 
     /** Verbatim from FlowLogRetentionRepository.COUNT_DUE_EXECUTIONS. */
     private static final String COUNT_DUE_EXECUTIONS = """
-            SELECT COUNT(*) FROM flow_execution
-             WHERE status IN ('COMPLETED', 'FAILED', 'CANCELLED')
-               AND COALESCE(completed_at, started_at) < ?
+            SELECT COUNT(*) FROM flow_execution e
+              JOIN flow f ON f.id = e.flow_id
+             WHERE e.status IN ('COMPLETED', 'FAILED', 'CANCELLED')
+               AND COALESCE(e.completed_at, e.started_at)
+                   < CAST(? AS timestamptz) - make_interval(days => COALESCE(f.retention_days, ?))
             """;
+
+    /** The global kelta.flow.retention.max-age-days default. */
+    private static final int GLOBAL_DAYS = 60;
 
     @Test
     @DisplayName("prunes old terminal executions and their step logs, sparing WAITING and fresh")
@@ -68,11 +78,10 @@ class FlowLogRetentionScenarioTest extends ScenarioBase {
 
         String suffix = Long.toHexString(System.nanoTime());
         Instant now = Instant.now();
-        Instant cutoff = now.minus(Duration.ofDays(60));
         Instant old = now.minus(Duration.ofDays(90));
 
         try (Connection db = openDbConnection()) {
-            String flowId = seedFlow(db, tenantId, suffix);
+            String flowId = seedFlow(db, tenantId, suffix, null);
             // Old + terminal, with a completed_at → must go, with its step log.
             String oldCompleted = seedExecution(db, tenantId, flowId, "COMPLETED", old, old);
             String oldStepLog = seedStepLog(db, oldCompleted);
@@ -86,10 +95,10 @@ class FlowLogRetentionScenarioTest extends ScenarioBase {
             String freshCompleted = seedExecution(db, tenantId, flowId, "COMPLETED", now, now);
 
             try {
-                long due = countDue(db, cutoff);
+                long due = countDue(db, now);
                 assertThat(due).as("both old terminal rows are due").isGreaterThanOrEqualTo(2);
 
-                int deleted = deleteBatch(db, cutoff, 1000);
+                int deleted = deleteBatch(db, now, 1000);
                 assertThat(deleted).as("delete statement executes and removes rows")
                         .isGreaterThanOrEqualTo(2);
 
@@ -110,7 +119,7 @@ class FlowLogRetentionScenarioTest extends ScenarioBase {
                         .as("fresh terminal execution retained").isTrue();
 
                 // Idempotent: a second pass finds nothing new to do.
-                assertThat(deleteBatch(db, cutoff, 1000))
+                assertThat(deleteBatch(db, now, 1000))
                         .as("second run is a no-op").isZero();
             } finally {
                 for (String id : new String[]{oldCompleted, oldNullCompleted, oldWaiting,
@@ -122,21 +131,59 @@ class FlowLogRetentionScenarioTest extends ScenarioBase {
         }
     }
 
+    @Test
+    @DisplayName("a flow's retentionDays overrides the global window; a flow without one keeps it")
+    void perFlowRetentionDaysOverridesGlobalWindow() throws Exception {
+        String adminToken = auth.loginAsAdmin();
+        String tenantId = auth.extractTenantId(adminToken);
+
+        String suffix = Long.toHexString(System.nanoTime());
+        Instant now = Instant.now();
+        Instant eightDaysAgo = now.minus(Duration.ofDays(8));
+
+        try (Connection db = openDbConnection()) {
+            String flowA = seedFlow(db, tenantId, suffix + "-a", 7);
+            String flowB = seedFlow(db, tenantId, suffix + "-b", null);
+            String executionA = seedExecution(db, tenantId, flowA, "COMPLETED", eightDaysAgo, eightDaysAgo);
+            String stepLogA = seedStepLog(db, executionA);
+            String executionB = seedExecution(db, tenantId, flowB, "COMPLETED", eightDaysAgo, eightDaysAgo);
+
+            try {
+                assertThat(deleteBatch(db, now, 1000))
+                        .as("flow A's execution is past its 7-day window").isGreaterThanOrEqualTo(1);
+
+                assertThat(exists(db, "flow_execution", executionA))
+                        .as("flow A (retentionDays 7) loses its 8-day-old execution").isFalse();
+                assertThat(exists(db, "flow_step_log", stepLogA))
+                        .as("and its step log, by cascade").isFalse();
+                assertThat(exists(db, "flow_execution", executionB))
+                        .as("flow B (no override, 60-day window) keeps its 8-day-old execution").isTrue();
+            } finally {
+                exec(db, "DELETE FROM flow_execution WHERE id = ?", executionA);
+                exec(db, "DELETE FROM flow_execution WHERE id = ?", executionB);
+                exec(db, "DELETE FROM flow WHERE id = ?", flowA);
+                exec(db, "DELETE FROM flow WHERE id = ?", flowB);
+            }
+        }
+    }
+
     // ------------------------------------------------------------- Helpers
 
-    private long countDue(Connection db, Instant cutoff) throws Exception {
+    private long countDue(Connection db, Instant now) throws Exception {
         try (PreparedStatement ps = db.prepareStatement(COUNT_DUE_EXECUTIONS)) {
-            ps.setTimestamp(1, Timestamp.from(cutoff));
+            ps.setTimestamp(1, Timestamp.from(now));
+            ps.setInt(2, GLOBAL_DAYS);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getLong(1) : 0L;
             }
         }
     }
 
-    private int deleteBatch(Connection db, Instant cutoff, int batchSize) throws Exception {
+    private int deleteBatch(Connection db, Instant now, int batchSize) throws Exception {
         try (PreparedStatement ps = db.prepareStatement(DELETE_EXECUTIONS)) {
-            ps.setTimestamp(1, Timestamp.from(cutoff));
-            ps.setInt(2, batchSize);
+            ps.setTimestamp(1, Timestamp.from(now));
+            ps.setInt(2, GLOBAL_DAYS);
+            ps.setInt(3, batchSize);
             return ps.executeUpdate();
         }
     }
@@ -151,17 +198,23 @@ class FlowLogRetentionScenarioTest extends ScenarioBase {
         }
     }
 
-    private String seedFlow(Connection db, String tenantId, String suffix) throws Exception {
+    private String seedFlow(Connection db, String tenantId, String suffix, Integer retentionDays)
+            throws Exception {
         String id = UUID.randomUUID().toString();
         try (PreparedStatement ps = db.prepareStatement("""
                 INSERT INTO flow (id, tenant_id, name, description, flow_type, active,
-                                  definition, created_at, updated_at)
+                                  definition, retention_days, created_at, updated_at)
                 VALUES (?, ?, ?, 'harness retention fixture', 'AUTOLAUNCHED', false,
-                        '{}'::jsonb, NOW(), NOW())
+                        '{}'::jsonb, ?, NOW(), NOW())
                 """)) {
             ps.setString(1, id);
             ps.setString(2, tenantId);
             ps.setString(3, "harness-retention-" + suffix);
+            if (retentionDays == null) {
+                ps.setNull(4, java.sql.Types.INTEGER);
+            } else {
+                ps.setInt(4, retentionDays);
+            }
             ps.executeUpdate();
         }
         return id;

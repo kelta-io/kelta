@@ -45,6 +45,9 @@ public class CreateFlowTool implements AdminTool {
                 "Step-log level: FULL (default; every step with input/output snapshots), ERRORS_ONLY "
                 + "(every step, snapshots only for a failed step — recommended for high-frequency or "
                 + "high-volume flows) or NONE (only a failed step's row)."));
+        properties.put("retentionDays", Schemas.integer(
+                "Days a finished run and its step logs are kept before the retention sweep deletes "
+                + "them (1-3650). Omit to use the platform-wide window (60 days by default).", 1, 3650));
 
         Tool tool = Tool.builder()
                 .name("create_flow")
@@ -85,6 +88,7 @@ public class CreateFlowTool implements AdminTool {
                     else attrs.put("active", false);
                     if (args.get("runAsUserId") instanceof String r && !r.isBlank()) attrs.put("runAsUserId", r);
                     if (args.get("stepLogging") instanceof String l && !l.isBlank()) attrs.put("stepLogging", l);
+                    if (args.get("retentionDays") instanceof Number days) attrs.put("retentionDays", days);
 
                     Map<String, Object> body = Map.of("data", Map.of(
                             "type", "flows",
