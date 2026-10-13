@@ -1,5 +1,7 @@
 package io.kelta.auth.aot;
 
+import io.kelta.auth.controller.ConsentController;
+import io.kelta.auth.controller.LoginController;
 import io.kelta.auth.model.KeltaSession;
 import io.kelta.auth.model.KeltaUserDetails;
 import io.kelta.auth.model.KeltaUserDetailsMixin;
@@ -10,6 +12,8 @@ import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.aot.hint.RuntimeHintsRegistrar;
 import org.springframework.aot.hint.TypeReference;
 import org.springframework.lang.Nullable;
+
+import java.util.List;
 
 /**
  * GraalVM native-image hints for kelta-auth.
@@ -36,6 +40,18 @@ public class AuthRuntimeHints implements RuntimeHintsRegistrar {
     }
 
     private void registerKeltaModels(RuntimeHints hints) {
+        // Template view models: Thymeleaf's SpEL reads their record accessors
+        // reflectively (login SSO buttons, consent scope list).
+        for (Class<?> viewModel : List.of(
+                LoginController.SsoProviderInfo.class,
+                ConsentController.ScopeDisplay.class)) {
+            hints.reflection().registerType(viewModel,
+                    MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                    MemberCategory.INVOKE_DECLARED_METHODS,
+                    MemberCategory.INVOKE_PUBLIC_METHODS,
+                    MemberCategory.DECLARED_FIELDS);
+        }
+
         // KeltaUserDetails is reflectively serialized by Spring Authorization
         // Server's JdbcOAuth2AuthorizationRowMapper (via its custom ObjectMapper
         // configured in AuthorizationServerConfig). Needs full reflective access.

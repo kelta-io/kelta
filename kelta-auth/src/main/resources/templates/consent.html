@@ -199,7 +199,7 @@
                 <input type="hidden" name="state" th:value="${state}">
 
                 <!-- Scopes requiring approval -->
-                <div th:if="${!scopes.isEmpty()}">
+                <div th:if="${hasScopes}">
                     <div class="section-label">Permissions requested</div>
                     <ul class="scope-list">
                         <li th:each="scopeItem : ${scopes}" class="scope-item">
@@ -214,7 +214,7 @@
                 </div>
 
                 <!-- Previously approved scopes (shown but not editable) -->
-                <div th:if="${!previouslyApprovedScopes.isEmpty()}">
+                <div th:if="${hasPreviouslyApprovedScopes}">
                     <div class="section-label">Previously approved</div>
                     <ul class="scope-list previously-approved">
                         <li th:each="scopeItem : ${previouslyApprovedScopes}" class="scope-item">

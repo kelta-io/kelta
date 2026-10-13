@@ -209,7 +209,7 @@
             </div>
 
             <!-- SSO Provider Buttons (OIDC) -->
-            <div th:if="${ssoProviders != null and !ssoProviders.isEmpty()}" class="sso-buttons">
+            <div th:if="${hasSsoProviders}" class="sso-buttons">
                 <a th:each="provider : ${ssoProviders}"
                    th:href="@{/oauth2/authorization/{regId}(regId=${provider.registrationId})}"
                    th:text="'Sign in with ' + ${provider.name}"
@@ -218,7 +218,7 @@
             </div>
 
             <!-- SSO Provider Buttons (SAML 2.0) -->
-            <div th:if="${samlProviders != null and !samlProviders.isEmpty()}" class="sso-buttons">
+            <div th:if="${hasSamlProviders}" class="sso-buttons">
                 <a th:each="provider : ${samlProviders}"
                    th:href="@{/saml2/authenticate/{regId}(regId=${provider.registrationId})}"
                    th:text="'Sign in with ' + ${provider.name}"
@@ -226,7 +226,7 @@
                 </a>
             </div>
 
-            <div th:if="${(ssoProviders != null and !ssoProviders.isEmpty()) or (samlProviders != null and !samlProviders.isEmpty())}" class="divider">
+            <div th:if="${hasSsoProviders or hasSamlProviders}" class="divider">
                 <span>or sign in with email</span>
             </div>
 

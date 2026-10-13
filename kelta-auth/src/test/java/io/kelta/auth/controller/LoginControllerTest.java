@@ -83,6 +83,8 @@ class LoginControllerTest {
             var providers = (List<LoginController.SsoProviderInfo>) model.getAttribute("ssoProviders");
             assertThat(providers).hasSize(1);
             assertThat(providers.get(0).name()).isEqualTo("Google SSO");
+            assertThat(model.getAttribute("hasSsoProviders")).isEqualTo(true);
+            assertThat(model.getAttribute("hasSamlProviders")).isEqualTo(false);
         }
 
         @Test
