@@ -1086,6 +1086,14 @@ for it, not just a `ScopedValue`.
     `tenantId` (create) or `If-Match` (top-level update/delete only) → `QueryEngine` write
     (hooks, validation, record-changed event) → same-pod cache eviction → response. Per-route
     differences are fields on its `WriteTarget` record, not branches.
+    **Record-changed events follow the transaction:** `DefaultQueryEngine.publishRecordEvent`
+    registers a `TransactionSynchronization` when one is active and publishes in `afterCommit()`
+    (one per event, in write order; a publish failure is logged and does not stop later events),
+    so a transactional write — e.g. `/api/operations` (`AtomicOperationsController` is
+    `@Transactional`, runs `AtomicOperationExecutor`) — reaches `kelta.record.changed.>` only after
+    commit and **never on rollback**. With no transaction active (the plain router write) the event
+    is published immediately, as before. The deferred publish still runs on the request thread
+    before the response is written: `@Transactional` commits when the controller method returns.
   - `JsonApiIncludeResolver` — `?include=` (see "Read-side include resolution" below);
     `RecordTenantScope` — the router's `X-Tenant-ID` second layer for tenant-scoped system
     collections (`injectTenantFilter`, `visibleToTenant`, shared-row narrowing, `injectTenantId`)
