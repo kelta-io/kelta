@@ -192,6 +192,10 @@ Rules:
   `ui-base-url`, or a verified custom domain of the account's own tenant (`AuthDomainResolver`).
   Otherwise the configured issuer, else no email. Never build the link from the `Host` header
   unchecked — a forged `Host` would mail the user a working link to the requester's site.
+- The pages set `<meta name="referrer" content="same-origin">` so the token in the URL never
+  leaves as a referrer. Never `no-referrer` on a page with a form: the browser then posts
+  `Origin: null`, which the CORS filter refuses ("Invalid CORS request", 403). MockMvc sends no
+  `Origin` unless a test adds one (`PasswordResetFlowTest.formPostsCarryTheBrowsersOrigin`).
 - A password the policy refuses leaves the token usable; a reset clears the force-change flag and
   any lockout and ends the user's other sessions (`UserSessionRevoker`).
 - Rate limited per IP (`kelta.auth.rate-limit.password-reset-paths`, below).

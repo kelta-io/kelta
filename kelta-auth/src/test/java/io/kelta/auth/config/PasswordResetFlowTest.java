@@ -222,7 +222,7 @@ class PasswordResetFlowTest {
         assertThat(form.getModelAndView().getModel()).containsEntry("token", token).doesNotContainKey("invalid");
         assertThat(form.getResponse().getContentAsString())
                 .contains("value=\"" + token + "\"").contains("name=\"_csrf\"")
-                .contains("<meta name=\"referrer\" content=\"no-referrer\">");
+                .contains("<meta name=\"referrer\" content=\"same-origin\">");
         assertThat(mvc.perform(get("/reset-password").param("token", "not-a-token")).andReturn()
                 .getModelAndView().getModel()).containsEntry("invalid", true);
 
@@ -237,6 +237,23 @@ class PasswordResetFlowTest {
                 .containsEntry("appUrl", "https://app.example.test/tenant-a/app");
         assertThat(done.getResponse().getContentAsString()).contains("href=\"https://app.example.test/tenant-a/app\"");
         assertThat(encoder.matches(STRONG, passwordHash(USER_ID))).isTrue();
+    }
+
+    @Test
+    @DisplayName("the forms post with the browser's Origin header: same-origin passes, \"null\" (no-referrer) does not")
+    void formPostsCarryTheBrowsersOrigin() throws Exception {
+        // A browser sends Origin on every form POST. The CORS filter compares it with the
+        // request's own origin; under a no-referrer policy it is "null" and the post is refused.
+        assertThat(mvc.perform(post("/forgot-password").header("Origin", "http://localhost").with(csrf())
+                .param("email", "nobody@example.test")).andReturn().getResponse().getStatus()).isEqualTo(200);
+        assertThat(mvc.perform(post("/forgot-password").header("Origin", "null").with(csrf())
+                .param("email", "nobody@example.test")).andReturn().getResponse().getStatus())
+                .as("why the pages must not use no-referrer").isEqualTo(403);
+        for (String page : List.of("/forgot-password", "/reset-password?token=x")) {
+            assertThat(mvc.perform(get(page)).andReturn().getResponse().getContentAsString())
+                    .contains("<meta name=\"referrer\" content=\"same-origin\">")
+                    .doesNotContain("content=\"no-referrer\"");
+        }
     }
 
     @Test
