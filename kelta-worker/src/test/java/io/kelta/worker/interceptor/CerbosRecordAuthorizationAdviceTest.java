@@ -683,4 +683,194 @@ class CerbosRecordAuthorizationAdviceTest {
             assertThat(result).isSameAs(body);
         }
     }
+
+    @Nested
+    @DisplayName("included resources")
+    class IncludedResources {
+
+        private Map<String, Object> resource(String type, String id, Map<String, Object> attributes) {
+            Map<String, Object> resource = new LinkedHashMap<>();
+            resource.put("type", type);
+            resource.put("id", id);
+            resource.put("attributes", attributes);
+            return resource;
+        }
+
+        private Map<String, Object> listWithIncluded(List<Map<String, Object>> included) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("data", List.of(resource("orders", "o1", Map.of("customer", "c1"))));
+            body.put("included", included);
+            return body;
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<Map<String, Object>> included(Object result) {
+            return (List<Map<String, Object>>) ((Map<String, Object>) result).get("included");
+        }
+
+        @Test
+        @DisplayName("checks each included collection with its own collection-wide read decision")
+        void includedCollectionWideDecisionPerType() {
+            var request = createRequest("/api/orders");
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("orders"), eq("read")))
+                    .thenReturn(true);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("customers"), eq("read")))
+                    .thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("products"), eq("read")))
+                    .thenReturn(true);
+
+            Object result = advice.beforeBodyWrite(listWithIncluded(List.of(
+                            resource("customers", "c1", Map.of("name", "Acme")),
+                            resource("customers", "c2", Map.of("name", "Beta")),
+                            resource("products", "p1", Map.of("sku", "X")))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(included(result)).extracting(r -> r.get("id")).containsExactly("p1");
+            // One decision per included type, not per included resource.
+            verify(authzService, times(1)).checkCollectionWideRecordAccess(
+                    any(), any(), any(), eq("customers"), eq("read"));
+            verify(authzService, times(1)).checkCollectionWideRecordAccess(
+                    any(), any(), any(), eq("products"), eq("read"));
+        }
+
+        @Test
+        @DisplayName("checks included records of a record-variant collection in one batch")
+        void includedRecordVariantBatch() {
+            var request = createRequest("/api/orders");
+            when(recordRuleIndex.hasRecordVariantRules(any(), eq("orders"))).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("orders"), eq("read")))
+                    .thenReturn(true);
+            when(recordRuleIndex.hasRecordVariantRules(any(), eq("customers"))).thenReturn(true);
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), eq("customers"), anyList(), eq("read")))
+                    .thenReturn(Set.of("c2"));
+
+            Object result = advice.beforeBodyWrite(listWithIncluded(List.of(
+                            resource("customers", "c1", Map.of("tier", "restricted")),
+                            resource("customers", "c2", Map.of("tier", "open")))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(included(result)).extracting(r -> r.get("id")).containsExactly("c2");
+            verify(authzService, times(1)).batchCheckRecordAccess(
+                    any(), any(), any(), eq("customers"),
+                    argThat(records -> records.size() == 2), eq("read"));
+        }
+
+        @Test
+        @DisplayName("a manual record share widens an included record the profile denied")
+        void includedShareWidening() {
+            var request = createRequest("/api/orders");
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("orders"), eq("read")))
+                    .thenReturn(true);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("customers"), eq("read")))
+                    .thenReturn(false);
+            when(recordShareAccessService.widen(eq("user@example.com"), eq("customers"), eq(Set.of("c1", "c2")),
+                    eq("read"))).thenReturn(Set.of("c1"));
+
+            Object result = advice.beforeBodyWrite(listWithIncluded(List.of(
+                            resource("customers", "c1", Map.of()),
+                            resource("customers", "c2", Map.of()))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(included(result)).extracting(r -> r.get("id")).containsExactly("c1");
+        }
+
+        @Test
+        @DisplayName("removes the included member when nothing in it is readable")
+        void noReadableIncludedRemovesMember() {
+            var request = createRequest("/api/orders");
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("orders"), eq("read")))
+                    .thenReturn(true);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("customers"), eq("read")))
+                    .thenReturn(false);
+
+            Object result = advice.beforeBodyWrite(listWithIncluded(List.of(resource("customers", "c1", Map.of()))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(((Map<?, ?>) result).containsKey("included")).isFalse();
+            assertThat((List<?>) ((Map<?, ?>) result).get("data")).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("filters the included resources of a readable single record")
+        void singleRecordIncludedFiltered() {
+            var request = createRequest("/api/orders/o1");
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("orders"), eq("read")))
+                    .thenReturn(true);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("customers"), eq("read")))
+                    .thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("products"), eq("read")))
+                    .thenReturn(true);
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("data", resource("orders", "o1", Map.of("customer", "c1")));
+            body.put("included", List.of(resource("customers", "c1", Map.of()), resource("products", "p1", Map.of())));
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(((Map<?, ?>) result).get("data")).isNotNull();
+            assertThat(included(result)).extracting(r -> r.get("id")).containsExactly("p1");
+            // The relationship linkage on the primary record is left as it is.
+            assertThat(((Map<?, ?>) ((Map<?, ?>) result).get("data")).get("attributes"))
+                    .isEqualTo(Map.of("customer", "c1"));
+        }
+
+        @Test
+        @DisplayName("a denied single record carries no included resources")
+        void deniedSingleRecordDropsIncluded() {
+            var request = createRequest("/api/orders/o1");
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("orders"), eq("read")))
+                    .thenReturn(false);
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("data", resource("orders", "o1", Map.of()));
+            body.put("included", List.of(resource("order-lines", "l1", Map.of())));
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(((Map<?, ?>) result).get("data")).isNull();
+            assertThat(((Map<?, ?>) result).containsKey("included")).isFalse();
+            verify(authzService, never()).checkCollectionWideRecordAccess(
+                    any(), any(), any(), eq("order-lines"), any());
+        }
+
+        @Test
+        @DisplayName("keeps included resources of a type whose direct path the advice does not filter")
+        void metadataTypeIncludedKept() {
+            var request = createRequest("/api/orders");
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("orders"), eq("read")))
+                    .thenReturn(true);
+
+            Object result = advice.beforeBodyWrite(listWithIncluded(List.of(resource("profiles", "pr1", Map.of()))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(included(result)).extracting(r -> r.get("id")).containsExactly("pr1");
+            verify(authzService, never()).checkCollectionWideRecordAccess(any(), any(), any(), eq("profiles"), any());
+        }
+
+        @Test
+        @DisplayName("drops an included resource without a type or id")
+        void unattributableIncludedDropped() {
+            var request = createRequest("/api/orders");
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), any(), eq("read")))
+                    .thenReturn(true);
+
+            Map<String, Object> typeless = new LinkedHashMap<>();
+            typeless.put("id", "x1");
+            Map<String, Object> idless = new LinkedHashMap<>();
+            idless.put("type", "products");
+
+            Object result = advice.beforeBodyWrite(listWithIncluded(List.of(
+                            typeless, idless, resource("products", "p1", Map.of()))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(included(result)).extracting(r -> r.get("id")).containsExactly("p1");
+        }
+    }
 }

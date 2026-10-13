@@ -28,6 +28,10 @@ import java.util.stream.Collectors;
  * manual record share ({@link RecordShareAccessService}) widens the user's
  * access to that record (READ share → read; EDIT share → read + edit).
  *
+ * <p>{@code included[]} resources ({@code ?include=}) get the read decision of their own
+ * collection, as a direct read of each would; a denied single record brings no included
+ * resources (see {@link #restrictIncluded}).
+ *
  * <p>Only applies to {@code /api/} paths when permissions are enabled.
  */
 @ControllerAdvice
@@ -124,35 +128,8 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
                 }
             }
 
-            Set<String> allowedIds;
-            if (recordRuleIndex.hasRecordVariantRules(tenantId, collectionId)) {
-                allowedIds = new HashSet<>(authzService.batchCheckRecordAccess(
-                        email, profileId, tenantId, collectionId, typedRecords, action));
-            } else {
-                // No record-variant rules: the record policy decides identically for
-                // every record, so one cached collection-wide check covers the page
-                // and Cerbos never sees the record payloads.
-                allowedIds = new HashSet<>();
-                if (authzService.checkCollectionWideRecordAccess(
-                        email, profileId, tenantId, collectionId, action)) {
-                    for (Map<String, Object> record : typedRecords) {
-                        String id = (String) record.get("id");
-                        if (id != null) {
-                            allowedIds.add(id);
-                        }
-                    }
-                }
-            }
-
-            // Manual record shares may widen access to records the profile denied
-            Set<String> deniedIds = typedRecords.stream()
-                    .map(r -> (String) r.get("id"))
-                    .filter(id -> id != null && !allowedIds.contains(id))
-                    .collect(Collectors.toSet());
-            if (!deniedIds.isEmpty()) {
-                allowedIds.addAll(recordShareAccessService.widen(email, collectionId, deniedIds, action));
-            }
-            final Set<String> finalAllowed = allowedIds;
+            final Set<String> finalAllowed =
+                    readableIds(email, profileId, tenantId, collectionId, typedRecords, action);
 
             List<Map<String, Object>> filtered = typedRecords.stream()
                     .filter(r -> {
@@ -172,6 +149,7 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
             if (removed > 0) {
                 reducePaginationCounts(result, removed);
             }
+            restrictIncluded(result, email, profileId, tenantId);
             return result;
         } else if (data instanceof Map<?, ?> singleRecord) {
             Map<String, Object> typedRecord = (Map<String, Object>) singleRecord;
@@ -179,11 +157,120 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
                 log.debug("Denied single record for user={} collection={}", email, collectionId);
                 Map<String, Object> result = new LinkedHashMap<>(responseBody);
                 result.put("data", null);
+                // Included resources were resolved from a record the caller may not read.
+                result.remove("included");
+                return result;
+            }
+            if (responseBody.get("included") instanceof List<?> included && !included.isEmpty()) {
+                Map<String, Object> result = new LinkedHashMap<>(responseBody);
+                restrictIncluded(result, email, profileId, tenantId);
                 return result;
             }
         }
 
         return responseBody;
+    }
+
+    /**
+     * The ids among {@code records} (JSON:API resource objects of {@code collectionId}) that the
+     * caller may {@code action}: the record-level Cerbos decision — one batched check when the
+     * collection has record-variant rules, else one cached collection-wide check — widened by
+     * manual record shares (one lookup for the denied ids).
+     */
+    private Set<String> readableIds(String email, String profileId, String tenantId,
+                                    String collectionId, List<Map<String, Object>> records, String action) {
+        Set<String> allowedIds;
+        if (recordRuleIndex.hasRecordVariantRules(tenantId, collectionId)) {
+            allowedIds = new HashSet<>(authzService.batchCheckRecordAccess(
+                    email, profileId, tenantId, collectionId, records, action));
+        } else {
+            // No record-variant rules: the record policy decides identically for
+            // every record, so one cached collection-wide check covers the page
+            // and Cerbos never sees the record payloads.
+            allowedIds = new HashSet<>();
+            if (authzService.checkCollectionWideRecordAccess(
+                    email, profileId, tenantId, collectionId, action)) {
+                for (Map<String, Object> record : records) {
+                    String id = (String) record.get("id");
+                    if (id != null) {
+                        allowedIds.add(id);
+                    }
+                }
+            }
+        }
+
+        // Manual record shares may widen access to records the profile denied
+        Set<String> deniedIds = records.stream()
+                .map(r -> (String) r.get("id"))
+                .filter(id -> id != null && !allowedIds.contains(id))
+                .collect(Collectors.toSet());
+        if (!deniedIds.isEmpty()) {
+            allowedIds.addAll(recordShareAccessService.widen(email, collectionId, deniedIds, action));
+        }
+        return allowedIds;
+    }
+
+    /**
+     * Applies record read authorization to the {@code included[]} resources of {@code result}:
+     * an included resource stays only when the caller could read it through
+     * {@code GET /api/{type}/{id}} answered by this advice — the included collection's own
+     * collection-level read, record-level rules and manual shares, not the primary collection's.
+     * Resources are grouped by their JSON:API {@code type} (JSON:API flattens every include depth
+     * into this one array), so each included collection costs one batched or cached decision.
+     *
+     * <p>A type whose direct path this advice does not filter (platform metadata paths) keeps its
+     * resources as they are, so an include never answers differently from a direct read. A
+     * resource with no {@code type} or {@code id} cannot be attributed to a readable record and is
+     * dropped. The primary records' relationship linkage ({@code relationships.<field>.data}) is
+     * left as is: the same id is already in the primary record's {@code attributes}.
+     */
+    @SuppressWarnings("unchecked")
+    private void restrictIncluded(Map<String, Object> result, String email, String profileId, String tenantId) {
+        if (!(result.get("included") instanceof List<?> included) || included.isEmpty()) {
+            return;
+        }
+
+        Map<String, List<Map<String, Object>>> byType = new LinkedHashMap<>();
+        for (Object item : included) {
+            if (item instanceof Map<?, ?> resource
+                    && resource.get("type") instanceof String type && !type.isBlank()
+                    && resource.get("id") instanceof String) {
+                byType.computeIfAbsent(type, t -> new ArrayList<>()).add((Map<String, Object>) resource);
+            }
+        }
+
+        Map<String, Set<String>> readableByType = new HashMap<>();
+        for (Map.Entry<String, List<Map<String, Object>>> entry : byType.entrySet()) {
+            String type = entry.getKey();
+            if (isMetadataPath("/api/" + type)) {
+                Set<String> all = new HashSet<>();
+                entry.getValue().forEach(r -> all.add((String) r.get("id")));
+                readableByType.put(type, all);
+            } else {
+                readableByType.put(type,
+                        readableIds(email, profileId, tenantId, type, entry.getValue(), "read"));
+            }
+        }
+
+        List<Object> kept = new ArrayList<>(included.size());
+        for (Object item : included) {
+            if (item instanceof Map<?, ?> resource
+                    && resource.get("type") instanceof String type
+                    && resource.get("id") instanceof String id
+                    && readableByType.getOrDefault(type, Set.of()).contains(id)) {
+                kept.add(item);
+            }
+        }
+
+        if (kept.size() < included.size()) {
+            log.debug("Filtered {} included resources from response for user={}",
+                    included.size() - kept.size(), email);
+        }
+        if (kept.isEmpty()) {
+            result.remove("included");
+        } else {
+            result.put("included", kept);
+        }
     }
 
     /**
