@@ -1,5 +1,6 @@
 package io.kelta.auth.model;
 
+import org.springframework.security.core.CredentialsContainer;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -8,7 +9,16 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 
-public class KeltaUserDetails implements UserDetails {
+/**
+ * The platform's authenticated principal.
+ * <p>
+ * Implements {@link CredentialsContainer} so Spring Security's {@code ProviderManager} erases the
+ * password hash once authentication succeeds. The principal outlives the login: it is held in the
+ * HTTP session and serialized into the OAuth2 authorization store, and neither needs the hash.
+ * Whether the user signed in with a local password is kept separately as
+ * {@link #hasLocalCredential()}, so it survives erasure.
+ */
+public class KeltaUserDetails implements UserDetails, CredentialsContainer {
 
     private final String id;
     private final String email;
@@ -16,11 +26,13 @@ public class KeltaUserDetails implements UserDetails {
     private final String profileId;
     private final String profileName;
     private final String displayName;
-    private final String passwordHash;
+    /** Not final: {@link #eraseCredentials()} clears it after authentication. */
+    private String passwordHash;
     private final boolean active;
     private final boolean locked;
     private final boolean forceChangePassword;
     private final String userType;
+    private final boolean localCredential;
 
     public KeltaUserDetails(String id, String email, String tenantId, String profileId,
                             String profileName, String displayName, String passwordHash,
@@ -33,6 +45,14 @@ public class KeltaUserDetails implements UserDetails {
                             String profileName, String displayName, String passwordHash,
                             boolean active, boolean locked, boolean forceChangePassword,
                             String userType) {
+        this(id, email, tenantId, profileId, profileName, displayName, passwordHash,
+                active, locked, forceChangePassword, userType, isPresent(passwordHash));
+    }
+
+    private KeltaUserDetails(String id, String email, String tenantId, String profileId,
+                             String profileName, String displayName, String passwordHash,
+                             boolean active, boolean locked, boolean forceChangePassword,
+                             String userType, boolean localCredential) {
         this.id = id;
         this.email = email;
         this.tenantId = tenantId;
@@ -44,6 +64,26 @@ public class KeltaUserDetails implements UserDetails {
         this.locked = locked;
         this.forceChangePassword = forceChangePassword;
         this.userType = userType;
+        this.localCredential = localCredential;
+    }
+
+    /**
+     * Rebuilds a principal from its serialized form (see {@link KeltaUserDetailsMixin}). The
+     * result never carries a password hash. Rows written before {@code localCredential} was
+     * stored have it {@code null} and may still hold {@code storedPasswordHash}; its presence
+     * decides {@code localCredential}, and the hash itself is dropped.
+     */
+    static KeltaUserDetails restore(String id, String email, String tenantId, String profileId,
+                                    String profileName, String displayName, String storedPasswordHash,
+                                    boolean active, boolean locked, boolean forceChangePassword,
+                                    String userType, Boolean localCredential) {
+        boolean local = localCredential != null ? localCredential : isPresent(storedPasswordHash);
+        return new KeltaUserDetails(id, email, tenantId, profileId, profileName, displayName, null,
+                active, locked, forceChangePassword, userType, local);
+    }
+
+    private static boolean isPresent(String passwordHash) {
+        return passwordHash != null && !passwordHash.isEmpty();
     }
 
     public String getId() { return id; }
@@ -52,12 +92,26 @@ public class KeltaUserDetails implements UserDetails {
     public String getProfileId() { return profileId; }
     public String getProfileName() { return profileName; }
     public String getDisplayName() { return displayName; }
+    /** The stored password hash, or {@code null} once credentials have been erased. */
     public String getPasswordHash() { return passwordHash; }
     public boolean isActive() { return active; }
     public boolean isLocked() { return locked; }
     public boolean isForceChangePassword() { return forceChangePassword; }
     /** INTERNAL or PORTAL; null (pre-userType serialized principals) reads as INTERNAL. */
     public String getUserType() { return userType == null ? "INTERNAL" : userType; }
+
+    /**
+     * Whether this user has a local password credential (internal login) rather than a
+     * federated or passwordless sign-in. Fixed at construction, so it still answers after
+     * {@link #eraseCredentials()}.
+     */
+    public boolean hasLocalCredential() { return localCredential; }
+
+    /** Clears the password hash. Called by {@code ProviderManager} after authentication. */
+    @Override
+    public void eraseCredentials() {
+        this.passwordHash = null;
+    }
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

@@ -126,9 +126,9 @@ public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingCo
             if (userDetails.getProfileName() != null) {
                 claims.put("profile_name", userDetails.getProfileName());
             }
-            // Indicate whether this user authenticated via internal login or SSO
-            String authMethod = (userDetails.getPassword() == null || userDetails.getPassword().isEmpty())
-                    ? "sso" : "internal";
+            // Indicate whether this user authenticated via internal login or SSO. Not derived
+            // from getPassword(): the hash is erased from the principal after authentication.
+            String authMethod = userDetails.hasLocalCredential() ? "internal" : "sso";
             claims.put("auth_method", authMethod);
 
             if (app != null) {

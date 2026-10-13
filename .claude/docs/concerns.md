@@ -330,6 +330,11 @@ between history rows and an under-privileged caller; treat changes to either as 
   enable it broadly (per-record cap, age-based purge). v1 limits: DELETED version's `changed_by`
   is the last updater (no principal reaches `QueryEngine.delete`); historical lookup ids render
   raw.
+- **`oauth2_authorization` has no retention.** Spring Authorization Server never deletes a row
+  when its tokens expire or are revoked (it only updates the row), and nothing in kelta-auth
+  sweeps the table; the only delete is `BaselineAdminPasswordInitializer`'s one-account cleanup.
+  Every sign-in adds a row (principal + attributes as text). A sweep would delete rows whose
+  code, access, refresh and ID tokens have all expired.
 - **Flow/job logs — `FlowLogRetentionSweep` is DRY-RUN by default**
   (`kelta.flow.retention.dry-run:true`), so in any environment left in dry-run `flow_execution`,
   `flow_step_log`, `flow_pending_resume` and `job_execution_log` still grow without bound. When
@@ -791,6 +796,7 @@ One line each; full write-ups are in git history.
 
 **Security**
 - 2026-10-12 (span-body-redaction) — the gateway recorded JSON request/response bodies as span attributes unredacted; both gateway and worker now use the shared `SensitiveBodyRedactor` (runtime-jsonapi: secret-named keys at any depth, PAT/JWT-shaped values, redact before truncate, no content captured for non-JSON/invalid JSON or `credentials` paths). Bodies captured before the fix remain in trace storage until retention expires.
+- 2026-10-12 (auth-principal-erase-credentials) — erase credentials from the authenticated principal: `KeltaUserDetails` is a `CredentialsContainer`, so `ProviderManager` clears the password hash after authentication; `KeltaUserDetailsMixin` never writes it to the authorization store and reads stored rows that still carry it without keeping it. `auth_method` reads `hasLocalCredential()`, not the hash.
 - 2026-10-12 — child-resource routes verify parent ownership and apply top-level tenant visibility; get-by-id applies the shared-system-row restriction (`RecordTenantScope.findChild`/`visibleToTenant`).
 - PLT-260 (2026-09-17) — direct `queryEngine` callers read system collections across tenants; scoping moved into `PhysicalTableStorageAdapter.query()`.
 - PLT-354 (2026-10-05) — anonymous no-tenant reads returned several tenants' rows; now `WHERE FALSE` (`refusesAnonymousRead`).
