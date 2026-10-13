@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.postgresql.util.PGobject;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.*;
@@ -47,6 +48,7 @@ class PackageRoundTripTest {
     private QueryEngine queryEngine;
     private JdbcTemplate importJdbc;
     private PackageImportService importService;
+    private DashboardTreeService dashboardTreeService;
 
     /** Every create the importer made, in order: system collection → written record. */
     private List<Map.Entry<String, Map<String, Object>>> creates;
@@ -82,8 +84,15 @@ class PackageRoundTripTest {
             return Map.of("id", id);
         });
 
+        dashboardTreeService = mock(DashboardTreeService.class);
+        when(dashboardTreeService.applyTree(anyString(), anyMap())).thenAnswer(inv ->
+                new DashboardTreeService.ApplyResult("tgt-dashboard-" + inv.getArgument(0),
+                        inv.getArgument(0), new DashboardTreeService.TreeCounts(1, 0, 0, 0)));
+
         importService = new PackageImportService(queryEngine, registry, importRepository,
-                new ObjectMapper(), (identifier, tenantId) -> identifier);
+                new ObjectMapper(), (identifier, tenantId) -> identifier, dashboardTreeService,
+                new DashboardComponentValidator(registry, mock(CollectionLifecycleManager.class), queryEngine),
+                mock(PlatformTransactionManager.class));
     }
 
     // ------------------------------------------------------------------
@@ -109,6 +118,8 @@ class PackageRoundTripTest {
         when(exportRepository.findAllIds("page_layout", SOURCE)).thenReturn(List.of("src-layout"));
         when(exportRepository.findAllIds("validation_rule", SOURCE)).thenReturn(List.of("src-rule"));
         when(exportRepository.findAllIds("global_picklist", SOURCE)).thenReturn(List.of("src-picklist"));
+        when(exportRepository.findAllIds("list_view", SOURCE)).thenReturn(List.of("src-view"));
+        when(exportRepository.findAllIds("dashboard", SOURCE)).thenReturn(List.of("src-dash"));
 
         when(exportRepository.findCollectionsByIds(SOURCE, collectionIds)).thenReturn(List.of(
                 row("id", "src-orders", "name", "orders", "display_name", "Orders", "active", true),
@@ -166,6 +177,22 @@ class PackageRoundTripTest {
                         "display_order", 1, "active", true),
                 row("id", "src-group", "menu_id", "src-menu", "menu_name", "main", "label", "Sales",
                         "display_order", 0, "active", true)));
+        when(exportRepository.findListViewsByIds(SOURCE, List.of("src-view"))).thenReturn(List.of(
+                row("id", "src-view", "collection_id", "src-orders", "collection_name", "orders",
+                        "name", "Open orders", "visibility", "PUBLIC", "is_default", false,
+                        "columns", List.of("status", "stage"),
+                        "filters", List.of(Map.of("field", "status", "operator", "eq", "value", "draft")),
+                        "sort_field", "status", "sort_direction", "DESC", "row_limit", 25,
+                        "view_type", "TABLE", "created_by", "src-user")));
+        when(exportRepository.findDashboardsByIds(SOURCE, List.of("src-dash"))).thenReturn(List.of(
+                row("id", "src-dash", "name", "Order health", "description", "Orders by status",
+                        "access_level", "PUBLIC", "is_dynamic", false, "column_count", 2,
+                        "running_user_id", "src-user", "created_by", "src-user")));
+        when(exportRepository.findDashboardComponentsByDashboardIds(SOURCE, List.of("src-dash"))).thenReturn(List.of(
+                row("id", "src-widget", "dashboard_id", "src-dash", "report_id", "src-report",
+                        "component_type", "chart", "title", "By status", "column_position", 1,
+                        "row_position", 1, "column_span", 2, "row_span", 1, "sort_order", 0,
+                        "config", Map.of("groupByField", "status"))));
     }
 
     @SuppressWarnings("unchecked")
@@ -177,16 +204,19 @@ class PackageRoundTripTest {
     // ------------------------------------------------------------------
 
     @Test
-    @DisplayName("a whole-tenant export carries at least one item of every supported type")
+    @DisplayName("a whole-tenant export carries at least one item of every supported type, and never seed records")
     void wholeTenantExportCoversEveryType() {
         var byType = new LinkedHashMap<String, Integer>();
         for (var item : exportItems()) {
             byType.merge((String) item.get("type"), 1, Integer::sum);
         }
 
-        assertThat(byType.keySet()).containsExactlyInAnyOrderElementsOf(
-                PackageImportService.supportedTypes());
+        List<String> itemTypes = PackageImportService.supportedTypes().stream()
+                .filter(type -> !"RECORD".equals(type))
+                .toList();
+        assertThat(byType.keySet()).containsExactlyInAnyOrderElementsOf(itemTypes);
         assertThat(byType.values()).allSatisfy(count -> assertThat(count).isPositive());
+        assertThat(packageService.exportPackage(SOURCE, Map.of(), false)).doesNotContainKey("records");
     }
 
     @Test
@@ -195,6 +225,9 @@ class PackageRoundTripTest {
     void exportedColumnsAllSurviveTheImport() {
         for (var item : exportItems()) {
             String type = (String) item.get("type");
+            if ("DASHBOARD".equals(type)) {
+                continue; // a dashboard tree document, not table columns — dashboardTreeRoundTrips
+            }
             CollectionDefinition def = SystemCollectionDefinitions.byName()
                     .get(PackageImportService.systemCollectionFor(type));
             Set<String> storable = new HashSet<>();
@@ -240,6 +273,41 @@ class PackageRoundTripTest {
         Map<String, Object> child = written("ui-menu-items", r -> "Orders".equals(r.get("label")));
         assertThat(child.get("parentId"))
                 .isEqualTo(createdIds.get(written("ui-menu-items", r -> "Sales".equals(r.get("label")))));
+    }
+
+    @Test
+    @DisplayName("list views and dashboards round-trip: export → apply writes what the source holds")
+    @SuppressWarnings("unchecked")
+    void listViewsAndDashboardsRoundTrip() {
+        var report = importService.importPackage(TARGET, Map.of("items", exportItems()),
+                PackageImportService.ImportOptions.defaults());
+        assertThat(report.failed()).as("%s", report.items()).isZero();
+
+        Map<String, Object> view = written("list-views");
+        assertThat(view)
+                .containsEntry("collectionId", idOf("collections", "orders"))
+                .containsEntry("name", "Open orders")
+                .containsEntry("visibility", "PUBLIC")
+                .containsEntry("columns", List.of("status", "stage"))
+                .containsEntry("filters", List.of(Map.of("field", "status", "operator", "eq", "value", "draft")))
+                .containsEntry("sortField", "status")
+                .containsEntry("sortDirection", "DESC")
+                .containsEntry("rowLimit", 25)
+                .containsEntry("viewType", "TABLE")
+                .doesNotContainKeys("createdBy", "id");
+
+        var tree = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(dashboardTreeService).applyTree(eq("Order health"), tree.capture());
+        Map<String, Object> applied = tree.getValue();
+        assertThat(applied)
+                .containsEntry("description", "Orders by status")
+                .containsEntry("accessLevel", "PUBLIC")
+                .containsEntry("columnCount", 2)
+                .containsEntry("dynamic", false)
+                .doesNotContainKeys("runningUserId", "name", "id");
+        assertThat((List<Map<String, Object>>) applied.get("components")).containsExactly(Map.of(
+                "title", "By status", "componentType", "chart", "columnPosition", 1, "rowPosition", 1,
+                "columnSpan", 2, "rowSpan", 1, "config", Map.of("groupByField", "status")));
     }
 
     @Test
@@ -364,6 +432,14 @@ class PackageRoundTripTest {
                 r -> row("id", createdIds.get(r), "name", r.get("name"), "path", r.get("path")));
         seed("FROM ui_menu WHERE", "ui-menus",
                 r -> row("id", createdIds.get(r), "name", r.get("name")));
+        seed("FROM list_view lv", "list-views",
+                r -> row("id", createdIds.get(r), "name", r.get("name"),
+                        "coll", nameOf("collections", r.get("collectionId"))));
+        when(importJdbc.queryForList(contains("FROM dashboard WHERE"), eq(TARGET))).thenReturn(
+                mockingDetails(dashboardTreeService).getInvocations().stream()
+                        .filter(inv -> inv.getMethod().getName().equals("applyTree"))
+                        .map(inv -> row("id", "tgt-dashboard-" + inv.getArgument(0), "name", inv.getArgument(0)))
+                        .toList());
         seed("FROM ui_menu_item mi", "ui-menu-items",
                 r -> row("id", createdIds.get(r), "label", r.get("label"),
                         "parent_label", nameOf("ui-menu-items", r.get("parentId"), "label"),

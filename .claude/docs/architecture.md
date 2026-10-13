@@ -988,6 +988,62 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   tenant whose collections had a `displayFieldId` set failed the whole `COLLECTION` item with
   `Referenced record ... does not exist in collection 'fields'`, which cascaded into `FIELD`
   imports failing too (`Collection not found in target`, since the collection was never created).
+- **Package item types, list views, dashboards and the `records` section (2026-10-13, KLT-585):**
+  `PackageImportService.TYPE_ORDER` is `COLLECTION, GLOBAL_PICKLIST, FIELD, PICKLIST_VALUE,
+  VALIDATION_RULE, PAGE_LAYOUT, LAYOUT_SECTION, LAYOUT_FIELD, LAYOUT_RELATED_LIST, FLOW, UI_PAGE,
+  UI_MENU, UI_MENU_ITEM, LIST_VIEW, DASHBOARD, RECORD`. Whatever order a package lists its items in,
+  they are applied in this order.
+  - `LIST_VIEW`: an exported `list_view` row plus `collection_name`. Its natural key is
+    `<collection_name>:<name>`, the same key `kelta list-views apply` and MCP `apply_listview` use.
+    It goes through `upsertViaEngine` like any other collection child, so `ListViewConfigHook`
+    validates it. A view on a platform system collection (e.g. `users`) resolves to that global row.
+  - `DASHBOARD`: the `PUT /api/dashboards/{name}/tree` document, keyed on `name`:
+    `{name, description?, accessLevel?, columnCount?, dynamic?, components: [{title, componentType,
+    columnPosition, rowPosition, columnSpan?, rowSpan?, config}]}`. It is what `kelta dashboards
+    apply` takes. Before anything is written, every widget runs through
+    `DashboardComponentValidator`, and one invalid widget fails the whole dashboard with the
+    validator's messages. The tree is then applied in one transaction through
+    `DashboardTreeService.applyTree`, which matches widgets on `title` (and under OVERWRITE
+    removes any widget missing from the item). Some values are not exported: `runningUserId` (a
+    source-tenant user) and a widget's `reportId` (a source-tenant report). An untitled widget is
+    exported as `<componentType> <n>`.
+  - With SKIP (the default), an existing list view or dashboard is reported `SKIPPED` and left
+    untouched. Re-applying a package therefore creates no duplicates.
+  - Export (`PackageService`): a whole-tenant export (`exportAllOptions`) carries every list view
+    and dashboard (`listViewIds`/`dashboardIds`). A `collectionNames` export adds the named
+    collections' list views (`findListViewIdsByCollectionIds`) and every dashboard with a widget
+    whose `config.collectionName` is one of them (`findDashboardIdsByComponentCollections`).
+    `excludeTypes` (`kelta metadata export --exclude list-view,dashboard`) empties the id list of
+    each named type. The excludable types are `LIST_VIEW`, `DASHBOARD`, `FLOW`, `PAGE_LAYOUT`,
+    `VALIDATION_RULE`, `UI_PAGE` and `UI_MENU`. Seed records are **never** exported.
+  - `RECORD` is the optional top-level `records` array, not an `items` entry. It is applied last,
+    after the display-field/ownership second pass:
+
+    ```json
+    "records": [
+      { "collection": "accounts", "key": ["name"],
+        "rows": [{ "name": "Acme", "industry": "Tech" }] },
+      { "collection": "contacts", "key": ["email"],
+        "references": { "account": { "collection": "accounts", "field": "name" } },
+        "rows": [{ "email": "ada@acme.io", "account": "Acme" }] }
+    ]
+    ```
+
+    Sections run in array order, so put parents first. `references` replaces a row's value with
+    the id of the one parent record whose `field` equals it; zero or several matches fail the
+    row. A row whose `key` fields already match a record (`QueryEngine` equality query) is
+    reported `SKIPPED` with that record's id. Re-applying the package therefore skips the rows
+    instead of hitting a unique violation. Seeds are insert-only: OVERWRITE never updates a
+    record.
+  - The remaining rows of a section are inserted as **one** `AtomicOperationExecutor` batch (the
+    `records bulk` / `POST /api/operations` write path) in its own `TransactionTemplate`, so a
+    section writes all of its new rows or none. A failed write or an invalid row marks every
+    pending row of the section `FAILED`. Report items are `type=RECORD` with
+    `naturalKey=<collection>:<field>=<value>,…`. `kelta metadata apply` prints per-type counts.
+  - A dry run writes nothing and opens no transaction. It does not validate widgets or look up
+    seed rows on a collection that the same dry run would create.
+  - Sandbox clone and promotion share this path, so a sandbox now gets the parent's list views and
+    dashboards too.
 
 **Worker-side system-permission check — how (use the existing pattern, don't reinvent):**
 - Enforce a specific system permission **in the controller/service** with a DB lookup against

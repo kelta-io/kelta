@@ -128,12 +128,47 @@ class PackageRepositoryTest {
     }
 
     @Test
+    @DisplayName("Collection-scoped export finds list views by collection id and dashboards by widget collection")
+    void findsListViewsAndDashboards() {
+        repository.findListViewIdsByCollectionIds("t1", List.of("c1"));
+        assertThat(capturedIdSql("t1", "c1"))
+                .isEqualTo("SELECT id FROM list_view WHERE tenant_id = ? AND collection_id IN (?)");
+
+        reset(jdbcTemplate);
+        repository.findDashboardIdsByComponentCollections("t1", List.of("sites", "inspections"));
+        assertThat(capturedIdSql("t1", "sites", "inspections"))
+                .contains("JOIN dashboard_component dc ON dc.dashboard_id = d.id")
+                .contains("WHERE d.tenant_id = ? AND dc.config->>'collectionName' IN (?,?)");
+    }
+
+    @Test
+    @DisplayName("List view export carries the owning collection's name; widgets come in display order")
+    void listViewAndWidgetExportQueries() {
+        repository.findListViewsByIds("t1", List.of("lv1"));
+        repository.findDashboardComponentsByDashboardIds("t1", List.of("d1"));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate, times(2)).queryForList(sql.capture(), any(Object[].class));
+        assertThat(sql.getAllValues().get(0))
+                .contains("SELECT lv.*, c.name AS collection_name FROM list_view lv")
+                .contains("WHERE lv.tenant_id = ? AND lv.id IN (?)");
+        assertThat(sql.getAllValues().get(1))
+                .contains("FROM dashboard_component WHERE tenant_id = ? AND dashboard_id IN (?)")
+                .endsWith("ORDER BY sort_order, id");
+    }
+
+    @Test
     @DisplayName("Collection-scoped lookups skip the query for an empty list")
     void collectionScopedLookupsSkipEmptyLists() {
         assertThat(repository.findValidationRuleIdsByCollectionIds("t1", List.of())).isEmpty();
         assertThat(repository.findPageLayoutIdsByCollectionIds("t1", List.of())).isEmpty();
         assertThat(repository.findFlowIdsByTriggerCollections("t1", List.of())).isEmpty();
         assertThat(repository.findGlobalPicklistIdsReferencedByCollections("t1", List.of())).isEmpty();
+        assertThat(repository.findListViewIdsByCollectionIds("t1", List.of())).isEmpty();
+        assertThat(repository.findDashboardIdsByComponentCollections("t1", List.of())).isEmpty();
+        assertThat(repository.findListViewsByIds("t1", List.of())).isEmpty();
+        assertThat(repository.findDashboardsByIds("t1", List.of())).isEmpty();
+        assertThat(repository.findDashboardComponentsByDashboardIds("t1", List.of())).isEmpty();
         verifyNoInteractions(jdbcTemplate);
     }
 

@@ -368,6 +368,48 @@ public class PackageRepository {
         );
     }
 
+    /** List views enriched with the owning collection's name (natural-key remap on import). */
+    public List<Map<String, Object>> findListViewsByIds(String tenantId, List<String> ids) {
+        if (ids.isEmpty()) return List.of();
+        String placeholders = String.join(",", ids.stream().map(i -> "?").toList());
+        Object[] params = new Object[ids.size() + 1];
+        params[0] = tenantId;
+        for (int i = 0; i < ids.size(); i++) params[i + 1] = ids.get(i);
+        return jdbcTemplate.queryForList(
+                "SELECT lv.*, c.name AS collection_name FROM list_view lv " +
+                        "JOIN collection c ON lv.collection_id = c.id " +
+                        "WHERE lv.tenant_id = ? AND lv.id IN (" + placeholders + ") " +
+                        "ORDER BY c.name, lv.name",
+                params
+        );
+    }
+
+    public List<Map<String, Object>> findDashboardsByIds(String tenantId, List<String> ids) {
+        if (ids.isEmpty()) return List.of();
+        String placeholders = String.join(",", ids.stream().map(i -> "?").toList());
+        Object[] params = new Object[ids.size() + 1];
+        params[0] = tenantId;
+        for (int i = 0; i < ids.size(); i++) params[i + 1] = ids.get(i);
+        return jdbcTemplate.queryForList(
+                "SELECT * FROM dashboard WHERE tenant_id = ? AND id IN (" + placeholders + ") ORDER BY name",
+                params
+        );
+    }
+
+    /** Widgets of the dashboards, in each dashboard's display order. */
+    public List<Map<String, Object>> findDashboardComponentsByDashboardIds(String tenantId, List<String> dashboardIds) {
+        if (dashboardIds.isEmpty()) return List.of();
+        String placeholders = String.join(",", dashboardIds.stream().map(i -> "?").toList());
+        Object[] params = new Object[dashboardIds.size() + 1];
+        params[0] = tenantId;
+        for (int i = 0; i < dashboardIds.size(); i++) params[i + 1] = dashboardIds.get(i);
+        return jdbcTemplate.queryForList(
+                "SELECT * FROM dashboard_component WHERE tenant_id = ? " +
+                        "AND dashboard_id IN (" + placeholders + ") ORDER BY sort_order, id",
+                params
+        );
+    }
+
     // ------------------------------------------------------------------
     // Collection-scoped export: what hangs off a set of collections
     // ------------------------------------------------------------------
@@ -380,6 +422,18 @@ public class PackageRepository {
     public List<String> findPageLayoutIdsByCollectionIds(String tenantId, List<String> collectionIds) {
         return findIdsIn("SELECT id FROM page_layout WHERE tenant_id = ? AND collection_id IN (%s)",
                 tenantId, collectionIds);
+    }
+
+    public List<String> findListViewIdsByCollectionIds(String tenantId, List<String> collectionIds) {
+        return findIdsIn("SELECT id FROM list_view WHERE tenant_id = ? AND collection_id IN (%s)",
+                tenantId, collectionIds);
+    }
+
+    /** Dashboards with at least one widget whose {@code config.collectionName} names one of the collections. */
+    public List<String> findDashboardIdsByComponentCollections(String tenantId, List<String> collectionNames) {
+        return findIdsIn("SELECT DISTINCT d.id FROM dashboard d "
+                + "JOIN dashboard_component dc ON dc.dashboard_id = d.id "
+                + "WHERE d.tenant_id = ? AND dc.config->>'collectionName' IN (%s)", tenantId, collectionNames);
     }
 
     /** Flows whose {@code trigger_config.collection} names one of the collections. */

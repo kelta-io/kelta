@@ -844,9 +844,12 @@ environments as **metadata packages** (`PackageService` export → `PackageImpor
   never resolves to a system row.
   Importers accept v1 packages (minus the new types).
 - **Types** (`PackageImportService.supportedTypes()`, applied in this order): `COLLECTION`,
-  `FIELD`, `GLOBAL_PICKLIST`, `PICKLIST_VALUE`, `VALIDATION_RULE`, `PAGE_LAYOUT`,
+  `GLOBAL_PICKLIST`, `FIELD`, `PICKLIST_VALUE`, `VALIDATION_RULE`, `PAGE_LAYOUT`,
   `LAYOUT_SECTION`, `LAYOUT_FIELD`, `LAYOUT_RELATED_LIST`, `FLOW`, `UI_PAGE`, `UI_MENU`,
-  `UI_MENU_ITEM`. Natural keys: related lists are
+  `UI_MENU_ITEM`, `LIST_VIEW`, `DASHBOARD`, then `RECORD` — the optional top-level `records`
+  seed section (never exported). The list view / dashboard / records formats are documented in
+  `architecture.md` → "Package item types, list views, dashboards and the `records` section".
+  Natural keys: related lists are
   `collection:layout:relatedCollection:relationshipField`, menu items are
   `menu:parentLabel:label` (empty parent segment at the top level). A menu item's `parent_id`
   is a *source* id — the importer orders parents first and remaps it through the ids the
