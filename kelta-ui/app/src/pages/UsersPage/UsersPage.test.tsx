@@ -31,8 +31,6 @@ vi.mock('../../hooks/useDelegatedAdmin', () => ({
   useDelegatedAdmin: () => delegatedReturn,
 }))
 
-vi.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: vi.fn() }) }))
-
 const sonnerToast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 vi.mock('sonner', () => ({ toast: sonnerToast }))
 
