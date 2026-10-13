@@ -71,6 +71,19 @@ Cross-cutting (off main path): `ObservabilityContextFilter (-90)`, `HttpBodyCapt
 resolution is done by `IncludeResolver` (`jsonapi` package), not a numbered filter; read-side
 FLS is enforced in the worker (`CerbosFieldSecurityAdvice`), not the gateway.
 
+**Span body capture.** `HttpBodyCaptureFilter` (gateway) and `SpanBodyEnrichmentFilter` (worker)
+record `http.request.body` / `http.response.body` span attributes for JSON bodies only, after
+`SensitiveBodyRedactor` (runtime-jsonapi) has redacted them: string values under a key that
+contains `password`/`secret`/`token`/`apikey`/`authorization`/`creditcard`/`privatekey`/`cookie`
+(or is exactly `ssn`), at any depth and after separators are ignored (`client_secret`, `x-api-key`),
+plus PAT- and JWT-shaped values under any key. Redaction runs before truncation (gateway 32 KB,
+worker `kelta.observability.request-logging.max-body-size`). Non-JSON bodies, invalid JSON and any
+path with a `credentials` segment have no content captured (the gateway records their size as
+`*.body.size`); a worker request body over the cache limit is cut by the servlet cache, so it
+is not valid JSON and is not captured either. New endpoints that accept secrets under a generic
+key (`value`, `data`) must add a path segment to `SensitiveBodyRedactor.SENSITIVE_PATH_SEGMENTS`
+or use a secret-named key.
+
 ### Public root endpoints (PLT-350)
 
 Two paths are answered by the gateway itself on every host, with no tenant and no auth — they

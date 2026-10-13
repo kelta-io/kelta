@@ -1,5 +1,12 @@
 package io.kelta.gateway.filter;
 
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.sdk.trace.ReadableSpan;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -10,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -24,6 +32,7 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -338,5 +347,152 @@ class HttpBodyCaptureFilterTest {
                     .expectError(RuntimeException.class)
                     .verify();
         }
+    }
+
+    @Nested
+    @DisplayName("Span attributes never carry sensitive values")
+    class SpanRedaction {
+
+        // Token-shaped fixtures built at runtime so the source never holds a literal token.
+        private static final String PAT = "klt_" + "AbCdEf0123456789xyz";
+        private static final String JWT = "eyJ" + "hbGciOiJIUzI1NiJ9" + ".eyJ" + "zdWIiOiJ1c2VyIn0"
+                + ".c2lnbmF0dXJlLXZhbHVl";
+
+        private SdkTracerProvider tracerProvider;
+        private Span span;
+        private Scope scope;
+
+        @BeforeEach
+        void startSpan() {
+            tracerProvider = SdkTracerProvider.builder().build();
+            span = tracerProvider.get("test").spanBuilder("request").startSpan();
+            scope = span.makeCurrent();
+        }
+
+        @AfterEach
+        void endSpan() {
+            scope.close();
+            span.end();
+            tracerProvider.close();
+        }
+
+        private Attributes attributes() {
+            return ((ReadableSpan) span).toSpanData().getAttributes();
+        }
+
+        private String attr(String key) {
+            return attributes().get(AttributeKey.stringKey(key));
+        }
+
+        /** Chain stub that reads the forwarded request body, then writes {@code responseBody}. */
+        private void chainEchoing(AtomicReference<String> forwarded, MediaType responseType, String responseBody) {
+            when(filterChain.filter(any(ServerWebExchange.class))).thenAnswer(invocation -> {
+                ServerWebExchange ex = invocation.getArgument(0);
+                return readAll(ex.getRequest().getBody())
+                        .doOnNext(forwarded::set)
+                        .then(Mono.defer(() -> {
+                            ServerHttpResponse response = ex.getResponse();
+                            response.setStatusCode(HttpStatus.OK);
+                            response.getHeaders().setContentType(responseType);
+                            DataBuffer buffer = new DefaultDataBufferFactory()
+                                    .wrap(responseBody.getBytes(StandardCharsets.UTF_8));
+                            return response.writeWith(Mono.just(buffer));
+                        }));
+            });
+        }
+
+        @Test
+        @DisplayName("redacts secrets in captured JSON request and response bodies, forwards originals")
+        void redactsJsonBodies() {
+            String requestJson = "{\"data\":{\"attributes\":{\"name\":\"idp\",\"clientSecret\":\"req-secret-1\","
+                    + "\"nested\":[{\"password\":\"req-secret-2\"}],\"note\":\"" + PAT + "\"}}}";
+            String responseJson = "{\"access_token\":\"resp-secret-1\",\"refreshToken\":\"resp-secret-2\","
+                    + "\"id\":\"keep-me\",\"link\":\"Bearer " + JWT + "\"}";
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
+                    .post("/api/oidc-providers")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(requestJson));
+            AtomicReference<String> forwarded = new AtomicReference<>();
+            chainEchoing(forwarded, MediaType.APPLICATION_JSON, responseJson);
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            // Downstream receives the untouched body.
+            assertThat(forwarded.get()).isEqualTo(requestJson);
+
+            String capturedRequest = attr("http.request.body");
+            String capturedResponse = attr("http.response.body");
+            assertThat(capturedRequest).contains("\"name\":\"idp\"", "\"clientSecret\":\"[REDACTED]\"")
+                    .doesNotContain("req-secret-1", "req-secret-2", PAT);
+            assertThat(capturedResponse).contains("\"id\":\"keep-me\"", "\"access_token\":\"[REDACTED]\"")
+                    .doesNotContain("resp-secret-1", "resp-secret-2", JWT);
+            assertThat(attributes().get(AttributeKey.longKey("http.request.body.size")))
+                    .isEqualTo((long) requestJson.length());
+
+            // No attribute anywhere on the span holds a secret.
+            assertThat(attributes().asMap().values()).allSatisfy(v -> assertThat(String.valueOf(v))
+                    .doesNotContain("req-secret", "resp-secret", PAT, JWT));
+        }
+
+        @Test
+        @DisplayName("non-JSON and invalid JSON bodies are recorded by size only")
+        void nonJsonSizeOnly() {
+            String form = "username=a&password=req-secret-1";
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
+                    .post("/api/login")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .contentLength(form.length())
+                    .body(form));
+            chainEchoing(new AtomicReference<>(), MediaType.APPLICATION_JSON, "{\"token\":\"resp-secret-1\"");
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            assertThat(attr("http.request.body")).isNull();
+            assertThat(attr("http.response.body")).isNull();
+            assertThat(attributes().get(AttributeKey.longKey("http.request.body.size")))
+                    .isEqualTo((long) form.length());
+            assertThat(attributes().get(AttributeKey.longKey("http.response.body.size"))).isPositive();
+        }
+
+        @Test
+        @DisplayName("bodies on sensitive paths are never captured")
+        void sensitivePathNotCaptured() {
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
+                    .post("/api/credentials")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"type\":\"api_key\",\"value\":\"req-secret-1\"}"));
+            chainEchoing(new AtomicReference<>(), MediaType.APPLICATION_JSON, "{\"value\":\"resp-secret-1\"}");
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            assertThat(attr("http.request.body")).isNull();
+            assertThat(attr("http.response.body")).isNull();
+        }
+
+        @Test
+        @DisplayName("redacts before truncating a large response")
+        void truncatesAfterRedaction() {
+            String pad = "x".repeat(HttpBodyCaptureFilter.MAX_BODY_SIZE - 30);
+            String responseJson = "{\"pad\":\"" + pad + "\",\"secret\":\"" + "S".repeat(200) + "\"}";
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/things"));
+            chainEchoing(new AtomicReference<>(), MediaType.APPLICATION_JSON, responseJson);
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            assertThat(attr("http.response.body")).hasSizeLessThanOrEqualTo(HttpBodyCaptureFilter.MAX_BODY_SIZE)
+                    .doesNotContain("SSSS");
+            assertThat(attributes().get(AttributeKey.booleanKey("http.response.body.truncated"))).isTrue();
+        }
+    }
+
+    /** Joins a body publisher into a UTF-8 string. */
+    private static Mono<String> readAll(Flux<DataBuffer> body) {
+        return DataBufferUtils.join(body)
+                .map(buffer -> {
+                    String text = buffer.toString(StandardCharsets.UTF_8);
+                    DataBufferUtils.release(buffer);
+                    return text;
+                })
+                .defaultIfEmpty("");
     }
 }

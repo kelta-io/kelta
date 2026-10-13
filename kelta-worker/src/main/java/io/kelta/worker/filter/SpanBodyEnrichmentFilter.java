@@ -1,5 +1,6 @@
 package io.kelta.worker.filter;
 
+import io.kelta.jsonapi.SensitiveBodyRedactor;
 import io.kelta.worker.interceptor.SpanIdCaptureInterceptor;
 import io.opentelemetry.api.trace.Span;
 import jakarta.servlet.FilterChain;
@@ -17,13 +18,15 @@ import org.springframework.web.util.ContentCachingRequestWrapper;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * Captures request/response bodies and enriches OTEL span attributes.
  * Request/response payloads are logged at DEBUG level for troubleshooting.
+ *
+ * <p>Only JSON bodies are captured, and only after {@link SensitiveBodyRedactor} has redacted
+ * sensitive values (redaction runs before truncation). Non-JSON bodies, invalid JSON, and bodies on
+ * {@link SensitiveBodyRedactor#isSensitivePath sensitive paths} are not captured.
  */
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE - 1)
@@ -33,16 +36,6 @@ public class SpanBodyEnrichmentFilter extends OncePerRequestFilter {
 
     private static final Set<String> EXCLUDE_PREFIXES = Set.of(
             "/actuator", "/health"
-    );
-
-    /**
-     * A JSON string member whose key names secret material: any key <em>containing</em> one of the
-     * words (so {@code clientSecret}, {@code newPassword}, {@code accessToken} are covered, not just
-     * the bare words), or exactly {@code ssn}. The value pattern honours escaped quotes.
-     */
-    static final Pattern SENSITIVE_FIELD_PATTERN = Pattern.compile(
-            "(\"(?:[^\"\\\\]*(?:password|secret|token|apikey|api_key|creditcard|credit_card|authorization)[^\"\\\\]*|ssn)\"\\s*:\\s*)\"(?:[^\"\\\\]|\\\\.)*\"",
-            Pattern.CASE_INSENSITIVE
     );
 
     @Value("${kelta.observability.request-logging.max-body-size:16384}")
@@ -71,9 +64,12 @@ public class SpanBodyEnrichmentFilter extends OncePerRequestFilter {
     }
 
     private void captureData(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response) {
-        // Extract bodies
-        String requestBody = extractBody(request.getContentAsByteArray(), request.getContentType());
-        String responseBody = extractBody(response.getContentAsByteArray(), response.getContentType());
+        // Extract bodies (never on paths that carry secrets under generic keys)
+        boolean sensitivePath = SensitiveBodyRedactor.isSensitivePath(request.getRequestURI());
+        String requestBody = sensitivePath ? null
+                : extractBody(request.getContentAsByteArray(), request.getContentType(), maxBodySize);
+        String responseBody = sensitivePath ? null
+                : extractBody(response.getContentAsByteArray(), response.getContentType(), maxBodySize);
 
         // Extract context from headers
         String tenantId = request.getHeader("X-Tenant-ID");
@@ -104,17 +100,17 @@ public class SpanBodyEnrichmentFilter extends OncePerRequestFilter {
         }
     }
 
-    private String extractBody(byte[] content, String contentType) {
-        if (content == null || content.length == 0) {
+    /**
+     * Returns the redacted, truncated JSON body, or {@code null} when the body is empty, not JSON,
+     * or not valid JSON. Redaction runs before truncation, so a cut never exposes part of a secret.
+     */
+    static String extractBody(byte[] content, String contentType, int maxBodySize) {
+        if (content == null || content.length == 0 || contentType == null || !contentType.contains("json")) {
             return null;
         }
-        // Capture JSON-like content types
-        if (contentType != null && (contentType.contains("json") || contentType.contains("text"))) {
-            String body = new String(content, StandardCharsets.UTF_8);
-            // Redact before truncating: a cut inside a secret value would leave it unmatched.
-            return truncate(sanitize(body));
-        }
-        return null;
+        return SensitiveBodyRedactor.redactJson(content, maxBodySize)
+                .map(r -> r.truncated() ? r.body() + "...[truncated]" : r.body())
+                .orElse(null);
     }
 
     private void enrichSpan(String requestBody, String responseBody,
@@ -138,16 +134,5 @@ public class SpanBodyEnrichmentFilter extends OncePerRequestFilter {
 
     private boolean shouldExclude(String path) {
         return EXCLUDE_PREFIXES.stream().anyMatch(path::startsWith);
-    }
-
-    private String truncate(String body) {
-        if (body.length() > maxBodySize) {
-            return body.substring(0, maxBodySize) + "...[truncated]";
-        }
-        return body;
-    }
-
-    static String sanitize(String body) {
-        return SENSITIVE_FIELD_PATTERN.matcher(body).replaceAll("$1\"[REDACTED]\"");
     }
 }
