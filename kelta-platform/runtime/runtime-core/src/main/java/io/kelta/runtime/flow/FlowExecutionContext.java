@@ -21,6 +21,7 @@ public class FlowExecutionContext {
     private final FlowDefinition definition;
     private final Instant startedAt;
     private final int invokeDepth;
+    private final FlowStepLogging stepLogging;
     private final List<CaughtError> caughtErrors = new ArrayList<>();
 
     private Map<String, Object> stateData;
@@ -44,6 +45,14 @@ public class FlowExecutionContext {
                                 String userId, FlowDefinition definition,
                                 Map<String, Object> initialState,
                                 int invokeDepth) {
+        this(executionId, tenantId, flowId, userId, definition, initialState, invokeDepth,
+            FlowStepLogging.FULL);
+    }
+
+    public FlowExecutionContext(String executionId, String tenantId, String flowId,
+                                String userId, FlowDefinition definition,
+                                Map<String, Object> initialState,
+                                int invokeDepth, FlowStepLogging stepLogging) {
         this.executionId = executionId;
         this.tenantId = tenantId;
         this.flowId = flowId;
@@ -57,12 +66,14 @@ public class FlowExecutionContext {
         this.completed = false;
         this.finalStatus = null;
         this.invokeDepth = invokeDepth;
+        this.stepLogging = stepLogging != null ? stepLogging : FlowStepLogging.FULL;
     }
 
     public String executionId() { return executionId; }
     public String tenantId() { return tenantId; }
     public String flowId() { return flowId; }
     public String userId() { return userId; }
+    public FlowStepLogging stepLogging() { return stepLogging; }
     public FlowDefinition definition() { return definition; }
     public Instant startedAt() { return startedAt; }
     public String currentStateId() { return currentStateId; }

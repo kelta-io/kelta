@@ -2156,6 +2156,38 @@ that user-facing config to the `scheduled_job` table (which the
   `job_execution_log` rows (status, startedAt, completedAt, durationMs,
   errorMessage) joined via `scheduled_job` so the result is tenant-scoped.
 
+### Flow step logging level (PLT-602)
+
+Every flow row carries `step_logging` (`flows.stepLogging`, V211: `VARCHAR(20) NOT NULL DEFAULT
+'FULL'`, CHECK `FULL|ERRORS_ONLY|NONE`). It is a **column, not a definition field**: the engine
+reads it without parsing the definition, existing rows default safely, it is queryable
+(`?filter[stepLogging][eq]=FULL`), and it rides the generic paths — the `flows` system-collection
+enum (unknown value → `DefaultValidationEngine` → JSON:API 400), `SELECT *` package export and
+`mapRowToFields` import — with no per-surface code. This mirrors `run_as_user_id` (V175).
+
+- **Read**: `FlowEngine` calls `FlowStore.findStepLogging(tenantId, flowId)` once per execution —
+  in `executeFlow` (start) and `resumeExecution` — and keeps it on `FlowExecutionContext`.
+  Parallel/Map branches and `InvokeFlow` targets inherit the context's level, because their rows
+  attach to the parent execution id. `JdbcFlowStore` falls back to `FULL` on a missing row or a
+  failed read (never log less than asked). No cache, so no NATS event: a change applies from the
+  next run.
+- **Write** (`FlowEngine.runStateLoop`): `FULL` is unchanged — insert a `RUNNING` row with the
+  input snapshot at step entry, `updateStepLog` with the output after. `ERRORS_ONLY` / `NONE` hold
+  the step's input state in memory (executors copy state, never mutate it) and write **one insert
+  after the outcome is known** (`logCompletedStep`): a `FAILED` step gets its row with input and
+  output snapshots at both levels; any other step gets a snapshot-free row (state id/name/type,
+  status, duration) under `ERRORS_ONLY` and nothing under `NONE`. If an executor throws, the
+  failed row is written before rethrow. Non-FULL rows are inserted at step end, so their
+  `started_at` is the completion time.
+- **Always written**: the `flow_execution` row (create, checkpoints, status, `duration_ms`,
+  `step_count`, `error_message`) at every level; the PLT-601 snapshot cap
+  (`kelta.flow.step-log.max-snapshot-bytes`) applies to every snapshot that is written.
+- `retry?mode=from-failure` reads the last `FAILED` step's input snapshot, which every level keeps.
+- Surfaces: `/api/flows` (generic router), `kelta flows create|update --step-logging`, MCP
+  `create_flow`/`update_flow`, the designer's trigger sheet (`TriggerEditSheet`), `kelta metadata
+  export/apply`. Tests: `FlowEngineStepLoggingTest`, `FlowStepLoggingApiTest`,
+  `JdbcFlowStoreStepLoggingTest`, `PackageRoundTripTest.flowStepLoggingRoundTrips`.
+
 ## Where to Add New Code
 
 | What | Where |

@@ -41,6 +41,10 @@ public class CreateFlowTool implements AdminTool {
         properties.put("runAsUserId", Schemas.string(
                 "User UUID stamped as createdBy/updatedBy on records this flow writes when no user "
                 + "started the run (cron/NATS/webhook). Defaults to the flow owner."));
+        properties.put("stepLogging", Schemas.string(
+                "Step-log level: FULL (default; every step with input/output snapshots), ERRORS_ONLY "
+                + "(every step, snapshots only for a failed step — recommended for high-frequency or "
+                + "high-volume flows) or NONE (only a failed step's row)."));
 
         Tool tool = Tool.builder()
                 .name("create_flow")
@@ -80,6 +84,7 @@ public class CreateFlowTool implements AdminTool {
                     if (args.get("active") instanceof Boolean b) attrs.put("active", b);
                     else attrs.put("active", false);
                     if (args.get("runAsUserId") instanceof String r && !r.isBlank()) attrs.put("runAsUserId", r);
+                    if (args.get("stepLogging") instanceof String l && !l.isBlank()) attrs.put("stepLogging", l);
 
                     Map<String, Object> body = Map.of("data", Map.of(
                             "type", "flows",

@@ -153,6 +153,19 @@ public interface FlowStore {
     Optional<String> findFlowDefinitionByName(String tenantId, String flowName);
 
     /**
+     * Loads a flow's step logging level, scoped to the tenant. Read once per
+     * execution (start and resume); sub-flows and invoked flows inherit the
+     * level of the execution they log into.
+     *
+     * @param tenantId the tenant ID
+     * @param flowId   the flow ID
+     * @return the flow's level, or {@link FlowStepLogging#FULL} when unknown
+     */
+    default FlowStepLogging findStepLogging(String tenantId, String flowId) {
+        return FlowStepLogging.FULL;
+    }
+
+    /**
      * Resolves a tenant's URL slug from its ID.
      * <p>
      * Needed by code paths that enter a tenant scope from outside any request or

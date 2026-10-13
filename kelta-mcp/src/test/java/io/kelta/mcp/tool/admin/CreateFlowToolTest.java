@@ -105,4 +105,22 @@ class CreateFlowToolTest {
                 .withRequestBody(matchingJsonPath("$.data.attributes.flowType", equalTo("RECORD_TRIGGERED")))
                 .withRequestBody(notMatching("(?s).*\"triggerType\".*")));
     }
+
+    @Test
+    void passesStepLoggingThrough() {
+        wm.stubFor(post(urlEqualTo("/api/flows"))
+                .willReturn(aResponse().withStatus(201).withBody("{\"data\":{\"id\":\"f3\"}}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("create_flow", Map.of(
+                        "name", "HighVolumeIngest",
+                        "flowType", "SCHEDULED",
+                        "stepLogging", "ERRORS_ONLY",
+                        "definition", Map.of(
+                                "nodes", java.util.List.of(Map.of("type", "start")))), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/flows"))
+                .withRequestBody(matchingJsonPath("$.data.attributes.stepLogging", equalTo("ERRORS_ONLY"))));
+    }
 }

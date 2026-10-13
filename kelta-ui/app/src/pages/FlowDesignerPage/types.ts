@@ -271,6 +271,9 @@ export interface ChoiceRuleConfig {
 // Flow API response
 // ---------------------------------------------------------------------------
 
+export const STEP_LOGGING_LEVELS = ['FULL', 'ERRORS_ONLY', 'NONE'] as const
+export type StepLogging = (typeof STEP_LOGGING_LEVELS)[number]
+
 export interface Flow {
   id: string
   name: string
@@ -281,6 +284,8 @@ export interface Flow {
   triggerConfig: string | null
   /** Audit identity for userless runs (cron/NATS/webhook); null = flow owner. */
   runAsUserId?: string | null
+  /** Which step-log rows runs write; absent on older payloads means FULL. */
+  stepLogging?: StepLogging
   createdBy: string
   createdAt: string
   updatedAt: string

@@ -18,10 +18,16 @@ import {
   NatsTriggerForm,
 } from '@/components/flows'
 import { useApi } from '@/context/ApiContext'
-import type { Flow, TriggerConfig } from '../types'
+import { STEP_LOGGING_LEVELS, type Flow, type StepLogging, type TriggerConfig } from '../types'
 
 /** Sentinel for "no run-as user configured" (radix Select forbids empty values). */
 const RUN_AS_OWNER = '__owner__'
+
+const STEP_LOGGING_LABELS: Record<StepLogging, string> = {
+  FULL: 'Full — every step with input and output (default)',
+  ERRORS_ONLY: 'Errors only — every step, snapshots for failures',
+  NONE: 'None — only the failing step',
+}
 
 interface TriggerEditSheetProps {
   open: boolean
@@ -47,12 +53,14 @@ export function TriggerEditSheet({ open, onOpenChange, flow }: TriggerEditSheetP
   const initialConfig = useMemo(() => parseTriggerConfig(flow), [flow])
   const [config, setConfig] = useState<Partial<TriggerConfig>>({})
   const [runAsUserId, setRunAsUserId] = useState<string>(RUN_AS_OWNER)
+  const [stepLogging, setStepLogging] = useState<StepLogging>('FULL')
   const [initialized, setInitialized] = useState(false)
 
   // Reset config when sheet opens
   if (open && !initialized) {
     setConfig(initialConfig)
     setRunAsUserId(flow.runAsUserId ?? RUN_AS_OWNER)
+    setStepLogging(flow.stepLogging ?? 'FULL')
     setInitialized(true)
   }
   if (!open && initialized) {
@@ -88,6 +96,7 @@ export function TriggerEditSheet({ open, onOpenChange, flow }: TriggerEditSheetP
         definition,
         triggerConfig: config,
         runAsUserId: runAsUserId === RUN_AS_OWNER ? null : runAsUserId,
+        stepLogging,
       })
     },
     onSuccess: () => {
@@ -133,6 +142,29 @@ export function TriggerEditSheet({ open, onOpenChange, flow }: TriggerEditSheetP
             <p className="text-xs text-muted-foreground">
               Audit identity stamped on records this flow creates or updates when no user started
               the run (scheduled, NATS, or webhook triggers).
+            </p>
+          </div>
+
+          <div className="space-y-1.5 border-t border-border pt-4">
+            <Label htmlFor="flow-step-logging">Step logging</Label>
+            <Select
+              value={stepLogging}
+              onValueChange={(value) => setStepLogging(value as StepLogging)}
+            >
+              <SelectTrigger id="flow-step-logging" data-testid="flow-step-logging-select">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STEP_LOGGING_LEVELS.map((level) => (
+                  <SelectItem key={level} value={level}>
+                    {STEP_LOGGING_LABELS[level]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Which step rows each run keeps. Use Errors only for high-frequency or high-volume
+              flows; failed steps keep their full input and output at every level.
             </p>
           </div>
         </div>

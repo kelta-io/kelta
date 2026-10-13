@@ -1,5 +1,6 @@
 package io.kelta.runtime.model.system;
 
+import io.kelta.runtime.flow.FlowStepLogging;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 
@@ -70,6 +71,12 @@ public final class AutomationSystemCollections {
             // falls back to the flow owner (created_by) when unset.
             .addField(FieldDefinition.string("runAsUserId", 36).withColumnName("run_as_user_id")
                 .withDescription("User the flow executes as, when it runs with fixed privileges."))
+            .addField(FieldDefinition.requiredString("stepLogging", 20).withColumnName("step_logging")
+                .withDefault(FlowStepLogging.FULL.name())
+                .withEnumValues(FlowStepLogging.names())
+                .withDescription("Which step-log rows runs write: FULL (every step with input/output "
+                    + "snapshots), ERRORS_ONLY (every step, snapshots only for a failed step) or NONE "
+                    + "(only a failed step)."))
             .build();
     }
 
