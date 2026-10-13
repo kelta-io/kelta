@@ -46,7 +46,8 @@ import type { FieldDefinition } from '@/hooks/useCollectionSchema'
 import type { UseCollectionPermissionsReturn } from '@/hooks/useCollectionPermissions'
 import type { PageLayoutDto } from '@/hooks/usePageLayout'
 import type { LookupOption } from '@/components/LookupSelect'
-import type { RecordType } from '@/types/collections'
+import type { RecordType, RecordTypePicklistOverride } from '@/types/collections'
+import { parseAvailableValues, recordTypePicklistsUrl } from '@/utils/recordTypePicklists'
 import { computeCloneFormData, computeInitialFormData } from './formData'
 import { REFERENCE_TYPES } from './formFieldTypes'
 
@@ -58,15 +59,6 @@ interface PicklistValueDto {
   isActive: boolean
   sortOrder: number
   color?: string
-}
-
-/** Record type picklist override from the API */
-interface RecordTypePicklistOverrideDto {
-  id: string
-  recordTypeId: string
-  fieldId: string
-  availableValues: unknown
-  defaultValue?: string | null
 }
 
 export interface UseRecordFormModelOptions {
@@ -151,26 +143,13 @@ interface PicklistOverride {
   defaultValue?: string
 }
 
-/** `availableValues` arrives as a JSON array or its string encoding; anything else is unusable. */
-function parseAvailableValues(raw: unknown): string[] | undefined {
-  let parsed = raw
-  if (typeof raw === 'string') {
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      return undefined
-    }
-  }
-  return Array.isArray(parsed) && parsed.every((v) => typeof v === 'string') ? parsed : undefined
-}
-
 /**
  * fieldId → the record type's override. A row whose `availableValues` is malformed keeps the
  * field's full picklist — with a console warning, so the misconfiguration is visible — and does
  * not take the type's other overrides down with it.
  */
 function buildPicklistOverrideMap(
-  overrides: RecordTypePicklistOverrideDto[]
+  overrides: RecordTypePicklistOverride[]
 ): Record<string, PicklistOverride> {
   const map: Record<string, PicklistOverride> = {}
   for (const o of overrides) {
@@ -273,8 +252,8 @@ export function useRecordFormModel({
   const { data: recordTypePicklistOverrides } = useQuery({
     queryKey: ['record-form-picklist-overrides', selectedRecordTypeId],
     queryFn: async () => {
-      const overrides = await apiClient.getList<RecordTypePicklistOverrideDto>(
-        `/api/record-type-picklists?filter[recordTypeId][eq]=${selectedRecordTypeId}`
+      const overrides = await apiClient.getList<RecordTypePicklistOverride>(
+        recordTypePicklistsUrl(selectedRecordTypeId!)
       )
       return buildPicklistOverrideMap(overrides)
     },

@@ -113,6 +113,30 @@ class PhysicalTableStorageAdapterSystemCollectionTest {
     }
 
     /**
+     * Builds a system collection that declares a field stored in {@code record_type_id}
+     * (the shape of a per-record-type settings collection).
+     */
+    private CollectionDefinition buildSystemCollectionWithRecordTypeField() {
+        return new CollectionDefinitionBuilder()
+                .name("record-type-settings")
+                .displayName("Record Type Settings")
+                .storageConfig(new StorageConfig("record_type_setting", null))
+                .systemCollection(true)
+                .tenantScoped(false)
+                .addField(new FieldDefinitionBuilder()
+                        .name("recordTypeId")
+                        .type(FieldType.STRING)
+                        .columnName("record_type_id")
+                        .build())
+                .addField(new FieldDefinitionBuilder()
+                        .name("fieldId")
+                        .type(FieldType.STRING)
+                        .columnName("field_id")
+                        .build())
+                .build();
+    }
+
+    /**
      * Builds a standard (non-system) collection definition.
      */
     private CollectionDefinition buildNonSystemCollection() {
@@ -419,6 +443,52 @@ class PhysicalTableStorageAdapterSystemCollectionTest {
     class ColumnNameMappingViaCreateTests {
 
         @Test
+        @DisplayName("Should write a declared record_type_id field on a system collection")
+        void create_writesDeclaredRecordTypeIdField_forSystemCollections() {
+            CollectionDefinition systemDef = buildSystemCollectionWithRecordTypeField();
+
+            Map<String, Object> data = new HashMap<>();
+            data.put("id", "row-1");
+            data.put("recordTypeId", "rt-1");
+            data.put("fieldId", "field-1");
+            data.put("createdAt", Instant.now());
+            data.put("updatedAt", Instant.now());
+
+            adapter.create(systemDef, data);
+
+            ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+            ArgumentCaptor<Object[]> paramsCaptor = ArgumentCaptor.forClass(Object[].class);
+            verify(jdbcTemplate).update(sqlCaptor.capture(), paramsCaptor.capture());
+
+            String sql = sqlCaptor.getValue();
+            assertEquals(1, sql.split("record_type_id", -1).length - 1,
+                    "INSERT should write record_type_id exactly once, got: " + sql);
+            assertTrue(java.util.Arrays.asList(paramsCaptor.getValue()).contains("rt-1"),
+                    "INSERT params should carry the record type id");
+        }
+
+        @Test
+        @DisplayName("Should write record_type_id once as a system column on a user collection")
+        void create_writesRecordTypeIdOnce_forNonSystemCollections() {
+            CollectionDefinition def = buildNonSystemCollection();
+
+            Map<String, Object> data = new HashMap<>();
+            data.put("id", "p-1");
+            data.put("name", "Widget");
+            data.put("recordTypeId", "rt-1");
+            data.put("createdAt", Instant.now());
+            data.put("updatedAt", Instant.now());
+
+            adapter.create(def, data);
+
+            ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+            verify(jdbcTemplate).update(sqlCaptor.capture(), any(Object[].class));
+            String sql = sqlCaptor.getValue();
+            assertEquals(1, sql.split("record_type_id", -1).length - 1,
+                    "INSERT should write record_type_id exactly once, got: " + sql);
+        }
+
+        @Test
         @DisplayName("Should use field-level columnName for system collections in INSERT SQL")
         void create_usesFieldLevelColumnName_forSystemCollections() {
             CollectionDefinition systemDef = buildSystemCollection();
@@ -552,6 +622,34 @@ class PhysicalTableStorageAdapterSystemCollectionTest {
     @Nested
     @DisplayName("Column Name Mapping Tests via update()")
     class ColumnNameMappingViaUpdateTests {
+
+        @Test
+        @DisplayName("Should update a declared record_type_id field on a system collection")
+        void update_writesDeclaredRecordTypeIdField_forSystemCollections() {
+            CollectionDefinition systemDef = buildSystemCollectionWithRecordTypeField();
+
+            Map<String, Object> existingRecord = new HashMap<>();
+            existingRecord.put("id", "row-1");
+            existingRecord.put("record_type_id", "rt-1");
+            when(jdbcTemplate.queryForList(contains("SELECT * FROM"), eq("row-1")))
+                    .thenReturn(List.of(existingRecord));
+            when(jdbcTemplate.update(contains("UPDATE"), any(Object[].class))).thenReturn(1);
+
+            Map<String, Object> updateData = new HashMap<>();
+            updateData.put("recordTypeId", "rt-2");
+            updateData.put("updatedAt", Instant.now());
+
+            adapter.update(systemDef, "row-1", updateData);
+
+            ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+            ArgumentCaptor<Object[]> paramsCaptor = ArgumentCaptor.forClass(Object[].class);
+            verify(jdbcTemplate).update(sqlCaptor.capture(), paramsCaptor.capture());
+            String sql = sqlCaptor.getValue();
+            assertEquals(1, sql.split("record_type_id", -1).length - 1,
+                    "UPDATE should set record_type_id exactly once, got: " + sql);
+            assertTrue(java.util.Arrays.asList(paramsCaptor.getValue()).contains("rt-2"),
+                    "UPDATE params should carry the new record type id");
+        }
 
         @Test
         @DisplayName("Should use field-level columnName for system collections in UPDATE SQL")
