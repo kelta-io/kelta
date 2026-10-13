@@ -40,6 +40,11 @@ class PushProviderWiringTest {
             return new ObjectMapper();
         }
 
+        @Bean
+        io.kelta.runtime.outbound.OutboundUrlGuard outboundUrlGuard() {
+            return new io.kelta.runtime.outbound.OutboundUrlGuard("");
+        }
+
         /** Boot's autoconfiguration normally supplies this. */
         @Bean
         org.springframework.web.client.RestClient.Builder restClientBuilder() {

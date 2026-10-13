@@ -9,24 +9,20 @@ import io.kelta.runtime.module.integration.spi.ApiSpecStore;
 import io.kelta.runtime.module.integration.spi.CredentialResolverPort;
 import io.kelta.runtime.module.integration.spi.IdempotencyStore;
 import io.kelta.runtime.module.integration.spi.IdempotencyStore.CachedResponse;
+import io.kelta.runtime.outbound.OutboundHttpClient;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionResult;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestTemplate;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -34,26 +30,39 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+/**
+ * Drives the handler against a real HTTP server on loopback. The guard allows
+ * {@code 127.0.0.0/8} for most tests; {@link #loopbackRefusedByDefault()} shows the default
+ * refuses it.
+ */
 @DisplayName("CallApiActionHandler")
 class CallApiActionHandlerTest {
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final PayloadMapperService mapper = new PayloadMapperService(new StateDataResolver(objectMapper));
+    private LoopbackServer server;
     private CallApiActionHandler handler;
-    private ObjectMapper objectMapper;
     private ApiSpecStore specStore;
     private CredentialResolverPort credentialResolver;
     private IdempotencyStore idempotencyStore;
-    private RestTemplate restTemplate;
 
     @BeforeEach
-    void setUp() {
-        objectMapper = new ObjectMapper();
-        PayloadMapperService mapper = new PayloadMapperService(new StateDataResolver(objectMapper));
+    void setUp() throws IOException {
+        server = new LoopbackServer();
         specStore = mock(ApiSpecStore.class);
         credentialResolver = mock(CredentialResolverPort.class);
         idempotencyStore = mock(IdempotencyStore.class);
-        restTemplate = mock(RestTemplate.class);
-        handler = new CallApiActionHandler(
-            objectMapper, mapper, specStore, credentialResolver, idempotencyStore, restTemplate);
+        handler = handlerWith(new OutboundUrlGuard("127.0.0.0/8"));
+    }
+
+    @AfterEach
+    void tearDown() {
+        server.close();
+    }
+
+    private CallApiActionHandler handlerWith(OutboundUrlGuard guard) {
+        return new CallApiActionHandler(
+            objectMapper, mapper, specStore, credentialResolver, idempotencyStore, guard);
     }
 
     @Test
@@ -65,47 +74,36 @@ class CallApiActionHandlerTest {
     @Test
     @DisplayName("Raw mode: builds URL from config + state, maps headers and body")
     void rawModeExecutes() throws Exception {
-        when(restTemplate.exchange(
-                anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
-            .thenReturn(new ResponseEntity<>("{\"id\":42}", HttpStatus.OK));
-
+        server.responseBody = "{\"id\":42}";
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("mode", "raw");
-        config.put("url", "https://api.example.com/orders/${$.input.orderId}");
+        config.put("url", server.base() + "/orders/${$.input.orderId}");
         config.put("method", "POST");
         config.put("headers", Map.of("X-Trace", "${$.input.traceId}"));
         config.put("body", Map.of("status", "submitted"));
 
-        ActionContext ctx = ActionContext.builder()
-            .tenantId("t-1")
-            .actionConfigJson(objectMapper.writeValueAsString(config))
-            .resolvedData(Map.of("input", Map.of("orderId", "O-99", "traceId", "trc")))
-            .build();
-
-        ActionResult result = handler.execute(ctx);
+        ActionResult result = handler.execute(context(config,
+            Map.of("input", Map.of("orderId", "O-99", "traceId", "trc"))));
 
         assertTrue(result.successful(), "expected success but got: " + result.errorMessage());
-        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<HttpEntity<String>> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
-        verify(restTemplate).exchange(urlCaptor.capture(), eq(HttpMethod.POST),
-            entityCaptor.capture(), eq(String.class));
-        assertEquals("https://api.example.com/orders/O-99", urlCaptor.getValue());
-        assertEquals("trc", entityCaptor.getValue().getHeaders().getFirst("X-Trace"));
-        assertTrue(entityCaptor.getValue().getBody().contains("\"status\":\"submitted\""));
+        assertEquals("POST", server.lastMethod);
+        assertEquals("/orders/O-99", server.lastPath);
+        assertEquals("trc", server.lastHeaders.getFirst("X-Trace"));
+        assertEquals("application/json", server.lastHeaders.getFirst("Content-Type"));
+        assertTrue(server.lastBody.contains("\"status\":\"submitted\""));
+        assertEquals(200, result.outputData().get("statusCode"));
+        assertEquals(Map.of("id", 42), result.outputData().get("responseData"));
     }
 
     @Test
     @DisplayName("Operation mode: loads spec + operation, fills path params, builds URL")
     void operationModeBuildsUrl() throws Exception {
-        ApiSpec spec = spec("petstore", "https://petstore.swagger.io/v2");
+        ApiSpec spec = spec("petstore", server.base() + "/v2");
         ApiOperation operation = operation(spec.id(), "getPetById", "GET", "/pet/{petId}");
         when(specStore.findSpec("t-1", "petstore")).thenReturn(Optional.of(spec));
         when(specStore.findOperation("t-1", "petstore", "getPetById"))
             .thenReturn(Optional.of(operation));
-
-        when(restTemplate.exchange(
-                anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
-            .thenReturn(new ResponseEntity<>("{}", HttpStatus.OK));
+        server.responseBody = "{}";
 
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("mode", "operation");
@@ -113,19 +111,27 @@ class CallApiActionHandlerTest {
         config.put("operationId", "getPetById");
         config.put("pathParams", Map.of("petId", "${$.queryResult.id}"));
 
-        ActionContext ctx = ActionContext.builder()
-            .tenantId("t-1")
-            .actionConfigJson(objectMapper.writeValueAsString(config))
-            .resolvedData(Map.of("queryResult", Map.of("id", "501")))
-            .build();
+        ActionResult result = handler.execute(context(config, Map.of("queryResult", Map.of("id", "501"))));
 
-        ActionResult result = handler.execute(ctx);
+        assertTrue(result.successful(), result.errorMessage());
+        assertEquals("GET", server.lastMethod);
+        assertEquals("/v2/pet/501", server.lastPath);
+        assertEquals(server.base() + "/v2/pet/501", result.outputData().get("url"));
+    }
 
-        assertTrue(result.successful());
-        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
-        verify(restTemplate).exchange(urlCaptor.capture(), eq(HttpMethod.GET),
-            any(HttpEntity.class), eq(String.class));
-        assertEquals("https://petstore.swagger.io/v2/pet/501", urlCaptor.getValue());
+    @Test
+    @DisplayName("Operation mode: a spec base URL on a non-public address is refused")
+    void operationModeBaseUrlChecked() throws Exception {
+        ApiSpec spec = spec("internal", "http://10.0.0.5/api");
+        ApiOperation operation = operation(spec.id(), "list", "GET", "/items");
+        when(specStore.findSpec("t-1", "internal")).thenReturn(Optional.of(spec));
+        when(specStore.findOperation("t-1", "internal", "list")).thenReturn(Optional.of(operation));
+
+        ActionResult result = handler.execute(context(
+            Map.of("mode", "operation", "specId", "internal", "operationId", "list"), Map.of()));
+
+        assertFalse(result.successful());
+        assertTrue(result.errorMessage().startsWith("Api.Refused:"), result.errorMessage());
     }
 
     @Test
@@ -136,29 +142,18 @@ class CallApiActionHandlerTest {
                 Map.of("value", "sk_test_123"),
                 Map.of("headerName", "X-API-Key", "location", "header"),
                 Instant.now()));
-        when(restTemplate.exchange(
-                anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
-            .thenReturn(new ResponseEntity<>("ok", HttpStatus.OK));
+        server.responseBody = "ok";
+        server.contentType = "text/plain";
 
-        Map<String, Object> config = Map.of(
+        ActionResult result = handler.execute(context(Map.of(
             "mode", "raw",
-            "url", "https://example.com/x",
+            "url", server.base() + "/x",
             "method", "GET",
-            "credentialRef", "salesforce");
+            "credentialRef", "salesforce"), Map.of()));
 
-        ActionContext ctx = ActionContext.builder()
-            .tenantId("t-1")
-            .actionConfigJson(objectMapper.writeValueAsString(config))
-            .resolvedData(Map.of())
-            .build();
-
-        ActionResult result = handler.execute(ctx);
-
-        assertTrue(result.successful());
-        ArgumentCaptor<HttpEntity<String>> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
-        verify(restTemplate).exchange(anyString(), eq(HttpMethod.GET),
-            entityCaptor.capture(), eq(String.class));
-        assertEquals("sk_test_123", entityCaptor.getValue().getHeaders().getFirst("X-API-Key"));
+        assertTrue(result.successful(), result.errorMessage());
+        assertEquals("sk_test_123", server.lastHeaders.getFirst("X-API-Key"));
+        assertEquals("ok", result.outputData().get("responseBody"));
     }
 
     @Test
@@ -167,29 +162,16 @@ class CallApiActionHandlerTest {
         when(credentialResolver.resolve(eq("t-1"), eq("github"), anyString()))
             .thenReturn(new ResolvedCredential("c-2", "github", "bearer_token",
                 Map.of("token", "ghp_token"), Map.of(), Instant.now()));
-        when(restTemplate.exchange(
-                anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
-            .thenReturn(new ResponseEntity<>("[]", HttpStatus.OK));
+        server.responseBody = "[]";
 
-        Map<String, Object> config = Map.of(
+        ActionResult result = handler.execute(context(Map.of(
             "mode", "raw",
-            "url", "https://api.github.com/user",
-            "credentialRef", "github");
+            "url", server.base() + "/user",
+            "credentialRef", "github"), Map.of()));
 
-        ActionContext ctx = ActionContext.builder()
-            .tenantId("t-1")
-            .actionConfigJson(objectMapper.writeValueAsString(config))
-            .resolvedData(Map.of())
-            .build();
-
-        ActionResult result = handler.execute(ctx);
-
-        assertTrue(result.successful());
-        ArgumentCaptor<HttpEntity<String>> captor = ArgumentCaptor.forClass(HttpEntity.class);
-        verify(restTemplate).exchange(anyString(), eq(HttpMethod.GET), captor.capture(),
-            eq(String.class));
-        assertEquals("Bearer ghp_token",
-            captor.getValue().getHeaders().getFirst("Authorization"));
+        assertTrue(result.successful(), result.errorMessage());
+        assertEquals("Bearer ghp_token", server.lastHeaders.getFirst("Authorization"));
+        assertNotNull(server.lastHeaders.getFirst("Accept"));
     }
 
     @Test
@@ -198,24 +180,15 @@ class CallApiActionHandlerTest {
         when(idempotencyStore.lookup(eq("t-1"), anyString()))
             .thenReturn(Optional.of(new CachedResponse(201, "{\"cached\":true}", "hash")));
 
-        Map<String, Object> config = Map.of(
+        ActionResult result = handler.execute(context(Map.of(
             "mode", "raw",
-            "url", "https://api.example.com/orders",
+            "url", server.base() + "/orders",
             "method", "POST",
             "body", Map.of("x", 1),
-            "idempotency", Map.of("enabled", true, "key", "fixed-key-1"));
-
-        ActionContext ctx = ActionContext.builder()
-            .tenantId("t-1")
-            .actionConfigJson(objectMapper.writeValueAsString(config))
-            .resolvedData(Map.of())
-            .build();
-
-        ActionResult result = handler.execute(ctx);
+            "idempotency", Map.of("enabled", true, "key", "fixed-key-1")), Map.of()));
 
         assertTrue(result.successful());
-        verify(restTemplate, never()).exchange(anyString(), any(HttpMethod.class),
-            any(HttpEntity.class), eq(String.class));
+        assertEquals(0, server.requests.get());
         assertEquals(201, result.outputData().get("statusCode"));
     }
 
@@ -223,74 +196,139 @@ class CallApiActionHandlerTest {
     @DisplayName("Idempotency miss sends upstream with header and records response on success")
     void idempotencyMissRecords() throws Exception {
         when(idempotencyStore.lookup(eq("t-1"), anyString())).thenReturn(Optional.empty());
-        when(restTemplate.exchange(
-                anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
-            .thenReturn(new ResponseEntity<>("{\"ok\":true}", HttpStatus.CREATED));
+        server.status = 201;
+        server.responseBody = "{\"ok\":true}";
 
-        Map<String, Object> config = Map.of(
+        handler.execute(context(Map.of(
             "mode", "raw",
-            "url", "https://api.example.com/orders",
+            "url", server.base() + "/orders",
             "method", "POST",
             "body", Map.of("x", 1),
-            "idempotency", Map.of("enabled", true, "key", "key-7", "ttlSeconds", 60));
+            "idempotency", Map.of("enabled", true, "key", "key-7", "ttlSeconds", 60)), Map.of()));
 
-        ActionContext ctx = ActionContext.builder()
-            .tenantId("t-1")
-            .actionConfigJson(objectMapper.writeValueAsString(config))
-            .resolvedData(Map.of())
-            .build();
-
-        handler.execute(ctx);
-
-        ArgumentCaptor<HttpEntity<String>> entity = ArgumentCaptor.forClass(HttpEntity.class);
-        verify(restTemplate).exchange(anyString(), eq(HttpMethod.POST), entity.capture(),
-            eq(String.class));
-        assertEquals("key-7", entity.getValue().getHeaders().getFirst("Idempotency-Key"));
+        assertEquals("key-7", server.lastHeaders.getFirst("Idempotency-Key"));
         verify(idempotencyStore).record(eq("t-1"), eq("key-7"), any(), any(),
             eq(201), eq("{\"ok\":true}"), eq(Duration.ofSeconds(60)));
     }
 
     @Test
-    @DisplayName("4xx maps to Api.HttpClientError")
+    @DisplayName("4xx maps to Api.HttpClientError with the response body")
     void httpClientErrorMaps() throws Exception {
-        when(restTemplate.exchange(
-                anyString(), any(HttpMethod.class), any(HttpEntity.class), eq(String.class)))
-            .thenThrow(HttpClientErrorException.create(
-                HttpStatus.NOT_FOUND, "Not Found", null, null, null));
+        server.status = 404;
+        server.responseBody = "{\"error\":\"missing\"}";
 
-        Map<String, Object> config = Map.of("mode", "raw", "url", "https://example.com/x");
-        ActionContext ctx = ActionContext.builder()
-            .tenantId("t-1")
-            .actionConfigJson(objectMapper.writeValueAsString(config))
-            .resolvedData(Map.of())
-            .build();
-
-        ActionResult result = handler.execute(ctx);
+        ActionResult result = handler.execute(context(
+            Map.of("mode", "raw", "url", server.base() + "/x"), Map.of()));
 
         assertFalse(result.successful());
-        assertTrue(result.errorMessage().startsWith("Api.HttpClientError:"),
-            "got: " + result.errorMessage());
+        assertTrue(result.errorMessage().startsWith("Api.HttpClientError: 404"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("missing"), result.errorMessage());
+    }
+
+    @Test
+    @DisplayName("5xx maps to Api.HttpServerError")
+    void httpServerErrorMaps() throws Exception {
+        server.status = 503;
+
+        ActionResult result = handler.execute(context(
+            Map.of("mode", "raw", "url", server.base() + "/x"), Map.of()));
+
+        assertFalse(result.successful());
+        assertTrue(result.errorMessage().startsWith("Api.HttpServerError: 503"), result.errorMessage());
+    }
+
+    @Test
+    @DisplayName("With the default guard, a loopback URL is refused and nothing is sent")
+    void loopbackRefusedByDefault() throws Exception {
+        CallApiActionHandler guarded = handlerWith(new OutboundUrlGuard(""));
+
+        ActionResult result = guarded.execute(context(
+            Map.of("mode", "raw", "url", server.base() + "/x"), Map.of()));
+
+        assertFalse(result.successful());
+        assertTrue(result.errorMessage().startsWith("Api.Refused:"), result.errorMessage());
+        assertEquals(0, server.requests.get());
+    }
+
+    @Test
+    @DisplayName("A raw URL resolved from state is checked after substitution")
+    void resolvedRawUrlChecked() throws Exception {
+        ActionResult result = handler.execute(context(
+            Map.of("mode", "raw", "url", "${$.input.target}"),
+            Map.of("input", Map.of("target", "http://169.254.169.254/latest/meta-data/"))));
+
+        assertFalse(result.successful());
+        assertTrue(result.errorMessage().startsWith("Api.Refused:"), result.errorMessage());
+    }
+
+    @Test
+    @DisplayName("A GET redirect to a non-public address is refused")
+    void redirectToNonPublicRefused() throws Exception {
+        server.status = 302;
+        server.responseBody = null;
+        server.location = "http://10.0.0.1/internal";
+
+        ActionResult result = handler.execute(context(
+            Map.of("mode", "raw", "url", server.base() + "/start"), Map.of()));
+
+        assertFalse(result.successful());
+        assertTrue(result.errorMessage().startsWith("Api.Refused:"), result.errorMessage());
+        assertEquals(1, server.requests.get());
+    }
+
+    @Test
+    @DisplayName("An oversized response keeps a truncated responseBody and is not parsed")
+    void oversizedResponseCapped() throws Exception {
+        server.responseBody = "[\"" + "x".repeat(CallApiActionHandler.MAX_RESPONSE_BYTES) + "\"]";
+
+        ActionResult result = handler.execute(context(
+            Map.of("mode", "raw", "url", server.base() + "/big"), Map.of()));
+
+        assertTrue(result.successful(), result.errorMessage());
+        assertTrue(((String) result.outputData().get("responseBody")).endsWith("... [truncated]"));
+        assertFalse(result.outputData().containsKey("responseData"));
+    }
+
+    @Test
+    @DisplayName("The request deadline maps to Api.Timeout")
+    void deadlineHonoured() throws Exception {
+        server.delayMillis = 2_000;
+        CallApiActionHandler quick = new CallApiActionHandler(
+            objectMapper, mapper, specStore, credentialResolver, idempotencyStore,
+            new OutboundHttpClient(new OutboundUrlGuard("127.0.0.0/8"),
+                new OutboundHttpClient.Limits(Duration.ofSeconds(1), Duration.ofMillis(300), 1024, 0)));
+
+        ActionResult result = quick.execute(context(
+            Map.of("mode", "raw", "url", server.base() + "/slow"), Map.of()));
+
+        assertFalse(result.successful());
+        assertTrue(result.errorMessage().startsWith("Api.Timeout:"), result.errorMessage());
     }
 
     @Test
     @DisplayName("validate() rejects raw mode without url and operation mode without specId")
     void validateRejectsBadConfig() throws Exception {
-        // raw mode without url
         String config1 = objectMapper.writeValueAsString(Map.of("mode", "raw"));
         assertThrows(IllegalArgumentException.class, () -> handler.validate(config1));
 
-        // operation mode without specId
         String config2 = objectMapper.writeValueAsString(
             Map.of("mode", "operation", "operationId", "x"));
         assertThrows(IllegalArgumentException.class, () -> handler.validate(config2));
 
-        // good raw
         String good = objectMapper.writeValueAsString(
             Map.of("mode", "raw", "url", "https://example.com"));
         assertDoesNotThrow(() -> handler.validate(good));
     }
 
     // -----------------------------------------------------------------------
+
+    private ActionContext context(Map<String, Object> config, Map<String, Object> state) throws Exception {
+        return ActionContext.builder()
+            .tenantId("t-1")
+            .actionConfigJson(objectMapper.writeValueAsString(config))
+            .resolvedData(state)
+            .build();
+    }
 
     private static ApiSpec spec(String name, String baseUrl) {
         return new ApiSpec(
@@ -303,10 +341,5 @@ class CallApiActionHandlerTest {
         return new ApiOperation(
             opId, "t-1", specId, opId, opId, method, path,
             "summary", null, null, null, null, null, null, false);
-    }
-
-    @SuppressWarnings("unused")
-    private static List<String> _refs() {
-        return List.of("ApiSpec");   // keep imports stable
     }
 }

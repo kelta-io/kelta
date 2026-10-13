@@ -145,7 +145,16 @@ public class AuthorizationServerConfig {
             WorkerClient workerClient,
             ClientRegistrationRepository clientRegistrationRepository,
             @org.springframework.beans.factory.annotation.Autowired(required = false) TotpService totpService,
-            PasswordPolicyService passwordPolicyService) throws Exception {
+            PasswordPolicyService passwordPolicyService,
+            org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient<
+                    org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest>
+                    oidcLoginTokenResponseClient,
+            org.springframework.security.oauth2.client.userinfo.OAuth2UserService<
+                    org.springframework.security.oauth2.client.oidc.userinfo.OidcUserRequest,
+                    org.springframework.security.oauth2.core.oidc.user.OidcUser> oidcLoginUserService,
+            org.springframework.security.oauth2.client.userinfo.OAuth2UserService<
+                    org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest,
+                    org.springframework.security.oauth2.core.user.OAuth2User> oauth2LoginUserService) throws Exception {
         org.springframework.security.web.authentication.SavedRequestAwareAuthenticationSuccessHandler
                 savedRequestHandler = new org.springframework.security.web.authentication.SavedRequestAwareAuthenticationSuccessHandler();
 
@@ -247,9 +256,15 @@ public class AuthorizationServerConfig {
         // Enable federated OAuth2 login only when OIDC federation can run: FederationConfig
         // supplies a DynamicClientRegistrationRepository only when encryption is configured.
         if (clientRegistrationRepository instanceof DynamicClientRegistrationRepository) {
+            // Calls to the identity provider go over FederationConfig's guarded clients
+            // (OidcLoginHttp); the ID-token decoder factory is picked up as a bean.
             http.oauth2Login(oauth2 -> oauth2
                     .loginPage("/login")
                     .clientRegistrationRepository(clientRegistrationRepository)
+                    .tokenEndpoint(token -> token.accessTokenResponseClient(oidcLoginTokenResponseClient))
+                    .userInfoEndpoint(userInfo -> userInfo
+                            .oidcUserService(oidcLoginUserService)
+                            .userService(oauth2LoginUserService))
                     .successHandler(new FederatedLoginSuccessHandler(
                             federatedUserMapper, workerClient))
             );

@@ -89,6 +89,11 @@ SMTP configuration ([Messaging](/docs/platform/messaging/)).
 
 Fire-and-forget webhook; without `bodyTemplate` the record is sent as JSON.
 
+The URL must be public: a host that resolves to a loopback, private or link-local address is
+refused unless the operator allow-lists that range (`KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS`).
+`GET` redirects are followed up to three hops, each checked the same way; other methods do not
+follow redirects. The call times out after 60 seconds, and a 4xx/5xx response fails the step.
+
 ## Integration
 
 ### `CALL_API`
@@ -111,8 +116,14 @@ The preferred way to call an external API. Two modes:
 - `credentialRef` names a vault credential; the handler applies bearer, basic, API-key or OAuth 2 client
   credentials — secrets never appear in the flow.
 - Payload fields accept `${$.path}` placeholders or `=<JSONata expression>`.
-- Error codes: `Api.HttpClientError` (4xx), `Api.HttpServerError` (5xx), `Api.Timeout`, `Credential.*`,
-  `Mapper.Failure` — catch them individually.
+- Error codes: `Api.HttpClientError` (4xx), `Api.HttpServerError` (5xx), `Api.Timeout`, `Api.Refused`,
+  `Credential.*`, `Mapper.Failure` — catch them individually.
+- The URL — the raw `url` or the imported spec's base URL — must be public: a host that resolves to
+  a loopback, private or link-local address is refused (`Api.Refused`) unless the operator
+  allow-lists that range (`KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS`). `GET`/`HEAD` redirects are
+  followed up to three hops, each checked the same way. The call times out after 60 seconds
+  (`Api.Timeout`) and reads at most 1 MB; a larger response keeps a truncated `responseBody` and
+  no `responseData`.
 
 ### `HTTP_CALLOUT` (legacy)
 

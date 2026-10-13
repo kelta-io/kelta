@@ -39,12 +39,13 @@ engine discovers them through the module SPI:
   `IdempotencyStore`, **`OutboundUrlGuard`**.
   - A handler that fetches a **tenant-configured URL** uses runtime-core's `OutboundHttpClient`
     with the `OutboundUrlGuard` extension (the worker registers it; `IntegrationModule` falls back
-    to a guard that allows no private range) — see `HttpCalloutActionHandler`. That gives the
-    non-public-address check, per-hop redirect re-validation, a deadline and a body cap.
-  - ⚠️ `RestTemplate` is **NOT** a registered extension — `getExtension(RestTemplate.class)`
-    returns `null`. Handlers that use it default:
-    `restTemplate != null ? restTemplate : new RestTemplate()`. Trusting the extension to be
-    non-null NPEs at startup.
+    to a guard that allows no private range) — see `HttpCalloutActionHandler`,
+    `CallApiActionHandler` (raw URL and spec base URL) and `OutboundMessageActionHandler`. That
+    gives the non-public-address check, per-hop redirect re-validation, a deadline and a body cap.
+    Each handler has a package-private constructor taking a pre-built `OutboundHttpClient` so
+    tests can shorten the limits.
+  - ⚠️ `RestTemplate` is **NOT** a registered extension and no handler uses one — don't add a
+    `RestTemplate`/`RestClient` for outbound calls.
 - **Secrets** (webhook URLs, API keys): resolve through the `CredentialResolverPort` extension
   (`resolve(tenantId, reference, purpose)`) — store a credential **reference** in node config,
   not the plaintext secret.
@@ -73,7 +74,8 @@ descriptor-driven): see `.claude/docs/playbooks.md` → "Add a flow action handl
 ## Tests
 
 JUnit 5 + Mockito; a real loopback `com.sun.net.httpserver.HttpServer` for outbound HTTP (allow
-`127.0.0.0/8` on the guard in the test). Co-locate `*ActionHandlerTest.java`.
+`127.0.0.0/8` on the guard in the test; `handlers/LoopbackServer` is a small shared one). Co-locate
+`*ActionHandlerTest.java`.
 
 ```bash
 mvn test -f kelta-platform/pom.xml -pl runtime/runtime-module-integration

@@ -7,7 +7,9 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * kelta-auth's {@link OutboundUrlGuard}, used for login-time OIDC discovery of a
- * tenant-configured issuer ({@code OidcDiscoveryService}).
+ * tenant-configured issuer ({@code OidcDiscoveryService}) and for federated login's calls to the
+ * provider's token, user-info and JWKS endpoints ({@code OidcLoginHttp},
+ * {@code DynamicClientRegistrationRepository}).
  *
  * <p>Unconditional on purpose: the allow-list is read at run time from
  * {@code kelta.outbound.allowed-private-cidrs} (declared in {@code application.yml} as

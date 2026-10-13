@@ -5,14 +5,12 @@ import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.crypto.ECDSASigner;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import io.kelta.runtime.outbound.OutboundHttpClient;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -23,10 +21,13 @@ import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.SecureRandom;
 import java.security.spec.ECPrivateKeySpec;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.Date;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Browser Web Push over VAPID (RFC 8292) with RFC 8291 aes128gcm payloads.
@@ -46,6 +47,14 @@ import java.util.Date;
  * <p>404 and 410 mean the subscription is gone for good; those are surfaced as
  * invalid-token failures so {@code DefaultPushService} prunes the device, exactly
  * as it does for a stale FCM/APNs token.
+ *
+ * <p><b>Outbound safety.</b> The endpoint is whatever URL the subscribing browser sent, so
+ * delivery goes through {@link OutboundHttpClient} with the worker's {@link OutboundUrlGuard}:
+ * the endpoint must be {@code https} ({@link #checkEndpoint}) and resolve to a public address
+ * unless allow-listed, redirects are not followed, and the request is bounded by
+ * {@link #CONNECT_TIMEOUT} / {@link #REQUEST_DEADLINE}. An endpoint that can never be delivered
+ * to (not https, non-public) prunes the device; one whose host does not resolve right now does
+ * not.
  */
 @Component
 public class WebPushProvider implements PushProvider {
@@ -58,19 +67,27 @@ public class WebPushProvider implements PushProvider {
     /** VAPID JWTs are short-lived; the spec caps them at 24h. */
     private static final long JWT_TTL_HOURS = 12;
     private static final SecureRandom RANDOM = new SecureRandom();
+    static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
+    static final Duration REQUEST_DEADLINE = Duration.ofSeconds(15);
+    /** Push services answer with an empty body; anything beyond this is not read. */
+    static final int MAX_RESPONSE_BYTES = 16 * 1024;
 
-    private final RestClient restClient;
+    private final OutboundHttpClient httpClient;
+    private final OutboundUrlGuard urlGuard;
     private final ObjectMapper objectMapper;
     private final String publicKey;
     private final PrivateKey privateKey;
     private final String subject;
 
     public WebPushProvider(ObjectMapper objectMapper,
+                           OutboundUrlGuard urlGuard,
                            @Value("${kelta.push.vapid.public-key:}") String publicKey,
                            @Value("${kelta.push.vapid.private-key:}") String privateKey,
                            @Value("${kelta.push.vapid.subject:}") String subject) {
         this.objectMapper = objectMapper;
-        this.restClient = RestClient.create();
+        this.urlGuard = urlGuard;
+        this.httpClient = new OutboundHttpClient(urlGuard, new OutboundHttpClient.Limits(
+                CONNECT_TIMEOUT, REQUEST_DEADLINE, MAX_RESPONSE_BYTES, 0));
         this.publicKey = publicKey;
         this.subject = subject == null || subject.isBlank() ? "mailto:admin@kelta.io" : subject;
         this.privateKey = parsePrivateKey(privateKey);
@@ -100,6 +117,27 @@ public class WebPushProvider implements PushProvider {
         return publicKey;
     }
 
+    /**
+     * Checks a subscription endpoint before it is stored or sent to: it must be an
+     * {@code https} URL whose host resolves to public addresses only (unless allow-listed).
+     * A host that does not resolve at the moment passes here and is checked again on send.
+     *
+     * @throws OutboundUrlGuard.RejectedUrlException when the endpoint may never be used
+     */
+    public static void checkEndpoint(OutboundUrlGuard urlGuard, String endpoint) {
+        if (endpoint == null || !endpoint.trim().toLowerCase(Locale.ROOT).startsWith("https://")) {
+            throw new OutboundUrlGuard.RejectedUrlException(OutboundUrlGuard.Reason.INVALID_URL,
+                    "a web push endpoint must be an https URL");
+        }
+        try {
+            urlGuard.check(endpoint);
+        } catch (OutboundUrlGuard.RejectedUrlException e) {
+            if (e.reason() != OutboundUrlGuard.Reason.UNRESOLVABLE) {
+                throw e;
+            }
+        }
+    }
+
     @Override
     public void send(PushMessage message, TenantPushSettings tenantSettings)
             throws PushDeliveryException {
@@ -127,6 +165,13 @@ public class WebPushProvider implements PushProvider {
             throw new PushDeliveryException("incomplete web push subscription", true);
         }
 
+        try {
+            checkEndpoint(urlGuard, endpoint);
+        } catch (OutboundUrlGuard.RejectedUrlException e) {
+            // Never deliverable: prune rather than retry.
+            throw new PushDeliveryException("web push endpoint refused: " + e.getMessage(), true);
+        }
+
         byte[] body;
         String vapidToken;
         try {
@@ -142,21 +187,23 @@ public class WebPushProvider implements PushProvider {
             throw new PushDeliveryException("web push encryption failed: " + e.getMessage(), false);
         }
 
-        ResponseEntity<String> response = restClient
-                .method(HttpMethod.POST)
-                .uri(endpoint)
-                .header("TTL", "86400")
-                .header("Content-Encoding", "aes128gcm")
-                .header("Authorization", "vapid t=" + vapidToken + ", k=" + publicKey)
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .body(body)
-                // Read the status rather than letting RestClient throw, so 404/410
-                // can be distinguished from a transient 5xx.
-                .retrieve()
-                .onStatus(status -> true, (req, res) -> { })
-                .toEntity(String.class);
+        OutboundHttpClient.Response response;
+        try {
+            response = httpClient.send(new OutboundHttpClient.Request("POST", endpoint, Map.of(
+                    "TTL", "86400",
+                    "Content-Encoding", "aes128gcm",
+                    "Authorization", "vapid t=" + vapidToken + ", k=" + publicKey,
+                    "Content-Type", "application/octet-stream"), body));
+        } catch (OutboundUrlGuard.RejectedUrlException e) {
+            // The host did not resolve (checkEndpoint let that through) or the check failed now
+            // — a transient condition, so the device is kept.
+            throw new PushDeliveryException("web push endpoint refused: " + e.getMessage(), false);
+        } catch (OutboundHttpClient.OutboundRequestException e) {
+            throw new PushDeliveryException("web push delivery failed: " + e.getMessage(), false);
+        }
 
-        int status = response.getStatusCode().value();
+        // The status decides: 404/410 are distinguished from a transient 5xx.
+        int status = response.statusCode();
         if (status / 100 == 2) {
             return;
         }

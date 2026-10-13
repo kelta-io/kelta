@@ -1,5 +1,6 @@
 package io.kelta.worker.service.push;
 
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import io.kelta.worker.repository.PushRepository;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,7 +28,8 @@ class DefaultPushServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DefaultPushService(pushProvider, pushRepository, List.of(pushProvider));
+        service = new DefaultPushService(pushProvider, pushRepository, List.of(pushProvider),
+                new OutboundUrlGuard(""));
     }
 
     @Nested
@@ -151,7 +153,7 @@ class DefaultPushServiceTest {
             when(webProvider.supports(anyString()))
                     .thenAnswer(call -> "web".equals(call.getArgument(0)));
             return new DefaultPushService(pushProvider, pushRepository,
-                    List.of(pushProvider, webProvider));
+                    List.of(pushProvider, webProvider), new OutboundUrlGuard(""));
         }
 
         @Test
@@ -235,6 +237,30 @@ class DefaultPushServiceTest {
             assertThat(id).isEqualTo("d1");
             verify(pushRepository, never()).insertDevice(any(), any(), any(), any(), any());
             verify(pushRepository).updateWebPushSubscription("d1", subscription);
+        }
+
+        @Test
+        @DisplayName("refuses an endpoint that is not https, and stores nothing")
+        void refusesNonHttpsEndpoint() {
+            assertThatThrownBy(() -> service.registerWebDevice("u1", "t1",
+                    "{\"endpoint\":\"http://push.example.com/a\"}", "Chrome"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("https");
+            verifyNoInteractions(pushRepository);
+        }
+
+        @Test
+        @DisplayName("refuses an endpoint on a non-public address, and stores nothing")
+        void refusesNonPublicEndpoint() {
+            for (String endpoint : new String[]{"https://127.0.0.1/x", "https://10.0.0.5/x",
+                    "https://169.254.169.254/latest"}) {
+                assertThatThrownBy(() -> service.registerWebDevice("u1", "t1",
+                        "{\"endpoint\":\"" + endpoint + "\"}", "Chrome"))
+                        .as(endpoint)
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("non-public");
+            }
+            verifyNoInteractions(pushRepository);
         }
 
         @Test

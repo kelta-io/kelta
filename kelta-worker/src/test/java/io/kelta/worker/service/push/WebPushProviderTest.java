@@ -3,6 +3,7 @@ package io.kelta.worker.service.push;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.crypto.ECDSAVerifier;
 import com.nimbusds.jwt.SignedJWT;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,7 @@ class WebPushProviderTest {
     private static final String VAPID_PRIVATE = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
 
     private WebPushProvider provider(String privateKey) {
-        return new WebPushProvider(new ObjectMapper(), VAPID_PUBLIC, privateKey,
+        return new WebPushProvider(new ObjectMapper(), new OutboundUrlGuard(""), VAPID_PUBLIC, privateKey,
                 "mailto:ops@example.com");
     }
 
@@ -113,6 +114,80 @@ class WebPushProviderTest {
     }
 
     @Nested
+    @DisplayName("Endpoint check")
+    class EndpointCheck {
+
+        private String subscription(String endpoint) {
+            var keys = generatedPublicPoint();
+            return "{\"endpoint\":\"" + endpoint + "\",\"keys\":{\"p256dh\":\""
+                    + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(keys)
+                    + "\",\"auth\":\"BTBZMqHH6r4Tts7J_aSIgg\"}}";
+        }
+
+        private byte[] generatedPublicPoint() {
+            try {
+                return WebPushCrypto.generateEphemeralKeys().publicPoint();
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        }
+
+        @Test
+        @DisplayName("an endpoint that is not https is pruned without sending")
+        void nonHttpsPrunes() {
+            PushDeliveryException e = catchThrowableOfType(
+                    () -> provider(VAPID_PRIVATE).send(message(subscription("http://push.example.com/x")), null),
+                    PushDeliveryException.class);
+
+            assertThat(e).isNotNull();
+            assertThat(e.isInvalidToken()).isTrue();
+            assertThat(e.getMessage()).contains("https");
+        }
+
+        @Test
+        @DisplayName("an endpoint on a non-public address is pruned without sending")
+        void nonPublicPrunes() {
+            for (String endpoint : new String[]{"https://127.0.0.1:9/x", "https://10.1.2.3/x",
+                    "https://169.254.169.254/x", "https://[::1]/x"}) {
+                PushDeliveryException e = catchThrowableOfType(
+                        () -> provider(VAPID_PRIVATE).send(message(subscription(endpoint)), null),
+                        PushDeliveryException.class);
+
+                assertThat(e).as(endpoint).isNotNull();
+                assertThat(e.isInvalidToken()).as(endpoint).isTrue();
+                assertThat(e.getMessage()).as(endpoint).contains("non-public");
+            }
+        }
+
+        @Test
+        @DisplayName("an allow-listed address is attempted, and a failed connection keeps the device")
+        void allowListedAttempted() {
+            WebPushProvider allowed = new WebPushProvider(new ObjectMapper(),
+                    new OutboundUrlGuard("127.0.0.0/8"), VAPID_PUBLIC, VAPID_PRIVATE, "mailto:ops@example.com");
+
+            // Nothing listens on the discard port, so the attempt fails as a transport error.
+            PushDeliveryException e = catchThrowableOfType(
+                    () -> allowed.send(message(subscription("https://127.0.0.1:9/x")), null),
+                    PushDeliveryException.class);
+
+            assertThat(e).isNotNull();
+            assertThat(e.isInvalidToken()).isFalse();
+            assertThat(e.getMessage()).contains("delivery failed");
+        }
+
+        @Test
+        @DisplayName("a host that does not resolve keeps the device")
+        void unresolvableKeepsDevice() {
+            PushDeliveryException e = catchThrowableOfType(
+                    () -> provider(VAPID_PRIVATE).send(message(subscription("https://push.invalid/x")), null),
+                    PushDeliveryException.class);
+
+            assertThat(e).isNotNull();
+            assertThat(e.isInvalidToken()).isFalse();
+        }
+    }
+
+    @Nested
     @DisplayName("VAPID token (RFC 8292)")
     class VapidToken {
 
@@ -172,7 +247,7 @@ class WebPushProviderTest {
             int len = Math.min(raw.length, 32);
             System.arraycopy(raw, raw.length - len, scalar, 32 - len, len);
 
-            var p = new WebPushProvider(new ObjectMapper(),
+            var p = new WebPushProvider(new ObjectMapper(), new OutboundUrlGuard(""),
                     java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(keys.publicPoint()),
                     java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(scalar),
                     "mailto:ops@example.com");
@@ -186,7 +261,8 @@ class WebPushProviderTest {
         @DisplayName("falls back to a valid mailto subject when none is configured")
         void defaultsSubject() throws Exception {
             // Safari rejects a token whose sub is absent or not a mailto:/https: URI.
-            var p = new WebPushProvider(new ObjectMapper(), VAPID_PUBLIC, VAPID_PRIVATE, "  ");
+            var p = new WebPushProvider(new ObjectMapper(), new OutboundUrlGuard(""),
+                    VAPID_PUBLIC, VAPID_PRIVATE, "  ");
 
             assertThat(SignedJWT.parse(p.vapidToken("https://push.test/x"))
                     .getJWTClaimsSet().getSubject()).startsWith("mailto:");

@@ -638,12 +638,33 @@ worker and in kelta-auth, from `kelta.outbound.allowed-private-cidrs` =
 | OIDC discovery — worker `OidcDiscoveryHook`, kelta-auth `OidcDiscoveryService` | 3 s / 5 s | 256 KB (over = error) | none | `discoveryStatus=blocked` (worker); no discovered endpoints (auth) |
 | OpenAPI spec `sourceUrl` — `ApiSpecService.fetchSpec` (`POST /api/api-specs/import`, `POST /api/api-specs/validate`) | 10 s / 30 s | 10 MB (over = 422) | 3, re-validated | 400 `sourceUrl refused: …` |
 | Flow `HTTP_CALLOUT` — `HttpCalloutActionHandler` | 10 s / 60 s | 1 MB read; `responseBody` keeps 50,000 chars, a truncated response is not parsed into `responseData` | 3 for `GET`, re-validated | step fails `HTTP callout refused: …` |
+| Flow `CALL_API` (raw URL and an imported spec's base URL) — `CallApiActionHandler` | 10 s / 60 s | 1 MB read; `responseBody` keeps 50,000 chars, a truncated response is not parsed into `responseData` | 3 for `GET`/`HEAD`, re-validated | step fails `Api.Refused: …` |
+| Flow `OUTBOUND_MESSAGE` — `OutboundMessageActionHandler` | 10 s / 60 s | 64 KB read; `responseBody` only when complete and ≤ 10,000 chars | 3 for `GET`, re-validated | step fails `Outbound message refused: …` |
+| external-rest collections — worker `RestClientExecutor` (`ExternalRestStorageAdapter`) | 10 s / 30 s | 10 MB (over = transport failure) | 3 for `GET`, re-validated | `StorageException` `External REST transport failure: … (<reason>)` |
+| OAuth 2.0 credential token URL (`oauth2_client_credentials` test/refresh, `oauth2_authorization_code` code exchange/refresh) — `OAuthTokenEndpointClient` (runtime-core) | 10 s / 15 s | 256 KB (over = error) | none | test/refresh fails `token URL refused: …` |
+| Web Push subscription endpoint — worker `WebPushProvider`, checked again at `POST /api/devices` | 5 s / 15 s | 16 KB (body unused) | none | subscribe: 400 `subscription endpoint refused: …`; send: device pruned |
+| kelta-auth federated OIDC login — token exchange, user info, JWKS (`OidcLoginHttp`) | 5 s connect / 10 s to response | — | none | registration not built; at fetch time the login fails |
 
-`HTTP_CALLOUT` gets the guard as a `ModuleContext` extension (`FlowConfig.moduleRegistry()`);
-without one `IntegrationModule` uses a guard that allows no private range. A 4xx/5xx status fails
-the step, as before. Restricted headers the JDK client manages (`Host`, `Connection`,
-`Content-Length`, `Expect`, `Upgrade`) are dropped from node config. A flow that must call an
-in-cluster service needs that range in the allow-list.
+`HTTP_CALLOUT`, `CALL_API` and `OUTBOUND_MESSAGE` get the guard as a `ModuleContext` extension
+(`FlowConfig.moduleRegistry()`); without one `IntegrationModule` uses a guard that allows no
+private range. A 4xx/5xx status fails the step, as before (`CALL_API`: `Api.HttpClientError` /
+`Api.HttpServerError`; a timeout or transport failure stays `Api.Timeout`). Restricted headers the
+JDK client manages (`Host`, `Connection`, `Content-Length`, `Expect`, `Upgrade`) are dropped from
+node config. A flow that must call an in-cluster service needs that range in the allow-list.
+
+**Web Push** endpoints are browser-supplied: an endpoint must be `https` and resolve to public
+addresses, checked when a browser subscribes and again on every send. An endpoint that can never
+be used (not `https`, non-public) prunes the device; a host that does not resolve at that moment
+does not.
+
+**kelta-auth OIDC login.** `DynamicClientRegistrationRepository` checks the token, user-info and
+JWKS endpoints when it builds a registration (malformed or non-public ⇒ no registration, so no SSO
+button); `OidcLoginHttp.requestFactory` checks every request again right before it is sent, never
+follows redirects and bounds connect and response wait. `FederationConfig` registers the token
+response client and the OIDC/OAuth2 user services (set on `oauth2Login` in
+`AuthorizationServerConfig`) and the ID-token `JwtDecoderFactory<ClientRegistration>` bean (picked
+up by type — keep exactly one). The authorization endpoint is a browser redirect, not a server
+fetch, and is not checked.
 
 ## OIDC federation providers (`oidc-providers`)
 

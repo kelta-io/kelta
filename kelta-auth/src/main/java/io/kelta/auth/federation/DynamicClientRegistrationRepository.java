@@ -4,6 +4,7 @@ import io.kelta.auth.service.OidcDiscoveryService;
 import io.kelta.auth.service.WorkerClient;
 import io.kelta.auth.service.WorkerClient.OidcProviderInfo;
 import io.kelta.crypto.EncryptionService;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
@@ -31,6 +32,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Hits are cached for {@code CACHE_TTL}; an id the worker reports as unknown is
  * remembered briefly in an {@link UnknownRegistrationCache} so repeated requests for it
  * skip the worker.
+ *
+ * <p>The token, user-info and JWKS endpoints are fetched by this service during login, so each
+ * is checked with the {@link OutboundUrlGuard} when the registration is built: a provider with
+ * an endpoint that is malformed or on a non-public address (unless allow-listed) gets no
+ * registration. A host that does not resolve at that moment is left to the fetch-time check in
+ * {@link OidcLoginHttp#requestFactory}, which applies the guard again to every request.
  */
 public class DynamicClientRegistrationRepository implements ClientRegistrationRepository {
 
@@ -43,24 +50,28 @@ public class DynamicClientRegistrationRepository implements ClientRegistrationRe
     private final WorkerClient workerClient;
     private final OidcDiscoveryService discoveryService;
     private final EncryptionService encryptionService;
+    private final OutboundUrlGuard urlGuard;
     private final Map<String, CachedRegistration> registrationCache = new ConcurrentHashMap<>();
     private final UnknownRegistrationCache unknownRegistrations;
 
     public DynamicClientRegistrationRepository(
             WorkerClient workerClient,
             OidcDiscoveryService discoveryService,
-            EncryptionService encryptionService) {
-        this(workerClient, discoveryService, encryptionService, new UnknownRegistrationCache());
+            EncryptionService encryptionService,
+            OutboundUrlGuard urlGuard) {
+        this(workerClient, discoveryService, encryptionService, urlGuard, new UnknownRegistrationCache());
     }
 
     DynamicClientRegistrationRepository(
             WorkerClient workerClient,
             OidcDiscoveryService discoveryService,
             EncryptionService encryptionService,
+            OutboundUrlGuard urlGuard,
             UnknownRegistrationCache unknownRegistrations) {
         this.workerClient = workerClient;
         this.discoveryService = discoveryService;
         this.encryptionService = encryptionService;
+        this.urlGuard = urlGuard;
         this.unknownRegistrations = unknownRegistrations;
     }
 
@@ -171,6 +182,11 @@ public class DynamicClientRegistrationRepository implements ClientRegistrationRe
                 log.warn("OIDC provider {} missing required endpoints (authorization or token)", provider.id());
                 return null;
             }
+            String refused = refusedEndpoint(endpoints);
+            if (refused != null) {
+                log.warn("OIDC provider {} not offered: {}", provider.id(), refused);
+                return null;
+            }
 
             return ClientRegistration.withRegistrationId(registrationId)
                     .clientId(provider.clientId())
@@ -193,5 +209,27 @@ public class DynamicClientRegistrationRepository implements ClientRegistrationRe
                     provider.id(), e.getMessage());
             return null;
         }
+    }
+
+    /** Why one of the endpoints this service fetches may not be used, or {@code null}. */
+    private String refusedEndpoint(OidcDiscoveryService.ResolvedEndpoints endpoints) {
+        String[][] fetched = {
+                {"token endpoint", endpoints.tokenUri()},
+                {"user-info endpoint", endpoints.userinfoUri()},
+                {"JWKS endpoint", endpoints.jwksUri()},
+        };
+        for (String[] endpoint : fetched) {
+            if (endpoint[1] == null || endpoint[1].isBlank()) {
+                continue;
+            }
+            try {
+                urlGuard.check(endpoint[1]);
+            } catch (OutboundUrlGuard.RejectedUrlException e) {
+                if (e.reason() != OutboundUrlGuard.Reason.UNRESOLVABLE) {
+                    return endpoint[0] + " refused: " + e.getMessage();
+                }
+            }
+        }
+        return null;
     }
 }

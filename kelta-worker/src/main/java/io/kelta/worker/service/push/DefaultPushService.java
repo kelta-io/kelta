@@ -1,5 +1,6 @@
 package io.kelta.worker.service.push;
 
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import io.kelta.worker.repository.PushRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,11 +28,13 @@ public class DefaultPushService {
     private final PushProvider pushProvider;
     private final java.util.List<PushProvider> providers;
     private final PushRepository pushRepository;
+    private final OutboundUrlGuard urlGuard;
 
     public DefaultPushService(PushProvider pushProvider, PushRepository pushRepository,
-                              java.util.List<PushProvider> allProviders) {
+                              java.util.List<PushProvider> allProviders, OutboundUrlGuard urlGuard) {
         this.pushProvider = pushProvider;
         this.pushRepository = pushRepository;
+        this.urlGuard = urlGuard;
         // Browser push runs ALONGSIDE the property-selected mobile provider — a
         // tenant can have both kinds of subscriber — so routing is per device
         // rather than one provider taking everything.
@@ -93,6 +96,12 @@ public class DefaultPushService {
         if (subscriptionJson == null || subscriptionJson.isBlank()) {
             throw new IllegalArgumentException("subscription is required for web devices");
         }
+        // The endpoint is browser-supplied and is where every later push is sent.
+        try {
+            WebPushProvider.checkEndpoint(urlGuard, endpointOf(subscriptionJson));
+        } catch (OutboundUrlGuard.RejectedUrlException e) {
+            throw new IllegalArgumentException("subscription endpoint refused: " + e.getMessage());
+        }
         String deviceId = registerDevice(userId, tenantId, "web",
                 webDeviceToken(subscriptionJson), deviceName);
         pushRepository.updateWebPushSubscription(deviceId, subscriptionJson);
@@ -101,15 +110,25 @@ public class DefaultPushService {
 
     /** Stable per-subscription token: the SHA-256 of its endpoint, hex-encoded. */
     static String webDeviceToken(String subscriptionJson) {
+        String endpoint = endpointOf(subscriptionJson);
+        try {
+            var digest = java.security.MessageDigest.getInstance("SHA-256");
+            return java.util.HexFormat.of()
+                    .formatHex(digest.digest(endpoint.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** The subscription's {@code endpoint}. */
+    static String endpointOf(String subscriptionJson) {
         try {
             var node = new tools.jackson.databind.ObjectMapper().readTree(subscriptionJson);
             String endpoint = node.path("endpoint").stringValue();
             if (endpoint == null || endpoint.isBlank()) {
                 throw new IllegalArgumentException("subscription has no endpoint");
             }
-            var digest = java.security.MessageDigest.getInstance("SHA-256");
-            return java.util.HexFormat.of()
-                    .formatHex(digest.digest(endpoint.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            return endpoint;
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
