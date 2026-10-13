@@ -84,6 +84,19 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         "record_type_id", "created_geo", "updated_geo"
     );
 
+    /**
+     * Whether {@code columnName} was already written by the system-field handling in create/update.
+     * {@code record_type_id} is a system column only on user-collection tables; a system collection
+     * that declares a field mapped to it (for example a record-type reference) writes it as a regular
+     * field.
+     */
+    private static boolean handledAsSystemColumn(CollectionDefinition definition, String columnName) {
+        if ("record_type_id".equals(columnName) && definition.systemCollection()) {
+            return false;
+        }
+        return SYSTEM_COLUMNS.contains(columnName);
+    }
+
     private final JdbcTemplate jdbcTemplate;
     private final SchemaMigrationEngine migrationEngine;
     private final tools.jackson.databind.ObjectMapper objectMapper;
@@ -445,7 +458,7 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             }
             if (data.containsKey(field.name())) {
                 String columnName = getColumnName(definition, field);
-                if (SYSTEM_COLUMNS.contains(columnName)) {
+                if (handledAsSystemColumn(definition, columnName)) {
                     continue; // Already handled as a system field above
                 }
                 columns.add(quoteIdentifier(columnName));
@@ -565,7 +578,7 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         for (FieldDefinition field : definition.fields()) {
             if (data.containsKey(field.name())) {
                 String columnName = getColumnName(definition, field);
-                if (SYSTEM_COLUMNS.contains(columnName)) {
+                if (handledAsSystemColumn(definition, columnName)) {
                     continue; // Already handled as a system field above
                 }
                 setClauses.add(quoteIdentifier(columnName) + " = " + castPlaceholder(field.type()));
