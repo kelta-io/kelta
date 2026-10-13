@@ -144,14 +144,16 @@ export interface RecordType {
 }
 
 /**
- * Picklist override for a record type
+ * Picklist override for a record type — one `record-type-picklists` row (see
+ * `utils/recordTypePicklists.ts`).
  */
 export interface RecordTypePicklistOverride {
   id: string
+  recordTypeId: string
   fieldId: string
-  fieldName: string
-  availableValues: string
-  defaultValue?: string
+  /** JSON array of allowed values (a JSON-encoded string on legacy rows): read with `parseAvailableValues`. */
+  availableValues: unknown
+  defaultValue?: string | null
 }
 
 /**

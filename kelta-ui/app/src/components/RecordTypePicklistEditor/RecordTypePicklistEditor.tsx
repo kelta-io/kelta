@@ -1,33 +1,70 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+/**
+ * RecordTypePicklistEditor — per-record-type picklist overrides (allowed values + default) for a
+ * collection's picklist / multi_picklist fields.
+ *
+ * Reads and writes the `record-type-picklists` system collection (`utils/recordTypePicklists.ts`),
+ * the same rows the record form core restricts its picklists by and `RecordTypeEnforcementHook`
+ * validates writes against. The values offered per field are the field's active picklist values,
+ * resolved exactly as the form resolves them (`usePicklistDisplayMaps`: global picklist via
+ * `fieldTypeConfig`, else the field's own values).
+ *
+ * Save writes only the fields the admin changed: a field left with every value allowed and no
+ * default has its row deleted, otherwise its row is created (POST) or updated (PATCH by id).
+ */
+
+import React, { useState, useCallback, useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
-import { useI18n } from '../../context/I18nContext'
-import { useApi } from '../../context/ApiContext'
+import { useI18n } from '@/context/I18nContext'
+import { useApi } from '@/context/ApiContext'
+import { usePicklistDisplayMaps } from '@/hooks/usePicklistOptions'
+import {
+  RECORD_TYPE_PICKLISTS_PATH,
+  parseAvailableValues,
+  recordTypePicklistsUrl,
+} from '@/utils/recordTypePicklists'
 import { useToast } from '../Toast'
 import { LoadingSpinner } from '../LoadingSpinner'
+import { ErrorMessage } from '../ErrorMessage'
 import type {
   RecordType,
   FieldDefinition,
-  PicklistValue,
   RecordTypePicklistOverride,
 } from '../../types/collections'
 
 export interface RecordTypePicklistEditorProps {
-  collectionId: string
   recordType: RecordType
   fields: FieldDefinition[]
   onClose: () => void
   onSaved: () => void
 }
 
-interface FieldOverrideState {
-  fieldId: string
-  fieldName: string
-  allValues: PicklistValue[]
+/** One active picklist value offered for a field, in display order. */
+interface PicklistOption {
+  value: string
+  label: string
+  color?: string
+}
+
+/** A field's override as shown/edited: the allowed values and the default ('' = none). */
+interface FieldSelection {
   checkedValues: Set<string>
   defaultValue: string
-  hasExistingOverride: boolean
 }
+
+interface FieldOverrideState extends FieldSelection {
+  fieldId: string
+  fieldName: string
+  allValues: PicklistOption[]
+  existingOverride?: RecordTypePicklistOverride
+}
+
+/** Query key of this editor's raw override rows (the record form caches its own parsed map). */
+function recordTypePicklistOverridesKey(recordTypeId: string): readonly unknown[] {
+  return ['record-type-picklist-overrides', recordTypeId]
+}
+
+const NO_OVERRIDES: RecordTypePicklistOverride[] = []
 
 const selectClasses = cn(
   'px-2 py-2 text-[0.8125rem] text-foreground bg-background border border-input rounded-md',
@@ -37,8 +74,15 @@ const selectClasses = cn(
   'flex-1'
 )
 
+function sameSelection(a: FieldSelection, b: FieldSelection): boolean {
+  if (a.defaultValue !== b.defaultValue || a.checkedValues.size !== b.checkedValues.size) {
+    return false
+  }
+  for (const v of a.checkedValues) if (!b.checkedValues.has(v)) return false
+  return true
+}
+
 export function RecordTypePicklistEditor({
-  collectionId,
   recordType,
   fields,
   onClose,
@@ -46,10 +90,12 @@ export function RecordTypePicklistEditor({
 }: RecordTypePicklistEditorProps): React.ReactElement {
   const { t } = useI18n()
   const { apiClient } = useApi()
+  const queryClient = useQueryClient()
   const { showToast } = useToast()
 
   const [isSaving, setIsSaving] = useState(false)
-  const [fieldStates, setFieldStates] = useState<Record<string, FieldOverrideState>>({})
+  // The admin's edits, by field id; a field without an entry shows its stored override.
+  const [drafts, setDrafts] = useState<Record<string, FieldSelection>>({})
   const [collapsedFields, setCollapsedFields] = useState<Set<string>>(new Set())
 
   // Filter to only picklist/multi_picklist fields
@@ -58,116 +104,90 @@ export function RecordTypePicklistEditor({
     [fields]
   )
 
-  // Fetch existing overrides for this record type
-  const { data: existingOverrides = [], isLoading: loadingOverrides } = useQuery({
-    queryKey: ['record-type-picklist-overrides', recordType.id],
+  // Existing overrides for this record type
+  const {
+    data: existingOverrides = NO_OVERRIDES,
+    isLoading: loadingOverrides,
+    error: overridesError,
+    refetch: refetchOverrides,
+  } = useQuery({
+    queryKey: recordTypePicklistOverridesKey(recordType.id),
     queryFn: () =>
-      apiClient.getList<RecordTypePicklistOverride>(
-        `/api/record-type-picklist-values?filter[recordTypeId][eq]=${recordType.id}`
-      ),
+      apiClient.getList<RecordTypePicklistOverride>(recordTypePicklistsUrl(recordType.id)),
   })
 
-  // Fetch values for each picklist field
-  const { data: fieldValues, isLoading: loadingValues } = useQuery({
-    queryKey: ['picklist-field-values', picklistFields.map((f) => f.id).join(',')],
-    queryFn: async () => {
-      const results: Record<string, PicklistValue[]> = {}
-      await Promise.all(
-        picklistFields.map(async (field) => {
-          try {
-            const values = await apiClient.getList<PicklistValue>(
-              `/api/picklist-values?filter[picklistSourceId][eq]=${field.id}&filter[picklistSourceType][eq]=FIELD`
-            )
-            results[field.id] = values
-          } catch {
-            results[field.id] = []
-          }
-        })
-      )
-      return results
-    },
-    enabled: picklistFields.length > 0,
-  })
+  // Active values for each picklist field, resolved the way the record form resolves them
+  const { displayMaps, isLoading: loadingValues } = usePicklistDisplayMaps(picklistFields)
 
-  // Initialize field states when data is loaded
-  useEffect(() => {
-    if (!fieldValues || loadingOverrides) return
+  const overrideByField = useMemo(() => {
+    const map = new Map<string, RecordTypePicklistOverride>()
+    for (const override of existingOverrides) map.set(override.fieldId, override)
+    return map
+  }, [existingOverrides])
 
-    const overrideMap = new Map<string, RecordTypePicklistOverride>()
-    for (const override of existingOverrides) {
-      overrideMap.set(override.fieldId, override)
-    }
-
-    const newStates: Record<string, FieldOverrideState> = {}
+  // What each field shows: the stored override (no row, or an unparseable one = every value
+  // allowed — what the form does), with the admin's draft on top.
+  const fieldStates = useMemo(() => {
+    const states: Record<string, FieldOverrideState> = {}
     for (const field of picklistFields) {
-      const values = fieldValues[field.id] ?? []
-      const override = overrideMap.get(field.id)
-
-      let checkedValues: Set<string>
-      let defaultValue = ''
-      const hasExistingOverride = !!override
-
-      if (override) {
-        // Parse available values from override (JSON string)
-        try {
-          const parsed = JSON.parse(override.availableValues) as string[]
-          checkedValues = new Set(parsed)
-        } catch {
-          checkedValues = new Set(values.map((v) => v.value))
-        }
-        defaultValue = override.defaultValue ?? ''
-      } else {
-        // No override — all values are available
-        checkedValues = new Set(values.map((v) => v.value))
+      const allValues: PicklistOption[] = Array.from(
+        displayMaps[field.name] ?? new Map<string, { label: string; color?: string }>(),
+        ([value, entry]) => ({ value, label: entry.label, color: entry.color })
+      )
+      const existingOverride = overrideByField.get(field.id)
+      const stored = existingOverride
+        ? parseAvailableValues(existingOverride.availableValues)
+        : undefined
+      const baseline: FieldSelection = {
+        checkedValues: new Set(stored ?? allValues.map((v) => v.value)),
+        defaultValue: existingOverride?.defaultValue ?? '',
       }
-
-      newStates[field.id] = {
+      states[field.id] = {
         fieldId: field.id,
         fieldName: field.displayName || field.name,
-        allValues: values,
-        checkedValues,
-        defaultValue,
-        hasExistingOverride,
+        allValues,
+        existingOverride,
+        ...(drafts[field.id] ?? baseline),
       }
     }
+    return states
+  }, [picklistFields, displayMaps, overrideByField, drafts])
 
-    setFieldStates(newStates)
-  }, [fieldValues, existingOverrides, picklistFields, loadingOverrides])
+  const updateSelection = useCallback(
+    (fieldId: string, change: (current: FieldOverrideState) => FieldSelection) => {
+      const state = fieldStates[fieldId]
+      if (!state) return
+      setDrafts((prev) => ({ ...prev, [fieldId]: change(state) }))
+    },
+    [fieldStates]
+  )
 
-  const handleToggleValue = useCallback((fieldId: string, value: string) => {
-    setFieldStates((prev) => {
-      const state = prev[fieldId]
-      if (!state) return prev
-
-      const newChecked = new Set(state.checkedValues)
-      if (newChecked.has(value)) {
-        newChecked.delete(value)
-        // If the default value was unchecked, clear it
-        const newDefault = state.defaultValue === value ? '' : state.defaultValue
-        return {
-          ...prev,
-          [fieldId]: { ...state, checkedValues: newChecked, defaultValue: newDefault },
+  const handleToggleValue = useCallback(
+    (fieldId: string, value: string) => {
+      updateSelection(fieldId, (state) => {
+        const checkedValues = new Set(state.checkedValues)
+        if (checkedValues.has(value)) {
+          checkedValues.delete(value)
+          // An unchecked value can no longer be the default
+          const defaultValue = state.defaultValue === value ? '' : state.defaultValue
+          return { checkedValues, defaultValue }
         }
-      } else {
-        newChecked.add(value)
-        return {
-          ...prev,
-          [fieldId]: { ...state, checkedValues: newChecked },
-        }
-      }
-    })
-  }, [])
+        checkedValues.add(value)
+        return { checkedValues, defaultValue: state.defaultValue }
+      })
+    },
+    [updateSelection]
+  )
 
-  const handleDefaultChange = useCallback((fieldId: string, value: string) => {
-    setFieldStates((prev) => {
-      const state = prev[fieldId]
-      if (!state) return prev
-      return {
-        ...prev,
-        [fieldId]: { ...state, defaultValue: value },
-      }
-    })
-  }, [])
+  const handleDefaultChange = useCallback(
+    (fieldId: string, value: string) => {
+      updateSelection(fieldId, (state) => ({
+        checkedValues: state.checkedValues,
+        defaultValue: value,
+      }))
+    },
+    [updateSelection]
+  )
 
   const handleToggleCollapse = useCallback((fieldId: string) => {
     setCollapsedFields((prev) => {
@@ -181,77 +201,88 @@ export function RecordTypePicklistEditor({
     })
   }, [])
 
-  const handleSelectAll = useCallback((fieldId: string) => {
-    setFieldStates((prev) => {
-      const state = prev[fieldId]
-      if (!state) return prev
-      return {
-        ...prev,
-        [fieldId]: {
-          ...state,
-          checkedValues: new Set(state.allValues.map((v) => v.value)),
-        },
-      }
-    })
-  }, [])
+  const handleSelectAll = useCallback(
+    (fieldId: string) => {
+      updateSelection(fieldId, (state) => ({
+        checkedValues: new Set(state.allValues.map((v) => v.value)),
+        defaultValue: state.defaultValue,
+      }))
+    },
+    [updateSelection]
+  )
 
-  const handleDeselectAll = useCallback((fieldId: string) => {
-    setFieldStates((prev) => {
-      const state = prev[fieldId]
-      if (!state) return prev
-      return {
-        ...prev,
-        [fieldId]: {
-          ...state,
-          checkedValues: new Set<string>(),
-          defaultValue: '',
-        },
-      }
-    })
-  }, [])
+  const handleDeselectAll = useCallback(
+    (fieldId: string) => {
+      updateSelection(fieldId, () => ({ checkedValues: new Set<string>(), defaultValue: '' }))
+    },
+    [updateSelection]
+  )
 
   const handleSave = useCallback(async () => {
     setIsSaving(true)
-    try {
-      const operations: Promise<void>[] = []
-
-      for (const [fieldId, state] of Object.entries(fieldStates)) {
-        const allSelected = state.allValues.every((v) => state.checkedValues.has(v.value))
-        const noneDeselected = allSelected && state.checkedValues.size === state.allValues.length
-
-        if (noneDeselected && !state.defaultValue) {
-          // All values selected with no default — remove override if it existed
-          if (state.hasExistingOverride) {
-            operations.push(
-              apiClient.deleteResource(
-                `/api/record-type-picklist-values?filter[recordTypeId][eq]=${recordType.id}&filter[fieldId][eq]=${fieldId}`
-              )
-            )
-          }
-        } else if (state.checkedValues.size > 0) {
-          // Some values selected (or has a default value) — set/update override
-          operations.push(
-            apiClient.putResource(
-              `/api/record-type-picklist-values?filter[recordTypeId][eq]=${recordType.id}&filter[fieldId][eq]=${fieldId}`,
-              {
-                availableValues: Array.from(state.checkedValues),
-                defaultValue: state.defaultValue || null,
-              }
-            )
-          )
-        }
+    const writes: Promise<unknown>[] = []
+    for (const [fieldId, draft] of Object.entries(drafts)) {
+      const state = fieldStates[fieldId]
+      if (!state) continue
+      const stored = state.existingOverride
+        ? parseAvailableValues(state.existingOverride.availableValues)
+        : undefined
+      const baseline: FieldSelection = {
+        checkedValues: new Set(stored ?? state.allValues.map((v) => v.value)),
+        defaultValue: state.existingOverride?.defaultValue ?? '',
       }
+      if (sameSelection(draft, baseline)) continue
 
-      await Promise.all(operations)
-      showToast(t('recordTypes.overrideSaved'), 'success')
-      onSaved()
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : t('errors.generic')
-      showToast(message, 'error')
-    } finally {
-      setIsSaving(false)
+      // Only values the field still offers, in its display order
+      const availableValues = state.allValues
+        .map((v) => v.value)
+        .filter((v) => draft.checkedValues.has(v))
+      const restricts = availableValues.length < state.allValues.length || draft.defaultValue !== ''
+      const existingId = state.existingOverride?.id
+
+      if (!restricts) {
+        // Every value allowed, no default: the override is redundant
+        if (existingId) {
+          writes.push(apiClient.deleteResource(`${RECORD_TYPE_PICKLISTS_PATH}/${existingId}`))
+        }
+        continue
+      }
+      const attributes = {
+        availableValues,
+        defaultValue: draft.defaultValue || null,
+      }
+      writes.push(
+        existingId
+          ? apiClient.patchResource(`${RECORD_TYPE_PICKLISTS_PATH}/${existingId}`, attributes)
+          : apiClient.postResource(RECORD_TYPE_PICKLISTS_PATH, {
+              recordTypeId: recordType.id,
+              fieldId,
+              ...attributes,
+            })
+      )
     }
-  }, [fieldStates, collectionId, recordType.id, apiClient, showToast, t, onSaved])
+
+    const results = await Promise.allSettled(writes)
+    if (writes.length > 0) {
+      // Refetch whatever landed — this editor's rows and every record form's parsed overrides
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: recordTypePicklistOverridesKey(recordType.id) }),
+        queryClient.invalidateQueries({ queryKey: ['record-form-picklist-overrides'] }),
+      ])
+    }
+    setIsSaving(false)
+
+    const failure = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (failure) {
+      // Keep the dialog open: written fields now match their refetched rows, the failed ones
+      // keep their draft so the admin can retry.
+      const reason: unknown = failure.reason
+      showToast(reason instanceof Error ? reason.message : t('errors.generic'), 'error')
+      return
+    }
+    showToast(t('recordTypes.overrideSaved'), 'success')
+    onSaved()
+  }, [drafts, fieldStates, recordType.id, apiClient, queryClient, showToast, t, onSaved])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -263,6 +294,8 @@ export function RecordTypePicklistEditor({
   )
 
   const isLoading = loadingOverrides || loadingValues
+  // Without the stored rows a save would POST over rows that already exist: block editing.
+  const loadFailed = !loadingOverrides && !!overridesError
 
   return (
     <div
@@ -301,6 +334,12 @@ export function RecordTypePicklistEditor({
             <div className="flex justify-center items-center py-12">
               <LoadingSpinner size="medium" label={t('common.loading')} />
             </div>
+          ) : loadFailed ? (
+            <ErrorMessage
+              error={overridesError instanceof Error ? overridesError : t('errors.generic')}
+              onRetry={() => void refetchOverrides()}
+              data-testid="picklist-override-load-error"
+            />
           ) : picklistFields.length === 0 ? (
             <div
               className="py-8 text-center text-muted-foreground text-sm"
@@ -454,7 +493,7 @@ export function RecordTypePicklistEditor({
             type="button"
             className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-primary-foreground bg-primary border-none rounded-md cursor-pointer transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleSave}
-            disabled={isSaving || isLoading || picklistFields.length === 0}
+            disabled={isSaving || isLoading || loadFailed || picklistFields.length === 0}
             data-testid="picklist-override-save"
           >
             {isSaving ? (

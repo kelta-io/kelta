@@ -2175,7 +2175,6 @@ export function CollectionDetailPage({
       {/* Record Type Picklist Override Editor Modal */}
       {picklistOverrideRecordType && (
         <RecordTypePicklistEditor
-          collectionId={collectionId}
           recordType={picklistOverrideRecordType}
           fields={sortedFields}
           onClose={() => setPicklistOverrideRecordType(undefined)}
