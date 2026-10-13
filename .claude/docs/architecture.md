@@ -68,8 +68,9 @@ Order values below are the live `getOrder()` returns from source (lower runs fir
 
 Cross-cutting (off main path): `ObservabilityContextFilter (-90)`, `HttpBodyCaptureFilter
 (-80)`, `SystemCollectionResponseCacheFilter (-10)`, `RequestLoggingFilter (MAX)`. `?include=`
-resolution is done by `IncludeResolver` (`jsonapi` package), not a numbered filter; read-side
-FLS is enforced in the worker (`CerbosFieldSecurityAdvice`), not the gateway.
+resolution is done in the worker by `JsonApiIncludeResolver` (runtime-core `router` package), not a
+numbered filter; read-side record authorization and FLS of included resources are enforced in the
+worker (`CerbosRecordAuthorizationAdvice`, `CerbosFieldSecurityAdvice`), not the gateway.
 
 **Span body capture.** `HttpBodyCaptureFilter` (gateway) and `SpanBodyEnrichmentFilter` (worker)
 record `http.request.body` / `http.response.body` span attributes for JSON bodies only, after
@@ -1554,7 +1555,21 @@ grandchild includes via already-resolved direct children (e.g.
 `page-layouts ?include=layout-sections,layout-fields` queries `layout-fields`
 by `sectionId IN (section ids)` after `layout-sections` resolves directly).
 Includes are skipped silently when the target is unresolvable — `200` with
-no `included` entry — never `5xx`.
+no `included` entry — never `5xx`. A failing include query is logged at WARN and contributes no
+included rows rather than failing the primary read.
+
+**Read authorization of included resources** — every `included[]` resource gets the read
+decision a direct `GET /api/{type}/{id}` would get. The include queries apply tenant scoping
+(`RecordTenantScope`) and owner scoping (the owner predicate in `PhysicalTableStorageAdapter.query()`,
+under the request's `CallerContext`) themselves; `CerbosRecordAuthorizationAdvice` then applies the
+included collection's own record read authorization — collection-level read, record-level rules,
+manual record shares — grouped by JSON:API `type`, so each included collection costs one batched
+(record-variant) or cached collection-wide decision, and drops what the caller may not read (the
+`included` member is omitted when nothing remains). A single primary record the caller may not
+read (`data: null`) carries no `included`. The primary records' relationship linkage is kept: the
+same id is already in their `attributes`. A type whose direct path the advice does not filter
+(the metadata paths) passes through as a direct read would. Field-level security (below) applies
+per type as well. Harness coverage: `IncludedResourceAuthorizationScenarioTest`.
 
 The field-name path and the always-on relationship serialization both require the field's
 `referenceConfig` to be present. `CollectionLifecycleManager.loadFieldsFromDb` builds it from the
