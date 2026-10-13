@@ -18,8 +18,9 @@ const tenantSlug = process.env.E2E_TENANT_SLUG || "default";
 const apiBaseUrl = process.env.E2E_API_BASE_URL || "https://kelta.io";
 const mailpitUrl = process.env.E2E_MAILPIT_URL || "";
 
-/** Meets the default password policy: no dictionary word, nothing of the user's name. */
-const NEW_PASSWORD = "Qz7#Lm2!Vx9w-e2e";
+/** Meets the default password policy: no dictionary word and no part of the user's name or
+ * email — the address is `e2e-forgot-…`, so not even "e2e". */
+const NEW_PASSWORD = "Qz7#Lm2!Vx9w-Kp4";
 
 test.use({
   storageState: { cookies: [], origins: [] },
