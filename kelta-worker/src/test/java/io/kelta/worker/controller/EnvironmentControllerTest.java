@@ -8,6 +8,7 @@ import io.kelta.worker.service.SandboxProvisioningService;
 import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.*;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -177,18 +178,112 @@ class EnvironmentControllerTest {
     }
 
     @Test
-    @DisplayName("createEnvironment maps validation failures to 400")
-    void createMapsValidationFailure() {
+    @DisplayName("createEnvironment answers 409 naming the archived sandbox that holds the name")
+    void createConflictsWithArchivedSandbox() {
+        grantPermission();
+        String detail = "Environment name 'dev' is already used by environment 'dev' "
+                + "(id env-old, status ARCHIVED) in this tenant. Choose a different name.";
+        when(provisioningService.createSandbox("t1", "dev", null, "SANDBOX", "user-1"))
+                .thenThrow(new SandboxProvisioningService.EnvironmentConflictException(
+                        "env-old", "dev", "ARCHIVED", detail));
+
+        Map<String, Object> body = Map.of("data", Map.of("attributes", Map.of("name", "dev")));
+
+        var response = controller.createEnvironment(body, request, "user-1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        Map<String, Object> error = firstError(response);
+        assertThat(error)
+                .containsEntry("status", "409")
+                .containsEntry("code", "ENVIRONMENT_NAME_CONFLICT")
+                .containsEntry("detail", detail)
+                .containsEntry("source", Map.of("pointer", "/data/attributes/name"));
+        assertThat(error.get("meta")).isEqualTo(Map.of("conflictingEnvironment",
+                Map.of("id", "env-old", "name", "dev", "status", "ARCHIVED")));
+    }
+
+    @Test
+    @DisplayName("createEnvironment answers 409 when a concurrent create wins the unique index")
+    void createMapsDuplicateKeyToConflict() {
         grantPermission();
         when(provisioningService.createSandbox(any(), any(), any(), any(), any()))
-                .thenThrow(new IllegalArgumentException("A tenant with slug 'acme--dev' already exists"));
+                .thenThrow(new DuplicateKeyException("idx_environment_tenant_name"));
 
-        Map<String, Object> body = new HashMap<>();
-        body.put("name", "dev");
+        var response = controller.createEnvironment(new HashMap<>(Map.of("name", "dev")), request, "user-1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(firstError(response)).containsEntry("code", "ENVIRONMENT_NAME_CONFLICT");
+    }
+
+    @Test
+    @DisplayName("createEnvironment answers 400 with the reason and a pointer to the offending attribute")
+    void createMapsValidationFailureWithPointer() {
+        grantPermission();
+        when(provisioningService.createSandbox(any(), any(), any(), any(), any()))
+                .thenThrow(new SandboxProvisioningService.InvalidEnvironmentRequestException(
+                        "name", "Sandbox name must contain letters or digits"));
+
+        Map<String, Object> body = Map.of("data", Map.of("attributes", Map.of("name", "!!!")));
 
         var response = controller.createEnvironment(body, request, "user-1");
 
         assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThat(firstError(response))
+                .containsEntry("status", "400")
+                .containsEntry("code", "VALIDATION_FAILED")
+                .containsEntry("detail", "Sandbox name must contain letters or digits")
+                .containsEntry("source", Map.of("pointer", "/data/attributes/name"));
+    }
+
+    @Test
+    @DisplayName("createEnvironment points a missing name at /name for a flat body")
+    void createRequiresNamePointer() {
+        grantPermission();
+
+        var response = controller.createEnvironment(new HashMap<>(), request, "user-1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThat(firstError(response))
+                .containsEntry("detail", "Environment name is required")
+                .containsEntry("source", Map.of("pointer", "/name"));
+    }
+
+    @Test
+    @DisplayName("createEnvironment rejects a non-string attribute with a pointer instead of a 500")
+    void createRejectsNonStringAttribute() {
+        grantPermission();
+
+        Map<String, Object> body = Map.of("data", Map.of("attributes", Map.of("name", 42)));
+
+        var response = controller.createEnvironment(body, request, "user-1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThat(firstError(response))
+                .containsEntry("detail", "name must be a string")
+                .containsEntry("source", Map.of("pointer", "/data/attributes/name"));
+        verifyNoInteractions(provisioningService);
+    }
+
+    @Test
+    @DisplayName("createEnvironment answers 400 without a pointer for a failure not tied to an attribute")
+    void createMapsValidationFailure() {
+        grantPermission();
+        when(provisioningService.createSandbox(any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalArgumentException("Sandboxes cannot be created from a sandbox tenant"));
+
+        var response = controller.createEnvironment(new HashMap<>(Map.of("name", "dev")), request, "user-1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThat(firstError(response))
+                .containsEntry("detail", "Sandboxes cannot be created from a sandbox tenant")
+                .doesNotContainKey("source");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> firstError(org.springframework.http.ResponseEntity<?> response) {
+        var errors = (List<Map<String, Object>>) ((Map<String, Object>) response.getBody()).get("errors");
+        assertThat(errors).hasSize(1);
+        return errors.get(0);
     }
 
     @Test

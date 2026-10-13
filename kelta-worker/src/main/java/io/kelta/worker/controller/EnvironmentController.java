@@ -1,5 +1,6 @@
 package io.kelta.worker.controller;
 
+import io.kelta.jsonapi.JsonApiError;
 import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BootstrapRepository;
@@ -10,6 +11,7 @@ import io.kelta.worker.service.SandboxProvisioningService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -90,30 +92,55 @@ public class EnvironmentController {
         requirePermission(request);
 
         Map<String, Object> attrs = unwrapJsonApiBody(body);
-        String name = (String) attrs.get("name");
-        String description = (String) attrs.get("description");
-        String type = (String) attrs.getOrDefault("type", "SANDBOX");
-        String remoteBaseUrl = (String) attrs.get("remoteBaseUrl");
-
-        if (name == null || name.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Environment name is required"));
-        }
+        String pointerPrefix = attrs == body ? "/" : "/data/attributes/";
 
         try {
+            String name = stringAttribute(attrs, "name");
+            String description = stringAttribute(attrs, "description");
+            String type = stringAttribute(attrs, "type");
+            String remoteBaseUrl = stringAttribute(attrs, "remoteBaseUrl");
+
+            if (name == null || name.isBlank()) {
+                throw new SandboxProvisioningService.InvalidEnvironmentRequestException(
+                        "name", "Environment name is required");
+            }
+
             if (remoteBaseUrl != null && !remoteBaseUrl.isBlank()) {
                 Map<String, Object> env = provisioningService.createRemoteEnvironment(
                         tenantId, name, description, type, remoteBaseUrl,
-                        (String) attrs.get("remoteTenantSlug"),
-                        (String) attrs.get("credentialRef"), userId);
+                        stringAttribute(attrs, "remoteTenantSlug"),
+                        stringAttribute(attrs, "credentialRef"), userId);
                 return ResponseEntity.status(HttpStatus.CREATED)
                         .body(JsonApiResponseBuilder.single("environments", extractId(env), env));
             }
             Map<String, Object> env = provisioningService.createSandbox(
-                    tenantId, name, description, type, userId);
+                    tenantId, name, description, type == null ? "SANDBOX" : type, userId);
             return ResponseEntity.status(HttpStatus.ACCEPTED)
                     .body(JsonApiResponseBuilder.single("environments", extractId(env), env));
+        } catch (SandboxProvisioningService.EnvironmentConflictException e) {
+            JsonApiError error = new JsonApiError("409", "ENVIRONMENT_NAME_CONFLICT", "Conflict", e.getMessage());
+            error.setSource(Map.of("pointer", pointerPrefix + "name"));
+            if (e.getEnvironmentId() != null) {
+                Map<String, Object> conflicting = new LinkedHashMap<>();
+                conflicting.put("id", e.getEnvironmentId());
+                conflicting.put("name", e.getEnvironmentName());
+                conflicting.put("status", e.getEnvironmentStatus());
+                error.setMeta(Map.of("conflictingEnvironment", conflicting));
+            }
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(errorDocument(error));
+        } catch (DuplicateKeyException e) {
+            // Lost a race with a concurrent create of the same name past the pre-checks.
+            log.warn("Environment create hit a unique index: {}", e.getMessage());
+            JsonApiError error = new JsonApiError("409", "ENVIRONMENT_NAME_CONFLICT", "Conflict",
+                    "An environment with this name was created concurrently in this tenant. Choose a different name.");
+            error.setSource(Map.of("pointer", pointerPrefix + "name"));
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(errorDocument(error));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            JsonApiError error = new JsonApiError("400", "VALIDATION_FAILED", "Validation Error", e.getMessage());
+            if (e instanceof SandboxProvisioningService.InvalidEnvironmentRequestException invalid) {
+                error.setSource(Map.of("pointer", pointerPrefix + invalid.getAttribute()));
+            }
+            return ResponseEntity.badRequest().body(errorDocument(error));
         }
     }
 
@@ -265,6 +292,18 @@ public class EnvironmentController {
         if (!granted) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, PERMISSION + " permission required");
         }
+    }
+
+    private static String stringAttribute(Map<String, Object> attrs, String key) {
+        Object value = attrs.get(key);
+        if (value == null || value instanceof String) {
+            return (String) value;
+        }
+        throw new SandboxProvisioningService.InvalidEnvironmentRequestException(key, key + " must be a string");
+    }
+
+    private static Map<String, Object> errorDocument(JsonApiError error) {
+        return Map.of("errors", List.of(error.toMap()));
     }
 
     private String extractId(Map<String, Object> data) {

@@ -107,21 +107,15 @@ public class SandboxProvisioningService {
 
         String parentSlug = (String) parent.get("slug");
         String normalized = normalizeName(name);
+        rejectNameInUse(parentTenantId, name);
         String sandboxSlug = parentSlug + "--" + normalized;
         if (!SLUG_PATTERN.matcher(sandboxSlug).matches()) {
-            throw new IllegalArgumentException(
+            throw new InvalidEnvironmentRequestException("name",
                     "Sandbox slug '" + sandboxSlug + "' is invalid — the combined parent slug + '--' + name "
                             + "must be at most 63 characters of [a-z0-9-]. Use a shorter name (max "
                             + Math.max(0, 61 - parentSlug.length() - 2) + " characters for this tenant).");
         }
-        Integer slugCount = environmentRepository.getJdbcTemplate().queryForObject(
-                "SELECT COUNT(*) FROM tenant WHERE slug = ?", Integer.class, sandboxSlug);
-        if (slugCount != null && slugCount > 0) {
-            throw new IllegalArgumentException("A tenant with slug '" + sandboxSlug + "' already exists");
-        }
-        if (environmentRepository.existsByTenantAndName(parentTenantId, name)) {
-            throw new IllegalArgumentException("Environment with name '" + name + "' already exists");
-        }
+        rejectSlugInUse(parentTenantId, name, sandboxSlug);
 
         // Create the sandbox tenant through the standard tenants write path so
         // the full lifecycle hook chain fires. Runs under the caller's context —
@@ -250,17 +244,20 @@ public class SandboxProvisioningService {
                                                        String type, String remoteBaseUrl,
                                                        String remoteTenantSlug, String credentialRef,
                                                        String createdBy) {
-        RemotePromotionClient.validateRemoteBaseUrl(remoteBaseUrl);
+        try {
+            RemotePromotionClient.validateRemoteBaseUrl(remoteBaseUrl);
+        } catch (IllegalArgumentException e) {
+            throw new InvalidEnvironmentRequestException("remoteBaseUrl", e.getMessage());
+        }
         if (remoteTenantSlug == null || remoteTenantSlug.isBlank()) {
-            throw new IllegalArgumentException("remoteTenantSlug is required for a remote environment");
+            throw new InvalidEnvironmentRequestException("remoteTenantSlug",
+                    "remoteTenantSlug is required for a remote environment");
         }
         if (credentialRef == null || credentialRef.isBlank()) {
-            throw new IllegalArgumentException(
+            throw new InvalidEnvironmentRequestException("credentialRef",
                     "credentialRef is required — the remote PAT must come from the credential vault");
         }
-        if (environmentRepository.existsByTenantAndName(tenantId, name)) {
-            throw new IllegalArgumentException("Environment with name '" + name + "' already exists");
-        }
+        rejectNameInUse(tenantId, name);
 
         String envType = type == null || type.isBlank() ? "PRODUCTION" : type;
         String envId = environmentRepository.createRemote(tenantId, name, description, envType,
@@ -424,16 +421,109 @@ public class SandboxProvisioningService {
 
     private String normalizeName(String name) {
         if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException("Sandbox name is required");
+            throw new InvalidEnvironmentRequestException("name", "Sandbox name is required");
         }
         String normalized = name.toLowerCase()
                 .replaceAll("[^a-z0-9-]+", "-")
                 .replaceAll("-{2,}", "-")
                 .replaceAll("^-|-$", "");
         if (normalized.isBlank()) {
-            throw new IllegalArgumentException("Sandbox name must contain letters or digits");
+            throw new InvalidEnvironmentRequestException("name", "Sandbox name must contain letters or digits");
         }
         return normalized;
+    }
+
+    /**
+     * Environment names are unique per tenant across every status, archived
+     * included (idx_environment_tenant_name) — check up front so the caller
+     * learns which environment holds the name instead of hitting the index.
+     */
+    private void rejectNameInUse(String tenantId, String name) {
+        var rows = environmentRepository.getJdbcTemplate().queryForList(
+                "SELECT id, name, status FROM environment WHERE tenant_id = ? AND name = ?",
+                tenantId, name);
+        if (!rows.isEmpty()) {
+            Map<String, Object> existing = rows.get(0);
+            throw new EnvironmentConflictException(
+                    String.valueOf(existing.get("id")), String.valueOf(existing.get("name")),
+                    String.valueOf(existing.get("status")),
+                    "Environment name '" + name + "' is already used by environment '" + existing.get("name")
+                            + "' (id " + existing.get("id") + ", status " + existing.get("status")
+                            + ") in this tenant. Choose a different name.");
+        }
+    }
+
+    /**
+     * A different name can normalize to a slug an existing sandbox already owns
+     * (e.g. "Dev" and "dev"); an archived sandbox keeps its decommissioned
+     * tenant and therefore its slug.
+     */
+    private void rejectSlugInUse(String parentTenantId, String name, String sandboxSlug) {
+        var rows = environmentRepository.getJdbcTemplate().queryForList(
+                "SELECT e.id, e.name, e.status FROM environment e JOIN tenant t ON t.id = e.sandbox_tenant_id "
+                        + "WHERE e.tenant_id = ? AND t.slug = ?",
+                parentTenantId, sandboxSlug);
+        if (!rows.isEmpty()) {
+            Map<String, Object> existing = rows.get(0);
+            throw new EnvironmentConflictException(
+                    String.valueOf(existing.get("id")), String.valueOf(existing.get("name")),
+                    String.valueOf(existing.get("status")),
+                    "Sandbox name '" + name + "' maps to slug '" + sandboxSlug + "', which is already used by "
+                            + "sandbox '" + existing.get("name") + "' (id " + existing.get("id") + ", status "
+                            + existing.get("status") + ") in this tenant. Choose a different name.");
+        }
+        Integer slugCount = environmentRepository.getJdbcTemplate().queryForObject(
+                "SELECT COUNT(*) FROM tenant WHERE slug = ?", Integer.class, sandboxSlug);
+        if (slugCount != null && slugCount > 0) {
+            throw new EnvironmentConflictException(null, null, null,
+                    "Sandbox name '" + name + "' maps to slug '" + sandboxSlug
+                            + "', which is already used by another tenant. Choose a different name.");
+        }
+    }
+
+    /** A create request rejected on one request attribute — answered 400 with a pointer to it. */
+    public static class InvalidEnvironmentRequestException extends IllegalArgumentException {
+        private final String attribute;
+
+        public InvalidEnvironmentRequestException(String attribute, String message) {
+            super(message);
+            this.attribute = attribute;
+        }
+
+        public String getAttribute() {
+            return attribute;
+        }
+    }
+
+    /**
+     * A create whose name (or derived sandbox slug) is already taken — answered
+     * 409. The conflicting environment's id, name and status are null when the
+     * slug belongs to a tenant no environment of this tenant points at.
+     */
+    public static class EnvironmentConflictException extends RuntimeException {
+        private final String environmentId;
+        private final String environmentName;
+        private final String environmentStatus;
+
+        public EnvironmentConflictException(String environmentId, String environmentName,
+                                            String environmentStatus, String message) {
+            super(message);
+            this.environmentId = environmentId;
+            this.environmentName = environmentName;
+            this.environmentStatus = environmentStatus;
+        }
+
+        public String getEnvironmentId() {
+            return environmentId;
+        }
+
+        public String getEnvironmentName() {
+            return environmentName;
+        }
+
+        public String getEnvironmentStatus() {
+            return environmentStatus;
+        }
     }
 
     private static String stripTrailingSlash(String url) {

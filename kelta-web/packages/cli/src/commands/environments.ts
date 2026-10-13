@@ -1,5 +1,6 @@
 import type { AxiosInstance } from 'axios';
 import { z } from 'zod';
+import { errorFromResponse } from '../errors.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
 
 /** Default delay between polls for `--wait` commands. */
@@ -96,7 +97,7 @@ export interface PromoteCreateOptions {
 }
 
 function requestError(res: { status: number; data: unknown }): Error {
-  return new Error(`Request failed (status ${String(res.status)}): ${JSON.stringify(res.data)}`);
+  return errorFromResponse(res.status, res.data);
 }
 
 function isSuccess(status: number): boolean {
