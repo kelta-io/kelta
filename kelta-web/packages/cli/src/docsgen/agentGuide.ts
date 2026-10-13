@@ -99,6 +99,10 @@ kelta pages publish /home                    # resolves ui-pages by path, sets p
   the flow reads \`$.input.k\`.
 - Validation rules are ERROR conditions: the formula evaluating TRUE rejects
   the write.
+- A rule can test related records through a ROLLUP_SUMMARY field it names:
+  the rollup is computed from the child rows at write time, and a value sent
+  in the body is ignored. E.g. a COUNT rollup \`openTasks\` (filter
+  \`{"status":"open"}\`) plus \`AND(state = "closed", openTasks > 0)\`.
 - A just-created collection can briefly 404 on other pods (cache refresh);
   the CLI retries name lookups, but chained scripts should tolerate one retry.
 - Page size clamps at 200 server-side; the CLI rejects larger values up front.

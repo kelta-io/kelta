@@ -300,7 +300,9 @@ public class DefaultQueryEngine implements QueryEngine {
 
         // Evaluate custom validation rules (formula-based)
         if (customValidationRuleEngine != null) {
-            customValidationRuleEngine.evaluate(definition.name(), recordData, OperationType.CREATE);
+            customValidationRuleEngine.evaluate(definition.name(),
+                    withRollupsForValidation(definition, recordData, OperationType.CREATE),
+                    OperationType.CREATE);
         }
 
         // Evaluate before-create hooks (module-provided lifecycle hooks)
@@ -415,9 +417,11 @@ public class DefaultQueryEngine implements QueryEngine {
         }
 
         // Custom (formula) rules may reference sibling fields, so they still see
-        // the merged record.
+        // the merged record — plus any rollup summary a rule reads, computed now.
         if (customValidationRuleEngine != null) {
-            customValidationRuleEngine.evaluate(definition.name(), mergedData, OperationType.UPDATE);
+            customValidationRuleEngine.evaluate(definition.name(),
+                    withRollupsForValidation(definition, mergedData, OperationType.UPDATE),
+                    OperationType.UPDATE);
         }
 
         // Capture previous data for event publishing (before persist overwrites)
@@ -899,6 +903,39 @@ public class DefaultQueryEngine implements QueryEngine {
     }
 
     /**
+     * Returns the record data custom validation rules see: when an active rule for this
+     * operation references a ROLLUP_SUMMARY field, a copy of {@code data} with that field set
+     * to its value computed now (one aggregate query per referenced field, before the write
+     * persists), replacing any client-supplied value. Rollups have no column, so the value
+     * only ever reaches the rules. Returns {@code data} itself when no rule reads a rollup.
+     */
+    private Map<String, Object> withRollupsForValidation(CollectionDefinition definition,
+                                                         Map<String, Object> data,
+                                                         OperationType operationType) {
+        List<FieldDefinition> rollups = definition.fields().stream()
+                .filter(field -> field.type() == FieldType.ROLLUP_SUMMARY)
+                .toList();
+        if (rollups.isEmpty()) {
+            return data;
+        }
+        Set<String> referenced = customValidationRuleEngine.referencedFields(definition.name(), operationType);
+        Map<String, Object> ruleData = data;
+        for (FieldDefinition rollup : rollups) {
+            if (!referenced.contains(rollup.name())) {
+                continue;
+            }
+            if (ruleData == data) {
+                ruleData = new HashMap<>(data);
+            }
+            Object computed = rollupSummaryService == null ? null : computeRollupValue(rollup, data);
+            logger.debug("Rollup field '{}' on '{}' computed for validation: {}",
+                    rollup.name(), definition.name(), computed);
+            ruleData.put(rollup.name(), computed);
+        }
+        return ruleData;
+    }
+
+    /**
      * Computes FORMULA and ROLLUP_SUMMARY field values after retrieval.
      */
     private void computeVirtualFields(CollectionDefinition definition, List<Map<String, Object>> records) {
@@ -1001,7 +1038,7 @@ public class DefaultQueryEngine implements QueryEngine {
         String fkColumn = resolveColumnName(childDef, foreignKeyField);
         String aggColumn = aggregateField == null ? null : resolveColumnName(childDef, aggregateField);
 
-        logger.info("Rollup '{}' executing: {} on {} {} where {}={}", field.name(),
+        logger.debug("Rollup '{}' executing: {} on {} {} where {}={}", field.name(),
                 aggregateFunction, childTable.toSql(), aggColumn != null ? "(" + aggColumn + ")" : "(*)",
                 fkColumn, parentId);
         try {

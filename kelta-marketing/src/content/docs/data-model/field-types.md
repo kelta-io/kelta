@@ -39,7 +39,7 @@ tools also accept the lower-case aliases.
 | `LOOKUP` | `VARCHAR(36)` + FK `ON DELETE SET NULL` | Optional relationship. See [Relationships](/docs/data-model/relationships/). |
 | `MASTER_DETAIL` | `VARCHAR(36)` + FK `ON DELETE CASCADE`, `NOT NULL` | Required, owning relationship. Alias `reference`. |
 | `FORMULA` | no column | Computed on read from `fieldTypeConfig.expression`; `returnType` `TEXT`, `NUMBER` or `BOOLEAN`. See [Formula fields](/docs/data-model/formula-fields/). |
-| `ROLLUP_SUMMARY` | no column | `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a master-detail child collection, computed on read. |
+| `ROLLUP_SUMMARY` | no column | `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` over a master-detail child collection, computed on read. Also computed at write time for any [validation rule](/docs/data-model/validation-rules/#rules-over-related-records) that references it. |
 
 `REFERENCE` still deserialises for compatibility and is treated as `MASTER_DETAIL`; do not create new fields with it.
 

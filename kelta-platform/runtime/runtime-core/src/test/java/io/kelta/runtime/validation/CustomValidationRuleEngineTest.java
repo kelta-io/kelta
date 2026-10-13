@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -237,6 +238,50 @@ class CustomValidationRuleEngineTest {
             // Only the ERROR rule contributes to the response
             assertEquals(1, ex.getErrors().size());
             assertEquals("err_rule", ex.getErrors().get(0).ruleName());
+        }
+    }
+
+    @Nested
+    @DisplayName("Referenced fields")
+    class ReferencedFieldsTests {
+
+        @Test
+        @DisplayName("Collects field references from parsed formulas, not string literals or function names")
+        void collectsFieldReferences() {
+            ruleRegistry.register("projects", List.of(
+                    new ValidationRuleDefinition("close", "AND(state = \"openTasks\", openTasks > 0)",
+                            "msg", "state", "CREATE_AND_UPDATE", true),
+                    new ValidationRuleDefinition("hours", "-totalHours < 0 || !ISBLANK(owner)",
+                            "msg", null, "UPDATE", true)));
+
+            assertEquals(Set.of("state", "openTasks", "totalHours", "owner"),
+                    engine.referencedFields("projects", OperationType.UPDATE));
+        }
+
+        @Test
+        @DisplayName("Skips rules that are inactive or do not apply to the operation")
+        void skipsInactiveAndNonApplicableRules() {
+            ruleRegistry.register("projects", List.of(
+                    new ValidationRuleDefinition("update_only", "openTasks > 0", "msg", null, "UPDATE", true),
+                    new ValidationRuleDefinition("inactive", "totalHours > 0", "msg", null, "CREATE", false),
+                    new ValidationRuleDefinition("create", "state = \"x\"", "msg", null, "CREATE", true)));
+
+            assertEquals(Set.of("state"), engine.referencedFields("projects", OperationType.CREATE));
+        }
+
+        @Test
+        @DisplayName("An unparseable formula contributes no references")
+        void unparseableFormulaContributesNothing() {
+            ruleRegistry.register("projects", List.of(
+                    new ValidationRuleDefinition("broken", "openTasks > (", "msg", null, "CREATE_AND_UPDATE", true)));
+
+            assertEquals(Set.of(), engine.referencedFields("projects", OperationType.UPDATE));
+        }
+
+        @Test
+        @DisplayName("Returns empty for a collection without rules")
+        void emptyWithoutRules() {
+            assertEquals(Set.of(), engine.referencedFields("projects", OperationType.UPDATE));
         }
     }
 }

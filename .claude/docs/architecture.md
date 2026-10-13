@@ -1094,6 +1094,16 @@ for it, not just a `ScopedValue`.
     commit and **never on rollback**. With no transaction active (the plain router write) the event
     is published immediately, as before. The deferred publish still runs on the request thread
     before the response is written: `@Transactional` commits when the controller method returns.
+    **Rollups are computed for validation:** before `CustomValidationRuleEngine.evaluate` (create:
+    the new record; update: stored record merged with the patch) `DefaultQueryEngine` asks the
+    engine for the field names its active rules for that operation reference
+    (`referencedFields`, parsed with `FormulaParser`, cached per formula) and computes each
+    referenced `ROLLUP_SUMMARY` field with `computeRollupValue` — one aggregate query per field,
+    not per child — into a **copy** of the data the rules see. The computed value overrides any
+    client-supplied one and is never persisted (rollups have no column). A collection whose rules
+    read no rollup costs no query. This is how a rule tests related records ("a parent cannot
+    close while a child is open"); the read is not locked, so a child written concurrently with
+    the parent update is not seen.
   - `JsonApiIncludeResolver` — `?include=` (see "Read-side include resolution" below);
     `RecordTenantScope` — the router's `X-Tenant-ID` second layer for tenant-scoped system
     collections (`injectTenantFilter`, `visibleToTenant`, shared-row narrowing, `injectTenantId`)

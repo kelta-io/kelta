@@ -60,7 +60,7 @@ public class CreateValidationRuleTool implements AdminTool {
         Tool tool = Tool.builder()
                 .name("create_validation_rule")
                 .title("Create Validation Rule")
-                .description("Create a validation rule on a collection. The record is rejected at create/update time when errorConditionFormula evaluates TRUE. Wraps POST /api/validation-rules.")
+                .description("Create a validation rule on a collection. The record is rejected at create/update time when errorConditionFormula evaluates TRUE. To test related records, reference a ROLLUP_SUMMARY field of the collection in the formula: it is computed from the child rows at write time (a client-supplied value is ignored), e.g. AND(state = \"closed\", openTasks > 0) with openTasks a filtered COUNT rollup. Wraps POST /api/validation-rules.")
                 .inputSchema(Schemas.object(properties, List.of("collectionName", "name", "errorMessage")))
                 .annotations(ToolHints.write(false, false))
                 .build();
