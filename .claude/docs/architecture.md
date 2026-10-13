@@ -957,6 +957,14 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   so a caller can tell "wrong password" from "right password, account still needs a forced
   change" apart. `kelta sandbox create`'s human-readable output states the `POST
   /auth/direct-login` login path alongside the printed credentials.
+- **Sandbox create returns where to sign in** (KLT-588): the `POST /api/environments` (sandbox)
+  response attributes carry `signInUrl` = `<kelta.ui-base-url>/<sandboxSlug>/login` (the UI's
+  tenant-scoped `login` route) and `apiBaseUrl` = `<kelta.external-base-url>/<sandboxSlug>` (the
+  gateway's slug-prefixed API base), next to `sandboxSlug`/`adminUsername`/`adminInitialPassword`;
+  `kelta sandbox create` prints both. Properties (worker `application.yml`): `kelta.ui-base-url`
+  ← `KELTA_UI_BASE_URL` (falls back to `EXTERNAL_BASE_URL`) and the existing
+  `kelta.external-base-url` ← `EXTERNAL_BASE_URL`. Self-hosters with a separate UI host set
+  `KELTA_UI_BASE_URL`; no host is hard-coded in Java.
 - **Sandbox auth is per-tenant-profile, never the parent's PAT (kelta#1539, regression-tested
   KLT-285):** a sandbox is a full tenant of its own. `GatewayPrincipal.tenantId`/`profileId` are
   resolved by `UserIdentityResolutionFilter` against the *request's* target tenant

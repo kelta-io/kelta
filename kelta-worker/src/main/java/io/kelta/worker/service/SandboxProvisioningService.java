@@ -10,6 +10,7 @@ import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.repository.EnvironmentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -55,6 +56,8 @@ public class SandboxProvisioningService {
     private final CollectionRegistry collectionRegistry;
     private final PlatformEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
+    private final String uiBaseUrl;
+    private final String apiBaseUrl;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -65,7 +68,9 @@ public class SandboxProvisioningService {
                                       QueryEngine queryEngine,
                                       CollectionRegistry collectionRegistry,
                                       PlatformEventPublisher eventPublisher,
-                                      ObjectMapper objectMapper) {
+                                      ObjectMapper objectMapper,
+                                      @Value("${kelta.ui-base-url:${kelta.external-base-url:}}") String uiBaseUrl,
+                                      @Value("${kelta.external-base-url:}") String apiBaseUrl) {
         this.environmentRepository = environmentRepository;
         this.environmentService = environmentService;
         this.packageService = packageService;
@@ -74,6 +79,8 @@ public class SandboxProvisioningService {
         this.collectionRegistry = collectionRegistry;
         this.eventPublisher = eventPublisher;
         this.objectMapper = objectMapper;
+        this.uiBaseUrl = stripTrailingSlash(uiBaseUrl);
+        this.apiBaseUrl = stripTrailingSlash(apiBaseUrl);
     }
 
     /**
@@ -84,7 +91,8 @@ public class SandboxProvisioningService {
      *
      * @return the environment row plus one-time credentials for the seeded
      *         sandbox admin ({@code adminInitialPassword} is never persisted or
-     *         retrievable again)
+     *         retrievable again), the sandbox's UI sign-in URL
+     *         ({@code signInUrl}) and its API base URL ({@code apiBaseUrl})
      */
     public Map<String, Object> createSandbox(String parentTenantId, String name, String description,
                                              String type, String createdBy) {
@@ -171,6 +179,8 @@ public class SandboxProvisioningService {
         result.put("adminUsername", sandboxSlug + "-admin");
         result.put("adminEmail", sandboxSlug + "-admin@kelta.local");
         result.put("adminInitialPassword", initialPassword);
+        result.put("signInUrl", uiBaseUrl + "/" + sandboxSlug + "/login");
+        result.put("apiBaseUrl", apiBaseUrl + "/" + sandboxSlug);
         publishEnvironmentEvent(parentTenantId, envId, "CREATED");
         return result;
     }
@@ -424,6 +434,10 @@ public class SandboxProvisioningService {
             throw new IllegalArgumentException("Sandbox name must contain letters or digits");
         }
         return normalized;
+    }
+
+    private static String stripTrailingSlash(String url) {
+        return url == null ? "" : url.replaceAll("/+$", "");
     }
 
     /** Resolves a tenant's slug — needed to bind schema-per-tenant context. */

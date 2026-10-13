@@ -94,6 +94,10 @@ kelta:
     # docker-compose service; set it to the Kubernetes service URL in a cluster.
     internal-url: ${KELTA_AUTH_INTERNAL_URL:http://kelta-auth:8081}
   external-base-url: ${EXTERNAL_BASE_URL:http://localhost:8080}
+  # Public origin of the web UI (e.g. https://app.example.com). `sandbox create` returns
+  # <ui-base-url>/<slug>/login as the sandbox's signInUrl, and <external-base-url>/<slug> as
+  # its apiBaseUrl. Falls back to external-base-url for single-host setups.
+  ui-base-url: ${KELTA_UI_BASE_URL:${EXTERNAL_BASE_URL:http://localhost:8080}}
   # SMS delivery (MFA verification codes + availability alerts). The default provider only
   # logs; set provider=twilio and the twilio.* secret to send for real (consumer-alerting
   # slice 10). Selecting twilio without the secret still boots — sends fail as FAILED deliveries.
