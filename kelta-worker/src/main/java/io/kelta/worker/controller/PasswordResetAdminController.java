@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BootstrapRepository;
+import io.kelta.worker.service.AuthSessionRevocationClient;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.SecurityAuditLogger;
 import jakarta.servlet.http.HttpServletRequest;
@@ -37,18 +38,22 @@ public class PasswordResetAdminController {
     private final JdbcTemplate jdbcTemplate;
     private final CerbosPermissionResolver permissionResolver;
     private final BootstrapRepository bootstrapRepository;
+    private final AuthSessionRevocationClient authSessions;
 
     public PasswordResetAdminController(JdbcTemplate jdbcTemplate,
                                         CerbosPermissionResolver permissionResolver,
-                                        BootstrapRepository bootstrapRepository) {
+                                        BootstrapRepository bootstrapRepository,
+                                        AuthSessionRevocationClient authSessions) {
         this.jdbcTemplate = jdbcTemplate;
         this.permissionResolver = permissionResolver;
         this.bootstrapRepository = bootstrapRepository;
+        this.authSessions = authSessions;
     }
 
     /**
      * Force a user to change their password on next login.
-     * Sets the force_change_on_login flag to true on the user_credential table.
+     * Sets the force_change_on_login flag to true on the user_credential table, then signs the
+     * user out of kelta-auth (sessions and refresh tokens) so the change is required now.
      */
     @PostMapping("/{userId}/reset-password")
     public ResponseEntity<?> resetPassword(HttpServletRequest request, @PathVariable String userId) {
@@ -80,6 +85,7 @@ public class PasswordResetAdminController {
         SecurityAuditLogger.log(SecurityAuditLogger.EventType.PASSWORD_RESET_ADMIN,
                 "admin", userId, tenantId, "success", "force_change_on_login=true");
         log.info("Password reset initiated for user {} by admin in tenant {}", userId, tenantId);
+        authSessions.revokeAfterCommit(tenantId, userId);
 
         return ResponseEntity.ok(Map.of("status", "reset_initiated", "userId", userId));
     }

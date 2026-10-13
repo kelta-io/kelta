@@ -189,6 +189,7 @@ public final class KeltaStack {
             .withEnv("SPRING_DATA_REDIS_PORT",     "6379")
             .withEnv("NATS_URL",                   "nats://nats:4222")
             .withEnv("KELTA_AUTH_ISSUER_URI",      "http://kelta-auth:8080")
+            .withEnv("KELTA_AUTH_INTERNAL_URL",    "http://kelta-auth:8080")
             .withEnv("EXTERNAL_BASE_URL",          "http://kelta-gateway:8080")
             .withEnv("CERBOS_HOST",                "cerbos")
             .withEnv("CERBOS_GRPC_PORT",           "3593")
@@ -236,6 +237,8 @@ public final class KeltaStack {
             // forced change that AuthFixture completes once (BaselineAdminPasswordInitializer).
             .withEnv("KELTA_BOOTSTRAP_ADMIN_PASSWORD", AuthFixture.BOOTSTRAP_ADMIN_PASSWORD)
             .withExposedPorts(8080)
+            .withLogConsumer(new org.testcontainers.containers.output.Slf4jLogConsumer(
+                    org.slf4j.LoggerFactory.getLogger("kelta-auth-container")))
             .waitingFor(Wait.forHttp("/actuator/health").withStartupTimeout(Duration.ofMinutes(2)));
 
     public static final GenericContainer<?> GATEWAY = serviceContainer("kelta-gateway")

@@ -43,11 +43,21 @@ public class AuthorizationRetentionSweep {
 
     private static final Logger log = LoggerFactory.getLogger(AuthorizationRetentionSweep.class);
 
-    /** A token group is spent when it is absent or expired before the cutoff (bound six times). */
+    /**
+     * A token group is spent when it is absent or expired before the cutoff (cutoff bound seven
+     * times). The leading {@code GREATEST(...) < ?} — the latest expiry of the row — is implied
+     * by the per-token conditions for any row Spring Authorization Server writes, and matches the
+     * expression index {@code idx_oauth2_authorization_latest_expiry} (worker migration V210),
+     * so a batch reads the expired rows through the index instead of scanning the table. Keep
+     * the expression identical to the index's.
+     */
     static final String DELETE_BATCH = """
             DELETE FROM oauth2_authorization WHERE id IN (
                 SELECT id FROM oauth2_authorization
-                WHERE (authorization_code_value IS NOT NULL OR access_token_value IS NOT NULL
+                WHERE GREATEST(authorization_code_expires_at, access_token_expires_at,
+                               oidc_id_token_expires_at, refresh_token_expires_at,
+                               device_code_expires_at, user_code_expires_at) < ?
+                  AND (authorization_code_value IS NOT NULL OR access_token_value IS NOT NULL
                        OR oidc_id_token_value IS NOT NULL OR refresh_token_value IS NOT NULL
                        OR device_code_value IS NOT NULL OR user_code_value IS NOT NULL)
                   AND (authorization_code_value IS NULL OR authorization_code_expires_at < ?)
@@ -105,7 +115,7 @@ public class AuthorizationRetentionSweep {
         int total = 0;
         for (int batch = 0; batch < maxBatches; batch++) {
             int deleted = jdbcTemplate.update(DELETE_BATCH,
-                    cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, batchSize);
+                    cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, batchSize);
             total += deleted;
             deletedCounter.increment(deleted);
             if (deleted < batchSize) {

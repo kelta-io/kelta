@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -157,6 +158,29 @@ class AuthorizationRetentionIntegrationTest {
         assertThat(sweep(3, 2).deleteExpired()).isEqualTo(6);
         assertThat(sweep(3, 2).deleteExpired()).isEqualTo(4);
         assertThat(app.queryForObject("SELECT count(*) FROM oauth2_authorization", Integer.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("the sweep and the sign-out lookup by login name can read through their indexes (V210)")
+    void lookupsUseTheirIndexes() {
+        String literal = "TIMESTAMPTZ '2026-01-01 00:00:00+00'";
+        String batch = AuthorizationRetentionSweep.DELETE_BATCH;
+        String select = batch.substring(batch.indexOf("SELECT id"), batch.indexOf("LIMIT ?"))
+                .replace("?", literal);
+        SingleConnectionDataSource connection = new SingleConnectionDataSource(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
+        try {
+            JdbcTemplate session = new JdbcTemplate(connection);
+            // The table is empty here; turning sequential scans off shows whether an index applies.
+            session.execute("SET enable_seqscan = off");
+            assertThat(String.join("\n", session.queryForList("EXPLAIN " + select, String.class)))
+                    .contains("idx_oauth2_authorization_latest_expiry");
+            assertThat(String.join("\n", session.queryForList("EXPLAIN SELECT id FROM oauth2_authorization "
+                    + "WHERE lower(principal_name) IN (lower('a@example.test'), lower('a'))", String.class)))
+                    .contains("idx_oauth2_authorization_principal_name_lower");
+        } finally {
+            connection.destroy();
+        }
     }
 
     private AuthorizationRetentionSweep sweep(int batchSize, int maxBatches) {

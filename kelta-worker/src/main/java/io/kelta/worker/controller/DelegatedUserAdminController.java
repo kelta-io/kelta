@@ -11,6 +11,7 @@ import io.kelta.runtime.query.QueryResult;
 import io.kelta.runtime.query.SortField;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.repository.DelegatedAdminScopeRepository;
+import io.kelta.worker.service.AuthSessionRevocationClient;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.SecurityAuditLogger;
 import io.kelta.worker.service.UserInviteService;
@@ -76,6 +77,7 @@ public class DelegatedUserAdminController {
     private final CerbosPermissionResolver permissionResolver;
     private final UserInviteService userInviteService;
     private final JdbcTemplate jdbcTemplate;
+    private final AuthSessionRevocationClient authSessions;
 
     public DelegatedUserAdminController(DelegatedAdminService delegatedAdminService,
                                         DelegatedAdminScopeRepository scopeRepository,
@@ -83,7 +85,8 @@ public class DelegatedUserAdminController {
                                         CollectionRegistry collectionRegistry,
                                         CerbosPermissionResolver permissionResolver,
                                         UserInviteService userInviteService,
-                                        JdbcTemplate jdbcTemplate) {
+                                        JdbcTemplate jdbcTemplate,
+                                        AuthSessionRevocationClient authSessions) {
         this.delegatedAdminService = delegatedAdminService;
         this.scopeRepository = scopeRepository;
         this.queryEngine = queryEngine;
@@ -91,6 +94,7 @@ public class DelegatedUserAdminController {
         this.permissionResolver = permissionResolver;
         this.userInviteService = userInviteService;
         this.jdbcTemplate = jdbcTemplate;
+        this.authSessions = authSessions;
     }
 
     // ------------------------------------------------------------------ me
@@ -211,7 +215,8 @@ public class DelegatedUserAdminController {
     /**
      * Forces a password change on next login — the same {@code user_credential} flag the
      * MANAGE_USERS-gated {@code PasswordResetAdminController} sets, scoped to delegated targets
-     * and gated on {@code canResetPasswords}.
+     * and gated on {@code canResetPasswords} — and signs the user out of kelta-auth. (A status
+     * change through {@link #updateUser} signs the user out via {@code UserSessionRevocationHook}.)
      */
     @PostMapping("/users/{id}/reset-password")
     public ResponseEntity<Map<String, String>> resetPassword(HttpServletRequest request,
@@ -229,6 +234,7 @@ public class DelegatedUserAdminController {
         }
         SecurityAuditLogger.log(SecurityAuditLogger.EventType.PASSWORD_RESET_ADMIN,
                 caller.email, id, caller.tenantId, "success", "delegated force_change_on_login=true");
+        authSessions.revokeAfterCommit(caller.tenantId, id);
         return ResponseEntity.ok(Map.of("status", "reset_initiated", "userId", id));
     }
 

@@ -91,4 +91,66 @@ class UserSessionRevokerTest {
 
         assertThat(revoker.signOutElsewhere("u1", "s")).isEqualTo(new UserSessionRevoker.Result(0, 0));
     }
+
+    @Test
+    @DisplayName("signOutEverywhere ends every session of the user, the current one included, and revokes only that user's authorizations")
+    void signsOutEverywhere() {
+        when(jdbc.queryForList(contains("FROM platform_user"), eq("u1")))
+                .thenReturn(List.of(Map.of("tenant_id", "t1", "email", "user@example.test")));
+        when(sessions.findByIndexNameAndIndexValue(FindByIndexNameSessionRepository.PRINCIPAL_NAME_INDEX_NAME, "t1:u1"))
+                .thenReturn(Map.of("a", new MapSession("a"), "b", new MapSession("b")));
+        when(jdbc.queryForList(contains("FROM oauth2_authorization"), eq(String.class),
+                eq("user@example.test"), eq("user@example.test"))).thenReturn(List.of("mine", "theirs"));
+        OAuth2Authorization mine = authorizationOf(UsernamePasswordAuthenticationToken.authenticated(
+                user("t1", "u1"), null, List.of()));
+        OAuth2Authorization theirs = authorizationOf(UsernamePasswordAuthenticationToken.authenticated(
+                user("t2", "u2"), null, List.of()));
+        when(authorizations.findById("mine")).thenReturn(mine);
+        when(authorizations.findById("theirs")).thenReturn(theirs);
+
+        UserSessionRevoker.Result result = revoker.signOutEverywhere("t1", "u1", List.of());
+
+        assertThat(result).isEqualTo(new UserSessionRevoker.Result(2, 1));
+        verify(sessions).deleteById("a");
+        verify(sessions).deleteById("b");
+        verify(authorizations).remove(mine);
+        verify(authorizations, never()).remove(theirs);
+    }
+
+    @Test
+    @DisplayName("signOutEverywhere leaves a user of another tenant alone")
+    void signOutEverywhereChecksTheTenant() {
+        when(jdbc.queryForList(contains("FROM platform_user"), eq("u1")))
+                .thenReturn(List.of(Map.of("tenant_id", "t1", "email", "user@example.test")));
+
+        assertThat(revoker.signOutEverywhere("t2", "u1", List.of("user@example.test")))
+                .isEqualTo(new UserSessionRevoker.Result(0, 0));
+        verify(sessions, never()).findByIndexNameAndIndexValue(anyString(), anyString());
+        verify(authorizations, never()).remove(any());
+    }
+
+    @Test
+    @DisplayName("signOutEverywhere for a removed user finds authorizations by the login names it was given")
+    void signOutEverywhereForARemovedUser() {
+        when(jdbc.queryForList(contains("FROM platform_user"), eq("u1"))).thenReturn(List.of());
+        when(sessions.findByIndexNameAndIndexValue(FindByIndexNameSessionRepository.PRINCIPAL_NAME_INDEX_NAME, "t1:u1"))
+                .thenReturn(Map.of());
+        when(jdbc.queryForList(contains("FROM oauth2_authorization"), eq(String.class),
+                eq("gone@example.test"), eq("gone"))).thenReturn(List.of("mine"));
+        OAuth2Authorization mine = authorizationOf(UsernamePasswordAuthenticationToken.authenticated(
+                user("t1", "u1"), null, List.of()));
+        when(authorizations.findById("mine")).thenReturn(mine);
+
+        assertThat(revoker.signOutEverywhere("t1", "u1", List.of("gone@example.test", "gone")).authorizationsRevoked())
+                .isEqualTo(1);
+        verify(authorizations).remove(mine);
+    }
+
+    @Test
+    @DisplayName("signOutEverywhere without a tenant or user id does nothing")
+    void signOutEverywhereNeedsBothIds() {
+        assertThat(revoker.signOutEverywhere(null, "u1", List.of())).isEqualTo(new UserSessionRevoker.Result(0, 0));
+        assertThat(revoker.signOutEverywhere("t1", " ", List.of())).isEqualTo(new UserSessionRevoker.Result(0, 0));
+        verify(jdbc, never()).queryForList(anyString(), any(Object[].class));
+    }
 }

@@ -185,13 +185,39 @@ class PasswordControllerTest {
         @Test
         @DisplayName("always returns success to prevent email enumeration")
         void alwaysReturnsSuccess() {
-            when(jdbcTemplate.update(contains("reset_token = NULL"), anyString())).thenReturn(0);
-            when(jdbcTemplate.update(contains("reset_token = ?"), anyString(), any(), any(), anyString())).thenReturn(0);
+            when(jdbcTemplate.queryForList(contains("FROM platform_user"), eq("nonexistent@test.com")))
+                    .thenReturn(List.of());
 
             var request = new PasswordController.ResetRequestBody("nonexistent@test.com");
             ResponseEntity<Map<String, String>> result = controller.requestPasswordReset(request);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+            verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
+            verifyNoInteractions(workerClient);
+        }
+
+        @Test
+        @DisplayName("the same address in two tenants: one token per user, each stored on that user only")
+        void oneTokenPerAccount() {
+            when(jdbcTemplate.queryForList(contains("FROM platform_user"), eq("shared@test.com")))
+                    .thenReturn(List.of(
+                            Map.of("id", "user-a", "tenant_id", "tenant-a", "first_name", "A", "tenant_name", "Tenant A"),
+                            Map.of("id", "user-b", "tenant_id", "tenant-b", "first_name", "B", "tenant_name", "Tenant B")));
+            when(jdbcTemplate.update(contains("reset_token = ?"), anyString(), any(Timestamp.class),
+                    any(Timestamp.class), anyString())).thenReturn(1);
+
+            controller.requestPasswordReset(new PasswordController.ResetRequestBody("shared@test.com"));
+
+            var tokens = org.mockito.ArgumentCaptor.forClass(Object.class);
+            verify(jdbcTemplate).update(contains("WHERE user_id = ?"), tokens.capture(), any(Timestamp.class),
+                    any(Timestamp.class), eq("user-a"));
+            verify(jdbcTemplate).update(contains("WHERE user_id = ?"), tokens.capture(), any(Timestamp.class),
+                    any(Timestamp.class), eq("user-b"));
+            assertThat(tokens.getAllValues()).doesNotHaveDuplicates();
+            verify(workerClient).sendTemplateEmail(eq("tenant-a"), eq("shared@test.com"), eq("user.password_reset"),
+                    anyMap(), eq("PASSWORD_RESET"), eq("user-a"));
+            verify(workerClient).sendTemplateEmail(eq("tenant-b"), eq("shared@test.com"), eq("user.password_reset"),
+                    anyMap(), eq("PASSWORD_RESET"), eq("user-b"));
         }
     }
 
@@ -256,14 +282,47 @@ class PasswordControllerTest {
                             "reset_token_expires_at", Timestamp.from(Instant.now().plusSeconds(3600))
                     )));
             when(passwordEncoder.encode("newpassword123")).thenReturn("$2a$newhash");
+            when(jdbcTemplate.update(contains("password_hash = ?"), eq("$2a$newhash"), any(Timestamp.class),
+                    any(Timestamp.class), eq("user-1"), eq("valid-token"))).thenReturn(1);
 
             var request = new PasswordController.ResetPasswordRequest("valid-token", "newpassword123");
             ResponseEntity<Map<String, String>> result = controller.resetPassword(request, httpRequest);
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-            verify(jdbcTemplate).update(contains("password_hash = ?"),
-                    eq("$2a$newhash"), any(Timestamp.class), any(Timestamp.class), eq("user-1"));
+            verify(jdbcTemplate).update(contains("WHERE user_id = ? AND reset_token = ?"),
+                    eq("$2a$newhash"), any(Timestamp.class), any(Timestamp.class), eq("user-1"), eq("valid-token"));
             verify(sessionRevoker).signOutElsewhere("user-1", null);
+        }
+
+        @Test
+        @DisplayName("a token matching more than one credential resets nobody")
+        void ambiguousTokenIsRefused() {
+            Timestamp future = Timestamp.from(Instant.now().plusSeconds(3600));
+            when(jdbcTemplate.queryForList(contains("reset_token"), eq("dup-token")))
+                    .thenReturn(List.of(Map.of("user_id", "user-1", "reset_token_expires_at", future),
+                            Map.of("user_id", "user-2", "reset_token_expires_at", future)));
+
+            var result = controller.resetPassword(
+                    new PasswordController.ResetPasswordRequest("dup-token", "newpassword123"), httpRequest);
+
+            assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
+            verifyNoInteractions(sessionRevoker);
+        }
+
+        @Test
+        @DisplayName("a token used meanwhile (no row updated) is refused and signs nobody out")
+        void consumedTokenIsRefused() {
+            when(jdbcTemplate.queryForList(contains("reset_token"), eq("used-token")))
+                    .thenReturn(List.of(Map.of("user_id", "user-1",
+                            "reset_token_expires_at", Timestamp.from(Instant.now().plusSeconds(3600)))));
+            when(passwordEncoder.encode("newpassword123")).thenReturn("$2a$newhash");
+
+            var result = controller.resetPassword(
+                    new PasswordController.ResetPasswordRequest("used-token", "newpassword123"), httpRequest);
+
+            assertThat(result.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            verifyNoInteractions(sessionRevoker);
         }
     }
 }

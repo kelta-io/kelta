@@ -77,7 +77,7 @@ class AuthorizationRetentionSweepTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbc).update(eq(AuthorizationRetentionSweep.DELETE_BATCH), args.capture());
         Timestamp cutoff = Timestamp.from(NOW.minus(Duration.ofDays(1)));
-        assertThat(args.getValue()).containsExactly(cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, 100);
+        assertThat(args.getValue()).containsExactly(cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, 100);
     }
 
     @Test

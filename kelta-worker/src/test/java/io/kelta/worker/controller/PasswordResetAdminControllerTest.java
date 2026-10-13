@@ -1,6 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.worker.repository.BootstrapRepository;
+import io.kelta.worker.service.AuthSessionRevocationClient;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.util.WithTenant;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,12 +30,14 @@ class PasswordResetAdminControllerTest {
     @Mock private CerbosPermissionResolver permissionResolver;
     @Mock private BootstrapRepository bootstrapRepository;
     @Mock private HttpServletRequest request;
+    @Mock private AuthSessionRevocationClient authSessions;
 
     private PasswordResetAdminController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new PasswordResetAdminController(jdbcTemplate, permissionResolver, bootstrapRepository);
+        controller = new PasswordResetAdminController(jdbcTemplate, permissionResolver, bootstrapRepository,
+                authSessions);
     }
 
     private void grantManageUsers() {
@@ -58,6 +61,24 @@ class PasswordResetAdminControllerTest {
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             verify(jdbcTemplate).update(contains("force_change_on_login = true"), any(), eq("user-1"));
+            verify(authSessions).revokeAfterCommit("tenant-1", "user-1");
+        }
+
+        @Test
+        @DisplayName("kelta-auth unreachable: the reset still succeeds")
+        void succeedsWhenAuthIsUnreachable() {
+            grantManageUsers();
+            when(jdbcTemplate.queryForList(contains("platform_user"), eq("user-1"), eq("tenant-1")))
+                    .thenReturn(List.of(Map.of("id", "user-1", "email", "user@test.com")));
+            when(jdbcTemplate.update(contains("UPDATE user_credential"), any(), eq("user-1")))
+                    .thenReturn(1);
+            // Port 1 on loopback: connection refused.
+            controller = new PasswordResetAdminController(jdbcTemplate, permissionResolver, bootstrapRepository,
+                    new AuthSessionRevocationClient("http://127.0.0.1:1", "internal-token"));
+
+            var response = controller.resetPassword(request, "user-1");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         }
 
         @Test
@@ -69,6 +90,7 @@ class PasswordResetAdminControllerTest {
             var response = controller.resetPassword(request, "user-1");
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            verifyNoInteractions(authSessions);
         }
 
         @Test

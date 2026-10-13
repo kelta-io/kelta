@@ -22,6 +22,7 @@ import org.mockito.Mockito;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.CredentialsExpiredException;
@@ -223,6 +224,88 @@ class BaselineAdminPasswordIntegrationTest {
     }
 
     @Test
+    @DisplayName("same email in two tenants, both flagged: the forced change and the email-link reset change only the signed-in tenant's user")
+    void sameEmailInAnotherTenantIsUntouched() throws Exception {
+        String otherTenant = "bbbbbbbb-0000-4000-8000-0000000000b2";
+        String otherUser = "bbbbbbbb-0000-4000-8000-0000000000c3";
+        String shared = "Initial-Value-1a2b3c";
+        boot(shared);
+        admin.update("INSERT INTO tenant (id, slug, name) VALUES (?, 'pw-scope-b', 'Tenant B')", otherTenant);
+        admin.update("INSERT INTO platform_user (id, tenant_id, email, first_name, last_name, status) "
+                + "VALUES (?, ?, ?, 'Other', 'Admin', 'ACTIVE')", otherUser, otherTenant, ADMIN_EMAIL);
+        admin.update("INSERT INTO user_credential (id, user_id, password_hash, force_change_on_login) "
+                + "VALUES (?, ?, ?, true)", "bbbbbbbb-0000-4000-8000-0000000000d4", otherUser, ENCODER.encode(shared));
+        try {
+            Map<String, Object> otherBefore = admin.queryForMap(
+                    "SELECT password_hash, force_change_on_login FROM user_credential WHERE user_id = ?", otherUser);
+            UserSessionRevoker revoker = Mockito.mock(UserSessionRevoker.class);
+
+            // Sign in to the platform tenant: right password, change required.
+            MockHttpServletRequest login = new MockHttpServletRequest("POST", "/login");
+            MockHttpSession loginSession = new MockHttpSession();
+            loginSession.setAttribute("tenantId", PLATFORM_TENANT_ID);
+            login.setSession(loginSession);
+            RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(login));
+            DaoAuthenticationProvider provider = new DaoAuthenticationProvider(new KeltaUserDetailsService(app));
+            provider.setPasswordEncoder(ENCODER);
+            CredentialsExpiredException expired = org.junit.jupiter.api.Assertions.assertThrows(
+                    CredentialsExpiredException.class,
+                    () -> provider.authenticate(new UsernamePasswordAuthenticationToken(ADMIN_EMAIL, shared)));
+            MockHttpServletResponse redirect = new MockHttpServletResponse();
+            new LoginFailureHandler().onAuthenticationFailure(login, redirect, expired);
+            RequestContextHolder.resetRequestAttributes();
+            assertThat(redirect.getRedirectedUrl()).isEqualTo("/change-password");
+
+            var session = login.getSession(false);
+            assertThat(session.getAttribute(ForcePasswordChangeController.SESSION_ATTR_USER_ID)).isEqualTo(ADMIN_USER_ID);
+            assertThat(session.getAttribute(ForcePasswordChangeController.SESSION_ATTR_TENANT_ID))
+                    .isEqualTo(PLATFORM_TENANT_ID);
+            String view = new ForcePasswordChangeController(app, ENCODER, revoker).changePassword(
+                    shared, "Chosen-In-Tenant-A-77", "Chosen-In-Tenant-A-77", session, new ExtendedModelMap());
+
+            assertThat(view).isEqualTo("redirect:/login?passwordChanged");
+            assertThat(signIn("Chosen-In-Tenant-A-77").isAuthenticated()).isTrue();
+            assertThat(admin.queryForMap(
+                    "SELECT password_hash, force_change_on_login FROM user_credential WHERE user_id = ?", otherUser))
+                    .as("the other tenant's user").isEqualTo(otherBefore);
+            Mockito.verify(revoker).signOutElsewhere(ADMIN_USER_ID, session.getId());
+            Mockito.verify(revoker, Mockito.never()).signOutElsewhere(Mockito.eq(otherUser), Mockito.any());
+
+            // Email-link reset: one token per account; using one resets only that account.
+            PasswordController passwords = new PasswordController(app, ENCODER, Mockito.mock(WorkerClient.class),
+                    Mockito.mock(PasswordPolicyService.class), revoker, new AuthProperties());
+            assertThat(passwords.requestPasswordReset(new PasswordController.ResetRequestBody(ADMIN_EMAIL))
+                    .getStatusCode().value()).isEqualTo(200);
+            String tokenA = admin.queryForObject("SELECT reset_token FROM user_credential WHERE user_id = ?",
+                    String.class, ADMIN_USER_ID);
+            String tokenB = admin.queryForObject("SELECT reset_token FROM user_credential WHERE user_id = ?",
+                    String.class, otherUser);
+            assertThat(tokenA).isNotNull().isNotEqualTo(tokenB);
+            assertThat(tokenB).isNotNull();
+
+            var reset = passwords.resetPassword(new PasswordController.ResetPasswordRequest(tokenA, "Reset-In-A-88"),
+                    new MockHttpServletRequest("POST", "/auth/password/reset"));
+
+            assertThat(reset.getStatusCode().value()).as("%s", reset.getBody()).isEqualTo(200);
+            assertThat(signIn("Reset-In-A-88").isAuthenticated()).isTrue();
+            Map<String, Object> otherAfter = admin.queryForMap(
+                    "SELECT password_hash, force_change_on_login, reset_token FROM user_credential WHERE user_id = ?",
+                    otherUser);
+            assertThat(otherAfter.get("password_hash")).isEqualTo(otherBefore.get("password_hash"));
+            assertThat(otherAfter.get("force_change_on_login")).isEqualTo(true);
+            assertThat(otherAfter.get("reset_token")).as("the other user's token is still unused").isEqualTo(tokenB);
+            assertThat(passwords.resetPassword(new PasswordController.ResetPasswordRequest(tokenA, "Reset-Again-99"),
+                    new MockHttpServletRequest("POST", "/auth/password/reset")).getStatusCode().value())
+                    .as("a token is used once").isEqualTo(400);
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+            admin.update("DELETE FROM user_credential WHERE user_id = ?", otherUser);
+            admin.update("DELETE FROM platform_user WHERE id = ?", otherUser);
+            admin.update("DELETE FROM tenant WHERE id = ?", otherTenant);
+        }
+    }
+
+    @Test
     @DisplayName("fresh install: \"password\" stops working and the admin must change the replacement")
     void baselinePasswordNoLongerAuthenticates() {
         assertThat(signIn("password")).as("precondition: the baseline seed").isNotNull();
@@ -274,6 +357,8 @@ class BaselineAdminPasswordIntegrationTest {
 
         MockHttpSession session = new MockHttpSession();
         session.setAttribute(ForcePasswordChangeController.SESSION_ATTR_EMAIL, ADMIN_EMAIL);
+        session.setAttribute(ForcePasswordChangeController.SESSION_ATTR_USER_ID, ADMIN_USER_ID);
+        session.setAttribute(ForcePasswordChangeController.SESSION_ATTR_TENANT_ID, PLATFORM_TENANT_ID);
         String view = new ForcePasswordChangeController(app, ENCODER, Mockito.mock(UserSessionRevoker.class)).changePassword(
                 generated, "Chosen-By-The-Admin-42", "Chosen-By-The-Admin-42", session, new ExtendedModelMap());
         assertThat(view).isEqualTo("redirect:/login?passwordChanged");

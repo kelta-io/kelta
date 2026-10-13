@@ -117,15 +117,18 @@ in, cookie name `kelta_auth_session`, `SameSite`, `cookie-secure`). `session/`:
 - `SessionPrincipalIndexResolver` / `TenantScopedSessionRegistry` — the per-user index and the
   OIDC registry over it (see Sign-out above).
 - `SignedInSessionTimeoutFilter` — the long timeout only once the session holds a signed-in user.
-- `UserSessionRevoker` — after a successful password change (`PasswordController` change and
-  email-link reset, `ForcePasswordChangeController`) ends every other session of the user (index
-  key tenant + user id; the session the change was made in is kept) and deletes the user's
-  `oauth2_authorization` rows, so earlier refresh tokens answer `invalid_grant`. Those rows carry
-  only the email as `principal_name`, so it reads candidates back through the authorization
-  service and deletes only rows whose stored `KeltaUserDetails` has the same tenant + id. Never
-  fails the request (the password is already changed); failures log at ERROR. A new
-  password-changing path must call it. Tests: `PasswordChangeSignOutFlowTest`,
-  `SharedHttpSessionIntegrationTest` (Redis), `UserSessionRevokerTest`.
+- `UserSessionRevoker` — `signOutElsewhere(userId, keepSessionId)` after a successful password
+  change (`PasswordController` change and email-link reset, `ForcePasswordChangeController`) ends
+  every other session of the user (index key tenant + user id; the session the change was made in
+  is kept) and deletes the user's `oauth2_authorization` rows, so earlier refresh tokens answer
+  `invalid_grant`. `signOutEverywhere(tenantId, userId, loginNames)` does the same with nothing
+  kept, for kelta-worker's internal call (below); it ignores a user id of another tenant and takes
+  the login names from the caller only when the user row is gone. `oauth2_authorization` rows carry
+  only the login name as `principal_name` (looked up via `lower(principal_name)`, indexed by worker
+  V210), so it reads candidates back through the authorization service and deletes only rows whose
+  stored `KeltaUserDetails` has the same tenant + id. Never fails the request (the change is
+  already made); failures log at ERROR. A new password-changing path must call it. Tests:
+  `PasswordChangeSignOutFlowTest`, `SharedHttpSessionIntegrationTest` (Redis), `UserSessionRevokerTest`.
 - **Native image**: every class written for a session value needs a serialization hint
   (`AuthRuntimeHints.registerHttpSessionSerialization`, on top of Spring Session's own). A new
   session attribute type gets a sample in the test `SessionAttributeSamples`;
@@ -140,8 +143,39 @@ is kept. Settings `kelta.auth.authorization-retention.*` (`enabled`, `interval` 
 `batch-size` 500, `max-batches` 100; first run 5 min after start). Every replica runs it — there is
 no cluster lock in this service (nor ShedLock anywhere in the repo): each statement is
 `DELETE … WHERE id IN (SELECT … LIMIT ? FOR UPDATE SKIP LOCKED)`, so concurrent sweeps take
-disjoint rows. The table has no RLS. Tests: `AuthorizationRetentionSweepTest`,
-`AuthorizationRetentionIntegrationTest` (real migrated schema, concurrent sweeps).
+disjoint rows. The select leads with `GREATEST(<six expiry columns>) < cutoff`, which matches the
+expression index `idx_oauth2_authorization_latest_expiry` (worker V210) — keep the two identical.
+The table has no RLS. Tests: `AuthorizationRetentionSweepTest`,
+`AuthorizationRetentionIntegrationTest` (real migrated schema, concurrent sweeps, index use).
+
+### Password paths are scoped to one user
+An email address can belong to users in several tenants, so every password write names one user
+by tenant + user id:
+- Forced change at sign-in: `KeltaUserDetailsService` leaves the user it loaded in the request
+  attribute `LOADED_USER_ATTRIBUTE`; when form login fails with `CredentialsExpiredException`
+  (raised after the password check), `config/LoginFailureHandler` calls
+  `ForcePasswordChangeController.begin`, which stores that user's id + tenant id (and the email,
+  for display) in the session and changes the session id. `/change-password` re-reads the account
+  by id + tenant, requires `force_change_on_login` and the current password, and updates only that
+  credential (`WHERE user_id = ? AND force_change_on_login = true AND <user is in the tenant>`).
+  A session without the id + tenant goes back to `/login`.
+- Email-link reset: `/auth/password/reset-request` issues one token per active account with the
+  address, stored on that user only and mailed with that tenant's name; `/auth/password/reset`
+  accepts a token only when it matches exactly one credential and clears it in the same
+  `UPDATE … WHERE user_id = ? AND reset_token = ?` (single use).
+- `/auth/password/change` resolves the signed-in principal by tenant + id.
+Test on Postgres: `BaselineAdminPasswordIntegrationTest.sameEmailInAnotherTenantIsUntouched`.
+
+### Internal endpoint (kelta-worker → kelta-auth)
+`POST /internal/tenants/{tenantId}/users/{userId}/revoke-sessions`
+(`controller/InternalSessionRevocationController`), optional body `{"loginNames": [...]}`: calls
+`UserSessionRevoker.signOutEverywhere`. kelta-worker's `AuthSessionRevocationClient` calls it after
+an admin password reset, deactivation or removal. Authenticated only by `X-Internal-Token` =
+`kelta.internal.token` (`KELTA_INTERNAL_TOKEN`, same value as the worker), compared in constant
+time; no token configured ⇒ every call 403. The ingress sends every path of the auth host here,
+so that check is the only gate: `/internal/**` is `permitAll` and CSRF-exempt in
+`AuthorizationServerConfig`, path variables only (no request record to hint for the native image).
+Tests: `InternalSessionRevocationControllerTest`, `InternalSessionRevocationFlowTest` (real chain).
 
 ### First-boot platform admin password
 `config/BaselineAdminPasswordInitializer` (`ApplicationRunner`) replaces the Flyway baseline's
