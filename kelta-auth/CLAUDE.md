@@ -103,6 +103,23 @@ plain surefire here and skip without Docker.
   every sign-out there. Without a SAML session it redirects to the same-origin
   `post_logout_redirect_uri` (else `/login?logout`).
 - `DynamicClientRegistrationRepository` — loads OIDC provider configs from worker at runtime
+  (`DynamicRelyingPartyRegistrationRepository` is the SAML mirror). Both cache hits for 5 min and
+  remember an id the worker reported as unknown for 30 s in a bounded per-pod
+  `UnknownRegistrationCache` (10k ids, ids over 256 chars never kept). Only an *answered* miss is
+  remembered: they call `WorkerClient.lookupActive{Oidc,Saml}Providers`, whose `Optional.empty()`
+  means the worker could not answer, so an outage is never cached as "no such provider". Listing
+  a tenant's providers (login page) forgets misses for the ids it found; `evictAll()` clears both.
+- Rate limiting: `filter/PortalPublicRateLimitFilter` (order -150, before Spring Security) also
+  budgets the unauthenticated federation endpoints — `/oauth2/authorization/`,
+  `/login/oauth2/code/`, `/saml2/authenticate/`, `/saml2/metadata`,
+  `/saml2/service-provider-metadata/`, `/login/saml2/sso/`, `/logout/saml2/slo/` at 60 per IP per 60 s, each prefix its own Redis bucket
+  (`kelta.auth.rate-limit.federation-paths`, separate from the portal `ip-paths` so overriding one
+  keeps the other). `GET /login` with a non-blank `tenant` or `idp_hint` has its own bucket
+  (`kelta.auth.rate-limit.login-page-limit`, 60; 0 disables); the password form POST to `/login`
+  is never counted. Paths match on the decoded servlet path, so encoded variants share a bucket.
+  Client IP and fail-open semantics are the portal limiter's (`kelta.security.trusted-proxies`).
+  The defaults live in the filter and in `application.yml`; `PortalPublicRateLimitFilterTest`
+  checks they agree.
 - `FederatedLoginSuccessHandler` — handles successful external IdP login
 - `FederatedUserMapper` — maps external identity to Kelta user
 

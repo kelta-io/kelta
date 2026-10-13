@@ -261,6 +261,16 @@ public class WorkerClient {
     }
 
     public List<OidcProviderInfo> findActiveOidcProviders(String tenantId) {
+        return lookupActiveOidcProviders(tenantId).orElse(List.of());
+    }
+
+    /**
+     * Like {@link #findActiveOidcProviders(String)}, but tells a failed lookup apart from
+     * an answered empty list: {@code Optional.empty()} means the worker could not answer
+     * (error or unexpected body). Callers that remember a miss use this so an outage is
+     * never cached as "no such provider".
+     */
+    public Optional<List<OidcProviderInfo>> lookupActiveOidcProviders(String tenantId) {
         try {
             JsonNode response = restClient.get()
                     .uri("/internal/oidc/providers?tenantId={tenantId}", tenantId)
@@ -268,17 +278,17 @@ public class WorkerClient {
                     .body(JsonNode.class);
 
             if (response == null || !response.isArray()) {
-                return List.of();
+                return Optional.empty();
             }
 
             List<OidcProviderInfo> providers = new ArrayList<>();
             for (JsonNode node : response) {
                 providers.add(parseOidcProviderInfo(node));
             }
-            return providers;
+            return Optional.of(providers);
         } catch (Exception e) {
             log.warn("Failed to list OIDC providers for tenant {}: {}", tenantId, e.getMessage());
-            return List.of();
+            return Optional.empty();
         }
     }
 
@@ -289,6 +299,14 @@ public class WorkerClient {
      * as "tenant has no SAML federation".
      */
     public List<SamlProviderInfo> findActiveSamlProviders(String tenantId) {
+        return lookupActiveSamlProviders(tenantId).orElse(List.of());
+    }
+
+    /**
+     * Like {@link #findActiveSamlProviders(String)}, but {@code Optional.empty()} when the
+     * worker could not answer, so a failure is never mistaken for "no such provider".
+     */
+    public Optional<List<SamlProviderInfo>> lookupActiveSamlProviders(String tenantId) {
         try {
             JsonNode response = restClient.get()
                     .uri("/internal/saml/providers?tenantId={tenantId}", tenantId)
@@ -296,17 +314,17 @@ public class WorkerClient {
                     .body(JsonNode.class);
 
             if (response == null || !response.isArray()) {
-                return List.of();
+                return Optional.empty();
             }
 
             List<SamlProviderInfo> providers = new ArrayList<>();
             for (JsonNode node : response) {
                 providers.add(parseSamlProviderInfo(node));
             }
-            return providers;
+            return Optional.of(providers);
         } catch (Exception e) {
             log.warn("Failed to list SAML providers for tenant {}: {}", tenantId, e.getMessage());
-            return List.of();
+            return Optional.empty();
         }
     }
 

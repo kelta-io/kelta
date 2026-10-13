@@ -128,6 +128,12 @@ mailbox to a high-volume public address.
   into an idle-expiry → tenant-wide self-sustaining 429 lockout (2026-07-11).
 - **Limiter keys never trust the leftmost `X-Forwarded-For`** — kelta-auth counts
   `trusted-proxy-count` hops from the right (set 0 when directly exposed).
+- **kelta-auth federation endpoints are limited by the same filter** from a separate list,
+  `kelta.auth.rate-limit.federation-paths`, so overriding `ip-paths` cannot drop them; the
+  login page counts only as `GET /login` with `tenant`/`idp_hint` (`login-page-limit`), never the
+  password POST. Unknown registration ids are remembered for 30 s per pod
+  (`UnknownRegistrationCache`), so a provider created moments after a miss can take up to 30 s to
+  resolve on that pod unless its login page is rendered first.
 - Everything fails **open** on a Redis outage except the bot challenge's replay claim (fails
   **closed**).
 - **e2e runs at ~84% of the tenant window** (1735 req / 5 min at the 100k default), so
@@ -806,6 +812,7 @@ One line each; full write-ups are in git history.
 - PLT-343 (2026-10-05) — platform admin shipped with a well-known password; `BaselineAdminPasswordInitializer`.
 - PLT-355 (2026-10-05) — client tenant headers could select a tenant; now a claim that must match the credential.
 - #1636 (2026-10-06) — kelta-auth open redirect on rejected `redirect_uri`.
+- 2026-10-12 (auth-federation-rate-limit) — kelta-auth's unauthenticated federation endpoints were outside its per-IP rate limit and an unknown registration id cost a worker lookup every time; per-IP budgets added and unknown ids cached briefly.
 - 2026-10-12 (spa-post-logout-redirect) — post-logout redirect URIs were not registered for the SPA client, so `/connect/logout` answered 400 and sign-out left the kelta-auth session alive; origin-based `PlatformPostLogoutRedirectUriValidator`. Then 400 `invalid_token` (`sid`): ID tokens had no `sid` because `KeltaUserDetails` had identity equality; value equality + `SessionRegistry`/`HttpSessionEventPublisher` beans.
 - KLT-377 (2026-10-06) — own-record CEL rules compared a UUID with the caller's email; PATs were always INTERNAL.
 - KLT-380 (2026-10-10) — `user-ui-preferences` rows were tenant-readable; owner-scoped.

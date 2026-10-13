@@ -4,6 +4,7 @@ import io.kelta.auth.service.WorkerClient;
 import io.kelta.auth.service.WorkerClient.SamlProviderInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -13,7 +14,10 @@ import org.springframework.security.saml2.provider.service.registration.RelyingP
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -57,8 +61,8 @@ class DynamicRelyingPartyRegistrationRepositoryTest {
     @Test
     @DisplayName("builds a registration from per-tenant provider config")
     void buildsRegistration() {
-        when(workerClient.findActiveSamlProviders("tenant-1"))
-                .thenReturn(List.of(provider(resource("/saml/idp.crt"))));
+        when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                .thenReturn(Optional.of(List.of(provider(resource("/saml/idp.crt")))));
 
         RelyingPartyRegistration reg = repoWithSpSigning().findByRegistrationId("tenant-1:saml-1");
 
@@ -76,8 +80,8 @@ class DynamicRelyingPartyRegistrationRepositoryTest {
     @Test
     @DisplayName("wires Single Logout (both sides) when the provider has an SLO URL")
     void wiresSingleLogoutWhenSloUrlPresent() {
-        when(workerClient.findActiveSamlProviders("tenant-1"))
-                .thenReturn(List.of(provider(resource("/saml/idp.crt"), "https://idp.acme.example/slo")));
+        when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                .thenReturn(Optional.of(List.of(provider(resource("/saml/idp.crt"), "https://idp.acme.example/slo"))));
 
         RelyingPartyRegistration reg = repoWithSpSigning().findByRegistrationId("tenant-1:saml-1");
 
@@ -93,8 +97,8 @@ class DynamicRelyingPartyRegistrationRepositoryTest {
     @Test
     @DisplayName("omits Single Logout when the provider has no SLO URL")
     void omitsSingleLogoutWhenNoSloUrl() {
-        when(workerClient.findActiveSamlProviders("tenant-1"))
-                .thenReturn(List.of(provider(resource("/saml/idp.crt"))));
+        when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                .thenReturn(Optional.of(List.of(provider(resource("/saml/idp.crt")))));
 
         RelyingPartyRegistration reg = repoWithSpSigning().findByRegistrationId("tenant-1:saml-1");
 
@@ -104,8 +108,8 @@ class DynamicRelyingPartyRegistrationRepositoryTest {
     @Test
     @DisplayName("attaches SP signing credential and requests signing when SP keypair configured")
     void signsWhenSpKeypairPresent() {
-        when(workerClient.findActiveSamlProviders("tenant-1"))
-                .thenReturn(List.of(provider(resource("/saml/idp.crt"))));
+        when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                .thenReturn(Optional.of(List.of(provider(resource("/saml/idp.crt")))));
 
         RelyingPartyRegistration reg = repoWithSpSigning().findByRegistrationId("tenant-1:saml-1");
 
@@ -116,8 +120,8 @@ class DynamicRelyingPartyRegistrationRepositoryTest {
     @Test
     @DisplayName("omits SP signing and request signing when no SP keypair configured")
     void noSigningWhenSpKeypairAbsent() {
-        when(workerClient.findActiveSamlProviders("tenant-1"))
-                .thenReturn(List.of(provider(resource("/saml/idp.crt"))));
+        when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                .thenReturn(Optional.of(List.of(provider(resource("/saml/idp.crt")))));
         var repo = new DynamicRelyingPartyRegistrationRepository(workerClient, SamlSpCredentials.none());
 
         RelyingPartyRegistration reg = repo.findByRegistrationId("tenant-1:saml-1");
@@ -129,8 +133,8 @@ class DynamicRelyingPartyRegistrationRepositoryTest {
     @Test
     @DisplayName("returns null for an unknown provider id")
     void returnsNullWhenProviderMissing() {
-        when(workerClient.findActiveSamlProviders("tenant-1"))
-                .thenReturn(List.of(provider(resource("/saml/idp.crt"))));
+        when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                .thenReturn(Optional.of(List.of(provider(resource("/saml/idp.crt")))));
 
         assertThat(repoWithSpSigning().findByRegistrationId("tenant-1:nope")).isNull();
     }
@@ -145,8 +149,8 @@ class DynamicRelyingPartyRegistrationRepositoryTest {
     @Test
     @DisplayName("returns null (skips provider) when the IdP certificate is unparseable")
     void returnsNullForBadCertificate() {
-        when(workerClient.findActiveSamlProviders("tenant-1"))
-                .thenReturn(List.of(provider("-----BEGIN CERTIFICATE-----\nnot-a-cert\n-----END CERTIFICATE-----")));
+        when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                .thenReturn(Optional.of(List.of(provider("-----BEGIN CERTIFICATE-----\nnot-a-cert\n-----END CERTIFICATE-----"))));
 
         assertThat(repoWithSpSigning().findByRegistrationId("tenant-1:saml-1")).isNull();
     }
@@ -154,14 +158,96 @@ class DynamicRelyingPartyRegistrationRepositoryTest {
     @Test
     @DisplayName("caches the registration so repeat lookups don't re-hit the worker")
     void cachesRegistration() {
-        when(workerClient.findActiveSamlProviders("tenant-1"))
-                .thenReturn(List.of(provider(resource("/saml/idp.crt"))));
+        when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                .thenReturn(Optional.of(List.of(provider(resource("/saml/idp.crt")))));
         var repo = repoWithSpSigning();
 
         repo.findByRegistrationId("tenant-1:saml-1");
         repo.findByRegistrationId("tenant-1:saml-1");
 
-        verify(workerClient, times(1)).findActiveSamlProviders("tenant-1");
+        verify(workerClient, times(1)).lookupActiveSamlProviders("tenant-1");
+    }
+
+    @Nested
+    @DisplayName("unknown registration ids")
+    class UnknownRegistrations {
+
+        private final MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+
+        private DynamicRelyingPartyRegistrationRepository repo() {
+            return new DynamicRelyingPartyRegistrationRepository(workerClient, SamlSpCredentials.none(),
+                    new UnknownRegistrationCache(Duration.ofSeconds(30), 100, clock));
+        }
+
+        @Test
+        @DisplayName("a second miss for the same id does not call the worker")
+        void secondMissSkipsWorker() {
+            when(workerClient.lookupActiveSamlProviders("tenant-1")).thenReturn(Optional.of(List.of()));
+            var repo = repo();
+
+            assertThat(repo.findByRegistrationId("tenant-1:nope")).isNull();
+            assertThat(repo.findByRegistrationId("tenant-1:nope")).isNull();
+
+            verify(workerClient, times(1)).lookupActiveSamlProviders("tenant-1");
+        }
+
+        @Test
+        @DisplayName("the miss expires, so a provider created afterwards is found")
+        void missExpires() {
+            when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                    .thenReturn(Optional.of(List.of()))
+                    .thenReturn(Optional.of(List.of(provider(resource("/saml/idp.crt")))));
+            var repo = repo();
+
+            assertThat(repo.findByRegistrationId("tenant-1:saml-1")).isNull();
+            clock.advance(Duration.ofSeconds(31));
+
+            assertThat(repo.findByRegistrationId("tenant-1:saml-1")).isNotNull();
+            verify(workerClient, times(2)).lookupActiveSamlProviders("tenant-1");
+        }
+
+        @Test
+        @DisplayName("a failed worker lookup is not remembered as a miss")
+        void failureNotCached() {
+            when(workerClient.lookupActiveSamlProviders("tenant-1")).thenReturn(Optional.empty());
+            var repo = repo();
+
+            repo.findByRegistrationId("tenant-1:saml-1");
+            repo.findByRegistrationId("tenant-1:saml-1");
+
+            verify(workerClient, times(2)).lookupActiveSamlProviders("tenant-1");
+        }
+
+        @Test
+        @DisplayName("rendering a login button for the provider forgets a recorded miss")
+        void buttonsForgetMiss() {
+            when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                    .thenReturn(Optional.of(List.of()))
+                    .thenReturn(Optional.of(List.of(provider(resource("/saml/idp.crt")))));
+            when(workerClient.findActiveSamlProviders("tenant-1"))
+                    .thenReturn(List.of(provider(resource("/saml/idp.crt"))));
+            var repo = repo();
+
+            assertThat(repo.findByRegistrationId("tenant-1:saml-1")).isNull();
+            repo.findButtonsByTenantId("tenant-1");
+
+            assertThat(repo.findByRegistrationId("tenant-1:saml-1")).isNotNull();
+        }
+
+        @Test
+        @DisplayName("a hit is still cached alongside remembered misses")
+        void positiveStillCached() {
+            when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                    .thenReturn(Optional.of(List.of(provider(resource("/saml/idp.crt")))));
+            var repo = repo();
+
+            assertThat(repo.findByRegistrationId("tenant-1:nope")).isNull();
+            assertThat(repo.findByRegistrationId("tenant-1:saml-1")).isNotNull();
+            assertThat(repo.findByRegistrationId("tenant-1:saml-1")).isNotNull();
+            assertThat(repo.findByRegistrationId("tenant-1:nope")).isNull();
+
+            verify(workerClient, times(2)).lookupActiveSamlProviders("tenant-1");
+        }
     }
 
     @Test

@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -30,6 +31,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>The platform is a single SP: every registration carries the same platform SP
  * signing credential ({@link SamlSpCredentials}) and a per-tenant verification
  * credential parsed from the IdP's stored certificate.
+ *
+ * <p>Hits are cached for {@code CACHE_TTL}; an id the worker reports as unknown is
+ * remembered briefly in an {@link UnknownRegistrationCache} so repeated requests for it
+ * skip the worker.
  */
 public class DynamicRelyingPartyRegistrationRepository implements RelyingPartyRegistrationRepository {
 
@@ -43,11 +48,19 @@ public class DynamicRelyingPartyRegistrationRepository implements RelyingPartyRe
     private final WorkerClient workerClient;
     private final SamlSpCredentials spCredentials;
     private final Map<String, CachedRegistration> registrationCache = new ConcurrentHashMap<>();
+    private final UnknownRegistrationCache unknownRegistrations;
 
     public DynamicRelyingPartyRegistrationRepository(WorkerClient workerClient,
                                                      SamlSpCredentials spCredentials) {
+        this(workerClient, spCredentials, new UnknownRegistrationCache());
+    }
+
+    DynamicRelyingPartyRegistrationRepository(WorkerClient workerClient,
+                                              SamlSpCredentials spCredentials,
+                                              UnknownRegistrationCache unknownRegistrations) {
         this.workerClient = workerClient;
         this.spCredentials = spCredentials;
+        this.unknownRegistrations = unknownRegistrations;
     }
 
     @Override
@@ -69,7 +82,18 @@ public class DynamicRelyingPartyRegistrationRepository implements RelyingPartyRe
         String tenantId = parts[0];
         String providerId = parts[1];
 
-        for (SamlProviderInfo provider : workerClient.findActiveSamlProviders(tenantId)) {
+        if (unknownRegistrations.isKnownUnknown(registrationId)) {
+            log.debug("SAML registration {} recently reported unknown — skipping lookup", registrationId);
+            return null;
+        }
+
+        Optional<List<SamlProviderInfo>> providers = workerClient.lookupActiveSamlProviders(tenantId);
+        if (providers.isEmpty()) {
+            // The worker could not answer: not evidence the provider is missing, so not cached.
+            log.warn("SAML provider lookup failed for registration: {}", registrationId);
+            return null;
+        }
+        for (SamlProviderInfo provider : providers.get()) {
             if (providerId.equals(provider.id())) {
                 RelyingPartyRegistration registration = buildRegistration(registrationId, provider);
                 if (registration != null) {
@@ -79,6 +103,7 @@ public class DynamicRelyingPartyRegistrationRepository implements RelyingPartyRe
             }
         }
 
+        unknownRegistrations.recordUnknown(registrationId);
         log.warn("No active SAML provider found for registration: {}", registrationId);
         return null;
     }
@@ -91,7 +116,9 @@ public class DynamicRelyingPartyRegistrationRepository implements RelyingPartyRe
      * @return registrations for the tenant's active SAML IdPs
      */
     public List<RelyingPartyRegistration> findByTenantId(String tenantId) {
-        return workerClient.findActiveSamlProviders(tenantId).stream()
+        List<SamlProviderInfo> providers = workerClient.findActiveSamlProviders(tenantId);
+        forgetUnknown(tenantId, providers);
+        return providers.stream()
                 .map(p -> {
                     String registrationId = tenantId + ":" + p.id();
                     RelyingPartyRegistration reg = buildRegistration(registrationId, p);
@@ -113,16 +140,25 @@ public class DynamicRelyingPartyRegistrationRepository implements RelyingPartyRe
      * to render login-page buttons that link to {@code /saml2/authenticate/{registrationId}}.
      */
     public List<SamlButton> findButtonsByTenantId(String tenantId) {
-        return workerClient.findActiveSamlProviders(tenantId).stream()
+        List<SamlProviderInfo> providers = workerClient.findActiveSamlProviders(tenantId);
+        // The login page is about to link to these, so a miss recorded moments ago
+        // (e.g. just before the provider was created) must not break the button.
+        forgetUnknown(tenantId, providers);
+        return providers.stream()
                 .map(p -> new SamlButton(
                         tenantId + ":" + p.id(),
                         p.name() != null && !p.name().isBlank() ? p.name() : p.registrationId()))
                 .toList();
     }
 
-    /** Evicts cached registrations (call when SAML provider config changes). */
+    /** Evicts cached registrations, hits and misses (call when SAML provider config changes). */
     public void evictAll() {
         registrationCache.clear();
+        unknownRegistrations.clear();
+    }
+
+    private void forgetUnknown(String tenantId, List<SamlProviderInfo> providers) {
+        unknownRegistrations.forget(providers.stream().map(p -> tenantId + ":" + p.id()).toList());
     }
 
     private RelyingPartyRegistration buildRegistration(String registrationId, SamlProviderInfo provider) {

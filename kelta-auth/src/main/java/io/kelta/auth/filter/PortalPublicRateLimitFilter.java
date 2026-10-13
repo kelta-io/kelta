@@ -27,7 +27,7 @@ import java.util.Map;
 
 /**
  * Per-IP rate limiting for kelta-auth's public portal endpoints
- * (consumer-alerting slice 7).
+ * (consumer-alerting slice 7) and its unauthenticated federation endpoints.
  *
  * <p><b>Why this is not in the gateway.</b> The obvious home for a per-IP budget
  * on {@code /portal/api/signup} is the gateway's {@code IpRateLimitFilter} — and
@@ -53,6 +53,17 @@ import java.util.Map;
  *
  * <p>Off unless {@code kelta.auth.rate-limit.ip-paths} is non-empty; it ships with
  * budgets for the three public portal paths.
+ *
+ * <p><b>Federation endpoints.</b> The unauthenticated SSO endpoints — OIDC initiation
+ * and callback, SAML AuthnRequest, metadata, assertion consumer and Single Logout — each
+ * resolve a registration through a worker lookup. They are budgeted from a separate
+ * property, {@code kelta.auth.rate-limit.federation-paths}, so overriding the portal
+ * list does not silently drop them. The login page counts too, but only a {@code GET
+ * /login} that carries {@code tenant} or {@code idp_hint} (the parameters that trigger
+ * the lookups), in its own bucket ({@code kelta.auth.rate-limit.login-page-limit});
+ * the password form POST to {@code /login} is never counted here. Every prefix is its
+ * own bucket, so a burst on one federation endpoint does not spend another's budget,
+ * nor any portal budget.
  *
  * <p><b>Client IP.</b> With {@code kelta.security.trusted-proxies} set (CIDRs or bare
  * addresses), the same rule as the gateway's {@code ClientIpResolver}: forwarding headers
@@ -86,6 +97,31 @@ public class PortalPublicRateLimitFilter extends OncePerRequestFilter {
             "/portal/api/signup=5,/portal/api/login/request=10,/portal/api/challenge=30,"
             + "/portal/login=10";
 
+    /**
+     * One federated sign-in touches each of these once (initiation, then the IdP's
+     * callback), so a person stays far below the budget. It is looser than the portal
+     * budgets because SSO is the primary sign-in for the tenants that enable it, and a
+     * whole office can share one egress IP. Each entry is its own bucket.
+     *
+     * <p>Trailing slashes are deliberate: {@code /oauth2/authorization/} must not match the
+     * authorization server's own {@code /oauth2/authorize}. {@code /saml2/metadata} has none
+     * because Spring also serves the aggregate {@code /saml2/metadata}; Spring's metadata
+     * resolver also answers the older {@code /saml2/service-provider-metadata/} form.
+     */
+    static final String DEFAULT_FEDERATION_PATHS =
+            "/oauth2/authorization/=60,/login/oauth2/code/=60,/saml2/authenticate/=60,"
+            + "/saml2/metadata=60,/saml2/service-provider-metadata/=60,/login/saml2/sso/=60,"
+            + "/logout/saml2/slo/=60";
+
+    /** Budget for {@code GET /login} with {@code tenant}/{@code idp_hint}; 0 disables it. */
+    static final int DEFAULT_LOGIN_PAGE_LIMIT = 60;
+
+    /** Bucket name for the login page rule — not a path prefix, so it never collides. */
+    static final String LOGIN_PAGE_BUCKET = "/login?federation";
+
+    private static final String LOGIN_PAGE_PATH = "/login";
+    private static final List<String> LOGIN_PAGE_LOOKUP_PARAMS = List.of("tenant", "idp_hint");
+
     /** See {@code RedisRateLimiter} in kelta-gateway — same semantics. */
     private static final RedisScript<Long> INCREMENT_WINDOW_SCRIPT = RedisScript.of(
             """
@@ -99,27 +135,46 @@ public class PortalPublicRateLimitFilter extends OncePerRequestFilter {
 
     private final StringRedisTemplate redisTemplate;
     private final Map<String, Integer> pathBudgets;
+    private final int loginPageLimit;
     private final int trustedProxyCount;
     private final List<Cidr> trustedProxies;
 
     public PortalPublicRateLimitFilter(
             StringRedisTemplate redisTemplate,
             @Value("${kelta.auth.rate-limit.ip-paths:" + DEFAULT_IP_PATHS + "}") List<String> ipPaths,
+            @Value("${kelta.auth.rate-limit.federation-paths:" + DEFAULT_FEDERATION_PATHS + "}")
+            List<String> federationPaths,
+            @Value("${kelta.auth.rate-limit.login-page-limit:" + DEFAULT_LOGIN_PAGE_LIMIT + "}")
+            int loginPageLimit,
             @Value("${kelta.auth.rate-limit.trusted-proxy-count:1}") int trustedProxyCount,
             @Value("${kelta.security.trusted-proxies:}") List<String> trustedProxies) {
         this.redisTemplate = redisTemplate;
-        this.pathBudgets = parsePathBudgets(ipPaths);
+        this.pathBudgets = parsePathBudgets(concat(ipPaths, federationPaths));
+        this.loginPageLimit = Math.max(0, loginPageLimit);
         this.trustedProxyCount = Math.max(0, trustedProxyCount);
         this.trustedProxies = parseTrustedProxies(trustedProxies);
         if (this.trustedProxies.isEmpty()) {
-            log.info("PortalPublicRateLimitFilter initialized: {} path(s) {} over a {}s window, "
-                            + "{} trusted proxy hop(s) (kelta.security.trusted-proxies unset)",
-                    pathBudgets.size(), pathBudgets, WINDOW.toSeconds(), this.trustedProxyCount);
+            log.info("PortalPublicRateLimitFilter initialized: {} path(s) {} and login page {}/window "
+                            + "over a {}s window, {} trusted proxy hop(s) (kelta.security.trusted-proxies unset)",
+                    pathBudgets.size(), pathBudgets, this.loginPageLimit, WINDOW.toSeconds(),
+                    this.trustedProxyCount);
         } else {
-            log.info("PortalPublicRateLimitFilter initialized: {} path(s) {} over a {}s window, "
-                            + "trusted-proxy mode with {} trusted range(s)",
-                    pathBudgets.size(), pathBudgets, WINDOW.toSeconds(), this.trustedProxies.size());
+            log.info("PortalPublicRateLimitFilter initialized: {} path(s) {} and login page {}/window "
+                            + "over a {}s window, trusted-proxy mode with {} trusted range(s)",
+                    pathBudgets.size(), pathBudgets, this.loginPageLimit, WINDOW.toSeconds(),
+                    this.trustedProxies.size());
         }
+    }
+
+    private static List<String> concat(List<String> first, List<String> second) {
+        List<String> all = new ArrayList<>();
+        if (first != null) {
+            all.addAll(first);
+        }
+        if (second != null) {
+            all.addAll(second);
+        }
+        return all;
     }
 
     private static List<Cidr> parseTrustedProxies(List<String> entries) {
@@ -184,14 +239,19 @@ public class PortalPublicRateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
-        String matched = matchPath(request.getRequestURI());
-        if (matched == null) {
+        String matched = matchPath(pathForMatching(request));
+        int limit;
+        if (matched != null) {
+            limit = pathBudgets.getOrDefault(matched, DEFAULT_REQUESTS_PER_WINDOW);
+        } else if (loginPageLimit > 0 && isFederatedLoginPage(request)) {
+            matched = LOGIN_PAGE_BUCKET;
+            limit = loginPageLimit;
+        } else {
             chain.doFilter(request, response);
             return;
         }
 
         String clientIp = resolveClientIp(request);
-        int limit = pathBudgets.getOrDefault(matched, DEFAULT_REQUESTS_PER_WINDOW);
         String key = KEY_PREFIX + matched + ":" + clientIp;
         long count = increment(key);
 
@@ -216,6 +276,41 @@ public class PortalPublicRateLimitFilter extends OncePerRequestFilter {
         } catch (RuntimeException e) {
             return WINDOW.toSeconds();
         }
+    }
+
+    /**
+     * {@code GET /login} with a non-blank {@code tenant} or {@code idp_hint} — the requests
+     * on which {@code LoginController} resolves registrations through the worker. Only GET
+     * is considered, so the password form POST is never counted and its body is never read
+     * here.
+     */
+    static boolean isFederatedLoginPage(HttpServletRequest request) {
+        if (!"GET".equalsIgnoreCase(request.getMethod())
+                || !LOGIN_PAGE_PATH.equals(pathForMatching(request))) {
+            return false;
+        }
+        for (String param : LOGIN_PAGE_LOOKUP_PARAMS) {
+            String value = request.getParameter(param);
+            if (value != null && !value.isBlank()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The decoded, normalized path the servlet container mapped — what Spring's own
+     * request matchers see — so a percent-encoded or path-parameter variant of a limited
+     * path is counted like the plain one. Falls back to the raw request URI when the
+     * container exposes no servlet path.
+     */
+    static String pathForMatching(HttpServletRequest request) {
+        String servletPath = request.getServletPath();
+        if (servletPath != null && !servletPath.isEmpty()) {
+            String pathInfo = request.getPathInfo();
+            return pathInfo == null ? servletPath : servletPath + pathInfo;
+        }
+        return request.getRequestURI();
     }
 
     /** Longest configured prefix matching {@code path}, or null if unlimited. */
