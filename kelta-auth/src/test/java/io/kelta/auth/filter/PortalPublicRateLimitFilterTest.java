@@ -35,14 +35,32 @@ class PortalPublicRateLimitFilterTest {
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private FilterChain chain;
 
+    private static final List<String> DEFAULT_IP_PATHS =
+            List.of(PortalPublicRateLimitFilter.DEFAULT_IP_PATHS.split(","));
+    private static final List<String> DEFAULT_FEDERATION_PATHS =
+            List.of(PortalPublicRateLimitFilter.DEFAULT_FEDERATION_PATHS.split(","));
+
     private PortalPublicRateLimitFilter filter(int trustedProxies) {
-        return new PortalPublicRateLimitFilter(redisTemplate,
-                List.of(PortalPublicRateLimitFilter.DEFAULT_IP_PATHS.split(",")), trustedProxies, List.of());
+        return new PortalPublicRateLimitFilter(redisTemplate, DEFAULT_IP_PATHS, DEFAULT_FEDERATION_PATHS,
+                PortalPublicRateLimitFilter.DEFAULT_LOGIN_PAGE_LIMIT, trustedProxies, List.of());
     }
 
     private PortalPublicRateLimitFilter trustingProxies(String... cidrs) {
-        return new PortalPublicRateLimitFilter(redisTemplate,
-                List.of(PortalPublicRateLimitFilter.DEFAULT_IP_PATHS.split(",")), 1, List.of(cidrs));
+        return new PortalPublicRateLimitFilter(redisTemplate, DEFAULT_IP_PATHS, DEFAULT_FEDERATION_PATHS,
+                PortalPublicRateLimitFilter.DEFAULT_LOGIN_PAGE_LIMIT, 1, List.of(cidrs));
+    }
+
+    /** Makes the mocked Redis count per key, like the real fixed-window script. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Long> countingRedis() {
+        Map<String, Long> counts = new java.util.HashMap<>();
+        lenient().when(redisTemplate.execute(any(RedisScript.class), anyList(), anyString()))
+                .thenAnswer(inv -> {
+                    String key = ((List<String>) inv.getArgument(1)).getFirst();
+                    return counts.merge(key, 1L, Long::sum);
+                });
+        lenient().when(redisTemplate.getExpire(anyString())).thenReturn(42L);
+        return counts;
     }
 
     @SuppressWarnings("unchecked")
@@ -338,6 +356,166 @@ class PortalPublicRateLimitFilterTest {
             var f = filter(1);
             assertThat(f.matchPath("/portal/login/request")).isEqualTo("/portal/login");
             assertThat(f.matchPath("/portal/api/login/request")).isEqualTo("/portal/api/login/request");
+        }
+    }
+
+    @Nested
+    @DisplayName("Federation endpoints")
+    class FederationEndpoints {
+
+        private MockHttpServletRequest get(String uri, String ip) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", uri);
+            request.setRequestURI(uri);
+            request.setRemoteAddr(ip);
+            return request;
+        }
+
+        private int status(PortalPublicRateLimitFilter f, MockHttpServletRequest request) throws Exception {
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            f.doFilter(request, response, chain);
+            return response.getStatus();
+        }
+
+        @Test
+        @DisplayName("answers 429 once an IP spends an endpoint's budget; another IP is unaffected")
+        void limitsPerIp() throws Exception {
+            countingRedis();
+            var f = filter(0);
+            String uri = "/oauth2/authorization/tenant-1:provider-1";
+
+            for (int i = 0; i < 60; i++) {
+                assertThat(status(f, get(uri, "198.51.100.1"))).isEqualTo(200);
+            }
+            MockHttpServletResponse limited = new MockHttpServletResponse();
+            f.doFilter(get(uri, "198.51.100.1"), limited, chain);
+
+            assertThat(limited.getStatus()).isEqualTo(429);
+            assertThat(limited.getHeader("Retry-After")).isEqualTo("42");
+            assertThat(status(f, get(uri, "198.51.100.2"))).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("covers every federation endpoint, each in its own bucket")
+        void coversEveryEndpoint() {
+            var f = filter(1);
+            assertThat(f.matchPath("/oauth2/authorization/t:p")).isEqualTo("/oauth2/authorization/");
+            assertThat(f.matchPath("/login/oauth2/code/t:p")).isEqualTo("/login/oauth2/code/");
+            assertThat(f.matchPath("/saml2/authenticate/t:p")).isEqualTo("/saml2/authenticate/");
+            assertThat(f.matchPath("/saml2/metadata/t:p")).isEqualTo("/saml2/metadata");
+            assertThat(f.matchPath("/saml2/metadata")).isEqualTo("/saml2/metadata");
+            assertThat(f.matchPath("/saml2/service-provider-metadata/t:p"))
+                    .isEqualTo("/saml2/service-provider-metadata/");
+            assertThat(f.matchPath("/login/saml2/sso/t:p")).isEqualTo("/login/saml2/sso/");
+            assertThat(f.matchPath("/logout/saml2/slo/t:p")).isEqualTo("/logout/saml2/slo/");
+        }
+
+        @Test
+        @DisplayName("leaves the authorization server and sign-out initiator alone")
+        void doesNotCoverOtherAuthPaths() {
+            var f = filter(1);
+            assertThat(f.matchPath("/oauth2/authorize")).isNull();
+            assertThat(f.matchPath("/oauth2/token")).isNull();
+            assertThat(f.matchPath("/logout/saml2/initiate")).isNull();
+            assertThat(f.matchPath("/login")).isNull();
+        }
+
+        @Test
+        @DisplayName("a burst on one federation endpoint does not spend another's budget")
+        void separateBuckets() throws Exception {
+            countingRedis();
+            var f = filter(0);
+            for (int i = 0; i < 61; i++) {
+                status(f, get("/saml2/authenticate/t:p", "198.51.100.1"));
+            }
+
+            assertThat(status(f, get("/oauth2/authorization/t:p", "198.51.100.1"))).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("counts the decoded servlet path, so an encoded variant shares the bucket")
+        void matchesDecodedPath() throws Exception {
+            Map<String, Long> counts = countingRedis();
+            MockHttpServletRequest request = get("/oauth2/%61uthorization/t:p", "198.51.100.1");
+            request.setServletPath("/oauth2/authorization/t:p");
+
+            filter(0).doFilter(request, new MockHttpServletResponse(), chain);
+
+            assertThat(counts).containsOnlyKeys("authratelimit:ip:/oauth2/authorization/:198.51.100.1");
+        }
+
+        @Test
+        @DisplayName("limits GET /login with tenant or idp_hint in its own bucket")
+        void limitsLoginPageWithLookupParams() throws Exception {
+            Map<String, Long> counts = countingRedis();
+            var f = filter(0);
+
+            for (int i = 0; i < 30; i++) {
+                MockHttpServletRequest withTenant = get("/login", "198.51.100.1");
+                withTenant.setParameter("tenant", "acme");
+                status(f, withTenant);
+                MockHttpServletRequest withHint = get("/login", "198.51.100.1");
+                withHint.setParameter("idp_hint", "t:p");
+                status(f, withHint);
+            }
+            MockHttpServletRequest over = get("/login", "198.51.100.1");
+            over.setParameter("idp_hint", "t:p");
+
+            assertThat(status(f, over)).isEqualTo(429);
+            assertThat(counts).containsOnlyKeys(
+                    "authratelimit:ip:" + PortalPublicRateLimitFilter.LOGIN_PAGE_BUCKET + ":198.51.100.1");
+        }
+
+        @Test
+        @DisplayName("never counts the password form POST or a plain login page")
+        void ignoresPasswordFormAndPlainLoginPage() throws Exception {
+            countingRedis();
+            var f = filter(0);
+            MockHttpServletRequest post = new MockHttpServletRequest("POST", "/login");
+            post.setRequestURI("/login");
+            post.setRemoteAddr("198.51.100.1");
+            post.setParameter("tenant", "acme");
+            post.setParameter("username", "user");
+
+            f.doFilter(post, new MockHttpServletResponse(), chain);
+            f.doFilter(get("/login", "198.51.100.1"), new MockHttpServletResponse(), chain);
+
+            verify(redisTemplate, never()).execute(any(RedisScript.class), anyList(), anyString());
+        }
+
+        @Test
+        @DisplayName("a login page limit of 0 turns that rule off")
+        void loginPageRuleCanBeDisabled() throws Exception {
+            countingRedis();
+            var f = new PortalPublicRateLimitFilter(redisTemplate, DEFAULT_IP_PATHS, DEFAULT_FEDERATION_PATHS,
+                    0, 0, List.of());
+            MockHttpServletRequest request = get("/login", "198.51.100.1");
+            request.setParameter("tenant", "acme");
+
+            f.doFilter(request, new MockHttpServletResponse(), chain);
+
+            verify(redisTemplate, never()).execute(any(RedisScript.class), anyList(), anyString());
+        }
+
+        @Test
+        @DisplayName("overriding the portal paths keeps the federation budgets")
+        void portalOverrideKeepsFederation() {
+            var f = new PortalPublicRateLimitFilter(redisTemplate, List.of("/portal/api/signup=1"),
+                    DEFAULT_FEDERATION_PATHS, PortalPublicRateLimitFilter.DEFAULT_LOGIN_PAGE_LIMIT, 1, List.of());
+
+            assertThat(f.matchPath("/oauth2/authorization/t:p")).isEqualTo("/oauth2/authorization/");
+        }
+
+        @Test
+        @DisplayName("application.yml declares the same federation default as the code")
+        void applicationYmlMatchesDefault() throws Exception {
+            // The test classpath shadows the main application.yml, so the in-code default is
+            // what tests see; this keeps the deployed default from drifting away from it.
+            String yml = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/resources/application.yml"));
+
+            assertThat(yml).contains("federation-paths: ${KELTA_AUTH_RATE_LIMIT_FEDERATION_PATHS:"
+                    + PortalPublicRateLimitFilter.DEFAULT_FEDERATION_PATHS + "}");
+            assertThat(yml).contains("login-page-limit: ${KELTA_AUTH_RATE_LIMIT_LOGIN_PAGE_LIMIT:"
+                    + PortalPublicRateLimitFilter.DEFAULT_LOGIN_PAGE_LIMIT + "}");
         }
     }
 

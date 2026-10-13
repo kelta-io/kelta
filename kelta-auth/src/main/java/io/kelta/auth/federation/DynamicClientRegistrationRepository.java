@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -26,6 +27,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>The registration ID is the OIDC provider's database ID, which is also used
  * as the OAuth2 login link: {@code /oauth2/authorization/{providerId}}.
+ *
+ * <p>Hits are cached for {@code CACHE_TTL}; an id the worker reports as unknown is
+ * remembered briefly in an {@link UnknownRegistrationCache} so repeated requests for it
+ * skip the worker.
  */
 public class DynamicClientRegistrationRepository implements ClientRegistrationRepository {
 
@@ -39,14 +44,24 @@ public class DynamicClientRegistrationRepository implements ClientRegistrationRe
     private final OidcDiscoveryService discoveryService;
     private final EncryptionService encryptionService;
     private final Map<String, CachedRegistration> registrationCache = new ConcurrentHashMap<>();
+    private final UnknownRegistrationCache unknownRegistrations;
 
     public DynamicClientRegistrationRepository(
             WorkerClient workerClient,
             OidcDiscoveryService discoveryService,
             EncryptionService encryptionService) {
+        this(workerClient, discoveryService, encryptionService, new UnknownRegistrationCache());
+    }
+
+    DynamicClientRegistrationRepository(
+            WorkerClient workerClient,
+            OidcDiscoveryService discoveryService,
+            EncryptionService encryptionService,
+            UnknownRegistrationCache unknownRegistrations) {
         this.workerClient = workerClient;
         this.discoveryService = discoveryService;
         this.encryptionService = encryptionService;
+        this.unknownRegistrations = unknownRegistrations;
     }
 
     @Override
@@ -69,8 +84,18 @@ public class DynamicClientRegistrationRepository implements ClientRegistrationRe
         String tenantId = parts[0];
         String providerId = parts[1];
 
-        List<OidcProviderInfo> providers = workerClient.findActiveOidcProviders(tenantId);
-        for (OidcProviderInfo provider : providers) {
+        if (unknownRegistrations.isKnownUnknown(registrationId)) {
+            log.debug("OIDC registration {} recently reported unknown — skipping lookup", registrationId);
+            return null;
+        }
+
+        Optional<List<OidcProviderInfo>> providers = workerClient.lookupActiveOidcProviders(tenantId);
+        if (providers.isEmpty()) {
+            // The worker could not answer: not evidence the provider is missing, so not cached.
+            log.warn("OIDC provider lookup failed for registration: {}", registrationId);
+            return null;
+        }
+        for (OidcProviderInfo provider : providers.get()) {
             if (providerId.equals(provider.id())) {
                 ClientRegistration registration = buildClientRegistration(registrationId, provider);
                 if (registration != null) {
@@ -80,6 +105,7 @@ public class DynamicClientRegistrationRepository implements ClientRegistrationRe
             }
         }
 
+        unknownRegistrations.recordUnknown(registrationId);
         log.warn("No OIDC provider found for registration: {}", registrationId);
         return null;
     }
@@ -92,7 +118,7 @@ public class DynamicClientRegistrationRepository implements ClientRegistrationRe
      */
     public List<ClientRegistration> findByTenantId(String tenantId) {
         List<OidcProviderInfo> providers = workerClient.findActiveOidcProviders(tenantId);
-        return providers.stream()
+        List<ClientRegistration> registrations = providers.stream()
                 .filter(p -> p.clientId() != null && p.clientSecretEnc() != null)
                 .map(p -> {
                     String registrationId = tenantId + ":" + p.id();
@@ -104,13 +130,17 @@ public class DynamicClientRegistrationRepository implements ClientRegistrationRe
                 })
                 .filter(java.util.Objects::nonNull)
                 .toList();
+        // These providers exist now, so a miss recorded moments ago must not hide them.
+        unknownRegistrations.forget(providers.stream().map(p -> tenantId + ":" + p.id()).toList());
+        return registrations;
     }
 
     /**
-     * Evicts cached registrations (call when OIDC provider config changes).
+     * Evicts cached registrations, hits and misses (call when OIDC provider config changes).
      */
     public void evictAll() {
         registrationCache.clear();
+        unknownRegistrations.clear();
     }
 
     private ClientRegistration buildClientRegistration(String registrationId, OidcProviderInfo provider) {

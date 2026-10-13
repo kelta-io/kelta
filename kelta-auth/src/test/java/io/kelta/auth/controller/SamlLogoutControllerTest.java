@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -137,8 +138,8 @@ class SamlLogoutControllerTest {
         SamlSpCredentials creds = SamlSpCredentials.fromPem(resource("/saml/sp.crt"), resource("/saml/sp.key"));
         DynamicRelyingPartyRegistrationRepository repo =
                 new DynamicRelyingPartyRegistrationRepository(workerClient, creds);
-        when(workerClient.findActiveSamlProviders("tenant-1"))
-                .thenReturn(List.of(samlProvider(resource("/saml/idp.crt"))));
+        when(workerClient.lookupActiveSamlProviders("tenant-1"))
+                .thenReturn(Optional.of(List.of(samlProvider(resource("/saml/idp.crt")))));
         RelyingPartyRegistration reg = repo.findByRegistrationId(REGISTRATION_ID);
         return Saml2LogoutRequest.withRelyingPartyRegistration(reg)
                 .samlRequest("PD94bWw+")

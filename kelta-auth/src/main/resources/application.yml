@@ -80,6 +80,16 @@ kelta:
     # the admin must change it at first sign-in. Blank: a random one is generated and printed
     # once in the kelta-auth log (BaselineAdminPasswordInitializer).
     bootstrap-admin-password: ${KELTA_BOOTSTRAP_ADMIN_PASSWORD:}
+    rate-limit:
+      # Per-IP budgets (requests per 60s window) for the unauthenticated federation
+      # endpoints, enforced by PortalPublicRateLimitFilter alongside the portal paths
+      # (kelta.auth.rate-limit.ip-paths). Comma-separated <path-prefix>=<limit>; each prefix
+      # is its own bucket. Must match PortalPublicRateLimitFilter.DEFAULT_FEDERATION_PATHS
+      # (a test checks). Empty disables federation limiting.
+      federation-paths: ${KELTA_AUTH_RATE_LIMIT_FEDERATION_PATHS:/oauth2/authorization/=60,/login/oauth2/code/=60,/saml2/authenticate/=60,/saml2/metadata=60,/saml2/service-provider-metadata/=60,/login/saml2/sso/=60,/logout/saml2/slo/=60}
+      # Budget for GET /login carrying tenant or idp_hint (the requests that resolve
+      # registrations); its own bucket, never the password form POST. 0 disables.
+      login-page-limit: ${KELTA_AUTH_RATE_LIMIT_LOGIN_PAGE_LIMIT:60}
   internal:
     token: ${KELTA_INTERNAL_TOKEN:}
     # Connected app: Superset OAuth2 client registration

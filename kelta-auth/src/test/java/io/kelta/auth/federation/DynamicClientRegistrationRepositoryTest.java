@@ -14,7 +14,10 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -65,7 +68,7 @@ class DynamicClientRegistrationRepositoryTest {
         @DisplayName("returns registration for valid provider")
         void returnsRegistration() {
             OidcProviderInfo prov = provider("prov-1", "client-id", "enc-secret");
-            when(workerClient.findActiveOidcProviders("tenant1")).thenReturn(List.of(prov));
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of(prov)));
             when(encryptionService.decrypt("enc-secret")).thenReturn("decrypted-secret");
             when(discoveryService.resolve(eq("https://idp.example.com"), any(EndpointOverrides.class)))
                     .thenReturn(validEndpoints());
@@ -82,7 +85,7 @@ class DynamicClientRegistrationRepositoryTest {
         @DisplayName("returns cached registration on second call")
         void returnsCached() {
             OidcProviderInfo prov = provider("prov-1", "client-id", "enc-secret");
-            when(workerClient.findActiveOidcProviders("tenant1")).thenReturn(List.of(prov));
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of(prov)));
             when(encryptionService.decrypt("enc-secret")).thenReturn("decrypted-secret");
             when(discoveryService.resolve(anyString(), any())).thenReturn(validEndpoints());
 
@@ -91,7 +94,7 @@ class DynamicClientRegistrationRepositoryTest {
 
             assertThat(cached).isNotNull();
             // WorkerClient should only be called once (first call), not for cache hit
-            verify(workerClient, times(1)).findActiveOidcProviders("tenant1");
+            verify(workerClient, times(1)).lookupActiveOidcProviders("tenant1");
         }
 
         @Test
@@ -106,7 +109,7 @@ class DynamicClientRegistrationRepositoryTest {
         @Test
         @DisplayName("returns null when provider not found")
         void returnsNullWhenNotFound() {
-            when(workerClient.findActiveOidcProviders("tenant1")).thenReturn(List.of());
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of()));
 
             ClientRegistration result = repo.findByRegistrationId("tenant1:missing-prov");
 
@@ -117,7 +120,7 @@ class DynamicClientRegistrationRepositoryTest {
         @DisplayName("returns null when client secret cannot be decrypted")
         void returnsNullWhenDecryptionFails() {
             OidcProviderInfo prov = provider("prov-1", "client-id", "enc-secret");
-            when(workerClient.findActiveOidcProviders("tenant1")).thenReturn(List.of(prov));
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of(prov)));
             when(encryptionService.decrypt("enc-secret")).thenThrow(new RuntimeException("decrypt error"));
 
             ClientRegistration result = repo.findByRegistrationId("tenant1:prov-1");
@@ -129,7 +132,7 @@ class DynamicClientRegistrationRepositoryTest {
         @DisplayName("returns null when missing required endpoints")
         void returnsNullWhenMissingEndpoints() {
             OidcProviderInfo prov = provider("prov-1", "client-id", "enc-secret");
-            when(workerClient.findActiveOidcProviders("tenant1")).thenReturn(List.of(prov));
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of(prov)));
             when(encryptionService.decrypt("enc-secret")).thenReturn("decrypted");
             when(discoveryService.resolve(anyString(), any())).thenReturn(
                     new ResolvedEndpoints(null, null, null, null, null, "manual"));
@@ -143,7 +146,7 @@ class DynamicClientRegistrationRepositoryTest {
         @DisplayName("returns null when clientSecretEnc is null")
         void returnsNullWhenClientSecretNull() {
             OidcProviderInfo prov = provider("prov-1", "client-id", null);
-            when(workerClient.findActiveOidcProviders("tenant1")).thenReturn(List.of(prov));
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of(prov)));
             when(discoveryService.resolve(anyString(), any())).thenReturn(validEndpoints());
 
             ClientRegistration result = repo.findByRegistrationId("tenant1:prov-1");
@@ -155,7 +158,7 @@ class DynamicClientRegistrationRepositoryTest {
         @DisplayName("returns null when clientSecretEnc is blank")
         void returnsNullWhenClientSecretBlank() {
             OidcProviderInfo prov = provider("prov-1", "client-id", "  ");
-            when(workerClient.findActiveOidcProviders("tenant1")).thenReturn(List.of(prov));
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of(prov)));
 
             ClientRegistration result = repo.findByRegistrationId("tenant1:prov-1");
 
@@ -214,7 +217,7 @@ class DynamicClientRegistrationRepositoryTest {
         @DisplayName("clears cache so next lookup hits provider again")
         void clearsCache() {
             OidcProviderInfo prov = provider("prov-1", "client-id", "enc-secret");
-            when(workerClient.findActiveOidcProviders("tenant1")).thenReturn(List.of(prov));
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of(prov)));
             when(encryptionService.decrypt("enc-secret")).thenReturn("decrypted");
             when(discoveryService.resolve(anyString(), any())).thenReturn(validEndpoints());
 
@@ -222,7 +225,103 @@ class DynamicClientRegistrationRepositoryTest {
             repo.evictAll();
             repo.findByRegistrationId("tenant1:prov-1");
 
-            verify(workerClient, times(2)).findActiveOidcProviders("tenant1");
+            verify(workerClient, times(2)).lookupActiveOidcProviders("tenant1");
+        }
+
+        @Test
+        @DisplayName("also clears remembered misses")
+        void clearsUnknown() {
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of()));
+
+            repo.findByRegistrationId("tenant1:missing");
+            repo.evictAll();
+            repo.findByRegistrationId("tenant1:missing");
+
+            verify(workerClient, times(2)).lookupActiveOidcProviders("tenant1");
+        }
+    }
+
+    @Nested
+    @DisplayName("unknown registration ids")
+    class UnknownRegistrations {
+
+        private final MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+
+        @BeforeEach
+        void useClock() {
+            repo = new DynamicClientRegistrationRepository(workerClient, discoveryService, encryptionService,
+                    new UnknownRegistrationCache(Duration.ofSeconds(30), 100, clock));
+        }
+
+        private void givenValidProvider() {
+            when(encryptionService.decrypt("enc-secret")).thenReturn("decrypted");
+            when(discoveryService.resolve(anyString(), any())).thenReturn(validEndpoints());
+        }
+
+        @Test
+        @DisplayName("a second miss for the same id does not call the worker")
+        void secondMissSkipsWorker() {
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of()));
+
+            assertThat(repo.findByRegistrationId("tenant1:missing")).isNull();
+            assertThat(repo.findByRegistrationId("tenant1:missing")).isNull();
+
+            verify(workerClient, times(1)).lookupActiveOidcProviders("tenant1");
+        }
+
+        @Test
+        @DisplayName("the miss expires, so a provider created afterwards is found")
+        void missExpires() {
+            givenValidProvider();
+            when(workerClient.lookupActiveOidcProviders("tenant1"))
+                    .thenReturn(Optional.of(List.of()))
+                    .thenReturn(Optional.of(List.of(provider("prov-1", "client-id", "enc-secret"))));
+
+            assertThat(repo.findByRegistrationId("tenant1:prov-1")).isNull();
+            clock.advance(Duration.ofSeconds(31));
+
+            assertThat(repo.findByRegistrationId("tenant1:prov-1")).isNotNull();
+            verify(workerClient, times(2)).lookupActiveOidcProviders("tenant1");
+        }
+
+        @Test
+        @DisplayName("a failed worker lookup is not remembered as a miss")
+        void failureNotCached() {
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.empty());
+
+            repo.findByRegistrationId("tenant1:prov-1");
+            repo.findByRegistrationId("tenant1:prov-1");
+
+            verify(workerClient, times(2)).lookupActiveOidcProviders("tenant1");
+        }
+
+        @Test
+        @DisplayName("a provider shown on the login page is usable even right after a miss")
+        void tenantListingOverridesMiss() {
+            givenValidProvider();
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of()));
+            assertThat(repo.findByRegistrationId("tenant1:prov-1")).isNull();
+
+            when(workerClient.findActiveOidcProviders("tenant1"))
+                    .thenReturn(List.of(provider("prov-1", "client-id", "enc-secret")));
+            repo.findByTenantId("tenant1");
+
+            assertThat(repo.findByRegistrationId("tenant1:prov-1")).isNotNull();
+        }
+
+        @Test
+        @DisplayName("a hit is still cached alongside remembered misses")
+        void positiveStillCached() {
+            givenValidProvider();
+            when(workerClient.lookupActiveOidcProviders("tenant1"))
+                    .thenReturn(Optional.of(List.of(provider("prov-1", "client-id", "enc-secret"))));
+
+            assertThat(repo.findByRegistrationId("tenant1:missing")).isNull();
+            assertThat(repo.findByRegistrationId("tenant1:prov-1")).isNotNull();
+            assertThat(repo.findByRegistrationId("tenant1:prov-1")).isNotNull();
+            assertThat(repo.findByRegistrationId("tenant1:missing")).isNull();
+
+            verify(workerClient, times(2)).lookupActiveOidcProviders("tenant1");
         }
     }
 }
