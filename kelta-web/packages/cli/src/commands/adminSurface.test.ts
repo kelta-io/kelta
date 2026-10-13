@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AxiosError, AxiosHeaders } from 'axios';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mapError } from '../errors.js';
+import { mapError, toErrorPayload } from '../errors.js';
 import type { CommandContext, RegisteredCommand } from '../registry/types.js';
 import { auditCommands } from './audit.js';
 import { collectionCommands } from './collections.js';
@@ -175,6 +175,55 @@ describe('picklist value-add', () => {
           isDefault: false,
         },
       },
+    });
+  });
+
+  it("surfaces the server's duplicate-value detail unchanged on 409", async () => {
+    const axios = fakeAxios({
+      '/api/global-picklists?filter[name][EQ]=crm-stage': { data: [{ id: CID }] },
+    });
+    const detail = "Picklist 'crm-stage' already has the value 'OPEN'";
+    const headers = new AxiosHeaders();
+    const conflict = new AxiosError(
+      'Request failed',
+      'ERR_BAD_REQUEST',
+      { headers },
+      {},
+      {
+        status: 409,
+        statusText: '',
+        headers: {},
+        config: { headers },
+        data: {
+          errors: [
+            {
+              status: '409',
+              code: 'UNIQUE_VIOLATION',
+              detail,
+              source: { pointer: '/data/attributes/value' },
+            },
+          ],
+        },
+      }
+    );
+    axios.post.mockRejectedValueOnce(conflict);
+    const error = await run(
+      picklistCommands,
+      'value-add',
+      { picklist: 'crm-stage', value: 'OPEN' },
+      axios
+    ).catch((e: unknown) => e);
+    expect(error).toBe(conflict);
+    const mapped = mapError(error);
+    expect(mapped.message).toBe(detail);
+    expect(mapped.exitCode).toBe(5);
+    const payload = JSON.parse(toErrorPayload(mapped)) as {
+      error: { code: string; detail: string; source: { pointer: string } };
+    };
+    expect(payload.error).toMatchObject({
+      code: 'UNIQUE_VIOLATION',
+      detail,
+      source: { pointer: '/data/attributes/value' },
     });
   });
 });
