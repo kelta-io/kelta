@@ -51,6 +51,14 @@ test.describe("Record type picklist overrides", () => {
     const valueCheckbox = (value: string) =>
       page.getByTestId(`value-checkbox-${status.id}-${value}`);
 
+    // The status badge reads the record type's `isActive` attribute
+    await detailPage.goto(collection.id);
+    await detailPage.clickTab("record-types");
+    await expect(page.getByTestId("record-type-row-0")).toContainText("Active");
+    await expect(page.getByTestId("record-type-row-0")).not.toContainText(
+      "Inactive",
+    );
+
     await openEditor();
     // No override yet: every value is allowed
     await expect(valueCheckbox("pending")).toBeChecked();

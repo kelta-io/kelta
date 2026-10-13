@@ -1646,12 +1646,12 @@ export function CollectionDetailPage({
                         <span
                           className={cn(
                             'inline-flex items-center px-2 py-1 text-xs font-medium rounded-full capitalize',
-                            rt.active
+                            rt.isActive
                               ? 'text-green-800 bg-green-100 dark:text-green-300 dark:bg-green-900'
                               : 'text-yellow-800 bg-yellow-100 dark:text-yellow-300 dark:bg-yellow-900'
                           )}
                         >
-                          {rt.active ? t('collections.active') : t('collections.inactive')}
+                          {rt.isActive ? t('collections.active') : t('collections.inactive')}
                         </span>
                       </td>
                       <td className="p-4 border-b border-border/50 w-[1%] whitespace-nowrap">

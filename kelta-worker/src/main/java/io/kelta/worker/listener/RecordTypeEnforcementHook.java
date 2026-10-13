@@ -17,6 +17,12 @@ import java.util.*;
  * field values are within the allowed values configured for that record type. On creation,
  * it also applies type-specific default values for picklist fields that are not provided.
  *
+ * <p>A {@code multi_picklist} field is checked per element: every selected value must be
+ * allowed, and the error names the ones that are not. Its value is normally a {@code List}
+ * (the JSON:API array the validation engine requires); an array, a JSON array string or a
+ * comma-separated string (the CSV-import encodings) is accepted too. Its record-type default
+ * is applied as a single-element list, the field's native shape.
+ *
  * <p>Runs with order {@code 100} to execute after field validation and approval lock hooks.
  *
  * @since 1.0.0
@@ -27,6 +33,9 @@ public class RecordTypeEnforcementHook implements BeforeSaveHook {
     private static final Logger log = LoggerFactory.getLogger(RecordTypeEnforcementHook.class);
 
     private static final String WILDCARD = "*";
+
+    /** {@code field.type} of a multi-select picklist (compared case-insensitively). */
+    private static final String MULTI_PICKLIST_TYPE = "multi_picklist";
 
     /**
      * System collections that should never have record type enforcement.
@@ -97,20 +106,13 @@ public class RecordTypeEnforcementHook implements BeforeSaveHook {
         for (PicklistRestriction restriction : restrictions) {
             Object value = record.get(restriction.fieldName());
 
-            if (value == null || (value instanceof String s && s.isEmpty())) {
+            if (isEmptyValue(value)) {
                 // Apply default value if field is not provided
                 if (restriction.defaultValue() != null && !restriction.defaultValue().isEmpty()) {
-                    defaults.put(restriction.fieldName(), restriction.defaultValue());
+                    defaults.put(restriction.fieldName(), defaultFor(restriction));
                 }
             } else {
-                // Validate the value is in the allowed set
-                String strValue = value.toString();
-                if (!restriction.availableValues().contains(strValue)) {
-                    errors.add(new BeforeSaveResult.ValidationError(
-                            restriction.fieldName(),
-                            String.format("Value '%s' is not allowed for record type. Allowed values: %s",
-                                    strValue, restriction.availableValues())));
-                }
+                validateValue(restriction, value, errors);
             }
         }
 
@@ -163,14 +165,8 @@ public class RecordTypeEnforcementHook implements BeforeSaveHook {
             }
 
             Object value = record.get(restriction.fieldName());
-            if (value != null && !(value instanceof String s && s.isEmpty())) {
-                String strValue = value.toString();
-                if (!restriction.availableValues().contains(strValue)) {
-                    errors.add(new BeforeSaveResult.ValidationError(
-                            restriction.fieldName(),
-                            String.format("Value '%s' is not allowed for record type. Allowed values: %s",
-                                    strValue, restriction.availableValues())));
-                }
+            if (!isEmptyValue(value)) {
+                validateValue(restriction, value, errors);
             }
         }
 
@@ -179,6 +175,141 @@ public class RecordTypeEnforcementHook implements BeforeSaveHook {
         }
 
         return BeforeSaveResult.ok();
+    }
+
+    /**
+     * Adds a validation error when {@code value} holds anything the record type does not allow.
+     * A multi-valued field (declared {@code multi_picklist}, or any list/array value) is checked
+     * per element; a single picklist compares its string form, as it always has.
+     */
+    private void validateValue(PicklistRestriction restriction, Object value,
+                               List<BeforeSaveResult.ValidationError> errors) {
+        if (restriction.multiValued() || value instanceof Collection<?> || value.getClass().isArray()) {
+            Set<String> disallowed = new LinkedHashSet<>();
+            for (String element : toValueList(value)) {
+                if (!restriction.availableValues().contains(element)) {
+                    disallowed.add(element);
+                }
+            }
+            if (disallowed.isEmpty()) {
+                return;
+            }
+            String message = disallowed.size() == 1
+                    ? String.format("Value '%s' is not allowed for record type. Allowed values: %s",
+                            disallowed.iterator().next(), restriction.availableValues())
+                    : String.format("Values %s are not allowed for record type. Allowed values: %s",
+                            quoteAll(disallowed), restriction.availableValues());
+            errors.add(new BeforeSaveResult.ValidationError(restriction.fieldName(), message));
+            return;
+        }
+
+        String strValue = value.toString();
+        if (!restriction.availableValues().contains(strValue)) {
+            errors.add(new BeforeSaveResult.ValidationError(
+                    restriction.fieldName(),
+                    String.format("Value '%s' is not allowed for record type. Allowed values: %s",
+                            strValue, restriction.availableValues())));
+        }
+    }
+
+    /**
+     * Whether a field value counts as "not provided": {@code null}, an empty string, or an empty
+     * list/array (a multi-picklist with nothing selected).
+     */
+    private static boolean isEmptyValue(Object value) {
+        if (value == null) {
+            return true;
+        }
+        if (value instanceof String s) {
+            return s.isEmpty();
+        }
+        if (value instanceof Collection<?> c) {
+            return c.isEmpty();
+        }
+        return value.getClass().isArray() && java.lang.reflect.Array.getLength(value) == 0;
+    }
+
+    /**
+     * The record type's default in the field's native shape: the string for a picklist, a list
+     * for a multi-picklist (a single value, or the values of a JSON array default).
+     */
+    private Object defaultFor(PicklistRestriction restriction) {
+        if (!restriction.multiValued()) {
+            return restriction.defaultValue();
+        }
+        String trimmed = restriction.defaultValue().trim();
+        if (trimmed.startsWith("[")) {
+            List<String> parsed = parseJsonArray(trimmed);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+        return List.of(restriction.defaultValue());
+    }
+
+    /**
+     * The selected values of a multi-picklist value, in order, blanks dropped. Accepts a
+     * {@code Collection}, an array, a JSON array string or a comma-separated string (the
+     * encodings {@code CsvImportService} reads); any other value is a single selection.
+     */
+    private List<String> toValueList(Object value) {
+        List<String> values = new ArrayList<>();
+        if (value instanceof Collection<?> c) {
+            for (Object element : c) {
+                addElement(values, element);
+            }
+        } else if (value.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(value);
+            for (int i = 0; i < length; i++) {
+                addElement(values, java.lang.reflect.Array.get(value, i));
+            }
+        } else if (value instanceof String s) {
+            String trimmed = s.trim();
+            List<String> parsed = trimmed.startsWith("[") ? parseJsonArray(trimmed) : null;
+            if (parsed != null) {
+                values.addAll(parsed);
+            } else if (trimmed.startsWith("[")) {
+                addElement(values, trimmed);
+            } else {
+                for (String part : trimmed.split(",")) {
+                    addElement(values, part.trim());
+                }
+            }
+        } else {
+            addElement(values, value);
+        }
+        return values;
+    }
+
+    private static void addElement(List<String> values, Object element) {
+        if (element != null && !element.toString().isEmpty()) {
+            values.add(element.toString());
+        }
+    }
+
+    /** A JSON array of scalars as strings (blanks dropped), or {@code null} if it is not one. */
+    private List<String> parseJsonArray(String json) {
+        try {
+            List<?> parsed = objectMapper.readValue(json, List.class);
+            List<String> values = new ArrayList<>();
+            for (Object element : parsed) {
+                if (element instanceof Map<?, ?> || element instanceof Collection<?>) {
+                    return null;
+                }
+                addElement(values, element);
+            }
+            return values;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String quoteAll(Set<String> values) {
+        StringJoiner joiner = new StringJoiner(", ");
+        for (String v : values) {
+            joiner.add("'" + v + "'");
+        }
+        return joiner.toString();
     }
 
     private String extractRecordTypeId(Map<String, Object> record) {
@@ -211,7 +342,8 @@ public class RecordTypeEnforcementHook implements BeforeSaveHook {
     private List<PicklistRestriction> loadPicklistRestrictions(String recordTypeId) {
         try {
             String sql = """
-                SELECT rtp.available_values, rtp.default_value, f.name AS field_name
+                SELECT rtp.available_values, rtp.default_value, f.name AS field_name,
+                       f.type AS field_type
                 FROM record_type_picklist rtp
                 JOIN field f ON f.id = rtp.field_id
                 WHERE rtp.record_type_id = ?
@@ -221,6 +353,7 @@ public class RecordTypeEnforcementHook implements BeforeSaveHook {
                 String fieldName = rs.getString("field_name");
                 String defaultValue = rs.getString("default_value");
                 String availableValuesJson = rs.getString("available_values");
+                boolean multiValued = MULTI_PICKLIST_TYPE.equalsIgnoreCase(rs.getString("field_type"));
 
                 Set<String> availableValues = new LinkedHashSet<>();
                 try {
@@ -233,7 +366,7 @@ public class RecordTypeEnforcementHook implements BeforeSaveHook {
                             fieldName, e.getMessage());
                 }
 
-                return new PicklistRestriction(fieldName, availableValues, defaultValue);
+                return new PicklistRestriction(fieldName, availableValues, defaultValue, multiValued);
             }, recordTypeId);
         } catch (Exception e) {
             log.error("Error loading picklist restrictions for record type '{}': {}",
@@ -244,7 +377,16 @@ public class RecordTypeEnforcementHook implements BeforeSaveHook {
 
     /**
      * Represents a picklist restriction for a single field within a record type.
+     *
+     * @param multiValued whether the field is a {@code multi_picklist} (validated per element,
+     *                    defaulted as a list)
      */
-    record PicklistRestriction(String fieldName, Set<String> availableValues, String defaultValue) {
+    record PicklistRestriction(String fieldName, Set<String> availableValues, String defaultValue,
+                               boolean multiValued) {
+
+        /** A single-value picklist restriction. */
+        PicklistRestriction(String fieldName, Set<String> availableValues, String defaultValue) {
+            this(fieldName, availableValues, defaultValue, false);
+        }
     }
 }
