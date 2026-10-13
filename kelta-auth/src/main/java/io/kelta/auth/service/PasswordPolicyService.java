@@ -261,9 +261,15 @@ public class PasswordPolicyService {
     // -----------------------------------------------------------------------
 
     public void incrementFailedAttempts(String userId, String tenantId) {
+        // A lockout that has run out starts a fresh count: the attempts that caused it are
+        // spent, so the next miss must not re-lock the account on their strength.
+        Timestamp now = Timestamp.from(Instant.now());
         jdbcTemplate.update(
-                "UPDATE user_credential SET failed_attempts = failed_attempts + 1, updated_at = ? WHERE user_id = ?",
-                Timestamp.from(Instant.now()), userId
+                "UPDATE user_credential SET "
+                        + "failed_attempts = CASE WHEN locked_until <= ? THEN 1 ELSE failed_attempts + 1 END, "
+                        + "locked_until = CASE WHEN locked_until <= ? THEN NULL ELSE locked_until END, "
+                        + "updated_at = ? WHERE user_id = ?",
+                now, now, now, userId
         );
 
         // Check if threshold reached

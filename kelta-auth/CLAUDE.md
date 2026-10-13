@@ -32,7 +32,13 @@ io.kelta.auth/
 ### OAuth2 Flow
 1. Client redirects to `/oauth2/authorize`
 2. `LoginController` renders Thymeleaf login page
-3. `KeltaUserDetailsService` loads user from worker via `WorkerClient`
+3. `KeltaUserDetailsService` loads the user by JDBC, scoped to the session's tenant
+   (`LoginTenantResolver`; no tenant → refused as "no tenant context in session").
+   Lockout: `AuthenticationEventListener` counts a failed sign-in (`PasswordPolicyService.
+   incrementFailedAttempts`) only for a wrong password against a loaded user, resolved by
+   that same tenant + email/username — refusals that load no user (unknown, inactive, no
+   tenant) are not counted. A lockout that has expired restarts the count at the next miss
+   (likewise `TotpService` for `mfa_failed_attempts`).
 4. `KeltaTokenCustomizer` adds custom claims (tenantId, profileId, groups)
 5. Token issued and returned to client
 6. Silent refresh: the SPA (`kelta-platform`, public client, PKCE) refreshes with

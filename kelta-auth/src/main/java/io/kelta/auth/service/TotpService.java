@@ -309,8 +309,12 @@ public class TotpService {
     }
 
     public void incrementMfaFailedAttempts(String userId) {
+        // As for password lockout: once an MFA lock has run out the count starts over.
         jdbcTemplate.update(
-                "UPDATE user_totp_secret SET mfa_failed_attempts = mfa_failed_attempts + 1, updated_at = NOW() WHERE user_id = ?",
+                "UPDATE user_totp_secret SET "
+                        + "mfa_failed_attempts = CASE WHEN mfa_locked_until <= NOW() THEN 1 ELSE mfa_failed_attempts + 1 END, "
+                        + "mfa_locked_until = CASE WHEN mfa_locked_until <= NOW() THEN NULL ELSE mfa_locked_until END, "
+                        + "updated_at = NOW() WHERE user_id = ?",
                 userId);
 
         var results = jdbcTemplate.queryForList(
