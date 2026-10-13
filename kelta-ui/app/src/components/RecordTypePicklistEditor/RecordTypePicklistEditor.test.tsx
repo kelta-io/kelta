@@ -81,7 +81,7 @@ const mockRecordType: RecordType = {
   collectionId: 'col-001',
   name: 'Standard',
   description: 'Standard record type',
-  active: true,
+  isActive: true,
   isDefault: true,
   createdAt: '2024-01-01T00:00:00Z',
   updatedAt: '2024-01-01T00:00:00Z',

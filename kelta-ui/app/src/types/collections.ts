@@ -137,7 +137,8 @@ export interface RecordType {
   collectionId: string
   name: string
   description?: string
-  active: boolean
+  /** The `record-types` status attribute (there is no `active`); inactive types are hidden. */
+  isActive: boolean
   isDefault: boolean
   createdAt: string
   updatedAt: string

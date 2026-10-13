@@ -273,3 +273,126 @@ describe('AdminClient users.tokens.create', () => {
     expect(result.token).toBe('klt_abc123');
   });
 });
+
+describe('AdminClient recordTypes', () => {
+  let axios: AxiosInstance;
+  let client: AdminClient;
+  let mockGet: ReturnType<typeof vi.fn>;
+  let mockPost: ReturnType<typeof vi.fn>;
+  let mockPatch: ReturnType<typeof vi.fn>;
+
+  const recordTypeResponse = (attributes: Record<string, unknown>) => ({
+    data: {
+      data: {
+        type: 'record-types',
+        id: 'rt-1',
+        attributes: { collectionId: 'col-1', name: 'Standard', isDefault: false, ...attributes },
+      },
+    },
+  });
+
+  const overrideRow = (id: string, availableValues: unknown) => ({
+    type: 'record-type-picklists',
+    id,
+    attributes: { recordTypeId: 'rt-1', fieldId: `field-${id}`, availableValues },
+  });
+
+  beforeEach(() => {
+    axios = createMockAxios();
+    client = new AdminClient(axios);
+    mockGet = axios.get as ReturnType<typeof vi.fn>;
+    mockPost = axios.post as ReturnType<typeof vi.fn>;
+    mockPatch = axios.patch as ReturnType<typeof vi.fn>;
+  });
+
+  it('reads isActive and mirrors it onto the deprecated active alias', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        data: [
+          { type: 'record-types', id: 'rt-1', attributes: { name: 'A', isActive: true } },
+          { type: 'record-types', id: 'rt-2', attributes: { name: 'B', isActive: false } },
+        ],
+      },
+    });
+
+    const types = await client.recordTypes.list('col-1');
+
+    expect(types.map((t) => [t.isActive, t.active])).toEqual([
+      [true, true],
+      [false, false],
+    ]);
+  });
+
+  it('sends a deprecated active flag on update as isActive', async () => {
+    mockPatch.mockResolvedValue(recordTypeResponse({ isActive: false }));
+
+    const updated = await client.recordTypes.update('col-1', 'rt-1', { active: false });
+
+    const body = mockPatch.mock.calls[0][1];
+    expect(body.data.attributes).toEqual({ isActive: false });
+    expect(updated.isActive).toBe(false);
+    expect(updated.active).toBe(false);
+  });
+
+  it('prefers an explicit isActive over the deprecated active flag on update', async () => {
+    mockPatch.mockResolvedValue(recordTypeResponse({ isActive: true }));
+
+    await client.recordTypes.update('col-1', 'rt-1', { isActive: true, active: false });
+
+    expect(mockPatch.mock.calls[0][1].data.attributes).toEqual({ isActive: true });
+  });
+
+  it('requests every picklist override in one page of 200', async () => {
+    mockGet.mockResolvedValue({ data: { data: [] } });
+
+    await client.recordTypes.getPicklistOverrides('col-1', 'rt 1');
+
+    expect(mockGet).toHaveBeenCalledWith(
+      '/api/record-type-picklists?filter[recordTypeId][eq]=rt%201&page[size]=200'
+    );
+  });
+
+  it('reads availableValues as a string array, parsing legacy JSON-string rows', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        data: [
+          overrideRow('a', ['Open', 'Closed']),
+          overrideRow('b', '["High","Low"]'),
+          overrideRow('c', 'not json'),
+          overrideRow('d', { not: 'an array' }),
+          overrideRow('e', [1, 2]),
+        ],
+      },
+    });
+
+    const overrides = await client.recordTypes.getPicklistOverrides('col-1', 'rt-1');
+
+    expect(overrides.map((o) => o.availableValues)).toEqual([
+      ['Open', 'Closed'],
+      ['High', 'Low'],
+      [],
+      [],
+      [],
+    ]);
+    expect(overrides[0].fieldId).toBe('field-a');
+  });
+
+  it('sends availableValues as an array and normalizes the created override', async () => {
+    mockPost.mockResolvedValue({ data: { data: overrideRow('a', '["Open"]') } });
+
+    const created = await client.recordTypes.setPicklistOverride('col-1', 'rt-1', 'field-a', {
+      availableValues: ['Open'],
+      defaultValue: 'Open',
+    });
+
+    const body = mockPost.mock.calls[0][1];
+    expect(mockPost.mock.calls[0][0]).toBe('/api/record-type-picklists');
+    expect(body.data.attributes).toEqual({
+      availableValues: ['Open'],
+      defaultValue: 'Open',
+      recordTypeId: 'rt-1',
+      fieldId: 'field-a',
+    });
+    expect(created.availableValues).toEqual(['Open']);
+  });
+});

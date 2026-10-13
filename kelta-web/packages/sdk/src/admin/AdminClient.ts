@@ -169,6 +169,40 @@ function specificity(a: LayoutAssignment, profileId?: string, recordTypeId?: str
 }
 
 /**
+ * A `record-types` row with the deprecated `active` alias mirrored from the `isActive` attribute.
+ */
+function normalizeRecordType(raw: RecordType): RecordType {
+  const loose = raw as RecordType & { isActive?: unknown; active?: unknown };
+  const isActive =
+    typeof loose.isActive === 'boolean'
+      ? loose.isActive
+      : typeof loose.active === 'boolean'
+        ? loose.active
+        : true;
+  return { ...raw, isActive, active: isActive };
+}
+
+/**
+ * Parses a `record-type-picklists.availableValues` value: a JSON array of strings, or (legacy
+ * rows) its JSON-encoded string. Anything else is unusable and reads as `[]`.
+ */
+function parseRecordTypeAvailableValues(raw: unknown): string[] {
+  let parsed = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(parsed) && parsed.every((v) => typeof v === 'string') ? parsed : [];
+}
+
+function normalizePicklistOverride(raw: RecordTypePicklistOverride): RecordTypePicklistOverride {
+  return { ...raw, availableValues: parseRecordTypeAvailableValues(raw.availableValues) };
+}
+
+/**
  * Default theme and branding constants for bootstrap.
  * These provide fallback values when the tenant has no custom theme.
  */
@@ -847,7 +881,7 @@ export class AdminClient {
       const response = await this.axios.get(
         `/api/record-types?filter[collectionId][eq]=${encodeURIComponent(collectionId)}`
       );
-      return unwrapJsonApiList<RecordType>(response.data);
+      return unwrapJsonApiList<RecordType>(response.data).map(normalizeRecordType);
     },
 
     create: async (collectionId: string, request: CreateRecordTypeRequest): Promise<RecordType> => {
@@ -856,26 +890,33 @@ export class AdminClient {
         collectionId,
       });
       const response = await this.axios.post('/api/record-types', body);
-      return unwrapJsonApiResource<RecordType>(response.data);
+      return normalizeRecordType(unwrapJsonApiResource<RecordType>(response.data));
     },
 
     get: async (_collectionId: string, recordTypeId: string): Promise<RecordType> => {
       const response = await this.axios.get(`/api/record-types/${recordTypeId}`);
-      return unwrapJsonApiResource<RecordType>(response.data);
+      return normalizeRecordType(unwrapJsonApiResource<RecordType>(response.data));
     },
 
     update: async (
       _collectionId: string,
       recordTypeId: string,
-      request: Partial<CreateRecordTypeRequest> & { active?: boolean }
+      request: Partial<CreateRecordTypeRequest> & {
+        /** @deprecated Use `isActive`; sent as `isActive` (the backend attribute). */
+        active?: boolean;
+      }
     ): Promise<RecordType> => {
+      const { active, ...attributes } = request;
+      if (attributes.isActive === undefined && active !== undefined) {
+        attributes.isActive = active;
+      }
       const body = toJsonApiBody(
         'record-types',
-        request as unknown as Record<string, unknown>,
+        attributes as unknown as Record<string, unknown>,
         recordTypeId
       );
       const response = await this.axios.patch(`/api/record-types/${recordTypeId}`, body);
-      return unwrapJsonApiResource<RecordType>(response.data);
+      return normalizeRecordType(unwrapJsonApiResource<RecordType>(response.data));
     },
 
     delete: async (_collectionId: string, recordTypeId: string): Promise<void> => {
@@ -886,10 +927,14 @@ export class AdminClient {
       _collectionId: string,
       recordTypeId: string
     ): Promise<RecordTypePicklistOverride[]> => {
+      // One row per record type × picklist field, so the HTTP maximum page (200) covers every
+      // field; the default page of 20 would silently drop overrides.
       const response = await this.axios.get(
-        `/api/record-type-picklists?filter[recordTypeId][eq]=${encodeURIComponent(recordTypeId)}`
+        `/api/record-type-picklists?filter[recordTypeId][eq]=${encodeURIComponent(recordTypeId)}&page[size]=200`
       );
-      return unwrapJsonApiList<RecordTypePicklistOverride>(response.data);
+      return unwrapJsonApiList<RecordTypePicklistOverride>(response.data).map(
+        normalizePicklistOverride
+      );
     },
 
     setPicklistOverride: async (
@@ -904,7 +949,9 @@ export class AdminClient {
         fieldId,
       });
       const response = await this.axios.post('/api/record-type-picklists', body);
-      return unwrapJsonApiResource<RecordTypePicklistOverride>(response.data);
+      return normalizePicklistOverride(
+        unwrapJsonApiResource<RecordTypePicklistOverride>(response.data)
+      );
     },
 
     removePicklistOverride: async (

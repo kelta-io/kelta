@@ -876,6 +876,60 @@ describe('CollectionDetailPage', () => {
     })
   })
 
+  describe('Record Types Tab', () => {
+    // The worker serves the record type's status as `isActive` (there is no `active`
+    // attribute); the badge read `active` and showed every type as Inactive.
+    it('shows each record type status from its isActive attribute', async () => {
+      const baseHandler = createGetHandler()
+      mockAxios.get.mockImplementation((url: string) => {
+        if (url.match(/\/api\/record-types/)) {
+          return Promise.resolve({
+            data: {
+              data: [
+                {
+                  type: 'record-types',
+                  id: 'rt-1',
+                  attributes: {
+                    collectionId: 'col-123',
+                    name: 'Standard',
+                    isActive: true,
+                    isDefault: true,
+                  },
+                },
+                {
+                  type: 'record-types',
+                  id: 'rt-2',
+                  attributes: {
+                    collectionId: 'col-123',
+                    name: 'Retired',
+                    isActive: false,
+                    isDefault: false,
+                  },
+                },
+              ],
+            },
+          })
+        }
+        return baseHandler(url)
+      })
+
+      render(
+        <TestWrapper>
+          <CollectionDetailPage />
+        </TestWrapper>
+      )
+
+      fireEvent.click(await screen.findByTestId('record-types-tab'))
+
+      const activeRow = await screen.findByTestId('record-type-row-0')
+      const inactiveRow = screen.getByTestId('record-type-row-1')
+      expect(within(activeRow).getByText('Standard')).toBeInTheDocument()
+      expect(within(activeRow).getByText('Active')).toBeInTheDocument()
+      expect(within(activeRow).queryByText('Inactive')).not.toBeInTheDocument()
+      expect(within(inactiveRow).getByText('Inactive')).toBeInTheDocument()
+    })
+  })
+
   describe('Accessibility', () => {
     beforeEach(() => {
       setupCollectionHandlers()

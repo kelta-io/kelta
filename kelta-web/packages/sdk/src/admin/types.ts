@@ -938,6 +938,12 @@ export interface RecordType {
   collectionId: string;
   name: string;
   description?: string;
+  /** Whether the record type is active — the `record-types` attribute. */
+  isActive: boolean;
+  /**
+   * @deprecated Read `isActive`. The backend has no `active` attribute; `recordTypes` reads
+   * mirror `isActive` here so existing callers keep working.
+   */
   active: boolean;
   isDefault: boolean;
   createdAt: string;
@@ -951,16 +957,24 @@ export interface CreateRecordTypeRequest {
   name: string;
   description?: string;
   isDefault?: boolean;
+  /** Defaults to `true` on the server. */
+  isActive?: boolean;
 }
 
 /**
- * Picklist value override for a record type
+ * Picklist value override for a record type — one `record-type-picklists` row.
  */
 export interface RecordTypePicklistOverride {
   id: string;
+  recordTypeId?: string;
   fieldId: string;
   fieldName: string;
-  availableValues: string;
+  /**
+   * The picklist values this record type allows. Stored as a JSONB array; legacy rows that hold
+   * its JSON-encoded string are parsed on read, and an unreadable value reads as `[]` (which the
+   * worker enforces as "nothing allowed").
+   */
+  availableValues: string[];
   defaultValue?: string;
 }
 
