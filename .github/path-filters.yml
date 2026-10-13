@@ -112,6 +112,20 @@ templates:
   - 'examples/templates/**'
   - 'ci/templates-install-check.*'
 
+# Upgrade test — the "upgrade" job boots the newest release, seeds it, upgrades it to HEAD
+# on the same volumes and re-reads the data. Anything that can change what an upgrade does
+# to existing data: migrations, the compose files both stacks boot (quickstart included),
+# the Dockerfiles, the CI cerbos config, the .env template, the job itself and its scripts.
+upgrade:
+  - 'kelta-worker/src/main/resources/db/migration/**'
+  - 'docker-compose*.yml'
+  - '**/Dockerfile*'
+  - 'docker/cerbos/**'
+  - '.env.example'
+  - '.github/workflows/ci.yml'
+  - 'ci/upgrade-*'
+  - 'ci/admin-first-sign-in.sh'
+
 # Workflow plumbing changed — run everything.
 workflows:
   - '.github/workflows/**'

@@ -94,7 +94,9 @@ Anything written after the backup was taken is lost.
 ## What CI checks
 
 Every pull request that touches a migration, a compose file, a Dockerfile or the upgrade job
-itself runs the **Upgrade Test** workflow (`.github/workflows/upgrade-test.yml`). It boots the
+itself runs the **Upgrade last release to HEAD** job (`upgrade` in `.github/workflows/ci.yml`).
+It is a dependency of the required **Quality Gate** check, so a pull request whose upgrade fails
+cannot merge. It boots the
 newest release reachable from the PR, seeds a tenant, a collection, records and a user through
 the API, stops the stack, starts the PR's build on the same volumes, and fails if any seeded
 value reads back differently. It covers one release to the next. Skipping releases is not tested.

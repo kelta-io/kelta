@@ -399,15 +399,15 @@ shellcheck ci/*.sh scripts/ci/*.sh
 ```
 
 A test may also run inside the job that uses its script (`ci/templates-install-check.test.ts`
-in `templates`, `ci/upgrade-verify.test.sh` in `upgrade-test.yml`), but never *only* there: one
+in `templates`, `ci/upgrade-verify.test.sh` in `upgrade`), but never *only* there: one
 this job cannot run must be named in a comment in the job with the reason and the job that runs
 it. Before this job, `ci/update-snapshots.test.ts` ran only when a workflow changed, so #1675's
 change to the script skipped its tests and broke it.
 
 ## Upgrade test (CI)
 
-`.github/workflows/upgrade-test.yml` checks that data written on the last release survives an
-upgrade to HEAD (job detail: `ci-cd.md` → `upgrade-test.yml`). The pattern, for anything that
+The `upgrade` job in `.github/workflows/ci.yml` (a `quality-gate` dependency) checks that data
+written on the last release survives an upgrade to HEAD (job detail: `ci-cd.md` → Upgrade test). The pattern, for anything that
 must be checked *across* a version change rather than on one build:
 
 - **Two stacks, one `COMPOSE_PROJECT_NAME`.** The release is the base compose with

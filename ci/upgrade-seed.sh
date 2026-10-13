@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Seeds the fixed dataset the "Upgrade Test" workflow (.github/workflows/upgrade-test.yml)
+# Seeds the fixed dataset the upgrade job (`upgrade` in .github/workflows/ci.yml)
 # carries across an upgrade: one tenant, one collection with five field types, three records
 # and one user — all through the public API, as a self-hoster's data would be written.
 #
