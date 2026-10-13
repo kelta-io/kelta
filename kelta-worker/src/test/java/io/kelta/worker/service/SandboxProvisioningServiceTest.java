@@ -94,7 +94,6 @@ class SandboxProvisioningServiceTest {
             stubParent(parentRow("acme"));
             when(jdbcTemplate.queryForObject(contains("COUNT(*) FROM tenant WHERE slug"),
                     eq(Integer.class), eq("acme--dev"))).thenReturn(0);
-            when(environmentRepository.existsByTenantAndName(PARENT, "dev")).thenReturn(false);
 
             when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "sbx-tenant"));
             when(jdbcTemplate.update(contains("UPDATE user_credential"), any(), any(), any()))
@@ -272,30 +271,62 @@ class SandboxProvisioningServiceTest {
         }
 
         @Test
-        @DisplayName("rejects a duplicate tenant slug")
+        @DisplayName("rejects a slug owned by another tenant as a conflict")
         void rejectsDuplicateSlug() {
             stubParent(parentRow("acme"));
             when(jdbcTemplate.queryForObject(contains("COUNT(*) FROM tenant WHERE slug"),
                     eq(Integer.class), eq("acme--dev"))).thenReturn(1);
 
             assertThatThrownBy(() -> service.createSandbox(PARENT, "dev", null, "SANDBOX", "admin"))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("already exists");
+                    .isInstanceOf(SandboxProvisioningService.EnvironmentConflictException.class)
+                    .hasMessageContaining("slug 'acme--dev'")
+                    .hasMessageContaining("already used by another tenant");
             verify(queryEngine, never()).create(any(), anyMap());
         }
 
         @Test
-        @DisplayName("rejects a duplicate environment name")
-        void rejectsDuplicateEnvironmentName() {
+        @DisplayName("names the archived sandbox that already holds the requested name")
+        void rejectsNameHeldByArchivedSandbox() {
             stubParent(parentRow("acme"));
-            when(jdbcTemplate.queryForObject(contains("COUNT(*) FROM tenant WHERE slug"),
-                    eq(Integer.class), eq("acme--dev"))).thenReturn(0);
-            when(environmentRepository.existsByTenantAndName(PARENT, "dev")).thenReturn(true);
+            when(jdbcTemplate.queryForList(contains("FROM environment WHERE tenant_id = ? AND name = ?"),
+                    eq(PARENT), eq("dev")))
+                    .thenReturn(List.of(Map.of("id", "env-old", "name", "dev", "status", "ARCHIVED")));
 
             assertThatThrownBy(() -> service.createSandbox(PARENT, "dev", null, "SANDBOX", "admin"))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("already exists");
+                    .isInstanceOfSatisfying(SandboxProvisioningService.EnvironmentConflictException.class, e -> {
+                        assertThat(e.getMessage()).isEqualTo("Environment name 'dev' is already used by "
+                                + "environment 'dev' (id env-old, status ARCHIVED) in this tenant. "
+                                + "Choose a different name.");
+                        assertThat(e.getEnvironmentId()).isEqualTo("env-old");
+                        assertThat(e.getEnvironmentName()).isEqualTo("dev");
+                        assertThat(e.getEnvironmentStatus()).isEqualTo("ARCHIVED");
+                    });
             verify(queryEngine, never()).create(any(), anyMap());
+        }
+
+        @Test
+        @DisplayName("names the sandbox whose slug a differently-cased name maps onto")
+        void rejectsNameMappingToExistingSandboxSlug() {
+            stubParent(parentRow("acme"));
+            when(jdbcTemplate.queryForList(contains("JOIN tenant"), eq(PARENT), eq("acme--dev")))
+                    .thenReturn(List.of(Map.of("id", "env-old", "name", "dev", "status", "ARCHIVED")));
+
+            assertThatThrownBy(() -> service.createSandbox(PARENT, "Dev", null, "SANDBOX", "admin"))
+                    .isInstanceOf(SandboxProvisioningService.EnvironmentConflictException.class)
+                    .hasMessageContaining("Sandbox name 'Dev' maps to slug 'acme--dev'")
+                    .hasMessageContaining("sandbox 'dev' (id env-old, status ARCHIVED)");
+            verify(queryEngine, never()).create(any(), anyMap());
+        }
+
+        @Test
+        @DisplayName("points a name that normalizes to nothing at the name attribute")
+        void rejectsNameWithoutLettersOrDigits() {
+            stubParent(parentRow("acme"));
+
+            assertThatThrownBy(() -> service.createSandbox(PARENT, "!!!", null, "SANDBOX", "admin"))
+                    .isInstanceOfSatisfying(SandboxProvisioningService.InvalidEnvironmentRequestException.class,
+                            e -> assertThat(e.getAttribute()).isEqualTo("name"))
+                    .hasMessageContaining("letters or digits");
         }
 
         @Test
@@ -366,7 +397,8 @@ class SandboxProvisioningServiceTest {
         void rejectsBadScheme() {
             assertThatThrownBy(() -> service.createRemoteEnvironment(PARENT, "remote", null,
                     "PRODUCTION", "ftp://remote.example.com", "acme", "vault-1", "admin"))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOfSatisfying(SandboxProvisioningService.InvalidEnvironmentRequestException.class,
+                            e -> assertThat(e.getAttribute()).isEqualTo("remoteBaseUrl"))
                     .hasMessageContaining("http or https");
         }
 
@@ -384,7 +416,8 @@ class SandboxProvisioningServiceTest {
         void requiresRemoteTenantSlug() {
             assertThatThrownBy(() -> service.createRemoteEnvironment(PARENT, "remote", null,
                     "PRODUCTION", "https://remote.example.com", " ", "vault-1", "admin"))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOfSatisfying(SandboxProvisioningService.InvalidEnvironmentRequestException.class,
+                            e -> assertThat(e.getAttribute()).isEqualTo("remoteTenantSlug"))
                     .hasMessageContaining("remoteTenantSlug is required");
         }
 
@@ -400,7 +433,6 @@ class SandboxProvisioningServiceTest {
         @Test
         @DisplayName("registers a remote target without creating a tenant")
         void registersRemote() {
-            when(environmentRepository.existsByTenantAndName(PARENT, "remote")).thenReturn(false);
             when(environmentRepository.createRemote(PARENT, "remote", null, "PRODUCTION",
                     "https://remote.example.com", "acme", "vault-1", "admin")).thenReturn("env-9");
             when(environmentRepository.findByIdAndTenant("env-9", PARENT))

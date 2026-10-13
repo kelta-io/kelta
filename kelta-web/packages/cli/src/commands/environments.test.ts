@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { AxiosInstance } from 'axios';
+import { AxiosError, AxiosHeaders, type AxiosInstance } from 'axios';
 import type { CommandContext } from '../registry/types.js';
+import { CliError, EXIT, mapError, toErrorPayload } from '../errors.js';
 import {
   environmentCommands,
   parseItemSpec,
@@ -92,6 +93,104 @@ describe('sandbox ops', () => {
     await expect(runSandboxCreate(client({ post }), { name: 'dev' })).rejects.toThrow(
       /Request failed/
     );
+  });
+
+  const conflictDetail =
+    "Environment name 'dev' is already used by environment 'dev' (id env-old, status ARCHIVED) " +
+    'in this tenant. Choose a different name.';
+  const conflictBody = {
+    errors: [
+      {
+        status: '409',
+        code: 'ENVIRONMENT_NAME_CONFLICT',
+        title: 'Conflict',
+        detail: conflictDetail,
+        source: { pointer: '/data/attributes/name' },
+        meta: { conflictingEnvironment: { id: 'env-old', name: 'dev', status: 'ARCHIVED' } },
+      },
+    ],
+  };
+
+  function rejectedWith(status: number, body: unknown): AxiosError {
+    const config = { headers: new AxiosHeaders() };
+    return new AxiosError(
+      `Request failed with status code ${String(status)}`,
+      'ERR_BAD_REQUEST',
+      config as never,
+      {},
+      { status, statusText: '', headers: {}, config: config as never, data: body }
+    );
+  }
+
+  async function sandboxCreateFailure(post: ReturnType<typeof vi.fn>): Promise<CliError> {
+    const ctx = {
+      profile: { name: 'test' },
+      global: { raw: false, quiet: false, yes: true },
+      log: vi.fn(),
+      client: { getAxiosInstance: () => client({ post }) },
+    } as unknown as CommandContext;
+    const def = environmentCommands.find((c) => c.group === 'sandbox' && c.name === 'create')!;
+    try {
+      await def.handler(ctx, def.input.parse({ name: 'dev' }) as never);
+    } catch (error) {
+      return mapError(error);
+    }
+    throw new Error('sandbox create did not fail');
+  }
+
+  it('sandbox create prints the server 409 detail naming the archived sandbox unchanged', async () => {
+    const post = vi.fn().mockRejectedValue(rejectedWith(409, conflictBody));
+
+    const mapped = await sandboxCreateFailure(post);
+
+    expect(mapped.message).toBe(conflictDetail);
+    expect(mapped.code).toBe('ENVIRONMENT_NAME_CONFLICT');
+    expect(mapped.exitCode).toBe(EXIT.CONFLICT);
+    const payload = JSON.parse(toErrorPayload(mapped)) as { error: Record<string, unknown> };
+    expect(payload.error.detail).toBe(conflictDetail);
+    expect(payload.error.meta).toEqual({
+      conflictingEnvironment: { id: 'env-old', name: 'dev', status: 'ARCHIVED' },
+    });
+  });
+
+  it('sandbox create keeps the 409 detail when the client resolves non-2xx responses', async () => {
+    const post = vi.fn().mockResolvedValue({ status: 409, data: conflictBody });
+
+    const mapped = await sandboxCreateFailure(post);
+
+    expect(mapped.message).toBe(conflictDetail);
+    expect(mapped.exitCode).toBe(EXIT.CONFLICT);
+  });
+
+  it('sandbox create prints the server 400 reason and pointer, not the generic status text', async () => {
+    const post = vi.fn().mockRejectedValue(
+      rejectedWith(400, {
+        errors: [
+          {
+            status: '400',
+            code: 'VALIDATION_FAILED',
+            detail: 'Sandbox name must contain letters or digits',
+            source: { pointer: '/data/attributes/name' },
+          },
+        ],
+      })
+    );
+
+    const mapped = await sandboxCreateFailure(post);
+
+    expect(mapped.message).toBe('Sandbox name must contain letters or digits');
+    expect(mapped.message).not.toMatch(/Request failed with status/);
+    expect(mapped.source).toEqual({ pointer: '/data/attributes/name' });
+  });
+
+  it('sandbox create prints a legacy { error } body instead of the generic status text', async () => {
+    const post = vi
+      .fn()
+      .mockRejectedValue(rejectedWith(400, { error: 'Environment name is required' }));
+
+    const mapped = await sandboxCreateFailure(post);
+
+    expect(mapped.message).toBe('Environment name is required');
   });
 
   it('lists environments defensively', async () => {

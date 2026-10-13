@@ -58,6 +58,8 @@ export class CliError extends Error {
 
 interface JsonApiErrorBody {
   errors?: JsonApiErrorEntry[];
+  /** Legacy `{ "error": "..." }` bodies some endpoints still return. */
+  error?: unknown;
 }
 
 /**
@@ -96,6 +98,30 @@ function codeForStatus(status: number): string {
 }
 
 /**
+ * Map a non-2xx HTTP response to a CliError, keeping the server's own reason:
+ * `errors[0].detail` of a JSON:API envelope, else a legacy `error` string.
+ * The generic `Request failed with status N` is only for a body with neither.
+ */
+export function errorFromResponse(status: number, data: unknown): CliError {
+  const body = (typeof data === 'object' && data !== null ? data : {}) as JsonApiErrorBody;
+  const entries = Array.isArray(body.errors) ? body.errors : [];
+  const first = entries[0];
+  const legacy = typeof body.error === 'string' && body.error !== '' ? body.error : undefined;
+  return new CliError(
+    first?.detail ?? first?.title ?? legacy ?? `Request failed with status ${status}`,
+    {
+      code: first?.code ?? codeForStatus(status),
+      exitCode: exitCodeForStatus(status),
+      status,
+      requestId: first?.meta?.requestId,
+      source: first?.source,
+      meta: first?.meta,
+      errors: entries.length > 0 ? entries : undefined,
+    }
+  );
+}
+
+/**
  * Map any thrown value to a CliError. Prefers the platform's JSON:API error
  * envelope (`errors[0].code` is the stable UPPER_SNAKE_CASE contract clients
  * branch on); falls back to SDK error classes, then generic mapping.
@@ -118,19 +144,7 @@ export function mapError(error: unknown): CliError {
         exitCode: EXIT.API,
       });
     }
-    const status = error.response.status;
-    const body = error.response.data as JsonApiErrorBody | undefined;
-    const entries = body?.errors ?? [];
-    const first = entries[0];
-    return new CliError(first?.detail ?? first?.title ?? `Request failed with status ${status}`, {
-      code: first?.code ?? codeForStatus(status),
-      exitCode: exitCodeForStatus(status),
-      status,
-      requestId: first?.meta?.requestId,
-      source: first?.source,
-      meta: first?.meta,
-      errors: entries.length > 0 ? entries : undefined,
-    });
+    return errorFromResponse(error.response.status, error.response.data);
   }
 
   if (isKeltaErrorLike(error)) {
