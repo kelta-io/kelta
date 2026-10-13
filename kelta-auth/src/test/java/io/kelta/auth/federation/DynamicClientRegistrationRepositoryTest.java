@@ -6,6 +6,7 @@ import io.kelta.auth.service.OidcDiscoveryService.ResolvedEndpoints;
 import io.kelta.auth.service.WorkerClient;
 import io.kelta.auth.service.WorkerClient.OidcProviderInfo;
 import io.kelta.crypto.EncryptionService;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -31,12 +32,14 @@ class DynamicClientRegistrationRepositoryTest {
     @Mock private WorkerClient workerClient;
     @Mock private OidcDiscoveryService discoveryService;
     @Mock private EncryptionService encryptionService;
+    /** Allows every URL unless a test says otherwise — keeps these tests off the network. */
+    @Mock private OutboundUrlGuard urlGuard;
 
     private DynamicClientRegistrationRepository repo;
 
     @BeforeEach
     void setUp() {
-        repo = new DynamicClientRegistrationRepository(workerClient, discoveryService, encryptionService);
+        repo = new DynamicClientRegistrationRepository(workerClient, discoveryService, encryptionService, urlGuard);
     }
 
     private OidcProviderInfo provider(String id, String clientId, String clientSecretEnc) {
@@ -242,6 +245,74 @@ class DynamicClientRegistrationRepositoryTest {
     }
 
     @Nested
+    @DisplayName("endpoint check")
+    class EndpointCheck {
+
+        private ClientRegistration build(ResolvedEndpoints endpoints, String allowedCidrs) {
+            repo = new DynamicClientRegistrationRepository(workerClient, discoveryService, encryptionService,
+                    new OutboundUrlGuard(allowedCidrs));
+            OidcProviderInfo prov = provider("prov-1", "client-id", "enc-secret");
+            when(workerClient.lookupActiveOidcProviders("tenant1")).thenReturn(Optional.of(List.of(prov)));
+            when(encryptionService.decrypt("enc-secret")).thenReturn("decrypted-secret");
+            when(discoveryService.resolve(anyString(), any())).thenReturn(endpoints);
+            return repo.findByRegistrationId("tenant1:prov-1");
+        }
+
+        private static ResolvedEndpoints endpoints(String token, String userinfo, String jwks) {
+            return new ResolvedEndpoints("https://idp.example.com/auth", token, userinfo, jwks, null, "discovered");
+        }
+
+        @Test
+        @DisplayName("refuses a provider whose token endpoint is on a private address")
+        void privateTokenEndpointRefused() {
+            assertThat(build(endpoints("http://10.0.0.5/token", null, null), "")).isNull();
+        }
+
+        @Test
+        @DisplayName("refuses a provider whose user-info endpoint is loopback")
+        void loopbackUserinfoRefused() {
+            assertThat(build(endpoints("https://203.0.113.10/token", "http://127.0.0.1:8080/userinfo", null), ""))
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("refuses a provider whose JWKS endpoint is the metadata address")
+        void metadataJwksRefused() {
+            assertThat(build(endpoints("https://203.0.113.10/token", null, "http://169.254.169.254/jwks"), ""))
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("refuses a provider whose endpoint is not http(s)")
+        void nonHttpEndpointRefused() {
+            assertThat(build(endpoints("file:///etc/passwd", null, null), "")).isNull();
+        }
+
+        @Test
+        @DisplayName("builds the registration when every fetched endpoint is public")
+        void publicEndpointsAccepted() {
+            ClientRegistration registration = build(endpoints("https://203.0.113.10/token",
+                    "https://203.0.113.10/userinfo", "https://203.0.113.10/jwks"), "");
+
+            assertThat(registration).isNotNull();
+            assertThat(registration.getProviderDetails().getTokenUri()).isEqualTo("https://203.0.113.10/token");
+        }
+
+        @Test
+        @DisplayName("builds the registration for an allow-listed private provider")
+        void allowListedPrivateAccepted() {
+            assertThat(build(endpoints("http://10.0.0.5/token", "http://10.0.0.5/userinfo",
+                    "http://10.0.0.5/jwks"), "10.0.0.5/32")).isNotNull();
+        }
+
+        @Test
+        @DisplayName("does not decide on a host that does not resolve right now")
+        void unresolvableLeftToFetchTime() {
+            assertThat(build(endpoints("https://idp.invalid/token", null, null), "")).isNotNull();
+        }
+    }
+
+    @Nested
     @DisplayName("unknown registration ids")
     class UnknownRegistrations {
 
@@ -250,6 +321,7 @@ class DynamicClientRegistrationRepositoryTest {
         @BeforeEach
         void useClock() {
             repo = new DynamicClientRegistrationRepository(workerClient, discoveryService, encryptionService,
+                    urlGuard,
                     new UnknownRegistrationCache(Duration.ofSeconds(30), 100, clock));
         }
 

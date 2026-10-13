@@ -11,6 +11,8 @@ import io.kelta.runtime.workflow.module.ModuleContext;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Map;
 import java.util.Set;
@@ -139,33 +141,35 @@ class IntegrationModuleTest {
         assertEquals(8, module.getActionHandlers().size());
     }
 
-    @Test
-    @DisplayName("HTTP_CALLOUT refuses private targets when no guard extension is supplied")
-    void calloutWithoutGuardExtensionRefusesPrivateTargets() {
+    @ParameterizedTest
+    @ValueSource(strings = {"HTTP_CALLOUT", "OUTBOUND_MESSAGE", "CALL_API"})
+    @DisplayName("Outbound handlers refuse private targets when no guard extension is supplied")
+    void outboundWithoutGuardExtensionRefusesPrivateTargets(String actionType) {
         module.onStartup(new ModuleContext(null, null, null, new ObjectMapper()));
 
-        ActionResult result = callout().execute(calloutContext("http://127.0.0.1:9/x"));
+        ActionResult result = handler(actionType).execute(calloutContext("http://127.0.0.1:9/x"));
 
         assertFalse(result.successful());
-        assertTrue(result.errorMessage().contains("refused"), result.errorMessage());
+        assertTrue(result.errorMessage().toLowerCase().contains("refused"), result.errorMessage());
     }
 
-    @Test
-    @DisplayName("HTTP_CALLOUT uses the guard extension's allow-list")
-    void calloutUsesGuardExtension() {
+    @ParameterizedTest
+    @ValueSource(strings = {"HTTP_CALLOUT", "OUTBOUND_MESSAGE", "CALL_API"})
+    @DisplayName("Outbound handlers use the guard extension's allow-list")
+    void outboundUsesGuardExtension(String actionType) {
         Map<Class<?>, Object> extensions = Map.of(OutboundUrlGuard.class, new OutboundUrlGuard("127.0.0.0/8"));
         module.onStartup(new ModuleContext(null, null, null, new ObjectMapper(), null, extensions));
 
         // Allowed by the guard, so the request is attempted; nothing listens on the discard port.
-        ActionResult result = callout().execute(calloutContext("http://127.0.0.1:9/x"));
+        ActionResult result = handler(actionType).execute(calloutContext("http://127.0.0.1:9/x"));
 
         assertFalse(result.successful());
-        assertFalse(result.errorMessage().contains("refused"), result.errorMessage());
+        assertFalse(result.errorMessage().toLowerCase().contains("refused"), result.errorMessage());
     }
 
-    private ActionHandler callout() {
+    private ActionHandler handler(String actionType) {
         return module.getActionHandlers().stream()
-            .filter(h -> "HTTP_CALLOUT".equals(h.getActionTypeKey()))
+            .filter(h -> actionType.equals(h.getActionTypeKey()))
             .findFirst().orElseThrow();
     }
 

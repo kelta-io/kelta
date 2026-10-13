@@ -18,7 +18,6 @@ import io.kelta.runtime.workflow.module.KeltaModule;
 import io.kelta.runtime.workflow.module.ModuleContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,9 +46,10 @@ import java.util.List;
  * <p>If no SPI implementations are provided via ModuleContext extensions,
  * logging no-op implementations are used as defaults.
  *
- * <p>{@code HTTP_CALLOUT} fetches through the {@link OutboundUrlGuard} extension (the host
- * service's guard, carrying its private-range allow-list). Without one it uses a guard that
- * allows no private range, so a missing extension never widens what a flow can reach.
+ * <p>{@code HTTP_CALLOUT}, {@code OUTBOUND_MESSAGE} and {@code CALL_API} fetch through the
+ * {@link OutboundUrlGuard} extension (the host service's guard, carrying its private-range
+ * allow-list). Without one they use a guard that allows no private range, so a missing extension
+ * never widens what a flow can reach.
  *
  * @since 1.0.0
  */
@@ -76,15 +76,13 @@ public class IntegrationModule implements KeltaModule {
     public void onStartup(ModuleContext context) {
         var objectMapper = context.objectMapper();
 
-        // HTTP handlers — use RestTemplate from extensions or create default
-        RestTemplate restTemplate = context.getExtension(RestTemplate.class);
-
+        // Outbound HTTP handlers — every tenant-configured URL goes through the host's guard
         OutboundUrlGuard urlGuard = context.getExtension(OutboundUrlGuard.class);
         if (urlGuard == null) {
             urlGuard = new OutboundUrlGuard("");
         }
         handlers.add(new HttpCalloutActionHandler(objectMapper, urlGuard));
-        handlers.add(new OutboundMessageActionHandler(objectMapper, restTemplate));
+        handlers.add(new OutboundMessageActionHandler(objectMapper, urlGuard));
 
         // Simple handlers (ObjectMapper only)
         handlers.add(new SendNotificationActionHandler(objectMapper));
@@ -131,7 +129,7 @@ public class IntegrationModule implements KeltaModule {
         IdempotencyStore idempotencyStore = context.getExtension(IdempotencyStore.class);
         handlers.add(new CallApiActionHandler(
             objectMapper, payloadMapper, apiSpecStore,
-            credentialResolver, idempotencyStore, restTemplate));
+            credentialResolver, idempotencyStore, urlGuard));
 
         // SQL_QUERY — raw SQL step. Needs JdbcTemplate + TransactionTemplate.
         // Skipped silently if extensions are not wired (e.g. in unit-test contexts

@@ -3,6 +3,7 @@ package io.kelta.auth.config;
 import io.kelta.auth.federation.DynamicClientRegistrationRepository;
 import io.kelta.auth.federation.DynamicRelyingPartyRegistrationRepository;
 import io.kelta.auth.federation.FederatedUserMapper;
+import io.kelta.auth.federation.OidcLoginHttp;
 import io.kelta.auth.federation.OpenSamlStatus;
 import io.kelta.auth.federation.SamlFederatedLoginSuccessHandler;
 import io.kelta.auth.federation.SamlLogoutSuccessHandler;
@@ -10,6 +11,7 @@ import io.kelta.auth.federation.SamlSpCredentials;
 import io.kelta.auth.service.OidcDiscoveryService;
 import io.kelta.auth.service.WorkerClient;
 import io.kelta.crypto.EncryptionService;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -18,7 +20,16 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient;
+import org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest;
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserRequest;
+import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
+import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.user.OAuth2User;
+import org.springframework.security.oauth2.jwt.JwtDecoderFactory;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrationRepository;
 import org.springframework.security.saml2.provider.service.web.authentication.logout.OpenSaml5LogoutRequestResolver;
 import org.springframework.security.saml2.provider.service.web.authentication.logout.Saml2LogoutRequestResolver;
@@ -76,7 +87,8 @@ public class FederationConfig {
     public ClientRegistrationRepository clientRegistrationRepository(
             WorkerClient workerClient,
             OidcDiscoveryService discoveryService,
-            ObjectProvider<EncryptionService> encryptionService) {
+            ObjectProvider<EncryptionService> encryptionService,
+            OutboundUrlGuard outboundUrlGuard) {
         EncryptionService encryption = encryptionService.getIfAvailable();
         if (encryption == null) {
             log.warn("EncryptionService not configured (KELTA_ENCRYPTION_KEY not set). "
@@ -84,7 +96,35 @@ public class FederationConfig {
             return disabledClientRegistrationRepository();
         }
         log.info("OIDC federation enabled");
-        return new DynamicClientRegistrationRepository(workerClient, discoveryService, encryption);
+        return new DynamicClientRegistrationRepository(workerClient, discoveryService, encryption, outboundUrlGuard);
+    }
+
+    /*
+     * The clients federated OIDC login uses to call a tenant's identity provider (token
+     * exchange, user info, JWKS) — all over OidcLoginHttp's guarded, redirect-free,
+     * timeout-bounded request factory. AuthorizationServerConfig sets the first two on
+     * oauth2Login; Spring Security picks the ID-token decoder factory up as a bean.
+     */
+
+    @Bean
+    public OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> oidcLoginTokenResponseClient(
+            OutboundUrlGuard outboundUrlGuard) {
+        return OidcLoginHttp.tokenResponseClient(OidcLoginHttp.requestFactory(outboundUrlGuard));
+    }
+
+    @Bean
+    public OAuth2UserService<OidcUserRequest, OidcUser> oidcLoginUserService(OutboundUrlGuard outboundUrlGuard) {
+        return OidcLoginHttp.oidcUserService(OidcLoginHttp.requestFactory(outboundUrlGuard));
+    }
+
+    @Bean
+    public OAuth2UserService<OAuth2UserRequest, OAuth2User> oauth2LoginUserService(OutboundUrlGuard outboundUrlGuard) {
+        return OidcLoginHttp.oauth2UserService(OidcLoginHttp.requestFactory(outboundUrlGuard));
+    }
+
+    @Bean
+    public JwtDecoderFactory<ClientRegistration> oidcIdTokenDecoderFactory(OutboundUrlGuard outboundUrlGuard) {
+        return OidcLoginHttp.idTokenDecoderFactory(OidcLoginHttp.requestFactory(outboundUrlGuard));
     }
 
     /**

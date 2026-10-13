@@ -126,6 +126,14 @@ plain surefire here and skip without Docker.
   Client IP and fail-open semantics are the portal limiter's (`kelta.security.trusted-proxies`).
   The defaults live in the filter and in `application.yml`; `PortalPublicRateLimitFilterTest`
   checks they agree.
+- Calls to the IdP during login (token exchange, user info, JWKS) go over `federation/OidcLoginHttp`:
+  every request is checked with the `OutboundUrlGuard` right before it is sent, redirects are never
+  followed, connect/response waits are bounded. `FederationConfig` registers the token response
+  client and user services (set on `oauth2Login` in `AuthorizationServerConfig`) and the
+  `JwtDecoderFactory<ClientRegistration>` bean Spring Security picks up **by type** — with more
+  than one it silently falls back to its own default client, so keep exactly one
+  (`FederationWiringTest` checks). `DynamicClientRegistrationRepository` also checks those three
+  endpoints when it builds a registration; a malformed or non-public one means no registration.
 - `FederatedLoginSuccessHandler` — handles successful external IdP login
 - `FederatedUserMapper` — maps external identity to Kelta user
 
@@ -157,6 +165,7 @@ Standard Spring Security exceptions (`AuthenticationException` hierarchy). No cu
 | User loading | `service/KeltaUserDetailsService.java` |
 | External IdP | `federation/DynamicClientRegistrationRepository.java` |
 | Fetching a tenant-supplied URL (runtime-core `OutboundHttpClient` + the `OutboundUrlGuard` bean from `config/OutboundConfig`) | `service/OidcDiscoveryService.java` |
+| Spring Security calling a tenant's IdP (token, user info, JWKS) over a guarded, redirect-free, timeout-bounded request factory | `federation/OidcLoginHttp.java` (beans in `config/FederationConfig`) |
 | MFA | `service/TotpService.java` + `controller/MfaController.java` |
 | Passwordless magic-link (portal users) | `controller/PortalLoginController.java` + `service/PortalLoginService.java` |
 | Worker HTTP client | `service/WorkerClient.java` |

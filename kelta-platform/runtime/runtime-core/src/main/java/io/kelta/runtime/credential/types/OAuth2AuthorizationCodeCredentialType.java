@@ -4,18 +4,17 @@ import io.kelta.runtime.credential.CredentialMaterial;
 import io.kelta.runtime.credential.CredentialTestResult;
 import io.kelta.runtime.credential.OAuthRefreshOutcome;
 import io.kelta.runtime.credential.OAuthTokenState;
+import io.kelta.runtime.outbound.OutboundHttpClient;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Iterator;
 import java.util.List;
@@ -25,17 +24,35 @@ import java.util.Set;
  * OAuth 2.0 Authorization Code grant. The user authorizes the platform via a
  * browser popup; the resulting code is exchanged for access/refresh tokens at
  * the token URL. Refresh uses the stored refresh_token.
+ *
+ * <p>The token URL is administrator-entered metadata, so code exchange and refresh go through
+ * the service's {@link OutboundUrlGuard} — see {@link OAuthTokenEndpointClient} for the limits.
  */
 @Component
 public class OAuth2AuthorizationCodeCredentialType extends AbstractCredentialType {
 
-    private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(15);
+    /** At most this much of an error response is quoted in the failure message. */
+    private static final int MAX_ERROR_BODY_CHARS = 1_000;
 
     private final ObjectMapper objectMapper;
+    private final OAuthTokenEndpointClient tokenEndpoint;
 
-    public OAuth2AuthorizationCodeCredentialType(ObjectMapper objectMapper) {
+    @Autowired
+    public OAuth2AuthorizationCodeCredentialType(ObjectMapper objectMapper,
+                                                 ObjectProvider<OutboundUrlGuard> urlGuard) {
+        this(objectMapper, OAuthTokenEndpointClient.from(urlGuard));
+    }
+
+    /** With a pre-built client — tests use it to point at a loopback server. */
+    OAuth2AuthorizationCodeCredentialType(ObjectMapper objectMapper, OutboundHttpClient httpClient) {
+        this(objectMapper, new OAuthTokenEndpointClient(httpClient));
+    }
+
+    private OAuth2AuthorizationCodeCredentialType(ObjectMapper objectMapper,
+                                                  OAuthTokenEndpointClient tokenEndpoint) {
         super(objectMapper);
         this.objectMapper = objectMapper;
+        this.tokenEndpoint = tokenEndpoint;
     }
 
     @Override public String getKey()         { return "oauth2_authorization_code"; }
@@ -125,21 +142,15 @@ public class OAuth2AuthorizationCodeCredentialType extends AbstractCredentialTyp
                 .append(URLEncoder.encode(clientSecret, StandardCharsets.UTF_8));
         }
 
-        HttpClient client = HttpClient.newBuilder().connectTimeout(HTTP_TIMEOUT).build();
-        HttpRequest req = HttpRequest.newBuilder()
-            .uri(URI.create(tokenUrl))
-            .timeout(HTTP_TIMEOUT)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .header("Accept", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
-            .build();
-        HttpResponse<String> res = client.send(req, HttpResponse.BodyHandlers.ofString());
+        OutboundHttpClient.Response res = tokenEndpoint.postForm(tokenUrl, body.toString());
         if (res.statusCode() / 100 != 2) {
+            String errorBody = res.bodyAsString();
             throw new IllegalStateException(
-                "Token endpoint returned HTTP " + res.statusCode() + ": " + res.body());
+                "Token endpoint returned HTTP " + res.statusCode() + ": "
+                    + errorBody.substring(0, Math.min(errorBody.length(), MAX_ERROR_BODY_CHARS)));
         }
 
-        JsonNode json = objectMapper.readTree(res.body());
+        JsonNode json = objectMapper.readTree(res.bodyAsString());
         String accessToken = textOrNull(json, "access_token");
         if (accessToken == null) {
             throw new IllegalStateException("Token response missing access_token");

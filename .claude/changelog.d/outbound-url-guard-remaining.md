@@ -1,0 +1,1 @@
+- 2026-10-12 fix(platform): Route outbound requests from flow `CALL_API` and `OUTBOUND_MESSAGE`, external-rest collections, OAuth 2.0 credential token URLs, Web Push delivery and kelta-auth federated login (token, user-info and JWKS endpoints) through the shared URL check (outbound-url-guard-remaining)

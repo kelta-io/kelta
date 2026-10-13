@@ -38,7 +38,7 @@ When retries are exhausted (or none apply), the first matching `Catch` moves exe
 | `ResourceNotFound` | `Resource` names a handler that is not registered |
 | `States.NoChoiceMatched` | a `Choice` had no matching rule and no `Default` |
 | `States.ItemsNotArray` | a `Map`'s `ItemsPath` did not resolve to an array |
-| `Api.HttpClientError`, `Api.HttpServerError`, `Api.Timeout`, `Credential.*`, `Mapper.Failure` | `CALL_API` |
+| `Api.HttpClientError`, `Api.HttpServerError`, `Api.Timeout`, `Api.Refused`, `Credential.*`, `Mapper.Failure` | `CALL_API` |
 | `<ExceptionName>` | an unexpected exception — its simple class name (e.g. `ValidationException`) |
 | `States.ALL` | wildcard used only in `ErrorEquals` |
 

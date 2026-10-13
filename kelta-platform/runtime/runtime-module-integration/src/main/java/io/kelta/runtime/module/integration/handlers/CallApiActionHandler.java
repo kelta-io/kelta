@@ -9,19 +9,13 @@ import io.kelta.runtime.module.integration.spi.ApiSpecStore;
 import io.kelta.runtime.module.integration.spi.CredentialResolverPort;
 import io.kelta.runtime.module.integration.spi.IdempotencyStore;
 import io.kelta.runtime.module.integration.spi.IdempotencyStore.CachedResponse;
+import io.kelta.runtime.outbound.OutboundHttpClient;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandler;
 import io.kelta.runtime.workflow.ActionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestTemplate;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
@@ -34,9 +28,11 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * Generic external-API call. Replaces {@code HTTP_CALLOUT} with a unified
@@ -58,6 +54,16 @@ import java.util.Set;
  *       {@code Credential.*}, {@code Mapper.Failure}) so flows can write
  *       targeted Catch policies.</li>
  * </ul>
+ *
+ * <p><b>Outbound safety.</b> In both modes the URL comes from tenant configuration (flow config
+ * or an imported spec's base URL), so the request goes through {@link OutboundHttpClient} with the
+ * host service's {@link OutboundUrlGuard}: a host that resolves to a non-public address is refused
+ * unless allow-listed ({@code Api.Refused}), and nothing is sent. {@code GET}/{@code HEAD}
+ * redirects are followed up to {@value #MAX_REDIRECTS} hops, each re-validated; other methods
+ * return the 3xx. The call is bounded by {@link #CONNECT_TIMEOUT} to connect and
+ * {@link #REQUEST_DEADLINE} overall ({@code Api.Timeout} on expiry or transport failure), and at
+ * most {@value #MAX_RESPONSE_BYTES} bytes of the response are read — a larger response keeps its
+ * truncated {@code responseBody} and is not parsed into {@code responseData}.
  */
 public class CallApiActionHandler implements ActionHandler {
 
@@ -66,31 +72,44 @@ public class CallApiActionHandler implements ActionHandler {
         Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
     private static final int MAX_RESPONSE_SIZE = 50_000;
     private static final Duration DEFAULT_IDEMPOTENCY_TTL = Duration.ofHours(24);
+    /** Sent when the step config sets no {@code Accept} header. */
+    private static final String DEFAULT_ACCEPT = "application/json, text/plain, */*";
+    static final int MAX_RESPONSE_BYTES = 1024 * 1024;
+    static final int MAX_REDIRECTS = 3;
+    static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    static final Duration REQUEST_DEADLINE = Duration.ofSeconds(60);
 
     private final ObjectMapper objectMapper;
     private final PayloadMapperService payloadMapper;
     private final ApiSpecStore apiSpecStore;
     private final CredentialResolverPort credentialResolver;
     private final IdempotencyStore idempotencyStore;
-    private RestTemplate restTemplate;
+    private final OutboundHttpClient httpClient;
 
     public CallApiActionHandler(ObjectMapper objectMapper,
                                  PayloadMapperService payloadMapper,
                                  ApiSpecStore apiSpecStore,
                                  CredentialResolverPort credentialResolver,
                                  IdempotencyStore idempotencyStore,
-                                 RestTemplate restTemplate) {
+                                 OutboundUrlGuard urlGuard) {
+        this(objectMapper, payloadMapper, apiSpecStore, credentialResolver, idempotencyStore,
+            new OutboundHttpClient(urlGuard, new OutboundHttpClient.Limits(
+                CONNECT_TIMEOUT, REQUEST_DEADLINE, MAX_RESPONSE_BYTES, MAX_REDIRECTS)));
+    }
+
+    /** With a pre-built client — tests use it to shorten the limits. */
+    CallApiActionHandler(ObjectMapper objectMapper,
+                         PayloadMapperService payloadMapper,
+                         ApiSpecStore apiSpecStore,
+                         CredentialResolverPort credentialResolver,
+                         IdempotencyStore idempotencyStore,
+                         OutboundHttpClient httpClient) {
         this.objectMapper = objectMapper;
         this.payloadMapper = payloadMapper;
         this.apiSpecStore = apiSpecStore;
         this.credentialResolver = credentialResolver;
         this.idempotencyStore = idempotencyStore;
-        this.restTemplate = restTemplate != null ? restTemplate : new RestTemplate();
-    }
-
-    /** Test seam. */
-    void setRestTemplate(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
+        this.httpClient = httpClient;
     }
 
     @Override
@@ -137,35 +156,39 @@ public class CallApiActionHandler implements ActionHandler {
                     log.info("CALL_API idempotency hit for key {} — replaying cached {}",
                         idempotency.key, cached.get().statusCode());
                     return success(request, cached.get().statusCode(),
-                        cached.get().responseBody(), config, stateData);
+                        cached.get().responseBody(), false, config, stateData);
                 }
-                request.headers.set("Idempotency-Key", idempotency.key);
+                request.headers.put("Idempotency-Key", idempotency.key);
             }
+            request.headers.putIfAbsent("Accept", DEFAULT_ACCEPT);
 
             log.info("CALL_API: method={} url={} mode={} workflowRule={}",
                 request.method, request.url, mode, context.workflowRuleId());
 
-            ResponseEntity<String> response;
+            OutboundHttpClient.Response response;
             try {
-                response = restTemplate.exchange(
-                    request.url,
-                    HttpMethod.valueOf(request.method),
-                    new HttpEntity<>(request.body, request.headers),
-                    String.class);
-            } catch (HttpClientErrorException e) {
-                return ActionResult.failure(
-                    "Api.HttpClientError: " + e.getStatusCode().value()
-                        + " — " + truncate(e.getResponseBodyAsString()));
-            } catch (HttpServerErrorException e) {
-                return ActionResult.failure(
-                    "Api.HttpServerError: " + e.getStatusCode().value()
-                        + " — " + truncate(e.getResponseBodyAsString()));
-            } catch (ResourceAccessException e) {
+                response = httpClient.send(new OutboundHttpClient.Request(
+                    request.method, request.url, request.headers,
+                    request.body == null ? null : request.body.getBytes(StandardCharsets.UTF_8)));
+            } catch (OutboundUrlGuard.RejectedUrlException e) {
+                log.warn("CALL_API refused: url={} workflowRule={} reason={}",
+                    request.url, context.workflowRuleId(), e.getMessage());
+                return ActionResult.failure("Api.Refused: " + e.getMessage());
+            } catch (OutboundHttpClient.OutboundRequestException e) {
                 return ActionResult.failure("Api.Timeout: " + e.getMessage());
             }
 
-            int status = response.getStatusCode().value();
-            String body = response.getBody();
+            int status = response.statusCode();
+            String body = response.body().length == 0 && !response.truncated()
+                ? null : response.bodyAsString();
+            if (status >= 400 && status < 500) {
+                return ActionResult.failure(
+                    "Api.HttpClientError: " + status + " — " + truncate(body == null ? "" : body));
+            }
+            if (status >= 500) {
+                return ActionResult.failure(
+                    "Api.HttpServerError: " + status + " — " + truncate(body == null ? "" : body));
+            }
 
             if (idempotency != null && idempotencyStore != null && status / 100 == 2) {
                 idempotencyStore.record(context.tenantId(), idempotency.key,
@@ -173,7 +196,7 @@ public class CallApiActionHandler implements ActionHandler {
                     status, body, idempotency.ttl);
             }
 
-            return success(request, status, body, config, stateData);
+            return success(request, status, body, response.truncated(), config, stateData);
         } catch (PayloadMapperException e) {
             return ActionResult.failure("Mapper.Failure: " + e.getMessage());
         } catch (CredentialFailure e) {
@@ -247,13 +270,15 @@ public class CallApiActionHandler implements ActionHandler {
         Object body = payloadMapper.map(config.get("requestBody"), stateData);
 
         String url = buildUrl(spec.baseUrl(), operation.pathTemplate(), pathParams, queryParams);
-        HttpHeaders headers = new HttpHeaders();
-        headersMap.forEach((k, v) -> headers.set(k, v == null ? "" : v.toString()));
-        if (!headers.containsHeader("Content-Type") && body != null) {
-            headers.set("Content-Type", "application/json");
+        Map<String, String> headers = newHeaders();
+        headersMap.forEach((k, v) -> headers.put(k, v == null ? "" : v.toString()));
+        if (!headers.containsKey("Content-Type") && body != null) {
+            headers.put("Content-Type", "application/json");
         }
         String bodyString = serializeBody(body);
-        return new ResolvedRequest(operation.httpMethod(), url, headers, bodyString);
+        String method = operation.httpMethod() == null
+            ? "GET" : operation.httpMethod().toUpperCase(Locale.ROOT);
+        return new ResolvedRequest(method, url, headers, bodyString);
     }
 
     private ResolvedRequest buildFromRaw(Map<String, Object> config,
@@ -262,7 +287,7 @@ public class CallApiActionHandler implements ActionHandler {
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("raw mode requires url");
         }
-        String method = stringOrDefault(config.get("method"), "GET").toUpperCase();
+        String method = stringOrDefault(config.get("method"), "GET").toUpperCase(Locale.ROOT);
         if (!ALLOWED_METHODS.contains(method)) {
             throw new IllegalArgumentException("Invalid method: " + method);
         }
@@ -275,10 +300,10 @@ public class CallApiActionHandler implements ActionHandler {
         Object body = payloadMapper.map(config.get("body"), stateData);
 
         String fullUrl = appendQuery(url, queryParams);
-        HttpHeaders headers = new HttpHeaders();
-        headersMap.forEach((k, v) -> headers.set(k, v == null ? "" : v.toString()));
-        if (!headers.containsHeader("Content-Type") && body != null) {
-            headers.set("Content-Type", "application/json");
+        Map<String, String> headers = newHeaders();
+        headersMap.forEach((k, v) -> headers.put(k, v == null ? "" : v.toString()));
+        if (!headers.containsKey("Content-Type") && body != null) {
+            headers.put("Content-Type", "application/json");
         }
         return new ResolvedRequest(method, fullUrl, headers, serializeBody(body));
     }
@@ -337,7 +362,7 @@ public class CallApiActionHandler implements ActionHandler {
             case "bearer_token" -> {
                 Object token = cred.secret("token");
                 if (token != null) {
-                    request.headers.set("Authorization", "Bearer " + token);
+                    request.headers.put("Authorization", "Bearer " + token);
                 }
             }
             case "basic_auth" -> {
@@ -346,7 +371,7 @@ public class CallApiActionHandler implements ActionHandler {
                 if (u != null && p != null) {
                     String encoded = Base64.getEncoder().encodeToString(
                         (u + ":" + p).getBytes(StandardCharsets.UTF_8));
-                    request.headers.set("Authorization", "Basic " + encoded);
+                    request.headers.put("Authorization", "Basic " + encoded);
                 }
             }
             case "oauth2_client_credentials", "oauth2_authorization_code" -> {
@@ -359,7 +384,7 @@ public class CallApiActionHandler implements ActionHandler {
                     throw new CredentialFailure("Credential.NoAccessToken",
                         "OAuth credential has no current access token");
                 }
-                request.headers.set("Authorization", "Bearer " + accessToken);
+                request.headers.put("Authorization", "Bearer " + accessToken);
             }
             default -> {
                 // SMTP / custom — credential isn't useful to a plain HTTP step.
@@ -379,7 +404,7 @@ public class CallApiActionHandler implements ActionHandler {
         if ("query".equalsIgnoreCase(location)) {
             request.url = appendQuery(request.url, Map.of(headerName, (Object) composed));
         } else {
-            request.headers.set(headerName, composed);
+            request.headers.put(headerName, composed);
         }
     }
 
@@ -437,6 +462,7 @@ public class CallApiActionHandler implements ActionHandler {
     // -----------------------------------------------------------------------
 
     private ActionResult success(ResolvedRequest request, int status, String body,
+                                  boolean truncated,
                                   Map<String, Object> config,
                                   Map<String, Object> stateData) {
         Map<String, Object> output = new LinkedHashMap<>();
@@ -444,11 +470,13 @@ public class CallApiActionHandler implements ActionHandler {
         output.put("url", request.url);
         output.put("method", request.method);
         if (body != null) {
-            output.put("responseBody", truncate(body));
-            try {
-                output.put("responseData", objectMapper.readValue(body, Object.class));
-            } catch (Exception ignored) {
-                // not JSON, that's fine
+            output.put("responseBody", truncated ? truncateAlways(body) : truncate(body));
+            if (!truncated) {
+                try {
+                    output.put("responseData", objectMapper.readValue(body, Object.class));
+                } catch (Exception ignored) {
+                    // not JSON, that's fine
+                }
             }
         }
 
@@ -494,13 +522,23 @@ public class CallApiActionHandler implements ActionHandler {
         return body.substring(0, MAX_RESPONSE_SIZE) + "... [truncated]";
     }
 
+    /** For a body the client already cut off at its byte cap. */
+    private static String truncateAlways(String body) {
+        return body.substring(0, Math.min(body.length(), MAX_RESPONSE_SIZE)) + "... [truncated]";
+    }
+
+    /** Header names are case-insensitive; a later value for the same name replaces the earlier. */
+    private static Map<String, String> newHeaders() {
+        return new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+    }
+
     private static class ResolvedRequest {
         String method;
         String url;
-        HttpHeaders headers;
+        Map<String, String> headers;
         String body;
 
-        ResolvedRequest(String method, String url, HttpHeaders headers, String body) {
+        ResolvedRequest(String method, String url, Map<String, String> headers, String body) {
             this.method = method;
             this.url = url;
             this.headers = headers;

@@ -391,7 +391,8 @@ class OidcSignOutFlowTest {
                     Mockito.mock(WorkerClient.class),
                     Mockito.mock(ClientRegistrationRepository.class),
                     null,
-                    policies);
+                    policies,
+                    null, null, null);
         }
     }
 }

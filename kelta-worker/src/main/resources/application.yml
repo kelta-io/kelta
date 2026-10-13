@@ -78,11 +78,12 @@ kelta:
   # Generate with: openssl rand -base64 32
   encryption:
     key: ${KELTA_ENCRYPTION_KEY:}
-  # Outbound fetches of tenant-supplied URLs (OIDC discovery, OpenAPI spec import, flow HTTP
-  # callouts) refuse non-public addresses (loopback, RFC 1918, link-local/metadata, CGNAT, ULA…).
-  # List comma-separated CIDRs here only for ranges that legitimately host such targets, e.g. a
-  # self-hosted identity provider or an in-cluster service a flow calls. kelta-auth reads the
-  # same variable for its login-time OIDC discovery.
+  # Outbound fetches of tenant-supplied URLs (OIDC discovery, OpenAPI spec import, flow
+  # HTTP_CALLOUT/CALL_API/OUTBOUND_MESSAGE, external-rest collections, OAuth 2.0 credential token
+  # URLs, Web Push) refuse non-public addresses (loopback, RFC 1918, link-local/metadata, CGNAT,
+  # ULA…). List comma-separated CIDRs here only for ranges that legitimately host such targets,
+  # e.g. a self-hosted identity provider or an in-cluster service a flow calls. kelta-auth reads
+  # the same variable for its OIDC discovery and federated login.
   outbound:
     allowed-private-cidrs: ${KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS:}
   auth:

@@ -93,6 +93,16 @@ class FederationWiringTest {
         ObjectMapper objectMapper() {
             return new ObjectMapper();
         }
+
+        @Bean
+        io.kelta.runtime.outbound.OutboundUrlGuard outboundUrlGuard() {
+            return new io.kelta.runtime.outbound.OutboundUrlGuard("");
+        }
+    }
+
+    private static boolean singleBeanOf(AssertableWebApplicationContext context, Class<?> type, Class<?>... generics) {
+        return context.getBeanNamesForType(
+                org.springframework.core.ResolvableType.forClassWithGenerics(type, generics)).length == 1;
     }
 
     private static MockMvc mockMvc(AssertableWebApplicationContext context) {
@@ -129,6 +139,22 @@ class FederationWiringTest {
                 assertThat(context).hasSingleBean(SamlLogoutController.class);
                 assertThat(context).hasSingleBean(Saml2LogoutRequestResolver.class);
                 assertThat(context).hasBean("samlSecurityFilterChain");
+                // oauth2Login resolves these by generic type and silently falls back to
+                // Spring's own clients when there is not exactly one.
+                assertThat(singleBeanOf(context, org.springframework.security.oauth2.jwt.JwtDecoderFactory.class,
+                        org.springframework.security.oauth2.client.registration.ClientRegistration.class)).isTrue();
+                assertThat(singleBeanOf(context,
+                        org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient.class,
+                        org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest.class))
+                        .isTrue();
+                assertThat(singleBeanOf(context,
+                        org.springframework.security.oauth2.client.userinfo.OAuth2UserService.class,
+                        org.springframework.security.oauth2.client.oidc.userinfo.OidcUserRequest.class,
+                        org.springframework.security.oauth2.core.oidc.user.OidcUser.class)).isTrue();
+                assertThat(singleBeanOf(context,
+                        org.springframework.security.oauth2.client.userinfo.OAuth2UserService.class,
+                        org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest.class,
+                        org.springframework.security.oauth2.core.user.OAuth2User.class)).isTrue();
             });
         }
 

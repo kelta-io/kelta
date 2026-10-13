@@ -6,8 +6,8 @@ import java.util.Map;
  * Minimal HTTP seam used by {@link ExternalRestStorageAdapter} to talk to a remote
  * REST backend. Kept deliberately tiny and dependency-free so the adapter's
  * request-building, response-mapping, and error handling can be unit-tested with a
- * fake executor — and so runtime-core need not pick a concrete HTTP client. A
- * production {@code RestClient}-backed implementation is wired in a later slice.
+ * fake executor — and so runtime-core need not pick a concrete HTTP client. The worker's
+ * implementation sends through {@link io.kelta.runtime.outbound.OutboundHttpClient}.
  *
  * @since 1.0.0
  */
@@ -16,7 +16,8 @@ public interface RestExecutor {
     /**
      * Perform an HTTP exchange. Implementations must NOT throw on non-2xx status —
      * they return the status in {@link RestResponse} so the adapter can map 404 → empty,
-     * etc. They may throw only on transport failure (DNS, connect, timeout).
+     * etc. They may throw only on transport failure (DNS, connect, timeout) or when the target
+     * may not be fetched (the worker's implementation refuses non-public addresses).
      *
      * @param request the request to send
      * @return the response (status + raw body)

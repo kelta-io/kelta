@@ -247,7 +247,8 @@ public class ExternalRestStorageAdapter implements ExternalStorageAdapter {
         try {
             response = executor.exchange(new RestRequest(method, url, headers, body));
         } catch (RuntimeException e) {
-            throw new StorageException("External REST transport failure: " + method + " " + url, e);
+            throw new StorageException("External REST transport failure: " + method + " " + url
+                    + (e.getMessage() != null ? " (" + e.getMessage() + ")" : ""), e);
         }
 
         if (cacheable && response.status() >= 200 && response.status() < 300) {

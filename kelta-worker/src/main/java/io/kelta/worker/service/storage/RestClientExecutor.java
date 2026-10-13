@@ -1,42 +1,58 @@
 package io.kelta.worker.service.storage;
 
+import io.kelta.runtime.outbound.OutboundHttpClient;
+import io.kelta.runtime.outbound.OutboundUrlGuard;
 import io.kelta.runtime.storage.RestExecutor;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
 /**
- * {@link RestExecutor} implementation backed by Spring's {@link RestClient}, used by
- * {@code ExternalRestStorageAdapter} for external-rest connectors.
+ * {@link RestExecutor} used by {@code ExternalRestStorageAdapter} for external-rest connectors.
  *
- * <p>Non-2xx responses are NOT raised as exceptions (a no-op {@code onStatus} handler
- * suppresses the default error handling) — the adapter inspects the status itself
- * (e.g. 404 → empty). Only genuine transport failures propagate.
+ * <p>The connector's {@code baseUrl} is tenant configuration, so every request goes through
+ * {@link OutboundHttpClient} with the worker's {@link OutboundUrlGuard}: a host that resolves to a
+ * non-public address is refused unless allow-listed, {@code GET} redirects are followed up to
+ * {@value #MAX_REDIRECTS} hops (each re-validated), and the call is bounded by
+ * {@link #CONNECT_TIMEOUT} / {@link #REQUEST_DEADLINE} and a {@value #MAX_RESPONSE_BYTES}-byte
+ * body. A larger response is a failure — the adapter needs the whole document.
+ *
+ * <p>Non-2xx responses are NOT raised as exceptions — the adapter inspects the status itself
+ * (e.g. 404 → empty). Refusals, timeouts and transport failures throw, and the adapter reports
+ * them as a transport failure.
  */
 @Component
 public class RestClientExecutor implements RestExecutor {
 
-    private final RestClient restClient;
+    static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    static final Duration REQUEST_DEADLINE = Duration.ofSeconds(30);
+    static final int MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+    static final int MAX_REDIRECTS = 3;
 
-    public RestClientExecutor() {
-        this.restClient = RestClient.create();
+    private final OutboundHttpClient httpClient;
+
+    @Autowired
+    public RestClientExecutor(OutboundUrlGuard urlGuard) {
+        this(new OutboundHttpClient(urlGuard, new OutboundHttpClient.Limits(
+                CONNECT_TIMEOUT, REQUEST_DEADLINE, MAX_RESPONSE_BYTES, MAX_REDIRECTS)));
+    }
+
+    /** With a pre-built client — tests use it to shorten the limits. */
+    RestClientExecutor(OutboundHttpClient httpClient) {
+        this.httpClient = httpClient;
     }
 
     @Override
     public RestResponse exchange(RestRequest request) {
-        RestClient.RequestBodySpec spec = restClient
-                .method(HttpMethod.valueOf(request.method()))
-                .uri(request.url());
-        if (request.headers() != null) {
-            request.headers().forEach(spec::header);
+        OutboundHttpClient.Response response = httpClient.send(new OutboundHttpClient.Request(
+                request.method(), request.url(), request.headers(),
+                request.body() == null ? null : request.body().getBytes(StandardCharsets.UTF_8)));
+        if (response.truncated()) {
+            throw new OutboundHttpClient.OutboundRequestException(OutboundHttpClient.OutboundRequestException.Kind.FAILED,
+                    "the response is larger than " + httpClient.limits().maxResponseBytes() + " bytes");
         }
-        if (request.body() != null) {
-            spec.body(request.body());
-        }
-        ResponseEntity<String> response = spec.retrieve()
-                .onStatus(status -> true, (req, res) -> { /* don't throw — adapter maps status */ })
-                .toEntity(String.class);
-        return new RestResponse(response.getStatusCode().value(), response.getBody());
+        return new RestResponse(response.statusCode(), response.bodyAsString());
     }
 }
