@@ -296,6 +296,34 @@ describe('ResourceClient', () => {
       expect(mockAxiosGet).toHaveBeenCalledWith('/api/users/123', undefined);
     });
 
+    it('should send GET request with a sparse fieldset as fields[resourceName]', async () => {
+      mockAxiosGet.mockResolvedValue({ data: { id: '123', name: 'Alice' } });
+
+      await resourceClient.get('123', { fields: ['name', 'email'] });
+
+      expect(mockAxiosGet).toHaveBeenCalledWith('/api/users/123', {
+        params: { 'fields[users]': 'name,email' },
+      });
+    });
+
+    it('should send include and fields together', async () => {
+      mockAxiosGet.mockResolvedValue({ data: { id: '123', name: 'Alice' } });
+
+      await resourceClient.get('123', { include: ['accounts'], fields: ['name'] });
+
+      expect(mockAxiosGet).toHaveBeenCalledWith('/api/users/123', {
+        params: { include: 'accounts', 'fields[users]': 'name' },
+      });
+    });
+
+    it('should send GET request without params when fields is empty', async () => {
+      mockAxiosGet.mockResolvedValue({ data: { id: '123', name: 'Alice' } });
+
+      await resourceClient.get('123', { fields: [] });
+
+      expect(mockAxiosGet).toHaveBeenCalledWith('/api/users/123', undefined);
+    });
+
     it('should throw ValidationError when response is null (Requirement 10.3)', async () => {
       mockAxiosGet.mockResolvedValue({ data: null });
 

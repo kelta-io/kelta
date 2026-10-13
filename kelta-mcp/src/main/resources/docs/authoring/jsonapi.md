@@ -66,6 +66,11 @@ bracketed form is not validated against the actual resource type — any
 bracket key works — so getting the type name wrong there won't raise an
 error, it just won't filter anything.
 
+The same parameter applies to `GET /api/<collection>/<id>`
+(`kelta records get <collection> <id> --fields a,b`): `data.attributes` and
+`data.relationships` keep only the named keys; `id`, `type` and `included`
+are unchanged, and so is the `ETag`.
+
 ## `--yes` on every non-GET
 
 Every CLI/API mutation is treated as requiring explicit confirmation:

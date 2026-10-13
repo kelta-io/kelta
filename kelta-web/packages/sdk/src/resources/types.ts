@@ -77,6 +77,11 @@ export interface GetOptions {
    * Related resources to include via JSON:API ?include= parameter
    */
   include?: string[];
+
+  /**
+   * Sparse fieldset: attribute/relationship names to return, sent as fields[<resourceName>]
+   */
+  fields?: string[];
 }
 
 /**

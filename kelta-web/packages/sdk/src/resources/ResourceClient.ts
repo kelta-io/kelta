@@ -56,6 +56,9 @@ export class ResourceClient<T = unknown> {
     if (options?.include && options.include.length > 0) {
       params.include = options.include.join(',');
     }
+    if (options?.fields && options.fields.length > 0) {
+      params[`fields[${this.resourceName}]`] = options.fields.join(',');
+    }
     const response = await this.client
       .getAxiosInstance()
       .get<T>(

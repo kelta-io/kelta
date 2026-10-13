@@ -120,16 +120,24 @@ const get = defineCommand({
     { name: 'collection', description: 'Collection name', required: true },
     { name: 'id', description: 'Record id', required: true },
   ],
-  options: [{ flag: '--include <rels>', description: 'Related resources to include' }],
+  options: [
+    { flag: '--include <rels>', description: 'Related resources to include' },
+    { flag: '--fields <fields>', description: 'Sparse fieldset, comma-separated' },
+  ],
   input: z.object({
     collection: z.string().min(1),
     id: z.string().min(1),
     include: z.string().optional(),
+    fields: z.string().optional(),
   }),
   handler: async (ctx, input) => {
+    const options = {
+      ...(input.include ? { include: parseList(input.include) } : {}),
+      ...(input.fields ? { fields: parseList(input.fields) } : {}),
+    };
     const body = await ctx.client
       .resource(input.collection)
-      .get(input.id, input.include ? { include: parseList(input.include) } : undefined);
+      .get(input.id, Object.keys(options).length > 0 ? options : undefined);
     return { data: body };
   },
 });
