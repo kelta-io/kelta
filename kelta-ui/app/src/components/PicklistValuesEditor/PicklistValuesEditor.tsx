@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast } from '../Toast'
 import { LoadingSpinner } from '../LoadingSpinner'
 import { ErrorMessage } from '../ErrorMessage'
 import type { PicklistValue } from '../../types/collections'
@@ -53,7 +53,6 @@ export function PicklistValuesEditor({
 }: PicklistValuesEditorProps): React.ReactElement {
   const { t } = useI18n()
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
 
   const [editedValues, setEditedValues] = useState<LocalValue[] | null>(null)
@@ -86,11 +85,11 @@ export function PicklistValuesEditor({
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['picklist-values', picklistId] })
-      showToast(t('picklists.valueSaved'), 'success')
+      toast.success(t('picklists.valueSaved'))
       onClose()
     },
     onError: (err: Error) => {
-      showToast(err.message || t('errors.generic'), 'error')
+      toast.error(err.message || t('errors.generic'))
     },
   })
 

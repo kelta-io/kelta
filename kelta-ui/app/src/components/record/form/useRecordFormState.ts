@@ -25,6 +25,7 @@
  */
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
 import { useLayoutRules } from '@kelta/components'
 import type { UseLayoutRulesResult } from '@kelta/components'
@@ -32,7 +33,6 @@ import type { CollectionValidationRule } from '@kelta/sdk'
 import { useI18n } from '@/context/I18nContext'
 import { dtosToLayoutRules } from '@/utils/layoutRules'
 import { useRecordMutation } from '@/hooks/useRecordMutation'
-import { useToast } from '@/components/Toast'
 import { ApiError, isStaleWriteError } from '@/services/apiClient'
 import type { CollectionRecord } from '@/hooks/useCollectionRecords'
 import type { FieldDefinition } from '@/hooks/useCollectionSchema'
@@ -140,7 +140,6 @@ export function useRecordFormState({
   recordTypeDefaults = NO_DEFAULTS,
 }: UseRecordFormStateOptions): RecordFormState {
   const navigate = useNavigate()
-  const { showToast } = useToast()
   const { t } = useI18n()
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
     ...initialData,
@@ -209,9 +208,8 @@ export function useRecordFormState({
   const mutations = useRecordMutation({
     collectionName,
     onSuccess: (saved) => {
-      showToast(
-        t(isNew ? 'success.created' : 'success.updated', { item: t('resources.record') }),
-        'success'
+      toast.success(
+        t(isNew ? 'success.created' : 'success.updated', { item: t('resources.record') })
       )
       if (onSaved) {
         onSaved(saved)
@@ -231,7 +229,7 @@ export function useRecordFormState({
         setConflict(true)
         return
       }
-      showToast(error.message || t('recordForm.saveFailed'), 'error')
+      toast.error(error.message || t('recordForm.saveFailed'))
       if (error instanceof ApiError && error.fieldErrors.length > 0) {
         const serverErrors: Record<string, string> = {}
         for (const fe of error.fieldErrors) {
@@ -288,7 +286,7 @@ export function useRecordFormState({
     const fieldErrors = validateFormValues(editableFields, formData, t, { isUpdate: !isNew })
     if (Object.keys(fieldErrors).length > 0) {
       setFormErrors((prev) => ({ ...prev, ...fieldErrors }))
-      showToast(t('errors.validation'), 'error')
+      toast.error(t('errors.validation'))
       return
     }
 
@@ -296,7 +294,7 @@ export function useRecordFormState({
     // block submit for ERROR severity. Warnings allow submit to proceed.
     const ruleResult = ruleEngine.runBeforeSave()
     if (ruleResult.blocked) {
-      showToast(ruleResult.violations[0]?.message ?? t('recordForm.validationFailed'), 'error')
+      toast.error(ruleResult.violations[0]?.message ?? t('recordForm.validationFailed'))
       return
     }
 
@@ -306,7 +304,7 @@ export function useRecordFormState({
     })
     if (Object.keys(errors).length > 0) {
       setFormErrors((prev) => ({ ...prev, ...errors }))
-      showToast(t('recordForm.fixInvalidJson'), 'error')
+      toast.error(t('recordForm.fixInvalidJson'))
       return
     }
 
@@ -330,7 +328,6 @@ export function useRecordFormState({
     ifMatch,
     selectedRecordTypeId,
     ruleEngine,
-    showToast,
     t,
   ])
 

@@ -7,8 +7,8 @@
  * fall back to the page-supplied text.
  */
 
+import { toast } from 'sonner'
 import { useMutation, useQueryClient, type QueryKey } from '@tanstack/react-query'
-import { useToast } from '../Toast'
 
 export interface CrudMessages {
   /** Toast shown after a successful create. */
@@ -53,17 +53,16 @@ export function useCrudMutations<TRow, TValues>({
   onCreated,
 }: UseCrudMutationsOptions<TRow, TValues>) {
   const queryClient = useQueryClient()
-  const { showToast } = useToast()
 
   const toastError = (fallback: string | undefined) => (err: Error) => {
-    showToast(err.message || fallback || messages.error, 'error')
+    toast.error(err.message || fallback || messages.error)
   }
 
   const createMutation = useMutation<unknown, Error, TValues>({
     mutationFn: create ? (values) => create(values) : missing('create'),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey })
-      showToast(messages.created, 'success')
+      toast.success(messages.created)
       onCreated?.(result)
     },
     onError: toastError(messages.createError),
@@ -73,7 +72,7 @@ export function useCrudMutations<TRow, TValues>({
     mutationFn: update ? ({ row, values }) => update(row, values) : missing('update'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey })
-      showToast(messages.updated, 'success')
+      toast.success(messages.updated)
     },
     onError: toastError(messages.updateError),
   })
@@ -82,7 +81,7 @@ export function useCrudMutations<TRow, TValues>({
     mutationFn: remove ? (row) => remove(row) : missing('remove'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey })
-      showToast(messages.deleted, 'success')
+      toast.success(messages.deleted)
     },
     onError: toastError(messages.deleteError),
   })

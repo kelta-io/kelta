@@ -54,7 +54,6 @@ let layout: Record<string, unknown> | null = null
 let permissions = { canCreate: true, canRead: true, canEdit: true, canDelete: true }
 const createMutate = vi.fn()
 const updateMutate = vi.fn()
-const showToast = vi.fn()
 const layoutRequests: Array<string | undefined> = []
 let mutationOptions: {
   onSuccess?: (saved?: { id: string }) => void
@@ -77,8 +76,12 @@ vi.mock('@/context/AuthContext', () => ({
 vi.mock('@/context/PluginContext', () => ({
   usePlugins: () => ({ getFieldRenderer: () => undefined }),
 }))
-vi.mock('@/components/Toast', () => ({
-  useToast: () => ({ showToast }),
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('sonner')>()),
+  toast: mockToast,
 }))
 vi.mock('@/hooks/useCollectionSchema', () => ({
   useCollectionSchema: () => ({
@@ -168,7 +171,7 @@ beforeEach(() => {
   permissions = { canCreate: true, canRead: true, canEdit: true, canDelete: true }
   createMutate.mockReset()
   updateMutate.mockReset()
-  showToast.mockReset()
+  Object.values(mockToast).forEach((fn) => fn.mockReset())
   getList.mockReset()
   getList.mockImplementation(routeList)
   mutationOptions = {}
@@ -219,7 +222,7 @@ describe('ObjectFormPage (create)', () => {
     fireEvent.change(screen.getByTestId('field-name'), { target: { value: 'Ada' } })
     fireEvent.click(screen.getByTestId('save-button'))
     act(() => mutationOptions.onSuccess?.({ id: 'new-1' }))
-    expect(showToast).toHaveBeenCalledWith('Record created successfully.', 'success')
+    expect(mockToast.success).toHaveBeenCalledWith('Record created successfully.')
   })
 
   it('shows no field type hints (admin chrome)', () => {
@@ -279,7 +282,7 @@ describe('ObjectFormPage (create)', () => {
     const input = screen.getByTestId('field-name')
     expect(input).toHaveAttribute('aria-invalid', 'true')
     expect(input).toHaveAttribute('aria-describedby', error.id)
-    expect(showToast).toHaveBeenCalledWith('Please correct the errors in the form.', 'error')
+    expect(mockToast.error).toHaveBeenCalledWith('Please correct the errors in the form.')
 
     // Typing a value clears the error and lets the save through.
     fireEvent.change(input, { target: { value: 'Ada' } })
@@ -338,7 +341,7 @@ describe('ObjectFormPage (create)', () => {
     fireEvent.click(screen.getByTestId('save-button'))
     expect(screen.getByTestId('field-error-qty')).toHaveTextContent('Quantity must be positive')
     expect(createMutate).not.toHaveBeenCalled()
-    expect(showToast).toHaveBeenCalledWith('Quantity must be positive', 'error')
+    expect(mockToast.error).toHaveBeenCalledWith('Quantity must be positive')
   })
 
   it('runs onBlur layout rules when a field loses focus', () => {
@@ -617,7 +620,7 @@ describe('ObjectFormPage (edit)', () => {
     renderAt('/acme/app/o/accounts/r1/edit')
     fireEvent.click(screen.getByTestId('save-button'))
     act(() => mutationOptions.onSuccess?.({ id: 'r1' }))
-    expect(showToast).toHaveBeenCalledWith('Record updated successfully.', 'success')
+    expect(mockToast.success).toHaveBeenCalledWith('Record updated successfully.')
   })
 
   it('shows an error, not an empty form, when the record cannot be loaded', () => {
@@ -689,7 +692,8 @@ describe('ObjectFormPage — optimistic concurrency (If-Match)', () => {
     expect(await screen.findByTestId('record-conflict-dialog')).toBeInTheDocument()
     expect(screen.getByText('This record was changed')).toBeInTheDocument()
     expect(screen.getByTestId('field-name')).toHaveValue('Mine')
-    expect(showToast).not.toHaveBeenCalled()
+    expect(mockToast.success).not.toHaveBeenCalled()
+    expect(mockToast.error).not.toHaveBeenCalled()
     expect(screen.queryByTestId('location')).toBeNull()
 
     // Keep editing: the prompt closes and the edits stay.
@@ -733,7 +737,7 @@ describe('ObjectFormPage — optimistic concurrency (If-Match)', () => {
       )
     )
     expect(screen.queryByTestId('record-conflict-dialog')).toBeNull()
-    expect(showToast).toHaveBeenCalledWith('Name must be unique', 'error')
+    expect(mockToast.error).toHaveBeenCalledWith('Name must be unique')
     expect(screen.getByTestId('field-error-name')).toHaveTextContent('Name must be unique')
   })
 })

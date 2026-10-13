@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import type {
   Campaign as SdkCampaign,
   CreateCampaignRequest,
@@ -286,7 +287,6 @@ export function CampaignsPage({
   const queryClient = useQueryClient()
   const { formatDate } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const [statsCampaign, setStatsCampaign] = useState<Campaign | null>(null)
 
@@ -368,9 +368,9 @@ export function CampaignsPage({
     mutationFn: (id: string) => keltaClient.admin.campaigns.send(id),
     onSuccess: () => {
       invalidateCampaigns()
-      showToast('Campaign queued for sending', 'success')
+      toast.success('Campaign queued for sending')
     },
-    onError: (err: Error) => showToast(err.message || 'An error occurred', 'error'),
+    onError: (err: Error) => toast.error(err.message || 'An error occurred'),
   })
 
   const scheduleMutation = useMutation({
@@ -378,25 +378,25 @@ export function CampaignsPage({
       keltaClient.admin.campaigns.schedule(id, scheduledAt),
     onSuccess: () => {
       invalidateCampaigns()
-      showToast('Campaign scheduled', 'success')
+      toast.success('Campaign scheduled')
     },
-    onError: (err: Error) => showToast(err.message || 'An error occurred', 'error'),
+    onError: (err: Error) => toast.error(err.message || 'An error occurred'),
   })
 
   const cancelMutation = useMutation({
     mutationFn: (id: string) => keltaClient.admin.campaigns.cancel(id),
     onSuccess: () => {
       invalidateCampaigns()
-      showToast('Campaign cancelled', 'success')
+      toast.success('Campaign cancelled')
     },
-    onError: (err: Error) => showToast(err.message || 'An error occurred', 'error'),
+    onError: (err: Error) => toast.error(err.message || 'An error occurred'),
   })
 
   const testMutation = useMutation({
     mutationFn: ({ id, email }: { id: string; email: string }) =>
       keltaClient.admin.campaigns.test(id, email),
-    onSuccess: () => showToast('Test email sent', 'success'),
-    onError: (err: Error) => showToast(err.message || 'An error occurred', 'error'),
+    onSuccess: () => toast.success('Test email sent'),
+    onError: (err: Error) => toast.error(err.message || 'An error occurred'),
   })
 
   const addSuppressionMutation = useMutation({
@@ -404,18 +404,18 @@ export function CampaignsPage({
       keltaClient.admin.campaigns.addSuppression(email, reason || undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campaign-suppressions'] })
-      showToast('Suppression added', 'success')
+      toast.success('Suppression added')
     },
-    onError: (err: Error) => showToast(err.message || 'An error occurred', 'error'),
+    onError: (err: Error) => toast.error(err.message || 'An error occurred'),
   })
 
   const removeSuppressionMutation = useMutation({
     mutationFn: (email: string) => keltaClient.admin.campaigns.removeSuppression(email),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campaign-suppressions'] })
-      showToast('Suppression removed', 'success')
+      toast.success('Suppression removed')
     },
-    onError: (err: Error) => showToast(err.message || 'An error occurred', 'error'),
+    onError: (err: Error) => toast.error(err.message || 'An error occurred'),
   })
 
   const handleSchedule = useCallback(

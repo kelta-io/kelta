@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { componentRegistry } from '../../services/componentRegistry'
 import { Button } from '@/components/ui/button'
 import {
@@ -102,7 +103,6 @@ function statusBadge(status: string) {
 export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): React.ReactElement {
   const { apiClient } = useApi()
   const queryClient = useQueryClient()
-  const { showToast } = useToast()
 
   const [isInstallOpen, setIsInstallOpen] = useState(false)
   const [manifestInput, setManifestInput] = useState('')
@@ -152,7 +152,7 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modules'] })
-      showToast('Module installed successfully', 'success')
+      toast.success('Module installed successfully')
       setIsInstallOpen(false)
       setManifestInput('')
       setSourceUrlInput('')
@@ -161,7 +161,7 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
       setSignatureInput('')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to install module', 'error')
+      toast.error(err.message || 'Failed to install module')
     },
   })
 
@@ -169,10 +169,10 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     mutationFn: (moduleId: string) => apiClient.post(`/api/modules/${moduleId}/enable`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modules'] })
-      showToast('Module enabled', 'success')
+      toast.success('Module enabled')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to enable module', 'error')
+      toast.error(err.message || 'Failed to enable module')
     },
   })
 
@@ -180,10 +180,10 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     mutationFn: (moduleId: string) => apiClient.post(`/api/modules/${moduleId}/disable`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modules'] })
-      showToast('Module disabled', 'success')
+      toast.success('Module disabled')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to disable module', 'error')
+      toast.error(err.message || 'Failed to disable module')
     },
   })
 
@@ -191,24 +191,24 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     mutationFn: (moduleId: string) => apiClient.delete(`/api/modules/${moduleId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modules'] })
-      showToast('Module uninstalled', 'success')
+      toast.success('Module uninstalled')
       setDeleteDialogOpen(false)
       setModuleToDelete(null)
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to uninstall module', 'error')
+      toast.error(err.message || 'Failed to uninstall module')
     },
   })
 
   const handleInstall = () => {
     if (!manifestInput.trim()) {
-      showToast('Manifest JSON is required', 'error')
+      toast.error('Manifest JSON is required')
       return
     }
     try {
       JSON.parse(manifestInput)
     } catch {
-      showToast('Manifest must be valid JSON', 'error')
+      toast.error('Manifest must be valid JSON')
       return
     }
     installMutation.mutate({

@@ -13,6 +13,7 @@
  */
 
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { ShieldCheck, Save, Plus, Trash2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -20,7 +21,6 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { FieldLabel } from '@/components/kelta'
 import { LoadingSpinner, ErrorMessage } from '@/components'
-import { useToast } from '@/components/Toast'
 import { useTenantIpAllowlist, type TenantIpAllowlist } from '@/hooks/useTenantIpAllowlist'
 import { isValidCidr } from '@/utils'
 
@@ -52,7 +52,6 @@ function NetworkAccessForm({
   isSaving,
   testId,
 }: NetworkAccessFormProps): React.ReactElement {
-  const { showToast } = useToast()
   const [enabled, setEnabled] = useState<boolean>(allowlist.enabled)
   const [cidrs, setCidrs] = useState<string[]>(allowlist.cidrs)
   const [draft, setDraft] = useState<string>('')
@@ -74,14 +73,14 @@ function NetworkAccessForm({
 
   const handleSave = async (): Promise<void> => {
     if (enabled && cidrs.length === 0) {
-      showToast('Add at least one allowed range, or turn off the restriction', 'error')
+      toast.error('Add at least one allowed range, or turn off the restriction')
       return
     }
     try {
       await save({ enabled, cidrs })
-      showToast('Network access settings saved', 'success')
+      toast.success('Network access settings saved')
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Save failed', 'error')
+      toast.error(err instanceof Error ? err.message : 'Save failed')
     }
   }
 

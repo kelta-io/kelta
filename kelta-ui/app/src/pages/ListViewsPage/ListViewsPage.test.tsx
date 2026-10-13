@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/context/I18nContext'
-import { ToastProvider } from '@/components/Toast'
+import { Toaster } from 'sonner'
 import { ListViewsPage } from './ListViewsPage'
 
 // Typed as variadic so the assertions can index the call args the page passes.
@@ -76,9 +76,10 @@ function renderPage() {
   return render(
     <I18nProvider>
       <QueryClientProvider client={qc}>
-        <ToastProvider>
+        <>
           <ListViewsPage />
-        </ToastProvider>
+          <Toaster />
+        </>
       </QueryClientProvider>
     </I18nProvider>
   )

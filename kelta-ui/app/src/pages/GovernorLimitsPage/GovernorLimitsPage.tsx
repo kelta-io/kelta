@@ -1,9 +1,9 @@
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
 import { useSystemPermissions } from '../../hooks/useSystemPermissions'
-import { useToast } from '../../components/Toast'
 import { LoadingSpinner, ErrorMessage } from '../../components'
 import { cn } from '@/lib/utils'
 
@@ -25,7 +25,6 @@ export function GovernorLimitsPage({ className }: GovernorLimitsPageProps): Reac
   const { t } = useI18n()
   const { apiClient, keltaClient } = useApi()
   const { hasPermission } = useSystemPermissions()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
 
   const canManageTenants = hasPermission('MANAGE_TENANTS')
@@ -50,12 +49,12 @@ export function GovernorLimitsPage({ className }: GovernorLimitsPageProps): Reac
       apiClient.put<GovernorLimits>('/api/governor-limits', limits),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['governor-limits'] })
-      showToast(t('governorLimits.saveSuccess'), 'success')
+      toast.success(t('governorLimits.saveSuccess'))
       setIsEditing(false)
       setEditLimits(null)
     },
     onError: () => {
-      showToast(t('governorLimits.saveError'), 'error')
+      toast.error(t('governorLimits.saveError'))
     },
   })
 
@@ -63,10 +62,10 @@ export function GovernorLimitsPage({ className }: GovernorLimitsPageProps): Reac
     mutationFn: (tier: Tier) => keltaClient.admin.governorLimits.updateTier(tier),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['governor-limits'] })
-      showToast(t('governorLimits.tierUpdated'), 'success')
+      toast.success(t('governorLimits.tierUpdated'))
     },
     onError: () => {
-      showToast(t('governorLimits.tierUpdateError'), 'error')
+      toast.error(t('governorLimits.tierUpdateError'))
     },
   })
 

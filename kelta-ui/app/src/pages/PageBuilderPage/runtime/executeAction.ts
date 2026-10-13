@@ -15,7 +15,7 @@
 import type { NavigateFunction } from 'react-router-dom'
 import type { QueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/services/apiClient'
-import type { ToastType } from '@/components/Toast/Toast'
+import type { ToastType } from '@/utils/toast'
 import { unwrapResource } from '@/utils/jsonapi'
 import type { PageAction, PropValue } from '../model/pageModel'
 import { isBinding } from '../model/pageModel'
@@ -37,7 +37,7 @@ export interface ActionRuntimeContext {
   apiClient: ApiClient
   navigate: NavigateFunction
   queryClient: QueryClient
-  /** sonner-backed toast — exactly `useToast().showToast`. */
+  /** sonner-backed toast — `showToast` from `@/utils/toast`. */
   showToast: (message: string, type: ToastType) => void
   /** Update a page variable (2d `usePageVariables` store). */
   setVar: (name: string, value: unknown) => void

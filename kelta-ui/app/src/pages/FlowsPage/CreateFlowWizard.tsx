@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -10,7 +11,6 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { useApi } from '@/context/ApiContext'
-import { useToast } from '@/components'
 import { getTenantSlug } from '@/context/TenantContext'
 import { cn } from '@/lib/utils'
 import type { FlowType, NatsTriggerConfig, TriggerConfig } from '@/pages/FlowDesignerPage/types'
@@ -34,7 +34,6 @@ const MINIMAL_DEFINITION = {
 export function CreateFlowWizard({ open, onOpenChange }: CreateFlowWizardProps) {
   const navigate = useNavigate()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
 
   const [step, setStep] = useState<Step>('Type')
@@ -74,14 +73,14 @@ export function CreateFlowWizard({ open, onOpenChange }: CreateFlowWizardProps) 
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['flows'] })
-      showToast('Flow created successfully', 'success')
+      toast.success('Flow created successfully')
       handleOpenChange(false)
       if (data?.id) {
         navigate(`/${getTenantSlug()}/flows/${data.id}/design`)
       }
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to create flow', 'error')
+      toast.error(err.message || 'Failed to create flow')
     },
   })
 

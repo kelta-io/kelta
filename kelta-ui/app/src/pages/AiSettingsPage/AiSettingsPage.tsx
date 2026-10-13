@@ -1,8 +1,8 @@
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApi } from '../../context/ApiContext'
 import { useSystemPermissions } from '../../hooks/useSystemPermissions'
-import { useToast } from '../../components/Toast'
 import { LoadingSpinner, ErrorMessage } from '../../components'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -58,7 +58,6 @@ export interface AiSettingsPageProps {
 export function AiSettingsPage({ className }: AiSettingsPageProps): React.ReactElement {
   const { keltaClient } = useApi()
   const { hasPermission } = useSystemPermissions()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
 
   const canManage = hasPermission('MANAGE_TENANTS')
@@ -84,11 +83,11 @@ export function AiSettingsPage({ className }: AiSettingsPageProps): React.ReactE
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ai-config'] })
       queryClient.invalidateQueries({ queryKey: ['ai-usage'] })
-      showToast('AI settings saved successfully', 'success')
+      toast.success('AI settings saved successfully')
       setEditConfig(null)
     },
     onError: () => {
-      showToast('Failed to save AI settings', 'error')
+      toast.error('Failed to save AI settings')
     },
   })
 

@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarClock, CalendarOff, Plus, Save, Trash2 } from 'lucide-react'
 
 import { useApi } from '../../context/ApiContext'
 import { useI18n } from '../../context/I18nContext'
-import { useToast } from '../../components/Toast'
 import { LoadingSpinner, ErrorMessage } from '../../components'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -44,7 +44,6 @@ const hhmm = (value: string | undefined): string => (value ? value.slice(0, 5) :
 export function ProviderAvailabilityPage(): React.ReactElement {
   const { apiClient } = useApi()
   const { t, locale } = useI18n()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
 
   const { data, isLoading, error } = useQuery({
@@ -101,13 +100,13 @@ export function ProviderAvailabilityPage(): React.ReactElement {
         })),
       }),
     onSuccess: () => {
-      showToast(t('availability.saved'), 'success')
+      toast.success(t('availability.saved'))
       void queryClient.invalidateQueries({ queryKey: ['telehealth-availability-me'] })
     },
     onError: (err: unknown) => {
       const detail = (err as { response?: { data?: { message?: string; error?: string } } })
         ?.response?.data
-      showToast(detail?.message || detail?.error || t('availability.saveFailed'), 'error')
+      toast.error(detail?.message || detail?.error || t('availability.saveFailed'))
     },
   })
 

@@ -7,13 +7,14 @@
  */
 
 import React, { useState, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Shield, Lock, ArrowLeft, Trash2, Pencil, Save, X } from 'lucide-react'
 import { useApi } from '../../context/ApiContext'
 import { useTenant } from '../../context/TenantContext'
 import { useI18n } from '../../context/I18nContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { SystemPermissionChecklist } from '@/components/SecurityEditor'
 import { ObjectPermissionMatrix } from '@/components/SecurityEditor'
 import { FieldPermissionEditor } from '@/components/SecurityEditor'
@@ -87,7 +88,6 @@ export function ProfileDetailPage({
   const { tenantSlug } = useTenant()
   const { formatDate } = useI18n()
   const queryClient = useQueryClient()
-  const { showToast } = useToast()
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
@@ -286,11 +286,11 @@ export function ProfileDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profile', id] })
-      showToast('Profile updated successfully', 'success')
+      toast.success('Profile updated successfully')
       setIsEditingBasicInfo(false)
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to update profile', 'error')
+      toast.error(error.message || 'Failed to update profile')
     },
   })
 
@@ -312,11 +312,11 @@ export function ProfileDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profile', id] })
-      showToast('System permissions saved successfully', 'success')
+      toast.success('System permissions saved successfully')
       setIsEditingPermissions(false)
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to save permissions', 'error')
+      toast.error(error.message || 'Failed to save permissions')
     },
   })
 
@@ -331,12 +331,12 @@ export function ProfileDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profile', id] })
-      showToast('Object permissions saved successfully', 'success')
+      toast.success('Object permissions saved successfully')
       setIsEditingObjectPerms(false)
       setLocalObjectPermissions(new Map())
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to save object permissions', 'error')
+      toast.error(error.message || 'Failed to save object permissions')
     },
   })
 
@@ -353,12 +353,12 @@ export function ProfileDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profile', id] })
-      showToast('Field permissions saved successfully', 'success')
+      toast.success('Field permissions saved successfully')
       setIsEditingFieldPerms(false)
       setLocalFieldPermissions(new Map())
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to save field permissions', 'error')
+      toast.error(error.message || 'Failed to save field permissions')
     },
   })
 
@@ -367,11 +367,11 @@ export function ProfileDetailPage({
     mutationFn: () => apiClient.deleteResource(`/api/profiles/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profiles'] })
-      showToast('Profile deleted successfully', 'success')
+      toast.success('Profile deleted successfully')
       navigate(`/${tenantSlug}/profiles`)
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to delete profile', 'error')
+      toast.error(error.message || 'Failed to delete profile')
     },
   })
 

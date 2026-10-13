@@ -1,7 +1,7 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { Archive, Download } from 'lucide-react'
 import { useI18n } from '../../../context/I18nContext'
-import { useToast } from '../../../components/Toast'
 import { useArchiveDetail, type ArchiveSummary } from '../../../hooks/useArchives'
 
 /**
@@ -19,7 +19,6 @@ export function ArchivedThreadBanner({
   testId?: string
 }) {
   const { t, formatDate } = useI18n()
-  const { showToast } = useToast()
   const [wantDetail, setWantDetail] = useState(false)
   const detail = useArchiveDetail(wantDetail ? archive.id : null)
 
@@ -40,7 +39,7 @@ export function ArchivedThreadBanner({
       window.open(match.downloadUrl, '_blank', 'noopener,noreferrer')
     } else if (detail.data) {
       // Detail loaded but the artifact/URL is unavailable (e.g. S3 disabled).
-      showToast(t('telehealth.archive.downloadError'), 'error')
+      toast.error(t('telehealth.archive.downloadError'))
     }
     // If detail hasn't loaded yet, the next click (after fetch resolves) opens it.
   }

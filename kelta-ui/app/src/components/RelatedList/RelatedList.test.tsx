@@ -25,10 +25,13 @@ vi.mock('@/context/ApiContext', () => ({
   })),
 }))
 
-// useToast lives on the @/components barrel; RelatedList uses it for CRUD/mass-edit feedback.
-const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }))
-vi.mock('@/components', () => ({
-  useToast: () => ({ showToast: mockShowToast }),
+// RelatedList toasts CRUD/mass-edit feedback through sonner.
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('sonner')>()),
+  toast: mockToast,
 }))
 
 // Mock collection store context
@@ -748,9 +751,7 @@ describe('RelatedList', () => {
       ).length
       await user.click(within(dialog).getByTestId('mass-edit-submit'))
 
-      await waitFor(() =>
-        expect(mockShowToast).toHaveBeenCalledWith('Updated 2 of 2 records', 'success')
-      )
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated 2 of 2 records'))
       // Job status was polled to a terminal state.
       const pollCalls = mockGet.mock.calls.filter(([u]) =>
         String(u).startsWith('/api/bulk-jobs/job-1')
@@ -786,9 +787,8 @@ describe('RelatedList', () => {
       await user.click(within(dialog).getByTestId('mass-edit-submit'))
 
       await waitFor(() =>
-        expect(mockShowToast).toHaveBeenCalledWith(
-          'Bulk update failed — check the Bulk Jobs page for details',
-          'error'
+        expect(mockToast.error).toHaveBeenCalledWith(
+          'Bulk update failed — check the Bulk Jobs page for details'
         )
       )
       // Rejection keeps the dialog open with the message inline.

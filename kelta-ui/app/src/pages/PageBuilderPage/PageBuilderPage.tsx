@@ -21,11 +21,12 @@
  */
 
 import React, { useState, useCallback, useEffect, useRef } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
 import { getTenantSlug } from '../../context/TenantContext'
-import { useToast, ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { cn } from '@/lib/utils'
 import { readComponents, readConfig, mergeConfig } from './pageConfig'
 import type { PageDataSource, PageVariable } from './pageConfig'
@@ -529,7 +530,6 @@ export function PageBuilderPage({
   const queryClient = useQueryClient()
   const { t, formatDate } = useI18n()
   const { apiClient, keltaClient } = useApi()
-  const { showToast } = useToast()
 
   // The canvas resolves plugin page components itself (via the widget registry / componentRegistry).
   // The end-user route binds the tenant slug; in the admin builder it is read from TenantContext.
@@ -624,7 +624,7 @@ export function PageBuilderPage({
       ) as unknown as Promise<UIPage>,
     onSuccess: (newPage) => {
       queryClient.invalidateQueries({ queryKey: ['ui-pages'] })
-      showToast(t('success.created', { item: t('builder.pages.page') }), 'success')
+      toast.success(t('success.created', { item: t('builder.pages.page') }))
       handleCloseForm()
       // Open the editor for the new page
       setEditingPageId(newPage.id)
@@ -637,7 +637,7 @@ export function PageBuilderPage({
       setViewMode('editor')
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -648,14 +648,14 @@ export function PageBuilderPage({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ui-pages'] })
       queryClient.invalidateQueries({ queryKey: ['ui-page', editingPageId] })
-      showToast(t('success.updated', { item: t('builder.pages.page') }), 'success')
+      toast.success(t('success.updated', { item: t('builder.pages.page') }))
       setHasUnsavedChanges(false)
       // Undoing back past this point should re-light the unsaved flag (slice 4).
       savedSnapshotJsonRef.current = currentSnapshotJsonRef.current
       handleCloseForm()
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -664,7 +664,7 @@ export function PageBuilderPage({
     mutationFn: (id: string) => apiClient.deleteResource(`/api/ui-pages/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ui-pages'] })
-      showToast(t('success.deleted', { item: t('builder.pages.page') }), 'success')
+      toast.success(t('success.deleted', { item: t('builder.pages.page') }))
       setDeleteDialogOpen(false)
       setPageToDelete(null)
       if (editingPageId === pageToDelete?.id) {
@@ -673,7 +673,7 @@ export function PageBuilderPage({
       }
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -683,10 +683,10 @@ export function PageBuilderPage({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ui-pages'] })
       queryClient.invalidateQueries({ queryKey: ['ui-page', editingPageId] })
-      showToast(t('builder.pages.publishSuccess') || 'Page published successfully', 'success')
+      toast.success(t('builder.pages.publishSuccess') || 'Page published successfully')
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -696,10 +696,10 @@ export function PageBuilderPage({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ui-pages'] })
       queryClient.invalidateQueries({ queryKey: ['ui-page', editingPageId] })
-      showToast(t('builder.pages.unpublishSuccess') || 'Page unpublished successfully', 'success')
+      toast.success(t('builder.pages.unpublishSuccess') || 'Page unpublished successfully')
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -708,14 +708,14 @@ export function PageBuilderPage({
     mutationFn: (id: string) => apiClient.postResource<UIPage>(`/api/ui-pages/${id}/duplicate`, {}),
     onSuccess: (newPage) => {
       queryClient.invalidateQueries({ queryKey: ['ui-pages'] })
-      showToast(t('builder.pages.duplicateSuccess') || 'Page duplicated successfully', 'success')
+      toast.success(t('builder.pages.duplicateSuccess') || 'Page duplicated successfully')
       // Open the editor for the duplicated page
       setEditingPageId(newPage.id)
       setComponents(seedComponents(newPage))
       setViewMode('editor')
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 

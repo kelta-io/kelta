@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 // EmailSettings types are not exported from the SDK; define locally to match the worker DTO.
 interface EmailSettings {
@@ -25,7 +26,6 @@ interface EmailSettingsUpdate {
 }
 import { useApi } from '../../context/ApiContext'
 import { useSystemPermissions } from '../../hooks/useSystemPermissions'
-import { useToast } from '../../components/Toast'
 import { ErrorMessage, LoadingSpinner } from '../../components'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -78,7 +78,6 @@ export interface EmailSettingsPageProps {
 export function EmailSettingsPage({ className }: EmailSettingsPageProps): React.ReactElement {
   const { keltaClient } = useApi()
   const { hasPermission } = useSystemPermissions()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
   const canManage = hasPermission('MANAGE_TENANTS')
 
@@ -100,24 +99,24 @@ export function EmailSettingsPage({ className }: EmailSettingsPageProps): React.
       keltaClient.admin.emailSettings.update(update as never),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['email-settings'] })
-      showToast('Email settings saved', 'success')
+      toast.success('Email settings saved')
     },
-    onError: () => showToast('Failed to save email settings', 'error'),
+    onError: () => toast.error('Failed to save email settings'),
   })
 
   const clear = useMutation({
     mutationFn: () => keltaClient.admin.emailSettings.update({ clear: true } as never),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['email-settings'] })
-      showToast('Reverted to platform default', 'success')
+      toast.success('Reverted to platform default')
     },
-    onError: () => showToast('Failed to revert', 'error'),
+    onError: () => toast.error('Failed to revert'),
   })
 
   const testSend = useMutation({
     mutationFn: (to: string) => keltaClient.admin.emailSettings.testSend(to),
-    onSuccess: () => showToast('Test email queued', 'success'),
-    onError: () => showToast('Failed to queue test email', 'error'),
+    onSuccess: () => toast.success('Test email queued'),
+    onError: () => toast.error('Failed to queue test email'),
   })
 
   const handleSave = () => {

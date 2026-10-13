@@ -14,11 +14,12 @@
  */
 
 import React, { useState, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ConfirmDialog } from '../../components'
+import { ConfirmDialog } from '../../components'
 import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
 import {
   AdminCrudPage,
@@ -225,7 +226,6 @@ export function OIDCProvidersPage({
 }: OIDCProvidersPageProps): React.ReactElement {
   const { t, formatDate } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   // Test connection state
   const [testingProviderId, setTestingProviderId] = useState<string | null>(null)
@@ -270,14 +270,14 @@ export function OIDCProvidersPage({
     },
     onSuccess: (result) => {
       if (result.success) {
-        showToast(t('oidc.connectionSuccess'), 'success')
+        toast.success(t('oidc.connectionSuccess'))
       } else {
-        showToast(`${t('oidc.connectionFailed')}: ${result.message}`, 'error')
+        toast.error(`${t('oidc.connectionFailed')}: ${result.message}`)
       }
       setTestingProviderId(null)
     },
     onError: (error: Error) => {
-      showToast(`${t('oidc.connectionFailed')}: ${error.message}`, 'error')
+      toast.error(`${t('oidc.connectionFailed')}: ${error.message}`)
       setTestingProviderId(null)
     },
   })

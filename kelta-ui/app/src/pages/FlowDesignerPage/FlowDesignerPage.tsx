@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ReactFlowProvider } from '@xyflow/react'
@@ -7,7 +8,7 @@ import type { Node, Edge } from '@xyflow/react'
 import { useApi } from '../../context/ApiContext'
 import type { Flow } from './types'
 import { unwrapResource } from '../../utils/jsonapi'
-import { useToast, LoadingSpinner, ErrorMessage } from '../../components'
+import { LoadingSpinner, ErrorMessage } from '../../components'
 import { cn } from '@/lib/utils'
 import { FlowToolbar } from './components/FlowToolbar'
 import { StepsPalette } from './components/StepsPalette'
@@ -31,7 +32,6 @@ export function FlowDesignerPage() {
   const { flowId } = useParams<{ flowId: string }>()
   const [searchParams] = useSearchParams()
   const { apiClient, keltaClient } = useApi()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
 
   // Tab state
@@ -101,11 +101,11 @@ export function FlowDesignerPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flow', flowId] })
-      showToast('Flow saved successfully', 'success')
+      toast.success('Flow saved successfully')
       setIsDirty(false)
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to save flow', 'error')
+      toast.error(err.message || 'Failed to save flow')
     },
   })
 
@@ -163,13 +163,13 @@ export function FlowDesignerPage() {
     },
     onSuccess: (data) => {
       if (data?.id) {
-        showToast('Test execution started', 'success')
+        toast.success('Test execution started')
         setTestDialogOpen(false)
         handleViewExecution(data.id)
       }
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to start test', 'error')
+      toast.error(err.message || 'Failed to start test')
     },
   })
 
@@ -186,10 +186,10 @@ export function FlowDesignerPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['flow', flowId] })
-      showToast(`Published as v${data?.versionNumber}`, 'success')
+      toast.success(`Published as v${data?.versionNumber}`)
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to publish', 'error')
+      toast.error(err.message || 'Failed to publish')
     },
   })
 
@@ -234,14 +234,14 @@ export function FlowDesignerPage() {
         setCurrentEdges(edges)
         setIsDirty(true)
         setGenerateDialogOpen(false)
-        showToast('Flow generated — review and save when ready', 'success')
+        toast.success('Flow generated — review and save when ready')
       } catch (err) {
-        showToast(err instanceof Error ? err.message : 'Generation failed', 'error')
+        toast.error(err instanceof Error ? err.message : 'Generation failed')
       } finally {
         setIsGenerating(false)
       }
     },
-    [apiClient, showToast]
+    [apiClient]
   )
 
   if (isLoading) {

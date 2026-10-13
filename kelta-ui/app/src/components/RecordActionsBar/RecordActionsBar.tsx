@@ -12,6 +12,7 @@
  */
 
 import React, { useCallback } from 'react'
+import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Star, ChevronDown } from 'lucide-react'
@@ -29,7 +30,6 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 
-import { useToast } from '../../components'
 import type { ApiClient } from '../../services/apiClient'
 
 /**
@@ -84,7 +84,6 @@ export function RecordActionsBar({
 }: RecordActionsBarProps): React.ReactElement {
   const navigate = useNavigate()
   const { t } = useI18n()
-  const { showToast } = useToast()
   const routes = useRecordRoutes(getTenantSlug())
 
   // Clone action — the create form of the record stack this bar renders in, seeded from it
@@ -103,10 +102,10 @@ export function RecordActionsBar({
       })
     },
     onSuccess: () => {
-      showToast(t('recordActions.approvalSubmitted'), 'success')
+      toast.success(t('recordActions.approvalSubmitted'))
     },
     onError: () => {
-      showToast(t('recordActions.approvalError'), 'error')
+      toast.error(t('recordActions.approvalError'))
     },
   })
 

@@ -11,7 +11,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { z } from 'zod'
 import { I18nProvider } from '../../../context/I18nContext'
-import { ToastProvider } from '../../Toast'
+import { Toaster } from 'sonner'
 import { ConfirmDialog } from '../../ConfirmDialog'
 import {
   AdminCrudPage,
@@ -113,9 +113,10 @@ function renderHarness(api: Api) {
   render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
-        <ToastProvider>
+        <>
           <Harness api={api} />
-        </ToastProvider>
+          <Toaster />
+        </>
       </I18nProvider>
     </QueryClientProvider>
   )

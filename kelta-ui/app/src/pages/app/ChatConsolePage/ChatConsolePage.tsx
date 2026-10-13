@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { MessageCircle, Video, X } from 'lucide-react'
 import {
   ConversationListItem,
@@ -7,7 +8,6 @@ import {
   type ChatMessageItem,
 } from '@kelta/components'
 import { useI18n } from '../../../context/I18nContext'
-import { useToast } from '../../../components/Toast'
 import { useMyIdentity } from '../../../hooks/useMyIdentity'
 import { useSystemPermissions } from '../../../hooks/useSystemPermissions'
 import {
@@ -37,7 +37,6 @@ type ChatTab = ChatView | 'archived'
  */
 export function ChatConsolePage({ testId = 'chat-console' }: { testId?: string }) {
   const { t, formatDate } = useI18n()
-  const { showToast } = useToast()
   const { identity } = useMyIdentity()
   const { hasPermission } = useSystemPermissions()
   const canManage = hasPermission('MANAGE_CHAT')
@@ -95,25 +94,22 @@ export function ChatConsolePage({ testId = 'chat-console' }: { testId?: string }
     try {
       await send.mutateAsync(body)
     } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : t('errors.generic', 'Something went wrong'),
-        'error'
-      )
+      toast.error(err instanceof Error ? err.message : t('errors.generic', 'Something went wrong'))
       throw err
     }
   }
 
   const handleClaim = () => {
     claim.mutate(undefined, {
-      onSuccess: () => showToast(t('chat.claimSuccess', 'Conversation assigned to you'), 'success'),
-      onError: (err: Error) => showToast(err.message, 'error'),
+      onSuccess: () => toast.success(t('chat.claimSuccess', 'Conversation assigned to you')),
+      onError: (err: Error) => toast.error(err.message),
     })
   }
 
   const handleClose = () => {
     close.mutate(undefined, {
-      onSuccess: () => showToast(t('chat.closeSuccess', 'Conversation closed'), 'success'),
-      onError: (err: Error) => showToast(err.message, 'error'),
+      onSuccess: () => toast.success(t('chat.closeSuccess', 'Conversation closed')),
+      onError: (err: Error) => toast.error(err.message),
     })
   }
 
@@ -122,7 +118,7 @@ export function ChatConsolePage({ testId = 'chat-console' }: { testId?: string }
       { subject: t('chat.newConversationSubject', 'Internal conversation') },
       {
         onSuccess: (conversation) => setActiveId(conversation.id),
-        onError: (err: Error) => showToast(err.message, 'error'),
+        onError: (err: Error) => toast.error(err.message),
       }
     )
   }
@@ -155,7 +151,7 @@ export function ChatConsolePage({ testId = 'chat-console' }: { testId?: string }
                       'telehealth.visit.errorGeneric',
                       'We couldn’t start the video visit. Please try again.'
                     )
-          showToast(message, 'error')
+          toast.error(message)
         },
       }
     )
@@ -311,7 +307,7 @@ export function ChatConsolePage({ testId = 'chat-console' }: { testId?: string }
                   serverUrl={videoGrant.url}
                   token={videoGrant.token}
                   onLeave={() => setVideoGrant(null)}
-                  onError={(err) => showToast(err.message, 'error')}
+                  onError={(err) => toast.error(err.message)}
                 />
               </div>
             ) : (

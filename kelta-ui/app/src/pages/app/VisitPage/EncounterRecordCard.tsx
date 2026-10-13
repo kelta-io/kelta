@@ -1,6 +1,6 @@
+import { toast } from 'sonner'
 import { FileText, Download } from 'lucide-react'
 import { useI18n } from '@/context/I18nContext'
-import { useToast } from '../../../components/Toast'
 import { useArchives, useArchiveDetail, type ArchiveSummary } from '../../../hooks/useArchives'
 
 /**
@@ -48,7 +48,6 @@ export function EncounterRecordCard({
 
 function EncounterRow({ archive, testId }: { archive: ArchiveSummary; testId: string }) {
   const { t, formatDate } = useI18n()
-  const { showToast } = useToast()
   const detail = useArchiveDetail(archive.id)
 
   const label =
@@ -61,7 +60,7 @@ function EncounterRow({ archive, testId }: { archive: ArchiveSummary; testId: st
     if (match?.downloadUrl) {
       window.open(match.downloadUrl, '_blank', 'noopener,noreferrer')
     } else {
-      showToast(t('telehealth.archive.downloadError'), 'error')
+      toast.error(t('telehealth.archive.downloadError'))
     }
   }
 

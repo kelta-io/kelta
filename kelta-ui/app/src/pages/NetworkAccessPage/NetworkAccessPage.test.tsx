@@ -4,7 +4,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NetworkAccessPage } from './NetworkAccessPage'
 
 const save = vi.fn().mockResolvedValue(undefined)
-const showToast = vi.fn()
 
 let hookState = {
   allowlist: { enabled: false, cidrs: [] as string[] },
@@ -18,8 +17,12 @@ vi.mock('@/hooks/useTenantIpAllowlist', () => ({
   useTenantIpAllowlist: () => hookState,
 }))
 
-vi.mock('@/components/Toast', () => ({
-  useToast: () => ({ showToast }),
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('sonner')>()),
+  toast: mockToast,
 }))
 
 describe('NetworkAccessPage', () => {
@@ -72,7 +75,7 @@ describe('NetworkAccessPage', () => {
     await waitFor(() => {
       expect(save).toHaveBeenCalledWith({ enabled: true, cidrs: ['10.0.0.0/8'] })
     })
-    expect(showToast).toHaveBeenCalledWith('Network access settings saved', 'success')
+    expect(mockToast.success).toHaveBeenCalledWith('Network access settings saved')
   })
 
   it('blocks saving when enabled with no ranges', async () => {
@@ -83,9 +86,8 @@ describe('NetworkAccessPage', () => {
     await user.click(screen.getByTestId('save-network-access'))
 
     expect(save).not.toHaveBeenCalled()
-    expect(showToast).toHaveBeenCalledWith(
-      expect.stringContaining('Add at least one allowed range'),
-      'error'
+    expect(mockToast.error).toHaveBeenCalledWith(
+      expect.stringContaining('Add at least one allowed range')
     )
   })
 })

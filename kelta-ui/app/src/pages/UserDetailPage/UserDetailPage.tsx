@@ -1,10 +1,10 @@
 import { useState, useCallback, useMemo, useRef, useEffect, type FormEvent } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useApi } from '../../context/ApiContext'
 import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
-import { useToast } from '../../components/Toast'
 import { ConfirmDialog } from '../../components'
 import { useSystemPermissions } from '../../hooks/useSystemPermissions'
 import { cn } from '@/lib/utils'
@@ -96,7 +96,6 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
   const queryClient = useQueryClient()
   const { t, formatDate } = useI18n()
   const { apiClient, keltaClient } = useApi()
-  const { showToast } = useToast()
   const { hasPermission } = useSystemPermissions()
   const navigate = useNavigate()
   const tenantSlug = getTenantSlug()
@@ -168,11 +167,11 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users', id] })
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      showToast(t('users.updateSuccess'), 'success')
+      toast.success(t('users.updateSuccess'))
       setIsEditing(false)
     },
     onError: (err: Error) => {
-      showToast(err.message || t('errors.generic'), 'error')
+      toast.error(err.message || t('errors.generic'))
     },
   })
 
@@ -184,10 +183,10 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users', id] })
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      showToast(t('users.statusUpdateSuccess'), 'success')
+      toast.success(t('users.statusUpdateSuccess'))
     },
     onError: (err: Error) => {
-      showToast(err.message || t('errors.generic'), 'error')
+      toast.error(err.message || t('errors.generic'))
     },
   })
 
@@ -196,10 +195,10 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
       apiClient.putResource<PlatformUser>(`/api/users/${id}`, { profileId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users', id] })
-      showToast('Profile updated successfully', 'success')
+      toast.success('Profile updated successfully')
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to update profile', 'error')
+      toast.error(err.message || 'Failed to update profile')
     },
   })
 
@@ -216,11 +215,11 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users', id] })
       queryClient.invalidateQueries({ queryKey: ['users', id, 'mfa-status'] })
-      showToast('MFA reset successfully', 'success')
+      toast.success('MFA reset successfully')
       setShowMfaResetConfirm(false)
     },
     onError: () => {
-      showToast('Failed to reset MFA', 'error')
+      toast.error('Failed to reset MFA')
       setShowMfaResetConfirm(false)
     },
   })
@@ -229,14 +228,13 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
   const resetPasswordMutation = useMutation({
     mutationFn: () => keltaClient.admin.users.resetPassword(id!),
     onSuccess: () => {
-      showToast(
-        'Password reset initiated. User will be prompted to change their password on next login.',
-        'success'
+      toast.success(
+        'Password reset initiated. User will be prompted to change their password on next login.'
       )
       setShowPasswordResetConfirm(false)
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to reset password', 'error')
+      toast.error(err.message || 'Failed to reset password')
       setShowPasswordResetConfirm(false)
     },
   })
@@ -250,12 +248,12 @@ export function UserDetailPage({ testId = 'user-detail-page' }: UserDetailPagePr
         expiresInDays: data.expiresInDays,
       }),
     onSuccess: (result) => {
-      showToast('Token minted successfully', 'success')
+      toast.success('Token minted successfully')
       setShowMintTokenForm(false)
       setMintedToken(result.token)
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to mint token', 'error')
+      toast.error(err.message || 'Failed to mint token')
     },
   })
 

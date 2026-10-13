@@ -11,12 +11,13 @@
  */
 
 import React, { useState, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
 import type { CreateTenantRequest, UpdateTenantRequest } from '@kelta/sdk'
-import { useToast, ConfirmDialog } from '../../components'
+import { ConfirmDialog } from '../../components'
 import { cn } from '@/lib/utils'
 import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable'
 import {
@@ -212,7 +213,6 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
   const queryClient = useQueryClient()
   const { formatDate } = useI18n()
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
 
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false)
   const [activateDialogOpen, setActivateDialogOpen] = useState(false)
@@ -270,12 +270,12 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
     mutationFn: (id: string) => keltaClient.admin.tenants.suspend(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tenants'] })
-      showToast('Tenant suspended.', 'success')
+      toast.success('Tenant suspended.')
       setSuspendDialogOpen(false)
       setTargetTenant(null)
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to suspend tenant.', 'error')
+      toast.error(error.message || 'Failed to suspend tenant.')
     },
   })
 
@@ -284,12 +284,12 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
     mutationFn: (id: string) => keltaClient.admin.tenants.activate(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tenants'] })
-      showToast('Tenant activated.', 'success')
+      toast.success('Tenant activated.')
       setActivateDialogOpen(false)
       setTargetTenant(null)
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to activate tenant.', 'error')
+      toast.error(error.message || 'Failed to activate tenant.')
     },
   })
 
@@ -298,12 +298,12 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
     mutationFn: ({ id, email }: { id: string; email: string }) =>
       keltaClient.admin.tenants.inviteAdmin(id, email),
     onSuccess: (result) => {
-      showToast(`Invite sent to ${result.email}.`, 'success')
+      toast.success(`Invite sent to ${result.email}.`)
       setInviteTenant(null)
       setInviteEmail('')
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to send the admin invite.', 'error')
+      toast.error(error.message || 'Failed to send the admin invite.')
     },
   })
 

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
@@ -17,7 +18,6 @@ import {
   NatsTriggerForm,
 } from '@/components/flows'
 import { useApi } from '@/context/ApiContext'
-import { useToast } from '@/components'
 import type { Flow, TriggerConfig } from '../types'
 
 /** Sentinel for "no run-as user configured" (radix Select forbids empty values). */
@@ -43,7 +43,6 @@ function parseTriggerConfig(flow: Flow): Partial<TriggerConfig> {
 
 export function TriggerEditSheet({ open, onOpenChange, flow }: TriggerEditSheetProps) {
   const { keltaClient } = useApi()
-  const { showToast } = useToast()
   const queryClient = useQueryClient()
   const initialConfig = useMemo(() => parseTriggerConfig(flow), [flow])
   const [config, setConfig] = useState<Partial<TriggerConfig>>({})
@@ -93,11 +92,11 @@ export function TriggerEditSheet({ open, onOpenChange, flow }: TriggerEditSheetP
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flow', flow.id] })
-      showToast('Trigger configuration saved', 'success')
+      toast.success('Trigger configuration saved')
       onOpenChange(false)
     },
     onError: (err: Error) => {
-      showToast(err.message || 'Failed to save trigger config', 'error')
+      toast.error(err.message || 'Failed to save trigger config')
     },
   })
 

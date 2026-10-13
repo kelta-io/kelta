@@ -27,9 +27,12 @@ vi.mock('@/context/I18nContext', () => ({
   })),
 }))
 
-// useToast lives on the @/components barrel.
-vi.mock('@/components', () => ({
-  useToast: () => ({ showToast: vi.fn() }),
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('sonner')>()),
+  toast: mockToast,
 }))
 
 // Stub the heavy tab-content components — this suite exercises the tab bar itself.

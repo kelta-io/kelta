@@ -2,7 +2,7 @@
  * Shared UI Components
  *
  * This module exports all shared UI components used throughout the application.
- * Components include: Header, Sidebar, Toast, ConfirmDialog, LoadingSpinner, ErrorMessage, etc.
+ * Components include: Header, Sidebar, ConfirmDialog, LoadingSpinner, ErrorMessage, etc.
  */
 
 // Header component
@@ -17,22 +17,9 @@ export type { ErrorBoundaryProps, ErrorBoundaryState, ErrorFallbackProps } from 
 export { PluginErrorBoundary } from './PluginErrorBoundary'
 export type { PluginErrorBoundaryProps } from './PluginErrorBoundary'
 
-// Toast notification system
-export {
-  Toast,
-  ToastProvider,
-  useToast,
-  ToastContext,
-  DEFAULT_DURATION,
-  DEFAULT_MAX_TOASTS,
-} from './Toast'
-export type {
-  ToastType,
-  ToastData,
-  ToastProps,
-  ToastContextValue,
-  ToastProviderProps,
-} from './Toast'
+// Legacy toast API (deprecated adapter over `sonner` — new code calls `toast` from 'sonner')
+export { ToastProvider, useToast } from './Toast'
+export type { ToastType, ToastContextValue, ToastProviderProps } from './Toast'
 
 // ConfirmDialog component
 export { ConfirmDialog } from './ConfirmDialog'

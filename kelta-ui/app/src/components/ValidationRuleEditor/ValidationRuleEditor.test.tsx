@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ValidationRuleEditor } from './ValidationRuleEditor'
 import { I18nProvider } from '../../context/I18nContext'
-import { ToastProvider } from '../Toast'
+import { Toaster } from 'sonner'
 
 vi.mock('../FieldExpressionPicker', () => ({
   FieldExpressionPicker: vi.fn(
@@ -41,7 +41,10 @@ vi.mock('../FieldExpressionPicker', () => ({
 function TestWrapper({ children }: { children: React.ReactNode }) {
   return (
     <I18nProvider>
-      <ToastProvider>{children}</ToastProvider>
+      <>
+        {children}
+        <Toaster />
+      </>
     </I18nProvider>
   )
 }

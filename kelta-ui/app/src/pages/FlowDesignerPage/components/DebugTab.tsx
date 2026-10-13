@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { ReactFlowProvider } from '@xyflow/react'
 import type { Node, Edge } from '@xyflow/react'
 import { useApi } from '../../../context/ApiContext'
 import { unwrapResource, unwrapCollection } from '../../../utils/jsonapi'
-import { useToast, LoadingSpinner } from '../../../components'
+import { LoadingSpinner } from '../../../components'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { CheckCircle2, XCircle, Clock, RotateCcw, Copy, ChevronDown, ChevronUp } from 'lucide-react'
@@ -76,7 +77,6 @@ function JsonViewer({ data, label }: { data: unknown; label: string }) {
 
 export function DebugTab({ executionId, nodes, edges }: DebugTabProps) {
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
 
   // Fetch execution details
@@ -136,14 +136,14 @@ export function DebugTab({ executionId, nodes, edges }: DebugTabProps) {
       return (await resp.json()) as { executionId: string }
     },
     onSuccess: () => {
-      showToast('Retry started', 'success')
+      toast.success('Retry started')
     },
-    onError: (err: Error) => showToast(err.message, 'error'),
+    onError: (err: Error) => toast.error(err.message),
   })
 
   const handleCopyId = () => {
     navigator.clipboard.writeText(executionId)
-    showToast('Execution ID copied', 'success')
+    toast.success('Execution ID copied')
   }
 
   if (execLoading || stepsLoading) {

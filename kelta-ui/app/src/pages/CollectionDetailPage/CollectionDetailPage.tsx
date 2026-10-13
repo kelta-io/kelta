@@ -13,18 +13,13 @@
  */
 
 import React, { useState, useCallback, useMemo, useRef } from 'react'
+import { toast } from 'sonner'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../context/I18nContext'
 import { getTenantSlug } from '../../context/TenantContext'
 import { useApi } from '../../context/ApiContext'
-import {
-  useToast,
-  ConfirmDialog,
-  LoadingSpinner,
-  ErrorMessage,
-  DataSourceSettings,
-} from '../../components'
+import { ConfirmDialog, LoadingSpinner, ErrorMessage, DataSourceSettings } from '../../components'
 import {
   FieldEditor,
   type FieldDefinition as FieldEditorDefinition,
@@ -102,7 +97,6 @@ export function CollectionDetailPage({
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { t, formatDate } = useI18n()
-  const { showToast } = useToast()
   const { apiClient } = useApi()
 
   // Get collection ID from props or route params
@@ -331,11 +325,11 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['collections'] })
-      showToast(t('success.deleted', { item: t('collections.title') }), 'success')
+      toast.success(t('success.deleted', { item: t('collections.title') }))
       navigate(`/${getTenantSlug()}/collections`)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -360,12 +354,12 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       invalidateCollectionCaches()
-      showToast(t('success.created', { item: t('collections.field') }), 'success')
+      toast.success(t('success.created', { item: t('collections.field') }))
       setFieldEditorOpen(false)
       setEditingField(undefined)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -382,12 +376,12 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       invalidateCollectionCaches()
-      showToast(t('success.updated', { item: t('collections.field') }), 'success')
+      toast.success(t('success.updated', { item: t('collections.field') }))
       setFieldEditorOpen(false)
       setEditingField(undefined)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -398,12 +392,12 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['validation-rules', collectionId] })
-      showToast(t('success.created', { item: t('collections.validationRules') }), 'success')
+      toast.success(t('success.created', { item: t('collections.validationRules') }))
       setValidationRuleEditorOpen(false)
       setEditingValidationRule(undefined)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -413,12 +407,12 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['validation-rules', collectionId] })
-      showToast(t('success.updated', { item: t('collections.validationRules') }), 'success')
+      toast.success(t('success.updated', { item: t('collections.validationRules') }))
       setValidationRuleEditorOpen(false)
       setEditingValidationRule(undefined)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -428,12 +422,12 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['validation-rules', collectionId] })
-      showToast(t('success.deleted', { item: t('collections.validationRules') }), 'success')
+      toast.success(t('success.deleted', { item: t('collections.validationRules') }))
       setDeleteValidationRuleDialogOpen(false)
       setValidationRuleToDelete(undefined)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -443,10 +437,10 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['validation-rules', collectionId] })
-      showToast(t('success.activated'), 'success')
+      toast.success(t('success.activated'))
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -456,10 +450,10 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['validation-rules', collectionId] })
-      showToast(t('success.deactivated'), 'success')
+      toast.success(t('success.deactivated'))
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -470,12 +464,12 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['record-types', collectionId] })
-      showToast(t('success.created', { item: t('collections.recordTypes') }), 'success')
+      toast.success(t('success.created', { item: t('collections.recordTypes') }))
       setRecordTypeEditorOpen(false)
       setEditingRecordType(undefined)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -485,12 +479,12 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['record-types', collectionId] })
-      showToast(t('success.updated', { item: t('collections.recordTypes') }), 'success')
+      toast.success(t('success.updated', { item: t('collections.recordTypes') }))
       setRecordTypeEditorOpen(false)
       setEditingRecordType(undefined)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -500,12 +494,12 @@ export function CollectionDetailPage({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['record-types', collectionId] })
-      showToast(t('success.deleted', { item: t('collections.recordTypes') }), 'success')
+      toast.success(t('success.deleted', { item: t('collections.recordTypes') }))
       setDeleteRecordTypeDialogOpen(false)
       setRecordTypeToDelete(undefined)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -522,12 +516,12 @@ export function CollectionDetailPage({
       queryClient.invalidateQueries({
         queryKey: ['picklist-dependencies', collectionId],
       })
-      showToast(t('picklistDependencies.saved'), 'success')
+      toast.success(t('picklistDependencies.saved'))
       setDependencyEditorOpen(false)
       setEditingDependency(undefined)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -541,12 +535,12 @@ export function CollectionDetailPage({
       queryClient.invalidateQueries({
         queryKey: ['picklist-dependencies', collectionId],
       })
-      showToast(t('picklistDependencies.deleted'), 'success')
+      toast.success(t('picklistDependencies.deleted'))
       setDeleteDependencyDialogOpen(false)
       setDependencyToDelete(undefined)
     },
     onError: (error: Error) => {
-      showToast(error.message || t('errors.generic'), 'error')
+      toast.error(error.message || t('errors.generic'))
     },
   })
 
@@ -851,7 +845,7 @@ export function CollectionDetailPage({
       setLocalFieldOrder(null)
     },
     onError: () => {
-      showToast(t('errors.generic'), 'error')
+      toast.error(t('errors.generic'))
       setLocalFieldOrder(null)
     },
   })

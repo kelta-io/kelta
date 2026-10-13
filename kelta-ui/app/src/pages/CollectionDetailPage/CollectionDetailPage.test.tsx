@@ -25,7 +25,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { CollectionDetailPage } from './CollectionDetailPage'
 import { I18nProvider } from '../../context/I18nContext'
-import { ToastProvider } from '../../components/Toast'
+import { Toaster } from 'sonner'
 import { AuthProvider } from '../../context/AuthContext'
 import { ApiProvider } from '../../context/ApiContext'
 import { PluginProvider } from '../../context/PluginContext'
@@ -153,14 +153,15 @@ function TestWrapper({
         <AuthProvider>
           <ApiProvider>
             <PluginProvider>
-              <ToastProvider>
+              <>
                 <MemoryRouter initialEntries={initialEntries}>
                   <Routes>
                     <Route path="/collections/:id" element={children} />
                     <Route path="/collections" element={<div>Collections List</div>} />
                   </Routes>
                 </MemoryRouter>
-              </ToastProvider>
+                <Toaster />
+              </>
             </PluginProvider>
           </ApiProvider>
         </AuthProvider>

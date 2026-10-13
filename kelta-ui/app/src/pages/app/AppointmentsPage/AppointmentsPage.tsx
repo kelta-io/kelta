@@ -1,7 +1,7 @@
+import { toast } from 'sonner'
 import { CalendarClock, Settings2, Video } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useI18n } from '../../../context/I18nContext'
-import { useToast } from '../../../components/Toast'
 import { useAppointmentActions, useAppointments } from '../../../hooks/useScheduling'
 import { canJoin } from '../VisitPage/visitWindow'
 import { cn } from '@/lib/utils'
@@ -14,7 +14,6 @@ import { cn } from '@/lib/utils'
  */
 export function AppointmentsPage({ testId = 'appointments-page' }: { testId?: string }) {
   const { t, formatDate } = useI18n()
-  const { showToast } = useToast()
   const navigate = useNavigate()
   const { tenantSlug } = useParams<{ tenantSlug: string }>()
   const appointments = useAppointments('provider')
@@ -28,7 +27,7 @@ export function AppointmentsPage({ testId = 'appointments-page' }: { testId?: st
     NO_SHOW: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
   }
 
-  const onError = (err: Error) => showToast(err.message, 'error')
+  const onError = (err: Error) => toast.error(err.message)
 
   return (
     <div className="mx-auto max-w-[900px] p-6" data-testid={testId}>

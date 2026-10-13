@@ -79,12 +79,14 @@ vi.mock('../../context/I18nContext', () => ({
   I18nProvider: ({ children }: { children: React.ReactNode }) => children,
 }))
 
-// Mock the Toast hook
-const mockShowToast = vi.fn()
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('sonner')>()),
+  toast: mockToast,
+}))
 vi.mock('../../components', () => ({
-  useToast: () => ({
-    showToast: mockShowToast,
-  }),
   ConfirmDialog: ({
     open,
     title,
@@ -641,7 +643,7 @@ describe('ResourceDetailPage', () => {
       await user.click(screen.getByText('Confirm'))
 
       await waitFor(() => {
-        expect(mockShowToast).toHaveBeenCalledWith('Record deleted successfully', 'success')
+        expect(mockToast.success).toHaveBeenCalledWith('Record deleted successfully')
         expect(mockNavigate).toHaveBeenCalledWith('/default/resources/users')
       })
     })
@@ -681,7 +683,7 @@ describe('ResourceDetailPage', () => {
       await user.click(screen.getByText('Confirm'))
 
       await waitFor(() => {
-        expect(mockShowToast).toHaveBeenCalledWith(expect.any(String), 'error')
+        expect(mockToast.error).toHaveBeenCalledWith(expect.any(String))
       })
     })
   })

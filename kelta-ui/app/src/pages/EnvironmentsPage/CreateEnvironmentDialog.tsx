@@ -11,12 +11,13 @@
  */
 
 import React, { useState } from 'react'
+import { toast } from 'sonner'
 import { useMutation } from '@tanstack/react-query'
 import { AlertTriangle, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
-import { useToast, ErrorMessage } from '../../components'
+import { ErrorMessage } from '../../components'
 import { createEnvironment } from './types'
 import type { CreatedEnvironment, CreateEnvironmentRequest } from './types'
 
@@ -42,15 +43,14 @@ function CredentialRow({
   testId: string
 }): React.ReactElement {
   const { t } = useI18n()
-  const { showToast } = useToast()
 
   const handleCopy = async () => {
     if (!value) return
     try {
       await navigator.clipboard.writeText(value)
-      showToast(t('environments.copied'), 'success')
+      toast.success(t('environments.copied'))
     } catch {
-      showToast(t('errors.generic'), 'error')
+      toast.error(t('errors.generic'))
     }
   }
 
@@ -83,7 +83,6 @@ export function CreateEnvironmentDialog({
 }: CreateEnvironmentDialogProps): React.ReactElement {
   const { t } = useI18n()
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const [variant, setVariant] = useState<EnvironmentVariant>('local')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -100,7 +99,7 @@ export function CreateEnvironmentDialog({
         // Local sandbox — show the one-time credentials before closing
         setCreatedCredentials(created)
       } else {
-        showToast(t('environments.createdToast'), 'success')
+        toast.success(t('environments.createdToast'))
         onClose()
       }
     },

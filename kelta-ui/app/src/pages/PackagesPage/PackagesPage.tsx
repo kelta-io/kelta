@@ -11,13 +11,14 @@
  */
 
 import React, { useState, useCallback, useRef, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Package, FolderOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useI18n } from '../../context/I18nContext'
 import { useApi } from '../../context/ApiContext'
 import { useCollectionSummaries } from '../../hooks/useCollectionSummaries'
-import { useToast, LoadingSpinner, ErrorMessage } from '../../components'
+import { LoadingSpinner, ErrorMessage } from '../../components'
 import type { ApiClient } from '../../services/apiClient'
 
 /**
@@ -357,7 +358,6 @@ interface ExportPanelProps {
 function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement {
   const { t } = useI18n()
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const [packageName, setPackageName] = useState<string>('')
   const [packageVersion, setPackageVersion] = useState<string>('1.0.0')
   const [packageDescription, setPackageDescription] = useState<string>('')
@@ -434,11 +434,11 @@ function ExportPanel({ onExportComplete }: ExportPanelProps): React.ReactElement
       a.click()
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
-      showToast(t('packages.exportSuccess'), 'success')
+      toast.success(t('packages.exportSuccess'))
       onExportComplete()
     },
     onError: (error: Error) => {
-      showToast(error.message, 'error')
+      toast.error(error.message)
     },
   })
 
@@ -623,7 +623,6 @@ interface ImportPanelProps {
 function ImportPanel({ onImportComplete }: ImportPanelProps): React.ReactElement {
   const { t } = useI18n()
   const { apiClient } = useApi()
-  const { showToast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<ImportPreview | null>(null)
@@ -635,7 +634,7 @@ function ImportPanel({ onImportComplete }: ImportPanelProps): React.ReactElement
       setPreview(data)
     },
     onError: (error: Error) => {
-      showToast(error.message, 'error')
+      toast.error(error.message)
     },
   })
 
@@ -645,12 +644,12 @@ function ImportPanel({ onImportComplete }: ImportPanelProps): React.ReactElement
     onSuccess: (data, variables) => {
       setImportResult(data)
       if (!variables.dryRun && data.success) {
-        showToast(t('packages.importSuccess'), 'success')
+        toast.success(t('packages.importSuccess'))
         onImportComplete()
       }
     },
     onError: (error: Error) => {
-      showToast(error.message, 'error')
+      toast.error(error.message)
     },
   })
 
