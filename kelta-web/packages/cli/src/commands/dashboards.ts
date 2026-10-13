@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { readDataArgument } from '../data.js';
 import { CliError, EXIT } from '../errors.js';
-import { defineCommand, type RegisteredCommand } from '../registry/types.js';
+import { defineCommand, type CommandContext, type RegisteredCommand } from '../registry/types.js';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface DashboardComponentResource {
   id: string;
@@ -15,6 +17,22 @@ interface DashboardTreeCounts {
   updated?: number;
   deleted?: number;
   unchanged?: number;
+}
+
+/** Resolve a dashboard name (or pass a dashboard id through) to the dashboard id. */
+async function dashboardIdByName(ctx: CommandContext, nameOrId: string): Promise<string> {
+  if (UUID.test(nameOrId)) return nameOrId;
+  const response = await ctx.client.getAxiosInstance().get<{
+    data?: Array<{ id: string }>;
+  }>(`/api/dashboards?filter[name][EQ]=${encodeURIComponent(nameOrId)}&page[size]=1`);
+  const id = response.data?.data?.[0]?.id;
+  if (!id) {
+    throw new CliError(`Dashboard "${nameOrId}" not found`, {
+      code: 'NOT_FOUND',
+      exitCode: EXIT.NOT_FOUND,
+    });
+  }
+  return id;
 }
 
 const dashboardList = defineCommand({
@@ -229,6 +247,51 @@ const dashboardDelete = defineCommand({
   },
 });
 
+const dashboardValidate = defineCommand({
+  group: 'dashboards',
+  name: 'validate',
+  summary: "Validate a dashboard's widget configs (read-only; prints the API response as-is)",
+  positionals: [{ name: 'dashboard', description: 'Dashboard name or id', required: true }],
+  options: [
+    {
+      flag: '--data <json>',
+      description:
+        'Body as JSON, @file, or - — e.g. {"components":[...]} to validate unsaved widgets',
+    },
+  ],
+  input: z.object({ dashboard: z.string().min(1), data: z.string().optional() }),
+  handler: async (ctx, input) => {
+    const dashboardId = await dashboardIdByName(ctx, input.dashboard);
+    const body = input.data ? readDataArgument(input.data) : {};
+    const response = await ctx.client
+      .getAxiosInstance()
+      .post<unknown>(`/api/dashboards/${dashboardId}/validate`, body);
+    return { data: response.data, verbatim: true, ids: [dashboardId] };
+  },
+});
+
+const dashboardData = defineCommand({
+  group: 'dashboards',
+  name: 'data',
+  summary: "Execute a dashboard's widgets and print their data (read-only; API response as-is)",
+  positionals: [{ name: 'dashboard', description: 'Dashboard name or id', required: true }],
+  options: [
+    {
+      flag: '--data <json>',
+      description: 'Runtime parameters as JSON, @file, or - (e.g. {"timeRange":"LAST_30_DAYS"})',
+    },
+  ],
+  input: z.object({ dashboard: z.string().min(1), data: z.string().optional() }),
+  handler: async (ctx, input) => {
+    const dashboardId = await dashboardIdByName(ctx, input.dashboard);
+    const body = input.data ? readDataArgument(input.data) : {};
+    const response = await ctx.client
+      .getAxiosInstance()
+      .post<unknown>(`/api/dashboards/${dashboardId}/data`, body);
+    return { data: response.data, verbatim: true, ids: [dashboardId] };
+  },
+});
+
 export const dashboardCommands: RegisteredCommand[] = [
   dashboardList,
   dashboardGet,
@@ -236,4 +299,6 @@ export const dashboardCommands: RegisteredCommand[] = [
   dashboardApply,
   dashboardUpdate,
   dashboardDelete,
+  dashboardValidate,
+  dashboardData,
 ];
