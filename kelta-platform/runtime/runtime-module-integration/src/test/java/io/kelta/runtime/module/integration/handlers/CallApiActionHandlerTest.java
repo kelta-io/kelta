@@ -305,6 +305,216 @@ class CallApiActionHandlerTest {
         assertTrue(result.errorMessage().startsWith("Api.Timeout:"), result.errorMessage());
     }
 
+    // -----------------------------------------------------------------------
+    // Credential redaction: the result lands in flow state and step-log snapshots
+    // -----------------------------------------------------------------------
+
+    /** Has characters URL encoding changes, so both the raw and encoded forms are checked. */
+    private static final String QUERY_KEY = "qk/SECRET+1234=";
+    private static final String QUERY_KEY_ENCODED = "qk%2FSECRET%2B1234%3D";
+
+    private void queryKeyCredential() {
+        when(credentialResolver.resolve(eq("t-1"), eq("ingest"), anyString()))
+            .thenReturn(new ResolvedCredential("c-9", "ingest", "api_key",
+                Map.of("value", QUERY_KEY),
+                Map.of("headerName", "api_key", "location", "query"),
+                Instant.now()));
+    }
+
+    private void assertNoQueryKey(Object value) throws Exception {
+        String serialized = objectMapper.writeValueAsString(value);
+        assertFalse(serialized.contains(QUERY_KEY), serialized);
+        assertFalse(serialized.contains(QUERY_KEY_ENCODED), serialized);
+        assertFalse(serialized.contains("SECRET"), serialized);
+    }
+
+    @Test
+    @DisplayName("Query-param credential: 2xx result url keeps scheme, host and path but masks the key")
+    void queryCredentialRedactedOnSuccess() throws Exception {
+        queryKeyCredential();
+        server.responseBody = "{\"items\":[],\"self\":\"/feed?page=2&api_key=" + QUERY_KEY_ENCODED + "\"}";
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("mode", "raw");
+        config.put("url", server.base() + "/feed");
+        config.put("queryParams", Map.of("page", "2"));
+        config.put("credentialRef", "ingest");
+        config.put("responseMapping", Map.of("calledUrl", "=`$response`.url"));
+
+        ActionResult result = handler.execute(context(config, Map.of()));
+
+        assertTrue(result.successful(), result.errorMessage());
+        String url = (String) result.outputData().get("url");
+        assertEquals(server.base() + "/feed?page=2&api_key=***", url);
+        assertEquals(Map.of("calledUrl", url), result.outputData().get("mapped"));
+        assertNoQueryKey(result);
+        assertEquals("/feed?page=2&api_key=" + QUERY_KEY_ENCODED, server.lastPath,
+            "the request sent upstream still carries the key");
+    }
+
+    @Test
+    @DisplayName("Query-param credential: a non-2xx error message and body echo carry no key")
+    void queryCredentialRedactedOnHttpError() throws Exception {
+        queryKeyCredential();
+        server.status = 401;
+        server.responseBody = "{\"error\":\"invalid api_key " + QUERY_KEY + "\"}";
+
+        ActionResult result = handler.execute(context(Map.of(
+            "mode", "raw", "url", server.base() + "/feed", "credentialRef", "ingest"), Map.of()));
+
+        assertFalse(result.successful());
+        assertTrue(result.errorMessage().startsWith("Api.HttpClientError: 401"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("invalid api_key ***"), result.errorMessage());
+        assertNoQueryKey(result);
+        assertEquals("/feed?api_key=" + QUERY_KEY_ENCODED, server.lastPath);
+    }
+
+    @Test
+    @DisplayName("Query-param credential: a transport exception naming the URL carries no key")
+    void queryCredentialRedactedOnTransportFailure() throws Exception {
+        queryKeyCredential();
+        OutboundHttpClient failing = mock(OutboundHttpClient.class);
+        when(failing.send(any())).thenAnswer(invocation -> {
+            OutboundHttpClient.Request sent = invocation.getArgument(0);
+            throw new OutboundHttpClient.OutboundRequestException(
+                OutboundHttpClient.OutboundRequestException.Kind.FAILED,
+                "ConnectException: cannot reach " + sent.url());
+        });
+        CallApiActionHandler failingHandler = new CallApiActionHandler(
+            objectMapper, mapper, specStore, credentialResolver, idempotencyStore, failing);
+
+        ActionResult result = failingHandler.execute(context(Map.of(
+            "mode", "raw", "url", "https://api.example.com/feed", "credentialRef", "ingest"), Map.of()));
+
+        assertFalse(result.successful());
+        assertEquals("Api.Timeout: ConnectException: cannot reach https://api.example.com/feed?api_key=***",
+            result.errorMessage());
+        assertNoQueryKey(result);
+        verify(failing).send(argThat(sent ->
+            sent.url().equals("https://api.example.com/feed?api_key=" + QUERY_KEY_ENCODED)));
+    }
+
+    @Test
+    @DisplayName("Query-param credential: an unexpected exception whose message holds the key is masked")
+    void queryCredentialRedactedOnUnexpectedFailure() throws Exception {
+        queryKeyCredential();
+        OutboundHttpClient failing = mock(OutboundHttpClient.class);
+        when(failing.send(any())).thenAnswer(invocation -> {
+            OutboundHttpClient.Request sent = invocation.getArgument(0);
+            throw new IllegalStateException("bad URI " + sent.url() + " (key " + QUERY_KEY + ")");
+        });
+        CallApiActionHandler failingHandler = new CallApiActionHandler(
+            objectMapper, mapper, specStore, credentialResolver, idempotencyStore, failing);
+
+        ActionResult result = failingHandler.execute(context(Map.of(
+            "mode", "raw", "url", "https://api.example.com/feed", "credentialRef", "ingest"), Map.of()));
+
+        assertFalse(result.successful());
+        assertTrue(result.errorMessage().startsWith("Api.Unexpected: bad URI https://api.example.com/feed"),
+            result.errorMessage());
+        assertNoQueryKey(result);
+    }
+
+    @Test
+    @DisplayName("Query-param credential: operation mode result url is masked")
+    void queryCredentialRedactedInOperationMode() throws Exception {
+        queryKeyCredential();
+        ApiSpec spec = spec("feed", server.base() + "/v1");
+        when(specStore.findSpec("t-1", "feed")).thenReturn(Optional.of(spec));
+        when(specStore.findOperation("t-1", "feed", "listItems"))
+            .thenReturn(Optional.of(operation(spec.id(), "listItems", "GET", "/items")));
+
+        ActionResult result = handler.execute(context(Map.of(
+            "mode", "operation", "specId", "feed", "operationId", "listItems",
+            "credentialRef", "ingest"), Map.of()));
+
+        assertTrue(result.successful(), result.errorMessage());
+        assertEquals(server.base() + "/v1/items?api_key=***", result.outputData().get("url"));
+        assertNoQueryKey(result);
+        assertEquals("/v1/items?api_key=" + QUERY_KEY_ENCODED, server.lastPath);
+    }
+
+    @Test
+    @DisplayName("Query-param credential: an idempotency replay masks the url and cached body")
+    void queryCredentialRedactedOnIdempotencyReplay() throws Exception {
+        queryKeyCredential();
+        when(idempotencyStore.lookup(eq("t-1"), anyString()))
+            .thenReturn(Optional.of(new CachedResponse(201, "{\"key\":\"" + QUERY_KEY + "\"}", "hash")));
+
+        ActionResult result = handler.execute(context(Map.of(
+            "mode", "raw", "url", server.base() + "/orders", "method", "POST",
+            "credentialRef", "ingest",
+            "idempotency", Map.of("enabled", true, "key", "k-1")), Map.of()));
+
+        assertTrue(result.successful(), result.errorMessage());
+        assertEquals(server.base() + "/orders?api_key=***", result.outputData().get("url"));
+        assertNoQueryKey(result);
+    }
+
+    @Test
+    @DisplayName("API-key header credential: no key appears in the result, even echoed back")
+    void apiKeyHeaderRedacted() throws Exception {
+        when(credentialResolver.resolve(eq("t-1"), eq("vendor"), anyString()))
+            .thenReturn(new ResolvedCredential("c-3", "vendor", "api_key",
+                Map.of("value", "hk_live_9876"),
+                Map.of("headerName", "X-API-Key", "location", "header", "prefix", "Key "),
+                Instant.now()));
+        server.responseBody = "{\"headers\":{\"X-API-Key\":\"Key hk_live_9876\"}}";
+
+        ActionResult result = handler.execute(context(Map.of(
+            "mode", "raw", "url", server.base() + "/echo", "credentialRef", "vendor"), Map.of()));
+
+        assertTrue(result.successful(), result.errorMessage());
+        assertNoSecret(result, "hk_live_9876");
+        assertEquals(Map.of("headers", Map.of("X-API-Key", "***")), result.outputData().get("responseData"));
+        assertEquals("Key hk_live_9876", server.lastHeaders.getFirst("X-API-Key"));
+    }
+
+    @Test
+    @DisplayName("Bearer credential: no token or Authorization value appears in the result")
+    void bearerRedacted() throws Exception {
+        when(credentialResolver.resolve(eq("t-1"), eq("github"), anyString()))
+            .thenReturn(new ResolvedCredential("c-2", "github", "bearer_token",
+                Map.of("token", "ghp_secretToken"), Map.of(), Instant.now()));
+        server.status = 403;
+        server.responseBody = "{\"headers\":{\"Authorization\":\"Bearer ghp_secretToken\"},"
+            + "\"token\":\"ghp_secretToken\"}";
+
+        ActionResult result = handler.execute(context(Map.of(
+            "mode", "raw", "url", server.base() + "/user", "credentialRef", "github"), Map.of()));
+
+        assertFalse(result.successful());
+        assertNoSecret(result, "ghp_secretToken");
+        assertEquals("Bearer ghp_secretToken", server.lastHeaders.getFirst("Authorization"));
+    }
+
+    @Test
+    @DisplayName("Basic credential: no password, encoded pair or Authorization value appears in the result")
+    void basicRedacted() throws Exception {
+        String encoded = java.util.Base64.getEncoder().encodeToString(
+            "svc-user:p4ssw0rd!".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(credentialResolver.resolve(eq("t-1"), eq("legacy"), anyString()))
+            .thenReturn(new ResolvedCredential("c-4", "legacy", "basic_auth",
+                Map.of("username", "svc-user", "password", "p4ssw0rd!"), Map.of(), Instant.now()));
+        server.responseBody = "{\"headers\":{\"Authorization\":\"Basic " + encoded + "\"},"
+            + "\"login\":\"svc-user\",\"pw\":\"p4ssw0rd!\"}";
+
+        ActionResult result = handler.execute(context(Map.of(
+            "mode", "raw", "url", server.base() + "/echo", "credentialRef", "legacy"), Map.of()));
+
+        assertTrue(result.successful(), result.errorMessage());
+        assertNoSecret(result, encoded, "p4ssw0rd!", "svc-user");
+        assertEquals("Basic " + encoded, server.lastHeaders.getFirst("Authorization"));
+    }
+
+    private void assertNoSecret(ActionResult result, String... secrets) throws Exception {
+        String serialized = objectMapper.writeValueAsString(result);
+        for (String secret : secrets) {
+            assertFalse(serialized.contains(secret), serialized);
+        }
+        assertFalse(serialized.contains("Bearer "), serialized);
+        assertFalse(serialized.contains("Basic "), serialized);
+    }
+
     @Test
     @DisplayName("validate() rejects raw mode without url and operation mode without specId")
     void validateRejectsBadConfig() throws Exception {

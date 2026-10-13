@@ -333,6 +333,20 @@ federated login applies the same guard through `OidcLoginHttp` (table in `integr
 code that fetches a tenant- or admin-supplied URL from inside the cluster should go through
 `OutboundHttpClient`.
 
+### Flow action results are persisted — never put a secret in one (PLT-605)
+
+A Task's `ActionResult` (output data **and** error message) goes into flow state, so `FlowEngine`
+writes it to `flow_step_log.output_snapshot`, the next step's `input_snapshot`, and the execution
+row's state and `error_message` — served by the flow-run UI, the runs/steps API and exports, and
+kept until the flow-log retention sweep removes it. A handler must never return a secret it
+resolved: not in a URL, an echoed header, a response body, or an exception message.
+`CALL_API` injects credentials only through `CredentialInjection` (next to the handler), which
+masks every injected query value and auth header as `***` in the returned `url`, response
+body/data and every failure message; a new credential type must inject through it too. Before
+the fix, a query-param `credentialRef` put the key in every step log's `url`; those old rows are
+not rewritten. Secrets shorter than 4 characters are masked in URLs by parameter name only, not
+scrubbed from free text.
+
 ### Data masking — v2 contexts (accepted)
 
 Masking is enforced on JSON:API (`CerbosFieldSecurityAdvice` strip → mask), filter/sort probes
