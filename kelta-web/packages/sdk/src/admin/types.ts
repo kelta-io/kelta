@@ -1680,6 +1680,8 @@ export interface FlowDefinition {
   version: number;
   triggerConfig?: string;
   definition: string;
+  /** Which step-log rows runs write; see {@link CreateFlowRequest.stepLogging}. */
+  stepLogging?: 'FULL' | 'ERRORS_ONLY' | 'NONE';
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -1715,6 +1717,11 @@ export interface CreateFlowRequest {
    * owner when unset.
    */
   runAsUserId?: string | null;
+  /**
+   * Which step-log rows runs write: `FULL` (default), `ERRORS_ONLY` (snapshots
+   * only for a failed step) or `NONE` (only a failed step's row).
+   */
+  stepLogging?: 'FULL' | 'ERRORS_ONLY' | 'NONE';
 }
 
 // --- Scheduled Jobs (Phase 4 Stream E) ---

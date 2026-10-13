@@ -376,6 +376,27 @@ class PackageRoundTripTest {
         assertThat((Map<String, Object>) fieldTypeConfig).containsEntry("restricted", true);
     }
 
+    @Test
+    @DisplayName("a flow's stepLogging survives export → JSON → apply (PLT-602)")
+    void flowStepLoggingRoundTrips() throws Exception {
+        when(exportRepository.findFlowsByIds(SOURCE, List.of("src-flow"))).thenReturn(List.of(
+                row("id", "src-flow", "name", "High-volume ingest", "flow_type", "SCHEDULED",
+                        "active", true, "version", 1, "step_logging", "ERRORS_ONLY",
+                        "definition", jsonb("{\"StartAt\":\"done\",\"States\":{\"done\":{\"Type\":\"Succeed\"}}}"))));
+
+        ObjectMapper http = new ObjectMapper();
+        String body = http.writeValueAsString(packageService.exportPackage(SOURCE, Map.of(), false));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> received = http.readValue(body, Map.class);
+
+        var report = importService.importPackage(TARGET, received,
+                PackageImportService.ImportOptions.defaults());
+
+        assertThat(report.failed()).as("%s", report.items()).isZero();
+        assertThat(written("flows")).containsEntry("name", "High-volume ingest")
+                .containsEntry("stepLogging", "ERRORS_ONLY");
+    }
+
     private static PGobject jsonb(String json) throws Exception {
         PGobject value = new PGobject();
         value.setType("jsonb");

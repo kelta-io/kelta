@@ -2,6 +2,7 @@ package io.kelta.worker.flow;
 
 import io.kelta.runtime.flow.FlowExecutionData;
 import io.kelta.runtime.flow.FlowStepLogData;
+import io.kelta.runtime.flow.FlowStepLogging;
 import io.kelta.runtime.flow.FlowStore;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -9,6 +10,7 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.nio.charset.StandardCharsets;
@@ -210,6 +212,20 @@ public class JdbcFlowStore implements FlowStore {
     @Override
     public Optional<String> findFlowDefinitionByName(String tenantId, String flowName) {
         return findDefinition("WHERE tenant_id = ? AND name = ?", tenantId, flowName);
+    }
+
+    @Override
+    public FlowStepLogging findStepLogging(String tenantId, String flowId) {
+        try {
+            List<String> results = jdbcTemplate.queryForList(
+                "SELECT step_logging FROM flow WHERE tenant_id = ? AND id = ? LIMIT 1",
+                String.class, tenantId, flowId);
+            return FlowStepLogging.fromValue(results.isEmpty() ? null : results.get(0));
+        } catch (DataAccessException e) {
+            // Logging less than the author asked for is worse than logging more.
+            log.warn("Could not read step_logging for flow {}, using FULL: {}", flowId, e.getMessage());
+            return FlowStepLogging.FULL;
+        }
     }
 
     @Override

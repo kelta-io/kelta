@@ -31,6 +31,33 @@ catalogue is on kelta.io:
   with `active: true` (CLI `--active`) when you mean it to run.
 - `runAsUserId` — the user the flow acts as when there is no initiating
   user (record, schedule and NATS starts); falls back to the flow owner.
+- `stepLogging` — which step-log rows a run writes: `FULL` (default),
+  `ERRORS_ONLY` or `NONE`. See [Step logging](#step-logging). CLI
+  `--step-logging`.
+
+## Step logging
+
+Every run writes its execution row (status, timings, step count, error)
+whatever the level. `stepLogging` controls the per-step rows behind
+`GET /api/flows/executions/{id}/steps` (`kelta flows run <id> --steps`):
+
+- `FULL` (default) — one row per step with the whole state envelope as
+  its input and output snapshots.
+- `ERRORS_ONLY` — one row per step with the state id, name, type, status
+  and duration, but no snapshots; a failed step's row keeps its input
+  and output snapshots.
+- `NONE` — no row for a successful step; a failed step's row is written
+  with its snapshots.
+
+A failed step keeps its input snapshot at every level, so
+`retry?mode=from-failure` still works. Use `ERRORS_ONLY` for
+high-frequency or high-volume flows (schedules every few minutes, NATS
+or record triggers on busy collections, `Map` over many items, large
+payloads): `FULL` writes the whole envelope twice per step, and those
+rows dominate database size. Set it with
+`kelta flows update <id> --step-logging ERRORS_ONLY` or
+`PATCH /api/flows/{id}` with `{"stepLogging": "ERRORS_ONLY"}`; an
+unknown value is a 400.
 
 ## Definition skeleton
 

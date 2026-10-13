@@ -38,6 +38,10 @@ public class UpdateFlowTool implements AdminTool {
         properties.put("runAsUserId", Schemas.string(
                 "User UUID stamped as createdBy/updatedBy on records this flow writes when no user "
                 + "started the run (cron/NATS/webhook). Empty string clears it (falls back to owner)."));
+        properties.put("stepLogging", Schemas.string(
+                "Step-log level: FULL (default; every step with input/output snapshots), ERRORS_ONLY "
+                + "(every step, snapshots only for a failed step — recommended for high-frequency or "
+                + "high-volume flows) or NONE (only a failed step's row)."));
 
         Tool tool = Tool.builder()
                 .name("update_flow")
@@ -63,8 +67,9 @@ public class UpdateFlowTool implements AdminTool {
                     if (args.get("definition") instanceof Map<?, ?> d) attrs.put("definition", d);
                     if (args.get("active") instanceof Boolean b) attrs.put("active", b);
                     if (args.get("runAsUserId") instanceof String r) attrs.put("runAsUserId", r.isBlank() ? null : r);
+                    if (args.get("stepLogging") instanceof String l && !l.isBlank()) attrs.put("stepLogging", l);
                     if (attrs.isEmpty()) {
-                        return error("Provide at least one of name, description, triggerConfig, definition, active.");
+                        return error("Provide at least one of name, description, triggerConfig, definition, active, runAsUserId, stepLogging.");
                     }
 
                     Map<String, Object> body = Map.of("data", Map.of(

@@ -17,13 +17,33 @@ failure. Runs are durable: a worker restart does not lose a `RUNNING` or `WAITIN
 | Need | Endpoint / command |
 |---|---|
 | One run | `GET /api/flows/executions/{executionId}` · `kelta flows run <executionId>` · MCP `get_flow_run` |
-| Its steps | `GET /api/flows/executions/{executionId}/steps` — one row per state: status, input snapshot, output, error, duration |
+| Its steps | `GET /api/flows/executions/{executionId}/steps` — one row per state: status, input snapshot, output, error, duration (what is kept depends on the flow's [step logging](#step-logging)) |
 | Runs of a flow | `GET /api/flows/{flowId}/flow-executions` · `kelta flows runs <flowId>` |
 | Runs that touched a record | `GET /api/flows/record-executions?recordId=…` — shown on the record's activity timeline |
 | All runs as a collection | `GET /api/flow-executions?filter[status][eq]=FAILED&sort=-startedAt` |
 
 The console shows the same under Setup → Automation → Flows → *Runs*, with the state machine highlighted per
 step; Setup → Platform → Monitoring links each run to its trace.
+
+## Step logging
+
+Each flow has a `stepLogging` level. The run row above is written at every level; the level decides which step
+rows are kept:
+
+| Level | Successful step | Failed step |
+|---|---|---|
+| `FULL` (default) | row with input and output snapshots | row with input and output snapshots |
+| `ERRORS_ONLY` | row with state, type, status and duration — no snapshots | row with input and output snapshots |
+| `NONE` | no row | row with input and output snapshots |
+
+`FULL` stores the whole state envelope twice per step, so for **high-frequency or high-volume flows** — short
+schedules, triggers on busy collections or NATS topics, `Map` over many items, large payloads — use
+`ERRORS_ONLY`: you keep the step path and timings of every run and full detail where a run failed. A failed step
+keeps its input snapshot at every level, so `retry?mode=from-failure` keeps working.
+
+Set it in the flow designer (*Trigger* → *Step logging*), with `kelta flows update <flowId> --step-logging
+ERRORS_ONLY`, MCP `update_flow`, or `PATCH /api/flows/{flowId}` with `{"stepLogging": "ERRORS_ONLY"}`. It travels
+with the flow in `kelta metadata export` / `apply`.
 
 ## Cancel and retry
 

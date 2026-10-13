@@ -242,7 +242,8 @@ public class FlowEngine {
 
                 FlowExecutionContext context = new FlowExecutionContext(
                     executionId, resumeTenantId, flowId, fresh.startedBy(),
-                    definition, fresh.stateData());
+                    definition, fresh.stateData(), 0,
+                    flowStore.findStepLogging(resumeTenantId, flowId));
                 context.setCurrentStateId(nextStateId);
                 flowStore.updateExecutionState(executionId, nextStateId, fresh.stateData(),
                     FlowExecutionData.STATUS_RUNNING, fresh.stepCount());
@@ -361,7 +362,7 @@ public class FlowEngine {
         FlowExecutionContext subContext = new FlowExecutionContext(
             parent.executionId(),
             parent.tenantId(), parent.flowId(), parent.userId(),
-            subFlow, input, parent.invokeDepth());
+            subFlow, input, parent.invokeDepth(), parent.stepLogging());
 
         Map<String, Object> finalData = runStateLoop(subContext);
         return buildSubFlowResult(finalData, subContext);
@@ -382,7 +383,7 @@ public class FlowEngine {
         FlowExecutionContext invokedContext = new FlowExecutionContext(
             parent.executionId(),
             parent.tenantId(), parent.flowId(), parent.userId(),
-            targetFlow, input, parent.invokeDepth() + 1);
+            targetFlow, input, parent.invokeDepth() + 1, parent.stepLogging());
 
         Map<String, Object> finalData = runStateLoop(invokedContext);
         return buildSubFlowResult(finalData, invokedContext);
@@ -436,7 +437,8 @@ public class FlowEngine {
                                             String userId, FlowDefinition definition,
                                             Map<String, Object> initialInput) {
         FlowExecutionContext context = new FlowExecutionContext(
-            executionId, tenantId, flowId, userId, definition, initialInput);
+            executionId, tenantId, flowId, userId, definition, initialInput, 0,
+            flowStore.findStepLogging(tenantId, flowId));
 
         log.info("Starting flow execution {} (flow={}, startAt={})",
             executionId, flowId, definition.startAt());
@@ -495,6 +497,27 @@ public class FlowEngine {
         return annotated;
     }
 
+    /**
+     * Writes the step row for a non-FULL level once the step's outcome is known, in one
+     * insert. A failed step always gets its row with input and output snapshots (the
+     * input was held in memory from step entry). ERRORS_ONLY also writes a snapshot-free
+     * row for every other step; NONE writes nothing else.
+     */
+    private void logCompletedStep(FlowExecutionContext context, String stateId,
+                                  StateDefinition state, Map<String, Object> stepInput,
+                                  StateExecutionResult result, int stepDuration) {
+        boolean failed = FlowStepLogData.STATUS_FAILED.equals(result.status());
+        if (failed) {
+            flowStore.logStepExecution(context.executionId(), stateId, state.name(), state.type(),
+                stepInput, result.updatedData(), result.status(),
+                result.errorMessage(), result.errorCode(), stepDuration, 1);
+        } else if (context.stepLogging() == FlowStepLogging.ERRORS_ONLY) {
+            flowStore.logStepExecution(context.executionId(), stateId, state.name(), state.type(),
+                null, null, result.status(),
+                result.errorMessage(), result.errorCode(), stepDuration, 1);
+        }
+    }
+
     private Map<String, Object> runStateLoop(FlowExecutionContext context) {
         while (!context.isCancelled() && context.stepCount() < MAX_STEPS) {
             StateDefinition currentState = context.currentState();
@@ -521,22 +544,37 @@ public class FlowEngine {
                 return context.stateData();
             }
 
-            // Log step start
             long stepStart = System.currentTimeMillis();
-            String stepLogId = flowStore.logStepExecution(
-                context.executionId(), context.currentStateId(), currentState.name(),
-                stateType, context.stateData(), null,
-                FlowStepLogData.STATUS_RUNNING, null, null, null, 1);
+            String stateId = context.currentStateId();
+            Map<String, Object> stepInput = context.stateData();
+            FlowStepLogging stepLogging = context.stepLogging();
+            String stepLogId = stepLogging == FlowStepLogging.FULL
+                ? flowStore.logStepExecution(context.executionId(), stateId, currentState.name(),
+                    stateType, stepInput, null, FlowStepLogData.STATUS_RUNNING, null, null, null, 1)
+                : null;
 
             context.incrementStepCount();
 
-            // Execute the state
-            StateExecutionResult result = executor.execute(currentState, context);
+            StateExecutionResult result;
+            try {
+                result = executor.execute(currentState, context);
+            } catch (RuntimeException e) {
+                if (stepLogId == null) {
+                    flowStore.logStepExecution(context.executionId(), stateId, currentState.name(),
+                        stateType, stepInput, null, FlowStepLogData.STATUS_FAILED,
+                        e.getMessage(), e.getClass().getSimpleName(),
+                        (int) (System.currentTimeMillis() - stepStart), 1);
+                }
+                throw e;
+            }
             int stepDuration = (int) (System.currentTimeMillis() - stepStart);
 
-            // Update step log
-            flowStore.updateStepLog(stepLogId, result.updatedData(),
-                result.status(), result.errorMessage(), result.errorCode(), stepDuration);
+            if (stepLogId != null) {
+                flowStore.updateStepLog(stepLogId, result.updatedData(),
+                    result.status(), result.errorMessage(), result.errorCode(), stepDuration);
+            } else {
+                logCompletedStep(context, stateId, currentState, stepInput, result, stepDuration);
+            }
 
             // Record step metrics
             String resource = (currentState instanceof StateDefinition.TaskState t) ? t.resource() : null;

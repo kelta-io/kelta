@@ -7,6 +7,20 @@ const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_ATTEMPTS = 150;
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
+export const STEP_LOGGING_LEVELS = ['FULL', 'ERRORS_ONLY', 'NONE'] as const;
+
+const STEP_LOGGING_OPTION = {
+  flag: '--step-logging <level>',
+  description:
+    'FULL (every step with snapshots) | ERRORS_ONLY (snapshots only for a failed step) | NONE (only a failed step)',
+};
+
+/** Case-insensitive `--step-logging`; anything outside the three levels fails before the request. */
+const stepLoggingInput = z.preprocess(
+  (value) => (typeof value === 'string' ? value.trim().toUpperCase() : value),
+  z.enum(STEP_LOGGING_LEVELS).optional()
+);
+
 interface ExecutionBody {
   data?: { id?: string; attributes?: { status?: string } };
 }
@@ -28,6 +42,7 @@ const list = defineCommand({
         { key: 'name', header: 'NAME' },
         { key: 'flowType', header: 'TYPE' },
         { key: 'active', header: 'ACTIVE' },
+        { key: 'stepLogging', header: 'STEP LOGGING' },
       ],
     };
   },
@@ -59,6 +74,7 @@ const create = defineCommand({
     { flag: '--description <text>', description: 'Description' },
     { flag: '--trigger-config <json>', description: 'Trigger config as JSON, @file, or -' },
     { flag: '--active', description: 'Create the flow active (default: inactive)' },
+    { ...STEP_LOGGING_OPTION, description: `${STEP_LOGGING_OPTION.description} (default: FULL)` },
   ],
   input: z.object({
     name: z.string().min(1),
@@ -67,6 +83,7 @@ const create = defineCommand({
     description: z.string().optional(),
     triggerConfig: z.string().optional(),
     active: z.boolean().default(false),
+    stepLogging: stepLoggingInput,
   }),
   handler: async (ctx, input) => {
     const attributes: Record<string, unknown> = {
@@ -77,6 +94,7 @@ const create = defineCommand({
     };
     if (input.description) attributes.description = input.description;
     if (input.triggerConfig) attributes.triggerConfig = readDataArgument(input.triggerConfig);
+    if (input.stepLogging) attributes.stepLogging = input.stepLogging;
     const response = await ctx.client
       .getAxiosInstance()
       .post<{ data?: { id?: string } }>('/api/flows', {
@@ -98,18 +116,21 @@ const update = defineCommand({
   options: [
     { flag: '--active <bool>', description: 'true|false' },
     { flag: '--definition <json>', description: 'Definition as JSON, @file, or -' },
+    STEP_LOGGING_OPTION,
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
   input: z.object({
     flowId: z.string().min(1),
     active: z.enum(['true', 'false']).optional(),
     definition: z.string().optional(),
+    stepLogging: stepLoggingInput,
     data: z.string().optional(),
   }),
   handler: async (ctx, input) => {
     const attributes: Record<string, unknown> = {};
     if (input.active !== undefined) attributes.active = input.active === 'true';
     if (input.definition) attributes.definition = readDataArgument(input.definition);
+    if (input.stepLogging) attributes.stepLogging = input.stepLogging;
     if (input.data) Object.assign(attributes, readDataArgument(input.data));
     const response = await ctx.client
       .getAxiosInstance()
