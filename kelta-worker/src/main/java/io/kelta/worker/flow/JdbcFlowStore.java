@@ -3,12 +3,15 @@ package io.kelta.worker.flow;
 import io.kelta.runtime.flow.FlowExecutionData;
 import io.kelta.runtime.flow.FlowStepLogData;
 import io.kelta.runtime.flow.FlowStore;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -20,6 +23,13 @@ import java.util.*;
  * <p>
  * Uses direct SQL queries via {@link JdbcTemplate} for performance and simplicity.
  * JSON columns are serialized/deserialized via {@link ObjectMapper}.
+ * <p>
+ * Step-log snapshots are capped at {@code maxSnapshotBytes}: the engine logs the whole
+ * flow state as each step's input and output, so a flow that carries a large payload
+ * through many steps writes it twice per step. Over the cap, the persisted snapshot is a
+ * small marker ({@code _truncated}, the original byte count and the top-level keys); the
+ * running flow still sees its full state. Execution {@code state_data} is never capped —
+ * it is what a WAITING flow resumes from.
  *
  * @since 1.0.0
  */
@@ -28,12 +38,38 @@ public class JdbcFlowStore implements FlowStore {
     private static final Logger log = LoggerFactory.getLogger(JdbcFlowStore.class);
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
 
+    /** Default step-log snapshot cap: 64 KiB of serialized JSON. */
+    public static final int DEFAULT_MAX_SNAPSHOT_BYTES = 65_536;
+    static final int MAX_MARKER_KEYS = 50;
+
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final int maxSnapshotBytes;
+    private final Counter snapshotBytes;
+    private final Counter snapshotsTruncated;
 
     public JdbcFlowStore(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+        this(jdbcTemplate, objectMapper, DEFAULT_MAX_SNAPSHOT_BYTES, null);
+    }
+
+    /**
+     * @param maxSnapshotBytes step-log snapshot cap in bytes of serialized JSON; {@code <= 0} disables it
+     * @param meterRegistry    optional; when present, records bytes written and snapshots truncated
+     */
+    public JdbcFlowStore(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
+                         int maxSnapshotBytes, MeterRegistry meterRegistry) {
         this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate);
         this.objectMapper = Objects.requireNonNull(objectMapper);
+        this.maxSnapshotBytes = maxSnapshotBytes;
+        this.snapshotBytes = meterRegistry == null ? null
+            : Counter.builder("kelta_flow_step_log_bytes")
+                .description("Bytes of step-log snapshot JSON written to flow_step_log, after the cap")
+                .baseUnit("bytes")
+                .register(meterRegistry);
+        this.snapshotsTruncated = meterRegistry == null ? null
+            : Counter.builder("kelta_flow_step_log_snapshots_truncated")
+                .description("Step-log snapshots replaced by a marker because they exceeded the cap")
+                .register(meterRegistry);
     }
 
     // -------------------------------------------------------------------------
@@ -130,7 +166,7 @@ public class JdbcFlowStore implements FlowStore {
                     NOW(), CASE WHEN ? IN ('SUCCEEDED', 'FAILED', 'SKIPPED') THEN NOW() ELSE NULL END)
             """,
             id, executionId, stateId, stateName, stateType, status,
-            toJson(inputSnapshot), toJson(outputSnapshot),
+            snapshotJson(inputSnapshot), snapshotJson(outputSnapshot),
             errorMessage, errorCode, attemptNumber, durationMs, status);
 
         return id;
@@ -145,7 +181,7 @@ public class JdbcFlowStore implements FlowStore {
                 error_code = ?, duration_ms = ?, completed_at = NOW(), updated_at = NOW()
             WHERE id = ?
             """,
-            toJson(outputSnapshot), status, errorMessage, errorCode, durationMs, stepLogId);
+            snapshotJson(outputSnapshot), status, errorMessage, errorCode, durationMs, stepLogId);
     }
 
     @Override
@@ -353,6 +389,34 @@ public class JdbcFlowStore implements FlowStore {
     // -------------------------------------------------------------------------
     // JSON Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Serializes a step-log snapshot, replacing it with a marker when it exceeds the cap.
+     */
+    String snapshotJson(Map<String, Object> snapshot) {
+        String json = toJson(snapshot);
+        if (json == null) {
+            return null;
+        }
+        int bytes = json.getBytes(StandardCharsets.UTF_8).length;
+        if (maxSnapshotBytes > 0 && bytes > maxSnapshotBytes) {
+            List<String> keys = new ArrayList<>(new TreeSet<>(snapshot.keySet()));
+            Map<String, Object> marker = new LinkedHashMap<>();
+            marker.put("_truncated", true);
+            marker.put("bytes", bytes);
+            marker.put("maxBytes", maxSnapshotBytes);
+            marker.put("keys", keys.size() > MAX_MARKER_KEYS ? keys.subList(0, MAX_MARKER_KEYS) : keys);
+            json = toJson(marker);
+            bytes = json.getBytes(StandardCharsets.UTF_8).length;
+            if (snapshotsTruncated != null) {
+                snapshotsTruncated.increment();
+            }
+        }
+        if (snapshotBytes != null) {
+            snapshotBytes.increment(bytes);
+        }
+        return json;
+    }
 
     private String toJson(Map<String, Object> map) {
         if (map == null) {

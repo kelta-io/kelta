@@ -20,9 +20,11 @@ import io.kelta.runtime.workflow.module.ModuleRegistry;
 import io.kelta.worker.flow.JdbcFlowStore;
 import io.kelta.worker.handler.SubmitForApprovalActionHandler;
 import io.kelta.worker.service.ApprovalService;
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -81,8 +83,12 @@ public class FlowConfig {
     // ---------------------------------------------------------------------------
 
     @Bean
-    public FlowStore flowStore(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
-        return new JdbcFlowStore(jdbcTemplate, objectMapper);
+    public FlowStore flowStore(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
+                               ObjectProvider<MeterRegistry> meterRegistry,
+                               @Value("${kelta.flow.step-log.max-snapshot-bytes:"
+                                   + JdbcFlowStore.DEFAULT_MAX_SNAPSHOT_BYTES + "}") int maxSnapshotBytes) {
+        log.info("Flow step-log snapshot cap: {} bytes", maxSnapshotBytes);
+        return new JdbcFlowStore(jdbcTemplate, objectMapper, maxSnapshotBytes, meterRegistry.getIfAvailable());
     }
 
     @Bean
