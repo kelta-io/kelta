@@ -65,6 +65,10 @@ import java.util.Map;
  * own bucket, so a burst on one federation endpoint does not spend another's budget,
  * nor any portal budget.
  *
+ * <p><b>Password reset.</b> {@code /forgot-password}, {@code /reset-password} and the JSON
+ * {@code /auth/password/reset-request} and {@code /auth/password/reset} are budgeted from
+ * {@code kelta.auth.rate-limit.password-reset-paths}, likewise separate.
+ *
  * <p><b>Client IP.</b> With {@code kelta.security.trusted-proxies} set (CIDRs or bare
  * addresses), the same rule as the gateway's {@code ClientIpResolver}: forwarding headers
  * count only when the socket peer is a trusted proxy, and the client is the right-most
@@ -93,7 +97,7 @@ public class PortalPublicRateLimitFilter extends OncePerRequestFilter {
      * and {@code /portal/login/verify}; that is fine — clicking a link you were
      * emailed is well inside a budget of 10 a minute.
      */
-    static final String DEFAULT_IP_PATHS =
+    public static final String DEFAULT_IP_PATHS =
             "/portal/api/signup=5,/portal/api/login/request=10,/portal/api/challenge=30,"
             + "/portal/login=10";
 
@@ -108,10 +112,19 @@ public class PortalPublicRateLimitFilter extends OncePerRequestFilter {
      * because Spring also serves the aggregate {@code /saml2/metadata}; Spring's metadata
      * resolver also answers the older {@code /saml2/service-provider-metadata/} form.
      */
-    static final String DEFAULT_FEDERATION_PATHS =
+    public static final String DEFAULT_FEDERATION_PATHS =
             "/oauth2/authorization/=60,/login/oauth2/code/=60,/saml2/authenticate/=60,"
             + "/saml2/metadata=60,/saml2/service-provider-metadata/=60,/login/saml2/sso/=60,"
             + "/logout/saml2/slo/=60";
+
+    /**
+     * The signed-out password reset (the pages and their JSON equivalents). Requesting a link
+     * mails the address, so it is tight; the reset page is opened from the email and then
+     * posted, perhaps more than once if the password does not meet the tenant's policy. The
+     * longest prefix wins, so {@code /auth/password/reset} does not count the request endpoint.
+     */
+    public static final String DEFAULT_PASSWORD_RESET_PATHS =
+            "/auth/password/reset-request=5,/auth/password/reset=10,/forgot-password=10,/reset-password=20";
 
     /** Budget for {@code GET /login} with {@code tenant}/{@code idp_hint}; 0 disables it. */
     static final int DEFAULT_LOGIN_PAGE_LIMIT = 60;
@@ -144,12 +157,14 @@ public class PortalPublicRateLimitFilter extends OncePerRequestFilter {
             @Value("${kelta.auth.rate-limit.ip-paths:" + DEFAULT_IP_PATHS + "}") List<String> ipPaths,
             @Value("${kelta.auth.rate-limit.federation-paths:" + DEFAULT_FEDERATION_PATHS + "}")
             List<String> federationPaths,
+            @Value("${kelta.auth.rate-limit.password-reset-paths:" + DEFAULT_PASSWORD_RESET_PATHS + "}")
+            List<String> passwordResetPaths,
             @Value("${kelta.auth.rate-limit.login-page-limit:" + DEFAULT_LOGIN_PAGE_LIMIT + "}")
             int loginPageLimit,
             @Value("${kelta.auth.rate-limit.trusted-proxy-count:1}") int trustedProxyCount,
             @Value("${kelta.security.trusted-proxies:}") List<String> trustedProxies) {
         this.redisTemplate = redisTemplate;
-        this.pathBudgets = parsePathBudgets(concat(ipPaths, federationPaths));
+        this.pathBudgets = parsePathBudgets(concat(concat(ipPaths, federationPaths), passwordResetPaths));
         this.loginPageLimit = Math.max(0, loginPageLimit);
         this.trustedProxyCount = Math.max(0, trustedProxyCount);
         this.trustedProxies = parseTrustedProxies(trustedProxies);

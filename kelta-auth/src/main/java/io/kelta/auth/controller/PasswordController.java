@@ -1,9 +1,8 @@
 package io.kelta.auth.controller;
 
-import io.kelta.auth.config.AuthProperties;
 import io.kelta.auth.model.KeltaUserDetails;
 import io.kelta.auth.service.PasswordPolicyService;
-import io.kelta.auth.service.WorkerClient;
+import io.kelta.auth.service.PasswordResetService;
 import io.kelta.auth.session.UserSessionRevoker;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -24,7 +23,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/auth/password")
@@ -34,24 +32,24 @@ public class PasswordController {
 
     private final JdbcTemplate jdbcTemplate;
     private final PasswordEncoder passwordEncoder;
-    private final WorkerClient workerClient;
     private final PasswordPolicyService policyService;
     private final UserSessionRevoker sessionRevoker;
-    private final String uiBaseUrl;
+    private final PasswordResetService resetService;
 
     public PasswordController(JdbcTemplate jdbcTemplate,
                               PasswordEncoder passwordEncoder,
-                              WorkerClient workerClient,
                               PasswordPolicyService policyService,
                               UserSessionRevoker sessionRevoker,
-                              AuthProperties authProperties) {
+                              PasswordResetService resetService) {
         this.jdbcTemplate = jdbcTemplate;
         this.passwordEncoder = passwordEncoder;
-        this.workerClient = workerClient;
         this.policyService = policyService;
         this.sessionRevoker = sessionRevoker;
-        this.uiBaseUrl = authProperties.getUiBaseUrl();
+        this.resetService = resetService;
     }
+
+    private static final Map<String, String> RESET_REQUESTED = Map.of("status", "ok",
+            "message", "If an account exists with that email, a reset link has been sent.");
 
     public record ChangePasswordRequest(
             @NotBlank String currentPassword,
@@ -122,7 +120,7 @@ public class PasswordController {
         log.info("Password changed for user {} (tenant {})", account.userId(), account.tenantId());
         // Every other device signs in again with the new password; this session stays signed in.
         sessionRevoker.signOutElsewhere(account.userId(), currentSessionId(httpRequest));
-        sendPasswordChangedEmail(account.userId());
+        resetService.sendPasswordChangedEmail(account.userId());
         return ResponseEntity.ok(Map.of("status", "ok"));
     }
 
@@ -166,140 +164,30 @@ public class PasswordController {
     }
 
     /**
-     * Issues an email-link reset token for each active account with this email address. The
-     * same address can belong to users in several tenants; each gets its own token, stored on
-     * that user's credential only and mailed with that tenant's name, so a token always resets
-     * exactly one user.
+     * Mails a reset link to each active account with this email address
+     * ({@link PasswordResetService#requestReset}). Open to signed-out callers, CSRF-exempt and
+     * rate limited per IP; always the same answer, so the response does not tell whether the
+     * address has an account.
      */
     @PostMapping("/reset-request")
     public ResponseEntity<Map<String, String>> requestPasswordReset(
-            @Valid @RequestBody ResetRequestBody request) {
-
-        List<Map<String, Object>> accounts = jdbcTemplate.queryForList(
-                "SELECT pu.id, pu.tenant_id, pu.first_name, t.name AS tenant_name "
-                        + "FROM platform_user pu JOIN user_credential uc ON uc.user_id = pu.id "
-                        + "JOIN tenant t ON t.id = pu.tenant_id "
-                        + "WHERE pu.email = ? AND pu.status = 'ACTIVE'",
-                request.email());
-
-        Timestamp expiresAt = Timestamp.from(Instant.now().plusSeconds(3600)); // 1 hour
-        for (Map<String, Object> account : accounts) {
-            String userId = (String) account.get("id");
-            // A new token replaces any earlier one for this user.
-            String resetToken = UUID.randomUUID().toString();
-            int updated = jdbcTemplate.update(
-                    "UPDATE user_credential SET reset_token = ?, reset_token_expires_at = ?, updated_at = ? "
-                            + "WHERE user_id = ?",
-                    resetToken, expiresAt, now(), userId);
-            if (updated == 1) {
-                log.info("Password reset requested for user {} (tenant {})", userId, account.get("tenant_id"));
-                sendPasswordResetEmail(request.email(), account, resetToken);
-            }
-        }
-
-        // Always the same answer, so the response does not tell whether the address has an account.
-        return ResponseEntity.ok(Map.of("status", "ok",
-                "message", "If an account exists with that email, a reset link has been sent."));
+            @Valid @RequestBody ResetRequestBody request,
+            HttpServletRequest httpRequest) {
+        resetService.requestReset(request.email(), httpRequest);
+        return ResponseEntity.ok(RESET_REQUESTED);
     }
 
+    /** Sets a new password with an emailed reset token ({@link PasswordResetService#reset}). */
     @PostMapping("/reset")
     public ResponseEntity<Map<String, String>> resetPassword(
             @Valid @RequestBody ResetPasswordRequest request,
             HttpServletRequest httpRequest) {
-
-        // Validate reset token
-        var results = jdbcTemplate.queryForList(
-                "SELECT uc.user_id, uc.reset_token_expires_at FROM user_credential uc " +
-                        "WHERE uc.reset_token = ?",
-                request.token()
-        );
-
-        // A token belongs to exactly one user; anything else is not a usable token.
-        if (results.size() != 1) {
-            if (results.size() > 1) {
-                log.warn("Reset token matches {} credentials — treating as invalid", results.size());
-            }
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset token"));
-        }
-
-        var row = results.get(0);
-        // Defensive: a row with a reset_token but no expires_at is an invariant
-        // violation. Treat it as invalid rather than NPE on the .toInstant() cast.
-        java.sql.Timestamp expiresTs = (java.sql.Timestamp) row.get("reset_token_expires_at");
-        if (expiresTs == null) {
-            log.warn("Reset token row has null expires_at — treating as invalid (user_id={})",
-                    row.get("user_id"));
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset token"));
-        }
-        Instant expiresAt = expiresTs.toInstant();
-        if (Instant.now().isAfter(expiresAt)) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset token"));
-        }
-
-        // Update password and clear reset token — on that one user, and only while the token is
-        // still theirs (a token is used once).
-        String userId = (String) row.get("user_id");
-        String newHash = passwordEncoder.encode(request.newPassword());
-
-        int updated = jdbcTemplate.update(
-                "UPDATE user_credential SET password_hash = ?, password_changed_at = ?, " +
-                        "reset_token = NULL, reset_token_expires_at = NULL, " +
-                        "force_change_on_login = false, failed_attempts = 0, locked_until = NULL, " +
-                        "updated_at = ? WHERE user_id = ? AND reset_token = ?",
-                newHash, now(), now(), userId, request.token()
-        );
-        if (updated != 1) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset token"));
-        }
-
-        log.info("Password reset completed for user_id {}", userId);
-        sessionRevoker.signOutElsewhere(userId, currentSessionId(httpRequest));
-        sendPasswordChangedEmail(userId);
-        return ResponseEntity.ok(Map.of("status", "ok"));
-    }
-
-    private void sendPasswordResetEmail(String email, Map<String, Object> account, String resetToken) {
-        try {
-            String tenantId   = (String) account.get("tenant_id");
-            String firstName  = (String) account.getOrDefault("first_name", "");
-            String tenantName = (String) account.getOrDefault("tenant_name", "Kelta");
-
-            String actionUrl = uiBaseUrl + "/reset-password?token=" + resetToken + "&email=" + email;
-            workerClient.sendTemplateEmail(tenantId, email, "user.password_reset",
-                    Map.of(
-                            "tenantName", tenantName == null ? "Kelta" : tenantName,
-                            "firstName", firstName == null ? "" : firstName,
-                            "actionUrl", actionUrl,
-                            "expiresIn", "1 hour"),
-                    "PASSWORD_RESET", (String) account.get("id"));
-            log.info("Password reset email queued for user {}", account.get("id"));
-        } catch (Exception e) {
-            log.error("Failed to send password reset email for user {}: {}", account.get("id"), e.getMessage());
-        }
-    }
-
-    private void sendPasswordChangedEmail(String userId) {
-        try {
-            var rows = jdbcTemplate.queryForList(
-                    "SELECT pu.email, pu.first_name, pu.tenant_id, t.name AS tenant_name "
-                            + "FROM platform_user pu JOIN tenant t ON t.id = pu.tenant_id "
-                            + "WHERE pu.id = ?",
-                    userId
-            );
-            if (rows.isEmpty()) return;
-            var row = rows.get(0);
-            workerClient.sendTemplateEmail(
-                    (String) row.get("tenant_id"),
-                    (String) row.get("email"),
-                    "user.password_changed",
-                    Map.of(
-                            "tenantName", row.getOrDefault("tenant_name", "Kelta"),
-                            "firstName",  row.getOrDefault("first_name", ""),
-                            "changedAt",  Instant.now().toString(),
-                            "ipAddress",  "unknown"),
-                    "PASSWORD_CHANGED", userId);
-        } catch (Exception e) {
-            log.warn("Failed to send password-changed notification: {}", e.getMessage());
-        }
+        return switch (resetService.reset(request.token(), request.newPassword(), currentSessionId(httpRequest))) {
+            case PasswordResetService.ResetResult.Done done -> ResponseEntity.ok(Map.of("status", "ok"));
+            case PasswordResetService.ResetResult.InvalidToken invalid ->
+                    ResponseEntity.badRequest().body(Map.of("error", invalid.message()));
+            case PasswordResetService.ResetResult.Rejected rejected ->
+                    ResponseEntity.badRequest().body(Map.of("error", rejected.message()));
+        };
     }
 }

@@ -123,3 +123,30 @@ VALUES ('test-user-1', 'test-tenant-1', 'admin@test.com', 'admin', 'Test', 'Admi
 -- password: 'password123'
 INSERT INTO user_credential (id, user_id, password_hash)
 VALUES ('test-cred-1', 'test-user-1', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy');
+
+CREATE TABLE IF NOT EXISTS password_policy (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    min_length INTEGER DEFAULT 8 NOT NULL,
+    max_length INTEGER DEFAULT 128 NOT NULL,
+    require_uppercase BOOLEAN DEFAULT FALSE NOT NULL,
+    require_lowercase BOOLEAN DEFAULT FALSE NOT NULL,
+    require_digit BOOLEAN DEFAULT FALSE NOT NULL,
+    require_special BOOLEAN DEFAULT FALSE NOT NULL,
+    history_count INTEGER DEFAULT 3 NOT NULL,
+    dictionary_check BOOLEAN DEFAULT TRUE NOT NULL,
+    personal_data_check BOOLEAN DEFAULT TRUE NOT NULL,
+    lockout_threshold INTEGER DEFAULT 5 NOT NULL,
+    lockout_duration_minutes INTEGER DEFAULT 30 NOT NULL,
+    max_age_days INTEGER,
+    mfa_required BOOLEAN DEFAULT FALSE NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS password_history (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    password_hash VARCHAR(500) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

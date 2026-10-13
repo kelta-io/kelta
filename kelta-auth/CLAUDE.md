@@ -159,12 +159,51 @@ by tenant + user id:
   by id + tenant, requires `force_change_on_login` and the current password, and updates only that
   credential (`WHERE user_id = ? AND force_change_on_login = true AND <user is in the tenant>`).
   A session without the id + tenant goes back to `/login`.
-- Email-link reset: `/auth/password/reset-request` issues one token per active account with the
-  address, stored on that user only and mailed with that tenant's name; `/auth/password/reset`
-  accepts a token only when it matches exactly one credential and clears it in the same
+- Email-link reset (`service/PasswordResetService`): a request issues one token per active account
+  with the address, stored on that user only and mailed with that tenant's name; a reset accepts a
+  token only when it matches exactly one credential and clears it in the same
   `UPDATE … WHERE user_id = ? AND reset_token = ?` (single use).
 - `/auth/password/change` resolves the signed-in principal by tenant + id.
 Test on Postgres: `BaselineAdminPasswordIntegrationTest.sameEmailInAnotherTenantIsUntouched`.
+
+Every way to set a password — `/auth/password/change`, the email-link reset and the forced
+`/change-password` — checks the new one against the tenant's policy (`PasswordPolicyService`:
+length, complexity, dictionary, personal data) and history, and records it in the history.
+
+### Forgot password (signed out)
+`service/PasswordResetService` does the work for two front doors, both `permitAll`:
+- Pages (`controller/ForgotPasswordController`, templates `forgot-password.html`,
+  `reset-password.html`; the login page links to it): `GET/POST /forgot-password`,
+  `GET /reset-password?token=…` (the emailed link) and `POST /reset-password`. Form posts with the
+  session's CSRF token like the login form. Every handler takes the `HttpSession` so it exists
+  before Thymeleaf writes the CSRF field (the link is usually opened with no session, and a session
+  cannot be created once the response is committed). After a reset a browser with a saved
+  authorization request goes to `/login?passwordReset` (sign-in resumes the app); otherwise the page
+  links to the tenant's app (`ui-base-url/<slug>/app`).
+- JSON for an external frontend (`PasswordController`): `POST /auth/password/reset-request`
+  `{email}` and `POST /auth/password/reset` `{token, newPassword}` — **CSRF-exempt**; the request
+  answers the same for any address and the reset needs the emailed token.
+Rules:
+- Enumeration-safe: the request answers the same whether or not the address has an account; the
+  email goes out on a separate (virtual) thread and a custom-domain lookup runs either way, so
+  timing does not tell either.
+- The emailed link opens on the request's host only when that host serves sign-in for the
+  account: `localhost`, `*.localhost`, `kelta.io`, `*.kelta.io`, the host of `issuer-uri` or
+  `ui-base-url`, or a verified custom domain of the account's own tenant (`AuthDomainResolver`).
+  Otherwise the configured issuer, else no email. Never build the link from the `Host` header
+  unchecked — a forged `Host` would mail the user a working link to the requester's site.
+- The pages set `<meta name="referrer" content="same-origin">` so the token in the URL never
+  leaves as a referrer. Never `no-referrer` on a page with a form: the browser then posts
+  `Origin: null`, which the CORS filter refuses ("Invalid CORS request", 403). MockMvc sends no
+  `Origin` unless a test adds one (`PasswordResetFlowTest.formPostsCarryTheBrowsersOrigin`).
+- A password the policy refuses leaves the token usable; a reset clears the force-change flag and
+  any lockout and ends the user's other sessions (`UserSessionRevoker`).
+- Rate limited per IP (`kelta.auth.rate-limit.password-reset-paths`, below).
+- Worker invites (`UserInviteService`) write the same `reset_token` column (7 days,
+  `force_change_on_login = true`), so an invite token also works on `/reset-password`.
+Tests: `PasswordResetFlowTest` (real chains, session filter, rate limit, real policy and
+templates), `PasswordResetServiceTest`, `BaselineAdminPasswordIntegrationTest` (Postgres, history),
+e2e `tests/auth/forgot-password.spec.ts` (Mailpit).
 
 ### Internal endpoint (kelta-worker → kelta-auth)
 `POST /internal/tenants/{tenantId}/users/{userId}/revoke-sessions`
@@ -215,7 +254,10 @@ plain surefire here and skip without Docker.
   (`kelta.auth.rate-limit.federation-paths`, separate from the portal `ip-paths` so overriding one
   keeps the other). `GET /login` with a non-blank `tenant` or `idp_hint` has its own bucket
   (`kelta.auth.rate-limit.login-page-limit`, 60; 0 disables); the password form POST to `/login`
-  is never counted. Paths match on the decoded servlet path, so encoded variants share a bucket.
+  is never counted. The signed-out password reset has its own list,
+  `kelta.auth.rate-limit.password-reset-paths` (`/auth/password/reset-request=5`,
+  `/auth/password/reset=10`, `/forgot-password=10`, `/reset-password=20`).
+  Paths match on the decoded servlet path, so encoded variants share a bucket.
   Client IP and fail-open semantics are the portal limiter's (`kelta.security.trusted-proxies`).
   The defaults live in the filter and in `application.yml`; `PortalPublicRateLimitFilterTest`
   checks they agree.

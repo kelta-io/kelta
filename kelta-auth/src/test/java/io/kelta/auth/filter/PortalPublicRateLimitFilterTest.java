@@ -39,14 +39,18 @@ class PortalPublicRateLimitFilterTest {
             List.of(PortalPublicRateLimitFilter.DEFAULT_IP_PATHS.split(","));
     private static final List<String> DEFAULT_FEDERATION_PATHS =
             List.of(PortalPublicRateLimitFilter.DEFAULT_FEDERATION_PATHS.split(","));
+    private static final List<String> DEFAULT_PASSWORD_RESET_PATHS =
+            List.of(PortalPublicRateLimitFilter.DEFAULT_PASSWORD_RESET_PATHS.split(","));
 
     private PortalPublicRateLimitFilter filter(int trustedProxies) {
         return new PortalPublicRateLimitFilter(redisTemplate, DEFAULT_IP_PATHS, DEFAULT_FEDERATION_PATHS,
+                DEFAULT_PASSWORD_RESET_PATHS,
                 PortalPublicRateLimitFilter.DEFAULT_LOGIN_PAGE_LIMIT, trustedProxies, List.of());
     }
 
     private PortalPublicRateLimitFilter trustingProxies(String... cidrs) {
         return new PortalPublicRateLimitFilter(redisTemplate, DEFAULT_IP_PATHS, DEFAULT_FEDERATION_PATHS,
+                DEFAULT_PASSWORD_RESET_PATHS,
                 PortalPublicRateLimitFilter.DEFAULT_LOGIN_PAGE_LIMIT, 1, List.of(cidrs));
     }
 
@@ -487,7 +491,7 @@ class PortalPublicRateLimitFilterTest {
         void loginPageRuleCanBeDisabled() throws Exception {
             countingRedis();
             var f = new PortalPublicRateLimitFilter(redisTemplate, DEFAULT_IP_PATHS, DEFAULT_FEDERATION_PATHS,
-                    0, 0, List.of());
+                    DEFAULT_PASSWORD_RESET_PATHS, 0, 0, List.of());
             MockHttpServletRequest request = get("/login", "198.51.100.1");
             request.setParameter("tenant", "acme");
 
@@ -500,7 +504,8 @@ class PortalPublicRateLimitFilterTest {
         @DisplayName("overriding the portal paths keeps the federation budgets")
         void portalOverrideKeepsFederation() {
             var f = new PortalPublicRateLimitFilter(redisTemplate, List.of("/portal/api/signup=1"),
-                    DEFAULT_FEDERATION_PATHS, PortalPublicRateLimitFilter.DEFAULT_LOGIN_PAGE_LIMIT, 1, List.of());
+                    DEFAULT_FEDERATION_PATHS, DEFAULT_PASSWORD_RESET_PATHS,
+                    PortalPublicRateLimitFilter.DEFAULT_LOGIN_PAGE_LIMIT, 1, List.of());
 
             assertThat(f.matchPath("/oauth2/authorization/t:p")).isEqualTo("/oauth2/authorization/");
         }
@@ -514,8 +519,59 @@ class PortalPublicRateLimitFilterTest {
 
             assertThat(yml).contains("federation-paths: ${KELTA_AUTH_RATE_LIMIT_FEDERATION_PATHS:"
                     + PortalPublicRateLimitFilter.DEFAULT_FEDERATION_PATHS + "}");
+            assertThat(yml).contains("password-reset-paths: ${KELTA_AUTH_RATE_LIMIT_PASSWORD_RESET_PATHS:"
+                    + PortalPublicRateLimitFilter.DEFAULT_PASSWORD_RESET_PATHS + "}");
             assertThat(yml).contains("login-page-limit: ${KELTA_AUTH_RATE_LIMIT_LOGIN_PAGE_LIMIT:"
                     + PortalPublicRateLimitFilter.DEFAULT_LOGIN_PAGE_LIMIT + "}");
+        }
+    }
+
+    @Nested
+    @DisplayName("Password reset endpoints")
+    class PasswordResetEndpoints {
+
+        private int status(PortalPublicRateLimitFilter f, String method, String uri) throws Exception {
+            MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+            request.setRequestURI(uri);
+            request.setRemoteAddr("198.51.100.7");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            f.doFilter(request, response, chain);
+            return response.getStatus();
+        }
+
+        @Test
+        @DisplayName("each reset path is its own bucket; the request endpoint is not counted as the reset")
+        void eachPathIsItsOwnBucket() {
+            PortalPublicRateLimitFilter f = filter(0);
+
+            assertThat(f.matchPath("/auth/password/reset-request")).isEqualTo("/auth/password/reset-request");
+            assertThat(f.matchPath("/auth/password/reset")).isEqualTo("/auth/password/reset");
+            assertThat(f.matchPath("/forgot-password")).isEqualTo("/forgot-password");
+            assertThat(f.matchPath("/reset-password")).isEqualTo("/reset-password");
+            assertThat(f.matchPath("/auth/password/change")).as("signed-in change").isNull();
+        }
+
+        @Test
+        @DisplayName("the sixth reset request in a window from one IP gets 429")
+        void requestEndpointIsLimited() throws Exception {
+            countingRedis();
+            PortalPublicRateLimitFilter f = filter(0);
+
+            for (int i = 0; i < 5; i++) {
+                assertThat(status(f, "POST", "/auth/password/reset-request")).isEqualTo(200);
+            }
+            assertThat(status(f, "POST", "/auth/password/reset-request")).isEqualTo(429);
+            assertThat(status(f, "POST", "/auth/password/reset")).as("separate bucket").isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("overriding the portal paths keeps the password reset budgets")
+        void portalOverrideKeepsPasswordReset() {
+            var f = new PortalPublicRateLimitFilter(redisTemplate, List.of("/portal/api/signup=1"),
+                    DEFAULT_FEDERATION_PATHS, DEFAULT_PASSWORD_RESET_PATHS,
+                    PortalPublicRateLimitFilter.DEFAULT_LOGIN_PAGE_LIMIT, 1, List.of());
+
+            assertThat(f.matchPath("/forgot-password")).isEqualTo("/forgot-password");
         }
     }
 

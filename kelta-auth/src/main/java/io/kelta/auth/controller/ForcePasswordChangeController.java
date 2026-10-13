@@ -1,6 +1,7 @@
 package io.kelta.auth.controller;
 
 import io.kelta.auth.model.KeltaUserDetails;
+import io.kelta.auth.service.PasswordPolicyService;
 import io.kelta.auth.session.UserSessionRevoker;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -26,8 +27,10 @@ import java.util.Optional;
  * <p>The form-login failure handler ({@code LoginFailureHandler}) starts it with {@link #begin}
  * once the password was verified, recording the signed-in user's tenant and user id in the
  * session. This controller changes exactly that user's password: it re-reads the account by
- * tenant + id, requires the account to still be flagged and the current password to match, and
- * updates only that user's credential. The user's other sessions and refresh tokens end
+ * tenant + id, requires the account to still be flagged and the current password to match, checks
+ * the new password against the tenant's password policy and history ({@link PasswordPolicyService},
+ * as {@code /auth/password/change} does), and updates only that user's credential, recording it in
+ * the history. The user's other sessions and refresh tokens end
  * ({@link UserSessionRevoker}); this browser signs in next with the new password.
  */
 @Controller
@@ -42,7 +45,8 @@ public class ForcePasswordChangeController {
     public static final String SESSION_ATTR_TENANT_ID = "force_change_tenant_id";
 
     private static final String ACCOUNT_SELECT =
-            "SELECT uc.password_hash, uc.force_change_on_login FROM platform_user pu "
+            "SELECT uc.password_hash, uc.force_change_on_login, pu.email, pu.first_name, pu.last_name "
+                    + "FROM platform_user pu "
                     + "JOIN user_credential uc ON uc.user_id = pu.id "
                     + "WHERE pu.id = ? AND pu.tenant_id = ? AND pu.status = 'ACTIVE'";
 
@@ -56,12 +60,14 @@ public class ForcePasswordChangeController {
     private final JdbcTemplate jdbcTemplate;
     private final PasswordEncoder passwordEncoder;
     private final UserSessionRevoker sessionRevoker;
+    private final PasswordPolicyService policyService;
 
     public ForcePasswordChangeController(JdbcTemplate jdbcTemplate, PasswordEncoder passwordEncoder,
-                                         UserSessionRevoker sessionRevoker) {
+                                         UserSessionRevoker sessionRevoker, PasswordPolicyService policyService) {
         this.jdbcTemplate = jdbcTemplate;
         this.passwordEncoder = passwordEncoder;
         this.sessionRevoker = sessionRevoker;
+        this.policyService = policyService;
     }
 
     /**
@@ -118,10 +124,6 @@ public class ForcePasswordChangeController {
         Pending pending = found.get();
         model.addAttribute("email", pending.email());
 
-        if (newPassword.length() < 8) {
-            model.addAttribute("error", "New password must be at least 8 characters.");
-            return "change-password";
-        }
         if (!newPassword.equals(confirmPassword)) {
             model.addAttribute("error", "New passwords do not match.");
             return "change-password";
@@ -145,9 +147,26 @@ public class ForcePasswordChangeController {
             return "change-password";
         }
 
+        // The tenant's password policy and history, as for a change made while signed in.
+        String firstName = account.get("first_name") instanceof String value ? value : "";
+        String lastName = account.get("last_name") instanceof String value ? value : "";
+        List<String> violations = policyService.validatePassword(newPassword,
+                account.get("email") instanceof String value ? value : pending.email(),
+                (firstName + " " + lastName).trim(), pending.tenantId());
+        if (!violations.isEmpty()) {
+            model.addAttribute("error", String.join("; ", violations));
+            return "change-password";
+        }
+        Optional<String> reused = policyService.checkHistory(pending.userId(), newPassword, pending.tenantId());
+        if (reused.isPresent()) {
+            model.addAttribute("error", reused.get());
+            return "change-password";
+        }
+
         Timestamp now = Timestamp.from(Instant.now());
+        String newHash = passwordEncoder.encode(newPassword);
         int updated = jdbcTemplate.update(CREDENTIAL_UPDATE,
-                passwordEncoder.encode(newPassword), now, now, pending.userId(), pending.tenantId());
+                newHash, now, now, pending.userId(), pending.tenantId());
         clear(session);
         if (updated != 1) {
             log.warn("Forced password change for user {} (tenant {}) updated {} rows",
@@ -155,6 +174,7 @@ public class ForcePasswordChangeController {
             return "redirect:/login";
         }
 
+        policyService.saveToHistory(pending.userId(), newHash, pending.tenantId());
         log.info("Forced password change completed for user {} (tenant {})", pending.userId(), pending.tenantId());
         // Sessions and refresh tokens from before the change end; this browser signs in next.
         sessionRevoker.signOutElsewhere(pending.userId(), session.getId());

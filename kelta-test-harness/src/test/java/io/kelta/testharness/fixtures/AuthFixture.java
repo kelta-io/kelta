@@ -46,8 +46,12 @@ public final class AuthFixture {
      */
     public static final String BOOTSTRAP_ADMIN_PASSWORD = "harness-bootstrap-admin-secret";
 
-    /** Harness-only platform-admin password the fixture chooses when completing the forced change. */
-    public static final String PLATFORM_ADMIN_PASSWORD = "harness-platform-admin-secret";
+    /**
+     * Harness-only platform-admin password the fixture chooses when completing the forced change.
+     * kelta-auth checks it against the default password policy: no dictionary word, nothing of the
+     * admin's name or email.
+     */
+    public static final String PLATFORM_ADMIN_PASSWORD = "harness-platform-Kp7-Wq3-Zt9";
 
     private static final Pattern CSRF_INPUT = Pattern.compile("<input[^>]*name=\"_csrf\"[^>]*>");
     private static final Pattern VALUE_ATTR = Pattern.compile("value=\"([^\"]*)\"");

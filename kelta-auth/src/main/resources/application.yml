@@ -135,6 +135,10 @@ kelta:
       # is its own bucket. Must match PortalPublicRateLimitFilter.DEFAULT_FEDERATION_PATHS
       # (a test checks). Empty disables federation limiting.
       federation-paths: ${KELTA_AUTH_RATE_LIMIT_FEDERATION_PATHS:/oauth2/authorization/=60,/login/oauth2/code/=60,/saml2/authenticate/=60,/saml2/metadata=60,/saml2/service-provider-metadata/=60,/login/saml2/sso/=60,/logout/saml2/slo/=60}
+      # Per-IP budgets for the signed-out password reset: the /forgot-password and /reset-password
+      # pages and the JSON /auth/password/reset-request and /auth/password/reset. Must match
+      # PortalPublicRateLimitFilter.DEFAULT_PASSWORD_RESET_PATHS (a test checks). Empty disables.
+      password-reset-paths: ${KELTA_AUTH_RATE_LIMIT_PASSWORD_RESET_PATHS:/auth/password/reset-request=5,/auth/password/reset=10,/forgot-password=10,/reset-password=20}
       # Budget for GET /login carrying tenant or idp_hint (the requests that resolve
       # registrations); its own bucket, never the password form POST. 0 disables.
       login-page-limit: ${KELTA_AUTH_RATE_LIMIT_LOGIN_PAGE_LIMIT:60}

@@ -1266,6 +1266,15 @@ the pending authorize URL in a hidden `authorize_url` field and
 same-origin `/oauth2/authorize?…` only — landing on a fresh form that says the page expired,
 instead of a dead-end 403.
 
+**Forgot password (signed out).** kelta-auth serves `/forgot-password` (linked from the login
+form) and the emailed `/reset-password?token=…` pages, plus CSRF-exempt JSON
+`POST /auth/password/reset-request` / `POST /auth/password/reset` for an external frontend — all
+`permitAll` and rate limited per IP (`PortalPublicRateLimitFilter`). The request answers the same for
+any address; the link is built only for a host that serves sign-in for that account (platform host,
+configured issuer/UI host, or the tenant's own custom domain), never from an unchecked `Host`. Every
+password write (change, reset, forced change) applies the tenant password policy and history
+(`PasswordPolicyService`). Detail: `kelta-auth/CLAUDE.md` → Forgot password.
+
 **Password change signs the user out elsewhere.** A successful change in kelta-auth
 (`/auth/password/change`, the email-link `/auth/password/reset`, the forced `/change-password`)
 calls `session/UserSessionRevoker`: every other HTTP session of that tenant's user ends (looked up

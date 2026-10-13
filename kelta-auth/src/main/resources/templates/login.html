@@ -172,6 +172,19 @@
             margin-bottom: 1.5rem;
         }
 
+        .forgot-password {
+            display: block;
+            text-align: center;
+            margin-top: 1.25rem;
+            font-size: 0.875rem;
+            color: #818cf8;
+            text-decoration: none;
+        }
+
+        .forgot-password:hover {
+            text-decoration: underline;
+        }
+
         .footer {
             text-align: center;
             margin-top: 1.5rem;
@@ -206,6 +219,10 @@
 
             <div th:if="${param.passwordChanged}" class="alert-success">
                 Password changed successfully. Please sign in with your new password.
+            </div>
+
+            <div th:if="${param.passwordReset}" class="alert-success">
+                Your password was reset. Sign in with your new password.
             </div>
 
             <!-- SSO Provider Buttons (OIDC) -->
@@ -246,6 +263,8 @@
 
                 <button type="submit" class="btn-primary">Sign In</button>
             </form>
+
+            <a th:href="@{/forgot-password}" class="forgot-password">Forgot password?</a>
         </div>
 
         <div class="footer">
