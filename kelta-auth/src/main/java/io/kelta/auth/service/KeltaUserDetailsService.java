@@ -8,6 +8,8 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import java.util.List;
 
@@ -15,6 +17,13 @@ import java.util.List;
 public class KeltaUserDetailsService implements UserDetailsService {
 
     private static final Logger log = LoggerFactory.getLogger(KeltaUserDetailsService.class);
+
+    /**
+     * Request attribute holding the {@link KeltaUserDetails} this request's sign-in loaded. A
+     * sign-in that must change its password fails after the password check with no principal on
+     * the exception; {@code LoginFailureHandler} reads the user (tenant + id) from here.
+     */
+    public static final String LOADED_USER_ATTRIBUTE = KeltaUserDetailsService.class.getName() + ".LOADED_USER";
 
     private final JdbcTemplate jdbcTemplate;
     private final LoginTenantResolver tenantResolver;
@@ -64,7 +73,12 @@ public class KeltaUserDetailsService implements UserDetailsService {
             throw new UsernameNotFoundException("User not found: " + emailOrUsername);
         }
 
-        return users.get(0);
+        KeltaUserDetails user = users.get(0);
+        RequestAttributes request = RequestContextHolder.getRequestAttributes();
+        if (request != null) {
+            request.setAttribute(LOADED_USER_ATTRIBUTE, user, RequestAttributes.SCOPE_REQUEST);
+        }
+        return user;
     }
 
     private org.springframework.jdbc.core.RowMapper<KeltaUserDetails> userDetailsRowMapper() {

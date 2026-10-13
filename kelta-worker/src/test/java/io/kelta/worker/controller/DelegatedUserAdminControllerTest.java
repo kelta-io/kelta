@@ -63,6 +63,7 @@ class DelegatedUserAdminControllerTest {
     @Mock private CerbosPermissionResolver permissionResolver;
     @Mock private UserInviteService userInviteService;
     @Mock private JdbcTemplate jdbcTemplate;
+    @Mock private io.kelta.worker.service.AuthSessionRevocationClient authSessions;
     @Mock private HttpServletRequest request;
 
     private final CollectionDefinition usersDef = CoreSystemCollections.users();
@@ -72,7 +73,7 @@ class DelegatedUserAdminControllerTest {
     @BeforeEach
     void setUp() {
         controller = new DelegatedUserAdminController(delegatedAdminService, scopeRepository,
-                queryEngine, collectionRegistry, permissionResolver, userInviteService, jdbcTemplate);
+                queryEngine, collectionRegistry, permissionResolver, userInviteService, jdbcTemplate, authSessions);
         lenient().when(collectionRegistry.get("users")).thenReturn(usersDef);
     }
 
@@ -477,6 +478,7 @@ class DelegatedUserAdminControllerTest {
                     .containsEntry("status", "reset_initiated")
                     .containsEntry("userId", "user-2");
             verify(jdbcTemplate).update(contains("force_change_on_login = true"), any(), eq("user-2"));
+            verify(authSessions).revokeAfterCommit(TENANT, "user-2");
         }
     }
 }

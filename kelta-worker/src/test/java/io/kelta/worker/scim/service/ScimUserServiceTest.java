@@ -20,6 +20,7 @@ import static org.mockito.Mockito.*;
 class ScimUserServiceTest {
 
     private JdbcTemplate jdbcTemplate;
+    private io.kelta.worker.service.AuthSessionRevocationClient authSessions;
     private ScimUserService service;
 
     private static final String TENANT_ID = "tenant-1";
@@ -28,7 +29,8 @@ class ScimUserServiceTest {
     @BeforeEach
     void setUp() {
         jdbcTemplate = mock(JdbcTemplate.class);
-        service = new ScimUserService(jdbcTemplate, null);
+        authSessions = mock(io.kelta.worker.service.AuthSessionRevocationClient.class);
+        service = new ScimUserService(jdbcTemplate, null, authSessions);
     }
 
     @Test
@@ -80,6 +82,38 @@ class ScimUserServiceTest {
         service.deleteUser(TENANT_ID, "user-1");
 
         verify(jdbcTemplate).update(contains("INACTIVE"), eq(TENANT_ID), eq("user-1"));
+        verify(authSessions).revokeAfterCommit(TENANT_ID, "user-1");
+    }
+
+    @Test
+    @DisplayName("a PATCH that deactivates an active user signs them out of kelta-auth; other patches do not")
+    @SuppressWarnings("unchecked")
+    void patchDeactivationSignsOut() {
+        ScimUser active = new ScimUser();
+        active.setActive(true);
+        ScimUser inactive = new ScimUser();
+        inactive.setActive(false);
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq(TENANT_ID), eq("user-1")))
+                .thenReturn(List.of(active), List.of(inactive));
+
+        service.patchUser(TENANT_ID, "user-1", patch("active", false), BASE_URL);
+
+        verify(authSessions).revokeAfterCommit(TENANT_ID, "user-1");
+
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq(TENANT_ID), eq("user-2")))
+                .thenReturn(List.of(active), List.of(active));
+        service.patchUser(TENANT_ID, "user-2", patch("name.givenName", "Ann"), BASE_URL);
+        verify(authSessions, never()).revokeAfterCommit(TENANT_ID, "user-2");
+    }
+
+    private static ScimPatchOp patch(String path, Object value) {
+        ScimPatchOp.Operation op = new ScimPatchOp.Operation();
+        op.setOp("replace");
+        op.setPath(path);
+        op.setValue(value);
+        ScimPatchOp patch = new ScimPatchOp();
+        patch.setOperations(List.of(op));
+        return patch;
     }
 
     @Test

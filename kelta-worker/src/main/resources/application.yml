@@ -88,6 +88,11 @@ kelta:
     allowed-private-cidrs: ${KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS:}
   auth:
     issuer-uri: ${KELTA_AUTH_ISSUER_URI:https://auth.kelta.io}
+    # kelta-auth's in-cluster address (not the public issuer) for service-to-service calls:
+    # signing a user out of kelta-auth after an admin password reset, deactivation or removal
+    # (AuthSessionRevocationClient, authenticated with kelta.internal.token). Default = the
+    # docker-compose service; set it to the Kubernetes service URL in a cluster.
+    internal-url: ${KELTA_AUTH_INTERNAL_URL:http://kelta-auth:8081}
   external-base-url: ${EXTERNAL_BASE_URL:http://localhost:8080}
   # SMS delivery (MFA verification codes + availability alerts). The default provider only
   # logs; set provider=twilio and the twilio.* secret to send for real (consumer-alerting

@@ -165,33 +165,39 @@ public class PasswordController {
         return session == null ? null : session.getId();
     }
 
+    /**
+     * Issues an email-link reset token for each active account with this email address. The
+     * same address can belong to users in several tenants; each gets its own token, stored on
+     * that user's credential only and mailed with that tenant's name, so a token always resets
+     * exactly one user.
+     */
     @PostMapping("/reset-request")
     public ResponseEntity<Map<String, String>> requestPasswordReset(
             @Valid @RequestBody ResetRequestBody request) {
 
-        // Invalidate any existing reset token before generating a new one
-        jdbcTemplate.update(
-                "UPDATE user_credential SET reset_token = NULL, reset_token_expires_at = NULL " +
-                        "WHERE user_id = (SELECT id FROM platform_user WHERE email = ? AND status = 'ACTIVE')",
-                request.email()
-        );
+        List<Map<String, Object>> accounts = jdbcTemplate.queryForList(
+                "SELECT pu.id, pu.tenant_id, pu.first_name, t.name AS tenant_name "
+                        + "FROM platform_user pu JOIN user_credential uc ON uc.user_id = pu.id "
+                        + "JOIN tenant t ON t.id = pu.tenant_id "
+                        + "WHERE pu.email = ? AND pu.status = 'ACTIVE'",
+                request.email());
 
-        // Generate reset token
-        String resetToken = UUID.randomUUID().toString();
-        Instant expiresAt = Instant.now().plusSeconds(3600); // 1 hour
-
-        int updated = jdbcTemplate.update(
-                "UPDATE user_credential SET reset_token = ?, reset_token_expires_at = ?, updated_at = ? " +
-                        "WHERE user_id = (SELECT id FROM platform_user WHERE email = ? AND status = 'ACTIVE')",
-                resetToken, Timestamp.from(expiresAt), now(), request.email()
-        );
-
-        // Always return success to prevent email enumeration
-        if (updated > 0) {
-            log.info("Password reset requested for {}", request.email());
-            sendPasswordResetEmail(request.email(), resetToken);
+        Timestamp expiresAt = Timestamp.from(Instant.now().plusSeconds(3600)); // 1 hour
+        for (Map<String, Object> account : accounts) {
+            String userId = (String) account.get("id");
+            // A new token replaces any earlier one for this user.
+            String resetToken = UUID.randomUUID().toString();
+            int updated = jdbcTemplate.update(
+                    "UPDATE user_credential SET reset_token = ?, reset_token_expires_at = ?, updated_at = ? "
+                            + "WHERE user_id = ?",
+                    resetToken, expiresAt, now(), userId);
+            if (updated == 1) {
+                log.info("Password reset requested for user {} (tenant {})", userId, account.get("tenant_id"));
+                sendPasswordResetEmail(request.email(), account, resetToken);
+            }
         }
 
+        // Always the same answer, so the response does not tell whether the address has an account.
         return ResponseEntity.ok(Map.of("status", "ok",
                 "message", "If an account exists with that email, a reset link has been sent."));
     }
@@ -208,7 +214,11 @@ public class PasswordController {
                 request.token()
         );
 
-        if (results.isEmpty()) {
+        // A token belongs to exactly one user; anything else is not a usable token.
+        if (results.size() != 1) {
+            if (results.size() > 1) {
+                log.warn("Reset token matches {} credentials — treating as invalid", results.size());
+            }
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset token"));
         }
 
@@ -226,17 +236,21 @@ public class PasswordController {
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset token"));
         }
 
-        // Update password and clear reset token
+        // Update password and clear reset token — on that one user, and only while the token is
+        // still theirs (a token is used once).
         String userId = (String) row.get("user_id");
         String newHash = passwordEncoder.encode(request.newPassword());
 
-        jdbcTemplate.update(
+        int updated = jdbcTemplate.update(
                 "UPDATE user_credential SET password_hash = ?, password_changed_at = ?, " +
                         "reset_token = NULL, reset_token_expires_at = NULL, " +
                         "force_change_on_login = false, failed_attempts = 0, locked_until = NULL, " +
-                        "updated_at = ? WHERE user_id = ?",
-                newHash, now(), now(), userId
+                        "updated_at = ? WHERE user_id = ? AND reset_token = ?",
+                newHash, now(), now(), userId, request.token()
         );
+        if (updated != 1) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset token"));
+        }
 
         log.info("Password reset completed for user_id {}", userId);
         sessionRevoker.signOutElsewhere(userId, currentSessionId(httpRequest));
@@ -244,30 +258,23 @@ public class PasswordController {
         return ResponseEntity.ok(Map.of("status", "ok"));
     }
 
-    private void sendPasswordResetEmail(String email, String resetToken) {
+    private void sendPasswordResetEmail(String email, Map<String, Object> account, String resetToken) {
         try {
-            var rows = jdbcTemplate.queryForList(
-                    "SELECT pu.tenant_id, pu.first_name, t.name AS tenant_name "
-                            + "FROM platform_user pu JOIN tenant t ON t.id = pu.tenant_id "
-                            + "WHERE pu.email = ? AND pu.status = 'ACTIVE'",
-                    email
-            );
-            if (rows.isEmpty()) return;
-            String tenantId   = (String) rows.get(0).get("tenant_id");
-            String firstName  = (String) rows.getFirst().getOrDefault("first_name", "");
-            String tenantName = (String) rows.getFirst().getOrDefault("tenant_name", "Kelta");
+            String tenantId   = (String) account.get("tenant_id");
+            String firstName  = (String) account.getOrDefault("first_name", "");
+            String tenantName = (String) account.getOrDefault("tenant_name", "Kelta");
 
             String actionUrl = uiBaseUrl + "/reset-password?token=" + resetToken + "&email=" + email;
             workerClient.sendTemplateEmail(tenantId, email, "user.password_reset",
                     Map.of(
-                            "tenantName", tenantName,
+                            "tenantName", tenantName == null ? "Kelta" : tenantName,
                             "firstName", firstName == null ? "" : firstName,
                             "actionUrl", actionUrl,
                             "expiresIn", "1 hour"),
-                    "PASSWORD_RESET", null);
-            log.info("Password reset email queued for {}", email);
+                    "PASSWORD_RESET", (String) account.get("id"));
+            log.info("Password reset email queued for user {}", account.get("id"));
         } catch (Exception e) {
-            log.error("Failed to send password reset email to {}: {}", email, e.getMessage());
+            log.error("Failed to send password reset email for user {}: {}", account.get("id"), e.getMessage());
         }
     }
 

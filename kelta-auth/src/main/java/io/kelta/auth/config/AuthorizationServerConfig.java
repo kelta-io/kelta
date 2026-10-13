@@ -38,12 +38,10 @@ import org.springframework.security.oauth2.server.authorization.token.JwtGenerat
 import org.springframework.security.oauth2.server.authorization.token.OAuth2AccessTokenGenerator;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
-import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
-import io.kelta.auth.controller.ForcePasswordChangeController;
 import io.kelta.auth.controller.MfaController;
 import io.kelta.auth.federation.DynamicClientRegistrationRepository;
 import io.kelta.auth.federation.FederatedLoginSuccessHandler;
@@ -173,6 +171,9 @@ public class AuthorizationServerConfig {
                                 "/actuator/health/**",
                                 "/auth/session",
                                 "/auth/direct-login",
+                                // Service-to-service; InternalSessionRevocationController checks
+                                // the internal token itself.
+                                "/internal/**",
                                 "/error",
                                 "/css/**",
                                 "/js/**",
@@ -223,24 +224,16 @@ public class AuthorizationServerConfig {
                             // so the authorization code flow completes and redirects back to the UI.
                             savedRequestHandler.onAuthenticationSuccess(request, response, authentication);
                         })
-                        .failureHandler((request, response, exception) -> {
-                            if (exception.getCause() instanceof CredentialsExpiredException
-                                    || exception instanceof CredentialsExpiredException) {
-                                String email = request.getParameter("username");
-                                request.getSession().setAttribute(
-                                        ForcePasswordChangeController.SESSION_ATTR_EMAIL, email);
-                                response.sendRedirect("/change-password");
-                            } else {
-                                response.sendRedirect("/login?error");
-                            }
-                        })
+                        // A password that must be changed continues at /change-password for the
+                        // user this sign-in loaded (tenant + id), anything else back to the form.
+                        .failureHandler(new LoginFailureHandler())
                 )
                 // A login form left open past the session timeout fails CSRF on submit;
                 // resume the user's authorization request instead of a dead-end 403.
                 .exceptionHandling(exceptions -> exceptions
                         .accessDeniedHandler(new ExpiredLoginFormHandler()))
                 .csrf(csrf -> csrf
-                        .ignoringRequestMatchers("/auth/session", "/auth/direct-login",
+                        .ignoringRequestMatchers("/auth/session", "/auth/direct-login", "/internal/**",
                                 "/portal/api/login/request", "/portal/api/login/verify",
                                 // Easy to miss: permitAll alone is not enough — without
                                 // a CSRF exemption this POST 403s for every caller.

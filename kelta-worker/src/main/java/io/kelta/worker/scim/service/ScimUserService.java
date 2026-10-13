@@ -37,12 +37,16 @@ public class ScimUserService {
     private final JdbcTemplate jdbcTemplate;
     private final ScimFilterParser filterParser;
     private final io.kelta.worker.service.UserInviteService userInviteService;
+    private final io.kelta.worker.service.AuthSessionRevocationClient authSessions;
 
     public ScimUserService(JdbcTemplate jdbcTemplate,
                             @org.springframework.beans.factory.annotation.Autowired(required = false)
-                            io.kelta.worker.service.UserInviteService userInviteService) {
+                            io.kelta.worker.service.UserInviteService userInviteService,
+                            @org.springframework.beans.factory.annotation.Autowired(required = false)
+                            io.kelta.worker.service.AuthSessionRevocationClient authSessions) {
         this.jdbcTemplate = jdbcTemplate;
         this.userInviteService = userInviteService;
+        this.authSessions = authSessions;
         this.filterParser = new ScimFilterParser(USER_ATTR_MAP);
     }
 
@@ -135,7 +139,7 @@ public class ScimUserService {
     @Transactional
     public ScimUser replaceUser(String tenantId, String userId, ScimUser request, String baseUrl) {
         // Verify user exists
-        getUser(tenantId, userId, baseUrl);
+        boolean wasActive = getUser(tenantId, userId, baseUrl).isActive();
 
         String email = extractEmail(request);
         if (email != null) {
@@ -157,13 +161,16 @@ public class ScimUserService {
                 tenantId, userId);
 
         log.info("SCIM: Replaced user {} in tenant {}", userId, tenantId);
+        if (wasActive && !request.isActive()) {
+            signOut(tenantId, userId);
+        }
         return getUser(tenantId, userId, baseUrl);
     }
 
     @Transactional
     public ScimUser patchUser(String tenantId, String userId, ScimPatchOp patchOp, String baseUrl) {
         // Verify user exists
-        getUser(tenantId, userId, baseUrl);
+        boolean wasActive = getUser(tenantId, userId, baseUrl).isActive();
 
         if (patchOp.getOperations() == null) {
             throw new ScimException(HttpStatus.BAD_REQUEST, "Operations list is required");
@@ -183,7 +190,11 @@ public class ScimUserService {
         }
 
         log.info("SCIM: Patched user {} in tenant {}", userId, tenantId);
-        return getUser(tenantId, userId, baseUrl);
+        ScimUser patched = getUser(tenantId, userId, baseUrl);
+        if (wasActive && !patched.isActive()) {
+            signOut(tenantId, userId);
+        }
+        return patched;
     }
 
     @Transactional
@@ -197,6 +208,14 @@ public class ScimUserService {
             throw new ScimException(HttpStatus.NOT_FOUND, "User " + userId + " not found");
         }
         log.info("SCIM: Deactivated user {} in tenant {}", userId, tenantId);
+        signOut(tenantId, userId);
+    }
+
+    /** A deactivated user is signed out of kelta-auth once this transaction commits. */
+    private void signOut(String tenantId, String userId) {
+        if (authSessions != null) {
+            authSessions.revokeAfterCommit(tenantId, userId);
+        }
     }
 
     private void applyUserPatchOp(String tenantId, String userId, ScimPatchOp.Operation op) {

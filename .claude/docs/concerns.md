@@ -293,7 +293,8 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
   `/validate/{hash}` fallback on a miss. There is no admin revoke endpoint
   (`AdminPersonalAccessTokenController` only mints). Fix either way: on status change delete or
   revoke every `pat:<hash>` for the user, and add `DELETE /api/admin/users/{id}/tokens/{tokenId}`.
-  Immediate kill switch until then: remove `API_ACCESS` from the profile.
+  Immediate kill switch until then: remove `API_ACCESS` from the profile. (Deactivation does end
+  the user's kelta-auth sessions and refresh tokens — `UserSessionRevocationHook`; PATs are separate.)
 - **PAT grace cache** (`PatAuthenticationFilter`, 5 min, serves validated PATs during worker
   outages; revocation is always checked first) is an unbounded map aged by TTL. If distinct PAT
   volume grows, switch to a size-bounded Caffeine cache.
@@ -302,9 +303,8 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
   generated password is in the first boot's kelta-auth log (shipped to Loki) until changed —
   production should set the env var; HTTP sessions are not revoked and direct-login JWTs run to
   expiry; the `oauth2_authorization` cleanup also signs out a
-  same-named admin of another tenant once; `ForcePasswordChangeController` updates every ACTIVE
-  user with the submitted email, with only the session's RLS binding limiting it to one tenant.
-  There is no test-only opt-out of the forced change (`testing.md`).
+  same-named admin of another tenant once. There is no test-only opt-out of the forced change
+  (`testing.md`).
 - **kelta-auth HTTP sessions are Java-serialized into Redis** (Spring Session, indexed store,
   `io.kelta.auth.session`). Two things follow. (1) Every class in a session value must be
   registered for serialization in the native image (`AuthRuntimeHints`) — the JVM never notices a
@@ -355,11 +355,10 @@ between history rows and an under-privileged caller; treat changes to either as 
   raw.
 - **`oauth2_authorization` retention (`AuthorizationRetentionSweep`, kelta-auth)** deletes a row
   once every token it holds expired more than `grace` ago (default 1 day), hourly, on every
-  replica (batched `FOR UPDATE SKIP LOCKED`). Two things it leaves: rows holding no token at all
-  (an authorization waiting on the consent page — nothing to date them by), and the table has no
-  index on the expiry or `principal_name` columns, so each batch and the password-change revocation
-  (`UserSessionRevoker`) scan it. Bounded once the backlog is gone; add an index in a worker
-  migration if the table stays large.
+  replica (batched `FOR UPDATE SKIP LOCKED`). It leaves rows holding no token at all (an
+  authorization waiting on the consent page — nothing to date them by). V210 indexes the
+  sweep's latest-expiry expression and `lower(principal_name)` (`UserSessionRevoker`); the sweep's
+  `GREATEST(...)` must stay identical to the index expression or it falls back to a scan.
 - **Flow/job logs — `FlowLogRetentionSweep` is DRY-RUN by default**
   (`kelta.flow.retention.dry-run:true`), so in any environment left in dry-run `flow_execution`,
   `flow_step_log`, `flow_pending_resume` and `job_execution_log` still grow without bound. When
@@ -872,6 +871,9 @@ One line each; full write-ups are in git history.
 - 2026-10-12 — kelta-auth error responses: errors on the sign-in pages rendered Spring Boot's JSON error map into a response already marked `text/html` ("No converter for [class java.util.LinkedHashMap] with preset Content-Type 'text/html'"). `AuthErrorController` (replaces `BasicErrorController`, whitelabel off) and `HtmlErrorPageResolver` render `templates/error.html` (status, neutral message, request id) for browsers and page handlers, and JSON for API callers. `AuthErrorHandlingTest`.
 - 2026-10-12 — kelta-auth session cookies on plain http: `Secure` followed the host name (any non-loopback host), so a plain-http install on a LAN host name got a cookie the browser dropped and could not sign in. `Secure` now follows the scheme the browser used (`X-Forwarded-Proto`, else the request), with `KELTA_AUTH_SESSION_COOKIE_SECURE` to override.
 - 2026-10-12 — `oauth2_authorization` had no retention (Spring Authorization Server never deletes rows); `AuthorizationRetentionSweep` now deletes rows whose every token expired before a grace period. `AuthorizationRetentionIntegrationTest` (real schema, concurrent sweeps).
+- 2026-10-13 — kelta-auth password paths are scoped to one user (tenant + user id): the forced `/change-password` changes the signed-in user recorded at sign-in, the email-link reset issues one token per account and a token resets exactly one user. `BaselineAdminPasswordIntegrationTest.sameEmailInAnotherTenantIsUntouched` (Postgres).
+- 2026-10-13 — an admin password reset, deactivation or removal in kelta-worker (`PasswordResetAdminController`, delegated reset, `users` status change or delete, SCIM deactivate/delete) now signs the user out of kelta-auth (sessions + refresh tokens) through `POST /internal/tenants/{tenantId}/users/{userId}/revoke-sessions` (`AuthSessionRevocationClient`, best effort after commit). `InternalSessionRevocationFlowTest`, `AuthSessionRevocationClientTest`.
+- 2026-10-13 — `oauth2_authorization` lookups by login name and by expiry are indexed (V210). `AuthorizationRetentionIntegrationTest.lookupsUseTheirIndexes`.
 - 2026-10-12 — kelta-auth sign-in lockout counting: a failed password sign-in now counts only against the user of the sign-in's own tenant (same email in several tenants), refusals that load no user (unknown or inactive user, no tenant context) are not counted, and a lockout that has expired restarts the count instead of re-locking on the next miss (password and MFA counters). `FailedSignInLockoutIntegrationTest`.
 - 2026-10-12 — kelta-auth never registered identity federation: OIDC brokering, SAML login/Single Logout and the `/logout/saml2/initiate` sign-out initiator (so every UI sign-out hit a 404) were gated on `@ConditionalOnBean(EncryptionService.class)`, evaluated before the auto-configuration that defines the bean. Now registered unconditionally (`FederationConfig`); encryption and OpenSAML are checked at run time.
 - 2026-10-11 — portal magic-link sign-in never reached the end-user app: `PortalLoginController.verify` stored the tenant UUID in the session while `TenantContextFilter` compares the `/oauth2/authorize` redirect slug, so it read as a tenant switch and cleared the new session (back to the password form). Now stores the slug; found by un-gating `e2e-tests/tests/auth/portal-login.spec.ts`.

@@ -149,7 +149,7 @@ class BeforeSaveHookWiringTest {
                 "UiPageConfigHook",
                 "UIPageConfigEventPublisher"));
         m.put("ui-translations", List.of("TranslationConfigEventPublisher"));
-        m.put("users", List.of("UserLifecycleHook"));
+        m.put("users", List.of("UserLifecycleHook", "UserSessionRevocationHook"));
         m.put("validation-rules", List.of("ValidationRuleRefreshHook"));
         return m;
     }
@@ -221,7 +221,8 @@ class BeforeSaveHookWiringTest {
             FormulaRecomputeService.class, ParticipantShareSupport.class, S3StorageService.class,
             SearchIndexService.class, SetupAuditService.class, TenantQuotaResolver.class,
             UiPageConfigValidator.class, UserInviteService.class, VectorMaintenanceService.class,
-            EncryptionService.class, CredentialTypeRegistry.class, OutboundUrlGuard.class);
+            EncryptionService.class, CredentialTypeRegistry.class, OutboundUrlGuard.class,
+            io.kelta.worker.service.AuthSessionRevocationClient.class);
 
     /** Collection key → the hooks registered directly on it (wildcard hooks excluded), in order. */
     private static Map<String, List<String>> registeredHooks(BeforeSaveHookRegistry registry) {

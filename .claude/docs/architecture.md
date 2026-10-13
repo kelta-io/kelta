@@ -1275,7 +1275,27 @@ refresh token issued before the change answers `invalid_grant` (terminal for the
 browser still signed in to kelta-auth gets new tokens without a login form; every other device signs
 in again. Access tokens (JWTs) run to their expiry. Same-email users of other tenants are untouched.
 Tests: `PasswordChangeSignOutFlowTest` (in-memory store), `SharedHttpSessionIntegrationTest`
-(Redis, two pods).
+(Redis, two pods). Each of those paths writes exactly one user, by tenant + user id: the forced
+change uses the user the sign-in loaded (recorded in the session by `LoginFailureHandler`), and an
+email-link reset token is issued per account and resets only that account (`kelta-auth/CLAUDE.md`
+→ Password paths are scoped to one user).
+
+**Admin actions sign the user out of kelta-auth (worker → auth).** After an administrator resets a
+password (`PasswordResetAdminController`, `DelegatedUserAdminController.resetPassword`), a `users`
+record leaves `ACTIVE` or is deleted (`listener/UserSessionRevocationHook` — generic collection API,
+`/api/operations`, CSV import, delegated `updateUser`), or SCIM deactivates/deletes a user
+(`ScimUserService`), the worker's `service/AuthSessionRevocationClient` calls kelta-auth's
+`POST /internal/tenants/{tenantId}/users/{userId}/revoke-sessions` (body `{"loginNames": [...]}`,
+sent for a deleted user) → `UserSessionRevoker.signOutEverywhere`: every session of that tenant's
+user ends (none kept) and every refresh token is revoked. The call runs after the transaction commits
+(at once when there is none), over the JDK `HttpClient` with a 2 s connect / 5 s response timeout and
+redirects off, to `kelta.auth.internal-url` (`KELTA_AUTH_INTERNAL_URL`, kelta-auth's in-cluster
+address, default `http://kelta-auth:8081`). Best effort: a failure logs ERROR and the admin action
+still succeeds. Authorization: the shared `X-Internal-Token` (`KELTA_INTERNAL_TOKEN`, same value on
+both services), constant-time compare, refused when unset. The gateway does not route to kelta-auth;
+the ingress sends every path of the auth host to it, so that token check is the endpoint's only gate
+(`/internal/**` is `permitAll` + CSRF-exempt in kelta-auth's default chain). PATs are not affected
+(`concerns.md`).
 
 ### Component layering — admin app vs. plugin library
 
