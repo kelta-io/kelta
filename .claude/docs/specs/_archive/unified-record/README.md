@@ -9,6 +9,11 @@
 >
 > Source-verified against the codebase on 2026-07-01 (Flyway head **V148**, next **V149**). If
 > code and this doc disagree, trust the code and fix this doc.
+>
+> **Shipped — archived.** Every slice landed, and a follow-up record-stack convergence put the
+> create/edit form (`RecordForm`) and the list (`RecordList`) on shared cores as well, with every
+> record URL built by `recordRoutes`. The live contract is `conventions.md` → Component reuse and
+> `architecture.md` → Record detail path; read this spec as history.
 
 ## How to use this document
 

@@ -22,6 +22,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
+import { useI18n } from '@/context/I18nContext'
 import { RecordList } from '@/components/record/list/RecordList'
 import type { RecordListChromeContext } from '@/components/record/list/RecordList'
 import type { RecordListFeatures } from '@/components/record/list/useRecordListModel'
@@ -54,6 +55,7 @@ export function ObjectListPage(): React.ReactElement {
     collection: string
   }>()
   const basePath = `/${tenantSlug}/app`
+  const { t } = useI18n()
   const routes = useMemo(() => recordRoutes('enduser', tenantSlug ?? ''), [tenantSlug])
 
   const breadcrumb = ({ collectionLabel }: RecordListChromeContext) => (
@@ -61,7 +63,7 @@ export function ObjectListPage(): React.ReactElement {
       <BreadcrumbList>
         <BreadcrumbItem>
           <BreadcrumbLink asChild>
-            <Link to={`${basePath}/home`}>Home</Link>
+            <Link to={`${basePath}/home`}>{t('navigation.home')}</Link>
           </BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator />

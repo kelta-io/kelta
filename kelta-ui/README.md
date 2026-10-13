@@ -64,7 +64,7 @@ There is **no central route/nav config object** — wiring is explicit:
    standard `/api/{collection}` JSON:API; admin controllers often return a `single(...)`
    envelope with rows under `attributes` — unwrap manually.
 
-Reuse the canonical shared components (`AdminDataTable`, `ObjectDataTable`/`ListShell`, `FilterBuilder`, `fieldControl`, `RecordShell`; don't fork tables/filters/forms — `.claude/docs/conventions.md` → Component reuse) and follow `DESIGN.md`. Full
+Reuse the canonical shared components (`AdminDataTable`, `ObjectDataTable`/`ListShell`, `FilterBuilder`, `fieldControl`; record pages are thin wrappers over `RecordShell` / `RecordForm` / `RecordList` with URLs from `recordRoutes`; don't fork tables/filters/forms — `.claude/docs/conventions.md` → Component reuse) and follow `DESIGN.md`. Full
 recipe incl. backend: `.claude/docs/playbooks.md` → "Add an admin UI page".
 
 ## Context Providers
@@ -80,12 +80,10 @@ The app wraps routes in a provider hierarchy:
 | `useCollectionRecords` | Fetch paginated records with filtering/sorting |
 | `useCollectionSchema` | Fetch field definitions |
 | `useCollectionSummaries` | Cached list of all collections |
-| `useCollectionPermissions` | Check CRUD permissions on a collection |
-| `useFieldPermissions` | Field-level read/write permissions |
-| `useObjectPermissions` | Object-level CRUD permissions (subset of `useCollectionPermissions`) |
+| `useCollectionPermissions` | Object-level CRUD flags + field-level visibility for a collection |
+| `useRecord` | Fetch one record (with its ETag for `If-Match`) |
+| `useRecordMutation` | Create / update / patch / delete records |
 | `usePageLayout` | Page layout configuration |
-| `useCreateResource` | Create mutation |
-| `useDeleteResource` | Delete mutation |
 | `useGlobalShortcuts` | Global keyboard shortcut state |
 | `useLookupDisplayMap` | Map lookup IDs to display values |
 

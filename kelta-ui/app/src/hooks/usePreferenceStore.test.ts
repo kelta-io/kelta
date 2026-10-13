@@ -110,4 +110,19 @@ describe('usePreferenceValue', () => {
     expect(mockPost).not.toHaveBeenCalled()
     expect(JSON.parse(localStorage.getItem(LOCAL_KEY)!)).toEqual(['still-local'])
   })
+  it('fetches and reads nothing when disabled', async () => {
+    localBacking.set(LOCAL_KEY, JSON.stringify(['local']))
+    const { result } = renderHook(
+      () =>
+        usePreferenceValue<string[]>('list-view', 'orders', {
+          localKey: LOCAL_KEY,
+          enabled: false,
+        }),
+      { wrapper }
+    )
+    expect(result.current.isLoaded).toBe(true)
+    expect(result.current.value).toBeNull()
+    await act(async () => {})
+    expect(mockGetList).not.toHaveBeenCalled()
+  })
 })

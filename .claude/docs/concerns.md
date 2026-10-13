@@ -606,9 +606,9 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   means `kelta-web` was built without `@livekit/components-react` installed — `npm install` and
   rebuild.
 - **Hand-maintained narrow copies of shared types drift silently** — prefer `@/types/config`,
-  `@kelta/sdk`, `hooks/useCollectionSchema`. `ResourceDetailPage.tsx` still forks
-  `CollectionSchema`/`fetchCollectionSchema` from `hooks/useCollectionSchema.ts`; collapsing them
-  is an open follow-up.
+  `@kelta/sdk`, `hooks/useCollectionSchema`. (`ResourceDetailPage`'s fork of
+  `CollectionSchema`/`fetchCollectionSchema` silently dropped `trackHistory` until it was collapsed
+  onto the hook — `conventions.md` → Component reuse.)
 - **`useRecordMutation`'s `onSuccess` fires for every mutation** incl. inline-edit PATCHes —
   operation-specific side effects (navigate after delete, announcements) go in the specific
   handler via `mutateAsync().then(...)`.

@@ -50,7 +50,6 @@
     "previous": "Zurück",
     "clear": "Leeren",
     "select": "Auswählen",
-    "selected": "ausgewählt",
     "selectAll": "Alle auswählen",
     "deselectAll": "Alle abwählen",
     "noResults": "Keine Ergebnisse gefunden",
@@ -78,7 +77,8 @@
     "picklists": "Auswahllisten",
     "pages": "Seiten",
     "menus": "Menüs",
-    "plugins": "Plugins"
+    "plugins": "Plugins",
+    "home": "Startseite"
   },
   "collections": {
     "title": "Sammlungen",
@@ -191,9 +191,7 @@
       "prefix": "Präfix",
       "padding": "Auffüllung",
       "currencyCode": "Standard-Währungscode",
-      "precision": "Dezimalgenauigkeit",
-      "latitude": "Breitengrad",
-      "longitude": "Längengrad"
+      "precision": "Dezimalgenauigkeit"
     }
   },
   "authorization": {
@@ -498,16 +496,7 @@
     "deleteRecord": "Datensatz löschen",
     "viewRecord": "Datensatz anzeigen",
     "record": "Datensatz",
-    "exportSelected": "Exportieren",
-    "exportOptions": "Exportoptionen",
-    "exportSelectedLabel": "{{count}} ausgewählte exportieren",
-    "exportAllVisible": "Alle sichtbaren exportieren ({{count}})",
-    "exportToCSV": "Als CSV exportieren",
-    "exportToJSON": "Als JSON exportieren",
-    "exportSuccess": "{{count}} Datensätze erfolgreich als {{format}} exportiert",
-    "bulkDelete": "Ausgewählte löschen",
     "confirmDelete": "Sind Sie sicher, dass Sie diesen Datensatz löschen möchten?",
-    "confirmBulkDelete": "Sind Sie sicher, dass Sie {{count}} Datensätze löschen möchten?",
     "cloneRecord": "{{collection}} klonen",
     "cloningFrom": "Klonen von Datensatz",
     "viewSource": "Quelle anzeigen"
@@ -1048,13 +1037,6 @@
     "hoursAgo": "vor {{count}}h",
     "daysAgo": "vor {{count}}t"
   },
-  "listViews": {
-    "savedSuccessfully": "Ansicht erfolgreich gespeichert",
-    "deletedSuccessfully": "Ansicht gelöscht"
-  },
-  "inlineEdit": {
-    "clickToEdit": "Zum Bearbeiten klicken"
-  },
   "summaryStats": {
     "recordCount": "{{count}} Datensätze",
     "filteredCount": "{{count}} gefiltert",
@@ -1125,5 +1107,10 @@
     "saved": "Profil gespeichert",
     "saveFailed": "Ihr Profil konnte nicht gespeichert werden",
     "loadFailed": "Ihr Profil konnte nicht geladen werden"
+  },
+  "recordForm": {
+    "breadcrumbNew": "Neu",
+    "breadcrumbEdit": "Bearbeiten",
+    "breadcrumbClone": "Klonen"
   }
 }

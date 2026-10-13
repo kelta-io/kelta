@@ -6,6 +6,7 @@
  * Supports ?include= for fetching related resources in a single request.
  */
 
+import { useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useApi } from '../context/ApiContext'
 import { useOffline } from '../offline'
@@ -28,8 +29,12 @@ export interface UseRecordReturn {
   record: CollectionRecord | undefined
   isLoading: boolean
   error: Error | null
-  /** Refetch the record; resolves once the fresh record (and its ETag) is in the cache. */
-  refetch: () => Promise<unknown>
+  /**
+   * Refetch the record; resolves once the fresh record is in the cache, to its ETag (undefined
+   * when the response carried none) — a caller about to write again can send it before the
+   * page has re-rendered with it.
+   */
+  refetch: () => Promise<string | undefined>
   /** Raw JSON:API response for building display maps from included resources */
   rawResponse: unknown
   /** Optimistic-locking version token from the GET `ETag` (slice 5); echo as `If-Match` on write. */
@@ -79,11 +84,13 @@ export function useRecord(options: UseRecordOptions): UseRecordReturn {
     staleTime: 30 * 1000, // 30 seconds
   })
 
+  const refetchEtag = useCallback(async () => (await refetch()).data?.etag, [refetch])
+
   return {
     record: data?.record,
     isLoading,
     error: error as Error | null,
-    refetch,
+    refetch: refetchEtag,
     rawResponse: data?.rawResponse,
     etag: data?.etag,
   }

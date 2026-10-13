@@ -33,6 +33,7 @@ import { RecordHistoryTab } from '../../components/RecordHistory/RecordHistoryTa
 import { RecordShell } from '../../components/record/RecordShell'
 import { RecordDetailBody } from '../../components/record/RecordDetailBody'
 import { RecordSectionNav } from '../../components/record/RecordSectionNav'
+import { useInlineFieldCommit } from '../../components/record/useInlineFieldCommit'
 import { resolveSectionNavItems } from '../../components/LayoutFieldSections/sectionNavItems'
 import { useCollectionSchema } from '../../hooks/useCollectionSchema'
 import { unwrapResource } from '../../utils/jsonapi'
@@ -48,7 +49,7 @@ export interface Resource {
   [key: string]: unknown
 }
 
-export interface RecordShare {
+interface RecordShare {
   id: string
   tenantId: string
   collectionId: string
@@ -348,32 +349,34 @@ export function ResourceDetailPage({
 
   // In-place inline field edit (unified record experience, slice 2): partial PATCH of one field.
   // Echoes the record's ETag as If-Match (slice 5): a concurrent edit → 409, so we reload the
-  // latest instead of clobbering it.
-  const handleFieldCommit = useCallback(
-    async (fieldName: string, value: unknown): Promise<void> => {
-      try {
-        await apiClient.patch(
-          `/api/${collectionName}/${resourceId}`,
-          {
-            data: {
-              type: collectionName,
-              id: resourceId,
-              attributes: { [fieldName]: value },
-            },
+  // latest instead of clobbering it. Commits run one at a time and each sends the version the
+  // previous one left behind (shared with the end-user detail page).
+  const writeField = useCallback(
+    async (fieldName: string, value: unknown, ifMatch: string | undefined): Promise<void> => {
+      await apiClient.patch(
+        `/api/${collectionName}/${resourceId}`,
+        {
+          data: {
+            type: collectionName,
+            id: resourceId,
+            attributes: { [fieldName]: value },
           },
-          etag
-        )
-      } catch (err) {
-        if ((err as { status?: number })?.status === 409) {
-          await refetchResource()
-        }
-        throw err
-      }
-      await refetchResource()
-      invalidateRecordContext()
+        },
+        ifMatch
+      )
     },
-    [apiClient, collectionName, resourceId, etag, refetchResource, invalidateRecordContext]
+    [apiClient, collectionName, resourceId]
   )
+  const refreshResource = useCallback(
+    async () => (await refetchResource()).data?.etag,
+    [refetchResource]
+  )
+  const handleFieldCommit = useInlineFieldCommit({
+    etag,
+    write: writeField,
+    refresh: refreshResource,
+    onCommitted: invalidateRecordContext,
+  })
 
   // Sharing: fetch shares for this record
   // The sharing endpoint may not be implemented yet — return empty array on error

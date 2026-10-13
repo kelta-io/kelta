@@ -99,7 +99,9 @@ export function useListViewState({
   const { searchParams, params, update } = listParams
   const { filters, sort, sorts, pageSize, viewId } = params
 
-  const savedViews = useSavedViews(collectionName)
+  // Preferences are fetched only for the features that use them: personal views need
+  // `savedViews`, the per-user renderer overrides only apply to shared views.
+  const savedViews = useSavedViews(collectionName, { enabled: savedViewsEnabled })
   const { sharedViews: publishedViews } = useSharedListViews(
     savedViewsEnabled && sharedViewsEnabled ? collectionName : undefined,
     collectionId
@@ -108,7 +110,9 @@ export function useListViewState({
     isLoaded: viewTypeOverridesLoaded,
     overrideFor: viewTypeOverrideFor,
     saveOverride: saveViewTypeOverride,
-  } = useViewTypeOverrides(collectionName)
+  } = useViewTypeOverrides(collectionName, {
+    enabled: savedViewsEnabled && sharedViewsEnabled,
+  })
 
   const sharedViews = useMemo(
     () => (savedViewsEnabled && sharedViewsEnabled ? publishedViews : []),

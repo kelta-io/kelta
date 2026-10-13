@@ -2,10 +2,8 @@ import type { Page, Locator } from "@playwright/test";
 import { BasePage } from "../base.page";
 
 export class ObjectListPage extends BasePage {
-  readonly newRecordButton: Locator;
   readonly dataTable: Locator;
   readonly searchInput: Locator;
-  readonly filterBar: Locator;
   readonly pagination: Locator;
 
   constructor(
@@ -14,20 +12,14 @@ export class ObjectListPage extends BasePage {
     tenantSlug?: string,
   ) {
     super(page, tenantSlug);
-    this.newRecordButton = this.testId("new-record-button");
     this.dataTable = this.testId("data-table");
     this.searchInput = this.testId("search-input");
-    this.filterBar = this.testId("filter-bar");
     this.pagination = this.testId("pagination");
   }
 
   async goto(): Promise<void> {
     await this.page.goto(this.tenantUrl(`/app/o/${this.collectionName}`));
     await this.waitForLoadingComplete();
-  }
-
-  async clickNewRecord(): Promise<void> {
-    await this.newRecordButton.click();
   }
 
   async search(text: string): Promise<void> {

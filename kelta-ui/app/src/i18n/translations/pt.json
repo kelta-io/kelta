@@ -50,7 +50,6 @@
     "previous": "Anterior",
     "clear": "Limpar",
     "select": "Selecionar",
-    "selected": "selecionado(s)",
     "selectAll": "Selecionar Todos",
     "deselectAll": "Desmarcar Todos",
     "noResults": "Nenhum resultado encontrado",
@@ -78,7 +77,8 @@
     "picklists": "Listas de Opcoes",
     "pages": "Paginas",
     "menus": "Menus",
-    "plugins": "Plugins"
+    "plugins": "Plugins",
+    "home": "Inicio"
   },
   "collections": {
     "title": "Colecoes",
@@ -191,9 +191,7 @@
       "prefix": "Prefixo",
       "padding": "Preenchimento",
       "currencyCode": "Codigo de Moeda Padrao",
-      "precision": "Precisao Decimal",
-      "latitude": "Latitude",
-      "longitude": "Longitude"
+      "precision": "Precisao Decimal"
     }
   },
   "authorization": {
@@ -498,16 +496,7 @@
     "deleteRecord": "Excluir Registro",
     "viewRecord": "Ver Registro",
     "record": "Registro",
-    "exportSelected": "Exportar",
-    "exportOptions": "Opcoes de exportacao",
-    "exportSelectedLabel": "Exportar {{count}} selecionados",
-    "exportAllVisible": "Exportar todos visiveis ({{count}})",
-    "exportToCSV": "Exportar para CSV",
-    "exportToJSON": "Exportar para JSON",
-    "exportSuccess": "{{count}} registros exportados com sucesso como {{format}}",
-    "bulkDelete": "Excluir Selecionados",
     "confirmDelete": "Tem certeza de que deseja excluir este registro?",
-    "confirmBulkDelete": "Tem certeza de que deseja excluir {{count}} registros?",
     "cloneRecord": "Clonar {{collection}}",
     "cloningFrom": "Clonando do registro",
     "viewSource": "Ver fonte"
@@ -1048,13 +1037,6 @@
     "hoursAgo": "{{count}}h atras",
     "daysAgo": "{{count}}d atras"
   },
-  "listViews": {
-    "savedSuccessfully": "Visualizacao salva com sucesso",
-    "deletedSuccessfully": "Visualizacao excluida"
-  },
-  "inlineEdit": {
-    "clickToEdit": "Clique para editar"
-  },
   "summaryStats": {
     "recordCount": "{{count}} registros",
     "filteredCount": "{{count}} filtrados",
@@ -1147,5 +1129,10 @@
     "closedAllDay": "Fechado o dia todo",
     "date": "Data",
     "addException": "Adicionar exceção"
+  },
+  "recordForm": {
+    "breadcrumbNew": "Novo",
+    "breadcrumbEdit": "Editar",
+    "breadcrumbClone": "Clonar"
   }
 }

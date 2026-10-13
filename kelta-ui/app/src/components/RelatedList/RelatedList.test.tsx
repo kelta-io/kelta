@@ -46,8 +46,8 @@ vi.mock('@/context/CollectionStoreContext', () => ({
 const { mockObjectPermissions } = vi.hoisted(() => ({
   mockObjectPermissions: { canCreate: true, canRead: true, canEdit: true, canDelete: true },
 }))
-vi.mock('@/hooks/useObjectPermissions', () => ({
-  useObjectPermissions: vi.fn(() => ({
+vi.mock('@/hooks/useCollectionPermissions', () => ({
+  useCollectionPermissions: vi.fn(() => ({
     permissions: mockObjectPermissions,
     isLoading: false,
   })),

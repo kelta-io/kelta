@@ -15,9 +15,18 @@
 
 import { useMemo } from 'react'
 import { skipToken, useQuery } from '@tanstack/react-query'
-import type { ObjectPermissions } from './useObjectPermissions'
 import type { MyPermissionsResponse } from './useSystemPermissions'
 import { MY_PERMISSIONS_QUERY_KEY } from './useSystemPermissions'
+
+/**
+ * Object-level CRUD permission flags.
+ */
+export interface ObjectPermissions {
+  canCreate: boolean
+  canRead: boolean
+  canEdit: boolean
+  canDelete: boolean
+}
 
 /**
  * Field visibility level.

@@ -116,8 +116,13 @@ function persistViews(collectionName: string, views: SavedView[]): void {
  * On mount, the default view (if one exists) is automatically selected.
  *
  * @param collectionName - The collection these views belong to
+ * @param options.enabled - False when the list's saved-views feature is off: the server
+ *   preference is neither fetched nor migrated to. Default true.
  */
-export function useSavedViews(collectionName: string): UseSavedViewsReturn {
+export function useSavedViews(
+  collectionName: string,
+  { enabled = true }: { enabled?: boolean } = {}
+): UseSavedViewsReturn {
   const [currentCollection, setCurrentCollection] = useState(collectionName)
   const [views, setViews] = useState<SavedView[]>(() => loadViews(collectionName))
   const [activeView, setActiveView] = useState<SavedView | null>(() => {
@@ -128,6 +133,7 @@ export function useSavedViews(collectionName: string): UseSavedViewsReturn {
   // Server-side persistence: one preference row per collection holding the view array.
   const pref = usePreferenceValue<SavedView[]>('list-view', collectionName, {
     localKey: getStorageKey(collectionName),
+    enabled,
   })
   const prefSave = pref.save
   const syncedRef = useRef<string | null>(null)
@@ -135,7 +141,7 @@ export function useSavedViews(collectionName: string): UseSavedViewsReturn {
   // When the server value loads: server wins (cross-device source of truth); an empty
   // server with existing local views triggers the one-time migration push.
   useEffect(() => {
-    if (!pref.isLoaded || syncedRef.current === collectionName) return
+    if (!enabled || !pref.isLoaded || syncedRef.current === collectionName) return
     syncedRef.current = collectionName
     if (pref.value !== null) {
       const serverViews = Array.isArray(pref.value) ? pref.value : []
@@ -152,7 +158,7 @@ export function useSavedViews(collectionName: string): UseSavedViewsReturn {
     if (local.length > 0) {
       prefSave(local)
     }
-  }, [pref.isLoaded, pref.value, collectionName, prefSave])
+  }, [enabled, pref.isLoaded, pref.value, collectionName, prefSave])
 
   // Reload views when collectionName changes (derived state pattern). No ref reset
   // needed: the sync guard compares syncedRef.current to the CURRENT collection name,

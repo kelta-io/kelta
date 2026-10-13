@@ -13,17 +13,14 @@ import {
  *   admin    /<tenant>/resources/<collection>…  (ResourceList/Form/DetailPage)
  *   end-user /<tenant>/app/o/<collection>…      (ObjectList/Form/DetailPage)
  *
- * It guards the convergence of the two stacks into one (unified-record slice 8,
- * `.claude/docs/specs/_archive/unified-record/8-admin-convergence.md` §6): when both
- * describe blocks pass every step, the stacks behave the same. Steps where a stack
- * differs from the target today are `test.fixme` with the gap named, so removing a
- * fixme is the signal that the gap is closed.
+ * Both stacks are thin wrappers over the same cores (`RecordShell`, `RecordForm`,
+ * `RecordList`), so every step runs unchanged against both: when both describe blocks
+ * pass, the stacks behave the same, and a step failing on one stack only is a bug in a
+ * wrapper or in a core's variant branch.
  *
  * One collection per run carries a representative field set (string, number, boolean,
  * date, picklist, lookup, master-detail); each step seeds its own records through the
- * API and asserts what was persisted through the API, not only what the UI shows. Since P10
- * both lists are the same `RecordList` core, so the list steps (filter builder, view switcher,
- * inline cell edit) run unchanged against both.
+ * API and asserts what was persisted through the API, not only what the UI shows.
  */
 
 const TENANT = process.env.E2E_TENANT_SLUG || "default";

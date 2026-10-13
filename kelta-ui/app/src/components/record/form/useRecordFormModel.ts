@@ -3,7 +3,8 @@
  *
  * Loads everything the form needs before it can mount: the collection schema,
  * the record (edit mode), object + field permissions, record types (with the
- * default auto-selected on create) and their picklist overrides, the resolved
+ * default auto-selected on create) and their picklist overrides (the allowed
+ * values, and on create the type's default value), the resolved
  * page layout, picklist values and lookup options merged into the fields, and
  * the collection's client-enforced validation rules, and the initial form data
  * (record values, or schema defaults + `prefill` on create).
@@ -64,8 +65,8 @@ interface RecordTypePicklistOverrideDto {
   id: string
   recordTypeId: string
   fieldId: string
-  availableValues: string | string[]
-  defaultValue?: string
+  availableValues: unknown
+  defaultValue?: string | null
 }
 
 export interface UseRecordFormModelOptions {
@@ -122,6 +123,12 @@ export interface RecordFormModel {
   validationRules: CollectionValidationRule[]
   /** Initial form values for the body's `useState`. */
   initialData: Record<string, unknown>
+  /**
+   * Create only: field name → the selected record type's picklist default (form value). Loads
+   * after the body mounts and changes with the record type, so the body applies it to fields
+   * the user has not touched rather than through `initialData`.
+   */
+  recordTypeDefaults: Record<string, unknown>
   /** Changes whenever the form's data source changes — key the body on it. */
   formKey: string
   /**
@@ -135,6 +142,49 @@ export interface RecordFormModel {
 }
 
 const NO_VALIDATION_RULES: CollectionValidationRule[] = []
+const NO_RECORD_TYPE_DEFAULTS: Record<string, unknown> = {}
+
+/** A record type's override of one picklist field. */
+interface PicklistOverride {
+  /** The values the type allows; undefined = the field's full picklist. */
+  values?: string[]
+  defaultValue?: string
+}
+
+/** `availableValues` arrives as a JSON array or its string encoding; anything else is unusable. */
+function parseAvailableValues(raw: unknown): string[] | undefined {
+  let parsed = raw
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return undefined
+    }
+  }
+  return Array.isArray(parsed) && parsed.every((v) => typeof v === 'string') ? parsed : undefined
+}
+
+/**
+ * fieldId → the record type's override. A row whose `availableValues` is malformed keeps the
+ * field's full picklist — with a console warning, so the misconfiguration is visible — and does
+ * not take the type's other overrides down with it.
+ */
+function buildPicklistOverrideMap(
+  overrides: RecordTypePicklistOverrideDto[]
+): Record<string, PicklistOverride> {
+  const map: Record<string, PicklistOverride> = {}
+  for (const o of overrides) {
+    const values = parseAvailableValues(o.availableValues)
+    if (!values) {
+      console.warn(
+        `Record type picklist override ${o.id} (record type ${o.recordTypeId}, field ${o.fieldId}) ` +
+          'has malformed availableValues; the field shows its full picklist.'
+      )
+    }
+    map[o.fieldId] = { values, defaultValue: o.defaultValue || undefined }
+  }
+  return map
+}
 
 /** Stable serialization of the create-mode prefill, used in the remount key. */
 function prefillKey(prefill: Record<string, unknown> | undefined): string {
@@ -218,23 +268,15 @@ export function useRecordFormModel({
     setRecordTypeChoice({ id })
   }, [])
 
-  // Fetch picklist overrides for the selected record type
+  // Fetch picklist overrides for the selected record type. (Own query key: the record type
+  // editor caches the raw override rows under a different shape.)
   const { data: recordTypePicklistOverrides } = useQuery({
-    queryKey: ['record-type-picklist-overrides', selectedRecordTypeId],
+    queryKey: ['record-form-picklist-overrides', selectedRecordTypeId],
     queryFn: async () => {
       const overrides = await apiClient.getList<RecordTypePicklistOverrideDto>(
         `/api/record-type-picklists?filter[recordTypeId][eq]=${selectedRecordTypeId}`
       )
-      // Build a map of fieldId → allowed values
-      const map: Record<string, { values: string[]; defaultValue?: string }> = {}
-      for (const o of overrides) {
-        const values =
-          typeof o.availableValues === 'string'
-            ? (JSON.parse(o.availableValues) as string[])
-            : o.availableValues
-        map[o.fieldId] = { values, defaultValue: o.defaultValue }
-      }
-      return map
+      return buildPicklistOverrideMap(overrides)
     },
     enabled: !!selectedRecordTypeId,
   })
@@ -343,9 +385,9 @@ export function useRecordFormModel({
       if ((f.type === 'picklist' || f.type === 'multi_picklist') && picklistValuesMap?.[f.id]) {
         let entries = picklistValuesMap[f.id]
         // Apply record type picklist restrictions if available
-        const rtOverride = recordTypePicklistOverrides?.[f.id]
-        if (rtOverride) {
-          const allowedSet = new Set(rtOverride.values)
+        const allowed = recordTypePicklistOverrides?.[f.id]?.values
+        if (allowed) {
+          const allowedSet = new Set(allowed)
           entries = entries.filter((v) => allowedSet.has(v.value))
         }
         updated = {
@@ -387,6 +429,23 @@ export function useRecordFormModel({
   // Prefill only applies to new records (e.g. ?order_ref=<id>)
   const queryDefaults = isNew ? prefill : undefined
 
+  // The selected record type's picklist defaults, for a plain create only: an edit keeps the
+  // stored values, a clone the source's. They win over the schema default; the prefill wins
+  // over them (those fields are left out).
+  const recordTypeDefaults = useMemo<Record<string, unknown>>(() => {
+    if (!isNew || isClone || !recordTypePicklistOverrides) return NO_RECORD_TYPE_DEFAULTS
+    const defaults: Record<string, unknown> = {}
+    for (const f of permissionFilteredFields) {
+      if (f.type !== 'picklist' && f.type !== 'multi_picklist') continue
+      if (queryDefaults && f.name in queryDefaults) continue
+      const override = recordTypePicklistOverrides[f.id]
+      const value = override?.defaultValue
+      if (!value || (override.values && !override.values.includes(value))) continue
+      defaults[f.name] = f.type === 'multi_picklist' ? [value] : value
+    }
+    return Object.keys(defaults).length > 0 ? defaults : NO_RECORD_TYPE_DEFAULTS
+  }, [isNew, isClone, recordTypePicklistOverrides, permissionFilteredFields, queryDefaults])
+
   // Compute initial data and a key that changes when the data source changes.
   // The key forces the form body to remount, running useState with fresh initialData.
   const initialData = useMemo(
@@ -425,6 +484,7 @@ export function useRecordFormModel({
     setSelectedRecordTypeId,
     validationRules,
     initialData,
+    recordTypeDefaults,
     formKey,
     etag,
     reload,

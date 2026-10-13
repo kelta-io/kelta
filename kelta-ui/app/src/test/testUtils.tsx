@@ -186,18 +186,6 @@ export function setupAuthMocks() {
 }
 
 /**
- * Wrap a test's fetch mock to also handle bootstrap config.
- * Call this after setting up your test's fetch mock.
- *
- * Note: This is still needed because bootstrap config (AuthContext) uses
- * native fetch. Page-level API mocking now uses mockAxios instead.
- */
-// eslint-disable-next-line react-refresh/only-export-components
-export function wrapFetchMock(testFetchMock: typeof fetch) {
-  global.fetch = createBootstrapFetchWrapper(testFetchMock)
-}
-
-/**
  * Shared mock Axios instance used by all tests.
  *
  * When axios.create() is called (by KeltaClient), it returns this mock instance.

@@ -50,7 +50,6 @@
     "previous": "السابق",
     "clear": "مسح",
     "select": "اختيار",
-    "selected": "محدد",
     "selectAll": "تحديد الكل",
     "deselectAll": "إلغاء تحديد الكل",
     "noResults": "لم يتم العثور على نتائج",
@@ -74,7 +73,8 @@
     "oidcProviders": "مزودي OIDC",
     "pages": "الصفحات",
     "menus": "القوائم",
-    "plugins": "الإضافات"
+    "plugins": "الإضافات",
+    "home": "الرئيسية"
   },
   "collections": {
     "title": "المجموعات",
@@ -369,16 +369,7 @@
     "deleteRecord": "حذف السجل",
     "viewRecord": "عرض السجل",
     "record": "سجل",
-    "exportSelected": "تصدير",
-    "exportOptions": "خيارات التصدير",
-    "exportSelectedLabel": "تصدير {{count}} محدد",
-    "exportAllVisible": "تصدير الكل المرئي ({{count}})",
-    "exportToCSV": "تصدير إلى CSV",
-    "exportToJSON": "تصدير إلى JSON",
-    "exportSuccess": "تم تصدير {{count}} سجلات بنجاح كـ {{format}}",
-    "bulkDelete": "حذف المحدد",
-    "confirmDelete": "هل أنت متأكد من حذف هذا السجل؟",
-    "confirmBulkDelete": "هل أنت متأكد من حذف {{count}} سجلات؟"
+    "confirmDelete": "هل أنت متأكد من حذف هذا السجل؟"
   },
   "dashboard": {
     "title": "لوحة التحكم",
@@ -767,5 +758,10 @@
     "fieldsChangedSummary": "تم تغيير {{count}} من الحقول: {{fields}}",
     "backToList": "كل الإصدارات",
     "byUser": "بواسطة {{user}}"
+  },
+  "recordForm": {
+    "breadcrumbNew": "جديد",
+    "breadcrumbEdit": "تعديل",
+    "breadcrumbClone": "استنساخ"
   }
 }

@@ -196,6 +196,8 @@ interface RecordFormBodyProps {
   validationRules?: CollectionValidationRule[]
   /** The loaded record's ETag (edit mode) — sent as `If-Match` on update. */
   etag?: string
+  /** Create only: the selected record type's picklist defaults (applied to untouched fields). */
+  recordTypeDefaults?: Record<string, unknown>
   /** Refetch the record and re-initialise the form (the conflict prompt's Reload). */
   onReload: () => Promise<void>
 }
@@ -231,6 +233,7 @@ function RecordFormBody({
   onRecordTypeChange,
   validationRules,
   etag,
+  recordTypeDefaults,
   onReload,
 }: RecordFormBodyProps): React.ReactElement {
   const { getFieldRenderer } = usePlugins()
@@ -259,6 +262,7 @@ function RecordFormBody({
     selectedRecordTypeId,
     validationRules,
     etag,
+    recordTypeDefaults,
   })
 
   // Reload re-keys this body (fresh values, ETag and conflict state) once the refetch lands.
@@ -481,6 +485,7 @@ export function RecordForm(props: RecordFormProps): React.ReactElement {
     setSelectedRecordTypeId,
     validationRules,
     initialData,
+    recordTypeDefaults,
     formKey,
     etag,
     reload,
@@ -604,6 +609,7 @@ export function RecordForm(props: RecordFormProps): React.ReactElement {
         onRecordTypeChange={setSelectedRecordTypeId}
         validationRules={validationRules}
         etag={etag}
+        recordTypeDefaults={recordTypeDefaults}
         onReload={reload}
       />
     </RecordStackProvider>

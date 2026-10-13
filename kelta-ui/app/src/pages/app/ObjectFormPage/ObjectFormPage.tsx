@@ -23,6 +23,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
+import { useI18n } from '@/context/I18nContext'
 import { RecordForm } from '@/components/record/form/RecordForm'
 import type { RecordFormChromeContext, RecordFormRoutes } from '@/components/record/form/RecordForm'
 import { recordRoutes } from '@/utils/recordRoutes'
@@ -43,6 +44,7 @@ export function ObjectFormPage(): React.ReactElement {
   const basePath = `/${tenantSlug}/app`
   const isNew = !recordId
   const [searchParams] = useSearchParams()
+  const { t } = useI18n()
 
   const routes = useMemo<RecordFormRoutes>(() => {
     const enduser = recordRoutes('enduser', tenantSlug ?? '')
@@ -70,7 +72,7 @@ export function ObjectFormPage(): React.ReactElement {
       <BreadcrumbList>
         <BreadcrumbItem>
           <BreadcrumbLink asChild>
-            <Link to={`${basePath}/home`}>Home</Link>
+            <Link to={`${basePath}/home`}>{t('navigation.home')}</Link>
           </BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator />
@@ -81,7 +83,15 @@ export function ObjectFormPage(): React.ReactElement {
         </BreadcrumbItem>
         <BreadcrumbSeparator />
         <BreadcrumbItem>
-          <BreadcrumbPage>{isClone ? 'Clone' : creating ? 'New' : 'Edit'}</BreadcrumbPage>
+          <BreadcrumbPage>
+            {t(
+              isClone
+                ? 'recordForm.breadcrumbClone'
+                : creating
+                  ? 'recordForm.breadcrumbNew'
+                  : 'recordForm.breadcrumbEdit'
+            )}
+          </BreadcrumbPage>
         </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>

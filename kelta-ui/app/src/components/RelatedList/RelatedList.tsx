@@ -46,7 +46,7 @@ import type { FieldControlContext } from '@/components/fieldControl'
 import { MassEditDialog } from './MassEditDialog'
 import { useRelatedRecords } from '@/hooks/useRelatedRecords'
 import { useCollectionSchema } from '@/hooks/useCollectionSchema'
-import { useObjectPermissions } from '@/hooks/useObjectPermissions'
+import { useCollectionPermissions } from '@/hooks/useCollectionPermissions'
 import { useSystemPermissions } from '@/hooks/useSystemPermissions'
 import { useRecordMutation } from '@/hooks/useRecordMutation'
 import { useApi } from '@/context/ApiContext'
@@ -292,7 +292,7 @@ export function RelatedList({
   const { schema, fields, isLoading: schemaLoading } = useCollectionSchema(collectionName)
 
   // Fetch permissions for the related collection
-  const { permissions } = useObjectPermissions(collectionName)
+  const { permissions } = useCollectionPermissions(collectionName)
 
   // Mass edit posts to /api/bulk-jobs, which requires the MANAGE_DATA system
   // permission (in-controller gate) — hide the affordance without it.

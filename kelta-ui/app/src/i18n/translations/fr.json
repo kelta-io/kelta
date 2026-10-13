@@ -50,7 +50,6 @@
     "previous": "Précédent",
     "clear": "Effacer",
     "select": "Sélectionner",
-    "selected": "sélectionné(s)",
     "selectAll": "Tout sélectionner",
     "deselectAll": "Tout désélectionner",
     "noResults": "Aucun résultat trouvé",
@@ -78,7 +77,8 @@
     "picklists": "Listes de choix",
     "pages": "Pages",
     "menus": "Menus",
-    "plugins": "Extensions"
+    "plugins": "Extensions",
+    "home": "Accueil"
   },
   "collections": {
     "title": "Collections",
@@ -191,9 +191,7 @@
       "prefix": "Préfixe",
       "padding": "Remplissage",
       "currencyCode": "Code de devise par défaut",
-      "precision": "Précision décimale",
-      "latitude": "Latitude",
-      "longitude": "Longitude"
+      "precision": "Précision décimale"
     }
   },
   "authorization": {
@@ -498,16 +496,7 @@
     "deleteRecord": "Supprimer l'enregistrement",
     "viewRecord": "Voir l'enregistrement",
     "record": "Enregistrement",
-    "exportSelected": "Exporter",
-    "exportOptions": "Options d'exportation",
-    "exportSelectedLabel": "Exporter {{count}} sélectionnés",
-    "exportAllVisible": "Exporter tous les visibles ({{count}})",
-    "exportToCSV": "Exporter en CSV",
-    "exportToJSON": "Exporter en JSON",
-    "exportSuccess": "{{count}} enregistrements exportés avec succès au format {{format}}",
-    "bulkDelete": "Supprimer la sélection",
     "confirmDelete": "Êtes-vous sûr de vouloir supprimer cet enregistrement ?",
-    "confirmBulkDelete": "Êtes-vous sûr de vouloir supprimer {{count}} enregistrements ?",
     "cloneRecord": "Cloner {{collection}}",
     "cloningFrom": "Clonage à partir de l'enregistrement",
     "viewSource": "Voir la source"
@@ -1010,13 +999,6 @@
     "hoursAgo": "il y a {{count}}h",
     "daysAgo": "il y a {{count}}j"
   },
-  "listViews": {
-    "savedSuccessfully": "Vue enregistrée avec succès",
-    "deletedSuccessfully": "Vue supprimée"
-  },
-  "inlineEdit": {
-    "clickToEdit": "Cliquez pour modifier"
-  },
   "summaryStats": {
     "recordCount": "{{count}} enregistrements",
     "filteredCount": "{{count}} filtrés",
@@ -1087,5 +1069,10 @@
     "saved": "Profil enregistré",
     "saveFailed": "Impossible d'enregistrer votre profil",
     "loadFailed": "Impossible de charger votre profil"
+  },
+  "recordForm": {
+    "breadcrumbNew": "Nouveau",
+    "breadcrumbEdit": "Modifier",
+    "breadcrumbClone": "Cloner"
   }
 }
