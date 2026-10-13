@@ -36,6 +36,16 @@ so those suites do not run in CI at all; see `concerns.md` → Test Coverage Gap
 `BaselineAdminPasswordIntegrationTest` migrates its database from kelta-worker's real migration
 directory via a `filesystem:` Flyway location, so it needs the whole repo checked out.)
 
+**kelta-auth HTTP sessions in tests.** A flow test that needs real session behaviour (cookie,
+session id, `sid`, the OIDC `SessionRegistry`) puts Spring Session's `SessionRepositoryFilter` in
+front of Spring Security and drives a cookie jar, over `InMemoryIndexedSessionRepository` — a
+test store that keeps every value serialized through the production `SessionAttributeSerializer`,
+so a value that would not survive Redis fails without Docker (`OidcSignOutFlowTest.Config`,
+`Browser`). `SharedHttpSessionIntegrationTest` runs the same chains as several application
+contexts ("pods") over a Redis container, with the session settings read from the service's own
+`application.yml`. Native-image coverage of session values is `SessionAttributeHintsTest`
+(samples in `SessionAttributeSamples`, checked against the hints Spring AOT would apply).
+
 **RLS-sensitive provisioning paths need a NOBYPASSRLS-backed test.** Any service that writes rows
 belonging to a tenant *other than the one bound on the request* (sandbox provisioning, tenant
 seeding, promotion, anything looping `callWithTenant`) can be silently wrong under RLS — a

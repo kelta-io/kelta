@@ -11,6 +11,7 @@ io.kelta.auth/
   federation/      ← External IdP brokering (dynamic client registration, user mapping)
   model/           ← KeltaUserDetails, KeltaSession, KeltaUserDetailsMixin
   service/         ← Business logic (token customizer, user details, TOTP, session, worker client, etc.)
+  session/         ← HTTP sessions in Redis: HttpSessionConfig, value serializer, cookie, index, OIDC SessionRegistry
 ```
 
 ## Key Patterns
@@ -25,8 +26,8 @@ io.kelta.auth/
   authorization store — never read it after login. Whether the user signed in with a local
   password is `hasLocalCredential()` (fixed at construction; drives the `auth_method` claim). The mixin never writes `passwordHash` and
   reads stored rows that still carry it without keeping it.
-- `KeltaSession` — serializable session data `SessionService` stores in Redis (the servlet
-  `HttpSession` is NOT in Redis — `spring.session.*` is inert, see `concerns.md`)
+- `KeltaSession` — the `kelta_session` SSO cookie's data, stored as JSON in Redis by
+  `SessionService` (separate from the HTTP session — see **HTTP sessions** below)
 - Both are plain classes (not records, not JPA entities)
 
 ### OAuth2 Flow
@@ -80,15 +81,39 @@ io.kelta.auth/
    When the browser's session is signed in, Spring AS also requires the ID token's
    `sid` to be the hash of that session's id. It writes `sid` at the code exchange
    by looking the user's sessions up in the `SessionRegistry` bean
-   (`AuthorizationServerConfig.sessionRegistry()`) **by principal** — the one read
-   back from the JDBC authorization store, a different instance from the session's.
-   So `KeltaUserDetails.equals/hashCode` (tenant + user id) is load-bearing: without
-   it tokens carry no `sid` and sign-out is a 400 `invalid_token` (`sid`). The
-   authorization chain's `ConcurrentSessionFilter` keeps `lastRequest` current, so a
-   session that authorizes again gets its own `sid`, not a newer device's; the
-   `HttpSessionEventPublisher` bean drops ended sessions from the registry.
+   (`session/HttpSessionConfig.sessionRegistry()`, a `TenantScopedSessionRegistry` over
+   the Redis session store) **by principal** — the one read back from the JDBC
+   authorization store, a different instance from the session's. Sessions are indexed
+   and looked up by tenant + user id (`SessionPrincipalKeys`, the same identity as
+   `KeltaUserDetails.equals/hashCode`), never by email, which repeats across tenants.
+   Spring Session updates a session's last access time on every request, so a session
+   that authorizes again gets its own `sid`, not a newer device's. Ending the session
+   (sign-out) deletes it from Redis, and with it from the index.
    Tests: `OidcLogoutEndpointTest` (redirect rules), `OidcSignOutFlowTest` (form
-   login → authorize → token → logout over the JDBC store).
+   login → authorize → token → logout over the JDBC store and the session filter),
+   `SharedHttpSessionIntegrationTest` (the same across pods and a restart, real Redis).
+
+### HTTP sessions
+Stored in Redis by Spring Session (Boot's `spring-boot-starter-session-data-redis`; the Boot 4
+auto-configuration lives in that module), so every replica sees every session and a restart or
+rollout signs nobody out. Settings: `spring.session.*` in `application.yml` (indexed repository —
+a literal, it gates auto-configuration at native build time — namespace `kelta:auth:session`,
+30-minute idle timeout before sign-in) and `kelta.auth.session.*` (8-hour idle timeout once signed
+in, cookie name `kelta_auth_session`, `SameSite`). `session/`:
+- `SessionAttributeSerializer` — Java serialization of each session value, read through a
+  JDK/Spring/platform class allowlist. A value that cannot be written is left out, one that cannot
+  be read (classes changed in a release) reads as absent — never a failed request.
+- `SessionCookieSerializer` — `HttpOnly`, path `/`, browser-session lifetime, no `Domain`;
+  `Secure` + `SameSite` except on loopback hosts (`CookieDomainResolver.secureForRequest`).
+  `SameSite=None` is what lets a SAML IdP's cross-site POST carry the session that started the
+  sign-in.
+- `SessionPrincipalIndexResolver` / `TenantScopedSessionRegistry` — the per-user index and the
+  OIDC registry over it (see Sign-out above).
+- `SignedInSessionTimeoutFilter` — the long timeout only once the session holds a signed-in user.
+- **Native image**: every class written for a session value needs a serialization hint
+  (`AuthRuntimeHints.registerHttpSessionSerialization`, on top of Spring Session's own). A new
+  session attribute type gets a sample in the test `SessionAttributeSamples`;
+  `SessionAttributeHintsTest` fails until it is hinted.
 
 ### First-boot platform admin password
 `config/BaselineAdminPasswordInitializer` (`ApplicationRunner`) replaces the Flyway baseline's

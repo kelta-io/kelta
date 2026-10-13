@@ -5,6 +5,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+import java.io.Serial;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
@@ -19,6 +20,14 @@ import java.util.Objects;
  * {@link #hasLocalCredential()}, so it survives erasure.
  */
 public class KeltaUserDetails implements UserDetails, CredentialsContainer {
+
+    /**
+     * Pinned so a principal in a stored HTTP session (Java serialization, Redis) still reads
+     * after a release that changes this class compatibly. Bump it only for an incompatible
+     * change; sessions holding the old form then read as signed out.
+     */
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private final String id;
     private final String email;

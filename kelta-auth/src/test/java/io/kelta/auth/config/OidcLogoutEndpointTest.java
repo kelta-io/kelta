@@ -6,6 +6,10 @@ import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import io.kelta.auth.service.AuthDomainResolver;
+import io.kelta.auth.session.InMemoryIndexedSessionRepository;
+import io.kelta.auth.session.SessionAttributeSerializer;
+import io.kelta.auth.session.SessionPrincipalIndexResolver;
+import io.kelta.auth.session.TenantScopedSessionRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +42,7 @@ import org.springframework.security.oauth2.server.authorization.settings.Authori
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.session.DelegatingIndexResolver;
 import org.springframework.test.context.junit.jupiter.web.SpringJUnitWebConfig;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -48,6 +53,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 
 import java.security.Principal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -260,15 +266,16 @@ class OidcLogoutEndpointTest {
 
         @Bean
         SessionRegistry sessionRegistry() {
-            return new AuthorizationServerConfig().sessionRegistry();
+            return new TenantScopedSessionRegistry<>(new InMemoryIndexedSessionRepository(
+                    new DelegatingIndexResolver<>(new SessionPrincipalIndexResolver()),
+                    new SessionAttributeSerializer(getClass().getClassLoader()), Duration.ofMinutes(30)));
         }
 
         @Bean
         SecurityFilterChain authorizationServerSecurityFilterChain(
-                HttpSecurity http, AuthDomainResolver resolver, RegisteredClientRepository clients,
-                SessionRegistry sessionRegistry) throws Exception {
+                HttpSecurity http, AuthDomainResolver resolver, RegisteredClientRepository clients) throws Exception {
             return new AuthorizationServerConfig()
-                    .authorizationServerSecurityFilterChain(http, resolver, clients, sessionRegistry);
+                    .authorizationServerSecurityFilterChain(http, resolver, clients);
         }
     }
 }

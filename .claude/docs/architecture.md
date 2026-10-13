@@ -1258,9 +1258,9 @@ session, and `UserMenu` → "Switch workspace" lists the others. Switching is a 
 (`window.location.assign`), never a router navigation: the auth/API/config providers are bound
 to the current tenant.
 
-**Stale kelta-auth login form.** `/oauth2/authorize` saves itself in the HTTP session (the
-pod's servlet container, default idle timeout — `spring.session.*` is inert, `concerns.md`) and
-redirects to `/login`; a form left open past that fails CSRF on submit. The login page carries
+**Stale kelta-auth login form.** `/oauth2/authorize` saves itself in the HTTP session (Redis,
+shared by every kelta-auth replica; 30-minute idle timeout until the browser signs in, 8 hours
+after — `io.kelta.auth.session.HttpSessionConfig`) and redirects to `/login`; a form left open past that fails CSRF on submit. The login page carries
 the pending authorize URL in a hidden `authorize_url` field and
 `ExpiredLoginFormHandler` (the default chain's access-denied handler) restarts that request —
 same-origin `/oauth2/authorize?…` only — landing on a fresh form that says the page expired,

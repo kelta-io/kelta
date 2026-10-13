@@ -3,6 +3,7 @@ package io.kelta.auth.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -32,6 +33,8 @@ public class AuthProperties {
     private DirectLogin directLogin = new DirectLogin();
 
     private Saml saml = new Saml();
+
+    private Session session = new Session();
 
     /**
      * Initial password for the Flyway baseline's platform admin ({@code admin@kelta.local}),
@@ -85,6 +88,9 @@ public class AuthProperties {
     public Saml getSaml() { return saml; }
     public void setSaml(Saml saml) { this.saml = (saml != null) ? saml : new Saml(); }
 
+    public Session getSession() { return session; }
+    public void setSession(Session session) { this.session = (session != null) ? session : new Session(); }
+
     /**
      * Credential-carrying record for a single internal service caller. A blank
      * secret disables registration for that client, so the default (empty map)
@@ -124,6 +130,38 @@ public class AuthProperties {
         public void setSpSigningPrivateKey(String spSigningPrivateKey) {
             this.spSigningPrivateKey = spSigningPrivateKey;
         }
+    }
+
+    /**
+     * The HTTP session cookie and the signed-in idle timeout. Sessions are stored in Redis
+     * ({@code io.kelta.auth.session.HttpSessionConfig}); the idle timeout of a session that has
+     * not signed in yet is {@code spring.session.timeout}.
+     */
+    public static class Session {
+        /** Idle timeout once the session holds a signed-in user. */
+        private Duration authenticatedTimeout = Duration.ofHours(8);
+        /** Name of the session cookie. */
+        private String cookieName = "kelta_auth_session";
+        /**
+         * {@code SameSite} attribute of the session cookie: {@code None}, {@code Lax},
+         * {@code Strict}, or blank for none. {@code None} lets an identity provider's
+         * cross-site POST back to the SAML assertion consumer service carry the session that
+         * started the login. On a loopback host (plain-http local development) the cookie is
+         * sent without {@code Secure}, and {@code None} is then left off, since browsers
+         * reject {@code SameSite=None} without {@code Secure}.
+         */
+        private String cookieSameSite = "None";
+
+        public Duration getAuthenticatedTimeout() { return authenticatedTimeout; }
+        public void setAuthenticatedTimeout(Duration authenticatedTimeout) {
+            this.authenticatedTimeout = authenticatedTimeout;
+        }
+
+        public String getCookieName() { return cookieName; }
+        public void setCookieName(String cookieName) { this.cookieName = cookieName; }
+
+        public String getCookieSameSite() { return cookieSameSite; }
+        public void setCookieSameSite(String cookieSameSite) { this.cookieSameSite = cookieSameSite; }
     }
 
     /**

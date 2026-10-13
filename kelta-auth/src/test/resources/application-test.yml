@@ -10,5 +10,3 @@ spring:
       mode: always
       schema-locations: classpath:schema-test.sql
       continue-on-error: true
-  session:
-    store-type: none

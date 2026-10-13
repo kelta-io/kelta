@@ -300,11 +300,22 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
 - **Platform admin first boot (PLT-343).** `BaselineAdminPasswordInitializer` swaps the baseline
   hash for `KELTA_BOOTSTRAP_ADMIN_PASSWORD` or a generated one with forced change. Residual: a
   generated password is in the first boot's kelta-auth log (shipped to Loki) until changed —
-  production should set the env var; HTTP sessions are not revoked (non-indexed Redis session
-  store) and direct-login JWTs run to expiry; the `oauth2_authorization` cleanup also signs out a
+  production should set the env var; HTTP sessions are not revoked and direct-login JWTs run to
+  expiry; the `oauth2_authorization` cleanup also signs out a
   same-named admin of another tenant once; `ForcePasswordChangeController` updates every ACTIVE
   user with the submitted email, with only the session's RLS binding limiting it to one tenant.
   There is no test-only opt-out of the forced change (`testing.md`).
+- **kelta-auth HTTP sessions are Java-serialized into Redis** (Spring Session, indexed store,
+  `io.kelta.auth.session`). Two things follow. (1) Every class in a session value must be
+  registered for serialization in the native image (`AuthRuntimeHints`) — the JVM never notices a
+  gap; `SessionAttributeHintsTest` and `OidcSignOutFlowTest.storedValuesAreRegisteredForNativeSerialization`
+  fail on one, so a new session attribute type needs a sample in `SessionAttributeSamples`.
+  (2) A stored value whose class changed incompatibly reads as absent (`SessionAttributeSerializer`):
+  Spring Security pins `serialVersionUID` per minor version, so a Spring Security minor upgrade
+  signs every browser out of kelta-auth once. Keep `KeltaUserDetails.serialVersionUID` unless its
+  serialized form really changes. The indexed store needs Redis keyspace notifications
+  (`CONFIG SET` at startup, `KELTA_AUTH_SESSION_REDIS_CONFIGURE_ACTION`); kelta-auth now needs
+  Redis to start and to serve any page that uses a session.
 - **SPA refresh token in `localStorage` for up to 30 idle days** (accepted). XSS or a malicious
   plugin bundle can read it. Mitigations: rotation on every use, 30-day idle TTL, logout clears
   the key and ends the auth session. Not done: server-side revoke on logout (public client has no
@@ -473,11 +484,11 @@ different issuer. Chromium in a container needs `E2E_BROWSER_HOST_RULES=MAP auth
 kelta-auth` and `E2E_BROWSER_SECURE_ORIGINS=http://kelta-ui:8080` (PKCE needs `crypto.subtle`).
 `BaselineIdentityProviderReconciler` repairs the `default` tenant's baseline `oidc_provider` rows
 when the issuer differs from production. Guard: `e2e-tests/tests/auth/real-sign-in.spec.ts`
-(`E2E_REAL_SIGN_IN`). **kelta-auth's `spring.session.*` block (`store-type: redis`,
-`same-site: strict`) is inert** — Boot 4 moved Spring Session auto-config to a module not on the
-classpath; wiring it with `same-site: strict` would break the cross-site local sign-in hop, and
-multi-replica kelta-auth has no shared sessions today. The harness uses `http://kelta-auth:8080`
-consistently.
+(`E2E_REAL_SIGN_IN`). kelta-auth's HTTP session cookie (`kelta_auth_session`) is
+`Secure; SameSite=None` on every host except loopback, where it has neither, so the plain-http
+local sign-in hop keeps working (`SessionCookieSerializer`; `SameSite=Strict` or `Lax` would also
+break SP-initiated SAML sign-in, whose response arrives as a cross-site POST). The harness uses
+`http://kelta-auth:8080` consistently and carries cookies by hand, `Secure` or not.
 
 ### `DynamicCollectionRouter` internals (split 2026-10-12)
 
