@@ -82,8 +82,13 @@ public class LoginController {
             log.warn("Ignoring idp_hint={} — no matching client registration", idpHint);
         }
 
-        // Resolve tenant from the request to load SSO providers
+        // Resolve tenant from the request to load SSO providers.
+        // The template only tests these booleans: a method call such as
+        // `list.isEmpty()` in a template expression needs reflection on the JDK
+        // collection class, which the native image does not register.
         String tenantId = resolveTenantId(request);
+        model.addAttribute("hasSsoProviders", false);
+        model.addAttribute("hasSamlProviders", false);
 
         if (tenantId != null && clientRegistrationRepository instanceof DynamicClientRegistrationRepository dynamicRepo) {
             List<ClientRegistration> registrations = dynamicRepo.findByTenantId(tenantId);
@@ -91,6 +96,7 @@ public class LoginController {
                     .map(reg -> new SsoProviderInfo(reg.getRegistrationId(), reg.getClientName()))
                     .toList();
             model.addAttribute("ssoProviders", providers);
+            model.addAttribute("hasSsoProviders", !providers.isEmpty());
         }
 
         // SAML SSO buttons link to /saml2/authenticate/{registrationId}.
@@ -100,6 +106,7 @@ public class LoginController {
                     .map(b -> new SsoProviderInfo(b.registrationId(), b.name()))
                     .toList();
             model.addAttribute("samlProviders", samlProviders);
+            model.addAttribute("hasSamlProviders", !samlProviders.isEmpty());
         }
 
         return "login";

@@ -95,6 +95,10 @@ public class ConsentController {
         model.addAttribute("state", state);
         model.addAttribute("scopes", scopesToApprove);
         model.addAttribute("previouslyApprovedScopes", previouslyApproved);
+        // Booleans for the template: `set.isEmpty()` in a template expression needs
+        // reflection on the JDK collection class, which the native image does not register.
+        model.addAttribute("hasScopes", !scopesToApprove.isEmpty());
+        model.addAttribute("hasPreviouslyApprovedScopes", !previouslyApproved.isEmpty());
         model.addAttribute("principalName", principal.getName());
 
         return "consent";
