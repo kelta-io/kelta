@@ -87,6 +87,7 @@ public class PortalAuthSettingsController {
         boolean selfSignup = jdbcTemplate.queryForList(
                         "SELECT settings#>>'{portalAuth,selfSignupEnabled}' FROM tenant WHERE id = ?",
                         String.class, tenantId).stream()
+                .filter(v -> v != null)
                 .findFirst().map(Boolean::parseBoolean).orElse(false);
         return ResponseEntity.ok(new PortalAuthSettings(uris, invite, selfSignup));
     }
