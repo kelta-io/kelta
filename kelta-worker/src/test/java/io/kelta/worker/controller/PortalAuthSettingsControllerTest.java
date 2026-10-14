@@ -71,6 +71,26 @@ class PortalAuthSettingsControllerTest {
     }
 
     @Test
+    @DisplayName("GET returns defaults for a tenant with no portalAuth settings")
+    void getReturnsDefaultsWhenPortalAuthAbsent() {
+        // The tenant row exists, so the scalar #>> lookups yield one NULL row each.
+        when(jdbcTemplate.queryForList(contains("portalAuth,redirectUris"),
+                eq(String.class), eq(TENANT))).thenReturn(List.of());
+        when(jdbcTemplate.queryForList(contains("portalAuth,inviteRedirectUri"),
+                eq(String.class), eq(TENANT))).thenReturn(java.util.Collections.singletonList(null));
+        when(jdbcTemplate.queryForList(contains("portalAuth,selfSignupEnabled"),
+                eq(String.class), eq(TENANT))).thenReturn(java.util.Collections.singletonList(null));
+
+        ResponseEntity<PortalAuthSettingsController.PortalAuthSettings> response =
+                withTenant(() -> controller.get(request));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody().redirectUris()).isEmpty();
+        assertThat(response.getBody().inviteRedirectUri()).isNull();
+        assertThat(response.getBody().selfSignupEnabled()).isFalse();
+    }
+
+    @Test
     @DisplayName("PUT persists the portalAuth settings as one jsonb_set")
     void putPersists() {
         ResponseEntity<PortalAuthSettingsController.PortalAuthSettings> response =
