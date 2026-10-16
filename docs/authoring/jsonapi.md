@@ -71,6 +71,36 @@ The same parameter applies to `GET /api/<collection>/<id>`
 `data.relationships` keep only the named keys; `id`, `type` and `included`
 are unchanged, and so is the `ETag`.
 
+## System-maintained fields
+
+A field flagged `systemMaintained: true` holds a value the platform keeps
+up to date for you: a counter a validation rule relies on, a
+last-computed timestamp. Flows and server-side code (before-save hooks,
+NATS listeners, schedulers) may write it. An API caller, whether a user
+session or a PAT, may read it but not set it:
+
+- a create that supplies a non-null value, or an update that changes the
+  stored value, fails with **400**, constraint `systemMaintained`,
+  detail `Field '<field>' on collection '<collection>' is system-maintained
+  and cannot be written through the API`. In `POST /api/operations` the
+  pointer is `/atomic:operations/<i>/data/attributes/<field>` and the whole
+  batch rolls back;
+- an update that re-sends the value already stored (a full-record
+  round-trip) is accepted, and the field is left out of the write. Numbers
+  compare by value, an ISO timestamp equals the stored instant, and `""`
+  equals null.
+
+Discover the flag in `GET /api/collections/{name}/schema` (every field
+carries `systemMaintained`), the MCP `get_collection_schema` tool, or the
+OpenAPI spec, where such attributes are `readOnly`. Set it on the field
+itself, on the `fields` system collection: `kelta fields add
+--system-maintained`, `kelta fields update <fieldId> --system-maintained
+true|false`, or `systemMaintained` in a field's attributes. A package
+exported with `kelta metadata export` carries the flag, and `kelta
+metadata apply` restores it; a package without the key applies the field
+with the flag `false`. To maintain the value, write it from a flow step
+(e.g. an update-record action), not from the API client.
+
 ## `--yes` on every non-GET
 
 Every CLI/API mutation is treated as requiring explicit confirmation:

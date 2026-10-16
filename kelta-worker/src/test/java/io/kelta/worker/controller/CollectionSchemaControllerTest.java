@@ -134,6 +134,30 @@ class CollectionSchemaControllerTest {
     }
 
     @Test
+    @DisplayName("Every field carries systemMaintained: true when flagged, false otherwise")
+    void systemMaintainedIsEmittedForEveryField() throws Exception {
+        CollectionDefinition inspections = CollectionDefinition.builder()
+                .name("inspections")
+                .displayName("Inspections")
+                .addField(FieldDefinition.requiredString("site"))
+                .addField(FieldDefinition.integer("failureCount").withSystemMaintained(true))
+                .build();
+        when(registry.get("inspections")).thenReturn(inspections);
+
+        String body = mvc.perform(get("/api/collections/inspections/schema"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fields[?(@.name=='failureCount')].systemMaintained").value(true))
+                .andExpect(jsonPath("$.fields[?(@.name=='site')].systemMaintained").value(false))
+                .andReturn().getResponse().getContentAsString();
+
+        for (JsonNode field : new ObjectMapper().readTree(body).get("fields")) {
+            assertThat(field.path("systemMaintained").isBoolean())
+                    .as("systemMaintained on %s", field.path("name").asText())
+                    .isTrue();
+        }
+    }
+
+    @Test
     @DisplayName("An unknown collection name is a 404, not a router record read")
     void unknownCollectionIsNotFound() throws Exception {
         when(registry.get("not-a-collection")).thenReturn(null);

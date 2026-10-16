@@ -43,10 +43,11 @@ public class GetCollectionSchemaTool implements UserTool, AdminTool {
                 .name("get_collection_schema")
                 .title("Get Collection Schema")
                 .description("Return the full schema for a collection: metadata + all field definitions "
-                        + "(type, required, enum values, references) plus its validation rules by default. "
+                        + "(type, required, enum values, references, systemMaintained) plus its validation rules by default. "
                         + "Wraps GET /api/collections/{name}/schema, and — when includeRules is true — "
                         + "GET /api/validation-rules for that collection. Use this before constructing a "
-                        + "query or create_record call to know what attributes are available. "
+                        + "query or create_record call to know what attributes are available; a systemMaintained "
+                        + "field is set by flows only, and a create or update that sets or changes it returns 400. "
                         + "Example: {\"collection\": \"accounts\"} returns accounts' fields with types/enums "
                         + "and its active validation rules.")
                 .inputSchema(Schemas.object(properties, List.of("collection")))

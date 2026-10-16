@@ -121,6 +121,7 @@ Add a field to a collection (friendly type aliases: text, number, picklist, refe
 - `--unique` — Unique constraint
 - `--indexed` — Create an index
 - `--searchable` — Full-text searchable
+- `--system-maintained` — Only flows and server-side code may set the value; an API write that sets or changes it gets a 400 (see `kelta docs jsonapi`)
 - `--description <text>` — Description
 - `--default <value>` — Default value (true|false for BOOLEAN, a number for numeric types)
 - `--picklist <name|id>` — Global picklist source (picklist types)
@@ -136,6 +137,7 @@ Update a field by id
 
 - `--display-name <label>` — Display name
 - `--required <bool>` — true|false
+- `--system-maintained <bool>` — true|false — set or clear the system-maintained flag (see `kelta docs jsonapi`)
 - `--description <text>` — Description
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 

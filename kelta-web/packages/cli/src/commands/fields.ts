@@ -73,6 +73,11 @@ const add = defineCommand({
     { flag: '--unique', description: 'Unique constraint' },
     { flag: '--indexed', description: 'Create an index' },
     { flag: '--searchable', description: 'Full-text searchable' },
+    {
+      flag: '--system-maintained',
+      description:
+        'Only flows and server-side code may set the value; an API write that sets or changes it gets a 400 (see `kelta docs jsonapi`)',
+    },
     { flag: '--description <text>', description: 'Description' },
     {
       flag: '--default <value>',
@@ -98,6 +103,7 @@ const add = defineCommand({
     unique: z.boolean().optional(),
     indexed: z.boolean().optional(),
     searchable: z.boolean().optional(),
+    systemMaintained: z.boolean().optional(),
     description: z.string().optional(),
     default: z.string().optional(),
     picklist: z.string().optional(),
@@ -119,6 +125,7 @@ const add = defineCommand({
       unique: input.unique,
       indexed: input.indexed,
       searchable: input.searchable,
+      systemMaintained: input.systemMaintained,
       description: input.description,
       defaultValue:
         input.default === undefined ? undefined : typedDefault(input.type, input.default),
@@ -170,6 +177,11 @@ const update = defineCommand({
   options: [
     { flag: '--display-name <label>', description: 'Display name' },
     { flag: '--required <bool>', description: 'true|false' },
+    {
+      flag: '--system-maintained <bool>',
+      description:
+        'true|false — set or clear the system-maintained flag (see `kelta docs jsonapi`)',
+    },
     { flag: '--description <text>', description: 'Description' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
@@ -177,6 +189,7 @@ const update = defineCommand({
     fieldId: z.string().min(1),
     displayName: z.string().optional(),
     required: z.enum(['true', 'false']).optional(),
+    systemMaintained: z.enum(['true', 'false']).optional(),
     description: z.string().optional(),
     data: z.string().optional(),
   }),
@@ -184,6 +197,9 @@ const update = defineCommand({
     const attributes: Record<string, unknown> = {};
     if (input.displayName) attributes.displayName = input.displayName;
     if (input.required !== undefined) attributes.required = input.required === 'true';
+    if (input.systemMaintained !== undefined) {
+      attributes.systemMaintained = input.systemMaintained === 'true';
+    }
     if (input.description) attributes.description = input.description;
     if (input.data) Object.assign(attributes, readDataArgument(input.data));
     const response = await ctx.client

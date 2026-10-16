@@ -120,6 +120,7 @@ public class CollectionSchemaController {
         out.put("required", !field.nullable());
         out.put("isRelationship", field.type().isRelationship());
         out.put("description", field.description());
+        out.put("systemMaintained", field.systemMaintained());
 
         if (field.defaultValue() != null) {
             out.put("default", field.defaultValue());
