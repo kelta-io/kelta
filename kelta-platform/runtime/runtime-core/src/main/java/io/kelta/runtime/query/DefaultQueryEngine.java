@@ -1,5 +1,6 @@
 package io.kelta.runtime.query;
 
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.EventFactory;
 import io.kelta.runtime.event.PlatformEvent;
@@ -271,6 +272,8 @@ public class DefaultQueryEngine implements QueryEngine {
         // may add one below); one supplied by the caller is dropped.
         Map<String, Object> recordData = definition.withoutServerOnlyFields(data);
 
+        rejectCallerWritesToSystemMaintained(definition, recordData, null);
+
         // Add system fields
         String id = UUID.randomUUID().toString();
         Instant now = Instant.now();
@@ -358,6 +361,8 @@ public class DefaultQueryEngine implements QueryEngine {
         recordData.remove("id");
         recordData.remove("createdAt");
         recordData.remove("createdBy");
+
+        rejectCallerWritesToSystemMaintained(definition, recordData, existing.get());
 
         // Reject writes that would change a collection-level immutable field.
         // These used to be stripped silently, which returned 200 for a write that
@@ -759,6 +764,82 @@ public class DefaultQueryEngine implements QueryEngine {
             }
         }
         return changedFields;
+    }
+
+    /**
+     * Refuses an API caller's write to a {@link FieldDefinition#systemMaintained()
+     * system-maintained} field. Only a bound {@link CallerContext} — an HTTP request, user or
+     * PAT — is refused; flows, NATS listeners and schedulers run with none and write freely.
+     *
+     * <p>On create ({@code stored == null}) any non-null value is a write. On update only a
+     * change is: re-sending the stored value (a full-record round-trip) is accepted, and the
+     * field leaves the patch so the stored value is not rewritten.
+     */
+    private void rejectCallerWritesToSystemMaintained(CollectionDefinition definition,
+                                                      Map<String, Object> recordData,
+                                                      Map<String, Object> stored) {
+        Set<String> systemMaintained = definition.systemMaintainedFieldNames();
+        if (systemMaintained.isEmpty() || CallerContext.current().isEmpty()) {
+            return;
+        }
+        List<FieldError> errors = new ArrayList<>();
+        for (String field : systemMaintained) {
+            if (!recordData.containsKey(field)) {
+                continue;
+            }
+            Object submitted = recordData.get(field);
+            if (stored == null) {
+                if (submitted != null) {
+                    errors.add(systemMaintainedError(definition, field));
+                }
+            } else if (sameSystemMaintainedValue(stored.get(field), submitted)) {
+                recordData.remove(field);
+            } else {
+                errors.add(systemMaintainedError(definition, field));
+            }
+        }
+        if (!errors.isEmpty()) {
+            throw new ValidationException(ValidationResult.failure(errors));
+        }
+    }
+
+    private static FieldError systemMaintainedError(CollectionDefinition definition, String field) {
+        return new FieldError(field, "Field '" + field + "' on collection '" + definition.name()
+                + "' is system-maintained and cannot be written through the API", "systemMaintained");
+    }
+
+    /**
+     * {@link #sameStoredValue} plus the read-back forms a system-maintained value (typically a
+     * counter or timestamp a flow keeps) takes: an empty string matches a stored null, numbers
+     * compare by value ({@code 3} equals a stored {@code 3.0}), and an ISO timestamp string
+     * equals the stored {@link Instant}.
+     */
+    private boolean sameSystemMaintainedValue(Object stored, Object submitted) {
+        if (isBlank(stored) && isBlank(submitted)) {
+            return true;
+        }
+        if (sameStoredValue(stored, submitted)) {
+            return true;
+        }
+        if (stored == null || submitted == null) {
+            return false;
+        }
+        if (stored instanceof Number || submitted instanceof Number) {
+            try {
+                return new java.math.BigDecimal(String.valueOf(stored).trim())
+                        .compareTo(new java.math.BigDecimal(String.valueOf(submitted).trim())) == 0;
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+        if (stored instanceof Instant storedInstant && submitted instanceof String text) {
+            try {
+                return storedInstant.equals(java.time.OffsetDateTime.parse(text.trim()).toInstant());
+            } catch (java.time.format.DateTimeParseException e) {
+                return false;
+            }
+        }
+        return false;
     }
 
     /**

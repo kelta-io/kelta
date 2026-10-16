@@ -72,7 +72,7 @@ public class CollectionLifecycleManager {
             SELECT name, type, required, unique_constraint, indexed, default_value,
                    constraints, field_type_config, reference_target, reference_collection_id,
                    relationship_type, relationship_name, cascade_delete, field_order, column_name,
-                   immutable, searchable, track_history, description
+                   immutable, searchable, track_history, description, system_maintained
             FROM field WHERE collection_id = ? AND active = true
             ORDER BY field_order, created_at, id
             """;
@@ -657,6 +657,7 @@ public class CollectionLifecycleManager {
             boolean unique = Boolean.TRUE.equals(row.get("unique_constraint"));
             boolean immutable = Boolean.TRUE.equals(row.get("immutable"));
             boolean trackHistory = Boolean.TRUE.equals(row.get("track_history"));
+            boolean systemMaintained = Boolean.TRUE.equals(row.get("system_maintained"));
             String columnName = (String) row.get("column_name");
 
             // Parse reference config. `reference_target` (the denormalized target collection NAME)
@@ -720,7 +721,7 @@ public class CollectionLifecycleManager {
             FieldDefinition fieldDef = new FieldDefinition(
                     fieldName, fieldType, !required, immutable, unique,
                     parsedDefaultValue, null, null, refConfig, parsedFieldTypeConfig, columnName, trackHistory,
-                    (String) row.get("description"));
+                    (String) row.get("description"), false, systemMaintained);
             fields.add(fieldDef);
         }
 

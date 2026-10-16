@@ -9,6 +9,8 @@ import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.router.AtomicOperationExecutor;
 import io.kelta.runtime.router.AtomicOperationExecutor.AtomicOperationException;
+import io.kelta.runtime.validation.FieldError;
+import io.kelta.runtime.validation.ValidationException;
 import io.kelta.worker.interceptor.FieldWriteGuard;
 import io.kelta.worker.service.CerbosAuthorizationService;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -20,6 +22,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -135,13 +139,18 @@ public class AtomicOperationsController {
         } catch (AtomicOperationException e) {
             log.warn("Atomic operation {} failed at index {}: {}",
                     e.getOperationType(), e.getOperationIndex(), e.getMessage());
+            rollbackBatch();
 
+            if (e.getCause() instanceof ValidationException validation) {
+                return ResponseEntity.badRequest().body(validationErrorResponse(validation, e.getOperationIndex()));
+            }
             return ResponseEntity.unprocessableEntity().body(errorResponse(
                     "422", "OPERATION_FAILED", "Operation failed",
                     e.getMessage() != null ? e.getMessage() : "Atomic operation failed",
                     "/atomic:operations/" + e.getOperationIndex()));
         } catch (Exception e) {
             log.error("Unexpected error during atomic operations", e);
+            rollbackBatch();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse(
                     "500", "INTERNAL_ERROR", "Internal error",
                     "An unexpected error occurred", null));
@@ -268,6 +277,38 @@ public class AtomicOperationsController {
         return opsList.stream()
                 .map(op -> mapper.convertValue(op, AtomicOperation.class))
                 .toList();
+    }
+
+    /**
+     * Marks the batch transaction rollback-only. The failure is answered with an error envelope
+     * rather than rethrown, so without this the operations before the failing one would commit.
+     */
+    private static void rollbackBatch() {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+        }
+    }
+
+    /**
+     * A field validation failure inside an operation is a 400, as it is on a single-record
+     * write, with one error per field pointing into the failing operation.
+     */
+    private Map<String, Object> validationErrorResponse(ValidationException validation, int operationIndex) {
+        String base = "/atomic:operations/" + operationIndex;
+        if (validation.getValidationResult() == null || validation.getValidationResult().errors().isEmpty()) {
+            return errorResponse("400", "VALIDATION_FAILED", "Validation Error", validation.getMessage(), base);
+        }
+        List<Map<String, Object>> errors = new ArrayList<>();
+        for (FieldError fieldError : validation.getValidationResult().errors()) {
+            var error = new LinkedHashMap<String, Object>();
+            error.put("status", "400");
+            error.put("code", fieldError.constraint().isBlank() ? "VALIDATION_FAILED" : fieldError.constraint());
+            error.put("title", "Validation Error");
+            error.put("detail", fieldError.message());
+            error.put("source", Map.of("pointer", base + "/data/attributes/" + fieldError.fieldName()));
+            errors.add(error);
+        }
+        return Map.of("errors", errors);
     }
 
     private Map<String, Object> errorResponse(String status, String code, String title, String detail, String pointer) {

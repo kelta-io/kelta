@@ -586,4 +586,54 @@ class FieldDefinitionTest {
             assertNull(elevenArg.description());
         }
     }
+
+    @Nested
+    @DisplayName("systemMaintained flag (KLT-609)")
+    class SystemMaintainedTests {
+
+        @Test
+        @DisplayName("every backward-compatible constructor and factory defaults systemMaintained to false")
+        void defaultsToFalse() {
+            FieldDefinition fourteenArg = new FieldDefinition(
+                "n", FieldType.STRING, true, false, false, null, null, null, null, null,
+                "n_col", true, "d", true);
+            FieldDefinition thirteenArg = new FieldDefinition(
+                "n", FieldType.STRING, true, false, false, null, null, null, null, null,
+                "n_col", true, "d");
+            FieldDefinition tenArg = new FieldDefinition(
+                "n", FieldType.STRING, true, false, false, null, null, null, null, null);
+
+            assertFalse(fourteenArg.systemMaintained());
+            assertTrue(fourteenArg.serverOnly());
+            assertFalse(thirteenArg.systemMaintained());
+            assertFalse(tenArg.systemMaintained());
+            assertFalse(FieldDefinition.integer("n").systemMaintained());
+            assertFalse(new FieldDefinitionBuilder().name("n").type(FieldType.STRING).build().systemMaintained());
+        }
+
+        @Test
+        @DisplayName("withSystemMaintained sets the flag and the other with-ers keep it")
+        void withSystemMaintainedSurvivesCopies() {
+            FieldDefinition field = FieldDefinition.integer("count").withSystemMaintained(true);
+
+            assertTrue(field.systemMaintained());
+            assertTrue(field.withColumnName("count_col").withDescription("x").withNullable(false)
+                .withTrackHistory(true).withServerOnly(false).systemMaintained());
+            assertFalse(field.withSystemMaintained(false).systemMaintained());
+            assertTrue(new FieldDefinitionBuilder().name("n").type(FieldType.INTEGER)
+                .systemMaintained(true).build().systemMaintained());
+        }
+
+        @Test
+        @DisplayName("CollectionDefinition lists its system-maintained fields")
+        void collectionListsSystemMaintainedFields() {
+            CollectionDefinition def = new CollectionDefinitionBuilder()
+                .name("inspections").displayName("Inspections")
+                .addField(FieldDefinition.string("name"))
+                .addField(FieldDefinition.integer("count").withSystemMaintained(true))
+                .build();
+
+            assertEquals(java.util.Set.of("count"), def.systemMaintainedFieldNames());
+        }
+    }
 }

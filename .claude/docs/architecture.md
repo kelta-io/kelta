@@ -1823,6 +1823,30 @@ lookup) reads the column over JDBC (`CredentialRepository`, `CredentialOAuthToke
 `SystemCollectionDefinitionsTest`). The flag is declared in code; tenant-authored fields cannot set
 it yet.
 
+**System-maintained fields** (KLT-609) — a field declared `FieldDefinition.systemMaintained`
+(`.withSystemMaintained(true)`; tenant fields set it as `systemMaintained` on the `fields` system
+collection, column `field.system_maintained`, V213, read into the definition by
+`CollectionLifecycleManager`) holds a value that flows and other internal paths maintain — a
+counter a validation rule relies on, a last-computed timestamp — and that an API caller may read
+but not set. `DefaultQueryEngine.create`/`update` enforce it, so every write path that reaches the
+engine is covered: the router's create/update, `POST /api/operations` and any other HTTP path.
+"API caller" means `CallerContext.current()` is present (bound by `CallerContextFilter` for every
+HTTP request, user and PAT alike); nothing a client sends — no header, parameter or body flag —
+decides the exemption. With a caller bound, a create that supplies a non-null value and an update
+whose value differs from the stored one fail with `ValidationException` → 400, constraint
+`systemMaintained`, message `Field '<field>' on collection '<collection>' is system-maintained and
+cannot be written through the API`. An update re-sending the stored value (a full-record
+round-trip; numbers compare by value, an ISO timestamp equals the stored `Instant`, `""` equals
+null) is accepted and the field leaves the patch. The check runs before the before-save hooks, so
+a hook may still set the field on a caller's request. Flows (`FlowEventListener`,
+`FlowEngine.startExecution` — its executor propagates only the tenant, so `POST
+/api/flows/{id}/execute` also runs its steps with no caller), NATS listeners and schedulers have no
+caller bound and write freely. Code that writes such a field through the query engine
+*synchronously inside* an HTTP request (e.g. a hook that updates a second record) runs with that
+request's caller bound and is refused like it. `AtomicOperationsController` answers a `ValidationException` from
+any operation with 400 (pointer `/atomic:operations/<i>/data/attributes/<field>`) and marks the
+batch transaction rollback-only, so the operations before the failing one do not commit.
+
 **Field history** — value changes to fields with `trackHistory=true` are captured
 by `FieldHistoryHook` (worker `listener/`, wildcard `BeforeSaveHook`, order 900):
 `afterCreate`/`afterUpdate` diff old vs new, `beforeDelete` re-reads the record for

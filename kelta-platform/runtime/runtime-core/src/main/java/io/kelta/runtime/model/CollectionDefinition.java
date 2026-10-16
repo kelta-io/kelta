@@ -326,6 +326,22 @@ public record CollectionDefinition(
     }
 
     /**
+     * Names of the fields declared {@link FieldDefinition#systemMaintained() system-maintained} —
+     * values only flows, hooks and other internal paths may set or change.
+     *
+     * @return the system-maintained field names; empty for almost every collection
+     */
+    public Set<String> systemMaintainedFieldNames() {
+        Set<String> names = new java.util.LinkedHashSet<>();
+        for (FieldDefinition field : fields) {
+            if (field.systemMaintained()) {
+                names.add(field.name());
+            }
+        }
+        return names.isEmpty() ? Set.of() : java.util.Collections.unmodifiableSet(names);
+    }
+
+    /**
      * Returns {@code true} if {@code fieldName} is a server-only field of this collection.
      *
      * @param fieldName the field name
