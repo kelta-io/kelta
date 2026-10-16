@@ -6,8 +6,11 @@ import io.kelta.runtime.event.RecordChangedPayload;
 import io.kelta.runtime.events.RecordEventPublisher;
 import io.kelta.worker.cache.WorkerCacheManager;
 import io.kelta.worker.listener.SystemFeatureEventPublisher;
+import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.GovernorLimitsRepository;
+import io.kelta.worker.service.CerbosPermissionResolver;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.servlet.http.HttpServletRequest;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,13 +19,16 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -42,6 +48,9 @@ class GovernorLimitsControllerTest {
     private RecordEventPublisher recordEventPublisher;
     private PlatformEventPublisher platformEventPublisher;
     private SystemFeatureEventPublisher featureEventPublisher;
+    private CerbosPermissionResolver permissionResolver;
+    private BootstrapRepository bootstrapRepository;
+    private HttpServletRequest request;
     private GovernorLimitsController controller;
 
     @SuppressWarnings("unchecked")
@@ -58,7 +67,18 @@ class GovernorLimitsControllerTest {
         // Default: Redis returns null (0 API calls)
         when(valueOps.get(anyString())).thenReturn(null);
         WorkerCacheManager cacheManager = new WorkerCacheManager(new SimpleMeterRegistry());
-        controller = new GovernorLimitsController(repository, objectMapper, redisTemplate, recordEventPublisher, cacheManager, featureEventPublisher);
+        permissionResolver = mock(CerbosPermissionResolver.class);
+        bootstrapRepository = mock(BootstrapRepository.class);
+        request = mock(HttpServletRequest.class);
+        controller = new GovernorLimitsController(repository, objectMapper, redisTemplate, recordEventPublisher,
+                cacheManager, featureEventPublisher, permissionResolver, bootstrapRepository);
+        grantPermission("MANAGE_TENANTS", true);
+    }
+
+    private void grantPermission(String permissionName, boolean granted) {
+        when(permissionResolver.getProfileId(request)).thenReturn("profile-1");
+        when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
+                Map.of("permission_name", permissionName, "granted", granted)));
     }
 
     /** Extracts the attributes map from a JSON:API single-resource response body. */
@@ -351,6 +371,48 @@ class GovernorLimitsControllerTest {
     // ==================== Tier Tests ====================
 
     @Nested
+    @DisplayName("Write authorization (MANAGE_TENANTS)")
+    class WriteAuthorizationTests {
+
+        @Test
+        @DisplayName("refuses a tier change without MANAGE_TENANTS, before touching the tenant")
+        void tierRequiresManageTenants() {
+            grantPermission("MANAGE_TENANTS", false);
+
+            assertThatThrownBy(() -> controller.updateTier("tenant-1", Map.of("tier", "UNLIMITED"), request))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                    .isEqualTo(HttpStatus.FORBIDDEN);
+            verify(repository, never()).updateTenantEdition(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("refuses a limits change without MANAGE_TENANTS, before touching the tenant")
+        void limitsRequireManageTenants() {
+            grantPermission("CUSTOMIZE_APPLICATION", true);
+
+            assertThatThrownBy(() -> controller.updateLimits("tenant-1", Map.of("apiCallsPerDay", 1_000_000), request))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                    .isEqualTo(HttpStatus.FORBIDDEN);
+            verify(repository, never()).updateTenantLimits(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("refuses a write from a caller with no identity")
+        void writesFailClosedWithoutIdentity() {
+            when(permissionResolver.getProfileId(request)).thenReturn(null);
+
+            assertThatThrownBy(() -> controller.updateTier("tenant-1", Map.of("tier", "FREE"), request))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                    .isEqualTo(HttpStatus.FORBIDDEN);
+            verifyNoInteractions(bootstrapRepository);
+            verify(repository, never()).updateTenantEdition(anyString(), anyString());
+        }
+    }
+
+    @Nested
     @DisplayName("PUT /api/governor-limits/tier")
     class UpdateTierTests {
 
@@ -358,7 +420,7 @@ class GovernorLimitsControllerTest {
         @DisplayName("rejects request with missing tier field")
         void rejectsMissingTier() {
             ResponseEntity<Map<String, Object>> response = controller.updateTier(
-                    "tenant-1", Map.of());
+                    "tenant-1", Map.of(), request);
 
             assertThat(response.getStatusCode().is4xxClientError()).isTrue();
         }
@@ -367,7 +429,7 @@ class GovernorLimitsControllerTest {
         @DisplayName("rejects request with invalid tier value")
         void rejectsInvalidTier() {
             ResponseEntity<Map<String, Object>> response = controller.updateTier(
-                    "tenant-1", Map.of("tier", "DELUXE"));
+                    "tenant-1", Map.of("tier", "DELUXE"), request);
 
             assertThat(response.getStatusCode().is4xxClientError()).isTrue();
         }
@@ -382,7 +444,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveCollections("tenant-1")).thenReturn(0);
 
             ResponseEntity<Map<String, Object>> response = controller.updateTier(
-                    "tenant-1", Map.of("tier", "enterprise"));
+                    "tenant-1", Map.of("tier", "enterprise"), request);
 
             assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
             verify(repository).updateTenantEdition("tenant-1", "ENTERPRISE");
@@ -394,7 +456,7 @@ class GovernorLimitsControllerTest {
             when(repository.updateTenantEdition("missing", "FREE")).thenReturn(0);
 
             ResponseEntity<Map<String, Object>> response = controller.updateTier(
-                    "missing", Map.of("tier", "FREE"));
+                    "missing", Map.of("tier", "FREE"), request);
 
             assertThat(response.getStatusCode().value()).isEqualTo(404);
         }
@@ -409,7 +471,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveCollections("tenant-1")).thenReturn(0);
 
             ResponseEntity<Map<String, Object>> response = controller.updateTier(
-                    "tenant-1", Map.of("tier", "FREE"));
+                    "tenant-1", Map.of("tier", "FREE"), request);
 
             Map<String, Object> attrs = getAttributes(response.getBody());
             assertThat(attrs.get("tier")).isEqualTo("FREE");
@@ -441,7 +503,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(50);
             when(repository.countActiveCollections("tenant-1")).thenReturn(30);
 
-            ResponseEntity<Map<String, Object>> response = controller.updateLimits("tenant-1", newLimits);
+            ResponseEntity<Map<String, Object>> response = controller.updateLimits("tenant-1", newLimits, request);
 
             assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
 
@@ -464,7 +526,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(0);
             when(repository.countActiveCollections("tenant-1")).thenReturn(0);
 
-            controller.updateLimits("tenant-1", newLimits);
+            controller.updateLimits("tenant-1", newLimits, request);
 
             ArgumentCaptor<PlatformEvent<RecordChangedPayload>> captor =
                     ArgumentCaptor.forClass(PlatformEvent.class);
@@ -491,7 +553,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(0);
             when(repository.countActiveCollections("tenant-1")).thenReturn(0);
 
-            ResponseEntity<Map<String, Object>> response = controller.updateLimits("tenant-1", newLimits);
+            ResponseEntity<Map<String, Object>> response = controller.updateLimits("tenant-1", newLimits, request);
 
             assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
             verify(repository).updateTenantLimits(eq("tenant-1"), anyString());

@@ -66,10 +66,12 @@ public class BulkOperationsController {
     }
 
     /**
-     * Bulk writes bypass per-record Cerbos advice (power-user path), so the
-     * write endpoints are gated in-controller on {@code MANAGE_DATA} —
-     * fail-closed when identity is missing. Reads keep the blanket
-     * {@code API_ACCESS} gate.
+     * Bulk writes bypass per-record Cerbos advice (power-user path), so every
+     * endpoint is gated in-controller on {@code MANAGE_DATA} — fail-closed when
+     * identity is missing. Reads too: {@code /api/bulk-jobs/**} is a static
+     * gateway route with only the blanket {@code API_ACCESS} check, and a job's
+     * results (and their CSV download, which no response advice sees) list record
+     * ids and per-row error messages for collections the caller may not read.
      *
      * @return an error response when denied, or null when allowed
      */
@@ -284,7 +286,13 @@ public class BulkOperationsController {
     @GetMapping("/{id}")
     public ResponseEntity<Map<String, Object>> getJob(
             @PathVariable String id,
-            @RequestHeader("X-Tenant-ID") String tenantId) {
+            @RequestHeader("X-Tenant-ID") String tenantId,
+            HttpServletRequest httpRequest) {
+
+        ResponseEntity<Map<String, Object>> denied = requireManageData(httpRequest);
+        if (denied != null) {
+            return denied;
+        }
 
         Optional<Map<String, Object>> jobOpt = bulkJobRepository.findByIdAndTenant(id, tenantId);
         if (jobOpt.isEmpty()) {
@@ -302,7 +310,13 @@ public class BulkOperationsController {
     public ResponseEntity<Map<String, Object>> listJobs(
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestParam(defaultValue = "20") int limit,
-            @RequestParam(defaultValue = "0") int offset) {
+            @RequestParam(defaultValue = "0") int offset,
+            HttpServletRequest httpRequest) {
+
+        ResponseEntity<Map<String, Object>> denied = requireManageData(httpRequest);
+        if (denied != null) {
+            return denied;
+        }
 
         int effectiveLimit = Math.min(Math.max(limit, 1), 100);
         int effectiveOffset = Math.max(offset, 0);
@@ -328,7 +342,13 @@ public class BulkOperationsController {
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestParam(defaultValue = "50") int limit,
             @RequestParam(defaultValue = "0") int offset,
-            @RequestParam(required = false) String status) {
+            @RequestParam(required = false) String status,
+            HttpServletRequest httpRequest) {
+
+        ResponseEntity<Map<String, Object>> denied = requireManageData(httpRequest);
+        if (denied != null) {
+            return denied;
+        }
 
         // Verify job belongs to tenant
         Optional<Map<String, Object>> jobOpt = bulkJobRepository.findByIdAndTenant(id, tenantId);
@@ -374,7 +394,12 @@ public class BulkOperationsController {
     @GetMapping(value = "/{id}/results/download", produces = "text/csv")
     public ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody> downloadResults(
             @PathVariable String id,
-            @RequestHeader("X-Tenant-ID") String tenantId) {
+            @RequestHeader("X-Tenant-ID") String tenantId,
+            HttpServletRequest httpRequest) {
+
+        if (requireManageData(httpRequest) != null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
 
         Optional<Map<String, Object>> jobOpt = bulkJobRepository.findByIdAndTenant(id, tenantId);
         if (jobOpt.isEmpty()) {

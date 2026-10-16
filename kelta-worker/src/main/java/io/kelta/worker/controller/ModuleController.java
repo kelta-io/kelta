@@ -8,13 +8,18 @@ import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleSignatureException;
 import io.kelta.worker.module.ModuleRouteRegistry;
 import io.kelta.worker.module.RuntimeModuleManager;
+import io.kelta.worker.repository.BootstrapRepository;
+import io.kelta.worker.service.CerbosPermissionResolver;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -25,6 +30,12 @@ import java.util.Map;
  * <p>
  * Provides CRUD operations for installing, enabling, disabling,
  * and uninstalling tenant-scoped modules. Returns JSON:API format.
+ * <p>
+ * {@code /api/modules/**} is a static gateway route, which carries only the blanket
+ * {@code API_ACCESS} check (signing-key writes excepted), so installing, enabling, disabling and
+ * uninstalling are gated here on {@code CUSTOMIZE_APPLICATION}: a module provisions collections,
+ * flows and routes into the tenant. Reads stay at {@code API_ACCESS} — the UI loads module
+ * bundles and actions for every user.
  *
  * @since 1.0.0
  */
@@ -34,6 +45,7 @@ import java.util.Map;
 public class ModuleController {
 
     private static final Logger log = LoggerFactory.getLogger(ModuleController.class);
+    static final String MANAGE_PERMISSION = "CUSTOMIZE_APPLICATION";
 
     private final RuntimeModuleManager runtimeModuleManager;
 
@@ -43,15 +55,39 @@ public class ModuleController {
 
     /** Null when module support is switched off; provisioned resources then list empty. */
     private final ModuleProvenanceStore provenanceStore;
+    private final CerbosPermissionResolver permissionResolver;
+    private final BootstrapRepository bootstrapRepository;
 
     public ModuleController(RuntimeModuleManager runtimeModuleManager,
                              ModuleConfigEventPublisher eventPublisher,
                             ObjectProvider<ModuleRouteRegistry> moduleRouteRegistry,
-                            ObjectProvider<ModuleProvenanceStore> provenanceStore) {
+                            ObjectProvider<ModuleProvenanceStore> provenanceStore,
+                            CerbosPermissionResolver permissionResolver,
+                            BootstrapRepository bootstrapRepository) {
         this.runtimeModuleManager = runtimeModuleManager;
         this.eventPublisher = eventPublisher;
         this.moduleRouteRegistry = moduleRouteRegistry.getIfAvailable();
         this.provenanceStore = provenanceStore.getIfAvailable();
+        this.permissionResolver = permissionResolver;
+        this.bootstrapRepository = bootstrapRepository;
+    }
+
+    /**
+     * Gates module lifecycle writes on {@value #MANAGE_PERMISSION}. Fail-closed: no resolvable
+     * profile is rejected. Must run before the handler's try/catch so the 403 is not turned
+     * into a 400.
+     */
+    private void requireManagePermission(HttpServletRequest request) {
+        String profileId = permissionResolver.getProfileId(request);
+        if (profileId == null || profileId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No identity");
+        }
+        boolean granted = bootstrapRepository.findProfileSystemPermissions(profileId).stream()
+                .anyMatch(p -> MANAGE_PERMISSION.equals(p.get("permission_name"))
+                        && Boolean.TRUE.equals(p.get("granted")));
+        if (!granted) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, MANAGE_PERMISSION + " permission required");
+        }
     }
 
     /**
@@ -74,7 +110,9 @@ public class ModuleController {
     public ResponseEntity<Map<String, Object>> installModule(
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestHeader(value = "X-User-ID", required = false) String userId,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        requireManagePermission(request);
         try {
             String manifestJson = (String) body.get("manifest");
             String sourceUrl = (String) body.getOrDefault("sourceUrl", "local://upload");
@@ -115,7 +153,9 @@ public class ModuleController {
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestPart("manifest") String manifestJson,
             @RequestPart("jar") MultipartFile jarFile,
-            @RequestPart(value = "signature", required = false) String signature) {
+            @RequestPart(value = "signature", required = false) String signature,
+            HttpServletRequest request) {
+        requireManagePermission(request);
         try {
             if (manifestJson == null || manifestJson.isBlank()) {
                 return ResponseEntity.badRequest().body(
@@ -162,7 +202,9 @@ public class ModuleController {
     @PostMapping("/{moduleId}/enable")
     public ResponseEntity<Map<String, Object>> enableModule(
             @RequestHeader("X-Tenant-ID") String tenantId,
-            @PathVariable String moduleId) {
+            @PathVariable String moduleId,
+            HttpServletRequest request) {
+        requireManagePermission(request);
         try {
             runtimeModuleManager.enableModule(tenantId, moduleId);
 
@@ -195,7 +237,9 @@ public class ModuleController {
     @PostMapping("/{moduleId}/disable")
     public ResponseEntity<Map<String, Object>> disableModule(
             @RequestHeader("X-Tenant-ID") String tenantId,
-            @PathVariable String moduleId) {
+            @PathVariable String moduleId,
+            HttpServletRequest request) {
+        requireManagePermission(request);
         try {
             var module = runtimeModuleManager.listModules(tenantId).stream()
                 .filter(m -> m.moduleId().equals(moduleId))
@@ -224,7 +268,9 @@ public class ModuleController {
     @DeleteMapping("/{moduleId}")
     public ResponseEntity<Map<String, Object>> uninstallModule(
             @RequestHeader("X-Tenant-ID") String tenantId,
-            @PathVariable String moduleId) {
+            @PathVariable String moduleId,
+            HttpServletRequest request) {
+        requireManagePermission(request);
         try {
             var module = runtimeModuleManager.listModules(tenantId).stream()
                 .filter(m -> m.moduleId().equals(moduleId))

@@ -90,6 +90,33 @@ class EmailSendControllerTest {
     }
 
     @Test
+    @DisplayName("Should 403 the record email log without MANAGE_EMAIL_TEMPLATES, before reading it")
+    void shouldRejectLogsWithoutPermission() {
+        when(bootstrapRepository.findProfileSystemPermissions("profile-1"))
+                .thenReturn(List.of(Map.of("permission_name", "API_ACCESS", "granted", true)));
+
+        assertThatThrownBy(() -> controller.listLogsByRecord("rec-1", 20, request))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("MANAGE_EMAIL_TEMPLATES");
+        verifyNoInteractions(emailRepository);
+    }
+
+    @Test
+    @DisplayName("Should list the record email log with MANAGE_EMAIL_TEMPLATES")
+    void shouldListLogsWithPermission() {
+        grantPermission();
+        when(emailRepository.findLogsBySourceId("rec-1", 20)).thenReturn(List.of(
+                Map.of("id", "log-1", "recipient_email", "dest@test.com", "subject", "Hi", "status", "SENT")));
+
+        var response = controller.listLogsByRecord("rec-1", 20, request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> data = (List<Map<String, Object>>) response.getBody().get("data");
+        assertThat(data).hasSize(1);
+    }
+
+    @Test
     @DisplayName("Should 403 when the profile lacks MANAGE_EMAIL_TEMPLATES")
     void shouldRejectWithoutPermission() {
         when(bootstrapRepository.findProfileSystemPermissions("profile-1"))

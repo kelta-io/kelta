@@ -6,6 +6,8 @@ import io.kelta.worker.module.ModuleConfigEventPublisher;
 import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleRouteRegistry;
 import io.kelta.worker.module.RuntimeModuleManager;
+import io.kelta.worker.repository.BootstrapRepository;
+import io.kelta.worker.service.CerbosPermissionResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import java.util.Map;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -28,6 +31,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -47,6 +51,7 @@ class ModuleControllerEnableTest {
 
     private RuntimeModuleManager manager;
     private ModuleConfigEventPublisher publisher;
+    private BootstrapRepository bootstrapRepository;
     private MockMvc mvc;
 
     @BeforeEach
@@ -56,8 +61,48 @@ class ModuleControllerEnableTest {
         publisher = mock(ModuleConfigEventPublisher.class);
         ObjectProvider<ModuleRouteRegistry> routes = mock(ObjectProvider.class);
         ObjectProvider<ModuleProvenanceStore> provenance = mock(ObjectProvider.class);
-        mvc = MockMvcBuilders.standaloneSetup(
-                new ModuleController(manager, publisher, routes, provenance)).build();
+        CerbosPermissionResolver permissionResolver = mock(CerbosPermissionResolver.class);
+        when(permissionResolver.getProfileId(any())).thenReturn("profile-1");
+        bootstrapRepository = mock(BootstrapRepository.class);
+        grant(true);
+        mvc = MockMvcBuilders.standaloneSetup(new ModuleController(
+                manager, publisher, routes, provenance, permissionResolver, bootstrapRepository)).build();
+    }
+
+    private void grant(boolean granted) {
+        when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
+                Map.of("permission_name", "CUSTOMIZE_APPLICATION", "granted", granted)));
+    }
+
+    @Test
+    @DisplayName("lifecycle writes need CUSTOMIZE_APPLICATION — /api/modules is a static route with only API_ACCESS")
+    void lifecycleWritesRequireCustomizeApplication() throws Exception {
+        grant(false);
+
+        mvc.perform(post("/api/modules/install").header("X-Tenant-ID", TENANT)
+                        .contentType("application/json").content("{\"manifest\":\"{}\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/modules/" + MODULE_ID + "/enable").header("X-Tenant-ID", TENANT))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/modules/" + MODULE_ID + "/disable").header("X-Tenant-ID", TENANT))
+                .andExpect(status().isForbidden());
+        mvc.perform(delete("/api/modules/" + MODULE_ID).header("X-Tenant-ID", TENANT))
+                .andExpect(status().isForbidden());
+
+        verify(manager, never()).installModule(anyString(), anyString(), anyString(), anyString(), any(), anyString());
+        verify(manager, never()).enableModule(anyString(), anyString());
+        verify(manager, never()).disableModule(anyString(), anyString());
+        verify(manager, never()).uninstallModule(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("reads stay open to API users — the UI loads module lists for everyone")
+    void readsNeedNoManagePermission() throws Exception {
+        grant(false);
+        when(manager.listModules(TENANT)).thenReturn(List.of());
+
+        mvc.perform(get("/api/modules").header("X-Tenant-ID", TENANT))
+                .andExpect(status().isOk());
     }
 
     @Test

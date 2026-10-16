@@ -4,6 +4,8 @@ import io.kelta.worker.module.ModuleConfigEventPublisher;
 import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleRouteRegistry;
 import io.kelta.worker.module.RuntimeModuleManager;
+import io.kelta.worker.repository.BootstrapRepository;
+import io.kelta.worker.service.CerbosPermissionResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,7 +55,8 @@ class ModuleControllerProvenanceTest {
         when(provenance.getIfAvailable()).thenReturn(store);
 
         mvc = MockMvcBuilders.standaloneSetup(new ModuleController(
-                manager, mock(ModuleConfigEventPublisher.class), routes, provenance)).build();
+                manager, mock(ModuleConfigEventPublisher.class), routes, provenance,
+                mock(CerbosPermissionResolver.class), mock(BootstrapRepository.class))).build();
     }
 
     private static Map<String, Object> row(String id, String type, String key, String ownership,
