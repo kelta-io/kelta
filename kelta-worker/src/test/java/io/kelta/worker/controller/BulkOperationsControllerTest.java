@@ -53,7 +53,7 @@ class BulkOperationsControllerTest {
         permissionResolver = mock(CerbosPermissionResolver.class);
         bootstrapRepository = mock(BootstrapRepository.class);
         request = new MockHttpServletRequest();
-        // Default: caller's profile holds MANAGE_DATA (write endpoints are gated on it)
+        // Default: caller's profile holds MANAGE_DATA (every endpoint is gated on it)
         lenient().when(permissionResolver.getProfileId(any())).thenReturn("prof-1");
         lenient().when(bootstrapRepository.findProfileSystemPermissions("prof-1")).thenReturn(List.of(
                 Map.of("permission_name", "MANAGE_DATA", "granted", true)));
@@ -80,6 +80,23 @@ class BulkOperationsControllerTest {
             assertThat(create.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
             assertThat(upload.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
             assertThat(abort.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            verifyNoInteractions(bulkJobRepository);
+        }
+
+        @Test
+        @DisplayName("profile without MANAGE_DATA → 403 on job, list, results and CSV download; nothing read")
+        void readsDeniedWithoutPermission() {
+            when(bootstrapRepository.findProfileSystemPermissions("prof-1")).thenReturn(List.of(
+                    Map.of("permission_name", "MANAGE_DATA", "granted", false)));
+
+            assertThat(controller.getJob(JOB_ID, TENANT_ID, request).getStatusCode())
+                    .isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(controller.listJobs(TENANT_ID, 20, 0, request).getStatusCode())
+                    .isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(controller.getResults(JOB_ID, TENANT_ID, 50, 0, null, request).getStatusCode())
+                    .isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(controller.downloadResults(JOB_ID, TENANT_ID, request).getStatusCode())
+                    .isEqualTo(HttpStatus.FORBIDDEN);
             verifyNoInteractions(bulkJobRepository);
         }
 
@@ -146,7 +163,7 @@ class BulkOperationsControllerTest {
             when(bulkJobRepository.findResults(eq(JOB_ID), eq(TENANT_ID), anyInt(), eq(0), isNull()))
                     .thenReturn(List.of(ok, failed));
 
-            var response = controller.downloadResults(JOB_ID, TENANT_ID);
+            var response = controller.downloadResults(JOB_ID, TENANT_ID, request);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(response.getHeaders().getFirst("Content-Disposition"))
@@ -165,7 +182,7 @@ class BulkOperationsControllerTest {
         void downloadResults_notFound() {
             when(bulkJobRepository.findByIdAndTenant(JOB_ID, TENANT_ID)).thenReturn(Optional.empty());
 
-            var response = controller.downloadResults(JOB_ID, TENANT_ID);
+            var response = controller.downloadResults(JOB_ID, TENANT_ID, request);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         }
@@ -350,7 +367,7 @@ class BulkOperationsControllerTest {
             when(bulkJobRepository.findByIdAndTenant(JOB_ID, TENANT_ID))
                     .thenReturn(Optional.of(job));
 
-            ResponseEntity<Map<String, Object>> response = controller.getJob(JOB_ID, TENANT_ID);
+            ResponseEntity<Map<String, Object>> response = controller.getJob(JOB_ID, TENANT_ID, request);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             Map<String, Object> attributes = getAttributes(response.getBody());
@@ -366,7 +383,7 @@ class BulkOperationsControllerTest {
             when(bulkJobRepository.findByIdAndTenant(JOB_ID, TENANT_ID))
                     .thenReturn(Optional.empty());
 
-            ResponseEntity<Map<String, Object>> response = controller.getJob(JOB_ID, TENANT_ID);
+            ResponseEntity<Map<String, Object>> response = controller.getJob(JOB_ID, TENANT_ID, request);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         }
@@ -403,7 +420,7 @@ class BulkOperationsControllerTest {
             when(bulkJobRepository.findByTenant(TENANT_ID, 20, 0))
                     .thenReturn(List.of(job1));
 
-            ResponseEntity<Map<String, Object>> response = controller.listJobs(TENANT_ID, 20, 0);
+            ResponseEntity<Map<String, Object>> response = controller.listJobs(TENANT_ID, 20, 0, request);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             @SuppressWarnings("unchecked")
@@ -436,7 +453,7 @@ class BulkOperationsControllerTest {
             when(bulkJobRepository.countResults(JOB_ID, TENANT_ID, null))
                     .thenReturn(1);
 
-            ResponseEntity<Map<String, Object>> response = controller.getResults(JOB_ID, TENANT_ID, 50, 0, null);
+            ResponseEntity<Map<String, Object>> response = controller.getResults(JOB_ID, TENANT_ID, 50, 0, null, request);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             @SuppressWarnings("unchecked")
@@ -450,7 +467,7 @@ class BulkOperationsControllerTest {
             when(bulkJobRepository.findByIdAndTenant(JOB_ID, TENANT_ID))
                     .thenReturn(Optional.empty());
 
-            ResponseEntity<Map<String, Object>> response = controller.getResults(JOB_ID, TENANT_ID, 50, 0, null);
+            ResponseEntity<Map<String, Object>> response = controller.getResults(JOB_ID, TENANT_ID, 50, 0, null, request);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         }
@@ -466,7 +483,7 @@ class BulkOperationsControllerTest {
                     .thenReturn(0);
 
             ResponseEntity<Map<String, Object>> response = controller.getResults(
-                    JOB_ID, TENANT_ID, 50, 0, "FAILURE");
+                    JOB_ID, TENANT_ID, 50, 0, "FAILURE", request);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         }

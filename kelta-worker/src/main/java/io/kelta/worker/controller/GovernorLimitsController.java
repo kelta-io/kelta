@@ -7,14 +7,19 @@ import io.kelta.runtime.event.RecordChangedPayload;
 import io.kelta.runtime.events.RecordEventPublisher;
 import io.kelta.worker.cache.WorkerCacheManager;
 import io.kelta.worker.listener.SystemFeatureEventPublisher;
+import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.GovernorLimitsRepository;
+import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.TenantTierQuotas;
+import jakarta.servlet.http.HttpServletRequest;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -31,6 +36,13 @@ import static java.util.Collections.emptyList;
  *
  * <p>Returns JSON:API format consistent with other collection endpoints.
  *
+ * <p>{@code /api/governor-limits/**} is a static gateway route, which carries only the blanket
+ * {@code API_ACCESS} check, so the writes are gated here on {@code MANAGE_TENANTS} — the
+ * platform-admin grant (provisioned tenants' administrators do not hold it). A tenant's tier and
+ * limits are the platform operator's to set: without this gate any API user could set their own
+ * tenant to {@code UNLIMITED}. Reads stay at {@code API_ACCESS}; the page shows a tenant its own
+ * limits and usage.
+ *
  * @since 1.0.0
  */
 @RestController
@@ -46,6 +58,7 @@ public class GovernorLimitsController {
 
     private static final String DAILY_KEY_PREFIX = "api-calls-daily:";
     private static final String AI_TOKEN_KEY_PREFIX = "ai-tokens-monthly:";
+    static final String WRITE_PERMISSION = "MANAGE_TENANTS";
 
     private final GovernorLimitsRepository repository;
     private final ObjectMapper objectMapper;
@@ -53,18 +66,42 @@ public class GovernorLimitsController {
     private final RecordEventPublisher recordEventPublisher;
     private final WorkerCacheManager cacheManager;
     private final SystemFeatureEventPublisher featureEventPublisher;
+    private final CerbosPermissionResolver permissionResolver;
+    private final BootstrapRepository bootstrapRepository;
 
     public GovernorLimitsController(GovernorLimitsRepository repository, ObjectMapper objectMapper,
                                      StringRedisTemplate redisTemplate,
                                      RecordEventPublisher recordEventPublisher,
                                      WorkerCacheManager cacheManager,
-                                     SystemFeatureEventPublisher featureEventPublisher) {
+                                     SystemFeatureEventPublisher featureEventPublisher,
+                                     CerbosPermissionResolver permissionResolver,
+                                     BootstrapRepository bootstrapRepository) {
         this.repository = repository;
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
         this.recordEventPublisher = recordEventPublisher;
         this.cacheManager = cacheManager;
         this.featureEventPublisher = featureEventPublisher;
+        this.permissionResolver = permissionResolver;
+        this.bootstrapRepository = bootstrapRepository;
+    }
+
+    /**
+     * Gates tier and limit writes on {@value #WRITE_PERMISSION}. Fail-closed: no resolvable
+     * profile is rejected. Runs before body validation so a caller without the grant learns
+     * nothing about the payload.
+     */
+    private void requireWritePermission(HttpServletRequest request) {
+        String profileId = permissionResolver.getProfileId(request);
+        if (profileId == null || profileId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No identity");
+        }
+        boolean granted = bootstrapRepository.findProfileSystemPermissions(profileId).stream()
+                .anyMatch(p -> WRITE_PERMISSION.equals(p.get("permission_name"))
+                        && Boolean.TRUE.equals(p.get("granted")));
+        if (!granted) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, WRITE_PERMISSION + " permission required");
+        }
     }
 
     /**
@@ -135,7 +172,9 @@ public class GovernorLimitsController {
     @PutMapping("/tier")
     public ResponseEntity<Map<String, Object>> updateTier(
             @RequestHeader("X-Tenant-ID") String tenantId,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        requireWritePermission(request);
         Object tierObj = body.get("tier");
         if (!(tierObj instanceof String tierStr) || tierStr.isBlank()) {
             return ResponseEntity.badRequest().body(
@@ -173,7 +212,9 @@ public class GovernorLimitsController {
     @PutMapping
     public ResponseEntity<Map<String, Object>> updateLimits(
             @RequestHeader("X-Tenant-ID") String tenantId,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        requireWritePermission(request);
         log.debug("PUT governor-limits for tenant {}: {}", tenantId, body);
 
         try {
