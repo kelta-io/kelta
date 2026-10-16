@@ -4,6 +4,9 @@ import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.PlatformEvent;
 import io.kelta.runtime.event.RecordChangedPayload;
 import io.kelta.runtime.flow.FlowEngine;
+import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.service.FlowActorResolver;
 import io.kelta.runtime.flow.FlowTriggerEvaluator;
 import io.kelta.runtime.flow.InitialStateBuilder;
@@ -30,6 +33,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * Maintains an in-memory cache of active flow trigger configs per tenant,
  * loaded from the DB on first access. The cache is invalidated when flows are
  * created, updated, or deleted.
+ * <p>
+ * A slim event ({@code payloadOmitted}: the publisher dropped {@code data} and
+ * {@code previousData} because the full event exceeded the NATS payload threshold)
+ * is evaluated against the record re-read by id; {@code previousData} stays empty.
  *
  * @since 1.0.0
  */
@@ -46,6 +53,8 @@ public class FlowEventListener {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final TenantSlugResolver tenantSlugResolver;
+    private final CollectionRegistry collectionRegistry;
+    private final QueryEngine queryEngine;
 
     /**
      * Cache: tenantId → list of active flow trigger configs.
@@ -68,7 +77,9 @@ public class FlowEventListener {
                               JdbcTemplate jdbcTemplate,
                               ObjectMapper objectMapper,
                               TenantSlugResolver tenantSlugResolver,
-                              FlowActorResolver flowActorResolver) {
+                              FlowActorResolver flowActorResolver,
+                              CollectionRegistry collectionRegistry,
+                              QueryEngine queryEngine) {
         this.flowEngine = flowEngine;
         this.flowActorResolver = flowActorResolver;
         this.triggerEvaluator = triggerEvaluator;
@@ -76,6 +87,8 @@ public class FlowEventListener {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.tenantSlugResolver = tenantSlugResolver;
+        this.collectionRegistry = collectionRegistry;
+        this.queryEngine = queryEngine;
     }
 
     /**
@@ -122,6 +135,9 @@ public class FlowEventListener {
                 if (configs.isEmpty()) {
                     return;
                 }
+                if (payload.isPayloadOmitted()) {
+                    payload.setData(reReadRecord(payload));
+                }
 
                 for (FlowTriggerConfig config : configs) {
                     try {
@@ -152,6 +168,24 @@ public class FlowEventListener {
         } catch (Exception e) {
             log.error("Error processing record change event for flow evaluation: {}",
                     e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Re-reads an omitted-payload record by id. Null when the record is gone (a delete, or
+     * deleted since) or the read fails: the flow then sees the id-only form.
+     */
+    private Map<String, Object> reReadRecord(RecordChangedPayload payload) {
+        CollectionDefinition definition = collectionRegistry.get(payload.getCollectionName());
+        if (definition == null || payload.getRecordId() == null) {
+            return null;
+        }
+        try {
+            return queryEngine.getById(definition, payload.getRecordId()).orElse(null);
+        } catch (Exception e) {
+            log.warn("Could not re-read {}/{} for flow triggers after payload omitted: {}",
+                    payload.getCollectionName(), payload.getRecordId(), e.getMessage());
+            return null;
         }
     }
 

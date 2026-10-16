@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.reactive.socket.WebSocketSession;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -127,6 +128,44 @@ class RealtimeBridgeTest {
         assertFalse(wsEvent.containsKey("data"), "owner-scoped record data must not fan out");
         assertEquals(Set.of("event", "collection", "changeType", "recordId", "timestamp"), wsEvent.keySet());
         assertEquals(RECORD_ID, wsEvent.get("recordId"));
+    }
+
+    @Test
+    @DisplayName("Slim events (payloadOmitted) fan out without data, flagged payloadOmitted")
+    void slimEventsForwardPayloadOmitted() {
+        when(subscriptionManager.getSubscribers(TENANT_ID, COLLECTION)).thenReturn(Set.of(session));
+        when(session.isOpen()).thenReturn(true);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("collectionName", COLLECTION);
+        payload.put("recordId", RECORD_ID);
+        payload.put("changeType", "UPDATED");
+        payload.put("changedFields", List.of("name"));
+        payload.put("payloadOmitted", true);
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("tenantId", TENANT_ID);
+        event.put("timestamp", "2026-10-15T12:00:00Z");
+        event.put("payload", payload);
+
+        bridge.onRecordChanged(toJson(event));
+
+        Map<String, Object> wsEvent = captureSentWsEvent();
+        assertFalse(wsEvent.containsKey("data"));
+        assertEquals(true, wsEvent.get("payloadOmitted"));
+        assertEquals(RECORD_ID, wsEvent.get("recordId"));
+        assertEquals("UPDATED", wsEvent.get("changeType"));
+    }
+
+    @Test
+    @DisplayName("Full events carry no payloadOmitted key")
+    void fullEventsHaveNoPayloadOmittedKey() {
+        when(subscriptionManager.getSubscribers(TENANT_ID, COLLECTION)).thenReturn(Set.of(session));
+        when(session.isOpen()).thenReturn(true);
+
+        bridge.onRecordChanged(recordChangedEvent(false));
+
+        Map<String, Object> wsEvent = captureSentWsEvent();
+        assertFalse(wsEvent.containsKey("payloadOmitted"));
+        assertTrue(wsEvent.containsKey("data"));
     }
 
     private Map<String, Object> captureSentWsEvent() {

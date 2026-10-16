@@ -21,6 +21,15 @@ public class NatsProperties {
      */
     private int maxInflightPublishes = 1000;
 
+    /**
+     * Largest serialized event body published as-is. A larger record-change event is
+     * published in its slim form ({@code data}/{@code previousData} dropped,
+     * {@code payloadOmitted=true}); any other larger event is not sent. 0 (the default)
+     * means the connected server's {@code max_payload} minus a 64 KiB headroom for
+     * headers and trace context.
+     */
+    private long maxEventPayloadBytes = 0;
+
     public String getUrl() {
         return url;
     }
@@ -43,5 +52,13 @@ public class NatsProperties {
 
     public void setMaxInflightPublishes(int maxInflightPublishes) {
         this.maxInflightPublishes = maxInflightPublishes;
+    }
+
+    public long getMaxEventPayloadBytes() {
+        return maxEventPayloadBytes;
+    }
+
+    public void setMaxEventPayloadBytes(long maxEventPayloadBytes) {
+        this.maxEventPayloadBytes = maxEventPayloadBytes;
     }
 }

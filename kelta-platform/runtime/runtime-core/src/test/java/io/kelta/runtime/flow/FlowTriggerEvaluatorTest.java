@@ -200,6 +200,35 @@ class FlowTriggerEvaluatorTest {
     // Helpers
     // -------------------------------------------------------------------------
 
+    @Test
+    void omittedPayloadEvaluatesFilterFormulaOnReReadData() {
+        Map<String, Object> reRead = Map.of("status", "SHIPPED");
+        RecordChangedPayload payload = RecordChangedPayload.updated(
+                        "orders", "rec-1", reRead, null, List.of("status"))
+                .withPayloadOmitted(true);
+        PlatformEvent<RecordChangedPayload> event = EventFactory.createRecordEvent(
+                "record.updated", "tenant-1", "user-1", payload);
+        when(formulaEvaluator.evaluateBoolean("status = 'SHIPPED'", reRead)).thenReturn(true);
+
+        assertTrue(evaluator.matchesRecordTrigger(event,
+                Map.of("filterFormula", "status = 'SHIPPED'")));
+        verify(formulaEvaluator).evaluateBoolean("status = 'SHIPPED'", reRead);
+    }
+
+    @Test
+    void omittedPayloadWithoutReReadDataDoesNotEvaluateFilterOnNull() {
+        RecordChangedPayload payload = RecordChangedPayload.updated(
+                        "orders", "rec-1", null, null, List.of("status"))
+                .withPayloadOmitted(true);
+        PlatformEvent<RecordChangedPayload> event = EventFactory.createRecordEvent(
+                "record.updated", "tenant-1", "user-1", payload);
+
+        assertFalse(evaluator.matchesRecordTrigger(event,
+                Map.of("filterFormula", "status = 'SHIPPED'")));
+        assertTrue(evaluator.matchesRecordTrigger(event, Map.of("triggerFields", List.of("status"))));
+        verifyNoInteractions(formulaEvaluator);
+    }
+
     private PlatformEvent<RecordChangedPayload> createEvent(ChangeType changeType, String collection) {
         RecordChangedPayload payload = switch (changeType) {
             case CREATED -> RecordChangedPayload.created(

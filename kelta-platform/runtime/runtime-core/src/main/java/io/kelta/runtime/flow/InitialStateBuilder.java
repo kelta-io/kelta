@@ -50,6 +50,10 @@ public class InitialStateBuilder {
         record.put("data", payload.getData() != null ? payload.getData() : Map.of());
         record.put("previousData", payload.getPreviousData() != null ? payload.getPreviousData() : Map.of());
         record.put("changedFields", payload.getChangedFields() != null ? payload.getChangedFields() : java.util.List.of());
+        // Slim event: data is the record re-read by id (or empty), previousData is unavailable.
+        if (payload.isPayloadOmitted()) {
+            record.put("payloadOmitted", true);
+        }
         state.put("record", record);
 
         // Context

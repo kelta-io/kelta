@@ -73,6 +73,12 @@ public class FlowTriggerEvaluator {
         // Check filter formula
         String filterFormula = (String) triggerConfig.get("filterFormula");
         if (filterFormula != null && !filterFormula.isBlank()) {
+            // A slim event whose record could not be re-read has no field values to test.
+            if (payload.isPayloadOmitted() && payload.getData() == null) {
+                log.warn("Skipping filter formula for {}/{}: payload omitted and record not re-read",
+                        payload.getCollectionName(), payload.getRecordId());
+                return false;
+            }
             try {
                 boolean matches = formulaEvaluator.evaluateBoolean(filterFormula, payload.getData());
                 if (!matches) {

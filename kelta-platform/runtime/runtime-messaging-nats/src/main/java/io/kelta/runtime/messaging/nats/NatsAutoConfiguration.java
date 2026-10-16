@@ -48,7 +48,8 @@ public class NatsAutoConfiguration {
         return new NatsEventPublisher(connectionManager, objectMapper,
                 properties.getMaxInflightPublishes(),
                 meterRegistryProvider.getIfAvailable(),
-                tracing);
+                tracing,
+                properties.getMaxEventPayloadBytes());
     }
 
     @Bean

@@ -66,6 +66,36 @@ class InitialStateBuilderTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void buildFromRecordEventFlagsOmittedPayload() {
+        PlatformEvent<RecordChangedPayload> event = EventFactory.createRecordEvent(
+                "record.updated", "tenant-1", "user-1",
+                RecordChangedPayload.updated("orders", "rec-1",
+                                Map.of("status", "SHIPPED"), null, List.of("status"))
+                        .withPayloadOmitted(true));
+
+        Map<String, Object> record = (Map<String, Object>) builder
+                .buildFromRecordEvent(event, "flow-1", "exec-1").get("record");
+
+        assertEquals(true, record.get("payloadOmitted"));
+        assertEquals("SHIPPED", ((Map<String, Object>) record.get("data")).get("status"));
+        assertEquals(Map.of(), record.get("previousData"));
+    }
+
+    @Test
+    void buildFromRecordEventOmitsFlagForFullPayload() {
+        PlatformEvent<RecordChangedPayload> event = EventFactory.createRecordEvent(
+                "record.created", "tenant-1", "user-1",
+                RecordChangedPayload.created("orders", "rec-1", Map.of("status", "ACTIVE")));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> record = (Map<String, Object>) builder
+                .buildFromRecordEvent(event, "flow-1", "exec-1").get("record");
+
+        assertFalse(record.containsKey("payloadOmitted"));
+    }
+
+    @Test
     void buildFromRecordEventContainsChangedFields() {
         PlatformEvent<RecordChangedPayload> event = EventFactory.createRecordEvent(
                 "record.updated", "tenant-1", "user-1",

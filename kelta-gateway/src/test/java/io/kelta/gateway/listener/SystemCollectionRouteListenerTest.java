@@ -153,6 +153,35 @@ class SystemCollectionRouteListenerTest {
         }
 
         @Test
+        @DisplayName("Slim event (payloadOmitted, null data) evicts all domains without throwing")
+        void slimEventWithNullDataEvictsAllDomains() throws Exception {
+            RecordChangedPayload payload = new RecordChangedPayload(
+                    "tenant_custom_domains", "domain-1", ChangeType.UPDATED,
+                    null, null, java.util.List.of("domain")).withPayloadOmitted(true);
+            String message = objectMapper.writeValueAsString(EventFactory.createRecordEvent(
+                    "record.updated", "tenant-1", "user-1", payload));
+
+            assertDoesNotThrow(() -> listener.onRecordChanged(message));
+
+            verify(cacheManager).evictAllCustomDomains();
+            verify(cacheManager, never()).removeCustomDomain(anyString());
+        }
+
+        @Test
+        @DisplayName("Slim event for collections still refreshes routes")
+        void slimCollectionsEventRefreshesRoutes() throws Exception {
+            RecordChangedPayload payload = new RecordChangedPayload(
+                    "collections", "col-1", ChangeType.UPDATED,
+                    null, null, java.util.List.of()).withPayloadOmitted(true);
+            String message = objectMapper.writeValueAsString(EventFactory.createRecordEvent(
+                    "record.updated", "tenant-1", "user-1", payload));
+
+            assertDoesNotThrow(() -> listener.onRecordChanged(message));
+
+            verify(routeRefresher).refresh();
+        }
+
+        @Test
         @DisplayName("Should NOT evict domains for non-domain collections")
         void shouldNotEvictDomainsForOtherCollections() throws Exception {
             String message = createEventMessage("products", "prod-1", ChangeType.CREATED);

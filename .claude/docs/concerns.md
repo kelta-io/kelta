@@ -750,6 +750,14 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **Every new `kelta.*` NATS subject namespace needs its own JetStream stream** in
   `JetStreamInitializer` (`ensureStream` is add-if-absent; existing streams can't gain subjects).
   Otherwise the publish never acks (`CancellationException`) and the event is dropped.
+- **`record.changed` events can arrive without record data (`payloadOmitted: true`, PLT-616).**
+  A record event whose JSON exceeds `kelta.nats.max-event-payload-bytes` (default: server
+  `max_payload` − 64 KiB) is published slim — no `data`/`previousData` — instead of being lost.
+  In-repo consumers handle it (`architecture.md` → Oversized events), but **external webhook
+  receivers (Svix `record.*` messages) and WebSocket clients must refetch the record by
+  `recordId` when `payloadOmitted` is true**; `previousData` is not recoverable. A new
+  `kelta.record.changed` consumer that reads `data` must do the same. An oversized event of any
+  other payload type is still dropped (WARN `Not publishing event`, failure counter).
 - **Changing a durable-consumer setting (maxDeliver, ackWait, deliverPolicy, …) is a
   rolling-upgrade hazard** (`SUB-90016 Existing consumer cannot be modified`).
   `NatsSubscriptionManager` now updates the durable in place (never delete/recreate — that drops the

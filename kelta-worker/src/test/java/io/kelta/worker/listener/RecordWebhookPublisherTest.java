@@ -107,6 +107,46 @@ class RecordWebhookPublisherTest {
     }
 
     @Test
+    @DisplayName("forwards a slim event without data, flagged payloadOmitted")
+    void forwardsSlimEvent() {
+        var event = new PlatformEvent<RecordChangedPayload>();
+        event.setEventId("evt-slim");
+        event.setTenantId("tenant-1");
+        event.setTimestamp(Instant.now());
+        event.setPayload(new RecordChangedPayload("orders", "rec-123", ChangeType.UPDATED,
+                null, null, List.of("name")).withPayloadOmitted(true));
+
+        server.expect(requestTo("http://svix.test/api/v1/app/tenant-1/msg/"))
+                .andExpect(jsonPath("$.eventType").value("record.updated"))
+                .andExpect(jsonPath("$.eventId").value("evt-slim"))
+                .andExpect(jsonPath("$.payload.recordId").value("rec-123"))
+                .andExpect(jsonPath("$.payload.payloadOmitted").value(true))
+                .andExpect(jsonPath("$.payload.changedFields[0]").value("name"))
+                .andExpect(jsonPath("$.payload.data").doesNotExist())
+                .andExpect(jsonPath("$.payload.previousData").doesNotExist())
+                .andRespond(withSuccess());
+
+        publisher.onRecordChanged(objectMapper.writeValueAsString(event));
+
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("full event carries no payloadOmitted key")
+    void fullEventHasNoPayloadOmittedKey() {
+        String json = buildEventJson("tenant-1", "orders", "rec-123", ChangeType.CREATED);
+
+        server.expect(requestTo("http://svix.test/api/v1/app/tenant-1/msg/"))
+                .andExpect(jsonPath("$.payload.data.name").value("Acme"))
+                .andExpect(jsonPath("$.payload.payloadOmitted").doesNotExist())
+                .andRespond(withSuccess());
+
+        publisher.onRecordChanged(json);
+
+        server.verify();
+    }
+
+    @Test
     @DisplayName("does not publish when tenant ID is missing")
     void skipsMissingTenantId() {
         String json = buildEventJson(null, "orders", "rec-123", ChangeType.CREATED);
