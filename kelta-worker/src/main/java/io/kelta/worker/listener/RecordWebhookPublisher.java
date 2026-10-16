@@ -24,6 +24,10 @@ import java.util.Set;
  * {@link RestClient} — the Svix Java SDK 1.68.0 ships Jackson-2 model annotations
  * and doesn't deserialize cleanly under Spring Boot 4 / Jackson 3.
  *
+ * <p>A slim event ({@code payloadOmitted}: the publisher dropped the record data because the
+ * full event exceeded the NATS payload threshold) is forwarded as-is — no {@code data} /
+ * {@code previousData}, {@code payloadOmitted: true} — so receivers refetch the record.
+ *
  * @since 1.0.0
  */
 public class RecordWebhookPublisher {
@@ -73,11 +77,17 @@ public class RecordWebhookPublisher {
             webhookPayload.put("recordId", payload.getRecordId());
             webhookPayload.put("collectionName", payload.getCollectionName());
             webhookPayload.put("changeType", payload.getChangeType().name());
-            webhookPayload.put("data", payload.getData());
             webhookPayload.put("timestamp", event.getTimestamp() != null ? event.getTimestamp().toString() : null);
+            if (payload.isPayloadOmitted()) {
+                webhookPayload.put("payloadOmitted", true);
+            } else {
+                webhookPayload.put("data", payload.getData());
+            }
 
             if (payload.getChangeType() == ChangeType.UPDATED) {
-                webhookPayload.put("previousData", payload.getPreviousData());
+                if (!payload.isPayloadOmitted()) {
+                    webhookPayload.put("previousData", payload.getPreviousData());
+                }
                 webhookPayload.put("changedFields", payload.getChangedFields());
             }
 

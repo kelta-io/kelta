@@ -7,6 +7,9 @@ import io.kelta.runtime.event.RecordChangedPayload;
 import io.kelta.runtime.flow.FlowEngine;
 import io.kelta.runtime.flow.FlowTriggerEvaluator;
 import io.kelta.runtime.flow.InitialStateBuilder;
+import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.service.TenantSlugResolver;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +37,8 @@ class FlowEventListenerTest {
     private JdbcTemplate jdbcTemplate;
     private ObjectMapper objectMapper;
     private TenantSlugResolver tenantSlugResolver;
+    private CollectionRegistry collectionRegistry;
+    private QueryEngine queryEngine;
     private FlowEventListener listener;
 
     @BeforeEach
@@ -45,9 +50,12 @@ class FlowEventListenerTest {
         objectMapper = new ObjectMapper();
         tenantSlugResolver = mock(TenantSlugResolver.class);
         when(tenantSlugResolver.resolveSlug(anyString())).thenReturn(Optional.of("acme-corp"));
+        collectionRegistry = mock(CollectionRegistry.class);
+        queryEngine = mock(QueryEngine.class);
         listener = new FlowEventListener(flowEngine, triggerEvaluator, initialStateBuilder,
                 jdbcTemplate, objectMapper, tenantSlugResolver,
-                org.mockito.Mockito.mock(io.kelta.worker.service.FlowActorResolver.class));
+                org.mockito.Mockito.mock(io.kelta.worker.service.FlowActorResolver.class),
+                collectionRegistry, queryEngine);
     }
 
     @Nested
@@ -369,6 +377,78 @@ class FlowEventListenerTest {
 
             // JDBC should be called twice (cache was invalidated between)
             verify(jdbcTemplate, times(2)).query(anyString(), any(RowMapper.class), eq("tenant-1"));
+        }
+    }
+
+    @Nested
+    @DisplayName("omitted payload")
+    class OmittedPayload {
+
+        private final String config = """
+            {"events": ["UPDATED"], "collection": "orders"}
+            """;
+
+        @Test
+        @DisplayName("re-reads the record by id and evaluates triggers and initial state on it")
+        @SuppressWarnings("unchecked")
+        void reReadsRecordWhenPayloadOmitted() throws Exception {
+            stubJdbcWithTriggerConfig(config);
+            CollectionDefinition orders = mock(CollectionDefinition.class);
+            when(collectionRegistry.get("orders")).thenReturn(orders);
+            when(queryEngine.getById(orders, "rec-1"))
+                    .thenReturn(Optional.of(Map.of("id", "rec-1", "status", "shipped")));
+            when(triggerEvaluator.matchesRecordTrigger(any(), any())).thenReturn(true);
+            when(initialStateBuilder.buildFromRecordEvent(any(), any(), any())).thenReturn(Map.of());
+
+            listener.handleRecordChanged(buildSlimMessage());
+
+            verify(queryEngine).getById(orders, "rec-1");
+            ArgumentCaptor<PlatformEvent<RecordChangedPayload>> evaluated =
+                    ArgumentCaptor.forClass(PlatformEvent.class);
+            verify(triggerEvaluator).matchesRecordTrigger(evaluated.capture(), any());
+            assertThat(evaluated.getValue().getPayload().getData()).containsEntry("status", "shipped");
+            ArgumentCaptor<PlatformEvent<RecordChangedPayload>> built =
+                    ArgumentCaptor.forClass(PlatformEvent.class);
+            verify(initialStateBuilder).buildFromRecordEvent(built.capture(), eq("flow-1"), anyString());
+            assertThat(built.getValue().getPayload().getData()).containsEntry("status", "shipped");
+            verify(flowEngine).startExecution(eq("tenant-1"), eq("flow-1"), any(), any(), any(),
+                    eq("rec-1"), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("proceeds with the id-only form when the record can no longer be read")
+        @SuppressWarnings("unchecked")
+        void proceedsIdOnlyWhenRecordGone() throws Exception {
+            stubJdbcWithTriggerConfig(config);
+            CollectionDefinition orders = mock(CollectionDefinition.class);
+            when(collectionRegistry.get("orders")).thenReturn(orders);
+            when(queryEngine.getById(orders, "rec-1")).thenReturn(Optional.empty());
+
+            listener.handleRecordChanged(buildSlimMessage());
+
+            ArgumentCaptor<PlatformEvent<RecordChangedPayload>> evaluated =
+                    ArgumentCaptor.forClass(PlatformEvent.class);
+            verify(triggerEvaluator).matchesRecordTrigger(evaluated.capture(), any());
+            assertThat(evaluated.getValue().getPayload().getData()).isNull();
+            assertThat(evaluated.getValue().getPayload().isPayloadOmitted()).isTrue();
+        }
+
+        @Test
+        @DisplayName("does not re-read events that carry their data")
+        void doesNotReReadFullEvents() throws Exception {
+            stubJdbcWithTriggerConfig(config);
+
+            listener.handleRecordChanged(buildRecordChangedMessage("tenant-1", "orders", ChangeType.UPDATED));
+
+            verifyNoInteractions(queryEngine);
+        }
+
+        private String buildSlimMessage() throws Exception {
+            RecordChangedPayload payload = new RecordChangedPayload(
+                    "orders", "rec-1", ChangeType.UPDATED, null, null, List.of("status"))
+                    .withPayloadOmitted(true);
+            return objectMapper.writeValueAsString(EventFactory.createRecordEvent(
+                    "record.updated", "tenant-1", "user-1", payload));
         }
     }
 

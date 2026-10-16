@@ -4,6 +4,7 @@ import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.ChangeType;
 import io.kelta.runtime.event.RecordChangedPayload;
+import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.service.CollectionLifecycleManager;
 import io.kelta.worker.service.SearchIndexService;
@@ -24,6 +25,9 @@ import java.util.Map;
  * <p>Uses a separate consumer group from {@code FlowEventListener} to ensure
  * search indexing is independent and does not interfere with flow processing.
  *
+ * <p>A slim event ({@code payloadOmitted}: the publisher dropped {@code data} because the
+ * full event exceeded the NATS payload threshold) is indexed from the record re-read by id.
+ *
  * @since 1.0.0
  */
 @Component
@@ -35,15 +39,18 @@ public class SearchIndexListener {
     private final CollectionLifecycleManager lifecycleManager;
     private final CollectionRegistry collectionRegistry;
     private final ObjectMapper objectMapper;
+    private final QueryEngine queryEngine;
 
     public SearchIndexListener(SearchIndexService searchIndexService,
                                 CollectionLifecycleManager lifecycleManager,
                                 CollectionRegistry collectionRegistry,
-                                ObjectMapper objectMapper) {
+                                ObjectMapper objectMapper,
+                                QueryEngine queryEngine) {
         this.searchIndexService = searchIndexService;
         this.lifecycleManager = lifecycleManager;
         this.collectionRegistry = collectionRegistry;
         this.objectMapper = objectMapper;
+        this.queryEngine = queryEngine;
     }
 
     /**
@@ -82,10 +89,11 @@ public class SearchIndexListener {
             final String boundCollection = collectionName;
             final String boundRecord = recordId;
             final ChangeType boundChange = changeType;
-            final Map<String, Object> boundData = payload.getData();
+            final RecordChangedPayload boundPayload = payload;
             TenantContext.runWithTenant(tenantId, () -> {
                 switch (boundChange) {
                     case CREATED, UPDATED -> {
+                        Map<String, Object> boundData = recordData(boundPayload);
                         if (boundData != null && !boundData.isEmpty()) {
                             String collectionId = lifecycleManager.getCollectionIdByName(boundCollection);
                             if (collectionId != null) {
@@ -100,6 +108,27 @@ public class SearchIndexListener {
 
         } catch (Exception e) {
             log.error("Error processing record change for search index: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The event's record data, re-read by id when the publisher omitted it. Null when the
+     * record is gone (or the read fails), which skips indexing as for any data-less event.
+     */
+    private Map<String, Object> recordData(RecordChangedPayload payload) {
+        if (!payload.isPayloadOmitted()) {
+            return payload.getData();
+        }
+        CollectionDefinition definition = collectionRegistry.get(payload.getCollectionName());
+        if (definition == null) {
+            return null;
+        }
+        try {
+            return queryEngine.getById(definition, payload.getRecordId()).orElse(null);
+        } catch (Exception e) {
+            log.warn("Could not re-read {}/{} for search index after payload omitted: {}",
+                    payload.getCollectionName(), payload.getRecordId(), e.getMessage());
+            return null;
         }
     }
 

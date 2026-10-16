@@ -1,5 +1,7 @@
 package io.kelta.runtime.event;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -38,6 +40,16 @@ public class RecordChangedPayload {
      * and let clients refetch through the owner-scoped JSON:API path. Defaults to false.
      */
     private boolean ownerScoped;
+
+    /**
+     * True when the publisher dropped {@code data} / {@code previousData} because the full event
+     * exceeded the NATS payload threshold ({@code kelta.nats.max-event-payload-bytes}). Consumers
+     * that need field values must re-read the record by id; broadcast consumers forward the slim
+     * form so receivers refetch. Defaults to false and is omitted from the JSON when false, so
+     * events below the threshold serialize exactly as before; absent on events from older pods.
+     */
+    @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+    private boolean payloadOmitted;
 
     /**
      * Default constructor for deserialization.
@@ -126,6 +138,15 @@ public class RecordChangedPayload {
         return this;
     }
 
+    public boolean isPayloadOmitted() { return payloadOmitted; }
+    public void setPayloadOmitted(boolean payloadOmitted) { this.payloadOmitted = payloadOmitted; }
+
+    /** Fluent variant of {@link #setPayloadOmitted} for inline publish sites. */
+    public RecordChangedPayload withPayloadOmitted(boolean payloadOmitted) {
+        this.payloadOmitted = payloadOmitted;
+        return this;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -148,6 +169,7 @@ public class RecordChangedPayload {
                 ", recordId='" + recordId + '\'' +
                 ", changeType=" + changeType +
                 ", changedFields=" + changedFields +
+                ", payloadOmitted=" + payloadOmitted +
                 '}';
     }
 }

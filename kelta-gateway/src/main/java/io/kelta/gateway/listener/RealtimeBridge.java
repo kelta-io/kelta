@@ -74,6 +74,13 @@ public class RealtimeBridge {
                 data = null;
             }
 
+            // Slim event: the publisher dropped the record data because the full event exceeded
+            // the NATS payload threshold. Forward it flagged so clients refetch the record.
+            boolean payloadOmitted = Boolean.TRUE.equals(payload.get("payloadOmitted"));
+            if (payloadOmitted) {
+                data = null;
+            }
+
             if (tenantId == null || collectionName == null) {
                 return;
             }
@@ -91,6 +98,9 @@ public class RealtimeBridge {
             wsEvent.put("recordId", recordId);
             if (data != null) {
                 wsEvent.put("data", data);
+            }
+            if (payloadOmitted) {
+                wsEvent.put("payloadOmitted", true);
             }
             wsEvent.put("timestamp", event.get("timestamp"));
 

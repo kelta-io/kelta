@@ -1952,6 +1952,29 @@ strategy — preserving data on the disk while hiding it from the API.
 6. CollectionRegistry updated
 7. Downstream: SearchIndexListener refreshes the Postgres `tsvector` search index, SvixWebhookPublisher notifies
 
+**Oversized events — the slim `record.changed` form (PLT-616):** `NatsEventPublisher` serializes
+each event and compares the body with a threshold, `kelta.nats.max-event-payload-bytes`
+(`NatsProperties`; 0/unset = the connected server's `max_payload` minus 64 KiB headroom for headers
+and trace context, falling back to 1 MiB − 64 KiB with no connection). The NATS server refuses a
+body over `max_payload` (1 MiB default), and before this the event was simply lost. Over the
+threshold:
+- a `RecordChangedPayload` event is published as a **slim copy** — same `eventId` (`Nats-Msg-Id`),
+  tenant, correlation, user, timestamp, `collectionName`, `recordId`, `changeType`,
+  `changedFields`, `containsMaskedFields`, `ownerScoped`; **no `data` / `previousData` keys**;
+  `payloadOmitted: true` — with one WARN `… payload omitted, publishing slim record event` naming
+  event id, subject, collection, record and sizes (never the body). The caller's event is not mutated.
+- any other payload type is **not sent**: WARN `Not publishing event …` and a publish failure.
+`payloadOmitted` is serialized only when true, so events under the threshold are byte-for-byte
+unchanged (older pods deserialize it as false). Consumers of `kelta.record.changed.>`:
+
+| Consumer | On `payloadOmitted` |
+|----------|---------------------|
+| `SearchIndexListener` (worker) | re-reads the record by id (`QueryEngine.getById`) and indexes that; gone → skips, as for any data-less event; DELETED needs no data |
+| `FlowEventListener` → `FlowTriggerEvaluator` / `InitialStateBuilder` (worker) | re-reads by id before evaluating triggers; `$.record.data` is the re-read row (or `{}` if gone), `$.record.previousData` is `{}`, `$.record.payloadOmitted` is `true`; a `filterFormula` never runs on null data (no match) |
+| `RecordWebhookPublisher` (worker, Svix) | forwards `payload.payloadOmitted: true` with no `data`/`previousData` — receivers refetch |
+| `RealtimeBridge` (gateway) | WebSocket event gets `payloadOmitted: true` and no `data`, like the masked/owner-scoped forms — clients refetch |
+| `SystemCollectionCacheInvalidationListener` (worker), `SystemCollectionRouteListener` (gateway) | id-only; null `data` is safe (custom-domain eviction falls back to evict-all) |
+
 **Config-change NATS subjects** (broadcast, every pod consumes):
 
 | Subject | Published by | Consumed by | Purpose |
