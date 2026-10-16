@@ -78,4 +78,16 @@ test.describe("Marketing site", () => {
     const response = await request.get(`${MARKETING_URL}/docs/definitely-not-a-page/`);
     expect(response.status()).toBe(404);
   });
+
+  // The image is built with PUBLIC_WAITLIST_ENDPOINT set (kelta-marketing/Dockerfile),
+  // so /waitlist renders the signup form and its privacy note, not the closed state.
+  test("serves the waitlist signup form with its privacy note", async ({ request }) => {
+    const response = await request.get(`${MARKETING_URL}/waitlist/`);
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('id="waitlist-form"');
+    expect(html).toContain("https://api.kelta.io/rzware/api/kelta-waitlist");
+    expect(html).toContain("Kelta Cloud has no pricing yet.");
+    expect(html).not.toContain("not open yet");
+  });
 });

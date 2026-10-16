@@ -71,7 +71,7 @@ edit the row in the same PR when a change shifts it.
 | Governed AI agents | Agent definitions + bounded tool-use runtime (`/api/ai/agents/{id}/run`), audited executions, PII masking of tool results, `AiAgentsPage`; AI page generation creates **unpublished drafts** only. Widget allow-list is duplicated FE ↔ `ProposalService.ALLOWED_WIDGET_TYPES`. | `AgentRuntimeService`, `ProposeUiPageHandler` | `_archive/app-intelligence/2-ai-page-generation.md` |
 | Semantic search / RAG | `VECTOR` fields (pgvector, HNSW), `POST /api/{collection}/semantic-search` (FLS-respecting, owner-scoped), embed-on-write, vectors purged when masking toggles. Prod Postgres must have the `vector` extension available. | `SemanticSearchService`, `EmbeddingOnWriteHook` | — |
 | Availability watch/target model | `watch-targets` + `watches` system collections; matcher tables with episode-based dedupe (`availability_state`, `alert`). | `WatchCriteria`, `AlertRepository` | `_archive/consumer-alerting/3-watch-model.md` |
-| Marketing + docs site (kelta.io) | Astro site deployed as `emf-marketing`; `/docs/**` reads `docs/authoring/*.md` and the generated CLI docs in place; `/roadmap`, `/waitlist` (no form while `PUBLIC_WAITLIST_ENDPOINT` is empty); no `/pricing`. | `kelta-marketing/`; ci-cd.md → Marketing site | — |
+| Marketing + docs site (kelta.io) | Astro site deployed as `emf-marketing`; `/docs/**` reads `docs/authoring/*.md` and the generated CLI docs in place; `/roadmap`, `/waitlist` (form POSTs to the Dockerfile's `PUBLIC_WAITLIST_ENDPOINT`; no form when built with it empty); no `/pricing`. | `kelta-marketing/`; ci-cd.md → Marketing site | — |
 
 ## 🟡 Partial — backend exists, gaps remain
 
