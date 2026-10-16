@@ -64,6 +64,35 @@ Nexus `/repository/**` route is no longer access-logged by Traefik (homelab-argo
 deploy workflow's `build-push-action` legs *do* get the token, so their per-service `gha` cache
 is real. To reclaim space on a node: `docker buildx prune --builder kelta-ci`.
 
+### Shared Docker daemon: per-run cerbos tag + disk reclaim (`e2e` / `quickstart` / `templates` / `upgrade`)
+
+All four compose jobs run on the node's one Docker daemon, often at the same time. Their Kelta
+services resolve to per-run `<COMPOSE_PROJECT_NAME>-<service>` images, but `docker-compose.ci.yml`
+gives cerbos an explicit `image:`, so it is **`kelta-cerbos-ci:${CERBOS_CI_TAG:-local}`**. Each
+job sets `CERBOS_CI_TAG` to `<run_id>-<run_attempt>-<job>` (`local` stays the default for a
+hand-run compose), and its `Stop stack` step removes that tag with an explicit
+`docker image rm … || true` — `down --rmi local` skips images that have a custom `image:` tag.
+
+Every job's last step runs `ci/docker-reclaim.sh` (#1794), which prunes unused images older
+than 24 h, default-builder cache older than 24 h, and trims the `kelta-ci` builder to 20 GB.
+`docker image prune --filter until=` ages an image by its **`Created`** time, and a build served
+from the warm `kelta-ci` cache keeps the *original* build's `Created` — weeks old for cerbos,
+whose `docker/cerbos/` context rarely changes. So a freshly `--load`ed image counted as old and
+unused, and another job's reclaim could delete it between this job's bake and its `up`. That
+broke run 38854982805 (PR #1810): `Start stack` → `No such image: kelta-cerbos-ci:local`
+(PLT-618). The fix has two parts:
+- **Per-run tag:** jobs no longer share one cerbos tag, so one job's bake or teardown cannot
+  retag or remove the image another job is about to start.
+- **Load-time label:** every bake `--load` (and the upgrade job's runner image) is labelled
+  `io.kelta.ci.loaded-at=<epoch>`. The reclaim prune skips labelled images
+  (`--filter label!=io.kelta.ci.loaded-at`) and removes them only once that label is older
+  than the age, one tag at a time and never forced, so a job's image survives every other
+  job's reclaim for 24 h however old its `Created` is.
+
+Not covered: the released `ghcr.io/kelta-io/*` images that `quickstart`/`upgrade` *pull* carry
+no label and an old `Created`. If one is pruned before `up`, compose pulls it again (only a
+prune landing inside `up`'s own image-check → create window could still fail it).
+
 > **Java dependencies are not scanned yet.** OWASP dependency-check is configured in `kelta-platform/pom.xml` but only inside `<pluginManagement>`, so it never runs. Wiring it up is blocked on the `NVD_API_KEY` secret: it is set, but the NVD API rejects it (`NvdApiException: Invalid API Key`), which dependency-check 10.0.4 masked as an opaque `NullPointerException` in `NvdCveClient`. Tracked as a follow-up — see `concerns.md`.
 
 ## `build-and-publish-containers.yml` — Post-merge deploy

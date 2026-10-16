@@ -8,7 +8,9 @@
 #      take over, preventing container-name collisions too.
 #   3. Allow kelta-ui origin in auth + gateway CORS.
 #   4. Bake cerbos config into a CI-only image (bind mounts don't reach the
-#      remote daemon).
+#      remote daemon), tagged per CI job via CERBOS_CI_TAG so concurrent jobs on
+#      the shared daemon never share (or remove) one another's image. `local` when
+#      run by hand.
 #
 # It builds no Kelta service, so on its own (with docker-compose.yml) it runs the
 # released ghcr images pinned by KELTA_VERSION — the quickstart job's path. The e2e
@@ -38,7 +40,7 @@ services:
     build:
       context: ./docker/cerbos
       dockerfile: Dockerfile.ci
-    image: kelta-cerbos-ci:local
+    image: kelta-cerbos-ci:${CERBOS_CI_TAG:-local}
     volumes: !reset []
 
   kelta-auth:
