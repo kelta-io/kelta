@@ -87,16 +87,6 @@ Then use `http://localhost:8090/default/mcp/admin` and `http://localhost:8090/de
 (the compose stack's tenant is `default`) in place of the hosted URLs above, with a token created
 in the local app. Every call below works the same way.
 
-**Check the connection.**
-
-```json
-{ "name": "ping", "arguments": {} }
-```
-
-```text
-pong (user)
-```
-
 ## 2. Read the API: `describe_api`
 
 The agent starts by reading the tenant's OpenAPI spec, which lists a JSON:API path for every
