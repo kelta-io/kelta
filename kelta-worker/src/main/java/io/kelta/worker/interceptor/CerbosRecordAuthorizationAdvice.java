@@ -298,6 +298,26 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
      */
     public boolean isRecordReadable(HttpServletRequest request, String collectionName,
                                     Map<String, Object> record) {
+        return isRecordAllowedFor(request, collectionName, record, "read");
+    }
+
+    /**
+     * The edit decision for one record of {@code collectionName}, for a handler that changes
+     * something hanging off a record without going through the record's own write path (an
+     * attachment upload). Same inputs and outcome as {@link #isRecordReadable} with the
+     * {@code edit} action: the record-level Cerbos decision widened by EDIT shares, allowed when
+     * permissions are disabled or the request carries no Cerbos identity.
+     *
+     * @param record a flat record as {@link io.kelta.runtime.query.QueryEngine} returns it
+     *               ({@code id} plus field values)
+     */
+    public boolean isRecordEditable(HttpServletRequest request, String collectionName,
+                                    Map<String, Object> record) {
+        return isRecordAllowedFor(request, collectionName, record, "edit");
+    }
+
+    private boolean isRecordAllowedFor(HttpServletRequest request, String collectionName,
+                                       Map<String, Object> record, String action) {
         if (!permissionsEnabled || !permissionResolver.hasIdentity(request)) {
             return true;
         }
@@ -310,7 +330,7 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
         resource.put("id", String.valueOf(id));
         resource.put("attributes", attributes);
         return isRecordAllowed(permissionResolver.getEmail(request), permissionResolver.getProfileId(request),
-                permissionResolver.getTenantId(request), collectionName, resource, "read");
+                permissionResolver.getTenantId(request), collectionName, resource, action);
     }
 
     /**

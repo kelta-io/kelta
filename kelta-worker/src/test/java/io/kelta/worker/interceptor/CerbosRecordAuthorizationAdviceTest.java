@@ -734,6 +734,48 @@ class CerbosRecordAuthorizationAdviceTest {
     }
 
     @Nested
+    @DisplayName("isRecordEditable (edit decision for handlers that write beside a record)")
+    class IsRecordEditable {
+
+        private jakarta.servlet.http.HttpServletRequest servletRequest() {
+            return createRequest("/api/attachments/upload-url").getServletRequest();
+        }
+
+        @Test
+        @DisplayName("checks the edit action on the record, with its field values as attributes")
+        void checksEditAction() {
+            var request = servletRequest();
+            when(authzService.checkRecordAccess(eq("user@example.com"), eq("profile-1"), eq("tenant-1"),
+                    eq("accounts"), eq("rec-1"), eq(Map.of("ownerId", "u-1")), eq("edit")))
+                    .thenReturn(true);
+
+            assertThat(advice.isRecordEditable(request, "accounts", Map.of("id", "rec-1", "ownerId", "u-1"))).isTrue();
+            verify(authzService, never()).checkRecordAccess(any(), any(), any(), any(), any(), any(), eq("read"));
+        }
+
+        @Test
+        @DisplayName("a READ share does not make a record editable; an EDIT share does")
+        void onlyEditSharesWiden() {
+            var request = servletRequest();
+            when(authzService.checkRecordAccess(any(), any(), any(), any(), any(), any(), eq("edit")))
+                    .thenReturn(false);
+            when(recordShareAccessService.widen(any(), eq("accounts"), eq(Set.of("rec-1")), eq("edit")))
+                    .thenReturn(Set.of());
+            assertThat(advice.isRecordEditable(request, "accounts", Map.of("id", "rec-1"))).isFalse();
+
+            when(recordShareAccessService.widen(any(), eq("accounts"), eq(Set.of("rec-1")), eq("edit")))
+                    .thenReturn(Set.of("rec-1"));
+            assertThat(advice.isRecordEditable(request, "accounts", Map.of("id", "rec-1"))).isTrue();
+        }
+
+        @Test
+        @DisplayName("a record without an id is never editable (fail closed)")
+        void noIdFailsClosed() {
+            assertThat(advice.isRecordEditable(servletRequest(), "accounts", Map.of("name", "x"))).isFalse();
+        }
+    }
+
+    @Nested
     @DisplayName("child-resource routes")
     class ChildResourceRoutes {
 
