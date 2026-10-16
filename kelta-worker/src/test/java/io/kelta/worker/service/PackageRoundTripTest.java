@@ -377,6 +377,55 @@ class PackageRoundTripTest {
     }
 
     @Test
+    @DisplayName("a field's systemMaintained flag survives export → JSON → apply to a clean tenant (KLT-610)")
+    void fieldSystemMaintainedRoundTrips() throws Exception {
+        List<String> collectionIds = List.of("src-orders", "src-lines");
+        when(exportRepository.findFieldsWithNamesByCollectionIds(SOURCE, collectionIds)).thenReturn(List.of(
+                row("id", "src-failures", "collection_id", "src-orders", "collection_name", "orders",
+                        "name", "failure_count", "type", "INTEGER", "system_maintained", true),
+                row("id", "src-status", "collection_id", "src-orders", "collection_name", "orders",
+                        "name", "status", "type", "PICKLIST", "system_maintained", false),
+                row("id", "src-order", "collection_id", "src-lines", "collection_name", "order_lines",
+                        "name", "order", "type", "LOOKUP", "system_maintained", false,
+                        "reference_collection_id", "src-orders", "reference_collection_name", "orders")));
+
+        ObjectMapper http = new ObjectMapper();
+        String body = http.writeValueAsString(packageService.exportPackage(SOURCE, Map.of(), false));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> received = http.readValue(body, Map.class);
+
+        var report = importService.importPackage(TARGET, received,
+                PackageImportService.ImportOptions.defaults());
+
+        assertThat(report.failed()).as("%s", report.items()).isZero();
+        assertThat(written("fields", r -> "failure_count".equals(r.get("name"))))
+                .containsEntry("systemMaintained", true);
+        assertThat(written("fields", r -> "status".equals(r.get("name"))))
+                .containsEntry("systemMaintained", false);
+    }
+
+    @Test
+    @DisplayName("a package exported before systemMaintained existed applies with the flag false (KLT-610)")
+    void fieldWithoutSystemMaintainedKeyAppliesFalse() {
+        var items = exportItems();
+        assertThat(items.stream()
+                .filter(item -> "FIELD".equals(item.get("type")))
+                .map(item -> ((Map<?, ?>) item.get("data")).containsKey("system_maintained")))
+                .as("fixture rows predate the column")
+                .containsOnly(false);
+
+        var report = importService.importPackage(TARGET, Map.of("items", items),
+                PackageImportService.ImportOptions.defaults());
+
+        assertThat(report.failed()).as("%s", report.items()).isZero();
+        assertThat(written("fields", r -> "status".equals(r.get("name"))))
+                .doesNotContainKey("systemMaintained");
+        // The engine fills an absent attribute from the system collection's default on create.
+        assertThat(SystemCollectionDefinitions.byName().get("fields").getField("systemMaintained")
+                .defaultValue()).isEqualTo(false);
+    }
+
+    @Test
     @DisplayName("a flow's stepLogging survives export → JSON → apply (PLT-602)")
     void flowStepLoggingRoundTrips() throws Exception {
         when(exportRepository.findFlowsByIds(SOURCE, List.of("src-flow"))).thenReturn(List.of(

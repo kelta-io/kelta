@@ -100,6 +100,8 @@ export interface FieldSpec {
   unique?: boolean;
   indexed?: boolean;
   searchable?: boolean;
+  /** Only flows and server-side code may set or change the value; API writes that do get a 400. */
+  systemMaintained?: boolean;
   description?: string;
   defaultValue?: string | number | boolean;
   /** Global picklist name or id (PICKLIST/MULTI_PICKLIST). */
@@ -169,6 +171,7 @@ export async function buildFieldBody(
   if (spec.unique !== undefined) attributes.uniqueConstraint = spec.unique;
   if (spec.indexed !== undefined) attributes.indexed = spec.indexed;
   if (spec.searchable !== undefined) attributes.searchable = spec.searchable;
+  if (spec.systemMaintained !== undefined) attributes.systemMaintained = spec.systemMaintained;
   if (spec.description) attributes.description = spec.description;
   if (spec.defaultValue !== undefined) attributes.defaultValue = spec.defaultValue;
 

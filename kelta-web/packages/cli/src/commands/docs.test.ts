@@ -21,6 +21,18 @@ describe('kelta docs', () => {
     expect(result.text).toContain('0-based');
   });
 
+  it('jsonapi documents system-maintained fields: who writes them and the 400', async () => {
+    const result = await run('jsonapi');
+    const text = result.text ?? '';
+    const section = text.slice(text.indexOf('## System-maintained fields'));
+    expect(section).toContain('`systemMaintained: true`');
+    expect(section).toContain('Flows and server-side code');
+    expect(section).toContain('**400**');
+    expect(section).toContain('is system-maintained\n  and cannot be written through the API');
+    expect(section).toContain('re-sends the value already stored');
+    expect(section).toContain('--system-maintained');
+  });
+
   it('an unknown topic is rejected with a usage error listing the valid topics', async () => {
     await expect(run('nope')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS', exitCode: 2 });
     await expect(run('nope')).rejects.toMatchObject({

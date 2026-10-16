@@ -13,6 +13,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.Map;
 
@@ -94,6 +96,31 @@ class GetCollectionSchemaToolTest {
         wm.verify(WireMock.getRequestedFor(urlEqualTo("/api/collections/customers/schema")));
         wm.verify(WireMock.getRequestedFor(urlEqualTo(
                 "/api/validation-rules?filter[collectionId][EQ]=ec000100-0000-0000-0000-000000000003&page[size]=200")));
+    }
+
+    @Test
+    void carriesSystemMaintainedForEachField() {
+        wm.stubFor(get(urlEqualTo("/api/collections/inspections/schema"))
+                .willReturn(aResponse().withStatus(200).withBody("""
+                        {"name":"inspections","displayName":"Inspections","systemCollection":false,\
+                        "fields":[\
+                        {"name":"site","type":"STRING","required":true,"isRelationship":false,"systemMaintained":false},\
+                        {"name":"failureCount","type":"INTEGER","required":false,"isRelationship":false,"systemMaintained":true}]}""")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(null,
+                new CallToolRequest("get_collection_schema",
+                        Map.of("collection", "inspections", "includeRules", false), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        JsonNode fields = new ObjectMapper()
+                .readTree(((TextContent) result.content().get(0)).text()).get("fields");
+        assertThat(fields).hasSize(2);
+        for (JsonNode field : fields) {
+            assertThat(field.has("systemMaintained"))
+                    .as("systemMaintained on %s", field.get("name").asString()).isTrue();
+        }
+        assertThat(fields.get(0).get("systemMaintained").asBoolean()).isFalse();
+        assertThat(fields.get(1).get("systemMaintained").asBoolean()).isTrue();
     }
 
     @Test

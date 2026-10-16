@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { Command } from 'commander';
 import type { CommandContext } from '../registry/types.js';
 import { CliError, EXIT } from '../errors.js';
 import { fieldCommands, typedDefault } from './fields.js';
@@ -14,13 +15,24 @@ function addCommand() {
 function fakeCtx() {
   const get = vi.fn().mockResolvedValue({ data: { data: { id: COLLECTION_ID } } });
   const post = vi.fn().mockResolvedValue({ data: { data: { id: 'f1' } } });
+  const patch = vi.fn().mockResolvedValue({ data: { data: { id: 'f1' } } });
   const ctx = {
     profile: { name: 'test' },
     global: { raw: false, quiet: false, yes: true },
     log: vi.fn(),
-    client: { getAxiosInstance: () => ({ get, post }) },
+    client: { getAxiosInstance: () => ({ get, post, patch }) },
   } as unknown as CommandContext;
-  return { ctx, post };
+  return { ctx, post, patch };
+}
+
+/** Parses real argv against the command's declared options, as `bindCommands` wires them. */
+function parseArgv(name: string, positionals: Record<string, string>, argv: string[]) {
+  const def = fieldCommands.find((c) => c.name === name);
+  if (!def) throw new Error(`no fields ${name} command`);
+  const command = new Command().exitOverride();
+  for (const opt of def.options ?? []) command.option(opt.flag, opt.description);
+  command.parse(argv, { from: 'user' });
+  return { def, input: def.input.parse({ ...command.opts(), ...positionals }) };
 }
 
 async function runAdd(type: string, defaultValue: string) {
@@ -130,6 +142,60 @@ describe('fields add --values', () => {
     await expect(run).rejects.toMatchObject({ exitCode: EXIT.USAGE });
     await expect(run).rejects.toThrow(/--picklist.*--values/);
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe('--system-maintained', () => {
+  function sentAttributes(call: unknown[] | undefined): Record<string, unknown> {
+    return (call?.[1] as { data: { attributes: Record<string, unknown> } }).data.attributes;
+  }
+
+  it('fields add --system-maintained sends systemMaintained: true', async () => {
+    const { ctx, post } = fakeCtx();
+    const { def, input } = parseArgv('add', { collection: 'inspections' }, [
+      '--name',
+      'failure_count',
+      '--type',
+      'number',
+      '--system-maintained',
+    ]);
+    await def.handler(ctx, input as never);
+
+    expect(post).toHaveBeenCalledWith('/api/fields', expect.anything());
+    expect(sentAttributes(post.mock.calls[0])).toMatchObject({
+      name: 'failure_count',
+      systemMaintained: true,
+    });
+  });
+
+  it('fields add without the switch leaves systemMaintained to the server default', async () => {
+    const { ctx, post } = fakeCtx();
+    const { def, input } = parseArgv('add', { collection: 'inspections' }, [
+      '--name',
+      'site',
+      '--type',
+      'text',
+    ]);
+    await def.handler(ctx, input as never);
+
+    expect(sentAttributes(post.mock.calls[0])).not.toHaveProperty('systemMaintained');
+  });
+
+  it.each([
+    ['true', true],
+    ['false', false],
+  ])('fields update --system-maintained %s sets systemMaintained: %s', async (flag, expected) => {
+    const { ctx, patch } = fakeCtx();
+    const { def, input } = parseArgv('update', { fieldId: 'f1' }, ['--system-maintained', flag]);
+    await def.handler(ctx, input as never);
+
+    expect(patch).toHaveBeenCalledWith('/api/fields/f1', {
+      data: { type: 'fields', id: 'f1', attributes: { systemMaintained: expected } },
+    });
+  });
+
+  it('fields update rejects a --system-maintained value other than true|false', () => {
+    expect(() => parseArgv('update', { fieldId: 'f1' }, ['--system-maintained', 'yes'])).toThrow();
   });
 });
 

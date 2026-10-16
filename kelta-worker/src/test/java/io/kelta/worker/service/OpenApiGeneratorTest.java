@@ -269,6 +269,43 @@ class OpenApiGeneratorTest {
     }
 
     @Test
+    @DisplayName("A system-maintained field is readOnly, says flows maintain it, and is never required")
+    @SuppressWarnings("unchecked")
+    void systemMaintainedFieldIsReadOnly() {
+        CollectionDefinition inspections = CollectionDefinition.builder()
+                .name("inspections")
+                .displayName("Inspections")
+                .addField(FieldDefinition.requiredString("site"))
+                .addField(new FieldDefinition("failureCount", FieldType.INTEGER, false, false, false,
+                        null, null, null, null, null)
+                        .withDescription("Failed checks so far.")
+                        .withSystemMaintained(true))
+                .build();
+
+        Map<String, Object> spec = generator.generate(List.of(inspections), null);
+        Map<String, Object> schemas = (Map<String, Object>) components(spec).get("schemas");
+
+        Map<String, Object> attributes = (Map<String, Object>) ((Map<String, Object>)
+                ((Map<String, Object>) ((Map<String, Object>) schemas.get("inspectionsResource"))
+                        .get("properties")).get("attributes")).get("properties");
+        Map<String, Object> failureCount = (Map<String, Object>) attributes.get("failureCount");
+        assertThat(failureCount.get("readOnly")).isEqualTo(true);
+        assertThat((String) failureCount.get("description"))
+                .startsWith("Failed checks so far.")
+                .contains("flows")
+                .contains("400");
+        assertThat(((Map<String, Object>) attributes.get("site"))).doesNotContainKey("readOnly");
+
+        Map<String, Object> requestAttributes = (Map<String, Object>) ((Map<String, Object>)
+                ((Map<String, Object>) ((Map<String, Object>) ((Map<String, Object>)
+                        schemas.get("inspectionsRequest")).get("properties")).get("data"))
+                        .get("properties")).get("attributes");
+        assertThat((List<String>) requestAttributes.get("required"))
+                .contains("site")
+                .doesNotContain("failureCount");
+    }
+
+    @Test
     @DisplayName("Read-only collections document only GET, including system ones")
     @SuppressWarnings("unchecked")
     void readOnlySystemCollectionsDocumentOnlyGet() {

@@ -41,6 +41,8 @@ public class OpenApiGenerator {
             .toList();
 
     private static final String ERROR_SCHEMA = "ErrorDocument";
+    private static final String SYSTEM_MAINTAINED_NOTE = "System-maintained: set by flows and server-side"
+            + " code; an API create that supplies it or an update that changes it returns 400.";
 
     /**
      * Generates an OpenAPI 3.0 specification from the given collections.
@@ -258,7 +260,7 @@ public class OpenApiGenerator {
                 continue; // server-only: a caller-supplied value is ignored
             }
             attributes.put(field.name(), mapFieldType(field));
-            if (!field.nullable() && field.defaultValue() == null) {
+            if (!field.nullable() && field.defaultValue() == null && !field.systemMaintained()) {
                 required.add(field.name());
             }
         }
@@ -376,6 +378,12 @@ public class OpenApiGenerator {
         mapped.putAll(TYPE_MAPPING.getOrDefault(field.type(), Map.of("type", "string")));
         if (field.description() != null && !field.description().isBlank()) {
             mapped.put("description", field.description());
+        }
+        if (field.systemMaintained()) {
+            mapped.put("readOnly", true);
+            Object description = mapped.get("description");
+            mapped.put("description", description == null
+                    ? SYSTEM_MAINTAINED_NOTE : description + " " + SYSTEM_MAINTAINED_NOTE);
         }
         if (field.nullable()) {
             mapped.put("nullable", true);
