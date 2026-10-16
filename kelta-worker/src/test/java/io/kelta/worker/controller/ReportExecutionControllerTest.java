@@ -4,6 +4,8 @@ import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.system.ReportSystemCollections;
 import io.kelta.runtime.query.*;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.worker.interceptor.CerbosRecordAuthorizationAdvice;
+import io.kelta.worker.interceptor.DerivedDataController;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.ReportExecutionService;
@@ -30,6 +32,7 @@ class ReportExecutionControllerTest {
     private CollectionRegistry collectionRegistry;
     private CerbosPermissionResolver permissionResolver;
     private BootstrapRepository bootstrapRepository;
+    private CerbosRecordAuthorizationAdvice recordAuthorization;
     private ReportExecutionController controller;
     private HttpServletRequest request;
 
@@ -40,10 +43,12 @@ class ReportExecutionControllerTest {
         collectionRegistry = mock(CollectionRegistry.class);
         permissionResolver = mock(CerbosPermissionResolver.class);
         bootstrapRepository = mock(BootstrapRepository.class);
+        recordAuthorization = mock(CerbosRecordAuthorizationAdvice.class);
         request = mock(HttpServletRequest.class);
         controller = new ReportExecutionController(reportExecutionService, queryEngine,
-                collectionRegistry, permissionResolver, bootstrapRepository);
+                collectionRegistry, permissionResolver, bootstrapRepository, recordAuthorization);
         grantPermission("VIEW_ANALYTICS");
+        when(recordAuthorization.isRecordReadable(any(), anyString(), any())).thenReturn(true);
     }
 
     private void grantPermission(String permissionName) {
@@ -229,6 +234,40 @@ class ReportExecutionControllerTest {
                 () -> controller.exportReport("report-1", "csv", request, response));
 
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+        verifyNoInteractions(reportExecutionService);
+    }
+
+    @Test
+    void isExemptFromTheRecordAdviceAsADerivedDataController() {
+        assertTrue(controller instanceof DerivedDataController);
+    }
+
+    @Test
+    void executeReturns404WhenReportIsNotReadable() {
+        CollectionDefinition reportsDef = ReportSystemCollections.reports();
+        when(collectionRegistry.get("reports")).thenReturn(reportsDef);
+        Map<String, Object> reportConfig = Map.of("id", "report-1", "name", "Hidden");
+        when(queryEngine.getById(eq(reportsDef), eq("report-1"))).thenReturn(Optional.of(reportConfig));
+        when(recordAuthorization.isRecordReadable(request, "reports", reportConfig)).thenReturn(false);
+
+        ResponseEntity<Map<String, Object>> response = controller.executeReport("report-1", 1, 200, request);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        verifyNoInteractions(reportExecutionService);
+    }
+
+    @Test
+    void exportReturns404WhenReportIsNotReadable() {
+        CollectionDefinition reportsDef = ReportSystemCollections.reports();
+        when(collectionRegistry.get("reports")).thenReturn(reportsDef);
+        Map<String, Object> reportConfig = Map.of("id", "report-1", "name", "Hidden");
+        when(queryEngine.getById(eq(reportsDef), eq("report-1"))).thenReturn(Optional.of(reportConfig));
+        when(recordAuthorization.isRecordReadable(request, "reports", reportConfig)).thenReturn(false);
+        HttpServletResponse response = mock(HttpServletResponse.class);
+
+        controller.exportReport("report-1", "csv", request, response);
+
+        verify(response).setStatus(404);
         verifyNoInteractions(reportExecutionService);
     }
 }

@@ -5,6 +5,8 @@ import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.*;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.workflow.BeforeSaveResult;
+import io.kelta.worker.interceptor.CerbosRecordAuthorizationAdvice;
+import io.kelta.worker.interceptor.DerivedDataController;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.DashboardComponentValidator;
@@ -27,15 +29,22 @@ import java.util.*;
  * <p>Provides endpoints to fetch aggregated data for dashboard widgets
  * (metric cards, bar charts, data tables, and recent records).
  *
+ * <p>A {@link DerivedDataController}: the widget results are not {@code dashboards} records, so
+ * the record-level advice leaves them alone and this controller authorizes the source records
+ * itself — the dashboard and each component must be readable by the caller, as a direct
+ * {@code GET} of them would be; an unreadable one answers like a missing one.
+ *
  * @since 1.0.0
  */
 @RestController
 @RequestMapping("/api/dashboards")
-public class DashboardDataController {
+public class DashboardDataController implements DerivedDataController {
 
     private static final Logger log = LoggerFactory.getLogger(DashboardDataController.class);
     private static final String VIEW_PERMISSION = "VIEW_ANALYTICS";
     private static final String MANAGE_PERMISSION = "MANAGE_REPORTS";
+    private static final String DASHBOARDS = "dashboards";
+    private static final String DASHBOARD_COMPONENTS = "dashboard-components";
 
     private final DashboardDataService dashboardDataService;
     private final DashboardComponentValidator dashboardComponentValidator;
@@ -43,19 +52,22 @@ public class DashboardDataController {
     private final CollectionRegistry collectionRegistry;
     private final CerbosPermissionResolver permissionResolver;
     private final BootstrapRepository bootstrapRepository;
+    private final CerbosRecordAuthorizationAdvice recordAuthorization;
 
     public DashboardDataController(DashboardDataService dashboardDataService,
                                    DashboardComponentValidator dashboardComponentValidator,
                                    QueryEngine queryEngine,
                                    CollectionRegistry collectionRegistry,
                                    CerbosPermissionResolver permissionResolver,
-                                   BootstrapRepository bootstrapRepository) {
+                                   BootstrapRepository bootstrapRepository,
+                                   CerbosRecordAuthorizationAdvice recordAuthorization) {
         this.dashboardDataService = dashboardDataService;
         this.dashboardComponentValidator = dashboardComponentValidator;
         this.queryEngine = queryEngine;
         this.collectionRegistry = collectionRegistry;
         this.permissionResolver = permissionResolver;
         this.bootstrapRepository = bootstrapRepository;
+        this.recordAuthorization = recordAuthorization;
     }
 
     /**
@@ -103,12 +115,14 @@ public class DashboardDataController {
         try {
             // Load dashboard record
             Map<String, Object> dashboard = loadDashboard(dashboardId);
-            if (dashboard == null) {
+            if (dashboard == null || !recordAuthorization.isRecordReadable(request, DASHBOARDS, dashboard)) {
                 return ResponseEntity.notFound().build();
             }
 
-            // Load all components for this dashboard
-            List<Map<String, Object>> components = loadDashboardComponents(dashboardId);
+            // Load the components of this dashboard the caller may read
+            List<Map<String, Object>> components = loadDashboardComponents(dashboardId).stream()
+                .filter(c -> recordAuthorization.isRecordReadable(request, DASHBOARD_COMPONENTS, c))
+                .toList();
             if (components.isEmpty()) {
                 Map<String, Object> attributes = new LinkedHashMap<>();
                 attributes.put("dashboardId", dashboardId);
@@ -179,9 +193,14 @@ public class DashboardDataController {
         requireAnalyticsAccess(request);
 
         try {
-            // Load the specific component
+            // Load the dashboard and the specific component; both must be readable by the caller
+            Map<String, Object> dashboard = loadDashboard(dashboardId);
+            if (dashboard == null || !recordAuthorization.isRecordReadable(request, DASHBOARDS, dashboard)) {
+                return ResponseEntity.notFound().build();
+            }
             Map<String, Object> component = loadComponent(componentId, dashboardId);
-            if (component == null) {
+            if (component == null
+                    || !recordAuthorization.isRecordReadable(request, DASHBOARD_COMPONENTS, component)) {
                 return ResponseEntity.notFound().build();
             }
 
@@ -287,7 +306,7 @@ public class DashboardDataController {
     // =========================================================================
 
     private Map<String, Object> loadDashboard(String dashboardId) {
-        CollectionDefinition dashboardsDef = collectionRegistry.get("dashboards");
+        CollectionDefinition dashboardsDef = collectionRegistry.get(DASHBOARDS);
         if (dashboardsDef == null) {
             log.error("Dashboards system collection not found in registry");
             return null;
@@ -296,7 +315,7 @@ public class DashboardDataController {
     }
 
     private List<Map<String, Object>> loadDashboardComponents(String dashboardId) {
-        CollectionDefinition componentsDef = collectionRegistry.get("dashboard-components");
+        CollectionDefinition componentsDef = collectionRegistry.get(DASHBOARD_COMPONENTS);
         if (componentsDef == null) {
             log.error("Dashboard-components system collection not found in registry");
             return List.of();
@@ -315,7 +334,7 @@ public class DashboardDataController {
     }
 
     private Map<String, Object> loadComponent(String componentId, String dashboardId) {
-        CollectionDefinition componentsDef = collectionRegistry.get("dashboard-components");
+        CollectionDefinition componentsDef = collectionRegistry.get(DASHBOARD_COMPONENTS);
         if (componentsDef == null) {
             log.error("Dashboard-components system collection not found in registry");
             return null;
