@@ -621,6 +621,10 @@ jobs:
       cancel-in-progress: true
     env:
       COMPOSE_PROJECT_NAME: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      # docker-compose.ci.yml's cerbos `image:` tag. Per run AND job: the four compose jobs
+      # share the node's daemon, and a fixed tag let one job's teardown remove the image
+      # another had just loaded (PLT-618). Spelled out: job env cannot read env.*.
+      CERBOS_CI_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-e2e
       # HEAD, not the pinned release the base file pulls: docker-compose.build.yml restores
       # the from-source build stanzas, docker-compose.ci.yml makes the stack safe on the
       # shared daemon, docker-compose.ci-build.yml swaps in the JVM Dockerfiles + CI UI build.
@@ -679,10 +683,13 @@ jobs:
           # mounts). The type=gha cache this used to set was a silent no-op: buildx drops
           # gha cache entries when ACTIONS_RUNTIME_TOKEN is not in its environment, and a
           # plain run step never has it — every build here ran cold.
+          # The label is when this job loaded the image. ci/docker-reclaim.sh ages labelled
+          # images by it, not by `Created`, which a cache-served build inherits from the
+          # original build and so can already be past the prune age the moment it is loaded.
           docker buildx bake --builder kelta-ci \
             -f docker-compose.yml -f docker-compose.build.yml \
             -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
-            --load \
+            --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
             kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
 
       - name: Start stack
@@ -841,6 +848,8 @@ jobs:
         if: always()
         run: |
           docker compose --profile ai --profile tools --profile seed down -v --rmi local || true
+          # `down --rmi local` skips images with a custom `image:` tag, so cerbos goes explicitly.
+          docker image rm "kelta-cerbos-ci:${CERBOS_CI_TAG}" 2>/dev/null || true
 
       # The node's Docker daemon is shared and nothing else cleans it; see ci/docker-reclaim.sh.
       # Guarded because an update_snapshots_ref dispatch can check out a branch without it.
@@ -880,8 +889,10 @@ jobs:
       cancel-in-progress: true
     env:
       COMPOSE_PROJECT_NAME: qs-${{ github.run_id }}-${{ github.run_attempt }}
-      # Only cerbos is built here (CI-baked config, tagged kelta-cerbos-ci:local so `up`
-      # finds it); select the persistent builder anyway so any build `up` does start is
+      # Per-run, per-job cerbos tag (see the e2e job).
+      CERBOS_CI_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-quickstart
+      # Only cerbos is built here (CI-baked config, tagged kelta-cerbos-ci:${CERBOS_CI_TAG} so
+      # `up` finds it); select the persistent builder anyway so any build `up` does start is
       # warm rather than cold on the default builder.
       BUILDX_BUILDER: kelta-ci
     steps:
@@ -918,7 +929,7 @@ jobs:
         run: |
           docker buildx bake --builder kelta-ci \
             -f docker-compose.yml -f docker-compose.ci.yml \
-            --load \
+            --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
             cerbos
 
       - name: Pull released Kelta images (ghcr.io/kelta-io/*:KELTA_VERSION from .env)
@@ -992,6 +1003,8 @@ jobs:
         if: always()
         run: |
           docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v --rmi local || true
+          # `down --rmi local` skips images with a custom `image:` tag, so cerbos goes explicitly.
+          docker image rm "kelta-cerbos-ci:${CERBOS_CI_TAG}" 2>/dev/null || true
 
       # The node's Docker daemon is shared and nothing else cleans it; see ci/docker-reclaim.sh.
       - name: Reclaim shared Docker disk
@@ -1030,6 +1043,8 @@ jobs:
       cancel-in-progress: true
     env:
       COMPOSE_PROJECT_NAME: tpl-${{ github.run_id }}-${{ github.run_attempt }}
+      # Per-run, per-job cerbos tag (see the e2e job).
+      CERBOS_CI_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-templates
       # The e2e job's from-source stack (see the comments there).
       COMPOSE_FILE: docker-compose.yml:docker-compose.build.yml:docker-compose.ci.yml:docker-compose.ci-build.yml
       BUILDX_BUILDER: kelta-ci
@@ -1066,7 +1081,7 @@ jobs:
           docker buildx bake --builder kelta-ci \
             -f docker-compose.yml -f docker-compose.build.yml \
             -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
-            --load \
+            --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
             kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
 
       - name: Start stack
@@ -1112,6 +1127,8 @@ jobs:
           docker rm -f "${COMPOSE_PROJECT_NAME}_templates" 2>/dev/null || true
           docker compose down -v --rmi local || true
           docker image rm "kelta-templates-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
+          # `down --rmi local` skips images with a custom `image:` tag, so cerbos goes explicitly.
+          docker image rm "kelta-cerbos-ci:${CERBOS_CI_TAG}" 2>/dev/null || true
 
       # The node's Docker daemon is shared and nothing else cleans it; see ci/docker-reclaim.sh.
       - name: Reclaim shared Docker disk
@@ -1161,6 +1178,8 @@ jobs:
     env:
       # Fixed for the whole job: both stacks share it, so HEAD starts on the release's volumes.
       COMPOSE_PROJECT_NAME: upg-${{ github.run_id }}-${{ github.run_attempt }}
+      # Per-run, per-job cerbos tag (see the e2e job).
+      CERBOS_CI_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-upgrade
       # The release stack: released images pinned by KELTA_VERSION, CI-safe overrides.
       RELEASE_COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
       # The HEAD stack: the e2e job's from-source file set.
@@ -1205,7 +1224,9 @@ jobs:
       - name: Build the seed/verify runner image
         timeout-minutes: 5
         run: |
-          docker buildx build --load -q -t "upgrade-runner:${COMPOSE_PROJECT_NAME}" -f - ci <<'DOCKERFILE'
+          # Labelled like the baked images: it sits unused while the release stack boots.
+          docker buildx build --load -q -t "upgrade-runner:${COMPOSE_PROJECT_NAME}" \
+            --label "io.kelta.ci.loaded-at=$(date +%s)" -f - ci <<'DOCKERFILE'
           FROM alpine:3.20
           RUN apk add --no-cache bash curl jq coreutils
           COPY upgrade-seed.sh upgrade-verify.sh upgrade-verify.test.sh /ci/
@@ -1221,7 +1242,7 @@ jobs:
           docker buildx bake --builder kelta-ci \
             -f docker-compose.yml -f docker-compose.build.yml \
             -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
-            --load \
+            --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
             kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
 
       - name: Pull release ${{ steps.release.outputs.tag }} images
@@ -1322,6 +1343,8 @@ jobs:
         run: |
           timeout 300 docker compose down -v --rmi local || true
           docker image rm "upgrade-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
+          # `down --rmi local` skips images with a custom `image:` tag, so cerbos goes explicitly.
+          docker image rm "kelta-cerbos-ci:${CERBOS_CI_TAG}" 2>/dev/null || true
 
       # The node's Docker daemon is shared and nothing else cleans it; see ci/docker-reclaim.sh.
       - name: Reclaim shared Docker disk
