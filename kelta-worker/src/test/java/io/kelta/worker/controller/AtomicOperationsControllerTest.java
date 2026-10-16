@@ -2,8 +2,12 @@ package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.CollectionDefinitionBuilder;
+import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.query.DefaultQueryEngine;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.storage.StorageAdapter;
 import io.kelta.worker.interceptor.FieldWriteGuard;
 import io.kelta.worker.service.CerbosAuthorizationService;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -16,6 +20,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
 
 import java.util.List;
 import java.util.Map;
@@ -278,5 +288,93 @@ class AtomicOperationsControllerTest {
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(queryEngine).update(eq(contacts), eq("rec-1"), captor.capture());
         assertThat(captor.getValue()).containsEntry("name", "y").doesNotContainKey("internalScore");
+    }
+
+    // ---- System-maintained fields (KLT-609) -------------------------------------------
+
+    /** Records whether the batch transaction committed or rolled back. */
+    private static final class RecordingTransactionManager extends AbstractPlatformTransactionManager {
+        boolean committed;
+        boolean rolledBack;
+
+        @Override protected Object doGetTransaction() { return new Object(); }
+        @Override protected void doBegin(Object transaction, TransactionDefinition definition) { }
+        @Override protected void doCommit(DefaultTransactionStatus status) { committed = true; }
+        @Override protected void doRollback(DefaultTransactionStatus status) { rolledBack = true; }
+    }
+
+    /**
+     * The controller behind its {@code @Transactional} proxy, over a real query engine, so the
+     * system-maintained check and the batch's commit/rollback are the production ones.
+     */
+    private AtomicOperationsController transactionalController(StorageAdapter storage,
+                                                               RecordingTransactionManager txManager) {
+        CollectionDefinition inspections = new CollectionDefinitionBuilder()
+                .name("inspections").displayName("Inspections")
+                .addField(FieldDefinition.string("name"))
+                .addField(FieldDefinition.doubleField("count").withSystemMaintained(true))
+                .build();
+        when(registry.get("inspections")).thenReturn(inspections);
+        when(lifecycleManager.getCollectionIdByName("inspections")).thenReturn("uuid-i");
+        when(authzService.checkCollectionAccess(anyString(), anyString(), anyString(), eq("uuid-i"), anyString()))
+                .thenReturn(true);
+        when(storage.create(eq(inspections), anyMap()))
+                .thenAnswer(inv -> new java.util.HashMap<>(inv.<Map<String, Object>>getArgument(1)));
+
+        AtomicOperationsController target = new AtomicOperationsController(new DefaultQueryEngine(storage),
+                registry, lifecycleManager, authzService, permissionResolver, new FieldWriteGuard(authzService), 100);
+        ProxyFactory proxy = new ProxyFactory(target);
+        proxy.setProxyTargetClass(true);
+        proxy.addAdvice(new TransactionInterceptor(txManager, new AnnotationTransactionAttributeSource()));
+        return (AtomicOperationsController) proxy.getProxy();
+    }
+
+    private static Map<String, Object> addInspection(Map<String, Object> attributes) {
+        return Map.of("op", "add", "data", Map.of("type", "inspections", "attributes", attributes));
+    }
+
+    @Test
+    @DisplayName("an add setting a system-maintained field is rejected with 400 and the whole batch rolls back")
+    @SuppressWarnings("unchecked")
+    void systemMaintainedWriteRejectsAndRollsBackBatch() {
+        StorageAdapter storage = mock(StorageAdapter.class);
+        RecordingTransactionManager txManager = new RecordingTransactionManager();
+        AtomicOperationsController tx = transactionalController(storage, txManager);
+        CallerContext caller = new CallerContext(UUID.randomUUID().toString(),
+                CallerContext.UserType.INTERNAL, true, true);
+
+        ResponseEntity<?> response = CallerContext.callAs(caller, () -> tx.executeOperations(
+                Map.of("atomic:operations", List.of(
+                        addInspection(Map.of("name", "first")),
+                        addInspection(Map.of("name", "second", "count", 99)))),
+                request));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        Map<String, Object> err = ((List<Map<String, Object>>) ((Map<String, Object>) response.getBody())
+                .get("errors")).get(0);
+        assertThat(err.get("code")).isEqualTo("systemMaintained");
+        assertThat((String) err.get("detail")).contains("'count'").contains("'inspections'");
+        assertThat(err.get("source")).isEqualTo(Map.of("pointer", "/atomic:operations/1/data/attributes/count"));
+        // The first add reached storage inside the batch transaction, which then rolled back.
+        verify(storage).create(any(), anyMap());
+        assertThat(txManager.rolledBack).isTrue();
+        assertThat(txManager.committed).isFalse();
+    }
+
+    @Test
+    @DisplayName("a batch that leaves system-maintained fields alone commits")
+    void batchWithoutSystemMaintainedWritesCommits() {
+        StorageAdapter storage = mock(StorageAdapter.class);
+        RecordingTransactionManager txManager = new RecordingTransactionManager();
+        AtomicOperationsController tx = transactionalController(storage, txManager);
+        CallerContext caller = new CallerContext(UUID.randomUUID().toString(),
+                CallerContext.UserType.INTERNAL, true, true);
+
+        ResponseEntity<?> response = CallerContext.callAs(caller, () -> tx.executeOperations(
+                Map.of("atomic:operations", List.of(addInspection(Map.of("name", "first")))), request));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(txManager.committed).isTrue();
+        assertThat(txManager.rolledBack).isFalse();
     }
 }

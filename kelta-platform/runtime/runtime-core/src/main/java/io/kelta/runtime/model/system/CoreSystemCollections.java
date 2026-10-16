@@ -208,6 +208,10 @@ public final class CoreSystemCollections {
             .addField(FieldDefinition.bool("trackHistory").withColumnName("track_history")
                 .withDefault(false)
                 .withDescription("Whether value changes are recorded in field history."))
+            .addField(FieldDefinition.bool("systemMaintained").withColumnName("system_maintained")
+                .withDefault(false)
+                .withDescription("Whether only flows and other internal paths may set or change the value; "
+                        + "an API write that sets or changes it is rejected with 400."))
             .addField(FieldDefinition.bool("searchable").withDefault(false)
                 .withDescription("Whether the field's values are indexed for full-text search."))
             .build();

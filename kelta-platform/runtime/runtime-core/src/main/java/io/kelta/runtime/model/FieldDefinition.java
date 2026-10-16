@@ -32,6 +32,12 @@ import java.util.Objects;
  *                   a filter, sort or aggregation field, and ignores a caller-supplied value on
  *                   create/update (hooks may still set it). Platform code that needs the value
  *                   reads the column directly.
+ * @param systemMaintained Whether the field is system-maintained (default: false). Its value is
+ *                   written by flows, hooks and other internal paths only: the query engine
+ *                   rejects an API caller's create that supplies a non-null value and an API
+ *                   caller's update that changes the stored value. "API caller" means a
+ *                   {@link io.kelta.runtime.context.CallerContext} is bound; flows, NATS listeners
+ *                   and schedulers run with none and may write the field.
  *
  * @since 1.0.0
  */
@@ -49,7 +55,8 @@ public record FieldDefinition(
     String columnName,
     boolean trackHistory,
     String description,
-    boolean serverOnly
+    boolean serverOnly,
+    boolean systemMaintained
 ) {
     /**
      * Compact constructor with validation and defensive copying.
@@ -68,6 +75,21 @@ public record FieldDefinition(
     }
 
     /**
+     * Backward-compatible constructor without the systemMaintained parameter.
+     * Delegates to the canonical constructor with systemMaintained = false.
+     */
+    public FieldDefinition(
+            String name, FieldType type, boolean nullable, boolean immutable,
+            boolean unique, Object defaultValue, ValidationRules validationRules,
+            List<String> enumValues, ReferenceConfig referenceConfig,
+            Map<String, Object> fieldTypeConfig, String columnName, boolean trackHistory,
+            String description, boolean serverOnly) {
+        this(name, type, nullable, immutable, unique, defaultValue,
+             validationRules, enumValues, referenceConfig, fieldTypeConfig, columnName,
+             trackHistory, description, serverOnly, false);
+    }
+
+    /**
      * Backward-compatible constructor without the serverOnly parameter.
      * Delegates to the canonical constructor with serverOnly = false.
      */
@@ -79,7 +101,7 @@ public record FieldDefinition(
             String description) {
         this(name, type, nullable, immutable, unique, defaultValue,
              validationRules, enumValues, referenceConfig, fieldTypeConfig, columnName,
-             trackHistory, description, false);
+             trackHistory, description, false, false);
     }
 
     /**
@@ -274,7 +296,7 @@ public record FieldDefinition(
     public FieldDefinition withColumnName(String columnName) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 
     /**
@@ -386,7 +408,7 @@ public record FieldDefinition(
     public FieldDefinition withNullable(boolean nullable) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 
     /**
@@ -398,7 +420,7 @@ public record FieldDefinition(
     public FieldDefinition withUnique(boolean unique) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 
     /**
@@ -410,7 +432,7 @@ public record FieldDefinition(
     public FieldDefinition withDefault(Object defaultValue) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 
     /**
@@ -422,7 +444,7 @@ public record FieldDefinition(
     public FieldDefinition withValidation(ValidationRules validationRules) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 
     /**
@@ -434,7 +456,7 @@ public record FieldDefinition(
     public FieldDefinition withImmutable(boolean immutable) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 
     /**
@@ -446,7 +468,7 @@ public record FieldDefinition(
     public FieldDefinition withEnumValues(java.util.List<String> enumValues) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 
     /**
@@ -458,7 +480,7 @@ public record FieldDefinition(
     public FieldDefinition withReferenceConfig(ReferenceConfig referenceConfig) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 
     /**
@@ -470,7 +492,7 @@ public record FieldDefinition(
     public FieldDefinition withTrackHistory(boolean trackHistory) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 
     /**
@@ -482,7 +504,7 @@ public record FieldDefinition(
     public FieldDefinition withDescription(String description) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 
     /**
@@ -494,6 +516,18 @@ public record FieldDefinition(
     public FieldDefinition withServerOnly(boolean serverOnly) {
         return new FieldDefinition(name, type, nullable, immutable, unique,
                 defaultValue, validationRules, enumValues, referenceConfig,
-                fieldTypeConfig, columnName, trackHistory, description, serverOnly);
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
+    }
+
+    /**
+     * Returns a copy of this field with the systemMaintained flag changed.
+     *
+     * @param systemMaintained whether API callers are refused writes that set or change the value
+     * @return a new field definition with the specified systemMaintained flag
+     */
+    public FieldDefinition withSystemMaintained(boolean systemMaintained) {
+        return new FieldDefinition(name, type, nullable, immutable, unique,
+                defaultValue, validationRules, enumValues, referenceConfig,
+                fieldTypeConfig, columnName, trackHistory, description, serverOnly, systemMaintained);
     }
 }

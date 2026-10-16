@@ -37,6 +37,7 @@ public class FieldDefinitionBuilder {
     private String columnName;
     private String description;
     private boolean serverOnly = false;
+    private boolean systemMaintained = false;
 
     /**
      * Creates a new field definition builder.
@@ -188,6 +189,17 @@ public class FieldDefinitionBuilder {
     }
 
     /**
+     * Marks the field system-maintained: API callers may not set or change its value.
+     *
+     * @param systemMaintained whether the field is system-maintained
+     * @return this builder for method chaining
+     */
+    public FieldDefinitionBuilder systemMaintained(boolean systemMaintained) {
+        this.systemMaintained = systemMaintained;
+        return this;
+    }
+
+    /**
      * Builds the field definition.
      * 
      * @return the constructed field definition
@@ -215,7 +227,8 @@ public class FieldDefinitionBuilder {
             columnName,
             false,
             description,
-            serverOnly
+            serverOnly,
+            systemMaintained
         );
     }
     
