@@ -5,11 +5,36 @@ import { describe, expect, it, vi } from 'vitest';
 const marketingRoot = join(import.meta.dirname, '..');
 const page = readFileSync(join(marketingRoot, 'src', 'pages', 'waitlist.astro'), 'utf8');
 
+const WAITLIST_ENDPOINT = 'https://api.kelta.io/rzware/api/kelta-waitlist';
+const CONTACT_EMAIL = 'cklinker@rzware.com';
+const NO_PRICING_SENTENCE = 'Kelta Cloud has no pricing yet.';
+
 // kelta.io has no MX record, so a mailto: capture bounced every signup (KLT-482).
 describe('waitlist page source', () => {
-  it('builds no mailto: link and names no email address', () => {
+  it('builds no mailto: link and names only the published contact address', () => {
     expect(page).not.toContain('mailto:');
-    expect(page).not.toMatch(/[\w.+-]+@[\w-]+\.[\w.]+/);
+    expect(page.match(/[\w.+-]+@[\w-]+\.[\w.]+/g)).toEqual([CONTACT_EMAIL]);
+    expect(readFileSync(join(marketingRoot, '..', 'SECURITY.md'), 'utf8')).toContain(CONTACT_EMAIL);
+  });
+
+  it('states under the form what is kept, why, how to be removed and that there is no pricing', () => {
+    const [whenSet] = page.split(') : (');
+    const privacy = whenSet.match(/<p id="waitlist-privacy"[^>]*>([\s\S]*?)<\/p>/)?.[1].replace(/\s+/g, ' ');
+    expect(whenSet.indexOf('id="waitlist-privacy"')).toBeGreaterThan(whenSet.indexOf('</form>'));
+    expect(privacy).toContain('We keep your email, where you signed up and when');
+    expect(privacy).toContain('only to send you one email when Kelta Cloud opens');
+    expect(privacy).toContain('reply to that email or write to {CONTACT_EMAIL}');
+    expect(privacy).toContain(NO_PRICING_SENTENCE);
+    expect(page).toContain(`const CONTACT_EMAIL = '${CONTACT_EMAIL}';`);
+  });
+
+  it('is built for production with the kelta.io capture endpoint', () => {
+    const dockerfile = readFileSync(join(marketingRoot, 'Dockerfile'), 'utf8');
+    expect(dockerfile).toContain(`ARG PUBLIC_WAITLIST_ENDPOINT=${WAITLIST_ENDPOINT}\n`);
+    expect(dockerfile).toContain('ENV PUBLIC_WAITLIST_ENDPOINT=$PUBLIC_WAITLIST_ENDPOINT');
+    // The workflow passes no override, so the Dockerfile default is what ships.
+    const workflow = readFileSync(join(marketingRoot, '..', '.github', 'workflows', 'build-and-publish-containers.yml'), 'utf8');
+    expect(workflow).not.toContain('PUBLIC_WAITLIST_ENDPOINT');
   });
 
   it('reads its capture destination from PUBLIC_WAITLIST_ENDPOINT', () => {
@@ -31,8 +56,8 @@ describe('waitlist page source', () => {
   });
 
   // CHARTER.md §2: publishing pricing is a red-zone [DECISION] nobody has made.
-  it.each([/pricing/i, /\/mo(nth)?\b/, /\$\d/, /\bplans?\b/i, /\btiers?\b/i])('contains no pricing text (%s)', (pattern) => {
-    expect(page).not.toMatch(pattern);
+  it.each([/pric(e|ing)/i, /\/mo(nth)?\b/, /\$\d/, /\bplans?\b/i, /\btiers?\b/i])('contains no pricing text (%s)', (pattern) => {
+    expect(page.replace(NO_PRICING_SENTENCE, '')).not.toMatch(pattern);
   });
 });
 

@@ -5,6 +5,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 // records (e.g. https://<tenant-host>/api/<collection>). Empty means signups are not open.
 const endpoint = (import.meta.env.PUBLIC_WAITLIST_ENDPOINT ?? '').trim();
 const RELEASES_URL = 'https://github.com/kelta-io/kelta/releases';
+// The project's published contact address (README, SECURITY.md). Not on kelta.io, which has no MX.
+const CONTACT_EMAIL = 'cklinker@rzware.com';
 ---
 
 <BaseLayout title="Waitlist" description="Get early access to Kelta Cloud, a fully managed, hosted version of the Kelta enterprise application platform.">
@@ -45,6 +47,10 @@ const RELEASES_URL = 'https://github.com/kelta-io/kelta/releases';
             </button>
           </form>
           <p id="waitlist-status" class="mt-4 min-h-[1.5rem] text-sm text-kelta-700" role="status" aria-live="polite"></p>
+          <p id="waitlist-privacy" class="mx-auto mt-2 max-w-md text-xs leading-relaxed text-kelta-700">
+            We keep your email, where you signed up and when, only to send you one email when Kelta Cloud
+            opens. To be removed, reply to that email or write to {CONTACT_EMAIL}. Kelta Cloud has no pricing yet.
+          </p>
           <noscript>
             <p class="mt-4 text-sm text-kelta-700">
               JavaScript is required to join the waitlist. Meanwhile, watch
