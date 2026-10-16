@@ -4,6 +4,8 @@ import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.worker.interceptor.CerbosRecordAuthorizationAdvice;
+import io.kelta.worker.interceptor.DerivedDataController;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.ReportExecutionService;
@@ -31,11 +33,15 @@ import java.util.*;
  * <p>Provides endpoints to run a report (producing paginated query results
  * from the report's configuration) and to export report data as CSV.
  *
+ * <p>A {@link DerivedDataController}: a report run is not a {@code reports} record, so the
+ * record-level advice leaves it alone and this controller requires the caller to be able to read
+ * the report record itself; an unreadable report answers like a missing one.
+ *
  * @since 1.0.0
  */
 @RestController
 @RequestMapping("/api/reports")
-public class ReportExecutionController {
+public class ReportExecutionController implements DerivedDataController {
 
     private static final Logger log = LoggerFactory.getLogger(ReportExecutionController.class);
     private static final String VIEW_PERMISSION = "VIEW_ANALYTICS";
@@ -46,17 +52,20 @@ public class ReportExecutionController {
     private final CollectionRegistry collectionRegistry;
     private final CerbosPermissionResolver permissionResolver;
     private final BootstrapRepository bootstrapRepository;
+    private final CerbosRecordAuthorizationAdvice recordAuthorization;
 
     public ReportExecutionController(ReportExecutionService reportExecutionService,
                                      QueryEngine queryEngine,
                                      CollectionRegistry collectionRegistry,
                                      CerbosPermissionResolver permissionResolver,
-                                     BootstrapRepository bootstrapRepository) {
+                                     BootstrapRepository bootstrapRepository,
+                                     CerbosRecordAuthorizationAdvice recordAuthorization) {
         this.reportExecutionService = reportExecutionService;
         this.queryEngine = queryEngine;
         this.collectionRegistry = collectionRegistry;
         this.permissionResolver = permissionResolver;
         this.bootstrapRepository = bootstrapRepository;
+        this.recordAuthorization = recordAuthorization;
     }
 
     /**
@@ -106,7 +115,7 @@ public class ReportExecutionController {
         try {
             // Load the report config from the reports system collection
             Map<String, Object> reportConfig = loadReportConfig(reportId);
-            if (reportConfig == null) {
+            if (reportConfig == null || !recordAuthorization.isRecordReadable(request, "reports", reportConfig)) {
                 return ResponseEntity.notFound().build();
             }
 
@@ -171,7 +180,7 @@ public class ReportExecutionController {
 
         try {
             Map<String, Object> reportConfig = loadReportConfig(reportId);
-            if (reportConfig == null) {
+            if (reportConfig == null || !recordAuthorization.isRecordReadable(request, "reports", reportConfig)) {
                 response.setStatus(404);
                 return;
             }

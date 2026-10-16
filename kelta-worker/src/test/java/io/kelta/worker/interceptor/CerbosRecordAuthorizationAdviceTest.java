@@ -106,6 +106,64 @@ class CerbosRecordAuthorizationAdviceTest {
         }
     }
 
+    @Nested
+    @DisplayName("derived-data controllers")
+    class DerivedData {
+
+        /** Stands in for DashboardDataController/ReportExecutionController. */
+        static class WidgetController implements DerivedDataController {
+            public Map<String, Object> execute() {
+                return Map.of();
+            }
+        }
+
+        static class GenericController {
+            public Map<String, Object> execute() {
+                return Map.of();
+            }
+        }
+
+        private MethodParameter returnTypeOf(Class<?> controller) throws Exception {
+            return new MethodParameter(controller.getDeclaredMethod("execute"), -1);
+        }
+
+        private ServletServerHttpRequest widgetDataPost() {
+            var request = createRequest("/api/dashboards/dash-1/components/comp-1/data");
+            ((MockHttpServletRequest) request.getServletRequest()).setMethod("POST");
+            return request;
+        }
+
+        private Map<String, Object> widgetData() {
+            return Map.of("data", Map.of("type", "widget-data", "id", "comp-1",
+                    "attributes", Map.of("componentId", "comp-1", "data", Map.of("series", List.of()))));
+        }
+
+        @Test
+        @DisplayName("keeps a widget result for a caller without create on dashboards")
+        void keepsDerivedResult() throws Exception {
+            Map<String, Object> body = widgetData();
+
+            Object result = advice.beforeBodyWrite(body, returnTypeOf(WidgetController.class),
+                    MediaType.APPLICATION_JSON, null, widgetDataPost(), null);
+
+            assertThat(result).isSameAs(body);
+            verifyNoInteractions(authzService);
+        }
+
+        @Test
+        @DisplayName("a non-derived handler on the same POST path is still checked as a create")
+        void genericHandlerStillChecked() throws Exception {
+            // No create grant on dashboards: the advice nulls the single resource, which is what
+            // emptied every widget for read-only analytics callers before the marker existed.
+            Object result = advice.beforeBodyWrite(widgetData(), returnTypeOf(GenericController.class),
+                    MediaType.APPLICATION_JSON, null, widgetDataPost(), null);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resultBody = (Map<String, Object>) result;
+            assertThat(resultBody).containsEntry("data", null);
+        }
+    }
+
     @Test
     @DisplayName("Should not throw when controller returns immutable Map.of body (regression)")
     void shouldNotThrowOnImmutableBody() {

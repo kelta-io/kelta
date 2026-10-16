@@ -5,6 +5,8 @@ import io.kelta.runtime.model.system.ReportSystemCollections;
 import io.kelta.runtime.query.*;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.workflow.BeforeSaveResult;
+import io.kelta.worker.interceptor.CerbosRecordAuthorizationAdvice;
+import io.kelta.worker.interceptor.DerivedDataController;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.DashboardComponentValidator;
@@ -32,6 +34,7 @@ class DashboardDataControllerTest {
     private CollectionRegistry collectionRegistry;
     private CerbosPermissionResolver permissionResolver;
     private BootstrapRepository bootstrapRepository;
+    private CerbosRecordAuthorizationAdvice recordAuthorization;
     private HttpServletRequest request;
     private DashboardDataController controller;
 
@@ -43,11 +46,18 @@ class DashboardDataControllerTest {
         collectionRegistry = mock(CollectionRegistry.class);
         permissionResolver = mock(CerbosPermissionResolver.class);
         bootstrapRepository = mock(BootstrapRepository.class);
+        recordAuthorization = mock(CerbosRecordAuthorizationAdvice.class);
         request = mock(HttpServletRequest.class);
         controller = new DashboardDataController(
             dashboardDataService, dashboardComponentValidator, queryEngine, collectionRegistry,
-            permissionResolver, bootstrapRepository);
+            permissionResolver, bootstrapRepository, recordAuthorization);
         grantPermission("VIEW_ANALYTICS");
+        when(recordAuthorization.isRecordReadable(any(), anyString(), any())).thenReturn(true);
+        // The single-component endpoint loads its dashboard first; dash-1 exists by default.
+        CollectionDefinition dashboardsDef = ReportSystemCollections.dashboards();
+        when(collectionRegistry.get("dashboards")).thenReturn(dashboardsDef);
+        when(queryEngine.getById(eq(dashboardsDef), eq("dash-1")))
+            .thenReturn(Optional.of(Map.of("id", "dash-1", "name", "Sales Dashboard")));
     }
 
     private void grantPermission(String permissionName) {
@@ -281,6 +291,72 @@ class DashboardDataControllerTest {
             "dash-1", "comp-1", null, request);
 
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+    }
+
+    // =========================================================================
+    // Source-record authorization (DerivedDataController)
+    // =========================================================================
+
+    @Test
+    void isExemptFromTheRecordAdviceAsADerivedDataController() {
+        assertTrue(controller instanceof DerivedDataController);
+    }
+
+    @Test
+    void shouldReturn404WhenDashboardIsNotReadable() {
+        when(recordAuthorization.isRecordReadable(eq(request), eq("dashboards"), any())).thenReturn(false);
+
+        ResponseEntity<Map<String, Object>> response = controller.executeDashboard("dash-1", null, request);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        verifyNoInteractions(dashboardDataService);
+    }
+
+    @Test
+    void shouldExecuteOnlyTheComponentsTheCallerMayRead() {
+        Map<String, Object> readable = Map.of("id", "comp-1", "componentType", "metric",
+            "dashboardId", "dash-1", "sortOrder", 1, "config", Map.of());
+        Map<String, Object> hidden = Map.of("id", "comp-2", "componentType", "metric",
+            "dashboardId", "dash-1", "sortOrder", 2, "config", Map.of());
+        CollectionDefinition componentsDef = ReportSystemCollections.dashboardComponents();
+        when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
+        when(queryEngine.executeQuery(eq(componentsDef), any()))
+            .thenReturn(QueryResult.of(List.of(readable, hidden), 2L, new Pagination(1, 100)));
+        when(recordAuthorization.isRecordReadable(request, "dashboard-components", hidden)).thenReturn(false);
+        when(dashboardDataService.executeDashboard(eq("dash-1"), eq(List.of(readable)), any(), any()))
+            .thenReturn(Map.of("comp-1", new WidgetResult("metric", Map.of("value", 1L), null, null)));
+
+        ResponseEntity<Map<String, Object>> response = controller.executeDashboard("dash-1", null, request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(1, getMeta(response.getBody()).get("widgetCount"));
+        verify(dashboardDataService).executeDashboard(eq("dash-1"), eq(List.of(readable)), any(), any());
+    }
+
+    @Test
+    void shouldReturn404ForAComponentOfAnUnreadableDashboard() {
+        when(recordAuthorization.isRecordReadable(eq(request), eq("dashboards"), any())).thenReturn(false);
+
+        ResponseEntity<Map<String, Object>> response = controller.executeComponent(
+            "dash-1", "comp-1", null, request);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        verifyNoInteractions(dashboardDataService);
+    }
+
+    @Test
+    void shouldReturn404WhenComponentIsNotReadable() {
+        CollectionDefinition componentsDef = ReportSystemCollections.dashboardComponents();
+        when(collectionRegistry.get("dashboard-components")).thenReturn(componentsDef);
+        Map<String, Object> component = Map.of("id", "comp-1", "dashboardId", "dash-1", "componentType", "metric");
+        when(queryEngine.getById(eq(componentsDef), eq("comp-1"))).thenReturn(Optional.of(component));
+        when(recordAuthorization.isRecordReadable(request, "dashboard-components", component)).thenReturn(false);
+
+        ResponseEntity<Map<String, Object>> response = controller.executeComponent(
+            "dash-1", "comp-1", null, request);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        verifyNoInteractions(dashboardDataService);
     }
 
     // =========================================================================

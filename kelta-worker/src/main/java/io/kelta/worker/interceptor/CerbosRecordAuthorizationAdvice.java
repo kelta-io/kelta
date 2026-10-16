@@ -82,6 +82,15 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
             return body;
         }
 
+        // A controller that serves data derived from records (widget results, report runs)
+        // authorizes the source record itself; its body is not a record of the path's
+        // collection, so checking it as one (as a "create" on a POST) nulled every widget
+        // for callers without create access. See DerivedDataController.
+        if (returnType != null
+                && DerivedDataController.class.isAssignableFrom(returnType.getContainingClass())) {
+            return body;
+        }
+
         HttpServletRequest httpRequest = servletRequest.getServletRequest();
         String path = httpRequest.getRequestURI();
 
