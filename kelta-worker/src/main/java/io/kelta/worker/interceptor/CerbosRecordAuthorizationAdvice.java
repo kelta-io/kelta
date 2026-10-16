@@ -85,9 +85,12 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
         // A controller that serves data derived from records (widget results, report runs)
         // authorizes the source record itself; its body is not a record of the path's
         // collection, so checking it as one (as a "create" on a POST) nulled every widget
-        // for callers without create access. See DerivedDataController.
+        // for callers without create access. See DerivedDataController. A controller gated
+        // on a system permission that returns no collection records is exempt for the same
+        // reason (PermissionGatedController).
         if (returnType != null
-                && DerivedDataController.class.isAssignableFrom(returnType.getContainingClass())) {
+                && (DerivedDataController.class.isAssignableFrom(returnType.getContainingClass())
+                    || PermissionGatedController.class.isAssignableFrom(returnType.getContainingClass()))) {
             return body;
         }
 
