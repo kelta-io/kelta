@@ -1,0 +1,35 @@
+{
+  "name": "Stamp completed tasks",
+  "description": "Sets completed_at when a task's status changes to done",
+  "flowType": "RECORD_TRIGGERED",
+  "active": true,
+  "triggerConfig": {
+    "collection": "tasks",
+    "events": ["UPDATED"],
+    "triggerFields": ["status"]
+  },
+  "definition": {
+    "StartAt": "IsDone",
+    "States": {
+      "IsDone": {
+        "Type": "Choice",
+        "Choices": [
+          { "Variable": "$.record.data.status", "StringEquals": "done", "Next": "StampCompletedAt" }
+        ],
+        "Default": "NotDone"
+      },
+      "StampCompletedAt": {
+        "Type": "Task",
+        "Resource": "UPDATE_RECORD",
+        "Parameters": {
+          "targetCollectionName": "tasks",
+          "recordId": "${$.record.data.id}",
+          "updates": [ { "field": "completed_at", "value": "${$.record.data.updatedAt}" } ]
+        },
+        "ResultPath": "$.stamp",
+        "End": true
+      },
+      "NotDone": { "Type": "Succeed" }
+    }
+  }
+}
