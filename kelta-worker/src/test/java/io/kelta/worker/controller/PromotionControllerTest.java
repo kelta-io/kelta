@@ -1,5 +1,6 @@
 package io.kelta.worker.controller;
 
+import io.kelta.worker.interceptor.PermissionGatedControllers;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.MetadataPromotionService;
@@ -39,6 +40,17 @@ class PromotionControllerTest {
         when(permissionResolver.getProfileId(request)).thenReturn("profile-1");
         when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
                 Map.of("permission_name", "MANAGE_SANDBOXES", "granted", true)));
+    }
+
+    @Test
+    @DisplayName("gates every handler on MANAGE_SANDBOXES (PermissionGatedController promise)")
+    void everyHandlerIsPermissionGated() {
+        when(permissionResolver.getProfileId(request)).thenReturn("profile-1");
+        when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
+                Map.of("permission_name", "MANAGE_SANDBOXES", "granted", false)));
+
+        PermissionGatedControllers.assertEveryHandlerForbidden(controller, request);
+        verifyNoInteractions(promotionService);
     }
 
     @Test

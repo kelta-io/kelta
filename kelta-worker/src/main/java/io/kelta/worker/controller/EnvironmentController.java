@@ -3,6 +3,7 @@ package io.kelta.worker.controller;
 import io.kelta.jsonapi.JsonApiError;
 import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.worker.interceptor.PermissionGatedController;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.RemotePromotionClient;
@@ -32,7 +33,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/environments")
-public class EnvironmentController {
+public class EnvironmentController implements PermissionGatedController {
 
     private static final Logger log = LoggerFactory.getLogger(EnvironmentController.class);
     private static final String PERMISSION = "MANAGE_SANDBOXES";

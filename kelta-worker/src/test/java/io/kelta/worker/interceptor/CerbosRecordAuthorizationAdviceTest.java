@@ -107,6 +107,64 @@ class CerbosRecordAuthorizationAdviceTest {
     }
 
     @Nested
+    @DisplayName("permission-gated controllers")
+    class PermissionGated {
+
+        /** Stands in for PromotionController/EnvironmentController. */
+        static class SandboxController implements PermissionGatedController {
+            public Map<String, Object> execute() {
+                return Map.of();
+            }
+        }
+
+        static class GenericController {
+            public Map<String, Object> execute() {
+                return Map.of();
+            }
+        }
+
+        private MethodParameter returnTypeOf(Class<?> controller) throws Exception {
+            return new MethodParameter(controller.getDeclaredMethod("execute"), -1);
+        }
+
+        private ServletServerHttpRequest promotionExecute() {
+            var request = createRequest("/api/promotions/promo-1/execute");
+            ((MockHttpServletRequest) request.getServletRequest()).setMethod("POST");
+            return request;
+        }
+
+        private Map<String, Object> promotion() {
+            return Map.of("data", Map.of("type", "promotions", "id", "promo-1",
+                    "attributes", Map.of("status", "EXECUTING")));
+        }
+
+        @Test
+        @DisplayName("keeps the resource for a caller without data-wide grants")
+        void keepsGatedResource() throws Exception {
+            Map<String, Object> body = promotion();
+
+            Object result = advice.beforeBodyWrite(body, returnTypeOf(SandboxController.class),
+                    MediaType.APPLICATION_JSON, null, promotionExecute(), null);
+
+            assertThat(result).isSameAs(body);
+            verifyNoInteractions(authzService);
+        }
+
+        @Test
+        @DisplayName("a handler without the marker on the same path is still checked")
+        void genericHandlerStillChecked() throws Exception {
+            // "promotions" is no collection: only MODIFY_ALL_DATA passes a create, so the
+            // advice nulls the resource after the promotion already started.
+            Object result = advice.beforeBodyWrite(promotion(), returnTypeOf(GenericController.class),
+                    MediaType.APPLICATION_JSON, null, promotionExecute(), null);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resultBody = (Map<String, Object>) result;
+            assertThat(resultBody).containsEntry("data", null);
+        }
+    }
+
+    @Nested
     @DisplayName("derived-data controllers")
     class DerivedData {
 
