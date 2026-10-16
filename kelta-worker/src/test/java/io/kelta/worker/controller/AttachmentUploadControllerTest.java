@@ -1,7 +1,13 @@
 package io.kelta.worker.controller;
 
+import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.worker.interceptor.CerbosRecordAuthorizationAdvice;
 import io.kelta.worker.repository.GovernorLimitsRepository;
 import io.kelta.worker.service.S3StorageService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,15 +36,39 @@ class AttachmentUploadControllerTest {
     @Mock
     private JdbcTemplate jdbcTemplate;
 
+    @Mock
+    private CollectionRegistry collectionRegistry;
+
+    @Mock
+    private QueryEngine queryEngine;
+
+    @Mock
+    private CerbosRecordAuthorizationAdvice recordAuthorization;
+
+    @Mock
+    private HttpServletRequest request;
+
     private AttachmentUploadController controller;
+
+    private final CollectionDefinition accounts = CollectionDefinition.builder().name("accounts")
+            .addField(FieldDefinition.string("name")).build();
+    private final Map<String, Object> parent = Map.of("id", "rec-1", "name", "Acme");
 
     private static final String TENANT_ID = "tenant-1";
     private static final String USER_EMAIL = "user@example.com";
 
     @BeforeEach
     void setUp() {
-        controller = new AttachmentUploadController(storageService, governorLimitsRepository, jdbcTemplate);
+        controller = new AttachmentUploadController(storageService, governorLimitsRepository, jdbcTemplate,
+                collectionRegistry, queryEngine, recordAuthorization);
         lenient().when(storageService.isEnabled()).thenReturn(true);
+        // Default: col-1 is the tenant's "accounts" collection and the caller may edit rec-1.
+        lenient().when(jdbcTemplate.queryForList(contains("FROM collection"), eq(String.class), eq("col-1"), eq(TENANT_ID)))
+                .thenReturn(List.of("accounts"));
+        lenient().when(collectionRegistry.get("accounts")).thenReturn(accounts);
+        lenient().when(queryEngine.getById(accounts, "rec-1")).thenReturn(Optional.of(parent));
+        lenient().when(recordAuthorization.isRecordReadable(request, "accounts", parent)).thenReturn(true);
+        lenient().when(recordAuthorization.isRecordEditable(request, "accounts", parent)).thenReturn(true);
     }
 
     private Map<String, Object> validUploadBody() {
@@ -64,7 +94,7 @@ class AttachmentUploadControllerTest {
         when(storageService.getPresignedUploadUrl(anyString(), eq("application/pdf"), any(Duration.class)))
                 .thenReturn("https://s3.example.com/presigned-upload-url");
 
-        ResponseEntity<Map<String, Object>> response = controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body);
+        ResponseEntity<Map<String, Object>> response = controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body, request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertNotNull(response.getBody());
@@ -84,7 +114,7 @@ class AttachmentUploadControllerTest {
         body.put("fileName", "report.pdf");
         // missing other required fields
 
-        ResponseEntity<Map<String, Object>> response = controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body);
+        ResponseEntity<Map<String, Object>> response = controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body, request);
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
     }
@@ -94,7 +124,7 @@ class AttachmentUploadControllerTest {
         Map<String, Object> body = validUploadBody();
         body.put("contentType", "application/x-executable");
 
-        ResponseEntity<Map<String, Object>> response = controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body);
+        ResponseEntity<Map<String, Object>> response = controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body, request);
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
     }
@@ -106,7 +136,7 @@ class AttachmentUploadControllerTest {
 
         when(storageService.getMaxFileSize()).thenReturn(52_428_800L);
 
-        ResponseEntity<Map<String, Object>> response = controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body);
+        ResponseEntity<Map<String, Object>> response = controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body, request);
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
     }
@@ -121,7 +151,7 @@ class AttachmentUploadControllerTest {
         when(governorLimitsRepository.sumStorageBytes(TENANT_ID)).thenReturn(10_737_000_000L);
         when(governorLimitsRepository.findTenantLimits(TENANT_ID)).thenReturn(Optional.empty());
 
-        ResponseEntity<Map<String, Object>> response = controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body);
+        ResponseEntity<Map<String, Object>> response = controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body, request);
 
         assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
     }
@@ -146,7 +176,7 @@ class AttachmentUploadControllerTest {
         when(jdbcTemplate.update(anyString(), anyString(), eq(attachmentId), eq(TENANT_ID)))
                 .thenReturn(1);
 
-        ResponseEntity<Map<String, Object>> response = controller.finalizeUpload(attachmentId, TENANT_ID, USER_EMAIL);
+        ResponseEntity<Map<String, Object>> response = controller.finalizeUpload(attachmentId, TENANT_ID, USER_EMAIL, request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
     }
@@ -156,7 +186,7 @@ class AttachmentUploadControllerTest {
         when(jdbcTemplate.queryForList(anyString(), eq("bad-id"), eq(TENANT_ID)))
                 .thenReturn(Collections.emptyList());
 
-        ResponseEntity<Map<String, Object>> response = controller.finalizeUpload("bad-id", TENANT_ID, USER_EMAIL);
+        ResponseEntity<Map<String, Object>> response = controller.finalizeUpload("bad-id", TENANT_ID, USER_EMAIL, request);
 
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
     }
@@ -165,12 +195,14 @@ class AttachmentUploadControllerTest {
     void finalizeUpload_alreadyFinalized_returnsBadRequest() {
         String attachmentId = "att-1";
         Map<String, Object> row = new LinkedHashMap<>();
+        row.put("collection_id", "col-1");
+        row.put("record_id", "rec-1");
         row.put("storage_key", "tenant-1/col-1/rec-1/att-1/report.pdf");
 
         when(jdbcTemplate.queryForList(anyString(), eq(attachmentId), eq(TENANT_ID)))
                 .thenReturn(List.of(row));
 
-        ResponseEntity<Map<String, Object>> response = controller.finalizeUpload(attachmentId, TENANT_ID, USER_EMAIL);
+        ResponseEntity<Map<String, Object>> response = controller.finalizeUpload(attachmentId, TENANT_ID, USER_EMAIL, request);
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
     }
@@ -190,7 +222,7 @@ class AttachmentUploadControllerTest {
                 .thenReturn(List.of(row));
         when(storageService.objectExists(anyString())).thenReturn(false);
 
-        ResponseEntity<Map<String, Object>> response = controller.finalizeUpload(attachmentId, TENANT_ID, USER_EMAIL);
+        ResponseEntity<Map<String, Object>> response = controller.finalizeUpload(attachmentId, TENANT_ID, USER_EMAIL, request);
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
     }
@@ -289,5 +321,75 @@ class AttachmentUploadControllerTest {
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verify(storageService, never()).deleteObject(anyString());
         verify(jdbcTemplate).update(contains("DELETE FROM file_attachment"), eq(attachmentId), eq(TENANT_ID));
+    }
+
+    // ==================== Parent-record edit gate ====================
+
+    @Test
+    void requestUploadUrl_forbiddenWhenParentNotEditable() {
+        when(recordAuthorization.isRecordEditable(request, "accounts", parent)).thenReturn(false);
+
+        ResponseEntity<Map<String, Object>> response =
+                controller.requestUploadUrl(TENANT_ID, USER_EMAIL, validUploadBody(), request);
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
+        verify(storageService, never()).getPresignedUploadUrl(anyString(), anyString(), any());
+    }
+
+    @Test
+    void requestUploadUrl_notFoundWhenParentUnreadable() {
+        // 404, not 403: a record the caller cannot read must not be confirmed to exist.
+        when(recordAuthorization.isRecordReadable(request, "accounts", parent)).thenReturn(false);
+
+        ResponseEntity<Map<String, Object>> response =
+                controller.requestUploadUrl(TENANT_ID, USER_EMAIL, validUploadBody(), request);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        verify(recordAuthorization, never()).isRecordEditable(any(), anyString(), any());
+        verify(storageService, never()).getPresignedUploadUrl(anyString(), anyString(), any());
+    }
+
+    @Test
+    void requestUploadUrl_notFoundForAnotherTenantsCollection() {
+        Map<String, Object> body = validUploadBody();
+        body.put("collectionId", "foreign-col");
+        when(jdbcTemplate.queryForList(contains("FROM collection"), eq(String.class), eq("foreign-col"), eq(TENANT_ID)))
+                .thenReturn(List.of());
+
+        ResponseEntity<Map<String, Object>> response =
+                controller.requestUploadUrl(TENANT_ID, USER_EMAIL, body, request);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        verifyNoInteractions(queryEngine);
+    }
+
+    @Test
+    void requestUploadUrl_notFoundForMissingParent() {
+        when(queryEngine.getById(accounts, "rec-1")).thenReturn(Optional.empty());
+
+        ResponseEntity<Map<String, Object>> response =
+                controller.requestUploadUrl(TENANT_ID, USER_EMAIL, validUploadBody(), request);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+    }
+
+    @Test
+    void finalizeUpload_forbiddenWhenParentNotEditable() {
+        Map<String, Object> row = new HashMap<>();
+        row.put("id", "att-1");
+        row.put("collection_id", "col-1");
+        row.put("record_id", "rec-1");
+        row.put("file_name", "report.pdf");
+        row.put("storage_key", "");
+        when(jdbcTemplate.queryForList(anyString(), eq("att-1"), eq(TENANT_ID))).thenReturn(List.of(row));
+        when(recordAuthorization.isRecordEditable(request, "accounts", parent)).thenReturn(false);
+
+        ResponseEntity<Map<String, Object>> response =
+                controller.finalizeUpload("att-1", TENANT_ID, USER_EMAIL, request);
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        verify(storageService, never()).objectExists(anyString());
+        verify(jdbcTemplate, never()).update(anyString(), anyString(), anyString(), anyString());
     }
 }

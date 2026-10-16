@@ -1,8 +1,13 @@
 package io.kelta.worker.controller;
 
 import io.kelta.jsonapi.JsonApiResponseBuilder;
+import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.worker.interceptor.CerbosRecordAuthorizationAdvice;
 import io.kelta.worker.repository.GovernorLimitsRepository;
 import io.kelta.worker.service.S3StorageService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -25,6 +30,13 @@ import java.util.*;
  *   <li>Client uploads the file directly to S3 using the presigned URL</li>
  *   <li>Client calls {@code POST /api/attachments/{id}/finalize} to mark the upload complete</li>
  * </ol>
+ *
+ * <p>Both steps require the caller to be able to <b>edit the parent record</b> the attachment
+ * hangs off ({@code collectionId}/{@code recordId}). The gateway only checks the caller's
+ * permission on the {@code attachments} system collection, and this controller writes
+ * {@code file_attachment} with raw JDBC, so no record-level rule ever saw the parent before.
+ * A parent that does not exist or that the caller cannot read answers 404 — never 403, which
+ * would confirm it exists; a readable parent the caller cannot edit answers 403.
  *
  * @since 1.0.0
  */
@@ -63,6 +75,10 @@ public class AttachmentUploadController {
             FROM file_attachment WHERE id = ? AND tenant_id = ?
             """;
 
+    private static final String SELECT_COLLECTION_NAME = """
+            SELECT name FROM collection WHERE id = ? AND tenant_id = ?
+            """;
+
     private static final String DELETE_ATTACHMENT = """
             DELETE FROM file_attachment WHERE id = ? AND tenant_id = ?
             """;
@@ -70,13 +86,54 @@ public class AttachmentUploadController {
     private final S3StorageService storageService;
     private final GovernorLimitsRepository governorLimitsRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final CollectionRegistry collectionRegistry;
+    private final QueryEngine queryEngine;
+    private final CerbosRecordAuthorizationAdvice recordAuthorization;
 
     public AttachmentUploadController(S3StorageService storageService,
                                        GovernorLimitsRepository governorLimitsRepository,
-                                       JdbcTemplate jdbcTemplate) {
+                                       JdbcTemplate jdbcTemplate,
+                                       CollectionRegistry collectionRegistry,
+                                       QueryEngine queryEngine,
+                                       CerbosRecordAuthorizationAdvice recordAuthorization) {
         this.storageService = storageService;
         this.governorLimitsRepository = governorLimitsRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.collectionRegistry = collectionRegistry;
+        this.queryEngine = queryEngine;
+        this.recordAuthorization = recordAuthorization;
+    }
+
+    /**
+     * Refuses an attachment write unless the caller may edit the parent record.
+     *
+     * @return the refusal (404 for a parent that is missing or unreadable, 403 for one the caller
+     *         can read but not edit), or {@code null} when the write may proceed
+     */
+    private ResponseEntity<Map<String, Object>> requireEditableParent(HttpServletRequest request,
+                                                                      String tenantId, String userEmail,
+                                                                      String collectionId, String recordId) {
+        ResponseEntity<Map<String, Object>> notFound = ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                JsonApiResponseBuilder.error("404", "Record not found",
+                        "No record " + recordId + " in collection " + collectionId));
+
+        List<String> names = jdbcTemplate.queryForList(SELECT_COLLECTION_NAME, String.class, collectionId, tenantId);
+        CollectionDefinition definition = names.isEmpty() ? null : collectionRegistry.get(names.get(0));
+        if (definition == null) {
+            return notFound;
+        }
+        Optional<Map<String, Object>> parent = queryEngine.getById(definition, recordId);
+        if (parent.isEmpty() || !recordAuthorization.isRecordReadable(request, definition.name(), parent.get())) {
+            return notFound;
+        }
+        if (!recordAuthorization.isRecordEditable(request, definition.name(), parent.get())) {
+            securityLog.info("security_event=ATTACHMENT_WRITE_DENIED user={} tenant={} collection={} record={}",
+                    userEmail, tenantId, definition.name(), recordId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+                    JsonApiResponseBuilder.error("403", "Forbidden",
+                            "Editing the record is required to attach files to it"));
+        }
+        return null;
     }
 
     /**
@@ -94,7 +151,8 @@ public class AttachmentUploadController {
     public ResponseEntity<Map<String, Object>> requestUploadUrl(
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestHeader("X-User-Email") String userEmail,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
 
         if (!storageService.isEnabled()) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
@@ -113,6 +171,12 @@ public class AttachmentUploadController {
             return ResponseEntity.badRequest().body(
                     JsonApiResponseBuilder.error("400", "Missing required fields",
                             "Required: fileName, contentType, fileSize, collectionId, recordId"));
+        }
+
+        ResponseEntity<Map<String, Object>> denied =
+                requireEditableParent(request, tenantId, userEmail, collectionId, recordId);
+        if (denied != null) {
+            return denied;
         }
 
         // Validate content type
@@ -204,7 +268,8 @@ public class AttachmentUploadController {
     public ResponseEntity<Map<String, Object>> finalizeUpload(
             @PathVariable String id,
             @RequestHeader("X-Tenant-ID") String tenantId,
-            @RequestHeader("X-User-Email") String userEmail) {
+            @RequestHeader("X-User-Email") String userEmail,
+            HttpServletRequest request) {
 
         if (!storageService.isEnabled()) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
@@ -219,6 +284,12 @@ public class AttachmentUploadController {
         }
 
         Map<String, Object> attachment = rows.get(0);
+        ResponseEntity<Map<String, Object>> denied = requireEditableParent(request, tenantId, userEmail,
+                (String) attachment.get("collection_id"), (String) attachment.get("record_id"));
+        if (denied != null) {
+            return denied;
+        }
+
         String existingKey = (String) attachment.get("storage_key");
 
         if (existingKey != null && !existingKey.isBlank()) {

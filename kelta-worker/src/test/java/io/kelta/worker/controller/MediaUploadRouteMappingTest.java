@@ -122,7 +122,8 @@ class MediaUploadRouteMappingTest {
         // Attachments with storage off answers its own distinctive 503.
         S3StorageService attachmentsStorage = mock(S3StorageService.class);
         AttachmentUploadController attachments = new AttachmentUploadController(
-                attachmentsStorage, mock(GovernorLimitsRepository.class), mock(JdbcTemplate.class));
+                attachmentsStorage, mock(GovernorLimitsRepository.class), mock(JdbcTemplate.class),
+                registry, queryEngine, recordAuthorization);
 
         mvc = MockMvcBuilders
                 .standaloneSetup(new MediaUploadController(registry, queryEngine, storage, recordAuthorization),
