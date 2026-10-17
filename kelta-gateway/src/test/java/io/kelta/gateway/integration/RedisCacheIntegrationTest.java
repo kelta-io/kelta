@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest
 @ActiveProfiles("test")
-class RedisCacheIntegrationTest {
+class RedisCacheIntegrationTest extends GatewayContainers {
 
     @Autowired
     private ReactiveRedisTemplate<String, String> redisTemplate;
@@ -38,16 +38,12 @@ class RedisCacheIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        // Clear Redis before each test (if Redis is available)
-        try {
-            redisTemplate.getConnectionFactory()
-                    .getReactiveConnection()
-                    .serverCommands()
-                    .flushDb()
-                    .block(Duration.ofSeconds(2));
-        } catch (Exception e) {
-            // Redis may not be available in test environment - tests will handle gracefully
-        }
+        // Real Redis (GatewayContainers) — start every test from an empty database.
+        redisTemplate.getConnectionFactory()
+                .getReactiveConnection()
+                .serverCommands()
+                .flushDb()
+                .block(Duration.ofSeconds(2));
     }
 
     @Test
@@ -84,15 +80,13 @@ class RedisCacheIntegrationTest {
         // Third request should exceed limit
         Mono<RateLimitResult> resultMono = rateLimiter.checkRateLimit(routeId, principal, config);
 
-        // Assert - request should be denied (if Redis is available)
+        // Assert - denied. (RedisRateLimiter fails open, so an allowed third request would mean
+        // the limiter never reached Redis.)
         StepVerifier.create(resultMono)
                 .assertNext(result -> {
-                    // If Redis is available, should be denied
-                    // If Redis is not available, graceful degradation allows request
-                    if (!result.isAllowed()) {
-                        assertThat(result.getRemainingRequests()).isEqualTo(0);
-                        assertThat(result.getRetryAfter()).isNotNull();
-                    }
+                    assertThat(result.isAllowed()).isFalse();
+                    assertThat(result.getRemainingRequests()).isEqualTo(0);
+                    assertThat(result.getRetryAfter()).isNotNull();
                 })
                 .verifyComplete();
     }
@@ -112,35 +106,33 @@ class RedisCacheIntegrationTest {
         String rateLimitKey = "ratelimit:" + routeId + ":" + principal;
         Boolean exists = redisTemplate.hasKey(rateLimitKey).block(Duration.ofSeconds(2));
 
-        if (exists != null && exists) {
-            // Assert - key should have TTL
-            Duration ttl = redisTemplate.getExpire(rateLimitKey).block(Duration.ofSeconds(2));
-            assertThat(ttl).isNotNull();
-            assertThat(ttl.getSeconds()).isGreaterThan(0);
-            assertThat(ttl.getSeconds()).isLessThanOrEqualTo(2);
-        }
-        // If Redis is not available, test passes (graceful degradation)
+        assertThat(exists).isTrue();
+
+        // Assert - the window key carries the window's TTL
+        Duration ttl = redisTemplate.getExpire(rateLimitKey).block(Duration.ofSeconds(2));
+        assertThat(ttl).isNotNull();
+        assertThat(ttl.getSeconds()).isGreaterThan(0);
+        assertThat(ttl.getSeconds()).isLessThanOrEqualTo(2);
     }
 
     @Test
-    void testRedisConnectionError_GracefulDegradation() {
-        // This test verifies graceful degradation when Redis is unavailable
-
-        // Arrange - configure rate limit
+    void testRateLimiting_SeparateCountersPerPrincipal() {
+        // A limit of one per principal: each principal's first request is allowed and spends
+        // only its own window. (Fail-open on a Redis error is covered without Redis by
+        // RedisRateLimiterTest.)
         RateLimitConfig config = new RateLimitConfig(1, Duration.ofMinutes(1));
 
-        // Act - attempt rate limit check (may fail if Redis unavailable)
-        Mono<RateLimitResult> resultMono = rateLimiter.checkRateLimit(
-                "test-route",
-                "test-user",
-                config
-        );
-
-        // Assert - should complete without error (either allowed or gracefully degraded)
-        StepVerifier.create(resultMono)
+        StepVerifier.create(rateLimiter.checkRateLimit("shared-route", "principal-a", config))
                 .assertNext(result -> {
-                    assertThat(result).isNotNull();
+                    assertThat(result.isAllowed()).isTrue();
+                    assertThat(result.getRemainingRequests()).isEqualTo(0);
                 })
+                .verifyComplete();
+        StepVerifier.create(rateLimiter.checkRateLimit("shared-route", "principal-b", config))
+                .assertNext(result -> assertThat(result.isAllowed()).isTrue())
+                .verifyComplete();
+        StepVerifier.create(rateLimiter.checkRateLimit("shared-route", "principal-a", config))
+                .assertNext(result -> assertThat(result.isAllowed()).isFalse())
                 .verifyComplete();
     }
 }

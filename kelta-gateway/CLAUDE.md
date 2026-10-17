@@ -97,7 +97,17 @@ mvn test -f kelta-gateway/pom.xml                                               
 mvn test -f kelta-gateway/pom.xml -Dtest=DynamicRouteLocatorTest                     # Single class
 mvn test -f kelta-gateway/pom.xml -Dtest=DynamicRouteLocatorTest#buildsRouteFromDefinition  # Single method
 mvn test -f kelta-gateway/pom.xml -Dtest="*Filter*"                                  # Pattern match
+mvn verify -f kelta-gateway/pom.xml -Pintegration-tests                              # + integration tests (Docker)
+mvn verify -f kelta-gateway/pom.xml -Pintegration-tests -Dtest=NoSuchTest \
+    -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=HealthCheckIntegrationTest    # one integration suite
 ```
+
+`*IntegrationTest` classes run through failsafe, only under `-Pintegration-tests` (CI passes it).
+They are `@SpringBootTest`s that extend `integration/GatewayContainers` (real Redis + NATS,
+started once per JVM). A suite that needs a worker points `kelta.gateway.worker-service-url` at a
+MockWebServer with a path-keyed `Dispatcher` (the gateway calls the worker by itself), and a test
+that adds routes to `RouteRegistry` calls `RouteRefresher.refresh()` afterwards — see
+`testing.md`.
 
 ## Test Fixtures
 

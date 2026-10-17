@@ -1,11 +1,21 @@
 package io.kelta.gateway.integration;
 
+import okhttp3.mockwebserver.Dispatcher;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
+
+import java.io.IOException;
 
 /**
  * Integration test for health check endpoints.
@@ -21,8 +31,48 @@ import org.springframework.test.web.reactive.server.WebTestClient;
  * Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.5
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureWebTestClient
 @ActiveProfiles("test")
-class HealthCheckIntegrationTest {
+class HealthCheckIntegrationTest extends GatewayContainers {
+
+    /**
+     * A healthy stand-in worker. Without one, {@code WorkerHealthIndicator} is DOWN and the
+     * aggregate health is 503 — correct in production, but these tests assert on a healthy
+     * gateway. Redis and NATS are real ({@link GatewayContainers}).
+     */
+    private static final MockWebServer WORKER = startWorker();
+
+    private static MockWebServer startWorker() {
+        MockWebServer server = new MockWebServer();
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                String path = request.getPath() == null ? "" : request.getPath();
+                String body = path.startsWith("/actuator/health") ? "{\"status\":\"UP\"}"
+                        : path.startsWith("/internal/bootstrap") ? "{\"collections\":[]}"
+                        : "{}";
+                return new MockResponse().setResponseCode(200)
+                        .setHeader("Content-Type", "application/json").setBody(body);
+            }
+        });
+        try {
+            server.start();
+        } catch (IOException e) {
+            throw new IllegalStateException("could not start the stand-in worker", e);
+        }
+        return server;
+    }
+
+    @DynamicPropertySource
+    static void workerUrl(DynamicPropertyRegistry registry) {
+        registry.add("kelta.gateway.worker-service-url",
+                () -> WORKER.url("/").toString().replaceAll("/$", ""));
+    }
+
+    @AfterAll
+    static void stopWorker() throws IOException {
+        WORKER.shutdown();
+    }
 
     @LocalServerPort
     private int port;
