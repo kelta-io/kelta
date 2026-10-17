@@ -202,32 +202,33 @@ class EndToEndRequestFlowIntegrationTest extends GatewayContainers {
                     .setBody("{\"data\": {\"type\": \"test\", \"id\": \"1\"}}"));
         }
 
-        // Act & Assert - first two requests should succeed
-        webTestClient.get()
+        // Act & Assert - RateLimitFilter limits by the TENANT's governor budget
+        // (apiCallsPerDay / 1440 per minute), not by the route's own RateLimitConfig, so these
+        // requests stay within the limit. What the flow must show is the limiter counting in
+        // real Redis: the headers are set and the remaining budget goes down by one per request.
+        int first = remaining(webTestClient.get()
                 .uri("/api/ratelimited/1")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer mock-token")
                 .header("X-Tenant-ID", "test-tenant-id")
                 .exchange()
                 .expectStatus().isOk()
                 .expectHeader().exists("X-RateLimit-Limit")
-                .expectHeader().exists("X-RateLimit-Remaining");
-
-        webTestClient.get()
+                .returnResult(String.class).getResponseHeaders());
+        int second = remaining(webTestClient.get()
                 .uri("/api/ratelimited/1")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer mock-token")
                 .header("X-Tenant-ID", "test-tenant-id")
                 .exchange()
-                .expectStatus().isOk();
+                .expectStatus().isOk()
+                .returnResult(String.class).getResponseHeaders());
 
-        // Third request should be rate limited (if Redis is available)
-        // Note: This test may pass if Redis is not available (graceful degradation)
-        webTestClient.get()
-                .uri("/api/ratelimited/1")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer mock-token")
-                .header("X-Tenant-ID", "test-tenant-id")
-                .exchange()
-                .expectStatus().value(status ->
-                    assertThat(status).isIn(HttpStatus.OK.value(), HttpStatus.TOO_MANY_REQUESTS.value()));
+        assertThat(second).isEqualTo(first - 1);
+    }
+
+    private static int remaining(HttpHeaders headers) {
+        String value = headers.getFirst("X-RateLimit-Remaining");
+        assertThat(value).as("X-RateLimit-Remaining").isNotNull();
+        return Integer.parseInt(value);
     }
 
     @Test

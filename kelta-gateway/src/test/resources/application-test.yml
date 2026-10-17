@@ -32,11 +32,13 @@ kelta:
       permissions-enabled: true
       permissions-cache-ttl-minutes: 5
 
-# No OTLP collector in tests (each failed push otherwise logs a ConnectException).
-management.otlp.metrics.export.enabled: false
-
 # Disable actuator endpoints for tests
 management:
+  # No OTLP collector in tests (each failed push otherwise logs a ConnectException).
+  otlp:
+    metrics:
+      export:
+        enabled: false
   endpoints:
     web:
       exposure:

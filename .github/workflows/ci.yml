@@ -214,7 +214,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: java-test-results-${{ matrix.service }}
-          path: kelta-${{ matrix.service }}/target/surefire-reports/
+          path: |
+            kelta-${{ matrix.service }}/target/surefire-reports/
+            kelta-${{ matrix.service }}/target/failsafe-reports/
           if-no-files-found: ignore
           retention-days: 7
 

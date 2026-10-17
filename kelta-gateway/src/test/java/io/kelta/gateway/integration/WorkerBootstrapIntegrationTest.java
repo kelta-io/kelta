@@ -144,6 +144,7 @@ class WorkerBootstrapIntegrationTest extends GatewayContainers {
                 .setBody(bootstrapJson));
 
         // Act - fetch bootstrap configuration
+        int bootstrapCallsBefore = bootstrapRequests.get();
         routeConfigService.refreshRoutes();
 
         // Assert - verify routes were created
@@ -158,8 +159,8 @@ class WorkerBootstrapIntegrationTest extends GatewayContainers {
         assertThat(productsRoute.get().getId()).isEqualTo("products-collection");
         assertThat(productsRoute.get().getBackendUrl()).isNotNull();
 
-        // Verify the refresh called the worker's bootstrap endpoint
-        assertThat(bootstrapRequests.get()).isPositive();
+        // Verify the refresh itself called the worker's bootstrap endpoint
+        assertThat(bootstrapRequests.get()).isGreaterThan(bootstrapCallsBefore);
         assertThat(lastBootstrapMethod.get()).isEqualTo("GET");
     }
 
@@ -219,13 +220,12 @@ class WorkerBootstrapIntegrationTest extends GatewayContainers {
         // Act - fetch bootstrap configuration
         routeConfigService.refreshRoutes();
 
-        // Assert - the bootstrap added no collection routes. (refreshRoutes() always registers the
-        // static admin/API routes first, so the registry itself is never empty.)
+        // Assert - the bootstrap added no collection routes: only the static admin/API routes
+        // refreshRoutes() always registers first (ids "static-<name>") remain.
         assertThat(bootstrapRequests.get()).isPositive();
         List<RouteDefinition> routes = routeRegistry.getAllRoutes();
-        assertThat(routes).extracting(RouteDefinition::getId)
-                .doesNotContain("users-collection", "products-collection", "valid-collection",
-                        "invalid-collection", "rate-limited-collection");
+        assertThat(routes).isNotEmpty()
+                .allSatisfy(route -> assertThat(route.getId()).startsWith("static-"));
     }
 
     @Test
