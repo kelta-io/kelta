@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest
 @ActiveProfiles("test")
-class RedisCacheIntegrationTest {
+class RedisCacheIntegrationTest extends GatewayContainers {
 
     @Autowired
     private ReactiveRedisTemplate<String, String> redisTemplate;

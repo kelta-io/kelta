@@ -5,6 +5,7 @@ import io.kelta.gateway.auth.GatewayPrincipal;
 import io.kelta.gateway.authz.cerbos.CerbosAuthorizationService;
 import io.kelta.gateway.route.RateLimitConfig;
 import io.kelta.gateway.route.RouteDefinition;
+import io.kelta.gateway.route.RouteRefresher;
 import io.kelta.gateway.route.RouteRegistry;
 import tools.jackson.databind.ObjectMapper;
 import okhttp3.mockwebserver.MockResponse;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpHeaders;
@@ -49,8 +51,9 @@ import static org.mockito.Mockito.when;
  * Validates: Complete request flow through all filters
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureWebTestClient
 @ActiveProfiles("test")
-class EndToEndRequestFlowIntegrationTest {
+class EndToEndRequestFlowIntegrationTest extends GatewayContainers {
 
     @LocalServerPort
     private int port;
@@ -60,6 +63,10 @@ class EndToEndRequestFlowIntegrationTest {
 
     @Autowired
     private RouteRegistry routeRegistry;
+
+    /** CachingRouteLocator only sees registry changes after a refresh (see RouteRefresher). */
+    @Autowired
+    private RouteRefresher routeRefresher;
 
     @MockitoBean
     private DynamicReactiveJwtDecoder jwtDecoder;
@@ -93,6 +100,10 @@ class EndToEndRequestFlowIntegrationTest {
                 .expiresAt(Instant.now().plusSeconds(3600))
                 .build();
 
+        // The security chain calls the one-argument decode(String); the tenant-aware overload is
+        // kept for callers that pass a tenant. Stub both — an unstubbed one returns null, which
+        // Reactor rejects inside AuthenticationWebFilter as "The mapper returned a null Mono" (500).
+        when(jwtDecoder.decode(anyString())).thenReturn(Mono.just(mockJwt));
         when(jwtDecoder.decode(anyString(), anyString())).thenReturn(Mono.just(mockJwt));
 
         // Mock Cerbos to allow all permissions in end-to-end flow tests
@@ -120,6 +131,7 @@ class EndToEndRequestFlowIntegrationTest {
                 "test-collection"
         );
         routeRegistry.addRoute(route);
+        routeRefresher.refresh();
 
         // Mock backend response
         String jsonApiResponse = """
@@ -155,12 +167,15 @@ class EndToEndRequestFlowIntegrationTest {
 
         // Assert - verify backend received transformed headers
         RecordedRequest backendRequest = mockBackend.takeRequest();
-        assertThat(backendRequest.getPath()).isEqualTo("/1");
+        // Collection routes forward the full path (stripPrefix 0): the worker serves /api/<collection>/<id>.
+        assertThat(backendRequest.getPath()).isEqualTo("/api/test/1");
         assertThat(backendRequest.getHeader("X-Forwarded-User")).isEqualTo("test-user");
         assertThat(backendRequest.getHeader("X-Forwarded-Groups")).isEqualTo("USER");
         // Backward compatibility: X-Forwarded-Roles should also be present
         assertThat(backendRequest.getHeader("X-Forwarded-Roles")).isEqualTo("USER");
-        assertThat(backendRequest.getHeader(HttpHeaders.AUTHORIZATION)).isNull();
+        // HeaderTransformationFilter deliberately preserves Authorization so backends can validate
+        // the JWT themselves (documented on the filter since commit 72a6ae96).
+        assertThat(backendRequest.getHeader(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer mock-token");
     }
 
     @Test
@@ -177,6 +192,7 @@ class EndToEndRequestFlowIntegrationTest {
                 rateLimitConfig
         );
         routeRegistry.addRoute(route);
+        routeRefresher.refresh();
 
         // Mock backend responses
         for (int i = 0; i < 3; i++) {
@@ -225,6 +241,7 @@ class EndToEndRequestFlowIntegrationTest {
                 "test-collection"
         );
         routeRegistry.addRoute(route);
+        routeRefresher.refresh();
 
         // Act & Assert - request without JWT should be unauthorized
         webTestClient.get()
@@ -232,8 +249,9 @@ class EndToEndRequestFlowIntegrationTest {
                 .exchange()
                 .expectStatus().isUnauthorized()
                 .expectBody()
-                .jsonPath("$.error.status").isEqualTo(401)
-                .jsonPath("$.error.code").isEqualTo("UNAUTHORIZED");
+                // JSON:API error envelope (conventions.md): errors[], status as a string.
+                .jsonPath("$.errors[0].status").isEqualTo("401")
+                .jsonPath("$.errors[0].code").isEqualTo("UNAUTHORIZED");
     }
 
     @Test
@@ -258,6 +276,7 @@ class EndToEndRequestFlowIntegrationTest {
                 "test-collection"
         );
         routeRegistry.addRoute(route);
+        routeRefresher.refresh();
 
         // Mock backend error response
         mockBackend.enqueue(new MockResponse()

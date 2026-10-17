@@ -16,14 +16,24 @@ spring:
           issuer-uri: http://localhost:8180/realms/kelta
           jwk-set-uri: http://localhost:8180/realms/kelta/protocol/openid-connect/certs
 
+# Required since SecurityConfig fails closed without it (no '*' with credentials).
+CORS_ALLOWED_ORIGIN_PATTERN: http://localhost:5173
+
 # Kelta Gateway test configuration
 kelta:
   gateway:
-    worker-service-url: http://emf-worker:80
+    # Nothing listens here; suites that need a worker point this at a MockWebServer.
+    worker-service-url: http://localhost:1
+    # No Cerbos in these tests; localhost avoids a DNS lookup of the cluster name on every check.
+    cerbos:
+      host: localhost
     # Rate limiting is driven by per-tenant governor limits from the worker
     security:
       permissions-enabled: true
       permissions-cache-ttl-minutes: 5
+
+# No OTLP collector in tests (each failed push otherwise logs a ConnectException).
+management.otlp.metrics.export.enabled: false
 
 # Disable actuator endpoints for tests
 management:

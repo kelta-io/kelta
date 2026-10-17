@@ -4,6 +4,7 @@ import io.kelta.gateway.route.RouteDefinition;
 import io.kelta.gateway.route.RouteRegistry;
 import io.kelta.gateway.service.RouteConfigService;
 import tools.jackson.databind.ObjectMapper;
+import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -23,6 +24,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -39,9 +42,24 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
-class WorkerBootstrapIntegrationTest {
+class WorkerBootstrapIntegrationTest extends GatewayContainers {
 
     private static MockWebServer mockWorker;
+
+    /**
+     * The worker's /internal/bootstrap answer for the current test. The gateway also calls the
+     * worker by itself (startup bootstrap with retries, slug map, governor limits, IP allowlists),
+     * so a FIFO enqueue() lets those calls consume the test's response — and takeRequest() then
+     * waits forever. A path-keyed dispatcher answers each endpoint independently.
+     */
+    private static volatile MockResponse bootstrapResponse = jsonResponse("{\"collections\":[]}");
+    private static final AtomicInteger bootstrapRequests = new AtomicInteger();
+    private static final AtomicReference<String> lastBootstrapMethod = new AtomicReference<>();
+
+    private static MockResponse jsonResponse(String body) {
+        return new MockResponse().setResponseCode(200)
+                .setHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE).setBody(body);
+    }
 
     @Autowired
     private RouteConfigService routeConfigService;
@@ -55,6 +73,18 @@ class WorkerBootstrapIntegrationTest {
     @BeforeAll
     static void setUpMockServer() throws IOException {
         mockWorker = new MockWebServer();
+        mockWorker.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                String path = request.getPath() == null ? "" : request.getPath();
+                if (path.startsWith("/internal/bootstrap")) {
+                    bootstrapRequests.incrementAndGet();
+                    lastBootstrapMethod.set(request.getMethod());
+                    return bootstrapResponse;
+                }
+                return jsonResponse("{}");
+            }
+        });
         mockWorker.start();
     }
 
@@ -74,12 +104,14 @@ class WorkerBootstrapIntegrationTest {
     void setUp() {
         // Clear route registry before each test
         routeRegistry.clear();
+        bootstrapRequests.set(0);
+        lastBootstrapMethod.set(null);
     }
 
     @Test
     void testBootstrapConfiguration_ValidResponse() throws Exception {
         // Arrange - create bootstrap response
-        String bootstrapResponse = """
+        String bootstrapJson = """
                 {
                     "collections": [
                         {
@@ -106,10 +138,10 @@ class WorkerBootstrapIntegrationTest {
                 }
                 """;
 
-        mockWorker.enqueue(new MockResponse()
+        bootstrapResponse = (new MockResponse()
                 .setResponseCode(200)
                 .setHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .setBody(bootstrapResponse));
+                .setBody(bootstrapJson));
 
         // Act - fetch bootstrap configuration
         routeConfigService.refreshRoutes();
@@ -126,16 +158,15 @@ class WorkerBootstrapIntegrationTest {
         assertThat(productsRoute.get().getId()).isEqualTo("products-collection");
         assertThat(productsRoute.get().getBackendUrl()).isNotNull();
 
-        // Verify request was made to worker's bootstrap endpoint
-        RecordedRequest request = mockWorker.takeRequest();
-        assertThat(request.getPath()).isEqualTo("/internal/bootstrap");
-        assertThat(request.getMethod()).isEqualTo("GET");
+        // Verify the refresh called the worker's bootstrap endpoint
+        assertThat(bootstrapRequests.get()).isPositive();
+        assertThat(lastBootstrapMethod.get()).isEqualTo("GET");
     }
 
     @Test
     void testBootstrapConfiguration_MissingRequiredFields() throws Exception {
         // Arrange - create bootstrap response with missing required fields
-        String bootstrapResponse = """
+        String bootstrapJson = """
                 {
                     "collections": [
                         {
@@ -153,10 +184,10 @@ class WorkerBootstrapIntegrationTest {
                 }
                 """;
 
-        mockWorker.enqueue(new MockResponse()
+        bootstrapResponse = (new MockResponse()
                 .setResponseCode(200)
                 .setHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .setBody(bootstrapResponse));
+                .setBody(bootstrapJson));
 
 
         // Act - fetch bootstrap configuration
@@ -173,30 +204,34 @@ class WorkerBootstrapIntegrationTest {
     @Test
     void testBootstrapConfiguration_EmptyResponse() throws Exception {
         // Arrange - create empty bootstrap response
-        String bootstrapResponse = """
+        String bootstrapJson = """
                 {
                     "collections": []
                 }
                 """;
 
-        mockWorker.enqueue(new MockResponse()
+        bootstrapResponse = (new MockResponse()
                 .setResponseCode(200)
                 .setHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .setBody(bootstrapResponse));
+                .setBody(bootstrapJson));
 
 
         // Act - fetch bootstrap configuration
         routeConfigService.refreshRoutes();
 
-        // Assert - no routes should be added
+        // Assert - the bootstrap added no collection routes. (refreshRoutes() always registers the
+        // static admin/API routes first, so the registry itself is never empty.)
+        assertThat(bootstrapRequests.get()).isPositive();
         List<RouteDefinition> routes = routeRegistry.getAllRoutes();
-        assertThat(routes).isEmpty();
+        assertThat(routes).extracting(RouteDefinition::getId)
+                .doesNotContain("users-collection", "products-collection", "valid-collection",
+                        "invalid-collection", "rate-limited-collection");
     }
 
     @Test
     void testBootstrapConfiguration_WorkerUnavailable() {
         // Arrange - mock worker returns error
-        mockWorker.enqueue(new MockResponse()
+        bootstrapResponse = (new MockResponse()
                 .setResponseCode(500)
                 .setBody("Internal Server Error"));
 
@@ -214,7 +249,7 @@ class WorkerBootstrapIntegrationTest {
     @Test
     void testBootstrapConfiguration_MalformedJson() {
         // Arrange - mock worker returns malformed JSON
-        mockWorker.enqueue(new MockResponse()
+        bootstrapResponse = (new MockResponse()
                 .setResponseCode(200)
                 .setHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .setBody("{ invalid json }"));
@@ -233,7 +268,7 @@ class WorkerBootstrapIntegrationTest {
     @Test
     void testBootstrapConfiguration_WithGovernorLimits() throws Exception {
         // Arrange - create bootstrap response with governor limits
-        String bootstrapResponse = """
+        String bootstrapJson = """
                 {
                     "collections": [
                         {
@@ -251,10 +286,10 @@ class WorkerBootstrapIntegrationTest {
                 }
                 """;
 
-        mockWorker.enqueue(new MockResponse()
+        bootstrapResponse = (new MockResponse()
                 .setResponseCode(200)
                 .setHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .setBody(bootstrapResponse));
+                .setBody(bootstrapJson));
 
 
         // Act - fetch bootstrap configuration

@@ -27,12 +27,16 @@ harness profile, and are `@Testcontainers(disabledWithoutDocker = true)`: withou
 they are **skipped**, not failed. In CI that is caught by `scripts/ci/assert-integration-tests-ran.sh`,
 which fails the job when an `*IntegrationTest` suite skipped every test; CI also sets
 `TESTCONTAINERS_RYUK_DISABLED=true`, since Ryuk is unreachable on the k8s-runner's shared daemon and
-Testcontainers otherwise reports Docker as unavailable. Locally on Docker Engine 29+, Testcontainers
-1.20.4 fails its API handshake (it speaks API 1.32; the engine's minimum is 1.40) and skips too —
-run with `-Dapi.version=1.44` (e.g. `JAVA_TOOL_OPTIONS=-Dapi.version=1.44`) until the dependency is
-bumped. (kelta-gateway is different: its pom excludes `*IntegrationTest` from surefire and runs
-them only via failsafe under `-Pintegration-tests`, which the CI `test-java` job does not activate —
-so those suites do not run in CI at all; see `concerns.md` → Test Coverage Gaps. kelta-auth's
+Testcontainers otherwise reports Docker as unavailable. (Docker Engine 29+ needs Testcontainers
+1.21.4, which every module pins.) kelta-gateway is different: its pom excludes `*IntegrationTest`
+from surefire and runs them through failsafe under `-Pintegration-tests`, which CI's `test-java`
+passes for gateway only (`matrix.mvn_args`). Its `@SpringBootTest` suites extend
+`integration/GatewayContainers`, which starts real Redis and NATS (JetStream) and wires them in via
+`@DynamicPropertySource`; a suite that needs a worker points `kelta.gateway.worker-service-url` at
+a MockWebServer with a **path-keyed `Dispatcher`** — the gateway calls the worker on its own
+(bootstrap retries, slug map, governor limits), so a FIFO `enqueue()` lets those calls take the
+test's response. After adding routes to `RouteRegistry` directly, call `RouteRefresher.refresh()`:
+`CachingRouteLocator` does not see registry changes otherwise. (kelta-auth's
 `BaselineAdminPasswordIntegrationTest` migrates its database from kelta-worker's real migration
 directory via a `filesystem:` Flyway location, so it needs the whole repo checked out.)
 
