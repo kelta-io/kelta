@@ -115,7 +115,8 @@ jobs:
     name: Test ${{ matrix.service }}
     needs: changes
     # Services with Testcontainers ITs (worker: RowLevelSecurityIntegrationTest; ai and auth:
-    # TenantBindingIntegrationTest; auth: BaselineAdminPasswordIntegrationTest) run on k8s-runner-integration, like the harness job: its
+    # TenantBindingIntegrationTest; auth: BaselineAdminPasswordIntegrationTest; gateway: its
+    # @SpringBootTest suites over GatewayContainers) run on k8s-runner-integration, like the harness job: its
     # Docker publishes container ports where the job can reach them. On k8s-runner the container
     # starts but getHost():getMappedPort() is "Connection refused" — those suites used to be
     # skipped instead. Services without Testcontainers stay on the lighter k8s-runner.
@@ -126,7 +127,10 @@ jobs:
         include:
           - service: gateway
             changed: ${{ needs.changes.outputs.gateway }}
-            runner: k8s-runner
+            # Its @SpringBootTest integration suites (real Redis + NATS via Testcontainers) run
+            # through failsafe, which the pom enables only under -Pintegration-tests.
+            runner: k8s-runner-integration
+            mvn_args: -Pintegration-tests
           - service: worker
             changed: ${{ needs.changes.outputs.worker }}
             runner: k8s-runner-integration
@@ -196,7 +200,7 @@ jobs:
           # @Testcontainers(disabledWithoutDocker = true) suite is then SKIPPED and the job
           # stays green. Same setting as the harness job below.
           TESTCONTAINERS_RYUK_DISABLED: "true"
-        run: mvn verify -f kelta-${{ matrix.service }}/pom.xml -B
+        run: mvn verify -f kelta-${{ matrix.service }}/pom.xml -B ${{ matrix.mvn_args }}
 
       - name: Assert integration tests ran (not skipped)
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
@@ -210,7 +214,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: java-test-results-${{ matrix.service }}
-          path: kelta-${{ matrix.service }}/target/surefire-reports/
+          path: |
+            kelta-${{ matrix.service }}/target/surefire-reports/
+            kelta-${{ matrix.service }}/target/failsafe-reports/
           if-no-files-found: ignore
           retention-days: 7
 

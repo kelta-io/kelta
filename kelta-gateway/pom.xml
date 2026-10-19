@@ -22,6 +22,8 @@
         <java.version>25</java.version>
         <spring-cloud.version>2025.1.1</spring-cloud.version>
         <protobuf.version>4.32.0</protobuf.version>
+        <!-- Same pin as the other modules (1.21.4 = Docker Engine 29 support); see testing.md. -->
+        <testcontainers.version>1.21.4</testcontainers.version>
         <graalvm-sdk.version>25.0.2</graalvm-sdk.version>
         <junit-quickcheck.version>1.0</junit-quickcheck.version>
         <skipITs>true</skipITs>
@@ -172,6 +174,25 @@
             <artifactId>reactor-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Testcontainers: real Redis + NATS for the @SpringBootTest integration tests
+             (GatewayContainers) -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Boot 4 no longer auto-configures WebTestClient for @SpringBootTest; tests opt in
+             with @AutoConfigureWebTestClient from this module. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webtestclient</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.security</groupId>
@@ -218,6 +239,13 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.cloud</groupId>
                 <artifactId>spring-cloud-dependencies</artifactId>
@@ -302,8 +330,9 @@
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <version>3.2.5</version>
                 <configuration>
-                    <!-- Include integration tests by tag and pattern -->
-                    <groups>integration</groups>
+                    <!-- Selected by name. (A former <groups>integration</groups> filter also required
+                         @Tag("integration"), which the self-contained @SpringBootTest suites never
+                         had — so, excluded from surefire by name too, they ran nowhere.) -->
                     <includes>
                         <include>**/*IntegrationTest.java</include>
                         <include>**/integration/**/*Test.java</include>

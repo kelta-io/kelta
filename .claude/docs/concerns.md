@@ -813,10 +813,21 @@ its own change with a full compose run.
 
 ## Test Coverage Gaps
 
-- **OPEN — kelta-gateway integration tests never run in CI.** Its pom runs `*IntegrationTest` only
-  via failsafe under `-Pintegration-tests`, which `test-java` doesn't activate, so its ~14 classes
-  are never attempted and `assert-integration-tests-ran.sh` finds nothing to judge. Fix: run with
-  `-Pintegration-tests` (expect some suites to need work). kelta-auth was fixed by PLT-343.
+- **FIXED — kelta-gateway integration tests never ran.** Its pom ran them only through failsafe
+  under `-Pintegration-tests`, which CI never passed, and failsafe's `<groups>integration</groups>`
+  filter also required `@Tag("integration")`, so the four untagged `@SpringBootTest` suites ran
+  nowhere at all. Ten tagged suites (`IntegrationTestBase` and its helpers, ~4,900 lines) targeted
+  the pre-Kelta Docker environment — a "sample service" on :8082 and Keycloak on :8180, neither of
+  which exists — so each timed out after two minutes; they were deleted, their topics being
+  covered against a real stack by the cross-service harness (`AuthFlow`, `TenantIsolation`,
+  `IncludedResourceAuthorization`, `OwnerScopedCollection`, `SystemCollectionResponseCache`, …).
+  The five live suites (27 tests) now run in CI: `GatewayContainers` gives them real Redis + NATS,
+  `test-java` passes `-Pintegration-tests` for gateway on `k8s-runner-integration`, and the
+  `groups` filter is gone. Their setup had rotted with the code (Boot 4's opt-in
+  `@AutoConfigureWebTestClient`, the fail-closed `CORS_ALLOWED_ORIGIN_PATTERN`, the one-argument
+  JWT `decode`, per-refresh route caching, JSON:API error envelopes) and was brought up to date;
+  one assertion that the gateway strips `Authorization` was reversed — the filter has preserved it
+  by design since commit 72a6ae96. kelta-auth was fixed by PLT-343.
 - **No worker Spring-context test** — bean-wiring bugs compile, pass unit tests and fail at pod
   start. **A `@Component` with a second (test) constructor needs `@Autowired` on the production
   one**; a second bean of an injected type needs `@Primary` or qualifiers. Copy
