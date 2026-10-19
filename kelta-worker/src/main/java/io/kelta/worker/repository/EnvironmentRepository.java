@@ -112,11 +112,14 @@ public class EnvironmentRepository {
         );
     }
 
+    /** Replaces name, description and config; a sandbox's recorded cloneMode survives the replace. */
     public void update(String envId, String tenantId, String name, String description, String config) {
         jdbcTemplate.update(
-                "UPDATE environment SET name = ?, description = ?, config = ?::jsonb, " +
-                        "updated_at = NOW() WHERE id = ? AND tenant_id = ?",
-                name, description, config, envId, tenantId
+                "UPDATE environment SET name = ?, description = ?, config = CASE " +
+                        "WHEN config->'cloneMode' IS NULL THEN ?::jsonb " +
+                        "ELSE COALESCE(?::jsonb, '{}'::jsonb) || jsonb_build_object('cloneMode', config->'cloneMode') " +
+                        "END, updated_at = NOW() WHERE id = ? AND tenant_id = ?",
+                name, description, config, config, envId, tenantId
         );
     }
 

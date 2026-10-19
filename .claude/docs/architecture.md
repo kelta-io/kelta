@@ -974,7 +974,8 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   skips `cloneIntoSandbox` and marks the environment `ACTIVE` directly — no custom collections,
   picklists, layouts, list views, flows, dashboards, menus or pages. The mode is stored as
   `environment.config.cloneMode` (`CLONED`|`EMPTY`, written by `createWithSandboxTenant`;
-  `recordCloneError` merges into `config` rather than replacing it) and every env read exposes it
+  `recordCloneError` merges into `config`, and `PATCH /api/environments/{id}` — whose `config`
+  replaces the stored one — keeps `cloneMode`) and every env read exposes it
   as the `clone_mode` attribute (`EnvironmentRepository.SELECT_COLUMNS`; a sandbox row with no
   recorded mode predates this and reads `CLONED`). **Refresh rule:** `POST
   /api/environments/{id}/refresh` on an `EMPTY` sandbox answers `409 EMPTY_SANDBOX_REFRESH` —

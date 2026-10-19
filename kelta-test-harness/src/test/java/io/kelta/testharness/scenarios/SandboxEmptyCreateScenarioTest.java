@@ -253,14 +253,19 @@ class SandboxEmptyCreateScenarioTest extends ScenarioBase {
         throw new AssertionError("Environment " + envId + " did not become ACTIVE (last status: " + lastStatus + ")");
     }
 
-    /** Rows of {@code table} owned by {@code ownerTenantId} that the app role sees when bound to {@code boundTenantId}. */
+    /**
+     * Rows of {@code table} owned by {@code ownerTenantId} that the app role sees when bound to
+     * {@code boundTenantId}. System collections are left out: the harness parent is the default
+     * tenant, which owns them, and V200's {@code system_rows_read} policy shows them to every tenant.
+     */
     private int countVisibleTo(String boundTenantId, String table, String ownerTenantId) throws SQLException {
         try (Connection conn = openAppDbConnection()) {
             conn.setAutoCommit(false);
             try (Statement st = conn.createStatement()) {
                 st.execute("SET LOCAL app.current_tenant_id = '" + boundTenantId.replace("'", "''") + "'");
                 try (ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM " + table
-                        + " WHERE tenant_id = '" + ownerTenantId.replace("'", "''") + "'")) {
+                        + " WHERE tenant_id = '" + ownerTenantId.replace("'", "''") + "'"
+                        + ("collection".equals(table) ? " AND system_collection = false" : ""))) {
                     rs.next();
                     return rs.getInt(1);
                 }

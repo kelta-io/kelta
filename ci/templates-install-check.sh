@@ -118,11 +118,16 @@ if [ "${1:-}" = "--in-container" ]; then
   name="$(basename "$template")"
   echo "::group::template $name into an empty sandbox"
   KELTA_TOKEN="$(sign_in)"
-  created=$(curl -fsS -m 120 -X POST "$GATEWAY_URL/$TENANT_SLUG/api/environments" \
+  create_body="$(mktemp)"
+  created_status=$(curl -sS -m 120 -o "$create_body" -w '%{http_code}' \
+    -X POST "$GATEWAY_URL/$TENANT_SLUG/api/environments" \
     -H "Authorization: Bearer $KELTA_TOKEN" -H "Content-Type: application/json" \
     -d "$(jq -cn --arg n "$SANDBOX_NAME" \
       '{data: {type: "environments", attributes: {name: $n, type: "SANDBOX", cloneMetadata: false}}}')") \
-    || fail "creating the empty sandbox $SANDBOX_NAME failed"
+    || created_status=000
+  created="$(cat "$create_body")"
+  [ "$created_status" = "202" ] \
+    || fail "creating the empty sandbox $SANDBOX_NAME answered HTTP $created_status: $created"
   attrs="$(jq -c '.data.attributes' <<<"$created")"
   [ "$(jq -r '.clone_mode' <<<"$attrs")" = "EMPTY" ] \
     || fail "sandbox $SANDBOX_NAME: clone_mode is $(jq -r '.clone_mode' <<<"$attrs"), expected EMPTY"
@@ -134,12 +139,14 @@ if [ "${1:-}" = "--in-container" ]; then
   KELTA_TOKEN="$(sign_in "$(jq -r '.adminUsername' <<<"$attrs")" \
     "$(jq -r '.adminInitialPassword' <<<"$attrs")" "$sandbox_slug")"
   export KELTA_TOKEN
+  ready=""
   for ((i = 0; i < READY_ATTEMPTS; i++)); do
-    [ "$(http_status "$sandbox_slug/api/collections")" = "200" ] && break
+    ready="$(http_status "$sandbox_slug/api/collections")"
+    [ "$ready" = "200" ] && break
     sleep 1
   done
-  [ "$(http_status "$sandbox_slug/api/collections")" = "200" ] \
-    || fail "sandbox $sandbox_slug: GET /api/collections never answered 200 with its admin's token"
+  [ "$ready" = "200" ] \
+    || fail "sandbox $sandbox_slug: GET /api/collections answered $ready, not 200, with its admin's token"
 
   for seed in "$template"/seeds/*.json; do
     collection="$(basename "$seed" .json)"

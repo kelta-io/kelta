@@ -187,15 +187,22 @@ class SandboxEmptyCreateRlsIntegrationTest {
 
         assertThat(sandboxTenantId).isNotBlank().isNotEqualTo(PARENT);
 
+        // V200's system_rows_read policy shows every tenant the platform's system collections.
+        Integer systemCollections = TenantContext.callWithTenant(sandboxTenantId, sandboxSlug, () ->
+                app.queryForObject("SELECT COUNT(*) FROM collection WHERE system_collection = true",
+                        Integer.class));
+        assertThat(systemCollections).as("the sandbox still reads the system collections").isPositive();
+
         for (String table : List.of("collection", "global_picklist", "flow")) {
             Integer parentSees = TenantContext.callWithTenant(PARENT, PARENT_SLUG, () ->
                     app.queryForObject("SELECT COUNT(*) FROM " + table + " WHERE tenant_id = ?",
                             Integer.class, PARENT));
             assertThat(parentSees).as("parent sees its own %s row", table).isEqualTo(1);
 
+            String ownRows = "collection".equals(table) ? " WHERE system_collection = false" : "";
             Integer sandboxSees = TenantContext.callWithTenant(sandboxTenantId, sandboxSlug, () ->
-                    app.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class));
-            assertThat(sandboxSees).as("sandbox has no %s rows — nothing cloned, parent rows hidden", table)
+                    app.queryForObject("SELECT COUNT(*) FROM " + table + ownRows, Integer.class));
+            assertThat(sandboxSees).as("sandbox has no custom %s rows — nothing cloned, parent rows hidden", table)
                     .isZero();
 
             Integer sandboxSeesParent = TenantContext.callWithTenant(sandboxTenantId, sandboxSlug, () ->
@@ -212,6 +219,17 @@ class SandboxEmptyCreateRlsIntegrationTest {
         Map<String, Object> result = TenantContext.callWithTenant(PARENT, PARENT_SLUG, () ->
                 service.createSandbox(PARENT, "norefresh", null, "SANDBOX", "admin", false));
         String envId = (String) result.get("id");
+
+        // An edit (PATCH /api/environments/{id}) replaces config; the clone mode must survive it.
+        EnvironmentRepository repository = new EnvironmentRepository(app);
+        TenantContext.runWithTenant(PARENT, PARENT_SLUG, () ->
+                repository.update(envId, PARENT, "norefresh", "edited", "{\"owner\":\"qa\"}"));
+        TenantContext.runWithTenant(PARENT, PARENT_SLUG, () ->
+                repository.update(envId, PARENT, "norefresh", "edited again", null));
+        assertThat(TenantContext.callWithTenant(PARENT, PARENT_SLUG, () ->
+                repository.findByIdAndTenant(envId, PARENT).orElseThrow()))
+                .containsEntry("clone_mode", "EMPTY")
+                .containsEntry("description", "edited again");
 
         assertThatThrownBy(() -> TenantContext.callWithTenant(PARENT, PARENT_SLUG, () ->
                 service.refreshSandbox(envId, PARENT)))

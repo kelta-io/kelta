@@ -28,6 +28,7 @@ let root: string;
 let sandboxAttributes: Record<string, unknown>;
 let sandboxInstalled: boolean;
 let environmentRequests: unknown[];
+let createError: string | undefined;
 
 interface Template {
   install: string;
@@ -93,6 +94,11 @@ before(async () => {
           return;
         }
         environmentRequests.push(JSON.parse(body));
+        if (createError) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ errors: [{ detail: createError }] }));
+          return;
+        }
         res.writeHead(202, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ data: { id: 'env-1', attributes: sandboxAttributes } }));
         return;
@@ -151,6 +157,7 @@ beforeEach(() => {
   counts = {};
   sandboxInstalled = false;
   environmentRequests = [];
+  createError = undefined;
   sandboxAttributes = {
     status: 'ACTIVE',
     clone_mode: 'EMPTY',
@@ -214,6 +221,19 @@ describe('templates-install-check.sh --in-container', () => {
 
     assert.equal(result.code, 1);
     assert.match(result.out, /::error::sandbox templates-empty: clone_mode is CLONED, expected EMPTY/);
+  });
+
+  it('fails with the status and body when the sandbox create is refused', async () => {
+    createError = 'cloneMetadata must be a boolean';
+    const dir = writeTemplates({ a: { install: MARK_INSTALLED } });
+
+    const result = await run(dir);
+
+    assert.equal(result.code, 1);
+    assert.match(
+      result.out,
+      /::error::creating the empty sandbox templates-empty answered HTTP 400: .*cloneMetadata must be a boolean/
+    );
   });
 
   it('fails when the sandbox already holds a template collection before the install', async () => {
