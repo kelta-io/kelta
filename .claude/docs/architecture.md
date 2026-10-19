@@ -1244,7 +1244,12 @@ for it, not just a `ScopedValue`.
   `visibleToTenant` applies the same rule to a single row, so get-by-id (including the display-field
   lookup) and the sub-resource routes 404 such a row before it is served or cached under the
   caller's `X-Tenant-ID` (a `fields` row costs one extra `collections` query, only when it is a
-  platform-tenant row read by another tenant). The
+  platform-tenant row read by another tenant). The display-field lookup
+  (`GET /api/collections/<name>`) fetches up to two rows for these collections and narrows them
+  with `filterSharedSystemRows` before taking the first: with one row it could pick the platform
+  tenant's same-named custom collection, which `visibleToTenant` then 404s, hiding the caller's
+  own (KLT-626 — a template installed into the `default` tenant and then into a sandbox of it
+  failed every `kelta list-views apply` in the sandbox). The
   narrowing is skipped when the caller **is** the platform tenant (`X-Tenant-ID ==
   SYSTEM_TENANT_ID`) — there every SYSTEM_TENANT_ID row is the caller's own, and the e2e /
   test-harness "default" tenant is exactly that tenant (its custom collections' fields vanished

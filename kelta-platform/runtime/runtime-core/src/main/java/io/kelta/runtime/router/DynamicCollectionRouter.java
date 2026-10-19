@@ -776,17 +776,22 @@ public class DynamicCollectionRouter {
         List<FilterCondition> filters = new ArrayList<>();
         filters.add(new FilterCondition(displayFieldName, FilterOperator.EQ, value));
 
-        // Inject tenant filter if applicable
+        // Inject tenant filter if applicable. For a collection that shares platform-tenant rows
+        // the filter is tenantId IN (caller, SYSTEM_TENANT_ID), so the value can match one row of
+        // each: fetch both and drop the platform row unless the list path would show it, or a
+        // custom collection of the platform tenant hides the caller's own same-named one.
+        int pageSize = SystemCollectionTenancy.sharesSystemRows(definition) ? 2 : 1;
         QueryRequest queryRequest = new QueryRequest(
-                new Pagination(1, 1), List.of(), List.of(), filters);
+                new Pagination(1, pageSize), List.of(), List.of(), filters);
         queryRequest = tenantScope.injectTenantFilter(queryRequest, definition, request);
 
         QueryResult result = queryEngine.executeQuery(definition, queryRequest);
-        if (result.data().isEmpty()) {
+        List<Map<String, Object>> rows = tenantScope.filterSharedSystemRows(definition, result.data(), request);
+        if (rows.isEmpty()) {
             return Optional.empty();
         }
 
-        return Optional.of(result.data().get(0));
+        return Optional.of(rows.get(0));
     }
 
     /**
