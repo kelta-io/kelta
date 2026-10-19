@@ -81,7 +81,9 @@ public class EnvironmentController implements PermissionGatedController {
 
     /**
      * Creates a local tenant-backed sandbox (default) or registers a remote
-     * promotion target when {@code remoteBaseUrl} is supplied. The parent
+     * promotion target when {@code remoteBaseUrl} is supplied. A sandbox clones
+     * the parent's metadata unless {@code cloneMetadata} is {@code false}, which
+     * creates it empty (system defaults only). The parent
      * tenant and creator identity come from the authenticated request — the
      * body cannot claim a different parent or creator.
      */
@@ -100,6 +102,7 @@ public class EnvironmentController implements PermissionGatedController {
             String description = stringAttribute(attrs, "description");
             String type = stringAttribute(attrs, "type");
             String remoteBaseUrl = stringAttribute(attrs, "remoteBaseUrl");
+            Boolean cloneMetadata = booleanAttribute(attrs, "cloneMetadata");
 
             if (name == null || name.isBlank()) {
                 throw new SandboxProvisioningService.InvalidEnvironmentRequestException(
@@ -115,7 +118,8 @@ public class EnvironmentController implements PermissionGatedController {
                         .body(JsonApiResponseBuilder.single("environments", extractId(env), env));
             }
             Map<String, Object> env = provisioningService.createSandbox(
-                    tenantId, name, description, type == null ? "SANDBOX" : type, userId);
+                    tenantId, name, description, type == null ? "SANDBOX" : type, userId,
+                    cloneMetadata == null || cloneMetadata);
             return ResponseEntity.status(HttpStatus.ACCEPTED)
                     .body(JsonApiResponseBuilder.single("environments", extractId(env), env));
         } catch (SandboxProvisioningService.EnvironmentConflictException e) {
@@ -145,7 +149,10 @@ public class EnvironmentController implements PermissionGatedController {
         }
     }
 
-    /** Re-clones the parent's current config into the sandbox (destructive overwrite). */
+    /**
+     * Re-clones the parent's current config into the sandbox (destructive
+     * overwrite). A sandbox created empty is refused with 409.
+     */
     @PostMapping("/{envId}/refresh")
     public ResponseEntity<?> refreshEnvironment(@PathVariable String envId, HttpServletRequest request) {
         String tenantId = requireTenant();
@@ -155,6 +162,9 @@ public class EnvironmentController implements PermissionGatedController {
             Map<String, Object> env = provisioningService.refreshSandbox(envId, tenantId);
             return ResponseEntity.status(HttpStatus.ACCEPTED)
                     .body(JsonApiResponseBuilder.single("environments", extractId(env), env));
+        } catch (SandboxProvisioningService.EmptySandboxRefreshException e) {
+            JsonApiError error = new JsonApiError("409", "EMPTY_SANDBOX_REFRESH", "Conflict", e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(errorDocument(error));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -301,6 +311,14 @@ public class EnvironmentController implements PermissionGatedController {
             return (String) value;
         }
         throw new SandboxProvisioningService.InvalidEnvironmentRequestException(key, key + " must be a string");
+    }
+
+    private static Boolean booleanAttribute(Map<String, Object> attrs, String key) {
+        Object value = attrs.get(key);
+        if (value == null || value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        throw new SandboxProvisioningService.InvalidEnvironmentRequestException(key, key + " must be a boolean");
     }
 
     private static Map<String, Object> errorDocument(JsonApiError error) {

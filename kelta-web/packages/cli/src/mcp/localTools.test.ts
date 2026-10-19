@@ -55,6 +55,18 @@ describe('selectLocalCommands', () => {
     expect(localToolName(metadataExport!)).toBe('cli_metadata_export');
   });
 
+  it('the sandbox create tool exposes the empty option', () => {
+    const sandboxCreate = allCommands.find(
+      (command) => command.group === 'sandbox' && command.name === 'create'
+    );
+    const tool = toMcpTool(sandboxCreate!);
+    expect(tool.name).toBe('cli_sandbox_create');
+    const properties = (tool.inputSchema as { properties?: Record<string, { type?: string }> })
+      .properties;
+    expect(properties).toHaveProperty('empty');
+    expect(properties?.empty?.type).toBe('boolean');
+  });
+
   it('toMcpTool carries schema and destructive annotations', () => {
     const promoteRollback = allCommands.find(
       (command) => command.group === 'promote' && command.name === 'rollback'

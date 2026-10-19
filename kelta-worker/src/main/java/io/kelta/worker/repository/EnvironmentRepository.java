@@ -26,7 +26,10 @@ public class EnvironmentRepository {
     private static final String SELECT_COLUMNS =
             "SELECT id, tenant_id, name, description, type, status, source_env_id, " +
                     "sandbox_tenant_id, remote_base_url, remote_tenant_slug, credential_ref, " +
-                    "config, created_by, created_at, updated_at ";
+                    "config, created_by, created_at, updated_at, " +
+                    // Sandboxes created before cloneMode was recorded were all full clones.
+                    "COALESCE(config->>'cloneMode', CASE WHEN sandbox_tenant_id IS NOT NULL THEN 'CLONED' END) " +
+                    "AS clone_mode ";
 
     public String create(String tenantId, String name, String description, String type,
                          String sourceEnvId, String config, String createdBy) {
@@ -43,14 +46,15 @@ public class EnvironmentRepository {
 
     /** Env row for a tenant-backed sandbox: points at the real sandbox tenant. */
     public String createWithSandboxTenant(String tenantId, String name, String description, String type,
-                                          String sourceEnvId, String sandboxTenantId, String createdBy) {
+                                          String sourceEnvId, String sandboxTenantId, String config,
+                                          String createdBy) {
         String id = UUID.randomUUID().toString();
         Timestamp now = Timestamp.from(Instant.now());
         jdbcTemplate.update(
                 "INSERT INTO environment (id, tenant_id, name, description, type, status, " +
-                        "source_env_id, sandbox_tenant_id, created_by, created_at, updated_at) " +
-                        "VALUES (?, ?, ?, ?, ?, 'CREATING', ?, ?, ?, ?, ?)",
-                id, tenantId, name, description, type, sourceEnvId, sandboxTenantId, createdBy, now, now
+                        "source_env_id, sandbox_tenant_id, config, created_by, created_at, updated_at) " +
+                        "VALUES (?, ?, ?, ?, ?, 'CREATING', ?, ?, ?::jsonb, ?, ?, ?)",
+                id, tenantId, name, description, type, sourceEnvId, sandboxTenantId, config, createdBy, now, now
         );
         return id;
     }

@@ -17,12 +17,20 @@
 #   2. runs `timeout 300 bash install.sh` with stdin from /dev/null, so no prompt can wait;
 #   3. reads each collection's record count (meta.totalCount of a page[size]=1 list) and
 #      compares it with the length of seeds/<collection>.json.
+# Then it installs the first template once more, into an empty sandbox (KLT-626): it creates a
+# sandbox of the tenant with cloneMetadata=false (what `kelta sandbox create --empty` sends),
+# checks the response says clone_mode EMPTY and status ACTIVE, signs in as the sandbox's
+# one-time admin, checks none of the template's collections exist there yet (the parent now
+# holds them all, so a clone would have carried them over), runs install.sh against the
+# sandbox with no deletions beforehand, and compares the seed counts there.
 # It exits non-zero at the first failed install, timeout or count mismatch.
 set -euo pipefail
 
 if [ "${1:-}" = "--in-container" ]; then
   TEMPLATES_DIR="${2:?templates directory}"
   AUTH_URL="${AUTH_URL:-http://kelta-auth:8081}"
+  SANDBOX_NAME="${SANDBOX_NAME:-templates-empty}"
+  READY_ATTEMPTS="${READY_ATTEMPTS:-60}"
   GATEWAY_URL="${GATEWAY_URL:-http://kelta-gateway:8080}"
   TENANT_SLUG="${TENANT_SLUG:-default}"
   ADMIN_USERNAME="${ADMIN_USERNAME:-admin@kelta.local}"
@@ -34,20 +42,58 @@ if [ "${1:-}" = "--in-container" ]; then
     exit 1
   }
 
+  # sign_in [username password tenant-slug] — defaults to the platform admin of TENANT_SLUG.
   sign_in() {
     local token
     token=$(curl -fsS -m 30 -X POST "$AUTH_URL/auth/direct-login" \
       -H "Content-Type: application/json" \
-      -d "$(jq -cn --arg u "$ADMIN_USERNAME" --arg p "$ADMIN_PASSWORD" --arg t "$TENANT_SLUG" \
-        '{username: $u, password: $p, tenantSlug: $t}')" | jq -r '.access_token // empty') \
+      -d "$(jq -cn --arg u "${1:-$ADMIN_USERNAME}" --arg p "${2:-$ADMIN_PASSWORD}" \
+        --arg t "${3:-$TENANT_SLUG}" '{username: $u, password: $p, tenantSlug: $t}')" \
+      | jq -r '.access_token // empty') \
       || fail "direct login to $AUTH_URL failed"
     [ -n "$token" ] || fail "direct login did not return an access_token"
     printf '%s' "$token"
   }
 
+  # record_count <collection> [tenant-slug]
   record_count() {
     curl -fsS -m 30 -H "Authorization: Bearer $KELTA_TOKEN" \
-      "$GATEWAY_URL/$TENANT_SLUG/api/$1?page%5Bsize%5D=1" | jq -e '.meta.totalCount'
+      "$GATEWAY_URL/${2:-$TENANT_SLUG}/api/$1?page%5Bsize%5D=1" | jq -e '.meta.totalCount'
+  }
+
+  # http_status <path> — GET through the gateway with KELTA_TOKEN; prints the status code.
+  http_status() {
+    curl -sS -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $KELTA_TOKEN" \
+      "$GATEWAY_URL/$1" || true
+  }
+
+  # install_template <dir> <tenant-slug> <label> — runs install.sh with the CLI env already
+  # exported (KELTA_TOKEN), then checks every seed file's record count in that tenant.
+  install_template() {
+    local template="$1" tenant="$2" label="$3" start status elapsed seed collection expected actual
+    export KELTA_URL="$GATEWAY_URL" KELTA_TENANT="$tenant"
+    start=$(date +%s)
+    set +e
+    timeout -k 10 "$INSTALL_TIMEOUT" bash "$template/install.sh" </dev/null
+    status=$?
+    set -e
+    elapsed=$(($(date +%s) - start))
+    if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+      fail "$label: install.sh did not finish within ${INSTALL_TIMEOUT}s"
+    elif [ "$status" -ne 0 ]; then
+      fail "$label: install.sh exited $status after ${elapsed}s"
+    fi
+    echo "$label: install.sh exited 0 in ${elapsed}s"
+
+    for seed in "$template"/seeds/*.json; do
+      collection="$(basename "$seed" .json)"
+      expected="$(jq length "$seed")"
+      actual="$(record_count "$collection" "$tenant")" \
+        || fail "$label: could not read the record count of $collection"
+      echo "$label/$collection: expected $expected, found $actual"
+      [ "$actual" -eq "$expected" ] \
+        || fail "$label: $collection holds $actual records, seeds/$collection.json has $expected"
+    done
   }
 
   shopt -s nullglob
@@ -61,32 +107,51 @@ if [ "${1:-}" = "--in-container" ]; then
     echo "::group::template $name"
 
     KELTA_TOKEN="$(sign_in)"
-    export KELTA_TOKEN KELTA_URL="$GATEWAY_URL" KELTA_TENANT="$TENANT_SLUG"
-
-    start=$(date +%s)
-    set +e
-    timeout -k 10 "$INSTALL_TIMEOUT" bash "$template/install.sh" </dev/null
-    status=$?
-    set -e
-    elapsed=$(($(date +%s) - start))
-    if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
-      fail "$name: install.sh did not finish within ${INSTALL_TIMEOUT}s"
-    elif [ "$status" -ne 0 ]; then
-      fail "$name: install.sh exited $status after ${elapsed}s"
-    fi
-    echo "$name: install.sh exited 0 in ${elapsed}s"
-
-    for seed in "$template"/seeds/*.json; do
-      collection="$(basename "$seed" .json)"
-      expected="$(jq length "$seed")"
-      actual="$(record_count "$collection")" || fail "$name: could not read the record count of $collection"
-      echo "$name/$collection: expected $expected, found $actual"
-      [ "$actual" -eq "$expected" ] \
-        || fail "$name: $collection holds $actual records, seeds/$collection.json has $expected"
-    done
+    export KELTA_TOKEN
+    install_template "$template" "$TENANT_SLUG" "$name"
     echo "::endgroup::"
   done
   echo "All ${#templates[@]} template(s) installed and their seed counts match"
+
+  # --- the first template again, into an empty sandbox ----------------------------------
+  template="${templates[0]%/}"
+  name="$(basename "$template")"
+  echo "::group::template $name into an empty sandbox"
+  KELTA_TOKEN="$(sign_in)"
+  created=$(curl -fsS -m 120 -X POST "$GATEWAY_URL/$TENANT_SLUG/api/environments" \
+    -H "Authorization: Bearer $KELTA_TOKEN" -H "Content-Type: application/json" \
+    -d "$(jq -cn --arg n "$SANDBOX_NAME" \
+      '{data: {type: "environments", attributes: {name: $n, type: "SANDBOX", cloneMetadata: false}}}')") \
+    || fail "creating the empty sandbox $SANDBOX_NAME failed"
+  attrs="$(jq -c '.data.attributes' <<<"$created")"
+  [ "$(jq -r '.clone_mode' <<<"$attrs")" = "EMPTY" ] \
+    || fail "sandbox $SANDBOX_NAME: clone_mode is $(jq -r '.clone_mode' <<<"$attrs"), expected EMPTY"
+  [ "$(jq -r '.status' <<<"$attrs")" = "ACTIVE" ] \
+    || fail "sandbox $SANDBOX_NAME: status is $(jq -r '.status' <<<"$attrs"), expected ACTIVE"
+  sandbox_slug="$(jq -r '.sandboxSlug' <<<"$attrs")"
+  echo "created empty sandbox $sandbox_slug"
+
+  KELTA_TOKEN="$(sign_in "$(jq -r '.adminUsername' <<<"$attrs")" \
+    "$(jq -r '.adminInitialPassword' <<<"$attrs")" "$sandbox_slug")"
+  export KELTA_TOKEN
+  for ((i = 0; i < READY_ATTEMPTS; i++)); do
+    [ "$(http_status "$sandbox_slug/api/collections")" = "200" ] && break
+    sleep 1
+  done
+  [ "$(http_status "$sandbox_slug/api/collections")" = "200" ] \
+    || fail "sandbox $sandbox_slug: GET /api/collections never answered 200 with its admin's token"
+
+  for seed in "$template"/seeds/*.json; do
+    collection="$(basename "$seed" .json)"
+    status="$(http_status "$sandbox_slug/api/$collection?page%5Bsize%5D=1")"
+    [ "$status" != "200" ] \
+      || fail "sandbox $sandbox_slug already holds $collection before the install — it was not created empty"
+  done
+  echo "sandbox $sandbox_slug holds none of $name's collections"
+
+  install_template "$template" "$sandbox_slug" "$name@$sandbox_slug"
+  echo "::endgroup::"
+  echo "$name installed into the empty sandbox $sandbox_slug with no deletions"
   exit 0
 fi
 

@@ -750,7 +750,7 @@ Apply a package file to this tenant (metadata items, then its seed records secti
 
 ## sandbox
 
-A sandbox is its own tenant with its own users, not a view into the parent tenant — the parent's PAT or session has no membership there and is refused on sandbox-tenant paths. `sandbox create` prints a one-time admin credential for the new tenant plus its sign-in URL (`signInUrl`, `<ui-base-url>/<slug>/login`) and API base URL (`apiBaseUrl`, `<external-base-url>/<slug>`); the worker builds both from `kelta.ui-base-url` (`KELTA_UI_BASE_URL`) and `kelta.external-base-url` (`EXTERNAL_BASE_URL`). Sign in at the printed URL, or authenticate via `POST /auth/direct-login` on the auth server (not the API host) with `username`, `password` and `tenantSlug` from the printed output, or run `kelta auth login` against the sandbox slug (browser login) and then `kelta token create` to mint a PAT scoped to it.
+A sandbox is its own tenant with its own users, not a view into the parent tenant — the parent's PAT or session has no membership there and is refused on sandbox-tenant paths. `sandbox create` prints a one-time admin credential for the new tenant plus its sign-in URL (`signInUrl`, `<ui-base-url>/<slug>/login`) and API base URL (`apiBaseUrl`, `<external-base-url>/<slug>`); the worker builds both from `kelta.ui-base-url` (`KELTA_UI_BASE_URL`) and `kelta.external-base-url` (`EXTERNAL_BASE_URL`). Sign in at the printed URL, or authenticate via `POST /auth/direct-login` on the auth server (not the API host) with `username`, `password` and `tenantSlug` from the printed output, or run `kelta auth login` against the sandbox slug (browser login) and then `kelta token create` to mint a PAT scoped to it. By default the sandbox is a clone of the parent's metadata (collections, fields, picklists, layouts, list views, flows, dashboards, menus, pages). `sandbox create --empty` sends `cloneMetadata: false` and creates it with the system defaults only — system collections, default profiles and the admin — while keeping the parent's edition, settings, limits and IP allowlist; use it for a clean tenant to build a template, package or reproduction in. `sandbox status` and `sandbox list` show `clone_mode` (`CLONED` or `EMPTY`). An empty sandbox cannot be refreshed: `sandbox refresh` would clone the parent's metadata into it, so it answers 409 `EMPTY_SANDBOX_REFRESH`; delete it and create one without `--empty` to get a clone.
 
 ### `kelta sandbox create`
 
@@ -758,6 +758,7 @@ Create a sandbox environment (prints one-time admin credentials)
 
 - `-n, --name <name>` — Environment name
 - `-d, --description <description>` — Environment description
+- `--empty` — Create the sandbox without cloning the parent's metadata: system collections, default profiles and the admin only (it cannot be refreshed)
 
 ### `kelta sandbox list`
 
@@ -771,7 +772,7 @@ Show environment status (with --wait, poll until ACTIVE or FAILED)
 
 ### `kelta sandbox refresh <envId>`
 
-Refresh a sandbox environment from its source **(destructive — needs --yes off-TTY)**
+Refresh a sandbox environment from its source (an --empty sandbox is refused with 409) **(destructive — needs --yes off-TTY)**
 
 ### `kelta sandbox delete <envId>`
 

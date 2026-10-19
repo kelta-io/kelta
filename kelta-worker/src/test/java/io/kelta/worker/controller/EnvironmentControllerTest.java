@@ -138,7 +138,7 @@ class EnvironmentControllerTest {
     @DisplayName("createEnvironment provisions a local sandbox with the caller as creator")
     void createProvisionsSandbox() {
         grantPermission();
-        when(provisioningService.createSandbox("t1", "dev", null, "SANDBOX", "user-1"))
+        when(provisioningService.createSandbox("t1", "dev", null, "SANDBOX", "user-1", true))
                 .thenReturn(Map.of("id", "env-new", "sandboxSlug", "acme--dev"));
 
         Map<String, Object> body = new HashMap<>();
@@ -147,7 +147,57 @@ class EnvironmentControllerTest {
         var response = controller.createEnvironment(body, request, "user-1");
 
         assertThat(response.getStatusCode().value()).isEqualTo(202);
-        verify(provisioningService).createSandbox("t1", "dev", null, "SANDBOX", "user-1");
+        verify(provisioningService).createSandbox("t1", "dev", null, "SANDBOX", "user-1", true);
+    }
+
+    @Test
+    @DisplayName("createEnvironment passes cloneMetadata=false through to create an empty sandbox")
+    void createPassesCloneMetadataFalse() {
+        grantPermission();
+        when(provisioningService.createSandbox("t1", "dev", null, "SANDBOX", "user-1", false))
+                .thenReturn(Map.of("id", "env-new", "clone_mode", "EMPTY"));
+
+        Map<String, Object> body = Map.of("data", Map.of(
+                "type", "environments",
+                "attributes", Map.of("name", "dev", "cloneMetadata", false)));
+
+        var response = controller.createEnvironment(body, request, "user-1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(202);
+        verify(provisioningService).createSandbox("t1", "dev", null, "SANDBOX", "user-1", false);
+    }
+
+    @Test
+    @DisplayName("createEnvironment clones when cloneMetadata is explicitly true")
+    void createPassesCloneMetadataTrue() {
+        grantPermission();
+        when(provisioningService.createSandbox("t1", "dev", null, "SANDBOX", "user-1", true))
+                .thenReturn(Map.of("id", "env-new", "clone_mode", "CLONED"));
+
+        var response = controller.createEnvironment(
+                new HashMap<>(Map.of("name", "dev", "cloneMetadata", true)), request, "user-1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(202);
+        verify(provisioningService).createSandbox("t1", "dev", null, "SANDBOX", "user-1", true);
+    }
+
+    @Test
+    @DisplayName("createEnvironment rejects a non-boolean cloneMetadata with 400 and a JSON:API pointer")
+    void createRejectsNonBooleanCloneMetadata() {
+        grantPermission();
+
+        Map<String, Object> body = Map.of("data", Map.of(
+                "attributes", Map.of("name", "dev", "cloneMetadata", "false")));
+
+        var response = controller.createEnvironment(body, request, "user-1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThat(firstError(response))
+                .containsEntry("status", "400")
+                .containsEntry("code", "VALIDATION_FAILED")
+                .containsEntry("detail", "cloneMetadata must be a boolean")
+                .containsEntry("source", Map.of("pointer", "/data/attributes/cloneMetadata"));
+        verifyNoInteractions(provisioningService);
     }
 
     @Test
@@ -170,14 +220,14 @@ class EnvironmentControllerTest {
         assertThat(response.getStatusCode().value()).isEqualTo(201);
         verify(provisioningService).createRemoteEnvironment("t1", "prod-eu", null, "PRODUCTION",
                 "https://eu.kelta.example", "acme", "vault-1", "user-1");
-        verify(provisioningService, never()).createSandbox(any(), any(), any(), any(), any());
+        verify(provisioningService, never()).createSandbox(any(), any(), any(), any(), any(), anyBoolean());
     }
 
     @Test
     @DisplayName("createEnvironment unwraps a JSON:API envelope")
     void createUnwrapsJsonApiBody() {
         grantPermission();
-        when(provisioningService.createSandbox("t1", "dev", null, "SANDBOX", "user-1"))
+        when(provisioningService.createSandbox("t1", "dev", null, "SANDBOX", "user-1", true))
                 .thenReturn(Map.of("id", "env-new"));
 
         Map<String, Object> body = Map.of("data", Map.of(
@@ -195,7 +245,7 @@ class EnvironmentControllerTest {
         grantPermission();
         String detail = "Environment name 'dev' is already used by environment 'dev' "
                 + "(id env-old, status ARCHIVED) in this tenant. Choose a different name.";
-        when(provisioningService.createSandbox("t1", "dev", null, "SANDBOX", "user-1"))
+        when(provisioningService.createSandbox("t1", "dev", null, "SANDBOX", "user-1", true))
                 .thenThrow(new SandboxProvisioningService.EnvironmentConflictException(
                         "env-old", "dev", "ARCHIVED", detail));
 
@@ -218,7 +268,7 @@ class EnvironmentControllerTest {
     @DisplayName("createEnvironment answers 409 when a concurrent create wins the unique index")
     void createMapsDuplicateKeyToConflict() {
         grantPermission();
-        when(provisioningService.createSandbox(any(), any(), any(), any(), any()))
+        when(provisioningService.createSandbox(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenThrow(new DuplicateKeyException("idx_environment_tenant_name"));
 
         var response = controller.createEnvironment(new HashMap<>(Map.of("name", "dev")), request, "user-1");
@@ -231,7 +281,7 @@ class EnvironmentControllerTest {
     @DisplayName("createEnvironment answers 400 with the reason and a pointer to the offending attribute")
     void createMapsValidationFailureWithPointer() {
         grantPermission();
-        when(provisioningService.createSandbox(any(), any(), any(), any(), any()))
+        when(provisioningService.createSandbox(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenThrow(new SandboxProvisioningService.InvalidEnvironmentRequestException(
                         "name", "Sandbox name must contain letters or digits"));
 
@@ -280,7 +330,7 @@ class EnvironmentControllerTest {
     @DisplayName("createEnvironment answers 400 without a pointer for a failure not tied to an attribute")
     void createMapsValidationFailure() {
         grantPermission();
-        when(provisioningService.createSandbox(any(), any(), any(), any(), any()))
+        when(provisioningService.createSandbox(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenThrow(new IllegalArgumentException("Sandboxes cannot be created from a sandbox tenant"));
 
         var response = controller.createEnvironment(new HashMap<>(Map.of("name", "dev")), request, "user-1");
@@ -309,6 +359,23 @@ class EnvironmentControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(202);
         verify(provisioningService).refreshSandbox("env-1", "t1");
+    }
+
+    @Test
+    @DisplayName("refresh of an empty sandbox answers 409 EMPTY_SANDBOX_REFRESH")
+    void refreshOfEmptySandboxConflicts() {
+        grantPermission();
+        when(provisioningService.refreshSandbox("env-1", "t1"))
+                .thenThrow(new SandboxProvisioningService.EmptySandboxRefreshException(
+                        "Sandbox 'dev' (id env-1) was created empty"));
+
+        var response = controller.refreshEnvironment("env-1", request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(firstError(response))
+                .containsEntry("status", "409")
+                .containsEntry("code", "EMPTY_SANDBOX_REFRESH")
+                .containsEntry("detail", "Sandbox 'dev' (id env-1) was created empty");
     }
 
     @Test

@@ -28,7 +28,12 @@ import java.util.regex.Pattern;
  * created through the standard tenant write path so the whole lifecycle hook
  * chain runs (schema creation, profile/OIDC/admin seeding, Cerbos sync, Svix,
  * Superset). Configuration is then cloned in by exporting a full metadata
- * package from the parent and importing it into the sandbox tenant.
+ * package from the parent and importing it into the sandbox tenant — unless the
+ * caller asks for an <b>empty</b> sandbox ({@code cloneMetadata=false}), which
+ * keeps only what the hook chain seeds (system collections, default profiles,
+ * the admin). The choice is recorded as {@code environment.config.cloneMode}
+ * ({@value #CLONE_MODE_CLONED} or {@value #CLONE_MODE_EMPTY}); an empty sandbox
+ * cannot be refreshed, because a refresh is a full clone of the parent.
  *
  * <p>Tenant-context discipline: cross-tenant hops are always explicit
  * {@link TenantContext#callWithTenant}/{@link TenantContext#runWithTenant} with
@@ -47,6 +52,8 @@ public class SandboxProvisioningService {
     private static final String PASSWORD_ALPHABET =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
     private static final int PASSWORD_LENGTH = 20;
+    public static final String CLONE_MODE_CLONED = "CLONED";
+    public static final String CLONE_MODE_EMPTY = "EMPTY";
 
     private final EnvironmentRepository environmentRepository;
     private final SandboxEnvironmentService environmentService;
@@ -84,10 +91,22 @@ public class SandboxProvisioningService {
     }
 
     /**
-     * Creates a sandbox tenant for the given parent and starts the async clone.
-     * The parent tenant id comes from the authenticated request context — never
-     * from the request body (a caller must not be able to claim another tenant
-     * as parent).
+     * Creates a sandbox tenant for the given parent and clones the parent's
+     * metadata into it. Same as {@code createSandbox(..., true)}.
+     */
+    public Map<String, Object> createSandbox(String parentTenantId, String name, String description,
+                                             String type, String createdBy) {
+        return createSandbox(parentTenantId, name, description, type, createdBy, true);
+    }
+
+    /**
+     * Creates a sandbox tenant for the given parent. With {@code cloneMetadata}
+     * the parent's metadata is cloned in; without it the sandbox is ACTIVE at
+     * once and holds only the platform's system defaults — it still inherits the
+     * parent's edition, settings, limits and IP allowlist, and gets the hardened
+     * one-time admin either way. The parent tenant id comes from the
+     * authenticated request context — never from the request body (a caller must
+     * not be able to claim another tenant as parent).
      *
      * @return the environment row plus one-time credentials for the seeded
      *         sandbox admin ({@code adminInitialPassword} is never persisted or
@@ -95,7 +114,7 @@ public class SandboxProvisioningService {
      *         ({@code signInUrl}) and its API base URL ({@code apiBaseUrl})
      */
     public Map<String, Object> createSandbox(String parentTenantId, String name, String description,
-                                             String type, String createdBy) {
+                                             String type, String createdBy, boolean cloneMetadata) {
         Map<String, Object> parent = environmentRepository.getJdbcTemplate().queryForList(
                         "SELECT * FROM tenant WHERE id = ?", parentTenantId).stream()
                 .findFirst()
@@ -163,9 +182,14 @@ public class SandboxProvisioningService {
         String envId = environmentRepository.createWithSandboxTenant(
                 parentTenantId, name, description,
                 "STAGING".equals(type) ? "STAGING" : "SANDBOX",
-                prodEnvId, sandboxTenantId, createdBy);
+                prodEnvId, sandboxTenantId,
+                cloneModeConfig(cloneMetadata ? CLONE_MODE_CLONED : CLONE_MODE_EMPTY), createdBy);
 
-        cloneIntoSandbox(parentTenantId, sandboxTenantId, envId);
+        if (cloneMetadata) {
+            cloneIntoSandbox(parentTenantId, sandboxTenantId, envId);
+        } else {
+            environmentRepository.updateStatus(envId, parentTenantId, "ACTIVE");
+        }
 
         Map<String, Object> result = new LinkedHashMap<>(
                 environmentRepository.findByIdAndTenant(envId, parentTenantId).orElseThrow());
@@ -266,9 +290,20 @@ public class SandboxProvisioningService {
         return environmentRepository.findByIdAndTenant(envId, tenantId).orElseThrow();
     }
 
-    /** Re-clones the parent's current config into the sandbox (OVERWRITE). */
+    /**
+     * Re-clones the parent's current config into the sandbox (OVERWRITE). An
+     * empty sandbox is refused: the refresh would import the parent's whole
+     * metadata package into a tenant created to hold none of it.
+     *
+     * @throws EmptySandboxRefreshException when the sandbox was created empty
+     */
     public Map<String, Object> refreshSandbox(String envId, String parentTenantId) {
         Map<String, Object> env = requireLocalSandbox(envId, parentTenantId);
+        if (CLONE_MODE_EMPTY.equals(env.get("clone_mode"))) {
+            throw new EmptySandboxRefreshException("Sandbox '" + env.get("name") + "' (id " + envId
+                    + ") was created empty (cloneMetadata=false); refresh clones the parent's metadata, "
+                    + "so it is not allowed. Delete the sandbox and create it without --empty to get a clone.");
+        }
         String sandboxTenantId = (String) env.get("sandbox_tenant_id");
         environmentRepository.updateStatus(envId, parentTenantId, "REFRESHING");
         cloneIntoSandbox(parentTenantId, sandboxTenantId, envId);
@@ -495,6 +530,13 @@ public class SandboxProvisioningService {
         }
     }
 
+    /** A refresh of a sandbox created with {@code cloneMetadata=false} — answered 409. */
+    public static class EmptySandboxRefreshException extends RuntimeException {
+        public EmptySandboxRefreshException(String message) {
+            super(message);
+        }
+    }
+
     /**
      * A create whose name (or derived sandbox slug) is already taken — answered
      * 409. The conflicting environment's id, name and status are null when the
@@ -560,12 +602,18 @@ public class SandboxProvisioningService {
         }
     }
 
+    private String cloneModeConfig(String cloneMode) {
+        return objectMapper.writeValueAsString(Map.of("cloneMode", cloneMode));
+    }
+
     private void recordCloneError(String parentTenantId, String envId, String detail) {
         try {
             String cfg = objectMapper.writeValueAsString(Map.of("cloneError", detail));
+            // Merged, not replaced: config also carries the sandbox's cloneMode.
             TenantContext.runWithTenant(parentTenantId, () ->
                     environmentRepository.getJdbcTemplate().update(
-                            "UPDATE environment SET config = ?::jsonb, updated_at = NOW() " +
+                            "UPDATE environment SET config = COALESCE(config, '{}'::jsonb) || ?::jsonb, "
+                                    + "updated_at = NOW() " +
                                     "WHERE id = ? AND tenant_id = ?",
                             cfg, envId, parentTenantId));
         } catch (Exception e) {

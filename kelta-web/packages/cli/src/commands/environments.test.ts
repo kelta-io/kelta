@@ -53,6 +53,83 @@ describe('sandbox ops', () => {
     expect(env.id).toBe('env1');
   });
 
+  it('creates an empty sandbox with cloneMetadata: false when empty is set', async () => {
+    const post = vi.fn().mockResolvedValue({
+      status: 202,
+      data: { data: { id: 'env1', attributes: { status: 'ACTIVE', clone_mode: 'EMPTY' } } },
+    });
+    await runSandboxCreate(client({ post }), { name: 'dev', empty: true });
+    expect(post).toHaveBeenCalledWith('/api/environments', {
+      data: { attributes: { name: 'dev', type: 'SANDBOX', cloneMetadata: false } },
+    });
+  });
+
+  function createCtx(post: ReturnType<typeof vi.fn>): CommandContext {
+    return {
+      profile: { name: 'test' },
+      global: { raw: false, quiet: false, yes: true },
+      log: vi.fn(),
+      client: { getAxiosInstance: () => client({ post }) },
+    } as unknown as CommandContext;
+  }
+
+  it('kelta sandbox create --empty sends cloneMetadata: false and prints the clone mode', async () => {
+    const post = vi.fn().mockResolvedValue({
+      status: 202,
+      data: { data: { id: 'env1', attributes: { status: 'ACTIVE', clone_mode: 'EMPTY' } } },
+    });
+    const def = environmentCommands.find((c) => c.group === 'sandbox' && c.name === 'create')!;
+    expect(def.options?.map((o) => o.flag)).toContain('--empty');
+
+    const result = await def.handler(
+      createCtx(post),
+      def.input.parse({ name: 'dev', empty: true }) as never
+    );
+
+    expect(post).toHaveBeenCalledWith('/api/environments', {
+      data: { attributes: { name: 'dev', type: 'SANDBOX', cloneMetadata: false } },
+    });
+    expect((result as { human: string }).human).toContain('status: ACTIVE, clone: EMPTY');
+  });
+
+  it('kelta sandbox create without --empty does not send cloneMetadata', async () => {
+    const post = vi.fn().mockResolvedValue({
+      status: 202,
+      data: { data: { id: 'env1', attributes: { status: 'CREATING', clone_mode: 'CLONED' } } },
+    });
+    const def = environmentCommands.find((c) => c.group === 'sandbox' && c.name === 'create')!;
+
+    await def.handler(createCtx(post), def.input.parse({ name: 'dev' }) as never);
+
+    const body = post.mock.calls[0][1] as { data: { attributes: Record<string, unknown> } };
+    expect(body.data.attributes).not.toHaveProperty('cloneMetadata');
+    expect(body.data.attributes).toEqual({ name: 'dev', type: 'SANDBOX' });
+  });
+
+  it('sandbox status and list show the clone mode', async () => {
+    const env = {
+      id: 'env1',
+      attributes: { name: 'dev', type: 'SANDBOX', status: 'ACTIVE', clone_mode: 'EMPTY' },
+    };
+    const get = vi.fn().mockResolvedValue({ status: 200, data: { data: [env] } });
+    const ctx = {
+      profile: { name: 'test' },
+      global: { raw: false, quiet: false, yes: true },
+      log: vi.fn(),
+      client: { getAxiosInstance: () => client({ get }) },
+    } as unknown as CommandContext;
+    const status = environmentCommands.find((c) => c.group === 'sandbox' && c.name === 'status')!;
+    const list = environmentCommands.find((c) => c.group === 'sandbox' && c.name === 'list')!;
+
+    const statusResult = await status.handler(ctx, status.input.parse({ envId: 'env1' }) as never);
+    const listResult = await list.handler(ctx, list.input.parse({}) as never);
+
+    expect((statusResult as { human: string }).human).toContain('Clone:  EMPTY');
+    expect((listResult as { columns: { key: string }[] }).columns.map((c) => c.key)).toContain(
+      'clone_mode'
+    );
+  });
+
   it('sandbox create prints the sign-in and API URLs with the one-time credentials', async () => {
     const post = vi.fn().mockResolvedValue({
       status: 202,

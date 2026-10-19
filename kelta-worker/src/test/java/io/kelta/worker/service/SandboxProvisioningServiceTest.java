@@ -102,7 +102,7 @@ class SandboxProvisioningServiceTest {
             when(environmentService.ensureProductionEnvironment(PARENT, "admin"))
                     .thenReturn(Map.of("id", "prod-env-1"));
             when(environmentRepository.createWithSandboxTenant(eq(PARENT), eq("dev"), any(),
-                    eq("SANDBOX"), eq("prod-env-1"), eq("sbx-tenant"), eq("admin")))
+                    eq("SANDBOX"), eq("prod-env-1"), eq("sbx-tenant"), any(), eq("admin")))
                     .thenReturn("env-1");
 
             Map<String, Object> envRow = new LinkedHashMap<>();
@@ -208,6 +208,63 @@ class SandboxProvisioningServiceTest {
         }
 
         @Test
+        @DisplayName("records cloneMode CLONED on the environment row by default")
+        void recordsClonedMode() {
+            happyPathSetup();
+
+            service.createSandbox(PARENT, "dev", null, "SANDBOX", "admin");
+
+            verify(environmentRepository).createWithSandboxTenant(eq(PARENT), eq("dev"), any(),
+                    eq("SANDBOX"), eq("prod-env-1"), eq("sbx-tenant"),
+                    eq("{\"cloneMode\":\"CLONED\"}"), eq("admin"));
+            verify(packageImportService).importPackage(eq("sbx-tenant"), anyMap(), any());
+        }
+
+        @Test
+        @DisplayName("cloneMetadata=false skips the clone, marks the env ACTIVE and records cloneMode EMPTY")
+        void emptySandboxSkipsClone() {
+            happyPathSetup();
+
+            var result = service.createSandbox(PARENT, "dev", null, "SANDBOX", "admin", false);
+
+            verify(environmentRepository).createWithSandboxTenant(eq(PARENT), eq("dev"), any(),
+                    eq("SANDBOX"), eq("prod-env-1"), eq("sbx-tenant"),
+                    eq("{\"cloneMode\":\"EMPTY\"}"), eq("admin"));
+            verifyNoInteractions(packageService, packageImportService);
+            verify(environmentRepository).updateStatus("env-1", PARENT, "ACTIVE");
+            verify(environmentRepository, never()).updateStatus("env-1", PARENT, "FAILED");
+            assertThat(result.get("adminInitialPassword")).isNotNull();
+        }
+
+        @Test
+        @DisplayName("an empty sandbox keeps the parent's edition, settings, limits, IP allowlist and the hardened admin")
+        void emptySandboxInheritsParentConfigAndHardensAdmin() {
+            happyPathSetup();
+
+            var result = service.createSandbox(PARENT, "dev", null, "SANDBOX", "admin", false);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> tenantCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(any(), tenantCaptor.capture());
+            assertThat(tenantCaptor.getValue())
+                    .containsEntry("edition", "ENTERPRISE")
+                    .containsEntry("settings", Map.of("theme", "dark"))
+                    .containsEntry("limits", Map.of("apiCalls", 1000))
+                    .containsEntry("ipAllowlistEnabled", Boolean.TRUE)
+                    .containsEntry("ipAllowlistCidrs", java.util.List.of("10.0.0.0/8"))
+                    .containsEntry("parentTenantId", PARENT);
+
+            ArgumentCaptor<Object> hashCaptor = ArgumentCaptor.forClass(Object.class);
+            verify(jdbcTemplate).update(contains("UPDATE user_credential"),
+                    hashCaptor.capture(), eq("sbx-tenant"), eq("acme--dev-admin"));
+            String hash = (String) hashCaptor.getValue();
+            assertThat(hash).startsWith("{bcrypt}");
+            assertThat(new BCryptPasswordEncoder().matches(
+                    (String) result.get("adminInitialPassword"), hash.substring("{bcrypt}".length())))
+                    .isTrue();
+        }
+
+        @Test
         @DisplayName("hardens the admin under the sandbox tenant's binding, not the caller's parent binding")
         void hardensUnderSandboxBinding() {
             happyPathSetup();
@@ -239,7 +296,7 @@ class SandboxProvisioningServiceTest {
                     .hasMessageContaining("acme--dev-admin");
 
             verify(environmentRepository, never()).createWithSandboxTenant(
-                    any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any());
             verify(jdbcTemplate).update(contains("SET status = 'DECOMMISSIONED'"), eq("sbx-tenant"));
             verifyNoInteractions(packageImportService, eventPublisher);
         }
@@ -468,6 +525,48 @@ class SandboxProvisioningServiceTest {
         assertThatThrownBy(() -> service.deleteSandbox("env-r", PARENT))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("not a tenant-backed local sandbox");
+    }
+
+    @Test
+    @DisplayName("refresh of an empty sandbox is rejected before any status change or clone")
+    void refreshRejectsEmptySandbox() {
+        Map<String, Object> env = new LinkedHashMap<>();
+        env.put("id", "env-1");
+        env.put("name", "dev");
+        env.put("sandbox_tenant_id", "sbx-tenant");
+        env.put("clone_mode", "EMPTY");
+        when(environmentRepository.findByIdAndTenant("env-1", PARENT)).thenReturn(Optional.of(env));
+
+        assertThatThrownBy(() -> service.refreshSandbox("env-1", PARENT))
+                .isInstanceOf(SandboxProvisioningService.EmptySandboxRefreshException.class)
+                .hasMessageContaining("created empty");
+        verify(environmentRepository, never()).updateStatus(any(), any(), any());
+        verifyNoInteractions(packageService, packageImportService);
+    }
+
+    @Test
+    @DisplayName("refresh of a cloned sandbox re-clones it")
+    void refreshClonesClonedSandbox() {
+        Map<String, Object> env = new LinkedHashMap<>();
+        env.put("id", "env-1");
+        env.put("sandbox_tenant_id", "sbx-tenant");
+        env.put("clone_mode", "CLONED");
+        when(environmentRepository.findByIdAndTenant("env-1", PARENT)).thenReturn(Optional.of(env));
+        when(jdbcTemplate.queryForList(contains("slug FROM tenant WHERE id"), eq(PARENT)))
+                .thenReturn(List.of(Map.of("slug", "acme")));
+        when(jdbcTemplate.queryForList(contains("slug FROM tenant WHERE id"), eq("sbx-tenant")))
+                .thenReturn(List.of(Map.of("slug", "acme--dev")));
+        Map<String, Object> options = Map.of("name", "sandbox-clone");
+        Map<String, Object> pkg = Map.of("items", List.of());
+        when(packageService.exportAllOptions(PARENT, "sandbox-clone", "1.0.0")).thenReturn(options);
+        when(packageService.exportPackage(PARENT, options)).thenReturn(pkg);
+        when(packageImportService.importPackage(eq("sbx-tenant"), eq(pkg), any()))
+                .thenReturn(new PackageImportService.ImportReport(0, 0, 0, 0, List.of()));
+
+        service.refreshSandbox("env-1", PARENT);
+
+        verify(environmentRepository).updateStatus("env-1", PARENT, "REFRESHING");
+        verify(packageImportService).importPackage(eq("sbx-tenant"), eq(pkg), any());
     }
 
     @Test
