@@ -859,6 +859,8 @@ Run a stdio MCP server: hosted kelta-mcp tools bridged + cli_ local tools
 - `--toolset <set>` — user|admin|all (default: "all")
 - `--source <source>` — auto|remote|local (default: "auto")
 - `--mcp-url <url>` — Hosted MCP base URL (default: api.→mcp. derivation)
+- `--tenant <slug>` — Serve this tenant (e.g. a sandbox) instead of the profile's; needs its token
+- `--token-env <var>` — Env var holding the --tenant token (keeps it out of argv and client config)
 - `--enable-api-tool` — Expose the raw cli_api escape hatch (off by default)
 
 ### `kelta mcp install <client>`
@@ -867,3 +869,5 @@ Print MCP client configuration for this profile (stdio bridge by default)
 
 - `--toolset <set>` — user|admin|all (default: "all")
 - `--direct` — Hosted HTTP config instead of the stdio bridge
+- `--tenant <slug>` — Bridge this tenant (e.g. a sandbox) instead of the profile's
+- `--token-env <var>` — Env var the launched server reads the --tenant token from (required with --tenant)

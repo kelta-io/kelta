@@ -217,6 +217,40 @@ class AddFieldToolTest {
     }
 
     @Test
+    void fieldScopedPicklistNeedsNoSourceId() {
+        stubCollectionLookup();
+        wm.stubFor(post(urlEqualTo("/api/fields"))
+                .willReturn(aResponse().withStatus(201).withBody("{}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("add_field", Map.of(
+                        "collectionName", "projects",
+                        "fieldName", "stage",
+                        "type", "picklist",
+                        "picklistSourceType", "FIELD"), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        // values are owned by the field (picklistSourceId = its own id) — no global binding
+        wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/fields"))
+                .withRequestBody(matchingJsonPath("$.data.attributes.type", equalTo("PICKLIST")))
+                .withRequestBody(WireMock.notContaining("globalPicklistId")));
+    }
+
+    @Test
+    void globalPicklistStillRequiresSourceId() {
+        stubCollectionLookup();
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("add_field", Map.of(
+                        "collectionName", "projects",
+                        "fieldName", "stage",
+                        "type", "picklist"), null));
+
+        assertThat(result.isError()).isEqualTo(Boolean.TRUE);
+        wm.verify(0, WireMock.postRequestedFor(urlEqualTo("/api/fields")));
+    }
+
+    @Test
     void maskingAttachesFieldTypeConfigForStringField() {
         stubCollectionLookup();
         wm.stubFor(post(urlEqualTo("/api/fields"))

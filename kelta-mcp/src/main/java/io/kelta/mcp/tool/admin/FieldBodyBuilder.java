@@ -117,13 +117,20 @@ final class FieldBodyBuilder {
     }
 
     private String applyPicklistConfig(Map<String, Object> args, Map<String, Object> attrs) {
-        Object pid = args.get("picklistSourceId");
-        if (!(pid instanceof String picklistSourceId) || picklistSourceId.isBlank()) {
-            return "picklist fields require \"picklistSourceId\" (UUID of the source picklist).";
-        }
         String sourceType = "GLOBAL";
         if (args.get("picklistSourceType") instanceof String st && !st.isBlank()) {
             sourceType = st.toUpperCase(Locale.ROOT);
+        }
+        Object pid = args.get("picklistSourceId");
+        if (!(pid instanceof String picklistSourceId) || picklistSourceId.isBlank()) {
+            if ("FIELD".equals(sourceType)) {
+                // Field-scoped: the values are owned by this field (picklistSourceId = the
+                // field's own id, assigned on create), so there is nothing to bind yet —
+                // apply_field_picklist adds the values afterwards.
+                return null;
+            }
+            return "picklist fields require \"picklistSourceId\" (UUID of the global picklist), "
+                    + "or picklistSourceType \"FIELD\" for values owned by the field (then apply_field_picklist).";
         }
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("picklistSourceType", sourceType);
