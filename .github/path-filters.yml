@@ -74,6 +74,7 @@ e2e:
   - 'kelta-ui/**'
   - 'e2e-tests/**'
   - 'ci/admin-first-sign-in.sh'
+  - 'ci/mcp-smoke.sh'
   - 'docker-compose.yml'
   - 'docker-compose.build.yml'
   - 'docker-compose.ci.yml'
