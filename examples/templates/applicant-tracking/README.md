@@ -71,4 +71,6 @@ install with a message naming the field and the value.
 Unlike the CRM and inspections templates, this one was authored through the admin MCP server
 alone (`kelta mcp serve` bridged to the hosted admin and user toolsets), not the CLI.
 `BUILD-LOG.md` records every MCP call, every error hit on the way, and the platform gaps the
-build had to route around.
+build had to route around. CI replays those calls every week from `mcp-replay/calls.json` and
+fails when the build needs more than 20% more of them than `mcp-replay/baseline.txt`; how to
+regenerate both is in `BUILD-LOG.md` → "Replaying the build in CI".

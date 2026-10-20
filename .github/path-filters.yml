@@ -121,6 +121,19 @@ templates:
   - 'kelta-worker/src/main/java/io/kelta/worker/service/PackageImportService.java'
   - '.github/path-filters.yml'
 
+# MCP replay — the "mcp-replay" job replays the applicant-tracking template's MCP-only build
+# (examples/templates/applicant-tracking/mcp-replay/calls.json) through `kelta mcp serve`
+# against kelta-mcp and fails when its tools/call count grows more than 20% over the baseline.
+# kelta-mcp serves the tools, the templates hold the fixture, the CLI's mcp/ source is the
+# bridge, and the replay's own ci/ scripts drive it. The job also runs on the weekly schedule.
+mcp_replay:
+  - 'kelta-mcp/**'
+  - 'examples/templates/**'
+  - 'kelta-web/packages/cli/src/mcp/**'
+  - 'ci/mcp-replay.*'
+  - 'ci/mcp-replay-compare.*'
+  - '.github/path-filters.yml'
+
 # Upgrade test — the "upgrade" job boots the newest release, seeds it, upgrades it to HEAD
 # on the same volumes and re-reads the data. Anything that can change what an upgrade does
 # to existing data: migrations, the compose files both stacks boot (quickstart included),
