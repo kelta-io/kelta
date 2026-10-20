@@ -1484,6 +1484,37 @@ value's `sortOrder` from its position in the input array and, with `prune:true`,
 (`isActive=false`, never a hard delete) any existing active value whose `value` is absent from
 that array.
 
+**`apply_field_picklist` and `seed_records` (KLT-628).** `apply_field_picklist` is the
+field-scoped twin of `apply_picklist`: the values belong to one picklist field
+(`picklistSourceType=FIELD`, `picklistSourceId` = the field's id, resolved by
+`AdminLookups.list("fields", {collectionId, name}, 1)` and refused unless the field is
+`PICKLIST`/`MULTI_PICKLIST`). Both tools share `PicklistValueApplier` (upsert on
+`(picklistSourceType, picklistSourceId, value)`, positional `sortOrder`, soft `prune`).
+`add_field` with `picklistSourceType: "FIELD"` no longer requires a `picklistSourceId` (the source
+is the field's own id, assigned on create) and writes no `fieldTypeConfig`, which is the shape
+`usePicklistOptions` resolves to a FIELD source. `seed_records` bulk-creates a collection's
+records from plain attribute objects through `POST /api/operations` in batches of 100 (the
+worker's default `kelta.api.max-batch-operations`; at most 1000 per call); `references:
+{"<field>": "<parent>.<keyField>"}` resolves a parent's natural key to its id with
+`AdminLookups.idByNaturalKey` for every record **before** the first write, so an unknown key
+creates nothing. Each batch is atomic; a failure after the first batch reports the committed
+count in the error's `structuredContent.created`. Step-by-step coverage of a template build:
+`docs/authoring/mcp-admin-coverage.md`.
+
+**Targeting a sandbox from the stdio bridge (KLT-628).** `kelta mcp serve --tenant <slug>
+--token-env <VAR>` (`kelta-web/packages/cli/src/commands/mcp.ts` → `applyTenantSelector`) writes
+the slug and the named variable's token into `KELTA_TENANT`/`KELTA_TOKEN` before anything resolves
+a profile. That env layer already outranks the profile file in `resolveProfile`, so both the
+bridged `RemoteEndpoint`s (`{mcpUrl}/{slug}/mcp/{toolset}`, bearer = that token) and every `cli_`
+local tool (`runLocalCommand` → `buildContext`) target the selected tenant. `--tenant` without a
+token for it (no `--token-env`, no `KELTA_TOKEN`, and not the profile's own tenant) is a usage
+error, because the profile's PAT would be refused there: `kelta-mcp`'s `McpAuthFilter` checks only
+the `klt_` prefix, and the tenant binding is enforced by the gateway's `PatAuthenticationFilter`
+(token tenant ≠ request tenant → 401 `tenant_mismatch`; pinned for a sandbox token on
+`/<parent>/mcp/admin` and the reverse by `sandboxScopedPatCannotReachAnotherTenant`).
+`kelta mcp install --tenant <slug> --token-env <VAR>` emits the same flags (never the token) and
+refuses `--tenant` without `--token-env` for the stdio config.
+
 **`apply_menu` (KLT-219)** upserts a `ui-menus` row plus its `ui-menu-items` tree — groups (an
 item with children and no `path`) and their children, one level deep — in a single idempotent
 call. It reuses `AdminLookups.upsert` for the menu row (natural key `name`), but items can't

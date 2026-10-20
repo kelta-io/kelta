@@ -66,6 +66,12 @@ export const externalMeta: Record<`authoring/${string}` | `cli/${string}`, Exter
     section: 'reference',
     order: 80,
   },
+  'authoring/mcp-admin-coverage': {
+    title: 'Authoring a Template Through the Admin MCP Toolset',
+    description: 'Pointing kelta mcp serve at a sandbox, and the MCP tool behind each step of building a template app.',
+    section: 'reference',
+    order: 90,
+  },
   'cli/commands': {
     title: 'kelta CLI — Command Reference',
     description: 'Every kelta command group, command, flag and default — generated from the CLI command registry.',

@@ -26,6 +26,7 @@ Picklists, rules and constraints:
 |---|---|
 | `list_picklists`, `get_picklist` | global picklists and values |
 | `create_picklist`, `apply_picklist` | create / create-or-update with values (`prune` deactivates) |
+| `apply_field_picklist` | create-or-update the values owned by one picklist field (add the field with `picklistSourceType: "FIELD"` first) |
 | `add_picklist_value`, `update_picklist_value`, `deactivate_picklist_value`, `delete_picklist` | value lifecycle |
 | `list_validation_rules`, `create_validation_rule`, `update_validation_rule`, `delete_validation_rule` | formula error conditions |
 | `list_unique_constraints`, `create_unique_constraint`, `delete_unique_constraint` | composite unique constraints |
@@ -36,7 +37,7 @@ User experience:
 |---|---|
 | `apply_layout` | whole page-layout tree, keyed on collection + name (`create_layout` is deprecated) |
 | `update_layout`, `delete_layout` | layout metadata / removal |
-| `list_listviews`, `create_listview`, `apply_listview`, `update_listview`, `delete_listview` | shared list views incl. `viewType`/`typeConfig` |
+| `list_listviews`, `create_listview`, `apply_listview`, `update_listview`, `delete_listview` | shared list views; `viewType`/`typeConfig` on create and update only |
 | `apply_page` | validate-then-upsert a page-builder page, keyed on path |
 | `apply_menu` | whole app/menu tree, keyed on menu name and item labels |
 | `apply_dashboard` | dashboard and its components, keyed on name and component titles |
@@ -48,6 +49,12 @@ Automation and integration:
 | `list_flows`, `create_flow`, `update_flow`, `delete_flow` | flow definitions (JSON state machines, `runAsUserId`) |
 | `import_api_spec` | import an OpenAPI 3 document into the API spec library |
 | `materialize_api_collection` | turn a GET operation into an external collection |
+
+Data:
+
+| Tool | Purpose |
+|---|---|
+| `seed_records` | bulk-create records from plain attribute objects, resolving reference fields from a parent's natural key (batches of 100 through `/api/operations`) |
 
 Plus `ping`.
 
@@ -79,5 +86,7 @@ Plus `ping`.
 ## Typical build order
 
 `create_collection` → `add_field` → `apply_picklist` → `create_validation_rule` / `create_unique_constraint` →
-`apply_layout` → `apply_listview` → `apply_menu` → `apply_page` → `create_flow`. The
+`apply_layout` → `apply_listview` → `apply_menu` → `apply_page` → `create_flow` → `apply_dashboard` → `seed_records`.
+To build in a sandbox, start the bridge with `kelta mcp serve --tenant <sandbox-slug> --token-env <VAR>`
+([coverage map](/docs/reference/mcp-admin-coverage/)). The
 [tutorial](/docs/getting-started/first-app/#part-3--from-an-mcp-client) walks through it.

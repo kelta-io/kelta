@@ -107,13 +107,17 @@ public class McpServerConfig {
             Typical build order for a new object: create_collection (optionally with an \
             inline initial field set) -> add_field (repeat per additional field) -> \
             create_validation_rule / create_unique_constraint as needed -> for picklist \
-            fields, apply_picklist first, then reference it from add_field via \
-            picklistSourceId -> apply_layout / apply_listview for the admin UI -> \
-            create_flow for automation. delete_ counterparts exist for every create_ tool; \
-            update_ counterparts exist for collection, flow, layout, listview, and \
-            validation_rule.
+            fields, either apply_picklist first and reference it from add_field via \
+            picklistSourceId (global picklist), or add_field with picklistSourceType FIELD \
+            and then apply_field_picklist (values owned by the field, which travel with it \
+            through metadata export/apply) -> apply_layout / apply_listview for the admin \
+            UI -> create_flow for automation -> apply_dashboard -> seed_records for sample \
+            data (parents before children; references resolves a parent's natural key to \
+            its id). delete_ counterparts exist for every create_ tool; update_ counterparts \
+            exist for collection, flow, layout, listview, and validation_rule.
 
-            Idempotent apply: apply_layout, apply_listview, apply_picklist, apply_menu, \
+            Idempotent apply: apply_layout, apply_listview, apply_picklist, \
+            apply_field_picklist, apply_menu, \
             apply_dashboard and apply_page are create-or-update, keyed on a natural key \
             (collection+name for layouts/list views, name for picklists/menus/dashboards, \
             title within the dashboard for each component, path — falling back to slug — for \

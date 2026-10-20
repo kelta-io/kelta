@@ -25,7 +25,55 @@ function resolveToolsets(toolset: string): Toolset[] {
   return toolset === 'all' ? TOOLSETS : [toolset as Toolset];
 }
 
-function resolveRemotes(
+export interface TenantSelector {
+  /** Tenant slug to serve instead of the profile's (e.g. a sandbox). */
+  tenant?: string;
+  /** Name of the env var holding that tenant's PAT — never the token itself. */
+  tokenEnv?: string;
+}
+
+/**
+ * Point the whole server (bridged hosted tools AND `cli_` local tools) at the
+ * selected tenant by writing it into `KELTA_TENANT`/`KELTA_TOKEN`, the env
+ * layer {@link resolveProfile} already ranks above the profile file. Every
+ * later resolution in this process — {@link resolveRemotes} and each local
+ * tool's context — then targets that tenant with its own token.
+ *
+ * A PAT only works on the tenant it was issued in (the gateway rejects it
+ * anywhere else), so `--tenant` without a token for that tenant fails here
+ * instead of every tool call failing with 401.
+ */
+export function applyTenantSelector(
+  profileFlag: string | undefined,
+  selector: TenantSelector
+): void {
+  if (selector.tokenEnv !== undefined) {
+    const token = process.env[selector.tokenEnv];
+    if (!token) {
+      throw new CliError(`--token-env ${selector.tokenEnv}: that environment variable is not set`, {
+        code: 'MISSING_TOKEN_ENV',
+        exitCode: EXIT.USAGE,
+      });
+    }
+    process.env.KELTA_TOKEN = token;
+  }
+  if (selector.tenant === undefined) return;
+  const profile = resolveProfile(profileFlag);
+  if (
+    selector.tokenEnv === undefined &&
+    process.env.KELTA_TOKEN === undefined &&
+    selector.tenant !== profile.tenantSlug
+  ) {
+    throw new CliError(
+      `--tenant ${selector.tenant} needs that tenant's own token: pass --token-env <VAR> ` +
+        `(or set KELTA_TOKEN). The token of profile "${profile.name}" is not valid on another tenant.`,
+      { code: 'MISSING_TENANT_TOKEN', exitCode: EXIT.USAGE }
+    );
+  }
+  process.env.KELTA_TENANT = selector.tenant;
+}
+
+export function resolveRemotes(
   profileFlag: string | undefined,
   toolset: string,
   mcpUrlFlag: string | undefined,
@@ -56,6 +104,14 @@ const serve = defineCommand({
     { flag: '--source <source>', description: 'auto|remote|local', default: 'auto' },
     { flag: '--mcp-url <url>', description: 'Hosted MCP base URL (default: api.→mcp. derivation)' },
     {
+      flag: '--tenant <slug>',
+      description: "Serve this tenant (e.g. a sandbox) instead of the profile's; needs its token",
+    },
+    {
+      flag: '--token-env <var>',
+      description: 'Env var holding the --tenant token (keeps it out of argv and client config)',
+    },
+    {
       flag: '--enable-api-tool',
       description: 'Expose the raw cli_api escape hatch (off by default)',
     },
@@ -64,11 +120,14 @@ const serve = defineCommand({
     toolset: z.enum(['user', 'admin', 'all']).default('all'),
     source: z.enum(['auto', 'remote', 'local']).default('auto'),
     mcpUrl: z.string().url().optional(),
+    tenant: z.string().min(1).optional(),
+    tokenEnv: z.string().min(1).optional(),
     enableApiTool: z.boolean().default(false),
   }),
   handler: async (ctx, input) => {
     // lazy import: registry.ts imports this module (cycle-safe at call time)
     const { allCommands } = await import('../registry/registry.js');
+    applyTenantSelector(ctx.global.profile, { tenant: input.tenant, tokenEnv: input.tokenEnv });
     const remotes = resolveRemotes(ctx.global.profile, input.toolset, input.mcpUrl, input.source);
     const server = buildMcpServer({
       commands: allCommands,
@@ -80,7 +139,8 @@ const serve = defineCommand({
     });
     ctx.log(
       `kelta MCP server on stdio (toolset ${input.toolset}, source ${input.source}, ` +
-        `${String(remotes.length)} hosted endpoint(s))`
+        `${String(remotes.length)} hosted endpoint(s)` +
+        `${input.tenant ? `, tenant ${input.tenant}` : ''})`
     );
     const transport = new StdioServerTransport();
     await connectServer(server, transport);
@@ -104,28 +164,55 @@ const install = defineCommand({
   options: [
     { flag: '--toolset <set>', description: 'user|admin|all', default: 'all' },
     { flag: '--direct', description: 'Hosted HTTP config instead of the stdio bridge' },
+    {
+      flag: '--tenant <slug>',
+      description: "Bridge this tenant (e.g. a sandbox) instead of the profile's",
+    },
+    {
+      flag: '--token-env <var>',
+      description:
+        'Env var the launched server reads the --tenant token from (required with --tenant)',
+    },
   ],
   input: z.object({
     client: z.enum(['claude-code', 'claude-desktop', 'cursor', 'generic']),
     toolset: z.enum(['user', 'admin', 'all']).default('all'),
     direct: z.boolean().default(false),
+    tenant: z.string().min(1).optional(),
+    tokenEnv: z.string().min(1).optional(),
   }),
   handler: (ctx, input) => {
     const profile = resolveProfile(ctx.global.profile);
-    const name = `kelta-${profile.name}${input.toolset === 'all' ? '' : `-${input.toolset}`}`;
+    if (input.tenant && !input.direct && !input.tokenEnv) {
+      // the profile's token is rejected on another tenant; the config must name where the
+      // tenant's own token comes from, and must never carry the token itself
+      throw new CliError(
+        "--tenant needs --token-env <VAR>: the env var holding that tenant's token",
+        {
+          code: 'MISSING_TOKEN_ENV',
+          exitCode: EXIT.USAGE,
+        }
+      );
+    }
+    const tenantSlug = input.tenant ?? profile.tenantSlug;
+    const name =
+      `kelta-${profile.name}${input.tenant ? `-${input.tenant}` : ''}` +
+      `${input.toolset === 'all' ? '' : `-${input.toolset}`}`;
     const serveArgs = [
       'mcp',
       'serve',
       '--profile',
       profile.name,
       ...(input.toolset === 'all' ? [] : ['--toolset', input.toolset]),
+      ...(input.tenant ? ['--tenant', input.tenant] : []),
+      ...(input.tokenEnv ? ['--token-env', input.tokenEnv] : []),
     ];
 
     if (input.direct) {
       // the hosted server has no "all": one endpoint per toolset
       const toolset = input.toolset === 'all' ? 'user' : input.toolset;
       const mcpUrl = profile.apiUrl ? deriveMcpUrl(profile.apiUrl) : undefined;
-      const url = `${mcpUrl ?? 'https://mcp.kelta.io'}/${profile.tenantSlug ?? '<tenant>'}/mcp/${toolset}`;
+      const url = `${mcpUrl ?? 'https://mcp.kelta.io'}/${tenantSlug ?? '<tenant>'}/mcp/${toolset}`;
       const text =
         input.client === 'claude-code'
           ? `claude mcp add ${name} --transport http --url ${url} \\\n  --header "Authorization: Bearer <YOUR_PAT>"\n` +
@@ -146,6 +233,11 @@ const install = defineCommand({
       return Promise.resolve({ text });
     }
 
+    if (input.tokenEnv) {
+      ctx.log(
+        `Note: ${input.tokenEnv} must hold the ${tenantSlug ?? 'tenant'} token in the environment the client launches the server with.`
+      );
+    }
     const command = launcherCommand();
     const stdioConfig = JSON.stringify(
       { mcpServers: { [name]: { command, args: serveArgs } } },

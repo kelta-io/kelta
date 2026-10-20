@@ -22,11 +22,14 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -168,6 +171,43 @@ class PatAuthenticationFilterTest {
             assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
             verify(metrics).recordAuthFailure(any(), eq("tenant_mismatch"));
             assertThat(exchange.getAttributes()).doesNotContainKey("gateway.principal");
+        }
+
+        @Test
+        @DisplayName("a sandbox's PAT is rejected on another tenant's MCP admin path, and the reverse")
+        void sandboxScopedPatCannotReachAnotherTenant() {
+            // `kelta mcp serve --tenant <sandbox> --token-env <VAR>` bridges
+            // /<sandbox>/mcp/admin with the sandbox's own token. kelta-mcp only checks the
+            // bearer's shape; this filter is what keeps that token inside its tenant.
+            String sandboxToken = "klt_sandbox_admin_token";
+            String sandboxHash = PatAuthenticationFilter.sha256(sandboxToken);
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get("pat:revoked:" + sandboxHash)).thenReturn(Mono.empty());
+            when(valueOps.get("pat:" + sandboxHash)).thenReturn(Mono.just("""
+                    {"userId":"u-sbx","tenantId":"tenant-sandbox","email":"admin@sbx.test","scopes":"[\\"api\\"]"}"""));
+            when(valueOps.get("pat:revoked:" + HASH)).thenReturn(Mono.empty());
+            when(valueOps.get("pat:" + HASH)).thenReturn(Mono.just(PAT_JSON)); // tenant t-1
+
+            MockServerWebExchange sandboxOnParent = MockServerWebExchange.from(MockServerHttpRequest
+                    .post("/parent/mcp/admin")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + sandboxToken)
+                    .build());
+            sandboxOnParent.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "t-1");
+            MockServerWebExchange parentOnSandbox = MockServerWebExchange.from(MockServerHttpRequest
+                    .post("/sandbox/mcp/admin")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN)
+                    .build());
+            parentOnSandbox.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-sandbox");
+
+            StepVerifier.create(filter.filter(sandboxOnParent, filterChain)).verifyComplete();
+            StepVerifier.create(filter.filter(parentOnSandbox, filterChain)).verifyComplete();
+
+            verify(filterChain, never()).filter(any(ServerWebExchange.class));
+            for (MockServerWebExchange exchange : List.of(sandboxOnParent, parentOnSandbox)) {
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+                assertThat(exchange.getAttributes()).doesNotContainKey("gateway.principal");
+            }
+            verify(metrics, times(2)).recordAuthFailure(any(), eq("tenant_mismatch"));
         }
 
         @Test

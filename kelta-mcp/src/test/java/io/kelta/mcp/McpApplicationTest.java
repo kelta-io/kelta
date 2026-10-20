@@ -177,6 +177,7 @@ class McpApplicationTest {
                 "delete_unique_constraint",
                 "create_picklist",
                 "apply_picklist",
+                "apply_field_picklist",
                 "list_picklists",
                 "get_picklist",
                 "delete_picklist",
@@ -202,7 +203,9 @@ class McpApplicationTest {
                 "delete_flow",
                 "list_flows",
                 "import_api_spec",
-                "materialize_api_collection");
+                "materialize_api_collection",
+                // template seed data
+                "seed_records");
     }
 
     @Test

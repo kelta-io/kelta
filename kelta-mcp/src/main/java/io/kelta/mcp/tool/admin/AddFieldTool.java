@@ -63,9 +63,10 @@ public class AddFieldTool implements AdminTool {
         properties.put("relationshipType", Schemas.string(
                 "Relationship semantics for reference/lookup fields: \"LOOKUP\" (default) or \"MASTER_DETAIL\"."));
         properties.put("picklistSourceId", Schemas.string(
-                "UUID of the source picklist for picklist/multiPicklist fields."));
+                "UUID of the global picklist for picklist/multiPicklist fields. Omit with picklistSourceType FIELD."));
         properties.put("picklistSourceType", Schemas.string(
-                "Source of picklist values: \"GLOBAL\" (default) or \"FIELD\"."));
+                "Source of picklist values: \"GLOBAL\" (default, needs picklistSourceId) or \"FIELD\" "
+                + "(values owned by this field — add them afterwards with apply_field_picklist)."));
         properties.put("maskingType", Schemas.string(
                 "Optional data masking for string-typed fields: FULL, LAST4, EMAIL, or CUSTOM (NONE clears). "
                 + "Users whose profile lacks unmask rights see the value redacted."));

@@ -96,4 +96,56 @@ describe('kelta mcp install', () => {
     const result = await run({ client: 'generic', direct: true });
     expect(result.text).toContain('/mcp/user');
   });
+
+  it('--tenant + --token-env are passed through to mcp serve, never the token', async () => {
+    const desktop = await run({
+      client: 'claude-desktop',
+      toolset: 'admin',
+      tenant: 'acme-sbx-1',
+      tokenEnv: 'SANDBOX_PAT',
+    });
+    const parsed = JSON.parse(desktop.text?.slice(desktop.text.indexOf('{')) ?? '{}') as {
+      mcpServers: Record<string, { command: string; args: string[] }>;
+    };
+    expect(parsed.mcpServers['kelta-prod-acme-sbx-1-admin'].args).toEqual([
+      'mcp',
+      'serve',
+      '--profile',
+      'prod',
+      '--toolset',
+      'admin',
+      '--tenant',
+      'acme-sbx-1',
+      '--token-env',
+      'SANDBOX_PAT',
+    ]);
+    expect(desktop.text).not.toContain(TOKEN);
+
+    const code = await run({
+      client: 'claude-code',
+      tenant: 'acme-sbx-1',
+      tokenEnv: 'SANDBOX_PAT',
+    });
+    expect(code.text).toContain('claude mcp add kelta-prod-acme-sbx-1 --');
+    expect(code.text).toContain(
+      'mcp serve --profile prod --tenant acme-sbx-1 --token-env SANDBOX_PAT'
+    );
+  });
+
+  it('--tenant without --token-env is refused for the stdio bridge', async () => {
+    await expect(run({ client: 'claude-code', tenant: 'acme-sbx-1' })).rejects.toThrow(
+      /--tenant needs --token-env/
+    );
+  });
+
+  it('--direct --tenant points the hosted URL at that tenant', async () => {
+    const result = await run({
+      client: 'claude-code',
+      direct: true,
+      toolset: 'admin',
+      tenant: 'acme-sbx-1',
+    });
+    expect(result.text).toContain('https://api.kelta.io/acme-sbx-1/mcp/admin');
+    expect(result.text).toContain('<YOUR_PAT>');
+  });
 });
