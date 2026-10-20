@@ -77,6 +77,34 @@ The run passes only if:
 Any other outcome is a fail. Record it anyway: the stuck points are the fixes to make
 before the next run.
 
+## Agent participant
+
+A run can also use a fresh agent session as the participant instead of a person. Decision D-036 option B
+(2026-10-19) allows this. Everything above applies, with these differences:
+
+- **Isolation replaces "never seen the repo".** Start the session in a new empty directory, with no
+  checkout and no instructions, memory, hooks, skills or MCP servers loaded. For Claude Code that
+  means `claude -p` with `--setting-sources project` (the empty directory has none),
+  `--strict-mcp-config` with an empty server list, `--disable-slash-commands` and
+  `--no-session-persistence`. Before the run, a probe session started with the same flags should
+  confirm that it sees no instructions or memory.
+- **The handoff is the prompt.** The prompt is the README URL above plus this fixed text, and
+  nothing else:
+
+      Follow this README's Quickstart to get a working Kelta app and create your first collection. Report each command you ran and anything that confused you.
+
+- **The recording is the session's own event stream** (`--output-format stream-json --verbose`),
+  rendered to `runs/<YYYY-MM-DD>-agent.log`. That file shows every command, its output and the
+  session's narration, in order. `script(1)` does not apply, because a headless session has no
+  terminal.
+- **The time limit is enforced** by killing the session at 60 minutes.
+- **The notes** (`runs/<YYYY-MM-DD>-agent.md`) record the decision, the date, the agent and model,
+  the prompt verbatim, the README commit SHA, the start and end times and a Friction section.
+- **Consent** is the decision that authorised the run. Redaction applies in full. In addition, remove
+  any output that lists the host's own processes, files or accounts.
+- **Pass criteria are unchanged.** An agent that creates the collection through the API, not
+  the UI, has reached a created collection, but it has not passed.
+
 ## Redaction and consent
 
 This repository is public. Before committing anything from a run:

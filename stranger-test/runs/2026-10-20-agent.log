@@ -1,0 +1,680 @@
+[agent]
+I'll start by fetching the README to see the Quickstart steps.
+
+$ git clone https://github.com/kelta-io/kelta.git 2>&1 | tail -2 && ls kelta && sed -n '/[Qq]uickstart/,/^## [^Q]/p' kelta/README.md | head -150
+
+Cloning into 'kelta'...
+CLAUDE.md
+CONTRIBUTING.md
+LICENSE
+Makefile
+NOTICE
+README.md
+SECURITY.md
+UPGRADING.md
+ci
+dependency-check-suppressions.xml
+docker
+docker-compose.build.yml
+docker-compose.ci-build.yml
+docker-compose.ci.yml
+docker-compose.jvm.yml
+docker-compose.yml
+docs
+e2e-tests
+examples
+kelta-ai
+kelta-auth
+kelta-cli-downloads
+kelta-gateway
+kelta-marketing
+kelta-mcp
+kelta-modules
+kelta-platform
+kelta-test-harness
+kelta-ui
+kelta-web
+kelta-worker
+package-lock.json
+scripts
+stranger-test
+## Quickstart
+
+Start a released Kelta stack, open the UI, and create your first collection. Nothing is
+built: Compose pulls the version pinned by `KELTA_VERSION` in `.env` from `ghcr.io/kelta-io`,
+so you need only Docker Compose v2.24+, `make` and `git` — no JDK, Maven or Node.
+
+```bash
+git clone https://github.com/kelta-io/kelta.git
+cd kelta
+make setup                  # first time only: copies .env.example → .env, generates dev signing keys
+docker compose up -d --wait # pulls + starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
+```
+
+To build this checkout from source instead, run `make up-jvm` — see
+[From source](#from-source-contributors).
+
+1. Open **http://localhost:5173/default/** and sign in as `<redacted-email>` with the
+   first-boot password kelta-auth prints once in its log
+   (`docker compose logs kelta-auth | grep -o 'Password: *[A-Za-z0-9]*'`), then choose your own.
+   Set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` in `.env` before the first start to pick it instead. The
+   `/default/` path is the tenant — the bare `http://localhost:5173` shows a *Tenant Required* page.
+2. Go to **Setup → Data Model → Collections**, click **Create Collection**, fill in
+   the wizard (Basics → Fields → Authorization → Review), then click **Create
+   Collection** on the Review step.
+
+... [115 lines trimmed] ...
+overlay (`docker-compose.jvm.yml`) swaps `build.dockerfile` and points the build at
+public sources. Switching modes recreates the containers but keeps volumes, so your data
+survives.
+
+**Where `make up-jvm` downloads from.** Base images come from Docker Hub and Maven
+dependencies from Maven Central. The `Dockerfile.jvm` files default to the project's own
+pull-through caches (`harbor.rzware.com`, `nexus.rzware.com`), which is what CI and
+production builds use; the JVM overlay overrides that with the `BASE_REGISTRY` and
+`MAVEN_MIRROR` build args, so a local build neither needs those hosts to be reachable nor
+downloads the whole dependency tree through them.
+
+$ cd <workdir>/kelta && docker compose version && docker info --format '{{.MemTotal}} {{.NCPU}}' && make --version | head -1 && lsof -iTCP -sTCP:LISTEN -P | grep -E ':(5173|8080|8081|8083|5432|6379|4222|3592|3593) ' ; make setup 2>&1 | tail -20
+
+<output removed: it listed the participant's unrelated host processes. Ports 5173 and 8080 were already in use by two local dev servers.>
+
+[agent]
+Ports 5173 and 8080 are already taken by two of your own `node` processes. I won't kill those. Instead, I'll check whether Compose lets me remap the ports.
+
+$ ps -o pid,command -p 26930,95166; grep -nE '^\s+- "?\$?\{?[A-Z_]*:?-?[0-9]+:[0-9]+' docker-compose.yml | head -30; grep -nE 'PORT' .env.example | head -20
+
+<output removed: it listed the participant's unrelated host processes. Ports 5173 and 8080 were already in use by two local dev servers.>
+
+[agent]
+The ports are hardcoded, so there's no env var to change them. Before remapping I need to know where `localhost:5173` and `localhost:8080` are baked in, such as the OIDC issuer or redirect URIs.
+
+$ grep -nE 'localhost:(5173|8080)' docker-compose.yml .env | head -30; grep -rnE 'localhost:5173|localhost:8080' kelta-platform --include=*.sql 2>/dev/null | head; grep -rln 'localhost:5173' --include=*.sql . 2>/dev/null | head
+
+docker-compose.yml:136:      UI_BASE_URL: http://localhost:5173
+docker-compose.yml:137:      CORS_ALLOWED_ORIGINS: http://localhost:5173
+docker-compose.yml:195:      EXTERNAL_BASE_URL: http://localhost:8080
+docker-compose.yml:221:      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+docker-compose.yml:247:      CORS_ALLOWED_ORIGIN_PATTERN: "http://localhost:5173"
+docker-compose.yml:287:      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness >/dev/null || exit 1"]
+docker-compose.yml:344:      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+(eval):1: no matches found: --include=*.sql
+(eval):1: no matches found: --include=*.sql
+
+$ sed -n 120,150p docker-compose.yml; sed -n 290,310p docker-compose.yml; grep -rlE "localhost:5173" --include='*.sql' --include='*.yml' --include='*.yaml' --include='*.properties' kelta-auth kelta-worker kelta-gateway kelta-ui 2>/dev/null | grep -v test | head
+
+      # Use SPRING_DATASOURCE_URL (Spring Boot relaxed binding) so runtime-core's
+      # default spring.datasource.url in application.properties doesn't win.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/kelta_control_plane
+      SPRING_DATASOURCE_USERNAME: kelta
+      SPRING_DATASOURCE_PASSWORD: kelta
+      DB_URL: jdbc:postgresql://postgres:5432/kelta_control_plane
+      DB_USERNAME: kelta
+      DB_PASSWORD: kelta
+      # Redis
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      # CRITICAL: issuer URI must match what tokens are issued with inside Docker
+      KELTA_AUTH_ISSUER_URI: http://auth.localhost:8081
+      WORKER_SERVICE_URL: http://kelta-worker:8080
+      # Session cookies
+      COOKIE_DOMAIN: localhost
+      UI_BASE_URL: http://localhost:5173
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      # Enable direct login for bootstrap/e2e (safe because DIRECT_LOGIN_ENABLED
+      # defaults to false in production)
+      DIRECT_LOGIN_ENABLED: "true"
+      # Initial platform-admin password, applied once on first boot with a forced change.
+      # Unset: kelta-auth generates one and prints it once in its log (quickstart.md).
+      KELTA_BOOTSTRAP_ADMIN_PASSWORD: ${KELTA_BOOTSTRAP_ADMIN_PASSWORD:-}
+      # Listen on 8081 inside the container too, so http://auth.localhost:8081 is
+      # the same URL for the browser (published port) and for containers (alias).
+      SERVER_PORT: "8081"
+      LOG_LEVEL: INFO
+      SECURITY_LOG_LEVEL: WARN
+    ports:
+      - "8081:8081"
+      retries: 10
+      start_period: 60s
+    networks:
+      - kelta-network
+
+  kelta-ui:
+    image: ghcr.io/kelta-io/kelta-ui:${KELTA_VERSION:-0.2.0}
+    container_name: kelta-ui
+    restart: unless-stopped
+    ports:
+      - "5173:8080"
+    depends_on:
+      kelta-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080 >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+kelta-auth/src/main/resources/application.yml
+
+$ grep -n '5173\|redirect' kelta-auth/src/main/resources/application.yml | head; ls kelta-ui; cat kelta-ui/*.conf* kelta-ui/nginx* 2>/dev/null | grep -nE 'proxy_pass|location' | head; grep -rn "5173" kelta-worker/src/main/resources/db 2>/dev/null | head -5
+
+93:    # UI login redirect URL pattern
+94:    ui-base-url: ${UI_BASE_URL:http://localhost:5173}
+96:    cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+150:    superset-redirect-uri: ${SUPERSET_REDIRECT_URI:}
+DESIGN.md
+Dockerfile
+README.md
+app
+nginx.conf
+package-lock.json
+9:    location /health {
+16:    location / {
+23:    # Exact-match locations win over the regex below.
+24:    location = /sw.js {
+28:    location = /push-handlers.js {
+35:    location ~ ^/[^/]+/manifest\.webmanifest$ {
+38:    location = /manifest.webmanifest {
+44:    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+69:    location /health {
+76:    location / {
+
+$ grep -nE 'ARG|ENV|VITE' kelta-ui/Dockerfile | head; grep -rn "localhost:8080" kelta-ui/app/src --include=*.ts* | grep -v test | head -5; grep -rn 'window\.\|runtime-config\|env.js' kelta-ui/nginx.conf kelta-ui/Dockerfile | head
+
+15:ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
+56:ARG VITE_API_BASE_URL=https://api.kelta.io
+57:ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+(eval):1: no matches found: --include=*.ts*
+
+[agent]
+The UI Dockerfile defaults `VITE_API_BASE_URL` to `https://api.kelta.io`. That raises the question of which API the released UI image actually calls. I'll pull the images and check the bundle.
+
+$ grep KELTA_VERSION .env; docker compose pull 2>&1 | tail -5; IMG=$(docker compose config --images | grep kelta-ui); echo $IMG; docker run --rm --entrypoint sh $IMG -c 'grep -rhoE "https?://(api\.kelta\.io|localhost:[0-9]+)[^\"]*" /usr/share/nginx/html 2>/dev/null | sort | uniq -c | head'
+
+KELTA_VERSION=0.2.0
+ be2429f38f70 Extracting 122.2MB
+ 8d2508384df5 Pull complete 0B
+ be2429f38f70 Pull complete 0B
+ Image ghcr.io/kelta-io/kelta-auth:0.2.0 Pulled 
+ Image ghcr.io/kelta-io/kelta-gateway:0.2.0 Pulled 
+ghcr.io/kelta-io/kelta-ui:0.2.0
+      1 http://localhost:4318/
+      4 http://localhost:8080
+      1 http://localhost:8080${t}`;return m.jsx(Xje,{redirectUri:window.location.origin+t+
+      2 http://localhost:9411/api/v2/spans
+
+$ S=<scratchpad> && cat > $S/ports.override.yml <<'EOF'
+services:
+  kelta-gateway:
+    ports: !override
+      - "18080:8080"
+  kelta-ui:
+    ports: !override
+      - "15173:8080"
+EOF
+docker compose -f docker-compose.yml -f $S/ports.override.yml up -d --wait 2>&1 | tail -15; docker compose ps --format '{{.Name}}\t{{.Status}}\t{{.Ports}}'
+
+<output removed: it listed the participant's unrelated host processes. Ports 5173 and 8080 were already in use by two local dev servers.>
+
+[agent]
+All 9 containers are healthy. Mailpit started too, although the README lists it under `--profile tools`; I'll note that. Next is Step 1, the README's password command:
+
+$ echo "--- README command:"; docker compose logs kelta-auth | grep -o 'Password: *[A-Za-z0-9]*'; echo "--- banner context:"; docker compose logs kelta-auth | grep -i -A6 'initial password' | head -15
+
+--- README command:
+Password:  <redacted>
+--- banner context:
+kelta-auth  | {"@timestamp":"2026-10-20T14:55:45.971726048Z","message":"\n================================================================================\n  Kelta platform admin initial password\n================================================================================\n  The platform admin <redacted-email> still had the Flyway baseline's well-known\n  password, so it was replaced with a generated one:\n\n    Account:   <redacted-email>  (tenant: default)\n    Password:  <redacted>\n\n  Sign in with it; you will be asked to change it on first sign-in.\n  This password is shown only once. To choose it instead, set\n  KELTA_BOOTSTRAP_ADMIN_PASSWORD before the first boot.\n================================================================================","logger_name":"io.kelta.auth.config.BaselineAdminPasswordInitializer","thread_name":"main","level":"WARN","level_value":30000,"service":"kelta-auth"}
+kelta-auth  | {"@timestamp":"2026-10-20T14:55:46.046276632Z","message":"Registered Platform OAuth2 client 'kelta-platform' with redirect URI 'http://localhost:5173/auth/callback'","logger_name":"io.kelta.auth.config.ConnectedAppRegistrar","thread_name":"main","level":"INFO","level_value":20000,"service":"kelta-auth"}
+kelta-auth  | {"@timestamp":"2026-10-20T14:55:46.049422215Z","message":"Registered CLI OAuth2 client 'kelta-cli' (PKCE public client, loopback redirect)","logger_name":"io.kelta.auth.config.ConnectedAppRegistrar","thread_name":"main","level":"INFO","level_value":20000,"service":"kelta-auth"}
+kelta-auth  | {"@timestamp":"2026-10-20T14:55:46.049532507Z","message":"No Superset client configured (kelta.auth.superset-client-id not set), skipping registration","logger_name":"io.kelta.auth.config.ConnectedAppRegistrar","thread_name":"main","level":"INFO","level_value":20000,"service":"kelta-auth"}
+kelta-auth  | {"@timestamp":"2026-10-20T14:55:49.9526043Z","message":"Initializing Spring DispatcherServlet 'dispatcherServlet'","logger_name":"org.apache.catalina.core.ContainerBase.[Tomcat].[localhost].[/]","thread_name":"tomcat-handler-0","level":"INFO","level_value":20000,"service":"kelta-auth"}
+kelta-auth  | {"@timestamp":"2026-10-20T14:55:49.953069675Z","message":"Initializing Servlet 'dispatcherServlet'","logger_name":"org.springframework.web.servlet.DispatcherServlet","thread_name":"tomcat-handler-0","level":"INFO","level_value":20000,"tags":["COMMONS-LOGGING"],"service":"kelta-auth"}
+kelta-auth  | {"@timestamp":"2026-10-20T14:55:49.95437555Z","message":"Completed initialization in 1 ms","logger_name":"org.springframework.web.servlet.DispatcherServlet","thread_name":"tomcat-handler-0","level":"INFO","level_value":20000,"tags":["COMMONS-LOGGING"],"service":"kelta-auth"}
+
+$ grep -rn "direct-login\|directLogin\|DIRECT_LOGIN" kelta-auth/src/main/java | grep -iE 'mapping|path|"/' | head -8; grep -rln "change-password\|changePassword" kelta-auth/src/main/java | head -3; grep -rnoE "\"/api/[a-z-]*/?collections[^\"]*\"" kelta-ui/app/src | head -8
+
+kelta-auth/src/main/java/io/kelta/auth/config/AuthorizationServerConfig.java:179:                                "/auth/direct-login",
+kelta-auth/src/main/java/io/kelta/auth/config/AuthorizationServerConfig.java:242:                        .ignoringRequestMatchers("/auth/session", "/auth/direct-login", "/internal/**",
+kelta-auth/src/main/java/io/kelta/auth/controller/DirectLoginController.java:45:@RequestMapping("/auth/direct-login")
+kelta-auth/src/main/java/io/kelta/auth/config/LoginFailureHandler.java
+kelta-auth/src/main/java/io/kelta/auth/config/AuthorizationServerConfig.java
+kelta-auth/src/main/java/io/kelta/auth/controller/ForcePasswordChangeController.java
+kelta-ui/app/src/pages/RequestLogPage/RequestLogPage.tsx:27:"/api/collections"
+
+$ sed -n 40,140p kelta-auth/src/main/java/io/kelta/auth/controller/DirectLoginController.java
+
+ * because Spring AOT (GraalVM native image) resolves bean conditions at build
+ * time, where the runtime env var {@code DIRECT_LOGIN_ENABLED} is unset and
+ * the bean would otherwise be pruned from the binary.
+ */
+@RestController
+@RequestMapping("/auth/direct-login")
+public class DirectLoginController {
+
+    private static final Logger log = LoggerFactory.getLogger(DirectLoginController.class);
+
+    private static final long ACCESS_TOKEN_TTL_HOURS = 8;
+    private static final long REFRESH_TOKEN_TTL_DAYS = 7;
+
+    private final AuthenticationManager authenticationManager;
+    private final JwtEncoder jwtEncoder;
+    private final AuthProperties authProperties;
+
+    public DirectLoginController(AuthenticationManager authenticationManager,
+                                 JwtEncoder jwtEncoder,
+                                 AuthProperties authProperties) {
+        this.authenticationManager = authenticationManager;
+        this.jwtEncoder = jwtEncoder;
+        this.authProperties = authProperties;
+    }
+
+    @PostMapping
+    public ResponseEntity<?> login(@RequestBody DirectLoginRequest request, HttpSession session,
+                                    HttpServletRequest httpRequest) {
+        if (!authProperties.getDirectLogin().isEnabled()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        if (request.username() == null || request.password() == null) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "username and password are required"));
+        }
+
+        // Set tenant context in the session so KeltaUserDetailsService can scope
+        // the user lookup to the correct tenant (same as LoginController does for OIDC).
+        if (request.tenantSlug() != null && !request.tenantSlug().isBlank()) {
+            session.setAttribute("tenantId", request.tenantSlug());
+        }
+
+        Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.username(), request.password()));
+        } catch (CredentialsExpiredException e) {
+            log.info("Direct login rejected for user {}: credentials expired (force change required)",
+                    request.username());
+            String forceChangeUrl = ServletUriComponentsBuilder.fromRequestUri(httpRequest)
+                    .replacePath("/change-password")
+                    .replaceQuery(null)
+                    .build()
+                    .toUriString();
+            return ResponseEntity.status(403)
+                    .body(Map.of(
+                            "error", "credentials_expired",
+                            "error_description", "Password must be changed before this account can authenticate",
+                            "force_change_url", forceChangeUrl));
+... [31 lines trimmed] ...
+
+        JwsHeader jwsHeader = JwsHeader.with(SignatureAlgorithm.RS256).build();
+        String accessToken = jwtEncoder.encode(
+                JwtEncoderParameters.from(jwsHeader, accessTokenClaims)).getTokenValue();
+
+        // Build ID token
+        JwtClaimsSet idTokenClaims = JwtClaimsSet.builder()
+                .issuer(issuer)
+                .subject(subject)
+                .audience(java.util.List.of("kelta-platform"))
+
+$ grep -rn "createCollection\|'/api/collections'\|\`/api/collections\|/collections\b" kelta-ui/app/src --include='*.ts' --include='*.tsx' | grep -iv test | grep -iE 'post|create|api' | head -10
+
+kelta-ui/app/src/context/CollectionStoreContext.tsx:214:          `/api/collections?page[size]=${PAGE_SIZE}&page[number]=${page}&include=fields`
+kelta-ui/app/src/components/DataSourceSettings/DataSourceSettings.tsx:61:    queryFn: () => apiClient.getOne<CollectionRecord>(`/api/collections/${collectionId}`),
+kelta-ui/app/src/components/DataSourceSettings/DataSourceSettings.tsx:119:      return apiClient.patchResource(`/api/collections/${collectionId}`, { adapterConfig })
+kelta-ui/app/src/components/CsvImportDialog/CsvImportDialog.tsx:85:        `/api/collections/${collectionName}/import/csv`,
+kelta-ui/app/src/hooks/useLookupDisplayMap.ts:106:                  `/api/collections/${targetId}`
+kelta-ui/app/src/hooks/useCollectionSchema.ts:81:    `/api/collections/${encodeURIComponent(collectionName)}?include=fields`
+kelta-ui/app/src/hooks/useCollectionSummaries.ts:5: * id, name, and displayName from the /api/collections endpoint
+kelta-ui/app/src/hooks/useCollectionSummaries.ts:50:        '/api/collections?filter[systemCollection][eq]=false&page[size]=500'
+kelta-ui/app/src/pages/CollectionWizardPage/CollectionWizardPage.tsx:540:          {t('collections.createCollection')}
+kelta-ui/app/src/pages/CollectionWizardPage/CollectionWizardPage.tsx:1180:          {t('collections.createCollection')}
+
+[agent]
+First login is expected to return `credentials_expired`, which forces a password change. I'll read the change-password endpoint and the wizard's submit code:
+
+$ grep -nE 'Mapping|RequestParam|param|redirect' kelta-auth/src/main/java/io/kelta/auth/controller/ForcePasswordChangeController.java | head -20; grep -nE 'apiClient\.(post|put|patch)|/api/' kelta-ui/app/src/pages/CollectionWizardPage/CollectionWizardPage.tsx | head; grep -nE 'tenant|X-Tenant|/default' kelta-ui/app/src/services/apiClient.ts 2>/dev/null | head
+
+14:import org.springframework.web.bind.annotation.GetMapping;
+15:import org.springframework.web.bind.annotation.PostMapping;
+16:import org.springframework.web.bind.annotation.RequestParam;
+102:    @GetMapping("/change-password")
+106:            return "redirect:/login";
+112:    @PostMapping("/change-password")
+114:            @RequestParam String currentPassword,
+115:            @RequestParam String newPassword,
+116:            @RequestParam String confirmPassword,
+122:            return "redirect:/login";
+142:            return "redirect:/login";
+174:            return "redirect:/login";
+181:        return "redirect:/login?passwordChanged";
+
+$ sed -n 95,182p kelta-auth/src/main/java/io/kelta/auth/controller/ForcePasswordChangeController.java; grep -rn "collections" kelta-ui/app/src/pages/CollectionWizardPage/*.ts* | grep -vi test | grep -iE 'post|create|mutat|api' | head
+
+    private static void clear(HttpSession session) {
+        session.removeAttribute(SESSION_ATTR_EMAIL);
+        session.removeAttribute(SESSION_ATTR_USER_ID);
+        session.removeAttribute(SESSION_ATTR_TENANT_ID);
+    }
+
+    @GetMapping("/change-password")
+    public String showChangePasswordForm(HttpSession session, Model model) {
+        Optional<Pending> pending = pending(session);
+        if (pending.isEmpty()) {
+            return "redirect:/login";
+        }
+        model.addAttribute("email", pending.get().email());
+        return "change-password";
+    }
+
+    @PostMapping("/change-password")
+    public String changePassword(
+            @RequestParam String currentPassword,
+            @RequestParam String newPassword,
+            @RequestParam String confirmPassword,
+            HttpSession session,
+            Model model) {
+
+        Optional<Pending> found = pending(session);
+        if (found.isEmpty()) {
+            return "redirect:/login";
+        }
+        Pending pending = found.get();
+        model.addAttribute("email", pending.email());
+
+        if (!newPassword.equals(confirmPassword)) {
+            model.addAttribute("error", "New passwords do not match.");
+            return "change-password";
+        }
+
+        List<Map<String, Object>> rows =
+                jdbcTemplate.queryForList(ACCOUNT_SELECT, pending.userId(), pending.tenantId());
+        if (rows.size() != 1) {
+            model.addAttribute("error", "Account not found.");
+            return "change-password";
+        }
+        Map<String, Object> account = rows.getFirst();
+        if (!Boolean.TRUE.equals(account.get("force_change_on_login"))) {
+            // Nothing left to change (changed in another session, or the flag was cleared).
+            clear(session);
+            return "redirect:/login";
+        }
+        if (!(account.get("password_hash") instanceof String currentHash)
+                || !passwordEncoder.matches(currentPassword, currentHash)) {
+            model.addAttribute("error", "Current password is incorrect.");
+            return "change-password";
+        }
+
+        // The tenant's password policy and history, as for a change made while signed in.
+        String firstName = account.get("first_name") instanceof String value ? value : "";
+        String lastName = account.get("last_name") instanceof String value ? value : "";
+        List<String> violations = policyService.validatePassword(newPassword,
+                account.get("email") instanceof String value ? value : pending.email(),
+                (firstName + " " + lastName).trim(), pending.tenantId());
+... [20 lines trimmed] ...
+
+        policyService.saveToHistory(pending.userId(), newHash, pending.tenantId());
+        log.info("Forced password change completed for user {} (tenant {})", pending.userId(), pending.tenantId());
+        // Sessions and refresh tokens from before the change end; this browser signs in next.
+        sessionRevoker.signOutElsewhere(pending.userId(), session.getId());
+        return "redirect:/login?passwordChanged";
+    }
+kelta-ui/app/src/pages/CollectionWizardPage/CollectionWizardPage.tsx:404:      const created = await keltaClient.admin.collections.create({
+kelta-ui/app/src/pages/CollectionWizardPage/CollectionWizardPage.tsx:540:          {t('collections.createCollection')}
+kelta-ui/app/src/pages/CollectionWizardPage/CollectionWizardPage.tsx:1180:          {t('collections.createCollection')}
+
+$ S=<scratchpad>; J=$S/jar; rm -f $J; A=http://auth.localhost:8081
+csrf() { grep -oE 'name="_csrf"[^>]*value="[^"]+"|value="[^"]+"[^>]*name="_csrf"' | grep -oE 'value="[^"]+"' | head -1 | cut -d'"' -f2; }
+T=$(curl -s -c $J -b $J "$A/login?tenant=default" | csrf); echo "csrf1=${T:0:8}…"
+curl -s -c $J -b $J -o /dev/null -w 'POST /login -> %{http_code} %{redirect_url}\n' -X POST "$A/login" --data-urlencode username=<redacted-email> --data-urlencode password=<redacted> --data-urlencode _csrf=$T --data-urlencode tenant=default
+P=$(curl -s -c $J -b $J "$A/change-password"); echo "$P" | grep -oE '<title>[^<]*|<h[12][^>]*>[^<]*' | head -3
+T2=$(echo "$P" | csrf); NEW='<redacted>'; echo "$NEW" > $S/newpw
+curl -s -c $J -b $J -o $S/cp.html -w 'POST /change-password -> %{http_code} %{redirect_url}\n' -X POST "$A/change-password" --data-urlencode currentPassword=<redacted> --data-urlencode newPassword="$NEW" --data-urlencode confirmPassword="$NEW" --data-urlencode _csrf=$T2; grep -oE 'class="[^"]*error[^"]*"[^>]*>[^<]+' $S/cp.html | head
+
+csrf1=xyyrIIub…
+POST /login -> 302 http://auth.localhost:8081/change-password
+<title>Change Password — Kelta Platform
+<h1>Kelta Platform
+POST /change-password -> 302 http://auth.localhost:8081/login?passwordChanged
+
+[agent]
+The password change succeeded. Next I'll get a token and find the API call behind `keltaClient.admin.collections.create`:
+
+$ f=$(grep -rln "class.*Collections\|collections *=" kelta-web --include=*.ts | grep -v test | xargs grep -ln "create" | head -3); echo "$f"; for x in $f; do grep -nE "create|/api|post\(" $x | head -8; done; sed -n 395,430p kelta-ui/app/src/pages/CollectionWizardPage/CollectionWizardPage.tsx
+
+(eval):1: no matches found: --include=*.ts
+
+  const handleCancel = useCallback(() => {
+    navigate(`/${getTenantSlug()}/collections`)
+  }, [navigate])
+
+  // Create collection
+  const handleCreate = useCallback(async () => {
+    setIsCreating(true)
+    try {
+      // Step 1: Create the collection
+      const created = await keltaClient.admin.collections.create({
+        name: basics.name,
+        displayName: basics.displayName,
+        description: basics.description || '',
+        active: basics.active,
+      } as unknown as import('@kelta/sdk').CollectionDefinition)
+
+      const collectionId = created.id!
+
+      // Step 2: Create fields
+      for (const field of fields) {
+        if (field.name) {
+          await keltaClient.admin.fields.add(collectionId, {
+            name: field.name,
+            displayName: field.displayName,
+            type: field.type,
+            required: field.required,
+            unique: field.unique,
+            indexed: field.indexed,
+            defaultValue: field.defaultValue,
+            description: field.description,
+            referenceTarget: field.referenceTarget,
+            fieldTypeConfig: field.fieldTypeConfig,
+            constraints: field.constraints,
+            trackHistory: field.trackHistory,
+          } as unknown as import('@kelta/sdk').FieldDefinition)
+        }
+
+$ grep -rnE "admin/collections|/collections\`|'/api/collections'" kelta-web/packages/sdk/src 2>/dev/null | grep -v test | head; ls kelta-web/packages 2>/dev/null
+
+kelta-web/packages/sdk/src/admin/AdminClient.ts:261:      const response = await this.axios.get('/api/collections', {
+kelta-web/packages/sdk/src/admin/AdminClient.ts:274:      const response = await this.axios.post('/api/collections', body);
+cli
+components
+formula
+plugin-sdk
+sdk
+
+$ sed -n 266,300p kelta-web/packages/sdk/src/admin/AdminClient.ts; grep -nE "fields'|/fields" kelta-web/packages/sdk/src/admin/AdminClient.ts | head -4; grep -nE "X-Tenant|tenant" kelta-ui/app/src/services/*.ts 2>/dev/null | head -5
+
+    get: async (id: string): Promise<CollectionDefinition> => {
+      const response = await this.axios.get(`/api/collections/${id}`);
+      return unwrapJsonApiResource<CollectionDefinition>(response.data);
+    },
+
+    create: async (definition: CollectionDefinition): Promise<CollectionDefinition> => {
+      const body = toJsonApiBody('collections', definition as unknown as Record<string, unknown>);
+      const response = await this.axios.post('/api/collections', body);
+      return unwrapJsonApiResource<CollectionDefinition>(response.data);
+    },
+
+    update: async (id: string, definition: CollectionDefinition): Promise<CollectionDefinition> => {
+      const body = toJsonApiBody(
+        'collections',
+        definition as unknown as Record<string, unknown>,
+        id
+      );
+      const response = await this.axios.patch(`/api/collections/${id}`, body);
+      return unwrapJsonApiResource<CollectionDefinition>(response.data);
+    },
+
+    delete: async (id: string): Promise<void> => {
+      await this.axios.delete(`/api/collections/${id}`);
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Fields
+  // ---------------------------------------------------------------------------
+
+  readonly fields = {
+    add: async (collectionId: string, field: FieldDefinition): Promise<FieldDefinition> => {
+      const body = toJsonApiBody('fields', {
+        ...(field as unknown as Record<string, unknown>),
+299:      const body = toJsonApiBody('fields', {
+303:      const response = await this.axios.post('/api/fields', body);
+312:      const body = toJsonApiBody('fields', field as unknown as Record<string, unknown>, fieldId);
+313:      const response = await this.axios.patch(`/api/fields/${fieldId}`, body);
+kelta-ui/app/src/services/componentRegistry.ts:42:  tenantSlug?: string
+kelta-ui/app/src/services/componentRegistry.ts:54:  tenantSlug: string
+kelta-ui/app/src/services/componentRegistry.ts:70:  tenantSlug: string
+kelta-ui/app/src/services/moduleUiBundles.test.ts:73:    // A tenant without the modules feature, or without permission, is the normal case.
+kelta-ui/app/src/services/moduleUiBundles.ts:26: * Loads the browser bundles of the tenant's active runtime modules, so a module can ship its UI
+
+$ grep -rnE "baseUrl|baseURL" kelta-ui/app/src --include='*.ts' --include='*.tsx' | grep -v test | grep -iE "tenant|slug|API_BASE" | head -5; sed -n 299,305p kelta-web/packages/sdk/src/admin/AdminClient.ts
+
+      const body = toJsonApiBody('fields', {
+        ...(field as unknown as Record<string, unknown>),
+        collectionId,
+      });
+      const response = await this.axios.post('/api/fields', body);
+      return unwrapJsonApiResource<FieldDefinition>(response.data);
+    },
+
+$ grep -rn "new KeltaClient\|createKeltaClient\|KeltaClient(" kelta-ui/app/src | grep -v test | head -3; grep -rn "getTenantSlug()}/api\|/\${.*[sS]lug.*}/api\|slug}/api" kelta-ui/app/src | grep -v test | head -3
+
+kelta-ui/app/src/context/ApiContext.tsx:56:    const client = new KeltaClient({
+kelta-ui/app/src/pages/ApiSpecsPage/ApiSpecsPage.tsx:104:          onOpen={(s) => navigate(`/${getTenantSlug()}/api-specs/${s.id}`)}
+kelta-ui/app/src/pages/ApiSpecsPage/ApiSpecDetailPage.tsx:78:          to={`/${getTenantSlug()}/api-specs`}
+
+$ sed -n 40,75p kelta-ui/app/src/context/ApiContext.tsx
+
+ */
+export function ApiProvider({ children, baseUrl = '' }: ApiProviderProps): React.ReactElement {
+  const { getAccessToken } = useAuth()
+
+  const keltaClient = useMemo(() => {
+    // Adapt AuthContext's getAccessToken to the SDK's TokenProvider interface
+    const tokenProvider: TokenProvider = {
+      getToken: async () => {
+        try {
+          return await getAccessToken()
+        } catch {
+          return null
+        }
+      },
+    }
+
+    const client = new KeltaClient({
+      baseUrl,
+      tokenProvider,
+      // Disable SDK-level response validation in the UI — the UI has its own
+      // error handling through ApiError / ApiClient.
+      validation: false,
+      // Disable retry for 401 — we handle it via the response interceptor below
+      retry: { maxAttempts: 0 },
+    })
+
+    // Add a 401 response interceptor: attempt token refresh + retry before redirecting
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(client.getAxiosInstance() as any).interceptors.response.use(
+      (response: unknown) => response,
+      async (error: unknown) => {
+        const err = error as {
+          response?: { status?: number }
+          config?: Record<string, unknown> & { headers?: Record<string, unknown> }
+        }
+        if (
+
+[agent]
+The stack is up and the admin password has been changed. I'm now getting a token and creating the collection through the same gateway API calls the wizard makes.
+
+$ S=<scratchpad>; NEW=$(cat $S/newpw)
+R=$(curl -s -X POST http://auth.localhost:8081/auth/direct-login -H 'Content-Type: application/json' -d "{\"username\":\"<redacted-email>\",\"password\":\"$NEW\",\"tenantSlug\":\"default\"}"); echo "$R" | python3 -c 'import sys,json;d=json.load(sys.stdin);print({k:(v[:15]+"…" if isinstance(v,str) and len(v)>20 else v) for k,v in d.items()})'
+echo "$R" | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])' > $S/tok
+for p in /api/collections /default/api/collections; do curl -s -o /dev/null -w "GET $p -> %{http_code}\n" -H "Authorization: Bearer $(cat $S/tok)" "http://localhost:18080$p?page[size]=1"; done
+
+Exit code 3
+{'id_token': 'eyJraWQiOiJkZXY…', 'expires_in': 28800, 'refresh_token': 'eyJraWQiOiJkZXY…', 'access_token': 'eyJraWQiOiJkZXY…', 'token_type': 'Bearer'}
+
+[agent]
+Login worked. The probe failed only because curl treated the `[size]` brackets as a glob, so I'll rerun it with globbing off:
+
+$ S=<scratchpad>; for p in /api/collections /default/api/collections; do curl -g -s -o $S/r.json -w "GET $p -> %{http_code}\n" -H "Authorization: Bearer $(cat $S/tok)" "http://localhost:18080$p?page[size]=1"; head -c 200 $S/r.json; echo; done
+
+GET /api/collections -> 401
+{"errors":[{"status":"401","code":"UNAUTHORIZED","title":"Unauthorized","detail":"Tenant context required for authentication","meta":{"path":"/api/collections"}}]}
+GET /default/api/collections -> 200
+{"metadata":{"totalCount":101,"currentPage":1,"pageSize":1,"totalPages":101},"data":[{"relationships":{"updatedBy":{"data":null},"displayFieldId":{"data":null},"createdBy":{"data":null}},"attributes":
+
+[agent]
+Now I'll create the collection the way the wizard does: create the collection, add a field, then confirm it's listed.
+
+$ S=<scratchpad>; G=http://localhost:18080/default; H=(-H "Authorization: Bearer $(cat $S/tok)" -H 'Content-Type: application/vnd.api+json')
+curl -s -w '\n-> %{http_code}\n' "${H[@]}" -X POST $G/api/collections -d '{"data":{"type":"collections","attributes":{"name":"quickstart_tasks","displayName":"Quickstart Tasks","description":"First collection","active":true}}}' | tee $S/c.json | tail -c 400
+CID=$(python3 -c 'import json,sys;print(json.loads(open(sys.argv[1]).read().rsplit("\n-> ",1)[0])["data"]["id"])' $S/c.json); echo CID=$CID
+curl -s -w '\n-> %{http_code}\n' "${H[@]}" -X POST $G/api/fields -d "{\"data\":{\"type\":\"fields\",\"attributes\":{\"name\":\"title\",\"displayName\":\"Title\",\"type\":\"string\",\"required\":true,\"collectionId\":\"$CID\"}}}" | tail -c 300
+curl -g -s "${H[@]}" "$G/api/collections/$CID?include=fields" | python3 -c 'import sys,json;d=json.load(sys.stdin);a=d["data"]["attributes"];print("collection:",a.get("name"),a.get("displayName"),"active=",a.get("active"));print("fields:",[i["attributes"].get("name") for i in d.get("included",[]) if i["type"]=="fields"])'
+
+":"2026-10-20T14:57:17.062713757Z","path":"/api/quickstart_tasks","createdBy":"63d8a151-211d-43ca-9c10-7c3ffe79f9de","ownerField":null,"systemCollection":false,"name":"quickstart_tasks","tenantId":"00000000-0000-0000-0000-000000000001","ownerScopeReads":true,"trackHistory":false,"updatedAt":"2026-10-20T14:57:17.062713757Z"},"id":"3de89cb6-eea5-498c-8631-4b955aaa8269","type":"collections"}}
+-> 201
+CID=3de89cb6-eea5-498c-8631-4b955aaa8269
+ue,"uniqueConstraint":false,"searchable":false,"createdBy":"63d8a151-211d-43ca-9c10-7c3ffe79f9de","name":"title","tenantId":"00000000-0000-0000-0000-000000000001","referenceTarget":null,"fieldTypeConfig":null,"trackHistory":false},"id":"ed95e574-a1a1-45ff-88d1-ec6ab0c6a749","type":"fields"}}
+-> 201
+collection: quickstart_tasks Quickstart Tasks active= True
+fields: ['title']
+
+[agent]
+The collection and field exist. As a last check, I'll write a record into the new collection and confirm the UI page loads:
+
+$ S=<scratchpad>; G=http://localhost:18080/default; H=(-H "Authorization: Bearer $(cat $S/tok)" -H 'Content-Type: application/vnd.api+json')
+sleep 2; curl -s -w '\n-> %{http_code}\n' "${H[@]}" -X POST $G/api/quickstart_tasks -d '{"data":{"type":"quickstart_tasks","attributes":{"title":"hello kelta"}}}' | tail -c 250
+curl -s "${H[@]}" $G/api/quickstart_tasks | head -c 250; echo
+curl -s -o /dev/null -w 'UI /default/ -> %{http_code}\n' http://localhost:15173/default/
+
+51-211d-43ca-9c10-7c3ffe79f9de","recordTypeId":null,"createdBy":"63d8a151-211d-43ca-9c10-7c3ffe79f9de","title":"hello kelta","updatedAt":"2026-10-20T14:57:24.593544469Z"},"id":"3be02503-94ef-4992-8cb4-ee2e920fbc10","type":"quickstart_tasks"}}
+-> 201
+{"metadata":{"totalCount":1,"currentPage":1,"pageSize":20,"totalPages":1},"data":[{"attributes":{"createdAt":"2026-10-20T14:57:24.593544Z","updatedBy":"63d8a151-211d-43ca-9c10-7c3ffe79f9de","recordTypeId":null,"createdBy":"63d8a151-211d-43ca-9c10-7c3
+UI /default/ -> 200
+
+[agent]
+I got a working Kelta 0.2.0 stack and created a first collection, `quickstart_tasks`, with a required `title` field. I also wrote a record to it and read it back. One part differs from the README: you already have dev servers on ports 5173 and 8080, so I ran Kelta on different ports and did the sign-in and collection steps with curl instead of the browser.
+
+## Commands I ran
+
+| Step | Command | Result |
+|---|---|---|
+| Clone | `git clone https://github.com/kelta-io/kelta.git && cd kelta` | OK |
+| Prerequisites | `docker compose version`, `make --version` | Compose v5.5.1, GNU Make 3.81 |
+| Port check | `lsof -iTCP -sTCP:LISTEN -P` | **Conflict:** your `<host dev server>` Vite server is on :5173 and your `<host dev server>` node server is on :8080 |
+| Setup | `make setup` | OK. It pulled `node:20-alpine` and wrote 5 secrets to `.env` |
+| Start | `docker compose -f docker-compose.yml -f <scratchpad>/ports.override.yml up -d --wait` | All 9 containers healthy in about 1 minute |
+| Step 1: password | `docker compose logs kelta-auth \| grep -o 'Password: *[A-Za-z0-9]*'` | Worked as documented |
+| Step 1: sign in | curl through kelta-auth's `/login` and then `/change-password` forms | 302 to `/change-password`, then 302 to `/login?passwordChanged` |
+| Token | `POST http://auth.localhost:8081/auth/direct-login` | Got an access token |
+| Step 2: create | `POST /default/api/collections`, then `POST /default/api/fields` (the same calls the wizard makes) | 201, 201 |
+| Check | `POST`/`GET /default/api/quickstart_tasks`; `GET http://localhost:15173/default/` | Record 201 and read back; UI 200 |
+
+The override file only moved the gateway to 18080 and the UI to 15173. I didn't stop your servers or change anything in the repo.
+
+## What confused me
+
+1. **The ports can't be changed, and the README doesn't say so.** 5173 and 8080 are fixed in `docker-compose.yml`, in the released UI bundle (it calls `http://localhost:8080` directly from the browser), and in the OAuth redirect URI (`http://localhost:5173/auth/callback`). The only fix is to free those ports. The README should list them as a requirement before `docker compose up`.
+2. **Don't open the UI on 15173 in a browser right now.** Login would fail, and the UI would send its API calls with your token to your own <host dev server> on :8080. To use the UI, stop your two dev servers, run `docker compose down`, and then run a plain `docker compose up -d --wait`.
+3. **The password command prints the label too.** It outputs `Password:  ByZB…`, so you have to copy just the token.
+4. **The README doesn't mention that you must change the password on first sign-in.** In a browser that's probably fine, but it's an extra step.
+5. **Every API call needs the tenant in the path.** `/api/collections` returns 401 "Tenant context required"; `/default/api/collections` works. The README only mentions this for the UI URL.
+6. **The service list is out of date.** The README says `up` starts eight services, but Mailpit starts as well, even though the port table lists it under `--profile tools`.
+7. **The UI Dockerfile's default API URL looks wrong.** It defaults `VITE_API_BASE_URL` to `https://api.kelta.io`. The released image is fine (it points at `localhost:8080`), but I had to check that by hand.
+
+## Still running
+
+The stack is still running and the admin password is now the one saved in `<scratchpad>/newpw`. To remove everything, including the volumes, run `docker compose down -v` from `<workdir>/kelta`.
+
+[session end: success, 27 turns, 222310 ms]

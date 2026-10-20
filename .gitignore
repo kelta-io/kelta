@@ -40,6 +40,8 @@ build/
 # Java
 *.class
 *.log
+# Stranger-test run logs are evidence (stranger-test/PROTOCOL.md)
+!stranger-test/runs/*.log
 *.jar
 *.war
 *.ear
