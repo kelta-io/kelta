@@ -636,6 +636,10 @@ jobs:
       # shared daemon, docker-compose.ci-build.yml swaps in the JVM Dockerfiles + CI UI build.
       # Read by every `docker compose` call in this job; the bake step spells the same list out.
       COMPOSE_FILE: docker-compose.yml:docker-compose.build.yml:docker-compose.ci.yml:docker-compose.ci-build.yml
+      # Turns on docker-compose.ci.yml's kelta-mcp (profile mcp) for every `docker compose`
+      # call in this job, so `up --wait` waits for it too. Only this job sets it: the
+      # quickstart, templates and upgrade stacks never see kelta-mcp.
+      COMPOSE_PROFILES: mcp
       # docker compose builds a service whose image it cannot find (the bake step's
       # --load images are not tagged with compose's <project>-<service> names), and it
       # builds with the CURRENT builder. setup-buildx-action used to make its builder
@@ -677,7 +681,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Build kelta CLI (agent-authoring benchmark drives it directly — kelta-mcp is not in CI compose)
+      - name: Build kelta CLI (agent-authoring benchmark + MCP smoke drive it)
         working-directory: kelta-web
         run: |
           npm ci --no-audit --no-fund
@@ -696,7 +700,7 @@ jobs:
             -f docker-compose.yml -f docker-compose.build.yml \
             -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
             --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
-            kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
+            kelta-auth kelta-worker kelta-gateway kelta-ui kelta-mcp cerbos
 
       - name: Start stack
         run: |
@@ -712,6 +716,14 @@ jobs:
             -e INITIAL_PASSWORD="$KELTA_BOOTSTRAP_ADMIN_PASSWORD" \
             -e NEW_PASSWORD="$E2E_ADMIN_PASSWORD" \
             curlimages/curl:8.11.0 sh < ci/admin-first-sign-in.sh
+
+      # A fresh tenant + PAT, then `kelta mcp serve --source remote --mcp-url
+      # http://kelta-mcp:8080 --toolset all` from a container on the compose network: fails
+      # unless the authoring tools are listed and a create_collection reads back through
+      # get_collection_schema. See ci/mcp-smoke.sh.
+      - name: MCP smoke (kelta mcp serve bridging the compose kelta-mcp)
+        timeout-minutes: 10
+        run: ADMIN_PASSWORD="$E2E_ADMIN_PASSWORD" bash ci/mcp-smoke.sh
 
       - name: Build Playwright runner image (tests + CLI baked in)
         # Bake e2e-tests + node_modules into a runner image. Bind-mounting the
@@ -833,7 +845,7 @@ jobs:
         if: failure()
         run: |
           mkdir -p _logs
-          for s in kelta-auth kelta-worker kelta-gateway kelta-ui postgres redis nats cerbos; do
+          for s in kelta-auth kelta-worker kelta-gateway kelta-ui kelta-mcp postgres redis nats cerbos; do
             docker compose logs --no-color "$s" > "_logs/${s}.log" 2>&1 || true
           done
 
@@ -853,7 +865,8 @@ jobs:
       - name: Stop stack + remove volumes
         if: always()
         run: |
-          docker compose --profile ai --profile tools --profile seed down -v --rmi local || true
+          # --profile replaces COMPOSE_PROFILES, so mcp is named again or kelta-mcp outlives `down`.
+          docker compose --profile ai --profile tools --profile seed --profile mcp down -v --rmi local || true
           # `down --rmi local` skips images with a custom `image:` tag, so cerbos goes explicitly.
           docker image rm "kelta-cerbos-ci:${CERBOS_CI_TAG}" 2>/dev/null || true
 

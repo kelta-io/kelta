@@ -408,6 +408,25 @@ this job cannot run must be named in a comment in the job with the reason and th
 it. Before this job, `ci/update-snapshots.test.ts` ran only when a workflow changed, so #1675's
 change to the script skipped its tests and broke it.
 
+## MCP smoke test (CI)
+
+The `e2e` job runs kelta-mcp in its compose stack (`docker-compose.ci.yml`, under the `mcp`
+profile; the job sets `COMPOSE_PROFILES=mcp`, so the quickstart, templates and upgrade stacks never
+build or start it) and, after the admin's first sign-in, its "MCP smoke" step runs
+`ci/mcp-smoke.sh`: from a throwaway node image on the compose network it creates a fresh tenant
+(`mcp-smoke`), mints a PAT for its admin (`POST /api/tenants/{id}/bootstrap-token`), starts
+`kelta mcp serve --source remote --mcp-url http://kelta-mcp:8080 --toolset all` and speaks stdio
+JSON-RPC to it — `initialize`, `tools/list` (fails unless `create_collection`, `apply_layout`,
+`bulk_apply` and `query_collection` are listed), one `create_collection` of `mcp_smoke_items`, then
+`get_collection_schema` (retried while it errors; fails unless it names that collection). By hand,
+against any stack whose kelta-mcp you can reach, with the CLI on `PATH` (or `KELTA_CLI="node
+kelta-web/packages/cli/dist/index.js"`) and bash + jq: `KELTA_URL=<gateway> KELTA_TENANT=<slug>
+KELTA_TOKEN=klt_… MCP_URL=<kelta-mcp base URL> bash ci/mcp-smoke.sh --in-container` (with
+`KELTA_TOKEN` set it skips the tenant provisioning). `ci/mcp-smoke.test.sh` drives it against a fake
+`kelta` stdio server and proves a missing authoring tool, a `tools/list` error, a failed create, a
+schema for another collection, a schema read that never succeeds and a bridge that exits at once
+each fail it.
+
 ## Upgrade test (CI)
 
 The `upgrade` job in `.github/workflows/ci.yml` (a `quality-gate` dependency) checks that data

@@ -11,10 +11,15 @@
 #      remote daemon), tagged per CI job via CERBOS_CI_TAG so concurrent jobs on
 #      the shared daemon never share (or remove) one another's image. `local` when
 #      run by hand.
+#   5. Add kelta-mcp (not in the base file: it is not part of the self-hosted
+#      quickstart) under the `mcp` profile, so CI can drive the MCP authoring
+#      tools through `kelta mcp serve` (ci/mcp-smoke.sh). Only a job that sets
+#      COMPOSE_PROFILES=mcp (the e2e job) builds or starts it.
 #
-# It builds no Kelta service, so on its own (with docker-compose.yml) it runs the
-# released ghcr images pinned by KELTA_VERSION — the quickstart job's path. The e2e
-# job adds docker-compose.build.yml + docker-compose.ci-build.yml to build HEAD.
+# Without that profile it builds no Kelta service, so on its own (with
+# docker-compose.yml) it runs the released ghcr images pinned by KELTA_VERSION — the
+# quickstart job's path. The e2e job adds docker-compose.build.yml +
+# docker-compose.ci-build.yml to build HEAD.
 #
 # Production images continue to be built from each service's original
 # Dockerfile by build-and-publish-containers.yml on main.
@@ -78,3 +83,27 @@ services:
 
   kelta-bootstrap:
     container_name: !reset null
+
+  # kelta-mcp/Dockerfile is already a JVM build, so docker-compose.ci-build.yml has
+  # nothing to swap. Reached by container DNS (http://kelta-mcp:8080) like the rest.
+  kelta-mcp:
+    profiles: [mcp]
+    build:
+      context: .
+      dockerfile: kelta-mcp/Dockerfile
+    restart: unless-stopped
+    environment:
+      GATEWAY_URL: http://kelta-gateway:8080
+    depends_on:
+      kelta-gateway:
+        condition: service_healthy
+    healthcheck:
+      # Exit code, not `grep UP` (see kelta-gateway in docker-compose.yml): Spring
+      # answers 503 when DOWN. curl, as in the image's own HEALTHCHECK.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - kelta-network
