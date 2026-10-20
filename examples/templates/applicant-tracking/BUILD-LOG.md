@@ -189,3 +189,68 @@ written as a generic platform task title for the ceo to file. None is patched he
    column** (CRM error 6) — 1 call (error 4).
 8. **Publish a kelta CLI release that includes `mcp serve --tenant/--token-env`** — 0 calls;
    the installed 1.0.1589 lacks the flags, and the environment variables stood in for them.
+
+## Replaying the build in CI
+
+The `mcp-replay` job in `.github/workflows/ci.yml` replays this build every week (and on changes
+to kelta-mcp, the templates or the replay scripts) and fails when it takes more than 20% more
+MCP calls than the checked-in baseline. No model runs in CI: the build's calls are a fixture.
+
+| File | What it is |
+|------|------------|
+| `mcp-replay/calls.json` | The build's tool calls in the order of the by-step table above, every argument spelled out. Generated: never edit it by hand |
+| `mcp-replay/generate.mjs` | Writes `calls.json` from `metadata.json`, `list-views/`, `dashboards/` and `seeds/`, so the replay builds what `install.sh` installs |
+| `mcp-replay/baseline.txt` | The `tools/call` count the replay measures: **94** |
+| `ci/mcp-replay.sh` | Creates a fresh tenant and its PAT, replays `calls.json` through `kelta mcp serve --source remote --mcp-url http://kelta-mcp:8080 --toolset all` over stdio, counts every `tools/call` (retries included), then checks the four collections and their seed counts |
+| `ci/mcp-replay-compare.sh` | Fails when `count > baseline * 1.2` |
+
+**Why 94 and not 101.** The replay counts `tools/call` requests only, and it can serve only what
+the hosted kelta-mcp serves:
+
+- the 2 `tools/list` requests of the discovery step are not tool calls (the replay lists once,
+  to check that every tool it calls is there, and does not count it);
+- 5 calls were local CLI tools of the bridge (`cli_dashboards_validate` ×2,
+  `cli_dashboards_data` ×2, `cli_metadata_export`), which `--source remote` does not serve and
+  kelta-mcp has no equivalent of, so they are not replayed;
+- the 3 `cli_dashboards_list` calls are replayed as `query_collection` on `dashboards`, which
+  reads the same rows.
+
+101 − 2 − 5 = 94. Everything else is replayed call for call, including the 5 calls that
+returned an error (marked `expectError` with the error's number from "Errors hit"). Error 1 was a
+partial success and is not reproduced: `create_collection` is sent without the picklist fields,
+which follow as `create_record` on `fields` as they did in the build. The failed `bulk_apply`
+batches (errors 2 and 3) and the duplicate picklist value (error 4) are sent after the rows they
+repeat, so they fail on `uk_field_collection_name` / `uq_picklist_value` even once atomic
+operations accept system collections. Sandbox 2's checks run in the same tenant; its
+verification moves Lena Vasquez-Hart to Hired instead of Rafael Duarte, who is already Hired by
+then.
+
+**Ids.** The fixture holds no id. A call's `save` keeps a value from its result (a jq expression
+on the result's JSON text), and an argument that is exactly `"{{name}}"` or `"{{name:key}}"` is
+replaced by it: the collection ids come from `update_collection`, the picklist field ids from
+`create_record`, and the seed references from the parent's `bulk_apply` result, keyed by the
+natural key `install.sh` uses (`{{candidatesIds:ada.brightwater@example.com}}`).
+
+**Regenerating the fixture and the baseline.** After a change to the template files, or to the
+generator because the platform now needs fewer calls (for example once a follow-up below is
+fixed and a call or an `expectError` call can go):
+
+1. `node examples/templates/applicant-tracking/mcp-replay/generate.mjs` rewrites `calls.json`;
+   `--check` only verifies it is current.
+2. Set `mcp-replay/baseline.txt` to the new number of calls
+   (`jq '.calls | length' examples/templates/applicant-tracking/mcp-replay/calls.json`): with no
+   retries that is what the replay counts, and `ci/mcp-replay.test.sh` fails while the two
+   differ.
+3. Replay it against a local stack started with kelta-mcp
+   (`COMPOSE_PROFILES=mcp docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.ci.yml up -d --wait`),
+   from a container on its network as CI does, after the platform admin's first sign-in
+   (`ci/admin-first-sign-in.sh`, as the job runs it) and with the CLI built in `kelta-web`
+   (`COMPOSE_PROJECT_NAME=<project> ADMIN_PASSWORD=<admin password> bash ci/mcp-replay.sh`),
+   or with the CLI on `PATH` against a fresh tenant you can reach:
+   `KELTA_URL=<gateway> KELTA_TENANT=<fresh slug> KELTA_TOKEN=klt_… MCP_URL=<kelta-mcp URL> MCP_REPLAY_COUNT_FILE=count.txt bash ci/mcp-replay.sh --in-container examples/templates/applicant-tracking`.
+   It must pass and write the baseline to the count file.
+4. `bash ci/mcp-replay.test.sh` and `bash ci/mcp-replay-compare.test.sh`.
+
+Lower the baseline in the same change that makes the build cheaper, so the 20% margin is measured
+from the new number. Raising it needs a reason in the PR: that is the regression this job exists
+to catch.

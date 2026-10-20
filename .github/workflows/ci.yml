@@ -3,9 +3,10 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  # Weekly backstop for the templates job alone: on a schedule the path filter is skipped,
-  # so every job gated on a filter output skips and only `templates` (which also accepts
-  # `schedule`) runs, alongside the unconditional worker-image-is-jvm check and the gate.
+  # Weekly backstop for the templates and mcp-replay jobs alone: on a schedule the path filter
+  # is skipped, so every job gated on a filter output skips and only `templates` and
+  # `mcp-replay` (which also accept `schedule`) run, alongside the unconditional
+  # worker-image-is-jvm check and the gate.
   schedule:
     - cron: '17 6 * * 1'
   workflow_dispatch:
@@ -67,6 +68,7 @@ jobs:
       runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
       quickstart: ${{ steps.filter.outputs.quickstart }}
       templates: ${{ steps.filter.outputs.templates }}
+      mcp_replay: ${{ steps.filter.outputs.mcp_replay }}
       upgrade: ${{ steps.filter.outputs.upgrade }}
       workflows: ${{ steps.filter.outputs.workflows }}
       ci_scripts: ${{ steps.filter.outputs.ci_scripts }}
@@ -80,7 +82,7 @@ jobs:
           fetch-depth: 0
 
       # A baseline-regeneration dispatch runs the e2e job only, and a scheduled run the
-      # templates job only: with no filter outputs every other job skips.
+      # templates and mcp-replay jobs only: with no filter outputs every other job skips.
       - name: Filter paths
         id: filter
         if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.update_snapshots_ref == '')
@@ -1158,6 +1160,160 @@ jobs:
           if [ -f ci/docker-reclaim.sh ]; then bash ci/docker-reclaim.sh; else echo "ci/docker-reclaim.sh not on this ref, skipping"; fi
 
   # ===========================================================================
+  # MCP replay call count (K-12) — replays the applicant-tracking template's MCP-only build
+  # (examples/templates/applicant-tracking/mcp-replay/calls.json: the tool calls BUILD-LOG.md
+  # records, arguments spelled out) through `kelta mcp serve --source remote --mcp-url
+  # http://kelta-mcp:8080 --toolset all` against a fresh tenant, and fails when the number of
+  # tools/call requests (retries included) grows more than 20% over mcp-replay/baseline.txt.
+  # No model and no secret: the "prompt" is the checked-in call list, and the only credentials
+  # are the CI-only admin password literal below and the PAT the stack mints for the tenant.
+  #
+  # The templates job's HEAD-built stack plus kelta-mcp (COMPOSE_PROFILES=mcp, as the e2e job).
+  # Runs on the weekly schedule, and when the `mcp_replay` path filter matches (kelta-mcp,
+  # the templates, the bridge's CLI source, the replay's ci/ scripts) or `workflows` does.
+  # ci/mcp-replay.sh also checks that the template's collections exist and hold the seed files'
+  # record counts.
+  # ===========================================================================
+  mcp-replay:
+    name: MCP Replay Call Count
+    needs: changes
+    if: >-
+      needs.changes.outputs.mcp_replay == 'true' || needs.changes.outputs.workflows == 'true'
+      || github.event_name == 'schedule'
+    runs-on: k8s-runner-integration
+    timeout-minutes: 45
+    concurrency:
+      group: mcp-replay-${{ github.head_ref || github.ref }}
+      cancel-in-progress: true
+    env:
+      COMPOSE_PROJECT_NAME: mcpr-${{ github.run_id }}-${{ github.run_attempt }}
+      # Per-run, per-job cerbos tag (see the e2e job).
+      CERBOS_CI_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-mcp-replay
+      # The e2e job's from-source stack (see the comments there).
+      COMPOSE_FILE: docker-compose.yml:docker-compose.build.yml:docker-compose.ci.yml:docker-compose.ci-build.yml
+      # docker-compose.ci.yml's kelta-mcp, for every `docker compose` call in this job.
+      COMPOSE_PROFILES: mcp
+      BUILDX_BUILDER: kelta-ci
+      KELTA_BOOTSTRAP_ADMIN_PASSWORD: ci-bootstrap-admin-secret
+      # Meets the default password policy (set through the forced change).
+      ADMIN_PASSWORD: ci-mcpr-Kp7-Wq3-Zt9
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx (persistent kelta-ci builder)
+        run: |
+          docker buildx inspect kelta-ci >/dev/null 2>&1 \
+            || docker buildx create --name kelta-ci --driver docker-container
+          docker buildx inspect --bootstrap kelta-ci
+
+      - name: Generate .env (JWK_SET + encryption key)
+        run: make setup
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build kelta CLI (its `mcp serve` is the bridge the replay drives)
+        timeout-minutes: 10
+        working-directory: kelta-web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build service images (JVM, persistent builder cache)
+        run: |
+          docker buildx bake --builder kelta-ci \
+            -f docker-compose.yml -f docker-compose.build.yml \
+            -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
+            --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
+            kelta-auth kelta-worker kelta-gateway kelta-ui kelta-mcp cerbos
+
+      - name: Start stack
+        timeout-minutes: 8
+        run: |
+          docker compose up -d --wait --wait-timeout 300
+
+      - name: Complete platform admin first sign-in (forced password change)
+        timeout-minutes: 2
+        run: |
+          docker run --rm -i --network "${COMPOSE_PROJECT_NAME}_kelta-network" \
+            -e INITIAL_PASSWORD="$KELTA_BOOTSTRAP_ADMIN_PASSWORD" \
+            -e NEW_PASSWORD="$ADMIN_PASSWORD" \
+            curlimages/curl:8.11.0 sh < ci/admin-first-sign-in.sh
+
+      # A fresh tenant + PAT, then the fixture's tools/call requests over stdio JSON-RPC; writes
+      # the count to mcp-replay-count.txt (even when the replay fails part-way) and checks the
+      # template's collections and seed counts. See ci/mcp-replay.sh.
+      - name: Replay the applicant-tracking MCP build
+        id: replay
+        timeout-minutes: 15
+        run: bash ci/mcp-replay.sh
+
+      - name: Compare the call count with the baseline (fails above +20%)
+        id: compare
+        run: |
+          bash ci/mcp-replay-compare.sh mcp-replay-count.txt \
+            examples/templates/applicant-tracking/mcp-replay/baseline.txt
+
+      - name: Report MCP replay call count
+        if: always() && steps.replay.outcome != 'skipped'
+        env:
+          REPLAY_OUTCOME: ${{ steps.replay.outcome }}
+        run: |
+          BASELINE="$(tr -d '[:space:]' < examples/templates/applicant-tracking/mcp-replay/baseline.txt)"
+          {
+            echo "### MCP replay call count (K-12)"
+            echo ""
+            if [ -f mcp-replay-count.txt ]; then
+              COUNT="$(tr -d '[:space:]' < mcp-replay-count.txt)"
+              echo "tools/call requests to replay the applicant-tracking build (retries included): **${COUNT}** / baseline **${BASELINE}** (fails above $((BASELINE * 6 / 5)), +20%)"
+              if [ "$REPLAY_OUTCOME" != "success" ]; then
+                echo ""
+                echo "The replay failed after ${COUNT} calls, so this count is partial."
+              fi
+            else
+              echo "No count file (ci/mcp-replay.sh did not get as far as the replay). Baseline: **${BASELINE}**."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: |
+          mkdir -p _logs
+          for s in kelta-auth kelta-worker kelta-gateway kelta-ui kelta-mcp postgres redis nats cerbos; do
+            docker compose logs --no-color "$s" > "_logs/${s}.log" 2>&1 || true
+          done
+
+      - name: Upload logs
+        continue-on-error: true
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-replay-logs
+          path: _logs/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop stack + remove volumes
+        if: always()
+        run: |
+          docker rm -f "${COMPOSE_PROJECT_NAME}_mcp-replay" 2>/dev/null || true
+          docker image rm "kelta-mcp-replay:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
+          docker compose down -v --rmi local || true
+          # `down --rmi local` skips images with a custom `image:` tag, so cerbos goes explicitly.
+          docker image rm "kelta-cerbos-ci:${CERBOS_CI_TAG}" 2>/dev/null || true
+
+      # The node's Docker daemon is shared and nothing else cleans it; see ci/docker-reclaim.sh.
+      - name: Reclaim shared Docker disk
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          if [ -f ci/docker-reclaim.sh ]; then bash ci/docker-reclaim.sh; else echo "ci/docker-reclaim.sh not on this ref, skipping"; fi
+
+  # ===========================================================================
   # Upgrade test — upgrades the newest release reachable from HEAD to HEAD on the same Docker
   # volumes and checks that data written on the release reads back unchanged: the path
   # UPGRADING.md tells a self-hoster to take (bump KELTA_VERSION, pull, up; kelta-worker runs
@@ -1635,13 +1791,13 @@ jobs:
 
   quality-gate:
     name: Quality Gate
-    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, upgrade, worker-image-is-jvm, dependency-audit, lint-workflows, test-ci-scripts, test-dora]
+    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, mcp-replay, upgrade, worker-image-is-jvm, dependency-audit, lint-workflows, test-ci-scripts, test-dora]
     if: always()
     runs-on: k8s-runner
     steps:
       - name: Check job results
         run: |
-          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart templates upgrade worker-image-is-jvm dependency-audit lint-workflows test-ci-scripts test-dora; do
+          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart templates mcp-replay upgrade worker-image-is-jvm dependency-audit lint-workflows test-ci-scripts test-dora; do
             case "${job}" in
               test-java)         result="${{ needs.test-java.result }}" ;;
               test-runtime)      result="${{ needs.test-runtime.result }}" ;;
@@ -1652,6 +1808,7 @@ jobs:
               e2e)               result="${{ needs.e2e.result }}" ;;
               quickstart)        result="${{ needs.quickstart.result }}" ;;
               templates)         result="${{ needs.templates.result }}" ;;
+              mcp-replay)        result="${{ needs.mcp-replay.result }}" ;;
               upgrade)           result="${{ needs.upgrade.result }}" ;;
               worker-image-is-jvm) result="${{ needs.worker-image-is-jvm.result }}" ;;
               dependency-audit)  result="${{ needs.dependency-audit.result }}" ;;

@@ -428,6 +428,34 @@ KELTA_TOKEN=klt_… MCP_URL=<kelta-mcp base URL> bash ci/mcp-smoke.sh --in-conta
 schema for another collection, a schema read that never succeeds and a bridge that exits at once
 each fail it.
 
+## MCP replay call count (CI)
+
+The `mcp-replay` job (K-12) guards how many MCP tool calls an MCP-only build takes. It runs on the
+weekly schedule and when the `mcp_replay` path filter matches (`kelta-mcp/**`,
+`examples/templates/**`, the CLI's `src/mcp/**`, the replay's `ci/` scripts). No model runs: the
+"fixed prompt" is `examples/templates/applicant-tracking/mcp-replay/calls.json`, the ordered tool
+calls of that template's build (its `BUILD-LOG.md`) with every argument spelled out, generated
+from the template files by `mcp-replay/generate.mjs` (`--check` fails when it is stale). Ids
+minted during the run are never in the fixture: a call's `save` keeps a jq expression's value from
+its result, and an argument that is exactly `"{{var}}"` or `"{{var:key}}"` is replaced by it.
+Calls the build saw fail carry `expectError`: an error there is tolerated (a success only warns),
+and the batches and the duplicate the build sent are replayed after the rows they repeat, so
+they fail on the unique constraints whatever gets fixed. On the stack from the `templates` job plus kelta-mcp
+(`COMPOSE_PROFILES=mcp`), `ci/mcp-replay.sh` creates tenant `mcp-replay` and its PAT the way
+`ci/mcp-smoke.sh` does, drives only `kelta mcp serve --source remote --mcp-url
+http://kelta-mcp:8080 --toolset all` over stdio JSON-RPC, counts every `tools/call` (an unexpected
+error is retried up to `MCP_REPLAY_RETRIES`, 2, and each retry counts), fails on an error the
+fixture does not expect, then checks over plain HTTP that every collection of the template's
+`metadata.json` exists with `jq length seeds/<c>.json` records. `ci/mcp-replay-compare.sh` fails
+when `count * 5 > baseline * 6` (baseline 100: 120 passes, 121 fails), and the job writes count,
+baseline and threshold to the step summary. `ci/mcp-replay.test.sh` drives the runner against a
+fake `kelta` and a fake `curl` (substitution, retries counted, expected and unexpected errors,
+missing tools, seed-count and missing-collection failures) and replays the real fixture against
+them: it must resolve every `{{var}}` and send exactly `baseline.txt` calls.
+`ci/mcp-replay-compare.test.sh` pins the threshold. To regenerate the fixture and baseline after a
+platform change that makes the build cheaper (or a template change): see "Replaying the build in
+CI" in `examples/templates/applicant-tracking/BUILD-LOG.md`.
+
 ## Upgrade test (CI)
 
 The `upgrade` job in `.github/workflows/ci.yml` (a `quality-gate` dependency) checks that data
