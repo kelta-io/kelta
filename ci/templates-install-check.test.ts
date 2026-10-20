@@ -14,11 +14,21 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 const SCRIPT = join(import.meta.dirname, 'templates-install-check.sh');
 const PASSWORD = 'admin-secret';
 const TOKEN = 'token-123';
+const SANDBOX_SLUG = 'default--templates-empty';
+const SANDBOX_ADMIN = `${SANDBOX_SLUG}-admin`;
+const SANDBOX_PASSWORD = 'one-time-secret';
+const SANDBOX_TOKEN = 'sandbox-token-456';
+/** A fake install.sh line that tells the stand-in its tenant now holds the template. */
+const MARK_INSTALLED = 'curl -fsS -X POST "$KELTA_URL/$KELTA_TENANT/__installed"';
 
 let server: Server;
 let baseUrl: string;
 let counts: Record<string, number>;
 let root: string;
+let sandboxAttributes: Record<string, unknown>;
+let sandboxInstalled: boolean;
+let environmentRequests: unknown[];
+let createError: string | undefined;
 
 interface Template {
   install: string;
@@ -68,9 +78,38 @@ before(async () => {
       const url = new URL(req.url ?? '/', 'http://localhost');
       if (req.method === 'POST' && url.pathname === '/auth/direct-login') {
         const login = JSON.parse(body);
-        const ok = login.password === PASSWORD && login.tenantSlug === 'default';
-        res.writeHead(ok ? 200 : 401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(ok ? { access_token: TOKEN } : { error: 'bad credentials' }));
+        const parent = login.password === PASSWORD && login.tenantSlug === 'default';
+        const sandbox =
+          login.username === SANDBOX_ADMIN &&
+          login.password === SANDBOX_PASSWORD &&
+          login.tenantSlug === SANDBOX_SLUG;
+        const token = parent ? TOKEN : sandbox ? SANDBOX_TOKEN : undefined;
+        res.writeHead(token ? 200 : 401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(token ? { access_token: token } : { error: 'bad credentials' }));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/default/api/environments') {
+        if (req.headers.authorization !== `Bearer ${TOKEN}`) {
+          res.writeHead(401).end();
+          return;
+        }
+        environmentRequests.push(JSON.parse(body));
+        if (createError) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ errors: [{ detail: createError }] }));
+          return;
+        }
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: { id: 'env-1', attributes: sandboxAttributes } }));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === `/${SANDBOX_SLUG}/__installed`) {
+        sandboxInstalled = true;
+        res.writeHead(204).end();
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/default/__installed') {
+        res.writeHead(204).end();
         return;
       }
       const match = url.pathname.match(/^\/default\/api\/([^/]+)$/);
@@ -81,6 +120,25 @@ before(async () => {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ data: [], meta: { totalCount: counts[match[1]] ?? 0 } }));
+        return;
+      }
+      const sandboxMatch = url.pathname.match(new RegExp(`^/${SANDBOX_SLUG}/api/([^/]+)$`));
+      if (req.method === 'GET' && sandboxMatch) {
+        if (req.headers.authorization !== `Bearer ${SANDBOX_TOKEN}`) {
+          res.writeHead(401).end();
+          return;
+        }
+        if (sandboxMatch[1] === 'collections') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ data: [] }));
+          return;
+        }
+        if (!sandboxInstalled) {
+          res.writeHead(404).end();
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: [], meta: { totalCount: counts[sandboxMatch[1]] ?? 0 } }));
         return;
       }
       res.writeHead(404).end();
@@ -97,6 +155,16 @@ after(() => {
 
 beforeEach(() => {
   counts = {};
+  sandboxInstalled = false;
+  environmentRequests = [];
+  createError = undefined;
+  sandboxAttributes = {
+    status: 'ACTIVE',
+    clone_mode: 'EMPTY',
+    sandboxSlug: SANDBOX_SLUG,
+    adminUsername: SANDBOX_ADMIN,
+    adminInitialPassword: SANDBOX_PASSWORD,
+  };
 });
 
 describe('templates-install-check.sh --in-container', () => {
@@ -104,7 +172,10 @@ describe('templates-install-check.sh --in-container', () => {
     counts = { accounts: 2, sites: 1 };
     const dir = writeTemplates({
       b: { install: 'echo "b $KELTA_URL $KELTA_TENANT $KELTA_TOKEN" >>"$LOG"; ! read -r _', seeds: { sites: [{}] } },
-      a: { install: 'echo "a $KELTA_URL $KELTA_TENANT $KELTA_TOKEN" >>"$LOG"', seeds: { accounts: [{}, {}] } },
+      a: {
+        install: `echo "a $KELTA_URL $KELTA_TENANT $KELTA_TOKEN" >>"$LOG"; ${MARK_INSTALLED}`,
+        seeds: { accounts: [{}, {}] },
+      },
     });
 
     const result = await run(dir);
@@ -115,8 +186,65 @@ describe('templates-install-check.sh --in-container', () => {
     assert.match(result.out, /All 2 template\(s\) installed/);
     assert.equal(
       readFileSync(join(dir, 'log'), 'utf8'),
-      `a ${baseUrl} default ${TOKEN}\nb ${baseUrl} default ${TOKEN}\n`
+      `a ${baseUrl} default ${TOKEN}\nb ${baseUrl} default ${TOKEN}\n` +
+        `a ${baseUrl} ${SANDBOX_SLUG} ${SANDBOX_TOKEN}\n`
     );
+  });
+
+  it('installs the first template into an empty sandbox created with cloneMetadata: false', async () => {
+    counts = { accounts: 2 };
+    const dir = writeTemplates({
+      a: { install: MARK_INSTALLED, seeds: { accounts: [{}, {}] } },
+    });
+
+    const result = await run(dir);
+
+    assert.equal(result.code, 0, result.out);
+    assert.deepEqual(environmentRequests, [
+      {
+        data: {
+          type: 'environments',
+          attributes: { name: 'templates-empty', type: 'SANDBOX', cloneMetadata: false },
+        },
+      },
+    ]);
+    assert.match(result.out, new RegExp(`sandbox ${SANDBOX_SLUG} holds none of a's collections`));
+    assert.match(result.out, new RegExp(`a@${SANDBOX_SLUG}/accounts: expected 2, found 2`));
+    assert.match(result.out, /a installed into the empty sandbox .* with no deletions/);
+  });
+
+  it('fails when the sandbox was cloned instead of created empty', async () => {
+    sandboxAttributes.clone_mode = 'CLONED';
+    const dir = writeTemplates({ a: { install: MARK_INSTALLED } });
+
+    const result = await run(dir);
+
+    assert.equal(result.code, 1);
+    assert.match(result.out, /::error::sandbox templates-empty: clone_mode is CLONED, expected EMPTY/);
+  });
+
+  it('fails with the status and body when the sandbox create is refused', async () => {
+    createError = 'cloneMetadata must be a boolean';
+    const dir = writeTemplates({ a: { install: MARK_INSTALLED } });
+
+    const result = await run(dir);
+
+    assert.equal(result.code, 1);
+    assert.match(
+      result.out,
+      /::error::creating the empty sandbox templates-empty answered HTTP 400: .*cloneMetadata must be a boolean/
+    );
+  });
+
+  it('fails when the sandbox already holds a template collection before the install', async () => {
+    counts = { accounts: 1 };
+    sandboxInstalled = true;
+    const dir = writeTemplates({ a: { install: 'true', seeds: { accounts: [{}] } } });
+
+    const result = await run(dir);
+
+    assert.equal(result.code, 1);
+    assert.match(result.out, /::error::sandbox .* already holds accounts before the install/);
   });
 
   it('stops at the first install.sh that exits non-zero', async () => {

@@ -965,6 +965,26 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   ← `KELTA_UI_BASE_URL` (falls back to `EXTERNAL_BASE_URL`) and the existing
   `kelta.external-base-url` ← `EXTERNAL_BASE_URL`. Self-hosters with a separate UI host set
   `KELTA_UI_BASE_URL`; no host is hard-coded in Java.
+- **Empty sandboxes — `cloneMetadata=false` (KLT-626):** `POST /api/environments` takes an
+  optional boolean attribute `cloneMetadata` (default `true`; anything non-boolean is `400
+  VALIDATION_FAILED` with `source.pointer` at the attribute). With `false`,
+  `SandboxProvisioningService.createSandbox` runs the same tenant write path (the
+  `TenantProvisioningHook` chain seeds system collections, default profiles and the admin; the
+  parent's edition, settings, limits and IP allowlist are copied; the admin is hardened) but
+  skips `cloneIntoSandbox` and marks the environment `ACTIVE` directly — no custom collections,
+  picklists, layouts, list views, flows, dashboards, menus or pages. The mode is stored as
+  `environment.config.cloneMode` (`CLONED`|`EMPTY`, written by `createWithSandboxTenant`;
+  `recordCloneError` merges into `config`, and `PATCH /api/environments/{id}` — whose `config`
+  replaces the stored one — keeps `cloneMode`) and every env read exposes it
+  as the `clone_mode` attribute (`EnvironmentRepository.SELECT_COLUMNS`; a sandbox row with no
+  recorded mode predates this and reads `CLONED`). **Refresh rule:** `POST
+  /api/environments/{id}/refresh` on an `EMPTY` sandbox answers `409 EMPTY_SANDBOX_REFRESH` —
+  a refresh is a full OVERWRITE clone of the parent, which would defeat the point; delete it and
+  create a cloned one instead. CLI: `kelta sandbox create --empty` (also the local MCP
+  `cli_sandbox_create` tool's `empty` option); `sandbox status`/`list` show the mode.
+  `SandboxEmptyCreateRlsIntegrationTest` (worker, Testcontainers) and
+  `SandboxEmptyCreateScenarioTest` (harness) cover it; the `templates` CI job installs the first
+  template into an empty sandbox (`ci/templates-install-check.sh`).
 - **Sandbox auth is per-tenant-profile, never the parent's PAT (kelta#1539, regression-tested
   KLT-285):** a sandbox is a full tenant of its own. `GatewayPrincipal.tenantId`/`profileId` are
   resolved by `UserIdentityResolutionFilter` against the *request's* target tenant
@@ -1224,7 +1244,12 @@ for it, not just a `ScopedValue`.
   `visibleToTenant` applies the same rule to a single row, so get-by-id (including the display-field
   lookup) and the sub-resource routes 404 such a row before it is served or cached under the
   caller's `X-Tenant-ID` (a `fields` row costs one extra `collections` query, only when it is a
-  platform-tenant row read by another tenant). The
+  platform-tenant row read by another tenant). The display-field lookup
+  (`GET /api/collections/<name>`) fetches up to two rows for these collections and narrows them
+  with `filterSharedSystemRows` before taking the first: with one row it could pick the platform
+  tenant's same-named custom collection, which `visibleToTenant` then 404s, hiding the caller's
+  own (KLT-626 — a template installed into the `default` tenant and then into a sandbox of it
+  failed every `kelta list-views apply` in the sandbox). The
   narrowing is skipped when the caller **is** the platform tenant (`X-Tenant-ID ==
   SYSTEM_TENANT_ID`) — there every SYSTEM_TENANT_ID row is the caller's own, and the e2e /
   test-harness "default" tenant is exactly that tenant (its custom collections' fields vanished

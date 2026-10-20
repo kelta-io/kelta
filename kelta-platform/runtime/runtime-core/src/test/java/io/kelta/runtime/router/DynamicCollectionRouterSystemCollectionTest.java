@@ -485,6 +485,39 @@ class DynamicCollectionRouterSystemCollectionTest {
         }
 
         @Test
+        @DisplayName("Should resolve a collection by name to the caller's row when the platform tenant has a same-named custom one")
+        void get_byNamePrefersCallerRowOverPlatformCustomCollection() throws Exception {
+            CollectionDefinition def = io.kelta.runtime.model.system.CoreSystemCollections.collections();
+            when(registry.get("collections")).thenReturn(def);
+            Map<String, Object> platformRow = new HashMap<>();
+            platformRow.put("id", "c-platform");
+            platformRow.put("name", "accounts");
+            platformRow.put("tenantId", io.kelta.runtime.model.system.SystemCollectionDefinitions.SYSTEM_TENANT_ID);
+            platformRow.put("systemCollection", false);
+            Map<String, Object> callerRow = new HashMap<>();
+            callerRow.put("id", "c-own");
+            callerRow.put("name", "accounts");
+            callerRow.put("tenantId", "tenant-123");
+            callerRow.put("systemCollection", false);
+            when(queryEngine.executeQuery(eq(def), any(QueryRequest.class))).thenReturn(
+                    new QueryResult(List.of(platformRow, callerRow),
+                            new io.kelta.runtime.query.PaginationMetadata(2, 1, 2, 1)));
+
+            MvcResult result = mockMvc.perform(get("/api/collections/accounts")
+                            .header("X-Tenant-ID", "tenant-123"))
+                    .andExpect(status().isOk())
+                    .andReturn();
+
+            Map<?, ?> data = (Map<?, ?>) objectMapper.readValue(
+                    result.getResponse().getContentAsString(), Map.class).get("data");
+            assertEquals("c-own", data.get("id"));
+            ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
+            verify(queryEngine).executeQuery(eq(def), captor.capture());
+            assertEquals(2, captor.getValue().pagination().pageSize(),
+                    "the lookup must fetch both the caller's and the platform tenant's row");
+        }
+
+        @Test
         @DisplayName("Should not extend SYSTEM_TENANT_ID visibility to other tenant-scoped system collections")
         void get_systemRowNotSharedForOtherCollections() throws Exception {
             CollectionDefinition def = buildTenantScopedSystemCollection();

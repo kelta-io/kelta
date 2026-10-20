@@ -21,6 +21,8 @@ export interface EnvironmentAttrs {
   sandbox_slug?: string;
   sandbox_tenant_id?: string;
   remote_base_url?: string;
+  /** CLONED (the parent's metadata was cloned in) or EMPTY (created with `--empty`). */
+  clone_mode?: string;
   /** Returned once on sandbox creation. */
   sandboxSlug?: string;
   /** Returned once on sandbox creation. */
@@ -86,6 +88,8 @@ export interface WaitOptions {
 export interface SandboxCreateOptions {
   name: string;
   description?: string;
+  /** Create the sandbox without cloning the parent's metadata (sends `cloneMetadata: false`). */
+  empty?: boolean;
 }
 
 export interface PromoteCreateOptions {
@@ -134,6 +138,9 @@ export async function runSandboxCreate(
   const attributes: Record<string, unknown> = { name: opts.name, type: 'SANDBOX' };
   if (opts.description !== undefined) {
     attributes.description = opts.description;
+  }
+  if (opts.empty) {
+    attributes.cloneMetadata = false;
   }
   const res = await client.post<JsonApiSingleResponse<EnvironmentAttrs>>('/api/environments', {
     data: { attributes },
@@ -305,6 +312,7 @@ function environmentHuman(env: EnvironmentResource): string {
     `  Type:   ${attrs.type ?? ''}`,
     `  Status: ${attrs.status ?? ''}`,
   ];
+  if (attrs.clone_mode) lines.push(`  Clone:  ${attrs.clone_mode}`);
   return lines.join('\n') + '\n';
 }
 
@@ -330,13 +338,24 @@ const sandboxCreate = defineCommand({
   options: [
     { flag: '-n, --name <name>', description: 'Environment name' },
     { flag: '-d, --description <description>', description: 'Environment description' },
+    {
+      flag: '--empty',
+      description:
+        "Create the sandbox without cloning the parent's metadata: system collections, " +
+        'default profiles and the admin only (it cannot be refreshed)',
+    },
   ],
-  input: z.object({ name: z.string().min(1), description: z.string().optional() }),
+  input: z.object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    empty: z.boolean().default(false),
+  }),
   handler: async (ctx, input) => {
     const env = await runSandboxCreate(ctx.client.getAxiosInstance(), input);
     const attrs = env.attributes ?? {};
     const lines = [
-      `Sandbox environment created (id: ${env.id}, status: ${attrs.status ?? 'PENDING'})`,
+      `Sandbox environment created (id: ${env.id}, status: ${attrs.status ?? 'PENDING'}` +
+        `${attrs.clone_mode ? `, clone: ${attrs.clone_mode}` : ''})`,
     ];
     if (attrs.sandboxSlug || attrs.adminUsername || attrs.adminInitialPassword) {
       lines.push(
@@ -372,6 +391,7 @@ const sandboxList = defineCommand({
         { key: 'name', header: 'NAME' },
         { key: 'type', header: 'TYPE' },
         { key: 'status', header: 'STATUS' },
+        { key: 'clone_mode', header: 'CLONE' },
         { key: 'sandbox_slug', header: 'SLUG' },
       ],
     };
@@ -396,7 +416,7 @@ const sandboxStatus = defineCommand({
 const sandboxRefresh = defineCommand({
   group: 'sandbox',
   name: 'refresh',
-  summary: 'Refresh a sandbox environment from its source',
+  summary: 'Refresh a sandbox environment from its source (an --empty sandbox is refused with 409)',
   dangerous: true,
   positionals: [{ name: 'envId', description: 'Environment id', required: true }],
   input: z.object({ envId: z.string().min(1) }),
