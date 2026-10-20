@@ -73,8 +73,8 @@ job sets `CERBOS_CI_TAG` to `<run_id>-<run_attempt>-<job>` (`local` stays the de
 hand-run compose), and its `Stop stack` step removes that tag with an explicit
 `docker image rm … || true` — `down --rmi local` skips images that have a custom `image:` tag.
 
-Every job's last step runs `ci/docker-reclaim.sh` (#1794), which prunes unused images older
-than 24 h, default-builder cache older than 24 h, and trims the `kelta-ci` builder to 20 GB.
+Every job's last step runs `ci/docker-reclaim.sh` (#1794), which removes unused images older
+than 24 h (except those compose or the workflows name), default-builder cache older than 24 h, and trims the `kelta-ci` builder to 20 GB.
 `docker image prune --filter until=` ages an image by its **`Created`** time, and a build served
 from the warm `kelta-ci` cache keeps the *original* build's `Created` — weeks old for cerbos,
 whose `docker/cerbos/` context rarely changes. So a freshly `--load`ed image counted as old and
@@ -88,6 +88,16 @@ broke run 38854982805 (PR #1810): `Start stack` → `No such image: kelta-cerbos
   (`--filter label!=io.kelta.ci.loaded-at`) and removes them only once that label is older
   than the age, one tag at a time and never forced, so a job's image survives every other
   job's reclaim for 24 h however old its `Created` is.
+
+The same race hit third-party images (KLT-638, run 39345314427: `Start stack` → `No such image:
+axllent/mailpit:latest`): every upstream image is older than 24 h, so once no container used it
+an `image prune --all` on another job deleted it between this job's pull and its `up`. The
+reclaim therefore has no `--all` prune. `docker image prune` removes dangling images only; tagged
+unlabelled images older than the age are removed one tag at a time (never forced), **except** a
+keep-list of every `image:` in the checkout's `docker-compose*.yml` and every `docker pull` /
+`FROM` image in `.github/workflows/*.yml` (`${VAR:-default}` read as its default; extra refs via
+`DOCKER_RECLAIM_KEEP`). With no keep-list to read, it keeps every tagged unlabelled image and
+prints a `::warning::`. A new compose service or workflow helper image is kept automatically.
 
 Not covered: the released `ghcr.io/kelta-io/*` images that `quickstart`/`upgrade` *pull* carry
 no label and an old `Created`. If one is pruned before `up`, compose pulls it again (only a
