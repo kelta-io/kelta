@@ -98,9 +98,14 @@ services:
       kelta-gateway:
         condition: service_healthy
     healthcheck:
-      # Exit code, not `grep UP` (see kelta-gateway in docker-compose.yml): Spring
-      # answers 503 when DOWN. curl, as in the image's own HEALTHCHECK.
-      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8080/actuator/health/readiness || exit 1"]
+      # The temurin JRE runtime stage ships neither curl nor wget (the image's own
+      # curl HEALTHCHECK can never pass), so probe over bash's /dev/tcp and require
+      # a 200 status line: Spring answers 503 while readiness is not UP.
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && head -n1 <&3 | grep -q " 200"'
       interval: 10s
       timeout: 5s
       retries: 10

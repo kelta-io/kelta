@@ -412,7 +412,8 @@ change to the script skipped its tests and broke it.
 
 The `e2e` job runs kelta-mcp in its compose stack (`docker-compose.ci.yml`, under the `mcp`
 profile; the job sets `COMPOSE_PROFILES=mcp`, so the quickstart, templates and upgrade stacks never
-build or start it) and, after the admin's first sign-in, its "MCP smoke" step runs
+build or start it; its healthcheck probes `/actuator/health/readiness` over bash's `/dev/tcp`
+because the temurin JRE runtime image has neither curl nor wget) and, after the admin's first sign-in, its "MCP smoke" step runs
 `ci/mcp-smoke.sh`: from a throwaway node image on the compose network it creates a fresh tenant
 (`mcp-smoke`), mints a PAT for its admin (`POST /api/tenants/{id}/bootstrap-token`), starts
 `kelta mcp serve --source remote --mcp-url http://kelta-mcp:8080 --toolset all` and speaks stdio
