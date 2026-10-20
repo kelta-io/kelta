@@ -1,0 +1,16 @@
+[
+  {"fullName":"Ada Brightwater","email":"ada.brightwater@example.com","phone":"+1-555-0110","currentTitle":"Software engineer","location":"Austin","source":"REFERRAL","profileUrl":"https://example.org/profiles/ada-brightwater"},
+  {"fullName":"Felix Marchetti","email":"felix.marchetti@example.com","phone":"+1-555-0111","currentTitle":"Senior developer","location":"Remote","source":"JOB_BOARD","profileUrl":"https://example.org/profiles/felix-marchetti"},
+  {"fullName":"Noor Haddad","email":"noor.haddad@example.com","phone":"+1-555-0112","currentTitle":"Platform engineer","location":"Toronto","source":"CAREERS_SITE","profileUrl":"https://example.org/profiles/noor-haddad"},
+  {"fullName":"Owen Castellanos","email":"owen.castellanos@example.com","phone":"+1-555-0113","currentTitle":"Junior developer","location":"Denver","source":"EVENT","profileUrl":"https://example.org/profiles/owen-castellanos"},
+  {"fullName":"Lena Vasquez-Hart","email":"lena.vasquez.hart@example.com","phone":"+1-555-0114","currentTitle":"UX designer","location":"Lisbon","source":"CAREERS_SITE","profileUrl":"https://example.org/profiles/lena-vasquez-hart"},
+  {"fullName":"Kofi Mensah-Lowe","email":"kofi.mensah.lowe@example.com","phone":"+1-555-0115","currentTitle":"Visual designer","location":"Porto","source":"AGENCY","profileUrl":"https://example.org/profiles/kofi-mensah-lowe"},
+  {"fullName":"Ingrid Solberg","email":"ingrid.solberg@example.com","phone":"+1-555-0116","currentTitle":"Sales development rep","location":"Chicago","source":"JOB_BOARD","profileUrl":"https://example.org/profiles/ingrid-solberg"},
+  {"fullName":"Rafael Duarte","email":"rafael.duarte@example.com","phone":"+1-555-0117","currentTitle":"Account manager","location":"Milwaukee","source":"REFERRAL","profileUrl":"https://example.org/profiles/rafael-duarte"},
+  {"fullName":"Mei-Ling Arden","email":"mei.ling.arden@example.com","phone":"+1-555-0118","currentTitle":"Regional sales lead","location":"Chicago","source":"AGENCY","profileUrl":"https://example.org/profiles/mei-ling-arden"},
+  {"fullName":"Hugo Pemberton","email":"hugo.pemberton@example.com","phone":"+1-555-0119","currentTitle":"HR assistant","location":"Chicago","source":"CAREERS_SITE","profileUrl":"https://example.org/profiles/hugo-pemberton"},
+  {"fullName":"Sasha Kowalczyk","email":"sasha.kowalczyk@example.com","phone":"+1-555-0120","currentTitle":"Business analyst","location":"Remote","source":"JOB_BOARD","profileUrl":"https://example.org/profiles/sasha-kowalczyk"},
+  {"fullName":"Theo Ashgrove","email":"theo.ashgrove@example.com","phone":"+1-555-0121","currentTitle":"Product owner","location":"Remote","source":"REFERRAL","profileUrl":"https://example.org/profiles/theo-ashgrove"},
+  {"fullName":"Yara Quillfeather","email":"yara.quillfeather@example.com","phone":"+1-555-0122","currentTitle":"Data analyst","location":"Remote","source":"EVENT","profileUrl":"https://example.org/profiles/yara-quillfeather"},
+  {"fullName":"Elliot Fenwick","email":"elliot.fenwick@example.com","phone":"+1-555-0123","currentTitle":"Backend developer","location":"Boise","source":"CAREERS_SITE","profileUrl":"https://example.org/profiles/elliot-fenwick"}
+]

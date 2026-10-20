@@ -1,0 +1,131 @@
+{
+  "name": "Hiring overview",
+  "description": "Open roles, the application pipeline by stage and upcoming interviews",
+  "accessLevel": "PUBLIC",
+  "columnCount": 3,
+  "components": [
+    {
+      "title": "Open roles",
+      "componentType": "metric",
+      "columnPosition": 1,
+      "rowPosition": 1,
+      "config": {
+        "collectionName": "job-openings",
+        "aggregateFunction": "COUNT",
+        "ignoreTimeRange": true,
+        "filters": [
+          {
+            "field": "status",
+            "operator": "eq",
+            "value": "OPEN"
+          }
+        ]
+      }
+    },
+    {
+      "title": "Active applications",
+      "componentType": "metric",
+      "columnPosition": 2,
+      "rowPosition": 1,
+      "config": {
+        "collectionName": "job-applications",
+        "aggregateFunction": "COUNT",
+        "ignoreTimeRange": true,
+        "filters": [
+          {
+            "field": "stage",
+            "operator": "neq",
+            "value": "HIRED"
+          },
+          {
+            "field": "stage",
+            "operator": "neq",
+            "value": "REJECTED"
+          }
+        ]
+      }
+    },
+    {
+      "title": "Hires",
+      "componentType": "metric",
+      "columnPosition": 3,
+      "rowPosition": 1,
+      "config": {
+        "collectionName": "job-applications",
+        "aggregateFunction": "COUNT",
+        "ignoreTimeRange": true,
+        "filters": [
+          {
+            "field": "stage",
+            "operator": "eq",
+            "value": "HIRED"
+          }
+        ]
+      }
+    },
+    {
+      "title": "Applications by stage",
+      "componentType": "chart",
+      "columnPosition": 1,
+      "rowPosition": 2,
+      "columnSpan": 2,
+      "config": {
+        "collectionName": "job-applications",
+        "groupByField": "stage",
+        "chartStyle": "bar",
+        "ignoreTimeRange": true
+      }
+    },
+    {
+      "title": "Candidates by source",
+      "componentType": "chart",
+      "columnPosition": 3,
+      "rowPosition": 2,
+      "config": {
+        "collectionName": "candidates",
+        "groupByField": "source",
+        "chartStyle": "pie",
+        "ignoreTimeRange": true
+      }
+    },
+    {
+      "title": "Applications by job opening",
+      "componentType": "chart",
+      "columnPosition": 1,
+      "rowPosition": 3,
+      "columnSpan": 3,
+      "config": {
+        "collectionName": "job-applications",
+        "groupByField": "job",
+        "chartStyle": "bar",
+        "ignoreTimeRange": true
+      }
+    },
+    {
+      "title": "Upcoming interviews",
+      "componentType": "table",
+      "columnPosition": 1,
+      "rowPosition": 4,
+      "columnSpan": 3,
+      "config": {
+        "collectionName": "interviews",
+        "fields": [
+          "title",
+          "application",
+          "interviewType",
+          "scheduledAt",
+          "interviewer"
+        ],
+        "sortBy": "scheduledAt",
+        "ignoreTimeRange": true,
+        "filters": [
+          {
+            "field": "outcome",
+            "operator": "eq",
+            "value": "PENDING"
+          }
+        ]
+      }
+    }
+  ]
+}
