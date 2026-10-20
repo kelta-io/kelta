@@ -1,6 +1,6 @@
 # Examples
 
-Three worked examples: two application templates you can install into a tenant with one command,
+Four worked examples: three application templates you can install into a tenant with one command,
 and a walkthrough of an AI agent building an app over MCP.
 
 Each template directory holds the
@@ -13,4 +13,5 @@ contents are on the docs page
 |----------|------------|---------|
 | [`templates/crm`](templates/crm/README.md) | Sales CRM: accounts, contacts, deals and activities, a flow that stamps closed deals, and a sales dashboard | `./examples/templates/crm/install.sh` |
 | [`templates/inspections`](templates/inspections/README.md) | Site inspections against reusable checklists, with a rule and flow that stop an inspection with an open high-severity finding from being marked passed | `./examples/templates/inspections/install.sh` |
+| [`templates/applicant-tracking`](templates/applicant-tracking/README.md) | Applicant tracking: job openings, candidates, applications moving through hiring stages and their interviews, a flow that stamps stage changes and hires, a Kanban hiring pipeline and a hiring dashboard. Built through the admin MCP server alone | `./examples/templates/applicant-tracking/install.sh` |
 | [`agents-mcp`](agents-mcp/README.md) | Walkthrough: an AI agent builds a task tracker over MCP — a `tasks` collection with a status picklist, records, a filtered query, and a flow that stamps `completed_at` when a task is done | [`agents-mcp/README.md`](agents-mcp/README.md) (walkthrough, nothing to install) |

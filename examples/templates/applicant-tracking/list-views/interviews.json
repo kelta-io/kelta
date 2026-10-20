@@ -1,0 +1,4 @@
+[
+  { "name": "Upcoming interviews", "columns": ["title", "application", "interviewType", "scheduledAt", "interviewer"], "filters": ["outcome=PENDING"], "sort": "scheduledAt", "default": true, "rowLimit": 25 },
+  { "name": "All interviews", "columns": ["title", "application", "interviewType", "scheduledAt", "interviewer", "outcome"], "sort": "-scheduledAt", "rowLimit": 50 }
+]

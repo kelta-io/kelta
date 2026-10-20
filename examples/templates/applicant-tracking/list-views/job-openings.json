@@ -1,0 +1,4 @@
+[
+  { "name": "Open roles", "columns": ["title", "department", "location", "employmentType", "headcount", "hiringManager"], "filters": ["status=OPEN"], "sort": "title", "default": true, "rowLimit": 25 },
+  { "name": "All job openings", "columns": ["title", "department", "status", "location", "openedOn"], "sort": "-openedOn", "rowLimit": 25 }
+]
