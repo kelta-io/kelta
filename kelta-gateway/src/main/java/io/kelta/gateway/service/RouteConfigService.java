@@ -294,13 +294,19 @@ public class RouteConfigService {
      *       data operations mounted under the prefix ({@code /api/collections/{name}/import},
      *       {@code /duplicates}, {@code /merge}) are not writes to the collections collection —
      *       their controllers act on the named collection's records — so they are exempt.</li>
+     *   <li>{@code scheduled-jobs} — writes only, with {@code MANAGE_WORKFLOWS} as the override
+     *       (the scheduled-jobs page and the flow designer are gated on it). Covers the generic
+     *       create/update/delete and {@code ScheduledJobActionsController}'s
+     *       {@code /{id}/pause|resume|execute} and {@code /validate-cron} POSTs, none of which check
+     *       a permission themselves. Reads stay API_ACCESS-only.</li>
      * </ul>
      */
     static final Map<String, StaticCollectionCheck> COLLECTION_CHECKED_STATIC_ROUTES = Map.of(
             "users", new StaticCollectionCheck(true, "MANAGE_USERS"),
             "profiles", new StaticCollectionCheck(false, "MANAGE_USERS"),
             "collections", new StaticCollectionCheck(false, "CUSTOMIZE_APPLICATION",
-                    Pattern.compile("^/api/collections/[^/]+/(import|duplicates|merge)(/.*)?$")));
+                    Pattern.compile("^/api/collections/[^/]+/(import|duplicates|merge)(/.*)?$")),
+            "scheduled-jobs", new StaticCollectionCheck(false, "MANAGE_WORKFLOWS"));
 
     /** Registers every {@link #STATIC_ROUTES} entry against the worker service URL. */
     private void registerStaticRoutes() {

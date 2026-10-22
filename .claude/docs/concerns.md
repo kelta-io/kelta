@@ -225,10 +225,10 @@ mailbox to a high-volume public address.
 ### Authorization gaps still open
 
 - **Static routes over system collections stop at `API_ACCESS` for generic CRUD** — PLT-331 added
-  a collection check for `users` (all methods), `profiles` and `collections` (writes) via
-  `RouteConfigService.COLLECTION_CHECKED_STATIC_ROUTES`, but `page-layouts`, `list-views`,
-  `ui-menus`, `ui-pages`, `global-picklists`, `oidc-providers`, `email-templates`, `scripts`,
-  `scheduled-jobs`, `webhooks`, `connected-apps`, `flows`, `approval-processes`, `reports`,
+  a collection check for `users` (all methods), `profiles`, `collections` and `scheduled-jobs`
+  (writes) via `RouteConfigService.COLLECTION_CHECKED_STATIC_ROUTES`, but `page-layouts`,
+  `list-views`, `ui-menus`, `ui-pages`, `global-picklists`, `oidc-providers`, `email-templates`,
+  `scripts`, `webhooks`, `connected-apps`, `flows`, `approval-processes`, `reports`,
   `dashboards`, … do not: their writes run at `API_ACCESS` (reads are post-filtered by
   `CerbosRecordAuthorizationAdvice`, except `flows`/`connected-apps`, which its `isMetadataPath`
   skips). Each needs an audit of which reads ordinary profiles rely on before it gets a row. (#1809

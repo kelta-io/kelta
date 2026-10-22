@@ -446,7 +446,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   child's Cerbos `collection` permission for the action, keyed on the collection id the gateway
   route carries (`CollectionLifecycleManager.getTenantVisibleCollectionId`). For a system
   collection behind a `static-` route it is that route's rule, mirrored in `GatewayStaticRoutes`
-  (users/profiles/collections checks with their override permissions, the tenants and
+  (users/profiles/collections/scheduled-jobs checks with their override permissions, the tenants and
   module-signing-key rules, `API_ACCESS` otherwise) and pinned to the gateway sources by
   `GatewayStaticRoutesSyncTest`. System permissions use the gateway's `system_feature` check
   (`CerbosAuthorizationService.checkSystemPermission`). A denial is a 403 `FORBIDDEN` JSON:API
@@ -468,9 +468,10 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   identical to the gateway), denying the whole batch (403, fail-closed) before executing if any op is
   unauthorized. The `IdentityCollectionGuardHook` still guards identity-collection writes underneath
   (see "Delegated administration" below).
-- **Static routes that front a system collection** (`users`, `profiles`, `collections`): these
-  are `static-` routes, yet `/api/users`, `/api/profiles` and `/api/collections` are served by the
-  generic `DynamicCollectionRouter`, which has no permission check of its own (only `readOnly`) —
+- **Static routes that front a system collection** (`users`, `profiles`, `collections`,
+  `scheduled-jobs`): these are `static-` routes, yet `/api/users`, `/api/profiles`,
+  `/api/collections` and `/api/scheduled-jobs` are served by the generic `DynamicCollectionRouter`
+  (plus any dedicated controllers under the prefix), which has no permission check of its own (only `readOnly`) —
   so before 2026-10-04 a least-privilege PAT reached body validation (`POST /api/users` answered a
   field-by-field 400) and list counts on them. The system collection's own bootstrap route sits at
   the same path but is owned by the platform tenant, so `RouteRegistry.findByPath` always prefers
@@ -485,6 +486,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   | `/api/users/**` | every method | `MANAGE_USERS` (as `IdentityCollectionGuardHook`) | `read` is checked — the record advice already emptied the list for callers without it; no self-service sub-paths exist (the caller's own record is `/api/me/profile`, under `/api/me/**`, which stays `API_ACCESS`-only) |
   | `/api/profiles/**` | writes | `MANAGE_USERS` | **intentionally `API_ACCESS`-only**: the user admin pages (gated on `MANAGE_USERS`, not a collection grant) list profiles, and the grants themselves live in `profile-*-permissions`, whose own routes are object-checked |
   | `/api/collections/**` | writes, except `/{name}/import`, `/duplicates`, `/merge` | `CUSTOMIZE_APPLICATION` (the setup pages' gate) | **intentionally `API_ACCESS`-only**: every record page, form and list reads collection and field metadata. The exempt sub-paths act on the named collection's records, not on the collections collection |
+  | `/api/scheduled-jobs/**` | writes, incl. `ScheduledJobActionsController`'s `/{id}/pause\|resume\|execute` and `/validate-cron` (POST → `create`) | `MANAGE_WORKFLOWS` (the scheduled-jobs page and flow designer's gate) | `API_ACCESS`-only, unchanged: only those `MANAGE_WORKFLOWS` pages call the route. The action endpoints check no permission themselves — this row is their authorization |
 
   Every other static route still stops at `API_ACCESS`. Adding a row is a security decision —
   check which UI flows read the route under an ordinary profile first; most seeded profiles
