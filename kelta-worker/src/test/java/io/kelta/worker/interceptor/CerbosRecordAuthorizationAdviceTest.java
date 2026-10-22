@@ -1,8 +1,10 @@
 package io.kelta.worker.interceptor;
 
+import io.kelta.worker.controller.PackageController;
 import io.kelta.worker.service.CerbosAuthorizationService;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.RecordShareAccessService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -161,6 +163,25 @@ class CerbosRecordAuthorizationAdviceTest {
             @SuppressWarnings("unchecked")
             Map<String, Object> resultBody = (Map<String, Object>) result;
             assertThat(resultBody).containsEntry("data", null);
+        }
+
+        @Test
+        @DisplayName("keeps package history for a caller without a grant on the packages collection")
+        void keepsPackageHistory() throws Exception {
+            // "packages" is a system collection no seeded profile holds an object permission on,
+            // so a CUSTOMIZE_APPLICATION profile without VIEW_ALL_DATA (Solution Manager) had its
+            // history emptied by the record check after the controller's own gate admitted it.
+            var request = createRequest("/api/packages/history");
+            Map<String, Object> body = Map.of("data", List.of(Map.of("type", "packages",
+                    "id", "pkg-1", "attributes", Map.of("name", "acme", "status", "success"))));
+            MethodParameter getHistory = new MethodParameter(
+                    PackageController.class.getDeclaredMethod("getHistory", HttpServletRequest.class), -1);
+
+            Object result = advice.beforeBodyWrite(body, getHistory,
+                    MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(result).isSameAs(body);
+            verifyNoInteractions(authzService);
         }
     }
 
