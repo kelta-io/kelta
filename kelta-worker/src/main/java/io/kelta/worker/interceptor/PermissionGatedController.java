@@ -2,8 +2,10 @@ package io.kelta.worker.interceptor;
 
 /**
  * Marks a controller whose every handler is gated on a system permission and returns platform
- * resources that are not records of any collection (sandbox environments, promotions),
- * exempting its handlers from {@link CerbosRecordAuthorizationAdvice}'s record-level filter.
+ * resources that are not records of any collection (sandbox environments, promotions), or rows
+ * of a platform-metadata system collection whose access that permission governs (package
+ * history — {@code CUSTOMIZE_APPLICATION}), exempting its handlers from
+ * {@link CerbosRecordAuthorizationAdvice}'s record-level filter.
  *
  * <p>The advice reads a {@code data} object or list under {@code /api/{segment}} as records of
  * collection {@code segment} and checks the request method's action on them. For a segment that
@@ -17,7 +19,7 @@ package io.kelta.worker.interceptor;
  *
  * <p>Implementing this is a promise: every handler of the controller checks its system
  * permission (fail-closed on a missing identity) before it reads or returns anything, and none
- * returns collection records — a controller that does uses {@link DerivedDataController} or
+ * returns tenant data records — a controller that does uses {@link DerivedDataController} or
  * keeps the advice. Use {@link DerivedDataController} when access follows a source record.
  */
 public interface PermissionGatedController {
