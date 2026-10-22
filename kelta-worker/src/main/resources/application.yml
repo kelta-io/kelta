@@ -121,6 +121,13 @@ kelta:
         # Re-push every tenant's policies on startup even if this image already seeded
         # (e.g. after restoring the Cerbos store from backup). Declared here, not env-only.
         force: ${CERBOS_SEED_FORCE:false}
+    superset:
+      # Where Superset reaches Postgres for per-tenant connections. Blank = the host, port and
+      # database of spring.datasource.url (the worker's own database); set any part when
+      # Superset must use another address, e.g. around a pooler the tenant users can't use.
+      database-host: ${SUPERSET_DATABASE_HOST:}
+      database-port: ${SUPERSET_DATABASE_PORT:}
+      database-name: ${SUPERSET_DATABASE_NAME:}
   svix:
     server-url: ${SVIX_SERVER_URL:http://localhost:8071}
     public-url: ${SVIX_PUBLIC_URL:${SVIX_SERVER_URL:http://localhost:8071}}

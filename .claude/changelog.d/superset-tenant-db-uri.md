@@ -1,0 +1,1 @@
+- 2026-10-22 fix(worker): build Superset tenant connections from the worker's datasource (SUPERSET_DATABASE_HOST/PORT/NAME override) instead of a hard-coded address, and register the Superset integration only when SUPERSET_URL is set (superset-tenant-db-uri)
