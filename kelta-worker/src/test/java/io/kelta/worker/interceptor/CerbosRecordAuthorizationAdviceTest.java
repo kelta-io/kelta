@@ -3,7 +3,7 @@ package io.kelta.worker.interceptor;
 import io.kelta.worker.controller.BulkOperationsController;
 import io.kelta.worker.controller.ChatController;
 import io.kelta.worker.controller.DataExportController;
-import io.kelta.worker.controller.EmailSendController;
+import io.kelta.worker.controller.EmailLogController;
 import io.kelta.worker.controller.GovernorLimitsController;
 import io.kelta.worker.controller.MailboxAdminController;
 import io.kelta.worker.controller.MailboxController;
@@ -224,7 +224,8 @@ class CerbosRecordAuthorizationAdviceTest {
                     Arguments.of(ChatController.class, "list", "GET", "/api/chat/conversations"),
                     Arguments.of(ChatController.class, "messages", "GET", "/api/chat/conversations/c-1/messages"),
                     Arguments.of(MailboxController.class, "listThreads", "GET", "/api/support/threads"),
-                    Arguments.of(MailboxController.class, "claim", "POST", "/api/support/threads/t-1/claim"));
+                    Arguments.of(MailboxController.class, "claim", "POST", "/api/support/threads/t-1/claim"),
+                    Arguments.of(EmailLogController.class, "listLogsByRecord", "GET", "/api/email/logs"));
         }
 
         private MethodParameter handler(Class<?> controller, String name) {
@@ -252,23 +253,6 @@ class CerbosRecordAuthorizationAdviceTest {
 
             assertThat(result).isSameAs(body);
             verifyNoInteractions(authzService);
-        }
-
-        @Test
-        @DisplayName("email logs keep the record check — the log does not say which collection its record is in")
-        void emailLogsStillChecked() {
-            // GET /api/email/logs?recordId= is gated on MANAGE_EMAIL_TEMPLATES only. Exempting it
-            // would let a template manager read recipients and subjects for any record id; doing it
-            // properly needs the source record's collection, which email_log does not store.
-            var request = createRequest("/api/email/logs");
-            Map<String, Object> body = Map.of("data", List.of(Map.of("id", "log-1")));
-
-            Object result = advice.beforeBodyWrite(body, handler(EmailSendController.class, "listLogsByRecord"),
-                    MediaType.APPLICATION_JSON, null, request, null);
-
-            @SuppressWarnings("unchecked")
-            List<Object> data = (List<Object>) ((Map<String, Object>) result).get("data");
-            assertThat(data).isEmpty();
         }
     }
 

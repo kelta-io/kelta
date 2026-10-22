@@ -678,14 +678,13 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   without VIEW_ALL_DATA / MODIFY_ALL_DATA get `data: null` / an empty list (after any write ran).
   Opted out: `PermissionGatedController` (packages, promotions, environments, bulk jobs, data
   exports, governor limits, support-mailbox admin, modules, module signing keys) and
-  `SelfScopedController` (watches, wins, devices, chat, support inbox) — the bodies of these
+  `SelfScopedController` (watches, wins, devices, chat, support inbox), plus
+  `DerivedDataController` for the record email log (`GET /api/email/logs?collection=&recordId=`
+  loads the record through the `QueryEngine` and checks `isRecordReadable` before reading the
+  log; `email_log` stores only the record id, so the caller names the collection) — the bodies of these
   controllers are authorized only by the controller itself (so governor-limit reads now need
   `VIEW_SETUP`, the setup page's gate, and signing-key writes re-check `MANAGE_CREDENTIALS` in the
   worker). Still open:
-  - `GET /api/email/logs` keeps the record check, so template managers without VIEW_ALL_DATA see
-    no email entries on the activity timeline. Exempting it would expose recipients and subjects
-    for any record id; doing it properly needs the source record's collection, which `email_log`
-    does not store (`DerivedDataController` + `isRecordReadable`).
   - `/api/_search` items are checked as records of `_search`, so search is empty without
     VIEW_ALL_DATA. The advice is its only per-record check — fix by checking each item against
     its own `type`, never by exempting it.

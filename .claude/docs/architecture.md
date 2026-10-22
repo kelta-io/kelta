@@ -1096,7 +1096,8 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   with open reads `ModuleController`, `ModuleSigningKeyController`). One whose access follows the
   caller — own rows or a membership, such as chat participants or support-mailbox agents —
   implements `SelfScopedController` (`ChatController`, `MailboxController`); one whose access
-  follows a source record implements `DerivedDataController`.
+  follows a source record implements `DerivedDataController` and loads that record through the
+  `QueryEngine` before `isRecordReadable` (`DashboardDataController`, `EmailLogController`).
 - Identity: inject **`CerbosPermissionResolver`** and read `getProfileId(request)`,
   `getEmail(request)`, `getProfileName(request)`, `getTenantId(request)`, `hasIdentity(request)`.
   The gateway's `RouteAuthorizationFilter.forwardWithHeaders` sets `X-User-Profile-Id`,
