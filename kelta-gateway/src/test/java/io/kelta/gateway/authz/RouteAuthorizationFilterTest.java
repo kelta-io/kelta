@@ -762,6 +762,12 @@ class RouteAuthorizationFilterTest {
         private final RouteDefinition collectionsCollection = new RouteDefinition("collections-uuid",
                 "/api/collections/**", "http://worker:80", "collections", null, 0, "platform-tenant")
                 .withSystemCollection(true);
+        private final RouteDefinition scheduledJobsRoute = new RouteDefinition("static-scheduled-jobs",
+                "/api/scheduled-jobs/**", "http://worker:80", "scheduled-jobs")
+                .withCollectionCheck(new StaticCollectionCheck(false, "MANAGE_WORKFLOWS"));
+        private final RouteDefinition scheduledJobsCollection = new RouteDefinition("scheduled-jobs-uuid",
+                "/api/scheduled-jobs/**", "http://worker:80", "scheduled-jobs", null, 0, "platform-tenant")
+                .withSystemCollection(true);
 
         private RouteAuthorizationFilter filter;
         private GatewayPrincipal principal;
@@ -780,6 +786,10 @@ class RouteAuthorizationFilterTest {
                     .thenReturn(Optional.of(profilesCollection));
             lenient().when(routeRegistry.findCollectionRouteBehind(collectionsRoute))
                     .thenReturn(Optional.of(collectionsCollection));
+            lenient().when(cerbosService.checkSystemPermission(principal, "MANAGE_WORKFLOWS"))
+                    .thenReturn(Mono.just(false));
+            lenient().when(routeRegistry.findCollectionRouteBehind(scheduledJobsRoute))
+                    .thenReturn(Optional.of(scheduledJobsCollection));
         }
 
         private MockServerWebExchange exchange(MockServerHttpRequest request, RouteDefinition route) {
@@ -934,6 +944,51 @@ class RouteAuthorizationFilterTest {
                     .contentType(MediaType.APPLICATION_JSON).body("{}"), collectionsRoute);
             run(write);
             assertThat(write.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        }
+
+        @Test
+        @DisplayName("Scheduled-job actions and writes need the collection grant or MANAGE_WORKFLOWS")
+        void scheduledJobWritesChecked() {
+            when(cerbosService.checkObjectPermission(principal, "scheduled-jobs-uuid", "create"))
+                    .thenReturn(Mono.just(false));
+            for (String action : List.of("pause", "resume", "execute")) {
+                MockServerWebExchange exchange = exchange(
+                        MockServerHttpRequest.post("/api/scheduled-jobs/job-1/" + action).build(), scheduledJobsRoute);
+                run(exchange);
+                assertDenied(exchange);
+            }
+
+            when(cerbosService.checkObjectPermission(principal, "scheduled-jobs-uuid", "edit"))
+                    .thenReturn(Mono.just(false));
+            MockServerWebExchange patch = exchange(MockServerHttpRequest.patch("/api/scheduled-jobs/job-1")
+                    .contentType(MediaType.APPLICATION_JSON).body("{}"), scheduledJobsRoute);
+            run(patch);
+            assertDenied(patch);
+        }
+
+        @Test
+        @DisplayName("MANAGE_WORKFLOWS admits a scheduled-job action without a collection grant")
+        void manageWorkflowsAdmitsScheduledJobAction() {
+            when(cerbosService.checkSystemPermission(principal, "MANAGE_WORKFLOWS")).thenReturn(Mono.just(true));
+            MockServerWebExchange exchange = exchange(
+                    MockServerHttpRequest.post("/api/scheduled-jobs/job-1/pause").build(), scheduledJobsRoute);
+
+            run(exchange);
+
+            verify(filterChain).filter(any());
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("GET /api/scheduled-jobs stays API_ACCESS-only")
+        void scheduledJobReadsStayOpen() {
+            MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/scheduled-jobs").build(),
+                    scheduledJobsRoute);
+
+            run(exchange);
+
+            verify(filterChain).filter(any());
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
         }
 
         @Test

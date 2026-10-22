@@ -204,6 +204,11 @@ class RouteConfigServiceTest {
         assertFalse(profilesRoute.getCollectionCheck().includeReads());
         RouteDefinition collectionsRoute = routeRegistry.findByPath("/api/collections", "tenant-1").orElseThrow();
         assertEquals("CUSTOMIZE_APPLICATION", collectionsRoute.getCollectionCheck().writeOverridePermission());
+        RouteDefinition scheduledJobsRoute = routeRegistry.findByPath("/api/scheduled-jobs", "tenant-1").orElseThrow();
+        assertNotNull(scheduledJobsRoute.getCollectionCheck(),
+                "scheduled-jobs writes (incl. pause/resume/execute) are authorized against the collection");
+        assertFalse(scheduledJobsRoute.getCollectionCheck().includeReads());
+        assertEquals("MANAGE_WORKFLOWS", scheduledJobsRoute.getCollectionCheck().writeOverridePermission());
         assertNull(routeRegistry.findByPath("/api/me", "tenant-1").orElseThrow().getCollectionCheck(),
                 "every other static route stays API_ACCESS-only");
     }
