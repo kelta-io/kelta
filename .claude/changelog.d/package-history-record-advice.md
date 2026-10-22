@@ -1,0 +1,1 @@
+- 2026-10-22 fix(worker): stop the record advice emptying package history for CUSTOMIZE_APPLICATION profiles without VIEW_ALL_DATA (package-history-record-advice)
