@@ -1,5 +1,14 @@
 package io.kelta.worker.interceptor;
 
+import io.kelta.worker.controller.BulkOperationsController;
+import io.kelta.worker.controller.ChatController;
+import io.kelta.worker.controller.DataExportController;
+import io.kelta.worker.controller.EmailSendController;
+import io.kelta.worker.controller.GovernorLimitsController;
+import io.kelta.worker.controller.MailboxAdminController;
+import io.kelta.worker.controller.MailboxController;
+import io.kelta.worker.controller.ModuleController;
+import io.kelta.worker.controller.ModuleSigningKeyController;
 import io.kelta.worker.controller.PackageController;
 import io.kelta.worker.service.CerbosAuthorizationService;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -7,6 +16,9 @@ import io.kelta.worker.service.RecordShareAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.MethodParameter;
@@ -15,6 +27,7 @@ import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.*;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -182,6 +195,80 @@ class CerbosRecordAuthorizationAdviceTest {
 
             assertThat(result).isSameAs(body);
             verifyNoInteractions(authzService);
+        }
+    }
+
+    /**
+     * The real handlers whose bodies are not records of the path's first segment. Each was emptied
+     * or nulled for a caller without VIEW_ALL_DATA / MODIFY_ALL_DATA — often after its write had
+     * run (a support mailbox's inbound secret is shown exactly once).
+     */
+    @Nested
+    @DisplayName("controllers that authorize their own responses")
+    class OwnAuthorization {
+
+        static Stream<Arguments> handlers() {
+            return Stream.of(
+                    Arguments.of(BulkOperationsController.class, "listJobs", "GET", "/api/bulk-jobs"),
+                    Arguments.of(BulkOperationsController.class, "createJob", "POST", "/api/bulk-jobs"),
+                    Arguments.of(DataExportController.class, "createExport", "POST", "/api/data-exports"),
+                    Arguments.of(DataExportController.class, "cancelExport", "POST", "/api/data-exports/x-1/cancel"),
+                    Arguments.of(GovernorLimitsController.class, "getStatus", "GET", "/api/governor-limits"),
+                    Arguments.of(GovernorLimitsController.class, "updateLimits", "PUT", "/api/governor-limits"),
+                    Arguments.of(MailboxAdminController.class, "create", "POST", "/api/support/mailboxes"),
+                    Arguments.of(MailboxAdminController.class, "rotateSecret", "POST", "/api/support/mailboxes/mb-1/rotate-secret"),
+                    Arguments.of(ModuleController.class, "listModules", "GET", "/api/modules"),
+                    Arguments.of(ModuleController.class, "enableModule", "POST", "/api/modules/m-1/enable"),
+                    Arguments.of(ModuleSigningKeyController.class, "listKeys", "GET", "/api/modules/signing-keys"),
+                    Arguments.of(ModuleSigningKeyController.class, "addKey", "POST", "/api/modules/signing-keys"),
+                    Arguments.of(ChatController.class, "list", "GET", "/api/chat/conversations"),
+                    Arguments.of(ChatController.class, "messages", "GET", "/api/chat/conversations/c-1/messages"),
+                    Arguments.of(MailboxController.class, "listThreads", "GET", "/api/support/threads"),
+                    Arguments.of(MailboxController.class, "claim", "POST", "/api/support/threads/t-1/claim"));
+        }
+
+        private MethodParameter handler(Class<?> controller, String name) {
+            return Arrays.stream(controller.getDeclaredMethods())
+                    .filter(m -> m.getName().equals(name))
+                    .findFirst()
+                    .map(m -> new MethodParameter(m, -1))
+                    .orElseThrow(() -> new AssertionError(controller.getSimpleName() + "." + name + " not found"));
+        }
+
+        @ParameterizedTest(name = "{0}.{1}")
+        @MethodSource("handlers")
+        @DisplayName("keeps the body for a caller without data-wide grants")
+        void keepsBody(Class<?> controller, String handler, String method, String path) {
+            var request = createRequest(path);
+            ((MockHttpServletRequest) request.getServletRequest()).setMethod(method);
+            Map<String, Object> resource = Map.of("type", "resource", "id", "id-1",
+                    "attributes", Map.of("name", "n"));
+            Map<String, Object> body = "GET".equals(method)
+                    ? Map.of("data", List.of(resource))
+                    : Map.of("data", resource);
+
+            Object result = advice.beforeBodyWrite(body, handler(controller, handler),
+                    MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(result).isSameAs(body);
+            verifyNoInteractions(authzService);
+        }
+
+        @Test
+        @DisplayName("email logs keep the record check — the log does not say which collection its record is in")
+        void emailLogsStillChecked() {
+            // GET /api/email/logs?recordId= is gated on MANAGE_EMAIL_TEMPLATES only. Exempting it
+            // would let a template manager read recipients and subjects for any record id; doing it
+            // properly needs the source record's collection, which email_log does not store.
+            var request = createRequest("/api/email/logs");
+            Map<String, Object> body = Map.of("data", List.of(Map.of("id", "log-1")));
+
+            Object result = advice.beforeBodyWrite(body, handler(EmailSendController.class, "listLogsByRecord"),
+                    MediaType.APPLICATION_JSON, null, request, null);
+
+            @SuppressWarnings("unchecked")
+            List<Object> data = (List<Object>) ((Map<String, Object>) result).get("data");
+            assertThat(data).isEmpty();
         }
     }
 

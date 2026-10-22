@@ -1,5 +1,6 @@
 package io.kelta.worker.controller;
 
+import io.kelta.worker.interceptor.PermissionGatedControllers;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.DataExportRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -44,6 +45,16 @@ class DataExportControllerTest {
         when(permissionResolver.getProfileId(request)).thenReturn("profile-1");
         when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
                 Map.of("permission_name", "VIEW_ALL_DATA", "granted", true)));
+    }
+
+    @Test
+    @DisplayName("gates every handler on VIEW_ALL_DATA (PermissionGatedController promise)")
+    void everyHandlerIsPermissionGated() {
+        when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
+                Map.of("permission_name", "VIEW_ALL_DATA", "granted", false)));
+
+        PermissionGatedControllers.assertEveryHandlerForbidden(controller, request);
+        verifyNoInteractions(dataExportService, dataExportRepository);
     }
 
     @Test

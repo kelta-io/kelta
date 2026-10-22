@@ -3,6 +3,7 @@ package io.kelta.worker.controller;
 import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.event.ModuleChangeType;
 import io.kelta.runtime.module.TenantModuleData;
+import io.kelta.worker.interceptor.PermissionGatedController;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
 import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleSignatureException;
@@ -42,7 +43,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/modules")
 @ConditionalOnBean(RuntimeModuleManager.class)
-public class ModuleController {
+public class ModuleController implements PermissionGatedController {
 
     private static final Logger log = LoggerFactory.getLogger(ModuleController.class);
     static final String MANAGE_PERMISSION = "CUSTOMIZE_APPLICATION";

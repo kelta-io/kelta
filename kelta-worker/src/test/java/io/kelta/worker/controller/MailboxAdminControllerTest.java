@@ -1,6 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.worker.interceptor.PermissionGatedControllers;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.MailboxAccessRepository;
 import io.kelta.worker.repository.MailboxAutoReplyDecisionRepository;
@@ -88,6 +89,19 @@ class MailboxAdminControllerTest {
 
     private <T> T withTenant(ScopedValue.CallableOp<T, RuntimeException> body) {
         return TenantContext.callWithTenant(TENANT, body);
+    }
+
+    @Test
+    @DisplayName("gates every handler on MANAGE_SUPPORT_MAILBOX (PermissionGatedController promise)")
+    void everyHandlerIsPermissionGated() {
+        when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
+                Map.of("permission_name", "MANAGE_SUPPORT_MAILBOX", "granted", false)));
+
+        withTenant(() -> {
+            PermissionGatedControllers.assertEveryHandlerForbidden(controller, request);
+            return null;
+        });
+        verifyNoInteractions(mailboxRepository, accessRepository, escalationRepository);
     }
 
     private Map<String, Object> mailboxRow() {

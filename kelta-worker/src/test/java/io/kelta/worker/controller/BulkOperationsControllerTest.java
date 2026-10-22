@@ -1,6 +1,7 @@
 package io.kelta.worker.controller;
 
 import tools.jackson.databind.ObjectMapper;
+import io.kelta.worker.interceptor.PermissionGatedControllers;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.BulkJobRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -59,6 +60,16 @@ class BulkOperationsControllerTest {
                 Map.of("permission_name", "MANAGE_DATA", "granted", true)));
         controller = new BulkOperationsController(bulkJobRepository, new ObjectMapper(), jdbcTemplate,
                 csvImportService, permissionResolver, bootstrapRepository);
+    }
+
+    @Test
+    @DisplayName("gates every handler on MANAGE_DATA (PermissionGatedController promise)")
+    void everyHandlerIsPermissionGated() {
+        when(bootstrapRepository.findProfileSystemPermissions("prof-1")).thenReturn(List.of(
+                Map.of("permission_name", "MANAGE_DATA", "granted", false)));
+
+        PermissionGatedControllers.assertEveryHandlerForbidden(controller, request);
+        verifyNoInteractions(bulkJobRepository, csvImportService);
     }
 
     @Nested

@@ -6,6 +6,7 @@ import io.kelta.runtime.event.PlatformEvent;
 import io.kelta.runtime.event.RecordChangedPayload;
 import io.kelta.runtime.events.RecordEventPublisher;
 import io.kelta.worker.cache.WorkerCacheManager;
+import io.kelta.worker.interceptor.PermissionGatedController;
 import io.kelta.worker.listener.SystemFeatureEventPublisher;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.GovernorLimitsRepository;
@@ -47,7 +48,7 @@ import static java.util.Collections.emptyList;
  */
 @RestController
 @RequestMapping("/api/governor-limits")
-public class GovernorLimitsController {
+public class GovernorLimitsController implements PermissionGatedController {
 
     private static final Logger log = LoggerFactory.getLogger(GovernorLimitsController.class);
 
@@ -59,6 +60,9 @@ public class GovernorLimitsController {
     private static final String DAILY_KEY_PREFIX = "api-calls-daily:";
     private static final String AI_TOKEN_KEY_PREFIX = "ai-tokens-monthly:";
     static final String WRITE_PERMISSION = "MANAGE_TENANTS";
+
+    /** Reading limits and usage — the governor-limits setup page's gate. */
+    static final String READ_PERMISSION = "VIEW_SETUP";
 
     private final GovernorLimitsRepository repository;
     private final ObjectMapper objectMapper;
@@ -92,15 +96,19 @@ public class GovernorLimitsController {
      * nothing about the payload.
      */
     private void requireWritePermission(HttpServletRequest request) {
+        requirePermission(request, WRITE_PERMISSION);
+    }
+
+    private void requirePermission(HttpServletRequest request, String permission) {
         String profileId = permissionResolver.getProfileId(request);
         if (profileId == null || profileId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No identity");
         }
         boolean granted = bootstrapRepository.findProfileSystemPermissions(profileId).stream()
-                .anyMatch(p -> WRITE_PERMISSION.equals(p.get("permission_name"))
+                .anyMatch(p -> permission.equals(p.get("permission_name"))
                         && Boolean.TRUE.equals(p.get("granted")));
         if (!granted) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, WRITE_PERMISSION + " permission required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, permission + " permission required");
         }
     }
 
@@ -110,12 +118,22 @@ public class GovernorLimitsController {
      * <p>Includes the configured limits and current usage metrics
      * (user count, collection count, daily API call count from Redis).
      *
+     * <p>Gated on {@value #READ_PERMISSION}, the setup page's own gate: the usage counts are tenant
+     * administration data, not something every API user needs.
+     *
      * @param tenantId the tenant ID from the gateway's X-Tenant-ID header
      * @return governor limits status with limits and usage metrics
      */
     @GetMapping
     public ResponseEntity<Map<String, Object>> getStatus(
-            @RequestHeader("X-Tenant-ID") String tenantId) {
+            @RequestHeader("X-Tenant-ID") String tenantId,
+            HttpServletRequest request) {
+        requirePermission(request, READ_PERMISSION);
+        return status(tenantId);
+    }
+
+    /** The status document; the writes return it too, after their own gate. */
+    private ResponseEntity<Map<String, Object>> status(String tenantId) {
         log.debug("GET governor-limits for tenant {}", tenantId);
 
         TenantLimitsView view = loadTenantLimits(tenantId);
@@ -199,7 +217,7 @@ public class GovernorLimitsController {
         featureEventPublisher.publishUpdated(tenantId, "limits");
 
         log.info("Updated tenant {} tier to {}", tenantId, validated);
-        return getStatus(tenantId);
+        return status(tenantId);
     }
 
     /**
@@ -230,7 +248,7 @@ public class GovernorLimitsController {
             featureEventPublisher.publishUpdated(tenantId, "limits");
 
             // Return the updated status (re-read to confirm)
-            return getStatus(tenantId);
+            return status(tenantId);
         } catch (Exception e) {
             log.error("Failed to update governor-limits for tenant {}: {}", tenantId, e.getMessage());
             return ResponseEntity.internalServerError().body(

@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import io.kelta.runtime.event.ModuleChangeType;
 import io.kelta.runtime.module.TenantModuleData;
+import io.kelta.worker.interceptor.PermissionGatedControllers;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
 import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleRouteRegistry;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -30,6 +32,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -52,6 +55,7 @@ class ModuleControllerEnableTest {
     private RuntimeModuleManager manager;
     private ModuleConfigEventPublisher publisher;
     private BootstrapRepository bootstrapRepository;
+    private ModuleController controller;
     private MockMvc mvc;
 
     @BeforeEach
@@ -65,13 +69,24 @@ class ModuleControllerEnableTest {
         when(permissionResolver.getProfileId(any())).thenReturn("profile-1");
         bootstrapRepository = mock(BootstrapRepository.class);
         grant(true);
-        mvc = MockMvcBuilders.standaloneSetup(new ModuleController(
-                manager, publisher, routes, provenance, permissionResolver, bootstrapRepository)).build();
+        controller = new ModuleController(
+                manager, publisher, routes, provenance, permissionResolver, bootstrapRepository);
+        mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
     private void grant(boolean granted) {
         when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
                 Map.of("permission_name", "CUSTOMIZE_APPLICATION", "granted", granted)));
+    }
+
+    @Test
+    @DisplayName("gates every lifecycle write on CUSTOMIZE_APPLICATION; the reads every UI loads stay open")
+    void everyHandlerIsPermissionGated() {
+        grant(false);
+
+        PermissionGatedControllers.assertEveryHandlerForbidden(controller, new MockHttpServletRequest(),
+                "listModules", "getModuleActions", "getProvisionedResources", "getModuleHealth", "getUiBundle");
+        verifyNoInteractions(manager, publisher);
     }
 
     @Test

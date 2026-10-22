@@ -1,0 +1,1 @@
+- 2026-10-22 fix(worker): stop the record advice emptying bulk-job, data-export, governor-limit, support-mailbox, module, signing-key, chat and support-inbox responses for callers without VIEW_ALL_DATA; governor-limit reads need VIEW_SETUP and signing-key writes check MANAGE_CREDENTIALS in the worker too (record-advice-own-authorization)

@@ -39,22 +39,37 @@ public final class PermissionGatedControllers {
     /**
      * Invokes every handler of {@code controller} with placeholder arguments and {@code request}
      * (whose profile must lack the permission) and asserts each answers 403.
+     *
+     * @param openReads handlers deliberately left at {@code API_ACCESS} (reads of platform
+     *                  resources every user's UI loads, such as the module list). Each must exist
+     *                  and be a {@code @GetMapping} — a write is never open — and is not invoked.
      */
-    public static void assertEveryHandlerForbidden(Object controller, HttpServletRequest request) {
+    public static void assertEveryHandlerForbidden(Object controller, HttpServletRequest request,
+                                                   String... openReads) {
         assertThat(controller).isInstanceOf(PermissionGatedController.class);
+        List<String> open = List.of(openReads);
         List<String> handlers = new ArrayList<>();
         List<String> ungated = new ArrayList<>();
+        List<String> openNotGet = new ArrayList<>();
         for (Method method : controller.getClass().getDeclaredMethods()) {
             if (MAPPINGS.stream().noneMatch(method::isAnnotationPresent)) {
                 continue;
             }
             handlers.add(method.getName());
+            if (open.contains(method.getName())) {
+                if (!method.isAnnotationPresent(GetMapping.class)) {
+                    openNotGet.add(method.getName());
+                }
+                continue;
+            }
             Integer status = statusOf(method, controller, request);
             if (status == null || status != HttpStatus.FORBIDDEN.value()) {
                 ungated.add(method.getName() + " -> " + status);
             }
         }
         assertThat(handlers).as("request handlers found").isNotEmpty();
+        assertThat(handlers).as("open reads named in the test are handlers").containsAll(open);
+        assertThat(openNotGet).as("open handlers that are not reads").isEmpty();
         assertThat(ungated).as("handlers that did not answer 403 without the permission").isEmpty();
     }
 

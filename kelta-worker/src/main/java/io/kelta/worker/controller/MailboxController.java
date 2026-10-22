@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.worker.interceptor.SelfScopedController;
 import io.kelta.worker.repository.MailboxAttachmentRepository;
 import io.kelta.worker.repository.MailboxEscalationRepository;
 import io.kelta.worker.repository.MailboxMessageRepository;
@@ -50,7 +51,7 @@ import java.util.Set;
  */
 @RestController
 @RequestMapping("/api/support")
-public class MailboxController {
+public class MailboxController implements SelfScopedController {
 
     private static final Logger log = LoggerFactory.getLogger(MailboxController.class);
     /** Separate channel so attachment reads are auditable without trawling application logs. */

@@ -1,6 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.jsonapi.JsonApiResponseBuilder;
+import io.kelta.worker.interceptor.PermissionGatedController;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.DataExportRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -27,7 +28,7 @@ import java.util.*;
  */
 @RestController
 @RequestMapping("/api/data-exports")
-public class DataExportController {
+public class DataExportController implements PermissionGatedController {
 
     private static final Logger log = LoggerFactory.getLogger(DataExportController.class);
     private static final Logger securityLog = LoggerFactory.getLogger("security.audit");

@@ -1,6 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.worker.interceptor.SelfScopedController;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.runtime.router.UserIdResolver;
@@ -35,7 +36,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/chat")
-public class ChatController {
+public class ChatController implements SelfScopedController {
 
     private static final String MANAGE_CHAT = "MANAGE_CHAT";
 

@@ -672,15 +672,25 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   equality); if `KeltaUserDetails` loses value equality or the index resolver and registry keys
   diverge, ID tokens lose `sid` and `/connect/logout` answers 400 `invalid_token` for every
   signed-in browser. Guard: `OidcSignOutFlowTest`.
-- **The record advice still nulls some permission-gated bodies (open).** Outside `/api/admin/`,
+- **Record advice vs. controllers that authorize their own bodies.** Outside `/api/admin/`,
   `CerbosRecordAuthorizationAdvice` checks a `data` body as records of the path's first segment,
-  so callers without VIEW_ALL_DATA / MODIFY_ALL_DATA (e.g. a seeded Solution Manager) get
-  `data: null` or an empty list from `/api/bulk-jobs`, `POST /api/data-exports`,
-  `/api/email/logs`, `/api/governor-limits`, `/api/support/**` (incl. the one-time inbound secret on
-  mailbox create/rotate), `/api/modules` (+ `signing-keys`) and `/api/chat/conversations`. Fix per
-  controller: `PermissionGatedController` when every handler is permission-gated,
-  `SelfScopedController` for membership-scoped ones (chat, support inbox), and per-item `type`
-  checks for `/api/_search` (the advice is its only record check — don't just exempt it).
+  so a controller whose body is not that collection's records must opt out by marker, or callers
+  without VIEW_ALL_DATA / MODIFY_ALL_DATA get `data: null` / an empty list (after any write ran).
+  Opted out: `PermissionGatedController` (packages, promotions, environments, bulk jobs, data
+  exports, governor limits, support-mailbox admin, modules, module signing keys) and
+  `SelfScopedController` (watches, wins, devices, chat, support inbox) — the bodies of these
+  controllers are authorized only by the controller itself (so governor-limit reads now need
+  `VIEW_SETUP`, the setup page's gate, and signing-key writes re-check `MANAGE_CREDENTIALS` in the
+  worker). Still open:
+  - `GET /api/email/logs` keeps the record check, so template managers without VIEW_ALL_DATA see
+    no email entries on the activity timeline. Exempting it would expose recipients and subjects
+    for any record id; doing it properly needs the source record's collection, which `email_log`
+    does not store (`DerivedDataController` + `isRecordReadable`).
+  - `/api/_search` items are checked as records of `_search`, so search is empty without
+    VIEW_ALL_DATA. The advice is its only per-record check — fix by checking each item against
+    its own `type`, never by exempting it.
+  - `ModuleHttpController` passes module output through; a module route returning
+    `{"data": {"id": …}}` is filtered as `modules` records (latent — no module does today).
 - **Cerbos `collectionId` keying:** the `collection` policy is UUID-keyed (gateway passes the
   route id); the `record` policy keys on the collection **name** (`architecture.md`). Mixing them
   silently denies every record to non-admin profiles.
