@@ -447,13 +447,16 @@ feature would do this and publish the event.
   `kelta.modules.runtime.enabled` gate real subsystems.
 - Presence-gated secrets/integrations (removing the gate constructs a bean with a null secret):
   `kelta.encryption.key`, `kelta.svix.auth-token`, `kelta.superset.url`, `kelta.sms.provider`,
-  `kelta.push.provider`. **Open:** `@ConditionalOnProperty` without `havingValue` matches any
-  value except `false`, blank included, and `application.yml` declares `kelta.encryption.key` and
-  `kelta.svix.auth-token` as `${ENV:}`. So those two gates never switch anything off; the beans are
-  built with a blank secret whenever the env var is unset. `kelta.superset.url` was the same until
-  it moved to a non-blank `Condition` (`SupersetConfig.SupersetUrlConfigured`); do the same for
-  the other two, after checking what consumes their beans unconditionally (`SupersetController`
-  did). The `sms`/`push` gates use `havingValue` and are unaffected.
+  `kelta.push.provider`. These keys are declared as `${ENV:}`, so "unset" arrives **blank**, and
+  `@ConditionalOnProperty` without `havingValue` matches a blank value — such a gate never
+  switches anything off. Svix and Superset use a non-blank `Condition` instead
+  (`SvixConfig.SvixTokenConfigured`, `SupersetConfig.SupersetUrlConfigured`; each also gates its
+  controller, `SvixPortalController` / `SupersetController`). The encryption key
+  keeps the property gate (it is what keeps native kelta-auth registering the bean) and
+  `EncryptionAutoConfiguration` decides from the value: the worker sets
+  `kelta.encryption.required=true`, so a blank key fails startup naming `KELTA_ENCRYPTION_KEY`;
+  kelta-auth leaves it optional (no service, federation and TOTP-secret encryption off). The
+  `sms`/`push` gates use `havingValue` and are unaffected.
 - `kelta.{worker,gateway,auth}.internal-auth.enabled` (default off): flipping on + removing is a
   security change needing the gateway client-credentials path verified first. It is declared in
   no `application*.yml`, so on a native image an env-var-only flip is silently ignored — declare it
@@ -647,8 +650,8 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   Never put operational settings there (it once forced JDBC DEBUG = 92% of all log volume); it
   still ships datasource/Hikari/Redis/actuator values each service must override.
 - **Never give a signing key a default** — `VisitTokenService`, `CampaignProperties`, the bot
-  challenge HMAC (when the challenge is enabled) and `KELTA_MAILBOX_VERP_SECRET` fail startup when
-  unset. A `log.warn` is not a control.
+  challenge HMAC (when the challenge is enabled), `KELTA_MAILBOX_VERP_SECRET` and the worker's
+  `KELTA_ENCRYPTION_KEY` fail startup when unset. A `log.warn` is not a control.
 - **Exporters that read rows with `queryForList` must convert `PGobject`** before the value leaves
   the service (KLT-479); **any id stored inside a JSON config column** is a source-tenant id —
   export a natural key beside it and remap on import (KLT-480). Open gap:

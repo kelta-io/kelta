@@ -1,9 +1,11 @@
 package io.kelta.worker.controller;
 
+import io.kelta.worker.config.SvixConfig;
 import io.kelta.worker.service.SvixTenantService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,10 +25,15 @@ import java.util.Map;
  *
  * <p>The tenant ID is resolved from the {@code X-Tenant-ID} header set by the gateway.
  *
+ * <p>Registered only with the Svix integration ({@code kelta.svix.auth-token} set): its service
+ * exists only then, so an unconditional controller would stop the worker booting without Svix.
+ * Without it {@code /api/svix/portal} is a 404 and the webhooks page shows its error state.
+ *
  * @since 1.0.0
  */
 @RestController
 @RequestMapping("/api/svix")
+@Conditional(SvixConfig.SvixTokenConfigured.class)
 public class SvixPortalController {
 
     private static final Logger log = LoggerFactory.getLogger(SvixPortalController.class);
