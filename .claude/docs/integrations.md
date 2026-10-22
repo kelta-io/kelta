@@ -6,7 +6,7 @@
 |---------|---------|------------|------------|-----------|
 | Anthropic Claude | AI assistant | `anthropic-java` 2.18.0 | API key | `kelta-ai/.../service/AnthropicService.java` |
 | Cerbos | Authorization (gRPC) | `cerbos-sdk-java` 0.12.0 | `${CERBOS_HOST}:${CERBOS_GRPC_PORT:3593}` | `kelta-gateway/.../authz/cerbos/CerbosAuthorizationService.java`, `kelta-worker/.../service/CerbosAuthorizationService.java` |
-| Svix | Webhook delivery | `com.svix:svix` 1.68.0 | `${SVIX_SERVER_URL}` | `kelta-worker/.../listener/SvixWebhookPublisher.java`, `.../service/SvixTenantService.java` |
+| Svix | Webhook delivery | `com.svix:svix` 1.68.0 | `${SVIX_SERVER_URL}`; on only with a non-blank `SVIX_AUTH_TOKEN` (`SvixConfig.SvixTokenConfigured`; else no publishers and `/api/svix/**` 404s) | `kelta-worker/.../listener/SvixWebhookPublisher.java`, `.../service/SvixTenantService.java` |
 | Superset | Embedded analytics | REST API | `${SUPERSET_URL}` | `kelta-worker/.../service/SupersetApiClient.java`, `kelta-ui/app/` (`@superset-ui/embedded-sdk`) |
 | AWS S3 / Garage | Object storage | `aws-sdk-s3` 2.30.1 | `${KELTA_S3_ENDPOINT}` | `kelta-worker/.../service/S3StorageService.java` (attachments); media bucket `${KELTA_MEDIA_*}` → `.../service/MediaStorageService.java` (see Media fields below) |
 | Keycloak | OIDC federation | Spring Security OAuth2 | Port 8180 (docker-compose) | `kelta-auth/.../federation/FederatedUserMapper.java` |
@@ -21,6 +21,21 @@ and later replicas of the same image skip, provided `GET /admin/policies` still 
 `collection` policy (a wiped/restored Cerbos store re-seeds). `CERBOS_SEED_FORCE=true`
 (`kelta.worker.cerbos.seed.force`) forces a full seed. Runtime permission changes never rely on this
 path — they sync through the profile/permission hooks and `CerbosPolicySyncCoalescer`.
+
+### Superset (embedded analytics)
+
+On only when `SUPERSET_URL` (`kelta.superset.url`) is non-blank (`SupersetConfig.SupersetUrlConfigured`,
+which also gates `SupersetController`). Leaving it unset registers no Superset bean and `/api/superset/**`
+answers 404. Each tenant gets a dedicated Postgres user (`SupersetDatabaseUserService`) and a Superset
+database connection (`SupersetTenantService`). Superset reaches Postgres at the
+`SupersetDatabaseTarget`: by default the host, port and database of the worker's own
+`spring.datasource.url`, each overridable with `SUPERSET_DATABASE_HOST`, `SUPERSET_DATABASE_PORT`,
+`SUPERSET_DATABASE_NAME` (`kelta.worker.superset.database-*`). Use the overrides when Superset must use
+another address, for example around a pooler the per-tenant users can't authenticate through. The
+same database name is the one the tenant users are granted `CONNECT` on. If the datasource URL
+can't be parsed and no override is set, the worker fails at startup with the setting to fix. A
+connection is created once per tenant, so existing Superset connections keep whatever URI they
+were created with; change them in Superset if the address moves.
 
 ### Cerbos SDK on native images
 

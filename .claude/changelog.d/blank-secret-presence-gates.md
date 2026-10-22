@@ -1,0 +1,1 @@
+- 2026-10-22 fix(worker): Svix registers only with a non-blank SVIX_AUTH_TOKEN, and a blank KELTA_ENCRYPTION_KEY now stops the worker with a message naming it instead of a NoSuchBeanDefinitionException (blank-secret-presence-gates)
