@@ -160,10 +160,11 @@ mailbox to a high-volume public address.
 
 - **Sandbox environments + promotion (V158):** in-controller gates (`MANAGE_SANDBOXES` on
   `/api/environments/**` + `/api/promotions/**`, `CUSTOMIZE_APPLICATION` on `/api/packages/**` —
-  static routes give only `API_ACCESS`); the environment and promotion controllers implement
-  `PermissionGatedController`, so the record advice leaves their bodies alone
-  (`PermissionGatedControllers.assertEveryHandlerForbidden` pins every handler's gate — #1807;
-  `PackageController` doesn't yet); approver ≠ creator + APPROVED-only execute; `ROLE`/
+  static routes give only `API_ACCESS`); the environment, promotion and package controllers
+  implement `PermissionGatedController`, so the record advice leaves their bodies alone
+  (`PermissionGatedControllers.assertEveryHandlerForbidden` pins every handler's gate — a new
+  handler without the permission check fails the controller's test); approver ≠ creator +
+  APPROVED-only execute; `ROLE`/
   `POLICY`/`ROUTE_POLICY`/`FIELD_POLICY` never promoted; provisioning copies the parent's IP
   allowlist and replaces the seeded admin's password (the allowlist filter fails open);
   `RemotePromotionClient` (admin-supplied URL): http/https only, no userinfo, no redirects,
@@ -671,6 +672,15 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   equality); if `KeltaUserDetails` loses value equality or the index resolver and registry keys
   diverge, ID tokens lose `sid` and `/connect/logout` answers 400 `invalid_token` for every
   signed-in browser. Guard: `OidcSignOutFlowTest`.
+- **The record advice still nulls some permission-gated bodies (open).** Outside `/api/admin/`,
+  `CerbosRecordAuthorizationAdvice` checks a `data` body as records of the path's first segment,
+  so callers without VIEW_ALL_DATA / MODIFY_ALL_DATA (e.g. a seeded Solution Manager) get
+  `data: null` or an empty list from `/api/bulk-jobs`, `POST /api/data-exports`,
+  `/api/email/logs`, `/api/governor-limits`, `/api/support/**` (incl. the one-time inbound secret on
+  mailbox create/rotate), `/api/modules` (+ `signing-keys`) and `/api/chat/conversations`. Fix per
+  controller: `PermissionGatedController` when every handler is permission-gated,
+  `SelfScopedController` for membership-scoped ones (chat, support inbox), and per-item `type`
+  checks for `/api/_search` (the advice is its only record check — don't just exempt it).
 - **Cerbos `collectionId` keying:** the `collection` policy is UUID-keyed (gateway passes the
   route id); the `record` policy keys on the collection **name** (`architecture.md`). Mixing them
   silently denies every record to non-admin profiles.

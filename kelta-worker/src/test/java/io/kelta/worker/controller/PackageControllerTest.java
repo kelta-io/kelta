@@ -1,5 +1,6 @@
 package io.kelta.worker.controller;
 
+import io.kelta.worker.interceptor.PermissionGatedControllers;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.PackageImportService;
@@ -73,6 +74,15 @@ class PackageControllerTest {
                     Map.of("name", "p", "version", "1.0.0"), request));
             assertForbidden(() -> controller.previewImport(file, request));
             assertForbidden(() -> controller.importPackage(file, false, "skip", "user-1", request));
+            verifyNoInteractions(packageService);
+        }
+
+        @Test
+        @DisplayName("gates every handler on CUSTOMIZE_APPLICATION (PermissionGatedController promise)")
+        void everyHandlerIsPermissionGated() {
+            revokePermission();
+
+            PermissionGatedControllers.assertEveryHandlerForbidden(controller, request);
             verifyNoInteractions(packageService);
         }
 

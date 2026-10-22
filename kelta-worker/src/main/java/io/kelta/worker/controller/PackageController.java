@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.worker.interceptor.PermissionGatedController;
 import io.kelta.worker.service.PackageImportService;
 import io.kelta.worker.service.PackageService;
 import org.slf4j.Logger;
@@ -18,9 +19,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Package export/import and history. Every handler is gated on {@code CUSTOMIZE_APPLICATION},
+ * so the record advice leaves its bodies alone ({@link PermissionGatedController}): the history
+ * rows belong to the {@code packages} system collection, which no seeded profile holds an object
+ * permission on, and checking them as records emptied the history for any admin without
+ * VIEW_ALL_DATA.
+ */
 @RestController
 @RequestMapping("/api/packages")
-public class PackageController {
+public class PackageController implements PermissionGatedController {
 
     private static final Logger log = LoggerFactory.getLogger(PackageController.class);
 

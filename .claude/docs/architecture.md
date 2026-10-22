@@ -1083,6 +1083,15 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   on missing identity rather than hard-deny, so write the explicit deny yourself). The worker
   does **not** make a Cerbos call for system permissions — Cerbos `system_feature` policies back
   the *gateway's* blanket `API_ACCESS` check; per-endpoint admin gating is the DB check above.
+- **Outside `/api/admin/`, the record advice still runs on a permission-gated controller.**
+  `CerbosRecordAuthorizationAdvice` reads any `data` object/list under `/api/<segment>` as records
+  of collection `<segment>`, so a caller holding the controller's permission but no grant on
+  `<segment>` (nor VIEW_ALL_DATA / MODIFY_ALL_DATA) gets `data: null` or an emptied list with a
+  200 — after any write already ran. A controller whose every handler is gated on a system
+  permission and returns no tenant data records implements **`PermissionGatedController`** and
+  calls `PermissionGatedControllers.assertEveryHandlerForbidden` in its test (references:
+  `PromotionController`, `EnvironmentController`, `PackageController`); one whose access follows a
+  source record implements `DerivedDataController` instead.
 - Identity: inject **`CerbosPermissionResolver`** and read `getProfileId(request)`,
   `getEmail(request)`, `getProfileName(request)`, `getTenantId(request)`, `hasIdentity(request)`.
   The gateway's `RouteAuthorizationFilter.forwardWithHeaders` sets `X-User-Profile-Id`,
