@@ -78,6 +78,9 @@ kelta:
   # Generate with: openssl rand -base64 32
   encryption:
     key: ${KELTA_ENCRYPTION_KEY:}
+    # The worker cannot run without it (credentials, tenant SMTP, support mailboxes): a blank key
+    # fails startup naming KELTA_ENCRYPTION_KEY (EncryptionAutoConfiguration).
+    required: true
   # Outbound fetches of tenant-supplied URLs (OIDC discovery, OpenAPI spec import, flow
   # HTTP_CALLOUT/CALL_API/OUTBOUND_MESSAGE, external-rest collections, OAuth 2.0 credential token
   # URLs, Web Push) refuse non-public addresses (loopback, RFC 1918, link-local/metadata, CGNAT,

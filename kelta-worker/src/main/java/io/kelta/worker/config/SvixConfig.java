@@ -8,13 +8,17 @@ import io.kelta.worker.service.SvixTenantService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Condition;
+import org.springframework.context.annotation.ConditionContext;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.type.AnnotatedTypeMetadata;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
@@ -30,13 +34,28 @@ import java.util.Map;
  * SDK 1.68.0 — the SDK ships Jackson-2 model annotations and doesn't
  * deserialize cleanly under Spring Boot 4 / Jackson 3.
  *
- * <p>Enabled when {@code kelta.svix.auth-token} is set.
+ * <p>Enabled when {@code kelta.svix.auth-token} is non-blank ({@link SvixTokenConfigured}). It is
+ * declared as {@code ${SVIX_AUTH_TOKEN:}}, and {@code @ConditionalOnProperty} without
+ * {@code havingValue} matches a blank value, so that gate built an unauthenticated client in
+ * every deployment without Svix and posted every record event to it. A native image evaluates this
+ * at build time; the production worker image is JVM, where it is read at startup.
  *
  * @since 1.0.0
  */
 @Configuration
-@ConditionalOnProperty(name = "kelta.svix.auth-token", matchIfMissing = false)
+@Conditional(SvixConfig.SvixTokenConfigured.class)
 public class SvixConfig {
+
+    /**
+     * True when {@code kelta.svix.auth-token} has text. Also gates {@code SvixPortalController},
+     * the one Svix bean outside this class, which needs {@link SvixTenantService}.
+     */
+    public static class SvixTokenConfigured implements Condition {
+        @Override
+        public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+            return StringUtils.hasText(context.getEnvironment().getProperty("kelta.svix.auth-token"));
+        }
+    }
 
     private static final Logger log = LoggerFactory.getLogger(SvixConfig.class);
 
