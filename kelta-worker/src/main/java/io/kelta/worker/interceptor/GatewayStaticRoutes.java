@@ -65,7 +65,8 @@ public final class GatewayStaticRoutes {
     static final Map<String, CollectionCheck> COLLECTION_CHECKS = Map.of(
             "users", new CollectionCheck(true, "MANAGE_USERS"),
             "profiles", new CollectionCheck(false, "MANAGE_USERS"),
-            "collections", new CollectionCheck(false, "CUSTOMIZE_APPLICATION"));
+            "collections", new CollectionCheck(false, "CUSTOMIZE_APPLICATION"),
+            "scheduled-jobs", new CollectionCheck(false, "MANAGE_WORKFLOWS"));
 
     /** {@code static-tenants}: writes need this; reads need it or address the caller's own tenant. */
     static final String TENANTS = "tenants";

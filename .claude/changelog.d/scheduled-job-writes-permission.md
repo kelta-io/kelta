@@ -1,0 +1,1 @@
+- 2026-10-22 fix(gateway): scheduled-job writes, including pause/resume/execute, need the scheduled-jobs grant or MANAGE_WORKFLOWS (scheduled-job-writes-permission)

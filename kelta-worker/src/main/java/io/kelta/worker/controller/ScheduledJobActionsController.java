@@ -21,6 +21,11 @@ import java.util.Map;
  *
  * <p>All operations are tenant-scoped via TenantContext.
  *
+ * <p>Authorization is the gateway's: {@code static-scheduled-jobs} carries a collection check
+ * ({@code RouteConfigService.COLLECTION_CHECKED_STATIC_ROUTES}), so every POST here — like a
+ * generic write to the collection — needs the {@code scheduled-jobs} grant for the action or
+ * {@code MANAGE_WORKFLOWS}. Reads stay {@code API_ACCESS}-only.
+ *
  * @since 1.0.0
  */
 @RestController
