@@ -447,7 +447,13 @@ feature would do this and publish the event.
   `kelta.modules.runtime.enabled` gate real subsystems.
 - Presence-gated secrets/integrations (removing the gate constructs a bean with a null secret):
   `kelta.encryption.key`, `kelta.svix.auth-token`, `kelta.superset.url`, `kelta.sms.provider`,
-  `kelta.push.provider`.
+  `kelta.push.provider`. **Open:** `@ConditionalOnProperty` without `havingValue` matches any
+  value except `false`, blank included, and `application.yml` declares `kelta.encryption.key` and
+  `kelta.svix.auth-token` as `${ENV:}`. So those two gates never switch anything off; the beans are
+  built with a blank secret whenever the env var is unset. `kelta.superset.url` was the same until
+  it moved to a non-blank `Condition` (`SupersetConfig.SupersetUrlConfigured`); do the same for
+  the other two, after checking what consumes their beans unconditionally (`SupersetController`
+  did). The `sms`/`push` gates use `havingValue` and are unaffected.
 - `kelta.{worker,gateway,auth}.internal-auth.enabled` (default off): flipping on + removing is a
   security change needing the gateway client-credentials path verified first. It is declared in
   no `application*.yml`, so on a native image an env-var-only flip is silently ignored — declare it
@@ -483,11 +489,6 @@ feature would do this and publish the event.
   `schemaVersion`, …) must be passed at the call site.
 - **`config.layout` is inert legacy** — the create-form `layoutType` select still writes it;
   nothing reads it. Remove once no page depends on it.
-- **Superset tenant connections hard-code the database address.**
-  `SupersetApiClient.createDatabaseConnection` builds the `sqlalchemy_uri` from a fixed host and
-  database name (and an un-encoded password), ignoring `kelta.worker.superset.database-name` and
-  the configured datasource — Superset analytics works only on the one deployment that matches.
-  Build it from configuration.
 - Possible N+1 in `SearchIndexService` reindex (per-collection queries) — matters past ~1k collections.
 - **Bulk/related-list mass edit** is gated on `MANAGE_DATA` in the UI because bulk writes bypass
   per-record Cerbos; bulk UPDATE runs `QueryEngine.update` (hooks fire, write-FLS doesn't).

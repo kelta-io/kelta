@@ -3,6 +3,7 @@ package io.kelta.worker.service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.*;
 import org.springframework.web.client.RestTemplate;
 
@@ -22,7 +23,8 @@ class SupersetApiClientTest {
     @BeforeEach
     void setUp() {
         restTemplate = mock(RestTemplate.class);
-        client = new SupersetApiClient("http://superset:8088", "admin", "password", restTemplate);
+        client = new SupersetApiClient("http://superset:8088", "admin", "password", restTemplate,
+                new SupersetDatabaseTarget("db.internal", 5432, "kelta"));
     }
 
     private void mockAuthentication() {
@@ -106,6 +108,27 @@ class SupersetApiClientTest {
                 "superset_acme", "generated-pass");
 
         assertEquals(42, dbId);
+    }
+
+    @Test
+    @DisplayName("points the tenant connection at the configured database target")
+    @SuppressWarnings("unchecked")
+    void createDatabaseConnectionUsesTarget() {
+        mockAuthentication();
+        var captor = ArgumentCaptor.forClass(HttpEntity.class);
+        when(restTemplate.exchange(
+                contains("/api/v1/database/"),
+                eq(HttpMethod.POST),
+                captor.capture(),
+                any(Class.class)
+        )).thenReturn(ResponseEntity.ok(Map.of("id", 42)));
+
+        client.createDatabaseConnection("tenant-uuid", "acme", "superset_acme", "generated-pass");
+
+        Map<String, Object> body = (Map<String, Object>) captor.getValue().getBody();
+        assertEquals("postgresql://superset_acme:generated-pass@db.internal:5432/kelta",
+                body.get("sqlalchemy_uri"));
+        assertEquals("kelta-acme", body.get("database_name"));
     }
 
     @Test

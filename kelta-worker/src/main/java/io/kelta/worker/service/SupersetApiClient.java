@@ -25,15 +25,17 @@ public class SupersetApiClient {
     private final String adminUsername;
     private final String adminPassword;
     private final RestTemplate restTemplate;
+    private final SupersetDatabaseTarget databaseTarget;
 
     private volatile String accessToken;
 
     public SupersetApiClient(String baseUrl, String adminUsername, String adminPassword,
-                              RestTemplate restTemplate) {
+                              RestTemplate restTemplate, SupersetDatabaseTarget databaseTarget) {
         this.baseUrl = baseUrl;
         this.adminUsername = adminUsername;
         this.adminPassword = adminPassword;
         this.restTemplate = restTemplate;
+        this.databaseTarget = databaseTarget;
     }
 
     // ----------------------------------------------------------------
@@ -84,7 +86,8 @@ public class SupersetApiClient {
      *
      * <p>The PostgreSQL user already has {@code search_path} and
      * {@code app.current_tenant_id} configured via {@code ALTER ROLE ... SET},
-     * so no extra connection options are needed.
+     * so no extra connection options are needed. The connection points at the configured
+     * {@link SupersetDatabaseTarget}.
      *
      * @param tenantId   the tenant UUID
      * @param tenantSlug the tenant slug (used as schema name)
@@ -97,10 +100,7 @@ public class SupersetApiClient {
         var body = Map.of(
                 "database_name", "kelta-" + tenantSlug,
                 "engine", "postgresql",
-                "sqlalchemy_uri", String.format(
-                        "postgresql://%s:%s@192.168.0.6:5432/emf_control_plane",
-                        dbUsername, dbPassword
-                ),
+                "sqlalchemy_uri", databaseTarget.sqlalchemyUri(dbUsername, dbPassword),
                 "expose_in_sqllab", true,
                 "allow_ctas", false,
                 "allow_cvas", false,
