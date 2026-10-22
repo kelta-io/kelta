@@ -22,6 +22,21 @@ and later replicas of the same image skip, provided `GET /admin/policies` still 
 (`kelta.worker.cerbos.seed.force`) forces a full seed. Runtime permission changes never rely on this
 path — they sync through the profile/permission hooks and `CerbosPolicySyncCoalescer`.
 
+### Superset (embedded analytics)
+
+On only when `SUPERSET_URL` (`kelta.superset.url`) is non-blank (`SupersetConfig.SupersetUrlConfigured`,
+which also gates `SupersetController`). Leaving it unset registers no Superset bean and `/api/superset/**`
+answers 404. Each tenant gets a dedicated Postgres user (`SupersetDatabaseUserService`) and a Superset
+database connection (`SupersetTenantService`). Superset reaches Postgres at the
+`SupersetDatabaseTarget`: by default the host, port and database of the worker's own
+`spring.datasource.url`, each overridable with `SUPERSET_DATABASE_HOST`, `SUPERSET_DATABASE_PORT`,
+`SUPERSET_DATABASE_NAME` (`kelta.worker.superset.database-*`). Use the overrides when Superset must use
+another address, for example around a pooler the per-tenant users can't authenticate through. The
+same database name is the one the tenant users are granted `CONNECT` on. If the datasource URL
+can't be parsed and no override is set, the worker fails at startup with the setting to fix. A
+connection is created once per tenant, so existing Superset connections keep whatever URI they
+were created with; change them in Superset if the address moves.
+
 ### Cerbos SDK on native images
 
 `cerbos-sdk-java` is gRPC + protobuf (`protobuf.version` is pinned in the gateway and worker poms).

@@ -301,7 +301,9 @@ class BeforeSaveHookWiringTest {
         return runner.withPropertyValues(
                 "kelta.encryption.key=dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktMTIzNDU=",
                 "kelta.svix.auth-token=test-token",
-                "kelta.superset.url=http://superset.invalid:8088");
+                "kelta.superset.url=http://superset.invalid:8088",
+                // Superset's tenant connections default to the worker's own database.
+                "spring.datasource.url=jdbc:postgresql://db.invalid:5432/kelta");
     }
 
     @Test

@@ -1,10 +1,12 @@
 package io.kelta.worker.controller;
 
+import io.kelta.worker.config.SupersetConfig;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.SupersetDatasetService;
 import io.kelta.worker.service.SupersetGuestTokenService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,10 +25,14 @@ import java.util.Map;
  *   <li>{@code POST /api/superset/datasets/sync} — trigger dataset sync for the current tenant</li>
  * </ul>
  *
+ * <p>Registered only with the Superset integration ({@code kelta.superset.url} set): its services
+ * exist only then, so an unconditional controller would stop the worker booting without Superset.
+ *
  * @since 1.0.0
  */
 @RestController
 @RequestMapping("/api/superset")
+@Conditional(SupersetConfig.SupersetUrlConfigured.class)
 public class SupersetController {
 
     private static final Logger log = LoggerFactory.getLogger(SupersetController.class);

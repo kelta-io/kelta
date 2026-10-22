@@ -2,7 +2,6 @@ package io.kelta.worker.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.security.SecureRandom;
@@ -106,10 +105,11 @@ public class SupersetDatabaseUserService {
     private final JdbcTemplate jdbcTemplate;
     private final String databaseName;
 
-    public SupersetDatabaseUserService(
-            JdbcTemplate jdbcTemplate,
-            @Value("${kelta.worker.superset.database-name:${spring.datasource.name:emf_control_plane}}")
-            String databaseName) {
+    /**
+     * @param databaseName the database per-tenant users get {@code CONNECT} on —
+     *                     {@link SupersetDatabaseTarget#database()}, which Superset connects to
+     */
+    public SupersetDatabaseUserService(JdbcTemplate jdbcTemplate, String databaseName) {
         validateDatabaseName(databaseName);
         this.jdbcTemplate = jdbcTemplate;
         this.databaseName = databaseName;

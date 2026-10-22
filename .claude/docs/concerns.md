@@ -449,8 +449,9 @@ feature would do this and publish the event.
   `kelta.encryption.key`, `kelta.svix.auth-token`, `kelta.superset.url`, `kelta.sms.provider`,
   `kelta.push.provider`. These keys are declared as `${ENV:}`, so "unset" arrives **blank**, and
   `@ConditionalOnProperty` without `havingValue` matches a blank value — such a gate never
-  switches anything off. Svix (and Superset) use a non-blank `Condition` instead
-  (`SvixConfig.SvixTokenConfigured`, which also gates `SvixPortalController`). The encryption key
+  switches anything off. Svix and Superset use a non-blank `Condition` instead
+  (`SvixConfig.SvixTokenConfigured`, `SupersetConfig.SupersetUrlConfigured`; each also gates its
+  controller, `SvixPortalController` / `SupersetController`). The encryption key
   keeps the property gate (it is what keeps native kelta-auth registering the bean) and
   `EncryptionAutoConfiguration` decides from the value: the worker sets
   `kelta.encryption.required=true`, so a blank key fails startup naming `KELTA_ENCRYPTION_KEY`;
@@ -491,11 +492,6 @@ feature would do this and publish the event.
   `schemaVersion`, …) must be passed at the call site.
 - **`config.layout` is inert legacy** — the create-form `layoutType` select still writes it;
   nothing reads it. Remove once no page depends on it.
-- **Superset tenant connections hard-code the database address.**
-  `SupersetApiClient.createDatabaseConnection` builds the `sqlalchemy_uri` from a fixed host and
-  database name (and an un-encoded password), ignoring `kelta.worker.superset.database-name` and
-  the configured datasource — Superset analytics works only on the one deployment that matches.
-  Build it from configuration.
 - Possible N+1 in `SearchIndexService` reindex (per-collection queries) — matters past ~1k collections.
 - **Bulk/related-list mass edit** is gated on `MANAGE_DATA` in the UI because bulk writes bypass
   per-record Cerbos; bulk UPDATE runs `QueryEngine.update` (hooks fire, write-FLS doesn't).
