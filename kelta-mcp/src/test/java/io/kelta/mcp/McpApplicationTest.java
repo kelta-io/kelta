@@ -17,7 +17,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.TestPropertySource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
+import java.io.InputStream;
 import java.util.List;
 import java.util.Set;
 
@@ -420,6 +423,46 @@ class McpApplicationTest {
         assertThat(res.getContentAsString())
                 .contains("rowLimit")
                 .contains("{10, 25, 50, 100}");
+    }
+
+    @Test
+    void userToolsListMatchesSnapshot() throws Exception {
+        assertToolsListMatchesSnapshot(userTransport, "/threadline-clothing/mcp/user", "/mcp/tools-list-user.json");
+    }
+
+    @Test
+    void adminToolsListMatchesSnapshot() throws Exception {
+        assertToolsListMatchesSnapshot(adminTransport, "/threadline-clothing/mcp/admin", "/mcp/tools-list-admin.json");
+    }
+
+    /**
+     * Pins the wire {@code tools/list} result (names, input/output schemas, titles,
+     * descriptions, annotations) to a snapshot captured from main, so an SDK bump
+     * cannot silently change what clients see. Regenerate the snapshot only for an
+     * intended tool change.
+     */
+    private static void assertToolsListMatchesSnapshot(
+            HttpServletStatelessServerTransportProvider transport, String path, String snapshot) throws Exception {
+        MockHttpServletResponse res = rpc(transport, path,
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}");
+        assertThat(res.getStatus()).isEqualTo(200);
+        JsonMapper mapper = JsonMapper.builder().build();
+        JsonNode result = mapper.readTree(res.getContentAsString()).get("result");
+        assertThat(result.has("nextCursor") && !result.get("nextCursor").isNull()).isFalse();
+        JsonNode expected;
+        try (InputStream in = McpApplicationTest.class.getResourceAsStream(snapshot)) {
+            assertThat(in).as("snapshot %s", snapshot).isNotNull();
+            expected = mapper.readTree(in);
+        }
+        assertThat(byName(result.get("tools"))).isEqualTo(byName(expected));
+    }
+
+    private static java.util.Map<String, JsonNode> byName(JsonNode tools) {
+        java.util.Map<String, JsonNode> byName = new java.util.TreeMap<>();
+        for (JsonNode tool : tools) {
+            byName.put(tool.get("name").asString(), tool);
+        }
+        return byName;
     }
 
     @Test

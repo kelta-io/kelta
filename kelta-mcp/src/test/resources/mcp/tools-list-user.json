@@ -1,0 +1,491 @@
+[ {
+  "name" : "ping",
+  "title" : "Ping (user)",
+  "description" : "Returns 'pong'. Smoke test that the user MCP endpoint is reachable.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : { },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "bulk_apply",
+  "title" : "Bulk Apply",
+  "description" : "Apply multiple record changes atomically via POST /api/operations (JSON:API Atomic Operations). All operations succeed together or none do. Use this for multi-record changes that must roll back as a unit (e.g. moving line items between orders, rewiring relationships).",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "operations" : {
+        "type" : "array",
+        "description" : "Ordered list of operations. Applied as a single transaction — all succeed or all roll back.",
+        "items" : {
+          "type" : "object",
+          "description" : "One operation. {\"op\":\"add\"|\"update\"|\"remove\", \"type\":\"<collection>\", \"id\":\"<id>\" (required for update/remove; a \"lid\" from an earlier add works too), \"lid\":\"<local-id>\" (optional on add — lets later operations reference the new record), \"attributes\":{...} (for add/update), \"relationships\":{...} (optional for add/update)}",
+          "additionalProperties" : true
+        },
+        "minItems" : 1
+      }
+    },
+    "required" : [ "operations" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "create_record",
+  "title" : "Create Record",
+  "description" : "Create a single record in a collection. Wraps POST /api/{collection} in JSON:API format. Returns the created record on success (HTTP 201).",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collection" : {
+        "type" : "string",
+        "description" : "Collection name (e.g. \"accounts\")."
+      },
+      "attributes" : {
+        "type" : "object",
+        "description" : "Field values for the new record, keyed by field name. Reference get_collection_schema to know what fields exist.",
+        "additionalProperties" : true
+      },
+      "relationships" : {
+        "type" : "object",
+        "description" : "Optional JSON:API relationships object. Each entry maps a relationship name to {\"data\": {\"type\": \"...\", \"id\": \"...\"}} or an array thereof for to-many.",
+        "additionalProperties" : true
+      }
+    },
+    "required" : [ "collection", "attributes" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "delete_record",
+  "title" : "Delete Record",
+  "description" : "Delete a single record. Wraps DELETE /api/{collection}/{id}. Returns 204 No Content on success. Idempotent — deleting a non-existent record returns 404.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collection" : {
+        "type" : "string",
+        "description" : "Collection name."
+      },
+      "id" : {
+        "type" : "string",
+        "description" : "Record id to delete."
+      }
+    },
+    "required" : [ "collection", "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "describe_api",
+  "title" : "Describe API",
+  "description" : "Return the auto-generated OpenAPI 3.0 spec for the current tenant: JSON:API CRUD paths and schemas for every collection, including system collections. Specialized controllers (flows, approvals, bulk) are NOT in this spec; use the dedicated tools for those. For one collection's field list, types, enums and validation rules, use get_collection_schema instead of parsing this spec. Example: call with no arguments, then look up the \"/accounts\" path in the returned \"paths\" object for its exact request/response shape.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : { },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "execute_flow",
+  "title" : "Execute Flow",
+  "description" : "Trigger a flow execution. Returns the execution id; use get_flow_run to poll status. Inputs must be double-wrapped: execute_flow(flowId, input={\"input\": {\"slug\": \"x\"}}) so the flow can read $.input.slug. See integrations.md \"Flows\" for the state envelope.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "flowId" : {
+        "type" : "string",
+        "description" : "Flow id (UUID) or name. Wraps POST /api/flows/{flowId}/execute."
+      },
+      "input" : {
+        "type" : "object",
+        "description" : "Optional HTTP request body. Must double-wrap the flow's input under an \"input\" key: pass {\"input\": {\"slug\": \"x\"}} so the engine's state envelope sets $.input = {\"slug\": \"x\"} and the flow can read $.input.slug. Single-wrapping (e.g. {\"slug\": \"x\"}) leaves $.input empty and downstream tasks fail with confusing errors.",
+        "additionalProperties" : true
+      }
+    },
+    "required" : [ "flowId" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "get_collection_schema",
+  "title" : "Get Collection Schema",
+  "description" : "Return the full schema for a collection: metadata + all field definitions (type, required, enum values, references, systemMaintained) plus its validation rules by default. PICKLIST and MULTI_PICKLIST fields carry picklistValues — the active values, each {value, label, isDefault, sortOrder}, in sortOrder — so write one of those values instead of guessing. Wraps GET /api/collections/{name}/schema, and — when includeRules is true — GET /api/validation-rules for that collection. Use this before constructing a query or create_record call to know what attributes are available; a systemMaintained field is set by flows only, and a create or update that sets or changes it returns 400. Example: {\"collection\": \"accounts\"} returns accounts' fields with types/enums and its active validation rules.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collection" : {
+        "type" : "string",
+        "description" : "Collection name or ID (e.g. \"accounts\" or a UUID). Looked up via /api/collections."
+      },
+      "includeRules" : {
+        "type" : "boolean",
+        "description" : "Also fetch and embed the collection's validation rules (default true).",
+        "default" : true
+      }
+    },
+    "required" : [ "collection" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "get_flow_run",
+  "title" : "Get Flow Run",
+  "description" : "Fetch the status of a flow execution. Wraps GET /api/flows/executions/{executionId}, with optional step-by-step logs from /steps merged in. Use to poll a long-running flow.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "executionId" : {
+        "type" : "string",
+        "description" : "Flow execution id returned by execute_flow."
+      },
+      "includeSteps" : {
+        "type" : "boolean",
+        "description" : "If true, also fetch step-level execution logs and merge them into the response.",
+        "default" : false
+      }
+    },
+    "required" : [ "executionId" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "get_record",
+  "title" : "Get Record",
+  "description" : "Fetch a single record by id from a collection. Returns the JSON:API single-resource response.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collection" : {
+        "type" : "string",
+        "description" : "Collection name."
+      },
+      "id" : {
+        "type" : "string",
+        "description" : "Record id (UUID), or display field value if the collection has one (e.g. email for users)."
+      },
+      "include" : {
+        "type" : "string",
+        "description" : "Comma-separated relationship names to include in the response."
+      }
+    },
+    "required" : [ "collection", "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "list_approvals",
+  "title" : "List Approvals",
+  "description" : "List approval instances, optionally filtered by status. Wraps the approvalInstances system collection. Useful to find what's waiting on you.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "status" : {
+        "type" : "string",
+        "description" : "Filter by status: \"pending\", \"approved\", \"rejected\", or \"all\" (default: pending)."
+      },
+      "pageSize" : {
+        "type" : "integer",
+        "description" : "Records per page (default 20).",
+        "minimum" : 1,
+        "maximum" : 200
+      },
+      "pageNumber" : {
+        "type" : "integer",
+        "description" : "Page number, 1-based (default 1).",
+        "minimum" : 1
+      }
+    },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "list_collections",
+  "title" : "List Collections",
+  "description" : "List all collections available in the current tenant. Returns JSON:API formatted list with collection metadata. Use this to discover what data is available before querying.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "includeSystem" : {
+        "type" : "boolean",
+        "description" : "Include system collections (users, fields, layouts, etc.). Default true.",
+        "default" : true
+      }
+    },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "list_notifications",
+  "title" : "List Notifications",
+  "description" : "List your own in-app notifications, newest first. Wraps GET /api/me/notifications; meta.unreadCount carries your unread total. Use mark_notification_read to mark one read.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "unreadOnly" : {
+        "type" : "boolean",
+        "description" : "Return only unread notifications.",
+        "default" : false
+      },
+      "pageSize" : {
+        "type" : "integer",
+        "description" : "Records per page (default 20).",
+        "minimum" : 1,
+        "maximum" : 200
+      },
+      "pageNumber" : {
+        "type" : "integer",
+        "description" : "Page number, 1-based (default 1).",
+        "minimum" : 1
+      }
+    },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "mark_notification_read",
+  "title" : "Mark Notification Read",
+  "description" : "Mark one of your in-app notifications read. Wraps POST /api/me/notifications/{id}/read; returns the notification and meta.unreadCount. Repeating the call keeps the first read time.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Id of one of your notifications (from list_notifications)."
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "query_collection",
+  "title" : "Query Collection",
+  "description" : "List records from a Kelta collection (GET /api/{collection}). For one record by id use `get_record`; for full-text use `search`; for field names use `get_collection_schema`.\n\nFilter ops: EQ NEQ GT GTE LT LTE CONTAINS STARTS ENDS ICONTAINS ISTARTS IENDS IEQ ISNULL IN. Multiple ops on one field AND together (ranges); fields AND across; NO OR. Rejected names map to workarounds — full list in the `filter` arg.\n\nReturns JSON:API: data[], optional included[], meta.totalCount, links.next/prev.\n\nExamples:\n  // count only — read meta.totalCount\n  { \"collection\": \"customers\", \"pageSize\": 1 }\n\n  // BETWEEN-style range on one field\n  { \"collection\": \"orders\",\n    \"filter\": { \"total\": { \"GTE\": 100, \"LTE\": 1000 } } }\n\n  // active customers, newest first, with related account\n  { \"collection\": \"customers\",\n    \"filter\":  { \"status\": { \"EQ\": \"ACTIVE\" } },\n    \"sort\":    \"-createdAt\",\n    \"include\": \"account\",\n    \"pageSize\": 25 }\n",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collection" : {
+        "type" : "string",
+        "description" : "Collection name from `list_collections` (e.g. \"customers\")."
+      },
+      "filter" : {
+        "type" : "object",
+        "description" : "{ field: { OP: value } }. Ops on one field AND together (ranges); fields AND across; NO OR.\nSupported: EQ NEQ GT GTE LT LTE CONTAINS STARTS ENDS ICONTAINS ISTARTS IENDS IEQ ISNULL IN.\nIN value is a CSV string or array, e.g. \"a,b\" or [\"a\",\"b\"].\nWorkarounds: BETWEEN→GTE+LTE; STARTSWITH/ENDSWITH→STARTS/ENDS; IS_NULL→ISNULL; OR→multiple queries.\nEx: { \"status\": { \"EQ\": \"ACTIVE\" }, \"createdAt\": { \"GTE\": \"2026-01-01T00:00:00Z\" } }",
+        "additionalProperties" : true
+      },
+      "sort" : {
+        "type" : "string",
+        "description" : "CSV sort keys; '-' prefix = desc. Ex: \"-createdAt,lastName\"."
+      },
+      "pageSize" : {
+        "type" : "integer",
+        "description" : "Records per page (default 20, max 200). Use 1 to fetch only meta.totalCount.",
+        "minimum" : 1,
+        "maximum" : 200
+      },
+      "pageNumber" : {
+        "type" : "integer",
+        "description" : "1-based page index (default 1).",
+        "minimum" : 1
+      },
+      "fields" : {
+        "type" : "string",
+        "description" : "Sparse fieldset — CSV attribute names. Default: all. Ex: \"firstName,lastName,email\"."
+      },
+      "include" : {
+        "type" : "string",
+        "description" : "CSV relationship names to eager-load (returned in top-level included[]). Ex: \"account,owner\"."
+      }
+    },
+    "required" : [ "collection" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "search",
+  "title" : "Search",
+  "description" : "Cross-collection full-text search. Returns hits with collection name, record id, and matched snippet. Useful when you don't know which collection holds the answer.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "query" : {
+        "type" : "string",
+        "description" : "Free-text query (matches against searchable fields across all collections)."
+      },
+      "limit" : {
+        "type" : "integer",
+        "description" : "Maximum results to return (default 20).",
+        "minimum" : 1,
+        "maximum" : 100
+      }
+    },
+    "required" : [ "query" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "semantic_search",
+  "title" : "Semantic Search",
+  "description" : "Vector similarity search over a collection's VECTOR field. Wraps POST /api/{collection}/semantic-search; returns the nearest records by cosine distance, with per-record distances under meta. Prefer this over `search` when ranking by meaning rather than keyword match.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collection" : {
+        "type" : "string",
+        "description" : "Collection name to search; it must define a VECTOR field."
+      },
+      "query" : {
+        "type" : "string",
+        "description" : "Natural-language text; records are ranked by semantic similarity to it."
+      },
+      "limit" : {
+        "type" : "integer",
+        "description" : "Maximum results to return (default 10).",
+        "minimum" : 1,
+        "maximum" : 100
+      }
+    },
+    "required" : [ "collection", "query" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "submit_for_approval",
+  "title" : "Submit for Approval",
+  "description" : "Submit a record for approval. Wraps POST /api/approvals/submit. Returns the new approval instance id; use list_approvals to track its status.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionId" : {
+        "type" : "string",
+        "description" : "Collection id (UUID) of the record being submitted. Use get_collection_schema to look up by name."
+      },
+      "recordId" : {
+        "type" : "string",
+        "description" : "Record id to submit for approval."
+      },
+      "processId" : {
+        "type" : "string",
+        "description" : "Optional approval process id. If omitted, the platform auto-selects a matching process."
+      }
+    },
+    "required" : [ "collectionId", "recordId" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "update_record",
+  "title" : "Update Record",
+  "description" : "Update fields on a single record. Wraps PATCH /api/{collection}/{id}. Only the attributes you supply are modified — omitted fields keep their current values.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collection" : {
+        "type" : "string",
+        "description" : "Collection name."
+      },
+      "id" : {
+        "type" : "string",
+        "description" : "Record id (UUID or display field value)."
+      },
+      "attributes" : {
+        "type" : "object",
+        "description" : "Field values to update. Only the keys you include are modified — other fields are untouched (PATCH semantics).",
+        "additionalProperties" : true
+      },
+      "relationships" : {
+        "type" : "object",
+        "description" : "Optional JSON:API relationships object to replace; each entry maps a relationship name to a JSON:API resource identifier.",
+        "additionalProperties" : true
+      }
+    },
+    "required" : [ "collection", "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+} ]
