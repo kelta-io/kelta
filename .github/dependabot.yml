@@ -1,7 +1,10 @@
 # Dependabot version updates. Documented in .claude/docs/ci-cd.md → Dependabot.
 #
-# Every ecosystem gets one weekly group for minor + patch bumps. Major bumps match no
-# group, so each arrives as its own PR and can be reviewed (and tested) on its own.
+# Every ecosystem gets one weekly group for minor + patch bumps and one for major bumps.
+# The major group is split per dependency (group-by: dependency-name), so a major bump
+# arrives as ONE PR covering every directory that uses it (not one PR per directory) and
+# can still be reviewed and tested on its own. GitHub Actions majors share one PR.
+# Majors also wait 7 days after release (cooldown) so a broken x.0.0 is not proposed.
 #
 # There is no root pom.xml: each Maven root below is built separately. The root
 # package-lock.json is an empty stub with no package.json, so "/" is not an npm entry.
@@ -29,6 +32,14 @@ updates:
         update-types:
           - minor
           - patch
+      maven-major:
+        group-by: dependency-name
+        patterns:
+          - "*"
+        update-types:
+          - major
+    cooldown:
+      semver-major-days: 7
 
   - package-ecosystem: npm
     directories:
@@ -49,6 +60,14 @@ updates:
         update-types:
           - minor
           - patch
+      npm-major:
+        group-by: dependency-name
+        patterns:
+          - "*"
+        update-types:
+          - major
+    cooldown:
+      semver-major-days: 7
 
   # Covers Dockerfile and the Dockerfile.* variants (.jvm, .migrate, .ci). A FROM whose
   # image comes from a build ARG (FROM ${GRAALVM_IMAGE}, FROM ${BASE_REGISTRY}/...)
@@ -79,6 +98,14 @@ updates:
         update-types:
           - minor
           - patch
+      docker-major:
+        group-by: dependency-name
+        patterns:
+          - "*"
+        update-types:
+          - major
+    cooldown:
+      semver-major-days: 7
 
   - package-ecosystem: github-actions
     directory: /
@@ -94,3 +121,10 @@ updates:
         update-types:
           - minor
           - patch
+      github-actions-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+    cooldown:
+      semver-major-days: 7
