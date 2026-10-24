@@ -7,10 +7,8 @@ import io.kelta.runtime.module.integration.spi.ApiSpecStore;
 import io.kelta.runtime.module.integration.spi.CredentialResolverPort;
 import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.runtime.module.integration.spi.IdempotencyStore;
-import io.kelta.runtime.module.integration.spi.PendingActionStore;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor;
 import io.kelta.runtime.module.integration.spi.noop.LoggingEmailService;
-import io.kelta.runtime.module.integration.spi.noop.LoggingPendingActionStore;
 import io.kelta.runtime.module.integration.spi.noop.LoggingScriptExecutor;
 import io.kelta.runtime.outbound.OutboundUrlGuard;
 import io.kelta.runtime.workflow.ActionHandler;
@@ -30,15 +28,15 @@ import java.util.List;
  *   <li><b>HTTP_CALLOUT</b> — Makes HTTP requests with response capture</li>
  *   <li><b>OUTBOUND_MESSAGE</b> — Sends outbound webhook messages</li>
  *   <li><b>SEND_NOTIFICATION</b> — Sends in-app notifications</li>
- *   <li><b>PUBLISH_EVENT</b> — Publishes custom events (e.g., to NATS)</li>
- *   <li><b>DELAY</b> — Delays subsequent workflow actions</li>
+ *   <li><b>PUBLISH_EVENT</b> — Publishes a tenant-scoped custom event (needs the
+ *       {@link PublishEventActionHandler.EventPublisher} extension)</li>
+ *   <li><b>DELAY</b> — Retired: fails, pointing at the {@code Wait} state</li>
  *   <li><b>EMAIL_ALERT</b> — Sends email notifications</li>
  *   <li><b>INVOKE_SCRIPT</b> — Invokes server-side scripts</li>
  * </ul>
  *
  * <p>Handlers with deep infrastructure dependencies use SPI interfaces:
  * <ul>
- *   <li>{@link PendingActionStore} — for DelayActionHandler</li>
  *   <li>{@link EmailService} — for EmailAlertActionHandler</li>
  *   <li>{@link ScriptExecutor} — for InvokeScriptActionHandler</li>
  * </ul>
@@ -87,17 +85,15 @@ public class IntegrationModule implements KeltaModule {
         // Simple handlers (ObjectMapper only)
         handlers.add(new SendNotificationActionHandler(objectMapper));
 
-        // Event publishing — use EventPublisher from extensions (optional)
+        // Event publishing — without an EventPublisher extension every execution fails
         PublishEventActionHandler.EventPublisher eventPublisher =
             context.getExtension(PublishEventActionHandler.EventPublisher.class);
         handlers.add(new PublishEventActionHandler(objectMapper, eventPublisher));
 
+        // Retired: kept registered so already-saved flows fail with a readable message
+        handlers.add(new DelayActionHandler());
+
         // SPI-based handlers — use implementations from extensions or defaults
-        PendingActionStore pendingActionStore = context.getExtension(PendingActionStore.class);
-        if (pendingActionStore == null) {
-            pendingActionStore = new LoggingPendingActionStore();
-        }
-        handlers.add(new DelayActionHandler(objectMapper, pendingActionStore));
 
         // PayloadMapperService is shared by EmailAlert (PR 5) and CALL_API
         // (PR 4) so build it once up front.

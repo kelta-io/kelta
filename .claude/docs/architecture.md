@@ -2074,6 +2074,21 @@ unchanged (older pods deserialize it as false). Consumers of `kelta.record.chang
 | `kelta.config.domain.changed.<domainId>` | `CustomDomainEventPublisher` (called from `TenantDomainController`) | `CustomDomainCacheInvalidationListener` | Custom domain → tenant slug cache |
 | `kelta.config.feature.changed.<tenantId>` | `SystemFeatureEventPublisher` (called from `GovernorLimitsController`) | `SystemFeatureCacheInvalidationListener` | Tenant limits / feature toggle caches |
 
+**Flow-published external events** (not a config broadcast — nothing in the platform consumes it):
+
+| Subject | Published by | Consumed by | Purpose |
+|---------|--------------|-------------|---------|
+| `kelta.event.<tenantId>.<topic>` | `PublishEventActionHandler` (flow `PUBLISH_EVENT` step) through the NATS-backed `EventPublisher` extension built in `FlowConfig.natsFlowEventPublisher` | external systems only (stream `KELTA_EVENTS`, 24h) | Tenant-scoped custom events for consumers outside Kelta |
+
+The handler, not the flow author, inserts `<tenantId>`; `<topic>` must be dot-separated
+`[A-Za-z0-9_-]+` tokens, so `*`, `>` and empty tokens cannot escape the tenant's namespace. The
+body is a plain JSON envelope (`eventId`, `eventType`, `tenantId`, `collectionId`, `collectionName`,
+`recordId`, `workflowRuleId`, `timestamp`, `data`, `recordData`), **not** a `PlatformEvent`, so it
+needs no `reflect-config.json` entry. The publish is a synchronous JetStream publish (waits for the
+ack; `Nats-Msg-Id` = `eventId`), so a missing stream or NATS outage fails the step. Deliberately
+outside `kelta.trigger.>`, which would let a flow start flows (or itself) through NATS. Consumer
+docs: `kelta-marketing/src/content/docs/api/external-events.md`.
+
 Custom domains and tenant settings live in raw JDBC tables rather than
 system collections, so the publishers are invoked directly from the
 controller after the mutation rather than via the BeforeSaveHook registry.

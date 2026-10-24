@@ -28,6 +28,7 @@ public class FlowExecutionContext {
     private String currentStateId;
     private int stepCount;
     private int failedCount;
+    private int triggerDepth;
     private boolean cancelled;
     private boolean completed;
     private boolean waiting;
@@ -173,6 +174,21 @@ public class FlowExecutionContext {
      */
     public int invokeDepth() {
         return invokeDepth;
+    }
+
+    /**
+     * Returns how many asynchronous {@code TRIGGER_FLOW} hops led to this execution.
+     * Zero for an execution started by anything else. Unlike {@link #invokeDepth()},
+     * which only counts synchronous {@code InvokeFlow} nesting inside one execution,
+     * this survives the hop into a new execution (it travels in the started
+     * execution's initial input under {@code FlowEngine.TRIGGER_DEPTH_KEY}).
+     */
+    public int triggerDepth() {
+        return triggerDepth;
+    }
+
+    public void setTriggerDepth(int triggerDepth) {
+        this.triggerDepth = triggerDepth;
     }
 
     public void addFailedCount(int n) {

@@ -79,6 +79,12 @@ public class JetStreamInitializer {
             ensureStream(jsm, "KELTA_AVAILABILITY",
                     List.of("kelta.availability.>"),
                     Duration.ofHours(1));
+            // Flow PUBLISH_EVENT steps: kelta.event.<tenantId>.<topic>, for consumers
+            // outside the platform. Deliberately NOT on kelta.trigger.> — nothing in the
+            // platform consumes it, so a flow cannot start flows (or itself) this way.
+            ensureStream(jsm, "KELTA_EVENTS",
+                    List.of("kelta.event.>"),
+                    Duration.ofHours(24));
         } catch (Exception e) {
             log.error("Failed to initialize JetStream streams: {}", e.getMessage(), e);
         }
