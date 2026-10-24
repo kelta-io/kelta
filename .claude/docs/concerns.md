@@ -292,7 +292,6 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
   so `/api/_search` can return a foreign record's id + `display_value`. Semantic search *is*
   scoped. Keep sensitive data out of an owner-scoped collection's display field.
 - **Realtime** — invalidation-only, but every subscriber still learns collection + id.
-- **Performance** — index the owner field on large collections (no generic index migration).
 - **Cross-pod window on an ownership change** — other pods keep the previous definition until they
   consume `kelta.config.collection.changed`. Enable ownership before members write, or accept the lag.
 - **Same-pod refresh ordering** — `CollectionLifecycleManager` holds a per-collection monitor across
@@ -852,10 +851,6 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **`kelta-marketing` installs only because of an `overrides` pin** (`@astrojs/tailwind@6` peer vs
   Astro 6). Real fix: move to `@tailwindcss/vite` + CSS-first `@theme` (visual-regression risk).
   Don't remove the override until then.
-- **pgvector:** `CollectionTableDdl` (via `initializeCollection`) creates the `vector` extension
-  lazily when a collection's table is created with a VECTOR field; adding a VECTOR field to an
-  existing collection (`SchemaMigrationEngine`) does not. Production Postgres must have the
-  extension available (or pre-created) before any tenant defines one.
 - Multiple BOM version overrides in `kelta-worker/pom.xml` raise transitive conflict risk — audit
   on every Spring Boot bump.
 
@@ -978,6 +973,8 @@ One line each; full write-ups are in git history.
 - Older: Superset SQL injection hardening; gateway actuator requires JWT except health/info; `/internal/**` JWT auth (flag-gated); schema-name sanitization in `SchemaLifecycleModule`.
 
 **Bugs**
+- KLT-739 (2026-10-24) — adding a VECTOR field to an existing collection failed with `type "vector" does not exist`: only table creation enabled pgvector. `SchemaMigrationEngine.ensureVectorExtension` is now shared by `CollectionTableDdl` and the `migrateSchema`/destructive add-or-retype paths (same actionable error when `CREATE EXTENSION` is refused). `SchemaMigrationEngineVectorIntegrationTest`.
+- KLT-739 (2026-10-24) — owner-scoped reads filter on `ownerField`, but its column was never indexed; `CollectionTableDdl` and `migrateSchema` (when `ownerField` is set or changed) now emit `CREATE INDEX IF NOT EXISTS idx_owner_<table>_<column>`. `OwnerColumnIndexIntegrationTest`.
 - KLT-500 (2026-10-10) — records written through atomic operations (`POST /api/operations`: `kelta records bulk`, the MCP `seed_records` tool) carried `createdBy`/`updatedBy` = `null` while single-record writes carried the user id (CRM template `BUILD-LOG.md` error #12); `AtomicOperationsController` now stamps both. Moved here from the `docs/authoring/mcp-admin-coverage.md` follow-ups (KLT-734).
 - 2026-10-12 — kelta-auth `/auth/password/change`, `/auth/password/reset-request` and `/auth/password/reset` answered 500 on PostgreSQL: they bound `java.time.Instant` parameters, which the PostgreSQL driver cannot infer a type for (H2 in the unit tests accepts them). Now bound as `java.sql.Timestamp`; `BaselineAdminPasswordIntegrationTest.passwordEndpointsOnPostgres` runs them on the real migrated schema.
 - 2026-10-12 — kelta-auth error responses: errors on the sign-in pages rendered Spring Boot's JSON error map into a response already marked `text/html` ("No converter for [class java.util.LinkedHashMap] with preset Content-Type 'text/html'"). `AuthErrorController` (replaces `BasicErrorController`, whitelabel off) and `HtmlErrorPageResolver` render `templates/error.html` (status, neutral message, request id) for browsers and page handlers, and JSON for API callers. `AuthErrorHandlingTest`.

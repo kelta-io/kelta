@@ -286,9 +286,19 @@ public class SchemaMigrationEngine {
             }
         }
 
+        ensureVectorExtensionForNewVectorColumns(oldDefinition, newDefinition);
+
         // Execute all migrations
         for (MigrationAction migration : migrations) {
             executeMigration(migration);
+        }
+
+        // Owner field set or changed → index the owner column that owner-scoped reads
+        // filter on. Runs after the ADD COLUMNs above, so a just-added owner LOOKUP exists.
+        if (newDefinition.ownerField() != null
+                && !newDefinition.ownerField().equals(oldDefinition.ownerField())
+                && !newDefinition.systemCollection()) {
+            ensureOwnerIndex(newDefinition, qualifiedName);
         }
 
         // captureGeo turned on → ensure the geo system columns exist. Tables created
@@ -332,6 +342,59 @@ public class SchemaMigrationEngine {
         jdbcTemplate.execute(geoSql);
         recordMigration(collectionName, MigrationType.ADD_COLUMN, geoSql);
         log.info("Ensured geo system columns on '{}' (captureGeo enabled)", qualifiedTableName);
+    }
+
+    /**
+     * Creates the index on an owner-scoped collection's owner column. Idempotent
+     * ({@code IF NOT EXISTS}) under event redelivery and multi-pod refresh.
+     */
+    void ensureOwnerIndex(CollectionDefinition definition, String qualifiedTableName) {
+        String sql = SqlIdentifiers.buildOwnerIndexStatement(definition, qualifiedTableName);
+        try {
+            jdbcTemplate.execute(sql);
+        } catch (DataAccessException e) {
+            if (!StorageConstraintErrors.isConcurrentDdlDuplicate(e)) {
+                throw new StorageException("Failed to index owner field '" + definition.ownerField()
+                        + "' of collection '" + definition.name() + "': " + e.getMessage(), e);
+            }
+        }
+        recordMigration(definition.name(), MigrationType.ADD_COLUMN, sql);
+        log.info("Ensured owner-field index on '{}' ({})", qualifiedTableName, definition.ownerField());
+    }
+
+    /**
+     * Enables the pgvector extension, which must exist before a {@code vector(N)} column can be
+     * created or added. Shared by table creation ({@code CollectionTableDdl}) and the add/retype
+     * column paths here. {@code CREATE EXTENSION} may be refused to a non-superuser role (production
+     * provisioning pre-installs it); the refusal is reported with actionable guidance instead of
+     * a cryptic {@code type "vector" does not exist} on the DDL that follows.
+     *
+     * @param jdbcTemplate   the template to run the DDL on
+     * @param collectionName the collection whose VECTOR field needs the extension
+     * @throws StorageException when the extension cannot be enabled
+     */
+    static void ensureVectorExtension(JdbcTemplate jdbcTemplate, String collectionName) {
+        try {
+            jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS vector");
+        } catch (DataAccessException e) {
+            throw new StorageException(
+                    "Collection '" + collectionName + "' has a VECTOR field but the pgvector "
+                            + "extension could not be enabled. Install pgvector on the database "
+                            + "(a pgvector-enabled image, or `CREATE EXTENSION vector` by an admin) "
+                            + "and ensure the worker's DB role may use it. Cause: " + e.getMessage(), e);
+        }
+    }
+
+    /** Ensures pgvector when {@code newDefinition} adds a VECTOR column or retypes one to VECTOR. */
+    private void ensureVectorExtensionForNewVectorColumns(CollectionDefinition oldDefinition,
+                                                          CollectionDefinition newDefinition) {
+        boolean newVectorColumn = newDefinition.fields().stream()
+                .filter(f -> f.type() == FieldType.VECTOR)
+                .map(f -> oldDefinition.getField(f.name()))
+                .anyMatch(old -> old == null || old.type() != FieldType.VECTOR);
+        if (newVectorColumn) {
+            ensureVectorExtension(jdbcTemplate, newDefinition.name());
+        }
     }
 
     /**
@@ -481,6 +544,8 @@ public class SchemaMigrationEngine {
                 planned.add(new AppliedChange("MODIFY_FIELD", newField.name(), a.type(), a.sql()));
             }
         }
+
+        ensureVectorExtensionForNewVectorColumns(oldDefinition, newDefinition);
 
         for (AppliedChange change : planned) {
             try {
