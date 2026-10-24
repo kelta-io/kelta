@@ -16,12 +16,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.server.RequestPath;
+import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
 import java.util.List;
@@ -179,6 +183,58 @@ class RateLimitFilterTest {
         assertEquals("60", headers.getFirst("Retry-After"));
         assertNotNull(headers.getFirst("X-RateLimit-Reset"));
         assertEquals("application/json", headers.getFirst(HttpHeaders.CONTENT_TYPE));
+    }
+
+    @Test
+    void testRateLimitExceeded_BodyIsJsonApiRateLimitError() throws Exception {
+        MockServerHttpRequest request = MockServerHttpRequest.get("/api/users")
+            .header("X-Correlation-ID", "corr-429").build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(request);
+        exchange.getAttributes().put("gateway.principal",
+            new GatewayPrincipal("user@example.com", List.of("USER"), null));
+        exchange.getAttributes().put("tenantId", TENANT_ID);
+        cacheManager.updateGovernorLimit(TENANT_ID, 100_000);
+        when(rateLimiter.checkRateLimit(eq(TENANT_ID), eq("tenant"), any(RateLimitConfig.class)))
+            .thenReturn(Mono.just(RateLimitResult.notAllowed(Duration.ofSeconds(60))));
+
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        JsonNode error = new ObjectMapper()
+            .readTree(exchange.getResponse().getBodyAsString().block()).get("errors").get(0);
+        assertThat(error.get("status").asString()).isEqualTo("429");
+        assertThat(error.get("code").asString()).isEqualTo("RATE_LIMIT_EXCEEDED");
+        assertThat(error.get("title").asString()).isEqualTo("RATE_LIMIT_EXCEEDED");
+        assertThat(error.get("detail").asString()).contains("60 seconds");
+        assertThat(error.get("meta").get("requestId").asString()).isEqualTo("corr-429");
+        assertThat(exchange.getResponse().getHeaders().getFirst("Retry-After")).isEqualTo("60");
+    }
+
+    @Test
+    void testRateLimitExceeded_PathWithDoubleQuote_StillValidJson() throws Exception {
+        MockServerWebExchange original = MockServerWebExchange.from(
+            MockServerHttpRequest.get("/api/users").build());
+        // A real decoded path can carry a quote; the URI builders reject one, so decorate.
+        ServerWebExchange exchange = original.mutate()
+            .request(new ServerHttpRequestDecorator(original.getRequest()) {
+                @Override
+                public RequestPath getPath() {
+                    return RequestPath.parse("/api/us\"ers", null);
+                }
+            })
+            .build();
+        assertThat(exchange.getRequest().getPath().value()).contains("\"");
+        exchange.getAttributes().put("gateway.principal",
+            new GatewayPrincipal("user@example.com", List.of("USER"), null));
+        exchange.getAttributes().put("tenantId", TENANT_ID);
+        cacheManager.updateGovernorLimit(TENANT_ID, 100_000);
+        when(rateLimiter.checkRateLimit(eq(TENANT_ID), eq("tenant"), any(RateLimitConfig.class)))
+            .thenReturn(Mono.just(RateLimitResult.notAllowed(Duration.ofSeconds(5))));
+
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        JsonNode body = new ObjectMapper().readTree(original.getResponse().getBodyAsString().block());
+        assertThat(body.get("errors").get(0).get("code").asString()).isEqualTo("RATE_LIMIT_EXCEEDED");
+        assertThat(body.get("errors").get(0).get("meta").get("requestId").asString()).isNotBlank();
     }
 
     @Test

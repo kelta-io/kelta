@@ -48,14 +48,31 @@ Several problems in one request produce several entries (one per field).
 | `NOT_FOUND` | 404 | record not found (or not visible) |
 | `COLLECTION_NOT_FOUND` | 404 | unknown collection |
 | — | 409 | unique-constraint violation, or stale `If-Match` |
-| `RATE_LIMIT_EXCEEDED` | 429 | see [Rate limits](/docs/api/rate-limits/); carries `Retry-After` |
+| `RATE_LIMIT_EXCEEDED` | 429 | tenant quota or per-user share used up; carries `Retry-After` and `X-RateLimit-*` headers — body below, details in [Rate limits](/docs/api/rate-limits/#handling-429) |
 | — | 5xx | unexpected; `meta.requestId` is what to report |
 
 Hook-raised validation errors use `VALIDATION_FAILED` unless the hook defines a more specific code.
 
+A rate-limited request (`Retry-After: 42`):
+
+```json
+{
+  "errors": [
+    {
+      "status": "429",
+      "code": "RATE_LIMIT_EXCEEDED",
+      "title": "RATE_LIMIT_EXCEEDED",
+      "detail": "Rate limit exceeded. Retry after 42 seconds.",
+      "meta": { "requestId": "3f2b9c1e-…" }
+    }
+  ]
+}
+```
+
 ## CLI and SDK
 
 The CLI prints the same envelope as one JSON line on stderr and maps status to exit codes
-([Output contract](/docs/cli/scripting/)). `@kelta/sdk` throws typed errors — `ValidationError`,
+([Output contract](/docs/cli/scripting/)). For `RATE_LIMIT_EXCEEDED` it adds `error.hint` (and a `Hint:`
+line in table output) telling you to wait the `Retry-After` seconds. `@kelta/sdk` throws typed errors — `ValidationError`,
 `AuthenticationError`, `AuthorizationError`, `NotFoundError`, `ServerError`, `NetworkError` — that expose the
 envelope ([SDK](/docs/sdk/sdk/)).
