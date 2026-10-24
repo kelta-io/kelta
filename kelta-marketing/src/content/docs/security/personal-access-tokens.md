@@ -64,8 +64,17 @@ GET /api/me/tokens          # id, name, tokenPrefix, scopes, expiresAt, lastUsed
 DELETE /api/me/tokens/{id}  # immediate — the hash is added to a revocation set every gateway consults
 ```
 
-Only the owner can list their tokens; there is no admin listing of another user's tokens. `kelta token list|revoke`,
-`kelta auth logout --revoke`.
+`kelta token list|revoke`, `kelta auth logout --revoke`.
+
+Administrators with `MANAGE_USERS` can list and revoke another user's tokens in their tenant:
+
+```http
+GET /api/admin/users/{userId}/tokens              # live tokens: id, name, tokenPrefix, scopes, createdAt, expiresAt
+DELETE /api/admin/users/{userId}/tokens/{tokenId} # audited as PAT_ADMIN_REVOKED
+```
+
+A user outside the tenant, or a token that user does not hold, answers `404`. Deactivating a user (status leaves
+`ACTIVE`) or deleting one revokes all of their tokens.
 
 ## Scoping a token: profiles, not scopes
 
@@ -88,6 +97,7 @@ which every request also counts against.
 ## Caveats
 
 - `lastUsedAt` is not currently maintained; rely on `requestCount`.
-- Deactivating the owner does not invalidate an already-cached token instantly (the gateway caches identity for a
-  few minutes). Revoke the token, or remove `API_ACCESS` from the profile, for immediate effect.
+- Revocation on deactivation is best effort: if Redis is unreachable at that moment the token row is still marked
+  revoked, but a gateway that already cached the token can keep honouring it until its cache entry expires. Remove
+  `API_ACCESS` from the profile for a guaranteed immediate cut-off.
 - MCP endpoints accept **only** PATs; JWTs are rejected there.
