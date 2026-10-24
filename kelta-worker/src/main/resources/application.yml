@@ -115,6 +115,11 @@ kelta:
       from-number: ${TWILIO_FROM_NUMBER:}
   worker:
     id: ${WORKER_ID:}
+    # Require a client_credentials JWT (scope "internal") on /internal/** (rollout flag, off =
+    # permit-all). Bound by InternalAuthProperties; InternalEndpointSecurityConfig reads it
+    # when it builds the /internal/** chain, so it holds on JVM and native alike.
+    internal-auth:
+      enabled: ${KELTA_WORKER_INTERNAL_AUTH_ENABLED:false}
     cerbos-cb-threshold: ${CERBOS_CB_THRESHOLD:3}
     cerbos-cb-cooldown-seconds: ${CERBOS_CB_COOLDOWN_SECONDS:10}
     cerbos:
