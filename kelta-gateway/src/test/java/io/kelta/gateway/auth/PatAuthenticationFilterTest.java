@@ -23,15 +23,19 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("PatAuthenticationFilter Tests")
@@ -57,7 +61,7 @@ class PatAuthenticationFilterTest {
     @BeforeEach
     void setUp() {
         WebClient.Builder builder = WebClient.builder();
-        filter = new PatAuthenticationFilter(redisTemplate, builder, "http://localhost", 300, metrics, redisRateLimiter);
+        filter = new PatAuthenticationFilter(redisTemplate, builder, "http://localhost", 300, 10_000, metrics, redisRateLimiter);
         lenient().when(filterChain.filter(any(ServerWebExchange.class))).thenReturn(Mono.empty());
         lenient().when(redisRateLimiter.incrementPatUsageCounter(any())).thenReturn(Mono.empty());
     }
@@ -266,7 +270,7 @@ class PatAuthenticationFilterTest {
                     .exchangeFunction(req -> Mono.error(
                             new RuntimeException("Simulated worker outage (connection refused)")));
             graceFilter = new PatAuthenticationFilter(
-                    redisTemplate, outageBuilder, "http://worker", 300, metrics, redisRateLimiter);
+                    redisTemplate, outageBuilder, "http://worker", 300, 10_000, metrics, redisRateLimiter);
         }
 
         private MockServerWebExchange exchangeFor(String path) {
@@ -321,6 +325,7 @@ class PatAuthenticationFilterTest {
             MockServerWebExchange exchange1 = exchangeFor("/api/records");
             StepVerifier.create(graceFilter.filter(exchange1, filterChain)).verifyComplete();
             assertThat(exchange1.getAttributes()).containsKey("gateway.principal");
+            assertThat(graceFilter.graceCache().getIfPresent(HASH)).isEqualTo(PAT_JSON);
 
             // Second request: token is revoked — must get 401 even though the grace
             // cache has valid PAT data for this hash.
@@ -330,6 +335,119 @@ class PatAuthenticationFilterTest {
             verify(filterChain, never()).filter(exchange2);
             assertThat(exchange2.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
             verify(metrics).recordAuthFailure(any(), eq("revoked_pat"));
+        }
+
+        @Test
+        @DisplayName("a revoked hit evicts the grace entry; the token stays refused while the worker fails")
+        void revokedHitEvictsGraceEntry() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get("pat:revoked:" + HASH))
+                    .thenReturn(Mono.empty())           // 1st: not revoked yet
+                    .thenReturn(Mono.just("revoked"))   // 2nd: revoked
+                    .thenReturn(Mono.empty());          // 3rd: revocation key gone (e.g. expired)
+            when(valueOps.get("pat:" + HASH))
+                    .thenReturn(Mono.just(PAT_JSON))    // 1st: Redis hit → grace entry written
+                    .thenReturn(Mono.empty());          // 3rd: Redis miss → failing worker → grace
+
+            MockServerWebExchange accepted = exchangeFor("/api/records");
+            StepVerifier.create(graceFilter.filter(accepted, filterChain)).verifyComplete();
+            assertThat(graceFilter.graceCache().getIfPresent(HASH)).isEqualTo(PAT_JSON);
+
+            MockServerWebExchange revoked = exchangeFor("/api/records");
+            StepVerifier.create(graceFilter.filter(revoked, filterChain)).verifyComplete();
+            assertThat(revoked.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(graceFilter.graceCache().getIfPresent(HASH)).isNull();
+
+            // Even if the revocation key were no longer visible, the worker is down and the
+            // grace entry is gone, so the stale token data cannot authenticate the request.
+            MockServerWebExchange afterRevocation = exchangeFor("/api/records");
+            StepVerifier.create(graceFilter.filter(afterRevocation, filterChain)).verifyComplete();
+            assertThat(afterRevocation.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(afterRevocation.getAttributes()).doesNotContainKey("gateway.principal");
+            verify(filterChain, times(1)).filter(any(ServerWebExchange.class));
+        }
+
+        @Test
+        @DisplayName("an expired PAT's JSON is never written to the grace cache")
+        void expiredPatIsNeverCached() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get("pat:revoked:" + HASH)).thenReturn(Mono.empty());
+            when(valueOps.get("pat:" + HASH))
+                    .thenReturn(Mono.just("""
+                            {"userId":"u-2","tenantId":"t-2","email":"grace@b.c","expiresAt":"2020-01-01T00:00:00Z"}"""))
+                    .thenReturn(Mono.empty());
+
+            MockServerWebExchange expired = exchangeFor("/api/records");
+            StepVerifier.create(graceFilter.filter(expired, filterChain)).verifyComplete();
+            assertThat(expired.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(metrics).recordAuthFailure(any(), eq("expired_pat"));
+            assertThat(graceFilter.graceCache().getIfPresent(HASH)).isNull();
+            assertThat(graceFilter.graceCache().estimatedSize()).isZero();
+
+            // Redis miss + worker outage: nothing to fall back on.
+            MockServerWebExchange outage = exchangeFor("/api/records");
+            StepVerifier.create(graceFilter.filter(outage, filterChain)).verifyComplete();
+            assertThat(outage.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(filterChain, never()).filter(any(ServerWebExchange.class));
+        }
+
+        @Test
+        @DisplayName("a cross-tenant rejection is not written to the grace cache")
+        void rejectedTenantMismatchIsNeverCached() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get("pat:revoked:" + HASH)).thenReturn(Mono.empty());
+            when(valueOps.get("pat:" + HASH)).thenReturn(Mono.just(PAT_JSON));
+            MockServerWebExchange exchange = exchangeFor("/api/records");
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "t-other");
+
+            StepVerifier.create(graceFilter.filter(exchange, filterChain)).verifyComplete();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(graceFilter.graceCache().getIfPresent(HASH)).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("Grace cache — bounded size")
+    class GraceCacheBound {
+
+        private static final long MAX_ENTRIES = 1_000;
+        private static final int DISTINCT_TOKENS = 100_000;
+
+        @Test
+        @DisplayName("100,000 distinct accepted tokens leave the grace cache at its configured bound")
+        @SuppressWarnings("unchecked")
+        void distinctTokenFloodStaysWithinBound() {
+            // stubOnly: no invocation recording, so 100k requests don't pile up in the mocks.
+            ReactiveStringRedisTemplate redis = mock(ReactiveStringRedisTemplate.class, withSettings().stubOnly());
+            ReactiveValueOperations<String, String> ops = mock(ReactiveValueOperations.class, withSettings().stubOnly());
+            GatewayFilterChain chain = mock(GatewayFilterChain.class, withSettings().stubOnly());
+            RedisRateLimiter rateLimiter = mock(RedisRateLimiter.class, withSettings().stubOnly());
+            GatewayMetrics gatewayMetrics = mock(GatewayMetrics.class, withSettings().stubOnly());
+            when(redis.opsForValue()).thenReturn(ops);
+            String patJson = """
+                    {"userId":"u-f","tenantId":"t-f","email":"flood@b.c","scopes":"[\\"api\\"]"}""";
+            when(ops.get(anyString())).thenAnswer(inv -> ((String) inv.getArgument(0)).startsWith("pat:revoked:")
+                    ? Mono.empty() : Mono.just(patJson));
+            when(chain.filter(any(ServerWebExchange.class))).thenReturn(Mono.empty());
+            when(rateLimiter.incrementPatUsageCounter(any())).thenReturn(Mono.empty());
+
+            PatAuthenticationFilter floodFilter = new PatAuthenticationFilter(redis, WebClient.builder(),
+                    "http://localhost:1", 300, MAX_ENTRIES, gatewayMetrics, rateLimiter);
+
+            for (int i = 0; i < DISTINCT_TOKENS; i++) {
+                MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
+                        .get("/api/records")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer klt_" + UUID.randomUUID())
+                        .build());
+                floodFilter.filter(exchange, chain).block();
+                if (i == 0) {
+                    assertThat(exchange.getAttributes()).containsKey("gateway.principal");
+                }
+            }
+
+            floodFilter.graceCache().cleanUp();
+            assertThat(floodFilter.graceCache().estimatedSize()).isPositive().isLessThanOrEqualTo(MAX_ENTRIES);
         }
     }
 
