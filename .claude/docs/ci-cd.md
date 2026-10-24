@@ -379,7 +379,14 @@ Weekly version-update PRs, labelled `dependencies`, at most 5 open per ecosystem
 | `github-actions` | `/` (`.github/workflows/`) |
 
 Each ecosystem has one group matching `update-types: [minor, patch]`, so those arrive as one
-weekly PR per ecosystem; a major bump matches no group and arrives as its own PR. A `FROM`
+weekly PR per ecosystem, and one `<ecosystem>-major` group. For maven, npm and docker the major
+group sets `group-by: dependency-name`, so a major bump of one dependency arrives as a single PR
+across every directory that uses it (before this, testcontainers 2.0 opened six PRs, one per
+Maven root); GitHub Actions majors share one PR. Majors have a 7-day `cooldown`
+(`semver-major-days`) so a just-released x.0.0 is not proposed. The maven entry ignores
+`org.springframework.boot:*` and `org.springframework.cloud:*` entirely (platform upgrades are
+planned tasks: a Spring Boot patch bump broke tenant creation, PLT-767) and allows only patch
+bumps for `org.graalvm.*:*` (the polyglot/js runtime tracks the GraalVM JDK line). A `FROM`
 whose image comes from a build `ARG` (`FROM ${GRAALVM_IMAGE}`, `FROM ${BASE_REGISTRY}/...`)
 cannot be resolved by Dependabot and is not updated. Dependabot PRs run the normal `ci.yml`
 and are merged by a human, like any other PR. Security updates (Dependabot alerts) are a

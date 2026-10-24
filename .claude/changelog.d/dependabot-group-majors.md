@@ -1,0 +1,1 @@
+- 2026-10-24 chore(ci): group Dependabot major bumps per dependency across directories (one PR per dependency, one for GitHub Actions) with a 7-day major cooldown
