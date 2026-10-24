@@ -2199,6 +2199,16 @@ export interface PersonalAccessTokenCreated {
   expiresAt: string;
 }
 
+/** A managed user's live token as an admin sees it (`GET /api/admin/users/{id}/tokens`). */
+export interface AdminUserPersonalAccessToken {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  scopes: string[];
+  createdAt: string;
+  expiresAt: string;
+}
+
 export interface CreatePersonalAccessTokenRequest {
   name: string;
   scopes?: string[];
