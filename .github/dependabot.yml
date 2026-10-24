@@ -4,7 +4,8 @@
 # The major group is split per dependency (group-by: dependency-name), so a major bump
 # arrives as ONE PR covering every directory that uses it (not one PR per directory) and
 # can still be reviewed and tested on its own. GitHub Actions majors share one PR.
-# Majors also wait 7 days after release (cooldown) so a broken x.0.0 is not proposed.
+# Maven and npm majors also wait 7 days after release (cooldown) so a broken x.0.0 is not
+# proposed; Dependabot supports semver-*-days only for those ecosystems, not docker or actions.
 #
 # There is no root pom.xml: each Maven root below is built separately. The root
 # package-lock.json is an empty stub with no package.json, so "/" is not an npm entry.
@@ -123,8 +124,6 @@ updates:
           - "*"
         update-types:
           - major
-    cooldown:
-      semver-major-days: 7
 
   - package-ecosystem: github-actions
     directory: /
@@ -145,5 +144,3 @@ updates:
           - "*"
         update-types:
           - major
-    cooldown:
-      semver-major-days: 7
