@@ -26,7 +26,7 @@ Log in via the browser and store a PAT for a profile (--token for headless)
 # Log in through the browser and save a 90-day PAT
 kelta auth login --url https://api.kelta.io --tenant acme
 # Headless login with an existing PAT
-kelta auth login --url https://api.kelta.io --tenant acme --profile staging --token klt_abc123def456
+kelta auth login --url https://api.kelta.io --tenant acme --profile staging --token "$KELTA_TOKEN"
 ```
 
 ### `kelta auth logout`

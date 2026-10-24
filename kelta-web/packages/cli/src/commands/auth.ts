@@ -69,7 +69,7 @@ const login = defineCommand({
       description: 'Log in through the browser and save a 90-day PAT',
     },
     {
-      cmd: 'kelta auth login --url https://api.kelta.io --tenant acme --profile staging --token klt_abc123def456',
+      cmd: 'kelta auth login --url https://api.kelta.io --tenant acme --profile staging --token "$KELTA_TOKEN"',
       description: 'Headless login with an existing PAT',
     },
   ],
