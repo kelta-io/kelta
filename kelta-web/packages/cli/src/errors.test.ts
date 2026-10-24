@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { AxiosError, AxiosHeaders } from 'axios';
 import { CommanderError } from 'commander';
 import { z } from 'zod';
-import { CliError, EXIT, mapError, toErrorPayload } from './errors.js';
+import { buildCommandIndex, checkInvocation } from './docsgen/docLines.js';
+import { CliError, EXIT, errorFromResponse, mapError, toErrorPayload } from './errors.js';
+import { buildManifest } from './registry/manifest.js';
+import { allCommands } from './registry/registry.js';
 
 function axiosError(
   status: number,
@@ -145,14 +148,17 @@ describe('mapError', () => {
   });
 
   it('gives no hint for other errors', () => {
-    expect(mapError(axiosError(404, 'missing')).hint).toBeUndefined();
+    expect(mapError(axiosError(500, 'oops')).hint).toBeUndefined();
+    expect(mapError(axiosError(409, 'taken')).hint).toBeUndefined();
   });
 
-  it('maps network errors (no response)', () => {
+  it('maps network errors (no response) with a hint to check the API URL', () => {
     const error = new AxiosError('socket hang up', 'ECONNRESET');
     const mapped = mapError(error);
     expect(mapped.code).toBe('NETWORK_ERROR');
     expect(mapped.exitCode).toBe(EXIT.API);
+    expect(mapped.hint).toContain('`kelta profile show`');
+    expect(mapped.hint).toContain('API URL');
   });
 
   it('maps zod failures to usage errors (exit 2)', () => {
@@ -192,13 +198,76 @@ describe('mapError', () => {
     expect(mapped.code).toBe('UNAUTHENTICATED');
   });
 
+  it.each([
+    [401, '`kelta auth login`'],
+    [403, 'permission'],
+    [404, 'tenant slug'],
+  ])('hints on SDK KeltaError-like errors with status %i', (statusCode, expected) => {
+    const mapped = mapError(Object.assign(new Error('failed'), { statusCode }));
+    expect(mapped.hint).toContain(expected);
+  });
+
   it('falls back for plain and unknown errors', () => {
     expect(mapError(new Error('boom')).code).toBe('ERROR');
     expect(mapError('boom').code).toBe('ERROR');
   });
 });
 
+describe('errorFromResponse hints', () => {
+  it('hints to log in on 401', () => {
+    const mapped = errorFromResponse(401, 'unauthorized');
+    expect(mapped.hint).toContain('`kelta auth login`');
+  });
+
+  it('hints at permissions and the profile/tenant on 403', () => {
+    const mapped = errorFromResponse(403, {
+      errors: [{ status: '403', code: 'INSUFFICIENT_PERMISSIONS', detail: 'denied' }],
+    });
+    expect(mapped.code).toBe('INSUFFICIENT_PERMISSIONS');
+    expect(mapped.hint).toMatch(/permission.*profile and tenant/);
+  });
+
+  it('hints to check the id, name and tenant slug on 404', () => {
+    const mapped = errorFromResponse(404, {
+      errors: [{ status: '404', code: 'RECORD_NOT_FOUND', detail: 'no such record' }],
+    });
+    expect(mapped.hint).toMatch(/id or name.*tenant slug/);
+  });
+
+  it('keeps the rate-limit hint when a 401/403/404 carries RATE_LIMIT_EXCEEDED', () => {
+    const mapped = errorFromResponse(403, {
+      errors: [{ status: '403', code: 'RATE_LIMIT_EXCEEDED', detail: 'slow down' }],
+    });
+    expect(mapped.hint).toMatch(/^Wait before retrying/);
+  });
+
+  it('names only commands that exist in the CLI registry', () => {
+    const hints = [
+      errorFromResponse(401, '').hint,
+      errorFromResponse(403, '').hint,
+      errorFromResponse(404, '').hint,
+      errorFromResponse(429, '').hint,
+      mapError(new AxiosError('socket hang up', 'ECONNRESET')).hint,
+    ];
+    const commands = hints.flatMap((hint) =>
+      [...(hint ?? '').matchAll(/`(kelta [^`]+)`/g)].map((match) => match[1])
+    );
+    expect(commands.length).toBeGreaterThanOrEqual(4);
+    const index = buildCommandIndex(buildManifest(allCommands), [], []);
+    for (const command of commands) {
+      expect(checkInvocation(command, index), command).toBeNull();
+    }
+  });
+});
+
 describe('toErrorPayload', () => {
+  it('includes the hint on a 401', () => {
+    const mapped = errorFromResponse(401, 'unauthorized');
+    const payload = JSON.parse(toErrorPayload(mapped)) as { error: { hint?: string } };
+    expect(payload.error.hint).toBeTruthy();
+    expect(payload.error.hint).toBe(mapped.hint);
+  });
+
   it('emits the single-line machine contract', () => {
     const payload = toErrorPayload(new CliError('bad', { code: 'X', exitCode: 1, status: 400 }));
     expect(JSON.parse(payload)).toEqual({

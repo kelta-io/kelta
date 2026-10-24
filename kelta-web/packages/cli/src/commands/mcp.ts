@@ -84,8 +84,12 @@ export function resolveRemotes(
   const mcpUrl = mcpUrlFlag ?? deriveMcpUrl(profile.apiUrl);
   if (!mcpUrl) {
     throw new CliError(
-      `Cannot derive the hosted MCP URL from ${profile.apiUrl} — pass --mcp-url (e.g. https://mcp.kelta.io)`,
-      { code: 'MISSING_MCP_URL', exitCode: EXIT.USAGE }
+      `Cannot derive the hosted MCP URL from ${profile.apiUrl} — pass --mcp-url <your API origin>`,
+      {
+        code: 'MISSING_MCP_URL',
+        exitCode: EXIT.USAGE,
+        hint: "Fix the profile's API URL (`kelta profile show`) or pass --mcp-url.",
+      }
     );
   }
   return resolveToolsets(toolset).map(
@@ -102,7 +106,10 @@ const serve = defineCommand({
   options: [
     { flag: '--toolset <set>', description: 'user|admin|all', default: 'all' },
     { flag: '--source <source>', description: 'auto|remote|local', default: 'auto' },
-    { flag: '--mcp-url <url>', description: 'Hosted MCP base URL (default: api.→mcp. derivation)' },
+    {
+      flag: '--mcp-url <url>',
+      description: "Hosted MCP base URL (default: the profile's API origin)",
+    },
     {
       flag: '--tenant <slug>',
       description: "Serve this tenant (e.g. a sandbox) instead of the profile's; needs its token",
@@ -226,7 +233,7 @@ const install = defineCommand({
       // the hosted server has no "all": one endpoint per toolset
       const toolset = input.toolset === 'all' ? 'user' : input.toolset;
       const mcpUrl = profile.apiUrl ? deriveMcpUrl(profile.apiUrl) : undefined;
-      const url = `${mcpUrl ?? 'https://mcp.kelta.io'}/${tenantSlug ?? '<tenant>'}/mcp/${toolset}`;
+      const url = `${mcpUrl ?? '<api-origin>'}/${tenantSlug ?? '<tenant>'}/mcp/${toolset}`;
       const text =
         input.client === 'claude-code'
           ? `claude mcp add ${name} --transport http --url ${url} \\\n  --header "Authorization: Bearer <YOUR_PAT>"\n` +
