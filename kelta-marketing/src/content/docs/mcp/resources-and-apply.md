@@ -18,11 +18,12 @@ Read the relevant `kelta://docs/*` resource before writing filters, layouts, pag
 
 ## The `apply_*` contract
 
-`apply_layout`, `apply_listview`, `apply_picklist`, `apply_menu`, `apply_dashboard` and `apply_page` are
+`apply_collection`, `apply_layout`, `apply_listview`, `apply_picklist`, `apply_menu`, `apply_dashboard` and `apply_page` are
 **create-or-update keyed on a natural key**, so a setup plan can be re-run until it converges:
 
 | Tool | Natural key |
 |---|---|
+| `apply_collection` | collection name; each field by `(collection, fieldName)`, each inline picklist value by `(field, value)` |
 | `apply_layout` | collection + layout name (or `layoutId`) |
 | `apply_listview` | collection + view name |
 | `apply_picklist` | picklist name; each value by `(picklist, value)` |
@@ -36,9 +37,10 @@ Each call reports:
 { "action": "created" | "updated" | "unchanged", "id": "…", "changed": ["columns", "sort"] }
 ```
 
-Tools that manage children (`apply_picklist`, `apply_menu`, `apply_dashboard`) nest one such result per value,
-item or component, and add `pruned` when `prune: true` removed extras — values are **deactivated**, menu items
-and dashboard components **deleted**. Without `prune`, absent children are reported as `stale` and left alone.
+Tools that manage children (`apply_collection`, `apply_picklist`, `apply_menu`, `apply_dashboard`) nest one such
+result per field, value, item or component, and add `pruned` when `prune: true` removed extras — values are **deactivated**, menu items
+and dashboard components **deleted**. Without `prune`, absent children are reported as `stale` and left alone. `apply_collection` never deletes
+a field it was not given; a field whose write fails is reported with its error next to the ones that succeeded.
 
 ### Which keys are compared
 

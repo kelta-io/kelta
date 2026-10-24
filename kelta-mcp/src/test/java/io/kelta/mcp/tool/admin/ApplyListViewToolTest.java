@@ -130,6 +130,96 @@ class ApplyListViewToolTest {
                 .withRequestBody(matchingJsonPath("$.data.attributes", WireMock.equalToJson("{\"rowLimit\":100}"))));
     }
 
+    private static Map<String, Object> kanbanArgs() {
+        Map<String, Object> args = baseArgs(50);
+        args.put("viewType", "kanban");
+        // Long, as a JSON number may arrive from the client; the worker reads it back as an int.
+        args.put("typeConfig", Map.of("kanban", Map.of(
+                "laneField", "status", "cardFields", List.of("title", "owner"), "maxCards", 10L)));
+        return args;
+    }
+
+    private void stubKanbanView() {
+        wm.stubFor(get(urlEqualTo(
+                "/api/list-views?filter[collectionId][eq]=" + COLLECTION_ID + "&filter[name][eq]=Main&page[size]=1"))
+                .inScenario("apply-kanban")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":[]}"))
+                .willSetStateTo("exists"));
+        wm.stubFor(get(urlEqualTo(
+                "/api/list-views?filter[collectionId][eq]=" + COLLECTION_ID + "&filter[name][eq]=Main&page[size]=1"))
+                .inScenario("apply-kanban")
+                .whenScenarioStateIs("exists")
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":[{\"id\":\"" + VIEW_ID + "\"}]}")));
+        wm.stubFor(post(urlEqualTo("/api/list-views"))
+                .willReturn(aResponse().withStatus(201).withBody(
+                        "{\"data\":{\"id\":\"" + VIEW_ID + "\"}}")));
+        // Stored typeConfig comes back with its keys in a different order than the call sent them.
+        wm.stubFor(get(urlEqualTo("/api/list-views/" + VIEW_ID))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":{\"id\":\"" + VIEW_ID + "\",\"attributes\":{"
+                                + "\"collectionId\":\"" + COLLECTION_ID + "\",\"name\":\"Main\","
+                                + "\"columns\":[\"name\"],\"filters\":[],\"rowLimit\":50,"
+                                + "\"viewType\":\"KANBAN\",\"typeConfig\":{\"kanban\":{\"maxCards\":10,"
+                                + "\"cardFields\":[\"title\",\"owner\"],\"laneField\":\"status\"}}}}}")));
+        wm.stubFor(patch(urlEqualTo("/api/list-views/" + VIEW_ID))
+                .willReturn(aResponse().withStatus(200).withBody(
+                        "{\"data\":{\"id\":\"" + VIEW_ID + "\"}}")));
+    }
+
+    @Test
+    void createCarriesUpperCasedViewTypeAndTypeConfig() {
+        stubKanbanView();
+
+        CallToolResult first = call(kanbanArgs());
+
+        assertThat(text(first)).contains("\"action\":\"created\"");
+        wm.verify(1, WireMock.postRequestedFor(urlEqualTo("/api/list-views"))
+                .withRequestBody(matchingJsonPath("$.data.attributes.viewType", WireMock.equalTo("KANBAN")))
+                .withRequestBody(matchingJsonPath("$.data.attributes.typeConfig", WireMock.equalToJson(
+                        "{\"kanban\":{\"laneField\":\"status\",\"cardFields\":[\"title\",\"owner\"],"
+                                + "\"maxCards\":10}}"))));
+    }
+
+    @Test
+    void identicalSecondCallWithNestedTypeConfigIsUnchanged() {
+        stubKanbanView();
+
+        assertThat(text(call(kanbanArgs()))).contains("\"action\":\"created\"");
+        CallToolResult second = call(kanbanArgs());
+
+        assertThat(second.isError()).isNotEqualTo(Boolean.TRUE);
+        assertThat(text(second)).contains("\"action\":\"unchanged\"");
+        wm.verify(0, WireMock.patchRequestedFor(urlEqualTo("/api/list-views/" + VIEW_ID)));
+    }
+
+    @Test
+    void viewTypeAndTypeConfigAreLeftAloneWhenOmitted() {
+        wm.stubFor(get(urlEqualTo(
+                "/api/list-views?filter[collectionId][eq]=" + COLLECTION_ID + "&filter[name][eq]=Main&page[size]=1"))
+                .willReturn(aResponse().withStatus(200).withBody("{\"data\":[]}")));
+        wm.stubFor(post(urlEqualTo("/api/list-views"))
+                .willReturn(aResponse().withStatus(201).withBody("{\"data\":{\"id\":\"" + VIEW_ID + "\"}}")));
+
+        call(baseArgs(50));
+
+        wm.verify(1, WireMock.postRequestedFor(urlEqualTo("/api/list-views"))
+                .withRequestBody(matchingJsonPath("$.data.attributes.viewType", WireMock.absent()))
+                .withRequestBody(matchingJsonPath("$.data.attributes.typeConfig", WireMock.absent())));
+    }
+
+    @Test
+    void diffComparesNestedJsonStructurally() {
+        Map<String, Object> current = Map.of("typeConfig", Map.of("a", 1, "b", Map.of("c", 2.0, "d", "x")));
+        Map<String, Object> sameReordered = Map.of("typeConfig", new java.util.TreeMap<>(Map.of(
+                "b", new java.util.TreeMap<>(Map.of("d", "x", "c", 2L)), "a", 1L)));
+        assertThat(AdminLookups.diff(current, sameReordered)).isEmpty();
+        assertThat(AdminLookups.diff(current, Map.of("typeConfig", Map.of("a", 2, "b", Map.of("c", 2, "d", "x")))))
+                .containsExactly("typeConfig");
+        assertThat(AdminLookups.diff(Map.of(), Map.of("typeConfig", Map.of("a", 1)))).containsExactly("typeConfig");
+    }
+
     private static String text(CallToolResult result) {
         return ((TextContent) result.content().get(0)).text();
     }

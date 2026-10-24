@@ -14,6 +14,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -27,7 +28,8 @@ import java.util.Map;
  * <p>{@code columns} and {@code filters} are the view's core shape and are
  * always written (an omitted {@code filters} means "no filters", matching the
  * worker's own required-field default — see {@link CreateListViewTool}).
- * {@code sort}, {@code rowLimit}, {@code visibility} and {@code isDefault} are
+ * {@code sort}, {@code rowLimit}, {@code visibility}, {@code isDefault}, {@code viewType}
+ * and {@code typeConfig} are
  * only compared/written when supplied, leaving them at their current value
  * (or the collection's default, on create) otherwise.
  *
@@ -88,6 +90,12 @@ public class ApplyListViewTool implements AdminTool {
         properties.put("visibility", Schemas.string("PRIVATE, PUBLIC or GROUP. Omit to leave the current value alone."));
         properties.put("isDefault", Schemas.bool(
                 "Whether this is the default view for the collection+visibility. Omit to leave the current value alone.", false));
+        properties.put("viewType", Schemas.string(
+                "Renderer: TABLE, KANBAN, CALENDAR or GALLERY (case-insensitive). Omit to leave the current value alone."));
+        properties.put("typeConfig", Schemas.freeObject(
+                "Settings for the chosen renderer, e.g. "
+                        + "{\"kanban\":{\"laneField\":\"status\",\"cardFields\":[\"title\"]}}. "
+                        + "Omit to leave the current value alone; an empty object {} clears it."));
 
         Tool tool = Tool.builder()
                 .name("apply_listview")
@@ -99,7 +107,8 @@ public class ApplyListViewTool implements AdminTool {
                         + "[...]}. Example: {\"collectionName\":\"projects\",\"name\":\"Open by owner\","
                         + "\"columns\":[\"name\",\"owner\",\"status\"],\"filters\":[{\"field\":\"status\","
                         + "\"operator\":\"in\",\"value\":[\"OPEN\",\"PENDING\"]}],\"sort\":\"-createdAt\","
-                        + "\"rowLimit\":25}. Wraps GET+POST/PATCH /api/list-views. Deprecates create_listview "
+                        + "\"rowLimit\":25}. viewType (TABLE|KANBAN|CALENDAR|GALLERY) and typeConfig are "
+                        + "compared and written only when supplied. Wraps GET+POST/PATCH /api/list-views. Deprecates create_listview "
                         + "for setup scripts that re-run.")
                 .inputSchema(Schemas.object(properties, List.of("collectionName", "name", "columns")))
                 .annotations(ToolHints.write(true, true))
@@ -147,6 +156,13 @@ public class ApplyListViewTool implements AdminTool {
             if (args.get("rowLimit") instanceof Number rl) attrs.put("rowLimit", rl.intValue());
             if (args.get("visibility") instanceof String v && !v.isBlank()) attrs.put("visibility", v);
             if (args.get("isDefault") instanceof Boolean b) attrs.put("isDefault", b);
+            if (args.get("viewType") instanceof String vt && !vt.isBlank()) {
+                attrs.put("viewType", vt.trim().toUpperCase(Locale.ROOT));
+            }
+            if (args.containsKey("typeConfig")) {
+                Object tc = args.get("typeConfig");
+                attrs.put("typeConfig", tc instanceof Map<?, ?> m && !m.isEmpty() ? m : null);
+            }
 
             AdminLookups.UpsertResult result = lookups.upsert("list-views", naturalKey, attrs);
             return CallToolResult.builder()

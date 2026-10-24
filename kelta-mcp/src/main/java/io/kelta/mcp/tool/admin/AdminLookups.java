@@ -3,14 +3,15 @@ package io.kelta.mcp.tool.admin;
 import io.kelta.mcp.client.GatewayHttpClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.NullNode;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * Gateway-backed name/id resolution shared by the admin tools.
@@ -281,17 +282,34 @@ final class AdminLookups {
         return out;
     }
 
+    /**
+     * Compares JSON values structurally: object key order never matters, and numbers compare by
+     * value, so an {@code Integer} from the tool arguments equals the {@code Long} or {@code 1.0}
+     * a nested JSON attribute (e.g. a list view's {@code typeConfig}) reads back as.
+     */
+    private static final Comparator<JsonNode> JSON_VALUE_ORDER = (a, b) -> {
+        if (a.isNumber() && b.isNumber()) {
+            return a.decimalValue().compareTo(b.decimalValue());
+        }
+        return a.equals(b) ? 0 : 1;
+    };
+
     /** Keys of {@code desired} whose value differs from {@code current}, in {@code desired}'s order. */
     static List<String> diff(Map<String, Object> current, Map<String, Object> desired) {
         List<String> changed = new ArrayList<>();
         for (Map.Entry<String, Object> entry : desired.entrySet()) {
-            JsonNode currentNode = MAPPER.valueToTree(current.get(entry.getKey()));
-            JsonNode desiredNode = MAPPER.valueToTree(entry.getValue());
-            if (!Objects.equals(currentNode, desiredNode)) {
+            JsonNode currentNode = toNode(current.get(entry.getKey()));
+            JsonNode desiredNode = toNode(entry.getValue());
+            if (!currentNode.equals(JSON_VALUE_ORDER, desiredNode)) {
                 changed.add(entry.getKey());
             }
         }
         return changed;
+    }
+
+    private static JsonNode toNode(Object value) {
+        JsonNode node = MAPPER.valueToTree(value);
+        return node == null ? NullNode.getInstance() : node;
     }
 
     private String create(String collection, Map<String, Object> attributes) {

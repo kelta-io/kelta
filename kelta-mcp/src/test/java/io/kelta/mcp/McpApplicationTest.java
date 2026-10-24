@@ -163,6 +163,7 @@ class McpApplicationTest {
                 "get_collection_schema",
                 // schema admin (Phase 6)
                 "create_collection",
+                "apply_collection",
                 "update_collection",
                 "delete_collection",
                 "add_field",
@@ -280,7 +281,7 @@ class McpApplicationTest {
         // without flagging it here is a real safety regression — fail loud.
         Set<String> destructive = Set.of(
                 "update_record", "delete_record", "bulk_apply",
-                "update_collection", "delete_collection",
+                "update_collection", "delete_collection", "apply_collection",
                 "update_field", "remove_field",
                 "update_layout", "delete_layout", "update_flow", "delete_flow",
                 "delete_picklist",

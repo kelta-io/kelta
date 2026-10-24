@@ -40,14 +40,14 @@ toolset. `cli_` tools are local to `kelta mcp serve`.
 
 | Step | Build-log evidence | MCP tool | Status |
 |------|--------------------|----------|--------|
-| Collections | both logs: every collection created by hand in the build sandbox | `create_collection` (optionally with inline fields), `update_collection`, `delete_collection` | covered |
+| Collections | both logs: every collection created by hand in the build sandbox | `apply_collection` (idempotent: collection, inline fields, field-scoped picklist values and display field in one call), `create_collection` (optionally with inline fields), `update_collection`, `delete_collection` | covered |
 | Fields, including native types and typed defaults | #7, #8 (`--type TEXT` became `STRING`), I#4 (string default broke every create) | `add_field`, `update_field`, `remove_field`. Every uppercase `FieldType` name passes through verbatim (`TEXT` stays `TEXT`); `defaultValue` takes a JSON boolean or number | covered |
 | Global picklists | #4 (`picklists get` printed no values), #5, #6 | `apply_picklist` (idempotent), `get_picklist` (includes the values), `list_picklists`, `deactivate_picklist_value` | covered |
-| Field-scoped picklists | #14, #15 (needed raw `POST /api/fields` and `/api/picklist-values`) | `add_field` with `picklistSourceType: "FIELD"` and no `picklistSourceId`, then `apply_field_picklist` (idempotent, `prune` deactivates extras) | covered |
+| Field-scoped picklists | #14, #15 (needed raw `POST /api/fields` and `/api/picklist-values`) | `apply_collection` with inline `values` on the field, or `add_field` with `picklistSourceType: "FIELD"` and no `picklistSourceId`, then `apply_field_picklist` (idempotent, `prune` deactivates extras) | covered |
 | Validation rules | Inspections rule on `inspections.status` | `create_validation_rule`, `update_validation_rule`, `list_validation_rules`, `delete_validation_rule` | covered |
 | Page layouts | both logs: one layout per collection with sections and related lists | `apply_layout` (whole tree, idempotent) | covered |
 | List views (table) | `list-views/*.json` in both templates | `apply_listview` (idempotent) | covered |
-| List views (kanban: "Pipeline board", "Inspection board") | `viewType: KANBAN` + `laneField`/`cardFields` in `list-views/*.json` | `create_listview` / `update_listview` take `viewType` and `typeConfig`; `apply_listview` does not | follow-up: add `viewType` and `typeConfig` to `apply_listview` so a re-run sets the renderer |
+| List views (kanban: "Pipeline board", "Inspection board") | `viewType: KANBAN` + `laneField`/`cardFields` in `list-views/*.json` | `apply_listview` (idempotent), `create_listview` and `update_listview` take `viewType` and `typeConfig` | covered |
 | Flows | #3 (no delete), #11, I#5 | `create_flow`, `update_flow`, `delete_flow`, `list_flows`; reference `kelta://docs/flows` | covered |
 | Flow test runs | Inspections counter flow; CRM "Stamp closed deals" | *(user)* `update_record` to trigger, `get_flow_run`, `execute_flow` | covered |
 | Dashboard | #10 (widget `config` keys undocumented) | `apply_dashboard` (idempotent); reference `kelta://docs/dashboards` | covered |
@@ -59,8 +59,6 @@ toolset. `cli_` tools are local to `kelta mcp serve`.
 
 ## Follow-ups
 
-- `apply_listview`: accept `viewType` and `typeConfig` (kanban lane and card fields), matching
-  `create_listview` / `update_listview`.
 - An `export_metadata` admin tool that returns the package JSON (with the `collections` scope of
   `cli_metadata_export`), for clients that connect to the hosted endpoint directly.
 - Atomic operations should stamp `createdBy` / `updatedBy` (CRM #12); `seed_records` inherits the
