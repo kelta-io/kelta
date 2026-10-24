@@ -452,4 +452,71 @@ class AtomicOperationsControllerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(queryEngine).create(eq(definition), anyMap());
     }
+
+    // ---- Tenant stamping (PLT-710) ---------------------------------------------------
+
+    @SuppressWarnings("unchecked")
+    private AtomicOperationsController membershipController(Map<String, Map<String, Object>> rows) {
+        CollectionDefinition memberships = SystemCollectionDefinitions.byName().get("group-memberships");
+        assertThat(memberships.tenantScoped()).isTrue();
+        when(registry.get("group-memberships")).thenReturn(memberships);
+        when(lifecycleManager.getCollectionIdByName("group-memberships")).thenReturn("uuid-gm");
+        when(authzService.checkCollectionAccess(anyString(), anyString(), anyString(), eq("uuid-gm"), eq("create")))
+                .thenReturn(true);
+        StorageAdapter storage = mock(StorageAdapter.class);
+        when(storage.create(eq(memberships), anyMap())).thenAnswer(inv -> {
+            Map<String, Object> row = new java.util.HashMap<>(inv.<Map<String, Object>>getArgument(1));
+            rows.put((String) row.get("id"), row);
+            return row;
+        });
+        when(storage.getById(eq(memberships), anyString()))
+                .thenAnswer(inv -> java.util.Optional.ofNullable(rows.get(inv.<String>getArgument(1))));
+        queryEngine = new DefaultQueryEngine(storage);
+        return new AtomicOperationsController(queryEngine, registry, lifecycleManager, authzService,
+                permissionResolver, new FieldWriteGuard(authzService), 100);
+    }
+
+    private static Map<String, Object> addMembership(Map<String, Object> attributes) {
+        return Map.of("op", "add", "data", Map.of("type", "group-memberships", "attributes", attributes));
+    }
+
+    @Test
+    @DisplayName("an add on a tenant-scoped system collection is stamped with the request's tenant and reads back with it")
+    @SuppressWarnings("unchecked")
+    void addOnTenantScopedSystemCollectionStampsTenant() {
+        Map<String, Map<String, Object>> rows = new java.util.HashMap<>();
+        AtomicOperationsController tenantController = membershipController(rows);
+
+        ResponseEntity<?> response = tenantController.executeOperations(Map.of("atomic:operations", List.of(
+                addMembership(Map.of("groupId", UUID.randomUUID().toString(), "memberType", "USER",
+                        "memberId", UUID.randomUUID().toString())))), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        List<io.kelta.jsonapi.AtomicResult> results = (List<io.kelta.jsonapi.AtomicResult>)
+                ((Map<String, Object>) response.getBody()).get("atomic:results");
+        assertThat(results.get(0).data().attributes()).containsEntry("tenantId", "tenant-1");
+        String id = results.get(0).data().id();
+        Map<String, Object> readBack = queryEngine.getById(registry.get("group-memberships"), id).orElseThrow();
+        assertThat(readBack).containsEntry("tenantId", "tenant-1");
+    }
+
+    @Test
+    @DisplayName("an add naming another tenant's tenantId is rejected with 422 at its index and writes nothing")
+    @SuppressWarnings("unchecked")
+    void addWithForeignTenantIdIsRejected() {
+        Map<String, Map<String, Object>> rows = new java.util.HashMap<>();
+        AtomicOperationsController tenantController = membershipController(rows);
+
+        ResponseEntity<?> response = tenantController.executeOperations(Map.of("atomic:operations", List.of(
+                addMembership(Map.of("groupId", UUID.randomUUID().toString(), "memberType", "USER",
+                        "memberId", UUID.randomUUID().toString(), "tenantId", "tenant-2")))), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        Map<String, Object> err = ((List<Map<String, Object>>) ((Map<String, Object>) response.getBody())
+                .get("errors")).get(0);
+        assertThat(err.get("code")).isEqualTo("OPERATION_FAILED");
+        assertThat((String) err.get("detail")).contains("tenant-2");
+        assertThat(err.get("source")).isEqualTo(Map.of("pointer", "/atomic:operations/0"));
+        assertThat(rows).isEmpty();
+    }
 }

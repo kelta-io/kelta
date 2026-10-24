@@ -113,7 +113,7 @@ final class RecordWritePipeline {
         stampGeo(data, definition, request, true);
 
         // Inject tenant ID for tenant-scoped system collections
-        tenantScope.injectTenantId(data, definition, request);
+        RecordTenantScope.injectTenantId(data, definition, request.getHeader("X-Tenant-ID"));
 
         Map<String, Object> created = queryEngine.create(definition, data);
 
