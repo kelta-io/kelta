@@ -451,7 +451,8 @@ static checks; all run without a stack.
   inline span is a reference. Fix the doc; when the doc is right and the CLI is wrong, add
   `{file, line, text, reason}` to `docLines.allowlist.json` — an entry that no longer exists or
   now passes fails the test. A fix to `AGENTS.md` goes in `docsgen/agentGuide.ts`
-  (`npm run gen:docs`); one to `docs/authoring/*.md` is mirrored in `docsgen/authoringDocs.ts`.
+  (`npm run gen:docs`); one to `docs/authoring/*.md` is mirrored in `docsgen/authoringDocs.ts` and
+  `kelta-mcp/src/main/resources/docs/authoring/` (pinned by `DocResourceTest`).
 
 ## MCP smoke test (CI)
 
