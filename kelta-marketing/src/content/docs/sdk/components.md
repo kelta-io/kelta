@@ -60,3 +60,8 @@ function Invoices() {
 `LayoutRenderer` (deprecated) renders a [page layout](/docs/console/page-layouts/) fetched from the API — sections,
 placements, visibility rules — and `useLayoutRules` evaluates the layout's compute/validate/default/transform
 rules as the user edits, matching what the app does.
+
+## Full API reference
+
+Every export of `@kelta/components` with its TypeScript signature and doc summary, generated from the package source:
+[@kelta/components — API Reference](/docs/reference/api-components/).

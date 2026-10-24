@@ -466,6 +466,22 @@ required fields) means regenerating the page in the same PR** — run that test 
 `-Dkelta.docs.write=true` (command in `testing.md` → Generated reference: system collections). Never
 hand-edit the page.
 
+## Package API reference pages
+
+`docs/authoring/api-{sdk,components,plugin-sdk,formula}.md` (published at `/docs/reference/api-*/`)
+list every export of each `kelta-web/packages/<pkg>/src/index.ts` with its signature and first
+doc-comment paragraph, rendered with the TypeScript compiler API by
+`kelta-web/scripts/gen-api-reference.mjs`. **Changing a package's public exports, a signature or the
+first TSDoc paragraph means running `npm run gen:api-reference` in `kelta-web` in the same PR**;
+`kelta-web/scripts/apiReference.test.ts` fails on a stale page. Never hand-edit them.
+
+The rule for every generated reference page: it lives in `docs/authoring/`, starts with a
+`GENERATED … do not edit by hand` comment, is registered in `kelta-marketing/src/docs/externalMeta.ts`,
+and carries a freshness test that compares the committed file to a fresh render. It is
+**site-only** — the CLI and MCP embed only the topics listed in `AUTHORING_DOCS`
+(`kelta-web/packages/cli/src/docsgen/authoringDocs.ts`), and generated references
+(`endpoints.md`, `system-collections.md`, `api-*.md`) stay out of it.
+
 ## TypeScript
 
 ### Naming
