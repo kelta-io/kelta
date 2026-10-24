@@ -49,14 +49,17 @@ public class DashboardTreeService {
     private static final Set<String> DASHBOARD_SCALARS = Set.of(
             "description", "accessLevel", "columnCount", "dynamic", "runningUserId");
 
+    // Scoped by tenant_id, not left to RLS: a connection that bypasses RLS (the compose
+    // superuser) otherwise matched another tenant's dashboard of the same name, and a package
+    // import into a sandbox updated the parent tenant's dashboard instead of creating its own.
     private static final String SELECT_DASHBOARD_BY_NAME = """
             SELECT id, name, description, access_level, is_dynamic, running_user_id, column_count
-            FROM dashboard WHERE name = ?
+            FROM dashboard WHERE tenant_id = ? AND name = ?
             """;
 
     private static final String SELECT_COMPONENTS = """
             SELECT id, title, component_type, column_position, row_position, column_span, row_span, config
-            FROM dashboard_component WHERE dashboard_id = ?
+            FROM dashboard_component WHERE tenant_id = ? AND dashboard_id = ?
             ORDER BY sort_order, id
             """;
 
@@ -105,7 +108,8 @@ public class DashboardTreeService {
         String dashboardId = asString(dashboard.get("id"));
 
         List<Map<String, Object>> components = new ArrayList<>();
-        for (Map<String, Object> row : jdbcTemplate.queryForList(SELECT_COMPONENTS, dashboardId)) {
+        for (Map<String, Object> row
+                : jdbcTemplate.queryForList(SELECT_COMPONENTS, TenantContext.get(), dashboardId)) {
             Map<String, Object> component = new LinkedHashMap<>();
             component.put("title", asString(row.get("title")));
             component.put("componentType", asString(row.get("component_type")));
@@ -251,7 +255,7 @@ public class DashboardTreeService {
                                  boolean dashboardPreexisted, Counts counts) {
         // A brand-new dashboard trivially has zero components — skip the read.
         List<Map<String, Object>> existing = dashboardPreexisted
-                ? new ArrayList<>(jdbcTemplate.queryForList(SELECT_COMPONENTS, dashboardId))
+                ? new ArrayList<>(jdbcTemplate.queryForList(SELECT_COMPONENTS, TenantContext.get(), dashboardId))
                 : new ArrayList<>();
 
         int sortOrder = 0;
@@ -352,7 +356,7 @@ public class DashboardTreeService {
     }
 
     private Map<String, Object> findDashboard(String name) {
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(SELECT_DASHBOARD_BY_NAME, name);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(SELECT_DASHBOARD_BY_NAME, TenantContext.get(), name);
         return rows.isEmpty() ? null : rows.get(0);
     }
 

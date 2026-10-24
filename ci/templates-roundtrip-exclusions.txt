@@ -9,7 +9,7 @@
 # type round-trip.
 #
 # Empty on purpose: UNIQUE_CONSTRAINT, REPORT and APPROVAL_PROCESS, the types the K-15 brief
-# expected to be missing, are exported and imported since KLT-665 (#1843), and KLT-666 found no
-# other type in PackageService/PackageImportService that cannot round-trip by reading them. CI is
-# the first real run: a type it shows failing gets a line here only with the follow-up task that
-# fixes it.
+# expected to be missing, are exported and imported since KLT-665 (#1843). The one type the
+# check's first CI run showed failing, DASHBOARD (DashboardTreeService matched another tenant's
+# dashboard by name, so the sandbox import updated the parent's), is fixed in KLT-666 itself.
+# A type that fails later gets a line here only with the follow-up task that fixes it.

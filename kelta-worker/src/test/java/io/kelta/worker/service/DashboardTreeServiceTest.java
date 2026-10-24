@@ -59,9 +59,9 @@ class DashboardTreeServiceTest {
                 Map.of("id", "new-" + sequence.incrementAndGet()));
 
         when(jdbcTemplate.queryForList(anyString(), any(Object.class))).thenReturn(List.of());
-        when(jdbcTemplate.queryForList(contains("FROM dashboard WHERE name"), eq(NAME)))
+        when(jdbcTemplate.queryForList(contains("FROM dashboard WHERE"), eq(TENANT), eq(NAME)))
                 .thenReturn(List.of());
-        when(jdbcTemplate.queryForList(contains("FROM dashboard_component WHERE dashboard_id"),
+        when(jdbcTemplate.queryForList(contains("FROM dashboard_component WHERE"), eq(TENANT),
                 anyString())).thenReturn(componentRows);
 
         service = new DashboardTreeService(queryEngine, collectionRegistry, jdbcTemplate, new ObjectMapper());
@@ -97,7 +97,7 @@ class DashboardTreeServiceTest {
         assertThat(result.counts().deleted()).isZero();
         assertThat(result.name()).isEqualTo(NAME);
         // Brand-new dashboard: no pre-read of dashboard-components needed.
-        verify(jdbcTemplate, never()).queryForList(contains("FROM dashboard_component"), anyString());
+        verify(jdbcTemplate, never()).queryForList(contains("FROM dashboard_component"), any(Object.class), anyString());
     }
 
     @Test
@@ -149,8 +149,31 @@ class DashboardTreeServiceTest {
         verify(queryEngine, never()).create(any(), any());
     }
 
+    @Test
+    @DisplayName("Another tenant's dashboard of the same name is not matched, even where RLS is bypassed")
+    void otherTenantsDashboardIsNotMatched() {
+        // A connection that bypasses RLS (the compose superuser) returns every tenant's rows;
+        // only the query's own tenant_id predicate keeps them out.
+        Map<String, Object> otherTenants = row("id", "dash-other", "tenant_id", "tenant-2", "name", NAME,
+                "description", null, "access_level", "PUBLIC", "is_dynamic", false,
+                "running_user_id", null, "column_count", 3);
+        when(jdbcTemplate.queryForList(contains("FROM dashboard WHERE"), any(Object[].class))).thenAnswer(inv -> {
+            String sql = inv.getArgument(0);
+            Object[] args = inv.getRawArguments().length > 1 && inv.getRawArguments()[1] instanceof Object[] a
+                    ? a : new Object[] {inv.getRawArguments()[1]};
+            boolean tenantScoped = sql.contains("tenant_id = ?");
+            return tenantScoped && !"tenant-2".equals(args[0]) ? List.of() : List.of(otherTenants);
+        });
+
+        ApplyResult result = apply(row("components", List.of(component("Total Books"))));
+
+        assertThat(result.dashboardId()).isEqualTo("new-1");
+        assertThat(result.counts().created()).isEqualTo(2); // its own dashboard + the widget
+        verify(queryEngine, never()).update(any(), eq("dash-other"), any());
+    }
+
     private void seedExistingDashboard() {
-        when(jdbcTemplate.queryForList(contains("FROM dashboard WHERE name"), eq(NAME)))
+        when(jdbcTemplate.queryForList(contains("FROM dashboard WHERE"), eq(TENANT), eq(NAME)))
                 .thenReturn(List.of(row("id", "dash-1", "name", NAME, "description", null,
                         "access_level", "PRIVATE", "is_dynamic", false, "running_user_id", null,
                         "column_count", 3)));
