@@ -1136,8 +1136,10 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   - `UNIQUE_CONSTRAINT`: export lists each exported collection's `uniq_*` indexes. It never carries
     the index name, because that embeds the source table. It leaves out a single-field index that
     backs the field's own `unique` flag, since that travels with the `FIELD`. An existing index
-    over the same field set (any order) is `SKIPPED` under either conflict mode: a field set has
-    nothing to overwrite.
+    over the same field set in the same order is `SKIPPED` under either conflict mode. Since
+    KLT-744 the index is created in the package's `field_names` order (the source index's column
+    order), and an existing index over the same set in another order is re-created in package
+    order under OVERWRITE (new index first, then the old one dropped).
   - `REPORT`: `primaryCollectionId` resolves by `primary_collection_name` (a platform system
     collection such as `users` included). Each plain column `fieldName`, plus `group_by` and
     `sort_by`, must be a field of that collection; dotted names read through `relatedJoins` and are
@@ -1157,6 +1159,24 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     only its seeded admin, so USER/GROUP approvers could never resolve there, and one report naming
     a since-deleted field would mark the whole clone `FAILED`. Unique constraints do ride along,
     since they come with every exported collection.
+- **Import preview classifies changed vs unchanged (2026-10-24, KLT-744):**
+  `PackageService.previewImport` (`POST /api/packages/import/preview`, `kelta metadata diff`, MCP
+  `diff_metadata`) runs the import as a dry run with `ImportOptions.preview()`
+  (`compareExisting=true`). Each per-type importer resolves the item's natural key and references
+  exactly as a real import does; for an item whose key already exists it compares the item —
+  mapped the way the import would write it, references already resolved to target ids — with the
+  target row read back through `QueryEngine.getById`, and returns the differing attributes (package
+  column names) in `ItemResult.changes`. Only attributes the package carries are compared; audit
+  fields and `tenantId` never count. Per type: `COLLECTION` also compares its display field (by
+  name) and ownership; `APPROVAL_PROCESS` compares each step by `step_number`
+  (`steps[<n>].<column>`, or `steps[<n>]` for a step the target lacks); `DASHBOARD` compares the
+  tree keys and widgets by title via `DashboardTreeService.readTree` (`components[<title>]…`);
+  `UNIQUE_CONSTRAINT` reports `field_names` when the column order differs; an existing `RECORD`
+  seed row is always unchanged (insert-only). The response lists `creates`, `updates`
+  (`{type, name, changes}`), `unchanged` and `conflicts` (an item that would fail, with its
+  `error`). Nothing is written. Tenant items the package does not carry (removals) are not
+  reported. `PackageRoundTripTest.everyTypeIsDocumentedAndCompared` fails when a `TYPE_ORDER` type
+  has no row in `docs/authoring/packages.md` or no comparison in the preview.
 
 **Worker-side system-permission check — how (use the existing pattern, don't reinvent):**
 - Enforce a specific system permission **in the controller/service** with a DB lookup against

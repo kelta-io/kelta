@@ -1247,7 +1247,7 @@ kelta metadata export --collections customers,orders --exclude list-view,dashboa
 
 ### `kelta metadata diff <file>`
 
-Preview the changes a package file would make (no writes)
+Preview a package file against this tenant (dry run, no writes): creates, updates with their changed attributes, unchanged counts, conflicts
 
 ```bash
 kelta metadata diff metadata.json
