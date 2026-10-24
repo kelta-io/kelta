@@ -275,6 +275,10 @@ Every new feature needs one. When a test drives a flow via `POST /api/flows/{id}
 or the `execute_flow` MCP tool, remember the **double-wrap** rule (`{ "input": { ... } }`) —
 see `integrations.md` → Flows. MCP tools are tested at the unit level with WireMock JSON-path
 matchers asserting the on-the-wire JSON:API body (see `conventions.md` → MCP tools).
+**Guard:** `ToolTestCoverageGuardTest` (kelta-mcp) scans `io.kelta.mcp.tool` for every concrete
+`AdminTool`/`UserTool` and fails when one has no `<ClassName>Test` under `src/test/java`, so a
+new tool cannot merge without its wire test. Use the same shape (classpath scan + name match,
+plus a planted-violation case proving the guard fires) for any "every X has a test" rule.
 
 **The same suite runs post-deploy against production** (`build-and-publish-containers.yml` →
 E2E, `app.kelta.io`, the `default` tenant). A spec must never persist a change to a tenant-wide
@@ -557,6 +561,28 @@ them: it must resolve every `{{var}}` and send exactly `baseline.txt` calls.
 `ci/mcp-replay-compare.test.sh` pins the threshold. To regenerate the fixture and baseline after a
 platform change that makes the build cheaper (or a template change): see "Replaying the build in
 CI" in `examples/templates/applicant-tracking/BUILD-LOG.md`.
+
+## Template install and round-trip checks (CI)
+
+The `templates` job (**Template Install Check**, details in `ci-cd.md`) installs every
+`examples/templates/*/` into one fresh tenant on a HEAD-built stack, then makes two idempotency
+assertions (KLT-666):
+
+- **Second apply** (`ci/templates-install-check.sh`): after `install.sh` and the seed-count check,
+  each template's `metadata.json` is applied again (`kelta metadata apply metadata.json --yes
+  --output json`); it must exit 0 with `created` 0 and `failed` 0, else the items not `SKIPPED`
+  are printed and the run fails once every template was tried. The sandbox install gets the same
+  second apply.
+- **`Template round-trip check`** step (`ci/templates-roundtrip-check.sh`, runs after a failed
+  install step too): per template, `kelta metadata export --collections …` from the tenant,
+  apply to a new empty sandbox, re-export, normalise both with
+  `ci/templates-roundtrip-normalise.jq` (ids and timestamps) and diff. Package types listed in
+  `ci/templates-roundtrip-exclusions.txt` (`<TYPE> <task> [why]`; a line without a task fails the
+  check) are dropped from both and printed — empty today; add a line only with the follow-up task
+  that removes it.
+
+Both scripts' tests (`ci/templates-install-check.test.ts`, `ci/templates-roundtrip-check.test.ts`)
+run in the job's runner image and in `test-ci-scripts`.
 
 ## Upgrade test (CI)
 
