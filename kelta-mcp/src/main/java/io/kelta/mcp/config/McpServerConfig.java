@@ -1,6 +1,7 @@
 package io.kelta.mcp.config;
 
 import io.kelta.mcp.auth.KeltaTransportContextExtractor;
+import io.kelta.mcp.observe.ArgumentTypeValidatingToolDecorator;
 import io.kelta.mcp.observe.ObservedToolDecorator;
 import io.kelta.mcp.observe.PatPropagatingToolDecorator;
 import io.kelta.mcp.observe.RateLimitedToolDecorator;
@@ -223,7 +224,8 @@ public class McpServerConfig {
             List<UserResourceTemplate> userResourceTemplates,
             ObservedToolDecorator decorator,
             RateLimitedToolDecorator rateLimiter,
-            PatPropagatingToolDecorator patPropagator) {
+            PatPropagatingToolDecorator patPropagator,
+            ArgumentTypeValidatingToolDecorator argumentValidator) {
         McpStatelessSyncServer server = McpServer.sync(transport)
                 .serverInfo(SERVER_NAME + "-user", SERVER_VERSION)
                 .instructions(USER_INSTRUCTIONS)
@@ -232,10 +234,10 @@ public class McpServerConfig {
                         .resources(false, false)  // (subscribe, listChanged): both off in stateless
                         .build())
                 .build();
-        server.addTool(wrap(pingTool("user"), "user", decorator, rateLimiter, patPropagator));
+        server.addTool(wrap(pingTool("user"), "user", decorator, rateLimiter, patPropagator, argumentValidator));
         for (UserTool tool : userTools) {
             McpStatelessServerFeatures.SyncToolSpecification spec = wrap(
-                    tool.toSpecification(), "user", decorator, rateLimiter, patPropagator);
+                    tool.toSpecification(), "user", decorator, rateLimiter, patPropagator, argumentValidator);
             server.addTool(spec);
             log.info("Registered user tool: {}", spec.tool().name());
         }
@@ -260,7 +262,8 @@ public class McpServerConfig {
             List<AdminResource> adminResources,
             ObservedToolDecorator decorator,
             RateLimitedToolDecorator rateLimiter,
-            PatPropagatingToolDecorator patPropagator) {
+            PatPropagatingToolDecorator patPropagator,
+            ArgumentTypeValidatingToolDecorator argumentValidator) {
         McpStatelessSyncServer server = McpServer.sync(transport)
                 .serverInfo(SERVER_NAME + "-admin", SERVER_VERSION)
                 .instructions(ADMIN_INSTRUCTIONS)
@@ -269,10 +272,10 @@ public class McpServerConfig {
                         .resources(false, false)  // (subscribe, listChanged): both off in stateless
                         .build())
                 .build();
-        server.addTool(wrap(pingTool("admin"), "admin", decorator, rateLimiter, patPropagator));
+        server.addTool(wrap(pingTool("admin"), "admin", decorator, rateLimiter, patPropagator, argumentValidator));
         for (AdminTool tool : adminTools) {
             McpStatelessServerFeatures.SyncToolSpecification spec = wrap(
-                    tool.toSpecification(), "admin", decorator, rateLimiter, patPropagator);
+                    tool.toSpecification(), "admin", decorator, rateLimiter, patPropagator, argumentValidator);
             server.addTool(spec);
             log.info("Registered admin tool: {}", spec.tool().name());
         }
@@ -292,17 +295,21 @@ public class McpServerConfig {
      *  2. Rate limiter — keys its bucket on the now-populated PAT;
      *     rate-limited calls return an error before observation runs.
      *  3. Observation — timer + counter, tagged with status.
-     *  4. Original tool.
+     *  4. Argument types — rejects an argument whose type doesn't match the
+     *     inputSchema with a 400 before the tool runs (still observed as an
+     *     error call).
+     *  5. Original tool.
      */
     private static McpStatelessServerFeatures.SyncToolSpecification wrap(
             McpStatelessServerFeatures.SyncToolSpecification original,
             String profile,
             ObservedToolDecorator observed,
             RateLimitedToolDecorator rateLimited,
-            PatPropagatingToolDecorator patPropagator) {
+            PatPropagatingToolDecorator patPropagator,
+            ArgumentTypeValidatingToolDecorator argumentValidator) {
         return patPropagator.decorate(
                 rateLimited.decorate(
-                        observed.decorate(original, profile),
+                        observed.decorate(argumentValidator.decorate(original), profile),
                         profile));
     }
 

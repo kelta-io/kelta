@@ -103,6 +103,39 @@ class ApplyLayoutToolTest {
     }
 
     @Test
+    void encodesSpacesInPathSegmentsAsPercentTwentyNotPlus() {
+        wm.stubFor(put(urlEqualTo("/api/collections/job%20applications/layouts/Main%20Layout/tree"))
+                .willReturn(aResponse().withStatus(200).withBody("{\"layoutId\":\"L1\"}")));
+
+        CallToolResult result = call(Map.of(
+                "collectionName", "job applications",
+                "name", "Main Layout",
+                "sections", List.of(Map.of("heading", "Overview",
+                        "fields", List.of(Map.of("name", "name"))))));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(1, WireMock.putRequestedFor(
+                        urlEqualTo("/api/collections/job%20applications/layouts/Main%20Layout/tree"))
+                .withRequestBody(matchingJsonPath("$.name", equalTo("Main Layout"))));
+        wm.verify(0, WireMock.putRequestedFor(
+                urlEqualTo("/api/collections/job+applications/layouts/Main+Layout/tree")));
+    }
+
+    @Test
+    void encodesLayoutIdAsAPathSegment() {
+        wm.stubFor(put(urlEqualTo("/api/page-layouts/L%201/tree"))
+                .willReturn(aResponse().withStatus(200).withBody("{\"layoutId\":\"L 1\"}")));
+
+        CallToolResult result = call(Map.of(
+                "layoutId", "L 1",
+                "sections", List.of(Map.of("heading", "Overview",
+                        "fields", List.of(Map.of("name", "name"))))));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        wm.verify(1, WireMock.putRequestedFor(urlEqualTo("/api/page-layouts/L%201/tree")));
+    }
+
+    @Test
     void placesFieldsInZeroBasedColumnsWhenColumnOmitted() {
         wm.stubFor(put(urlEqualTo("/api/collections/projects/layouts/Main/tree"))
                 .willReturn(aResponse().withStatus(200).withBody("{\"layoutId\":\"L1\"}")));

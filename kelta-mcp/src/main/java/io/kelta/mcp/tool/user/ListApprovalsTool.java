@@ -46,7 +46,7 @@ public class ListApprovalsTool implements UserTool {
                 .callHandler((context, request) -> {
                     Map<String, Object> args = request.arguments();
                     if (args == null) args = Map.of();
-                    String status = String.valueOf(args.getOrDefault("status", "pending"));
+                    String status = args.get("status") instanceof String s ? s : "pending";
 
                     List<String> parts = new ArrayList<>();
                     if (!"all".equalsIgnoreCase(status) && !status.isBlank()) {
