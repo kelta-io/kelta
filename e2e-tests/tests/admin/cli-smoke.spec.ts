@@ -203,12 +203,18 @@ test.describe("kelta CLI smoke", () => {
     expect(diffed.status, diffed.stderr).toBe(0);
     const diff = JSON.parse(diffed.stdout) as {
       creates?: unknown[];
-      updates?: unknown[];
+      updates?: Array<{ changes?: unknown }>;
+      unchanged?: unknown[];
       conflicts?: unknown[];
     };
     expect(diff).toHaveProperty("creates");
     expect(diff).toHaveProperty("updates");
     expect(diff).toHaveProperty("conflicts");
+    // KLT-744: existing items are split into updates (with changed attributes) and unchanged.
+    expect(Array.isArray(diff.unchanged)).toBe(true);
+    for (const update of diff.updates ?? []) {
+      expect(Array.isArray(update.changes)).toBe(true);
+    }
 
     const applied = runCli(["metadata", "apply", file, "--dry-run", "--output", "json"]);
     expect(applied.status, applied.stderr).toBe(0);

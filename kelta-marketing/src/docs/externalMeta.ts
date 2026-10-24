@@ -66,6 +66,12 @@ export const externalMeta: Record<`authoring/${string}` | `cli/${string}`, Exter
     section: 'reference',
     order: 80,
   },
+  'authoring/packages': {
+    title: 'Authoring Metadata Packages',
+    description: 'The package file kelta metadata export, diff and apply move between tenants: every item type with its natural key, how references resolve by name, and what diff reports.',
+    section: 'reference',
+    order: 85,
+  },
   'authoring/mcp-admin-coverage': {
     title: 'Authoring a Template Through the Admin MCP Toolset',
     description: 'Pointing kelta mcp serve at a sandbox, and the MCP tool behind each step of building a template app.',

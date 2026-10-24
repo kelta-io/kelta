@@ -129,7 +129,33 @@ class PackageServiceTest {
         }
 
         @Test
-        @DisplayName("Should classify skipped/failed items as conflicts")
+        @DisplayName("Should list an existing item that differs under updates with its changed attributes, "
+                + "and an identical one under unchanged")
+        void shouldSplitExistingItemsIntoUpdatesAndUnchanged() {
+            Map<String, Object> pkg = new LinkedHashMap<>();
+            pkg.put("items", List.of());
+            when(importService.importPackage(eq("t1"), eq(pkg), any())).thenReturn(report(
+                    new PackageImportService.ItemResult("REPORT", "Open orders", "SKIPPED", null, "r-1",
+                            List.of("group_by")),
+                    new PackageImportService.ItemResult("COLLECTION", "accounts", "SKIPPED", null, "c-1",
+                            List.of()),
+                    new PackageImportService.ItemResult("RECORD", "accounts:name=Acme", "SKIPPED", null, "rec-1",
+                            List.of())));
+
+            var result = service.previewImport("t1", pkg);
+
+            assertThat(result.get("updates")).isEqualTo(List.of(
+                    Map.of("type", "REPORT", "name", "Open orders", "changes", List.of("group_by"))));
+            assertThat(result.get("unchanged")).isEqualTo(List.of(
+                    Map.of("type", "COLLECTION", "name", "accounts"),
+                    Map.of("type", "RECORD", "name", "accounts:name=Acme")));
+            assertThat(result.get("conflicts")).isEqualTo(List.of());
+            verify(importService).importPackage(eq("t1"), eq(pkg),
+                    argThat(o -> o.dryRun() && o.compareExisting()));
+        }
+
+        @Test
+        @DisplayName("Should classify uncompared skipped/failed items as conflicts")
         void shouldIdentifyConflicts() {
             Map<String, Object> pkg = new LinkedHashMap<>();
             pkg.put("items", List.of(

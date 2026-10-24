@@ -59,7 +59,7 @@ The complete list with every flag and default is generated from the command regi
 - `kelta <group> --help`, `kelta <group> <command> --help` — human help.
 - `kelta manifest [--group records]` — the full machine-readable catalogue: every command with a JSON Schema of
   its input, positionals, options, and `dangerous`/auth flags. Agents start here.
-- `kelta docs agent` — the [agent guide](/docs/cli/agents/); `kelta docs jsonapi|page-layouts|list-views|dashboards|ui-pages|ui-menus|flows`
+- `kelta docs agent` — the [agent guide](/docs/cli/agents/); `kelta docs jsonapi|page-layouts|list-views|dashboards|ui-pages|ui-menus|flows|packages`
   — the authoring reference, identical to the pages under [Authoring reference](/docs/reference/jsonapi/).
 
 ## Examples
