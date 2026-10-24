@@ -109,7 +109,7 @@ mvn clean install -DskipTests -f kelta-platform/pom.xml \
 ## Tech Stack
 
 - Java 25
-- Spring Boot 4.0.5, Spring Cloud 2025.1.1
+- Spring Boot 4.0.9, Spring Cloud 2025.1.4
 - NATS (jnats), Spring Data Redis, Spring Data JDBC
 - PostgreSQL, Jackson
 - Mockito 5.21, Testcontainers 1.21.4, jqwik 1.8.2
