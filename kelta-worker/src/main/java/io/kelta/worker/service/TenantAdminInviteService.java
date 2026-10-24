@@ -1,6 +1,7 @@
 package io.kelta.worker.service;
 
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.worker.controller.PersonalAccessTokenController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -25,6 +26,10 @@ import java.util.Optional;
  * {@code /api/tenants/{id}} itself), while every row touched here belongs to the managed
  * tenant — so the work runs under an explicit {@code callWithTenant} for that tenant, the same
  * per-tenant binding the other cross-tenant paths use.
+ *
+ * <p>A successful invite also revokes every live bootstrap token of the tenant
+ * ({@link PersonalAccessTokenController#revokeBootstrapTokens}), so a platform admin's temporary
+ * access ends when the owner takes over.
  */
 @Service
 public class TenantAdminInviteService {
@@ -34,10 +39,13 @@ public class TenantAdminInviteService {
 
     private final JdbcTemplate jdbcTemplate;
     private final UserInviteService userInviteService;
+    private final PersonalAccessTokenController personalAccessTokenController;
 
-    public TenantAdminInviteService(JdbcTemplate jdbcTemplate, UserInviteService userInviteService) {
+    public TenantAdminInviteService(JdbcTemplate jdbcTemplate, UserInviteService userInviteService,
+                                    PersonalAccessTokenController personalAccessTokenController) {
         this.jdbcTemplate = jdbcTemplate;
         this.userInviteService = userInviteService;
+        this.personalAccessTokenController = personalAccessTokenController;
     }
 
     public record AdminInvite(String userId, String email) {}
@@ -68,12 +76,13 @@ public class TenantAdminInviteService {
     }
 
     /**
-     * Points the managed tenant's seeded admin at {@code email} and sends the invite.
+     * Points the managed tenant's seeded admin at {@code email}, sends the invite, then revokes
+     * every live bootstrap token in the tenant, audited with {@code actor}.
      *
      * @return the invited admin, or empty when the tenant or its seeded admin does not exist
      * @throws ResponseStatusException 409 when another user of the tenant already has the email
      */
-    public Optional<AdminInvite> inviteSeededAdmin(String tenantId, String email) {
+    public Optional<AdminInvite> inviteSeededAdmin(String tenantId, String email, String actor) {
         List<String> slugs = jdbcTemplate.queryForList(
                 "SELECT slug FROM tenant WHERE id = ?", String.class, tenantId);
         if (slugs.isEmpty()) {
@@ -98,6 +107,10 @@ public class TenantAdminInviteService {
                         "Another user in this tenant already has that email");
             }
             userInviteService.inviteUser(tenantId, userId);
+            List<String> revoked = personalAccessTokenController.revokeBootstrapTokens(tenantId, actor);
+            if (!revoked.isEmpty()) {
+                log.info("Revoked {} bootstrap token(s) in tenant {} on admin invite", revoked.size(), tenantId);
+            }
             return Optional.of(new AdminInvite(userId, email));
         });
     }

@@ -2,10 +2,12 @@ package io.kelta.worker.controller;
 
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
+import io.kelta.worker.service.SecurityAuditLogger;
 import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -13,6 +15,10 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 
@@ -181,24 +187,48 @@ class PersonalAccessTokenControllerTest {
     class RevokeToken {
         @Test
         void shouldRevokeTokenSuccessfully() {
-            when(jdbcTemplate.queryForList(contains("user_api_token WHERE id"), eq("tok-1"), eq("user-1")))
+            when(jdbcTemplate.queryForList(contains("FROM user_api_token WHERE tenant_id = ?"),
+                    eq("tenant-1"), eq("tok-1"), eq("user-1")))
                     .thenReturn(List.of(Map.of("id", "tok-1", "token_hash", "abc123")));
+            when(jdbcTemplate.update(contains("revoked = true"), any(), any(), eq("tok-1"), eq("tenant-1")))
+                    .thenReturn(1);
             when(redisTemplate.opsForValue()).thenReturn(valueOps);
 
-            var response = controller.revokeToken("tok-1", "user-1");
+            try (MockedStatic<SecurityAuditLogger> audit = mockStatic(SecurityAuditLogger.class)) {
+                var response = controller.revokeToken("tok-1", "user-1");
 
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-            verify(jdbcTemplate).update(contains("revoked = true"), any(), any(), eq("tok-1"));
+                assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+                audit.verify(() -> SecurityAuditLogger.log(SecurityAuditLogger.EventType.PAT_REVOKED,
+                        "user-1", "tok-1", "tenant-1", "success", null));
+            }
+            verify(redisTemplate).delete("pat:abc123");
+            verify(valueOps).set(eq("pat:revoked:abc123"), eq("revoked"), eq(Duration.ofDays(366)));
         }
 
         @Test
         void shouldReturn404ForNonExistentToken() {
-            when(jdbcTemplate.queryForList(contains("user_api_token WHERE id"), eq("tok-1"), eq("user-1")))
+            when(jdbcTemplate.queryForList(contains("FROM user_api_token WHERE tenant_id = ?"),
+                    eq("tenant-1"), eq("tok-1"), eq("user-1")))
                     .thenReturn(List.of());
 
             var response = controller.revokeToken("tok-1", "user-1");
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            verify(jdbcTemplate, never()).update(contains("revoked = true"), any(Object[].class));
+        }
+
+        @Test
+        void shouldReturn404WhenTokenRevokedConcurrently() {
+            when(jdbcTemplate.queryForList(contains("FROM user_api_token WHERE tenant_id = ?"),
+                    eq("tenant-1"), eq("tok-1"), eq("user-1")))
+                    .thenReturn(List.of(Map.of("id", "tok-1", "token_hash", "abc123")));
+            when(jdbcTemplate.update(contains("revoked = true"), any(), any(), eq("tok-1"), eq("tenant-1")))
+                    .thenReturn(0);
+
+            var response = controller.revokeToken("tok-1", "user-1");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            verifyNoInteractions(redisTemplate);
         }
 
         @Test
@@ -206,6 +236,50 @@ class PersonalAccessTokenControllerTest {
             var response = controller.revokeToken("tok-1", null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /api/me/tokens/validate/{tokenHash}")
+    class ValidateToken {
+        private Map<String, Object> row(Instant expiresAt) {
+            return Map.of("id", "tok-1", "user_id", "user-1", "tenant_id", "tenant-1",
+                    "scopes", "[\"api\"]", "expires_at", Timestamp.from(expiresAt),
+                    "email", "user@test.com", "status", "ACTIVE");
+        }
+
+        @Test
+        void shouldReturnMetadataForLiveToken() {
+            when(jdbcTemplate.queryForList(contains("FROM user_api_token"), eq("hash-live")))
+                    .thenReturn(List.of(row(Instant.now().plus(1, ChronoUnit.HOURS))));
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+
+            var response = controller.validateToken("hash-live");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+
+        @Test
+        void shouldReturn404ForExpiredBootstrapToken() {
+            when(jdbcTemplate.queryForList(contains("FROM user_api_token"), eq("hash-expired")))
+                    .thenReturn(List.of(row(Instant.now().minus(1, ChronoUnit.MINUTES))));
+
+            var response = controller.validateToken("hash-expired");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            verifyNoInteractions(redisTemplate);
+        }
+
+        @Test
+        void shouldReturn404ForRevokedToken() {
+            // The lookup only matches live rows; a revoked token's row is filtered out by SQL.
+            when(jdbcTemplate.queryForList(contains("t.revoked = false"), eq("hash-revoked")))
+                    .thenReturn(List.of());
+
+            var response = controller.validateToken("hash-revoked");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            verifyNoInteractions(redisTemplate);
         }
     }
 

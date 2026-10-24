@@ -61,7 +61,7 @@ public class TenantAdminInviteController {
 
         TenantAdminInviteService.AdminInvite invite;
         try {
-            invite = inviteService.inviteSeededAdmin(id, email).orElse(null);
+            invite = inviteService.inviteSeededAdmin(id, email, actor).orElse(null);
         } catch (ResponseStatusException e) {
             audit(actor, id, id, "failure", e.getReason());
             throw e;

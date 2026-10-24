@@ -525,7 +525,9 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   ids 404, a user outside the tenant 404 and an inactive user 409. The plaintext token is
   returned once. Every attempt is audited as `TENANT_BOOTSTRAP_TOKEN_ISSUED`. The token works
   only on the target tenant's URLs, because `PatAuthenticationFilter` rejects a tenant mismatch
-  with 401. The grant this implies is recorded in `concerns.md`.
+  with 401. A successful `admin-invite` on the tenant revokes every live `bootstrap-*` token in it
+  (`PersonalAccessTokenController#revokeBootstrapTokens`, same steps as `DELETE /api/me/tokens/{id}`,
+  audited `TENANT_BOOTSTRAP_TOKEN_REVOKED`). The grant this implies is recorded in `concerns.md`.
   `POST /api/tenants` also accepts a transient **`adminEmail`** attribute — not a `tenants`
   field: `TenantProvisioningHook` strips it in `beforeCreate` and, after provisioning, seeds the
   admin with that email and sends the same invite. Provisioned admins have no usable password

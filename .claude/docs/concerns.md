@@ -198,9 +198,14 @@ mailbox to a high-volume public address.
   change is a security change): default 1 h / max 24 h (`MAX_LIFETIME`), Redis `pat:<hash>`
   cached for exactly the remaining lifetime; the PAT is rejected on any other tenant's URL; the
   platform tenant → 403, non-UUID ids → 404; user lookup tenant-filtered; every attempt logged as
-  `TENANT_BOOTSTRAP_TOKEN_ISSUED` on `security.audit` (log-only, not a table row). Residual: the
-  token is never auto-revoked when the tenant is claimed; expired tokens no longer count against
-  the 10-live cap.
+  `TENANT_BOOTSTRAP_TOKEN_ISSUED` on `security.audit` (log-only, not a table row). Claiming the
+  tenant (`POST /api/tenants/{id}/admin-invite` → `TenantAdminInviteService.inviteSeededAdmin`)
+  revokes every live `bootstrap-*` token in that tenant, whichever user holds it
+  (`PersonalAccessTokenController#revokeBootstrapTokens`, tenant-filtered: DB `revoked`, Redis
+  `pat:<hash>` dropped + `pat:revoked:<hash>` set, each audited `TENANT_BOOTSTRAP_TOKEN_REVOKED`
+  with the inviting actor; a Redis outage is logged and the DB revoke still stands). Residual: a
+  bootstrap token minted *after* the invite lives until it expires (≤ 24 h); a token renamed
+  away from `bootstrap-` escapes the sweep; expired tokens no longer count against the 10-live cap.
 - **Server-only fields:** secret material on system collections (`credentials.dataEnc`,
   `credential-oauth-tokens.accessTokenEnc`/`refreshTokenEnc`, `oidc-providers.clientSecretEnc`,
   `connected-apps.clientSecretHash`, `connected-app-tokens.tokenHash`) is declared
