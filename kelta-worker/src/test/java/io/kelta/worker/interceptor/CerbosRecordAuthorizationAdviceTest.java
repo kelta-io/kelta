@@ -45,6 +45,8 @@ class CerbosRecordAuthorizationAdviceTest {
     @Mock private CerbosPermissionResolver permissionResolver;
     @Mock private RecordShareAccessService recordShareAccessService;
     @Mock private io.kelta.worker.service.RecordRuleIndex recordRuleIndex;
+    @Mock private io.kelta.runtime.registry.CollectionRegistry collectionRegistry;
+    @Mock private io.kelta.runtime.query.QueryEngine queryEngine;
 
     private CerbosRecordAuthorizationAdvice advice;
 
@@ -54,7 +56,8 @@ class CerbosRecordAuthorizationAdviceTest {
         // pre-short-circuit behavior every existing test was written against).
         lenient().when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(true);
         advice = new CerbosRecordAuthorizationAdvice(
-                authzService, permissionResolver, recordShareAccessService, recordRuleIndex, true);
+                authzService, permissionResolver, recordShareAccessService, recordRuleIndex,
+                collectionRegistry, queryEngine, true);
     }
 
     private ServletServerHttpRequest createRequest(String path) {
@@ -585,7 +588,8 @@ class CerbosRecordAuthorizationAdviceTest {
     @DisplayName("Should skip when permissions disabled")
     void shouldDoNothingWhenDisabled() {
         var disabledAdvice = new CerbosRecordAuthorizationAdvice(
-                authzService, permissionResolver, recordShareAccessService, recordRuleIndex, false);
+                authzService, permissionResolver, recordShareAccessService, recordRuleIndex,
+                collectionRegistry, queryEngine, false);
         assertThat(disabledAdvice.supports(null, null)).isFalse();
     }
 
@@ -811,7 +815,8 @@ class CerbosRecordAuthorizationAdviceTest {
             assertThat(advice.isRecordReadable(anonymous, "photos", Map.of("id", "rec-1"))).isTrue();
 
             CerbosRecordAuthorizationAdvice disabled = new CerbosRecordAuthorizationAdvice(
-                    authzService, permissionResolver, recordShareAccessService, recordRuleIndex, false);
+                    authzService, permissionResolver, recordShareAccessService, recordRuleIndex,
+                collectionRegistry, queryEngine, false);
             assertThat(disabled.isRecordReadable(servletRequest(), "photos", Map.of("id", "rec-1"))).isTrue();
             verifyNoInteractions(authzService);
         }
@@ -1235,6 +1240,211 @@ class CerbosRecordAuthorizationAdviceTest {
                     request("GET", "/api/orders"), null);
 
             assertThat(((Map<?, ?>) result).containsKey("included")).isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("global search hits")
+    class SearchHits {
+
+        private Map<String, Object> hit(String type, String id) {
+            Map<String, Object> hit = new LinkedHashMap<>();
+            hit.put("id", id);
+            hit.put("type", type);
+            hit.put("collectionName", type);
+            hit.put("displayValue", type + " " + id);
+            return hit;
+        }
+
+        private Map<String, Object> searchBody(List<Map<String, Object>> hits) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("data", hits);
+            body.put("meta", Map.of("total", hits.size()));
+            return body;
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<Map<String, Object>> data(Object result) {
+            return (List<Map<String, Object>>) ((Map<String, Object>) result).get("data");
+        }
+
+        private void registerCollections(String... names) {
+            for (String name : names) {
+                lenient().when(collectionRegistry.get(name))
+                        .thenReturn(io.kelta.worker.TestFixtures.collectionDefinition(name));
+            }
+        }
+
+        @Test
+        @DisplayName("a profile that reads only A gets only A's hits, and meta.total counts only those")
+        void onlyReadableCollectionsHits() {
+            var request = createRequest("/api/_search");
+            registerCollections("accounts", "invoices");
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("accounts"), eq("read")))
+                    .thenReturn(true);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("invoices"), eq("read")))
+                    .thenReturn(false);
+            when(recordShareAccessService.widen(any(), eq("invoices"), any(), eq("read"))).thenReturn(Set.of());
+
+            Object result = advice.beforeBodyWrite(searchBody(List.of(
+                            hit("invoices", "b1"), hit("accounts", "a1"),
+                            hit("invoices", "b2"), hit("accounts", "a2"))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(data(result)).extracting(h -> h.get("id")).containsExactly("a1", "a2");
+            assertThat(((Map<?, ?>) ((Map<?, ?>) result).get("meta")).get("total")).isEqualTo(2);
+            // One decision per hit collection — never one for a "_search" collection.
+            verify(authzService, times(1)).checkCollectionWideRecordAccess(
+                    any(), any(), any(), eq("accounts"), eq("read"));
+            verify(authzService, times(1)).checkCollectionWideRecordAccess(
+                    any(), any(), any(), eq("invoices"), eq("read"));
+            verify(authzService, never()).checkCollectionWideRecordAccess(
+                    any(), any(), any(), eq("_search"), any());
+            verify(authzService, never()).batchCheckRecordAccess(any(), any(), any(), eq("_search"), anyList(), any());
+        }
+
+        @Test
+        @DisplayName("record-variant rules are checked against the record's real attributes, loaded in one query")
+        @SuppressWarnings("unchecked")
+        void recordVariantCheckedWithLoadedAttributes() {
+            var request = createRequest("/api/_search");
+            registerCollections("accounts");
+            when(queryEngine.executeQuery(any(), any())).thenReturn(io.kelta.runtime.query.QueryResult.of(List.of(
+                    Map.of("id", "a1", "tier", "restricted"),
+                    Map.of("id", "a2", "tier", "open")), 2, new io.kelta.runtime.query.Pagination(1, 2)));
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), eq("accounts"), anyList(), eq("read")))
+                    .thenReturn(Set.of("a2"));
+            when(recordShareAccessService.widen(any(), eq("accounts"), eq(Set.of("a1")), eq("read")))
+                    .thenReturn(Set.of());
+
+            Object result = advice.beforeBodyWrite(searchBody(List.of(hit("accounts", "a1"), hit("accounts", "a2"))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(data(result)).extracting(h -> h.get("id")).containsExactly("a2");
+            assertThat(((Map<?, ?>) ((Map<?, ?>) result).get("meta")).get("total")).isEqualTo(1);
+
+            var query = org.mockito.ArgumentCaptor.forClass(io.kelta.runtime.query.QueryRequest.class);
+            verify(queryEngine, times(1)).executeQuery(any(), query.capture());
+            assertThat(query.getValue().filters()).singleElement().satisfies(f -> {
+                assertThat(f.fieldName()).isEqualTo("id");
+                assertThat(f.operator()).isEqualTo(io.kelta.runtime.query.FilterOperator.IN);
+                assertThat((Collection<Object>) f.value()).containsExactlyInAnyOrder("a1", "a2");
+            });
+            var records = org.mockito.ArgumentCaptor.forClass(List.class);
+            verify(authzService).batchCheckRecordAccess(any(), any(), any(), eq("accounts"), records.capture(), eq("read"));
+            assertThat((List<Map<String, Object>>) records.getValue())
+                    .extracting(r -> ((Map<String, Object>) r.get("attributes")).get("tier"))
+                    .containsExactly("restricted", "open");
+        }
+
+        @Test
+        @DisplayName("a manual READ share restores a hit the record-level rule denied")
+        void manualShareRestoresDeniedHit() {
+            var request = createRequest("/api/_search");
+            registerCollections("accounts");
+            when(queryEngine.executeQuery(any(), any())).thenReturn(io.kelta.runtime.query.QueryResult.of(List.of(
+                    Map.of("id", "a1", "tier", "restricted"),
+                    Map.of("id", "a2", "tier", "open")), 2, new io.kelta.runtime.query.Pagination(1, 2)));
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), eq("accounts"), anyList(), eq("read")))
+                    .thenReturn(Set.of("a2"));
+            when(recordShareAccessService.widen(any(), eq("accounts"), eq(Set.of("a1")), eq("read")))
+                    .thenReturn(Set.of("a1"));
+
+            Object result = advice.beforeBodyWrite(searchBody(List.of(hit("accounts", "a1"), hit("accounts", "a2"))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(data(result)).extracting(h -> h.get("id")).containsExactly("a1", "a2");
+        }
+
+        @Test
+        @DisplayName("a hit whose record the QueryEngine does not return is dropped, share or not")
+        void unloadedRecordDropped() {
+            var request = createRequest("/api/_search");
+            registerCollections("accounts");
+            when(queryEngine.executeQuery(any(), any())).thenReturn(io.kelta.runtime.query.QueryResult.of(List.of(
+                    Map.of("id", "a2", "tier", "open")), 1, new io.kelta.runtime.query.Pagination(1, 2)));
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), eq("accounts"), anyList(), eq("read")))
+                    .thenReturn(Set.of("a2"));
+
+            Object result = advice.beforeBodyWrite(searchBody(List.of(hit("accounts", "a1"), hit("accounts", "a2"))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(data(result)).extracting(h -> h.get("id")).containsExactly("a2");
+            verifyNoInteractions(recordShareAccessService);
+        }
+
+        @Test
+        @DisplayName("an owner-scoped collection's hits are narrowed by the QueryEngine's owner predicate")
+        void ownerScopedHitsLoadedThroughQueryEngine() {
+            var request = createRequest("/api/_search");
+            when(collectionRegistry.get("notes")).thenReturn(io.kelta.runtime.model.CollectionDefinition.builder()
+                    .name("notes").addField(io.kelta.runtime.model.FieldDefinition.string("title"))
+                    .ownerField("owner").ownerScope(io.kelta.runtime.model.OwnerScope.ALL).ownerScopeReads(true)
+                    .build());
+            when(recordRuleIndex.hasRecordVariantRules(any(), eq("notes"))).thenReturn(false);
+            when(queryEngine.executeQuery(any(), any())).thenReturn(io.kelta.runtime.query.QueryResult.of(List.of(
+                    Map.of("id", "n2", "title", "mine")), 1, new io.kelta.runtime.query.Pagination(1, 2)));
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("notes"), eq("read")))
+                    .thenReturn(true);
+
+            Object result = advice.beforeBodyWrite(searchBody(List.of(hit("notes", "n1"), hit("notes", "n2"))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(data(result)).extracting(h -> h.get("id")).containsExactly("n2");
+            verify(queryEngine, times(1)).executeQuery(any(), any());
+        }
+
+        @Test
+        @DisplayName("hits of an unknown or system collection are dropped without a Cerbos call")
+        void unknownOrSystemCollectionDropped() {
+            var request = createRequest("/api/_search");
+            when(collectionRegistry.get("ghosts")).thenReturn(null);
+            when(collectionRegistry.get("profiles")).thenReturn(io.kelta.runtime.model.CollectionDefinition.builder()
+                    .name("profiles").addField(io.kelta.runtime.model.FieldDefinition.string("name"))
+                    .systemCollection(true).build());
+
+            Object result = advice.beforeBodyWrite(searchBody(List.of(hit("ghosts", "g1"), hit("profiles", "p1"))),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(data(result)).isEmpty();
+            verifyNoInteractions(authzService, queryEngine);
+        }
+
+        @Test
+        @DisplayName("the response recheck reuses the decisions the controller already made on this request")
+        void recheckReusesRequestDecisions() {
+            var request = createRequest("/api/_search");
+            registerCollections("accounts");
+            when(queryEngine.executeQuery(any(), any())).thenReturn(io.kelta.runtime.query.QueryResult.of(List.of(
+                    Map.of("id", "a1", "tier", "open")), 1, new io.kelta.runtime.query.Pagination(1, 1)));
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), eq("accounts"), anyList(), eq("read")))
+                    .thenReturn(Set.of("a1"));
+
+            List<Map<String, Object>> readable =
+                    advice.readableSearchHits(request.getServletRequest(), List.of(hit("accounts", "a1")));
+            Object result = advice.beforeBodyWrite(searchBody(readable),
+                    null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(data(result)).extracting(h -> h.get("id")).containsExactly("a1");
+            verify(queryEngine, times(1)).executeQuery(any(), any());
+            verify(authzService, times(1)).batchCheckRecordAccess(any(), any(), any(), any(), anyList(), any());
+        }
+
+        @Test
+        @DisplayName("every hit is readable when permissions are disabled or the request has no identity")
+        void readableWithoutIdentityOrPermissions() {
+            MockHttpServletRequest anonymous = new MockHttpServletRequest("GET", "/api/_search");
+            when(permissionResolver.hasIdentity(anonymous)).thenReturn(false);
+            List<Map<String, Object>> hits = List.of(hit("accounts", "a1"));
+            assertThat(advice.readableSearchHits(anonymous, hits)).isEqualTo(hits);
+
+            CerbosRecordAuthorizationAdvice disabled = new CerbosRecordAuthorizationAdvice(
+                    authzService, permissionResolver, recordShareAccessService, recordRuleIndex,
+                    collectionRegistry, queryEngine, false);
+            assertThat(disabled.readableSearchHits(new MockHttpServletRequest("GET", "/api/_search"), hits))
+                    .isEqualTo(hits);
+            verifyNoInteractions(authzService, queryEngine);
         }
     }
 }

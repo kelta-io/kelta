@@ -1,5 +1,12 @@
 package io.kelta.worker.interceptor;
 
+import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.query.FilterCondition;
+import io.kelta.runtime.query.Pagination;
+import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.query.QueryRequest;
+import io.kelta.runtime.query.QueryResult;
+import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.router.DynamicCollectionRouter;
 import io.kelta.worker.service.CerbosAuthorizationService;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -33,6 +40,10 @@ import java.util.stream.Collectors;
  * collection, as a direct read of each would; a denied single record brings no included
  * resources (see {@link #restrictIncluded}).
  *
+ * <p>Global search ({@code /api/_search}) returns hits of many collections: each hit gets the
+ * read decision of its own collection and record, never of a {@code _search} collection (see
+ * {@link #readableSearchHits}).
+ *
  * <p>Only applies to {@code /api/} paths when permissions are enabled.
  */
 @ControllerAdvice
@@ -44,18 +55,31 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
     private final CerbosPermissionResolver permissionResolver;
     private final RecordShareAccessService recordShareAccessService;
     private final RecordRuleIndex recordRuleIndex;
+    private final CollectionRegistry collectionRegistry;
+    private final QueryEngine queryEngine;
     private final boolean permissionsEnabled;
+
+    /** The path collection of {@code GET /api/_search}, whose hits are records of other collections. */
+    static final String SEARCH_COLLECTION = "_search";
+
+    /** Request attribute memoizing this request's search-hit decisions: type → id → readable. */
+    private static final String SEARCH_DECISIONS_ATTRIBUTE =
+            CerbosRecordAuthorizationAdvice.class.getName() + ".searchDecisions";
 
     public CerbosRecordAuthorizationAdvice(
             CerbosAuthorizationService authzService,
             CerbosPermissionResolver permissionResolver,
             RecordShareAccessService recordShareAccessService,
             RecordRuleIndex recordRuleIndex,
+            CollectionRegistry collectionRegistry,
+            QueryEngine queryEngine,
             @Value("${kelta.gateway.security.permissions-enabled:true}") boolean permissionsEnabled) {
         this.authzService = authzService;
         this.permissionResolver = permissionResolver;
         this.recordShareAccessService = recordShareAccessService;
         this.recordRuleIndex = recordRuleIndex;
+        this.collectionRegistry = collectionRegistry;
+        this.queryEngine = queryEngine;
         this.permissionsEnabled = permissionsEnabled;
     }
 
@@ -135,6 +159,10 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
         // The collection the handler served — the child on a child-resource route.
         String collectionId = ApiPaths.collectionName(httpRequest);
         String action = mapMethodToAction(httpRequest.getMethod());
+
+        if (SEARCH_COLLECTION.equals(collectionId) && data instanceof List<?> hits) {
+            return restrictSearchHits(responseBody, hits, httpRequest, email, profileId, tenantId);
+        }
 
         if (data instanceof List<?> records) {
             // Collect all records for a single batched Cerbos call
@@ -225,6 +253,155 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
             allowedIds.addAll(recordShareAccessService.widen(email, collectionId, deniedIds, action));
         }
         return allowedIds;
+    }
+
+    /**
+     * Keeps only the search hits the caller may read, each against its own {@code type}. The
+     * search controller has already filtered its page through {@link #readableSearchHits}, so on
+     * that path every decision here comes from the request's memo; the recheck is what keeps a
+     * hit from ever being served under the {@code _search} path's own collection decision.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> restrictSearchHits(Map<String, Object> responseBody, List<?> hits,
+                                                   HttpServletRequest request, String email,
+                                                   String profileId, String tenantId) {
+        List<Map<String, Object>> typedHits = new ArrayList<>();
+        for (Object hit : hits) {
+            if (hit instanceof Map<?, ?> hitMap) {
+                typedHits.add((Map<String, Object>) hitMap);
+            }
+        }
+        List<Map<String, Object>> kept = filterSearchHits(request, email, profileId, tenantId, typedHits);
+
+        Map<String, Object> result = new LinkedHashMap<>(responseBody);
+        result.put("data", kept);
+        if (kept.size() < hits.size()) {
+            log.debug("Filtered {} search hits from response for user={}", hits.size() - kept.size(), email);
+            if (result.get("meta") instanceof Map<?, ?> meta && meta.get("total") instanceof Number) {
+                Map<String, Object> adjusted = new LinkedHashMap<>((Map<String, Object>) meta);
+                adjusted.put("total", kept.size());
+                result.put("meta", adjusted);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * The search hits among {@code hits} the caller may read, in their original order. A hit is a
+     * resource object whose {@code type} is a collection name and whose {@code id} is a record of
+     * it. Each hit gets the decision a {@code GET /api/{type}/{id}} answered by this advice would
+     * get: hits are grouped by type and each collection costs one cached collection-wide check, or
+     * — when it has record-variant rules — one {@link QueryEngine} load of those ids (so the rules
+     * see the record's real attributes, not the search-index row) and one batched Cerbos check;
+     * manual record shares widen either. An owner-scoped collection's hits are loaded the same way,
+     * so the owner predicate narrows them as it narrows a list read. A hit whose record the {@link QueryEngine} does not return
+     * (stale index row, owner-scoped read), whose collection is unknown, or which has no
+     * {@code type}/{@code id}, is dropped. Decisions are memoized on the request, so the response
+     * recheck in {@link #beforeBodyWrite} and repeated pages of an over-fetching caller decide each
+     * hit once. Everything is readable when permissions are disabled or the request carries no
+     * Cerbos identity (the advice leaves such bodies untouched).
+     */
+    public List<Map<String, Object>> readableSearchHits(HttpServletRequest request,
+                                                        List<Map<String, Object>> hits) {
+        if (!permissionsEnabled || !permissionResolver.hasIdentity(request)) {
+            return hits;
+        }
+        return filterSearchHits(request, permissionResolver.getEmail(request),
+                permissionResolver.getProfileId(request), permissionResolver.getTenantId(request), hits);
+    }
+
+    private List<Map<String, Object>> filterSearchHits(HttpServletRequest request, String email,
+                                                       String profileId, String tenantId,
+                                                       List<Map<String, Object>> hits) {
+        Map<String, Map<String, Boolean>> decided = searchDecisions(request);
+
+        Map<String, Set<String>> undecided = new LinkedHashMap<>();
+        for (Map<String, Object> hit : hits) {
+            if (hit.get("type") instanceof String type && !type.isBlank()
+                    && hit.get("id") instanceof String id
+                    && !decided.getOrDefault(type, Map.of()).containsKey(id)) {
+                undecided.computeIfAbsent(type, t -> new LinkedHashSet<>()).add(id);
+            }
+        }
+        for (Map.Entry<String, Set<String>> entry : undecided.entrySet()) {
+            String type = entry.getKey();
+            Set<String> readable = readableSearchIds(email, profileId, tenantId, type, entry.getValue());
+            Map<String, Boolean> typeDecisions = decided.computeIfAbsent(type, t -> new HashMap<>());
+            entry.getValue().forEach(id -> typeDecisions.put(id, readable.contains(id)));
+        }
+
+        List<Map<String, Object>> kept = new ArrayList<>(hits.size());
+        for (Map<String, Object> hit : hits) {
+            if (hit.get("type") instanceof String type && hit.get("id") instanceof String id
+                    && Boolean.TRUE.equals(decided.getOrDefault(type, Map.of()).get(id))) {
+                kept.add(hit);
+            }
+        }
+        return kept;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Map<String, Boolean>> searchDecisions(HttpServletRequest request) {
+        Object existing = request.getAttribute(SEARCH_DECISIONS_ATTRIBUTE);
+        if (existing instanceof Map<?, ?> map) {
+            return (Map<String, Map<String, Boolean>>) map;
+        }
+        Map<String, Map<String, Boolean>> decisions = new HashMap<>();
+        request.setAttribute(SEARCH_DECISIONS_ATTRIBUTE, decisions);
+        return decisions;
+    }
+
+    /** The readable ids among {@code ids}, records of {@code collectionName} named by search hits. */
+    private Set<String> readableSearchIds(String email, String profileId, String tenantId,
+                                          String collectionName, Set<String> ids) {
+        CollectionDefinition definition = collectionRegistry.get(collectionName);
+        // The search index holds tenant collections only (SearchIndexListener skips system ones).
+        if (definition == null || definition.systemCollection()) {
+            return Set.of();
+        }
+        // Record-variant rules need the record's real attributes; an owner-scoped read needs the
+        // QueryEngine's owner predicate. Otherwise the collection-wide decision needs only the ids.
+        boolean load = recordRuleIndex.hasRecordVariantRules(tenantId, collectionName)
+                || (definition.isOwnerScoped() && definition.ownerScopeReads());
+        List<Map<String, Object>> records = load
+                ? loadRecords(definition, ids)
+                : ids.stream().map(id -> Map.<String, Object>of("id", id)).toList();
+        return readableIds(email, profileId, tenantId, collectionName, records, "read");
+    }
+
+    /**
+     * The records with {@code ids} as JSON:API resource objects ({@code id} + {@code attributes}),
+     * loaded through the {@link QueryEngine} under the request's tenant and caller in one query.
+     * A failing load is logged and yields no records, so the hits are denied (fail-closed).
+     */
+    private List<Map<String, Object>> loadRecords(CollectionDefinition definition, Set<String> ids) {
+        List<Map<String, Object>> resources = new ArrayList<>(ids.size());
+        List<String> remaining = new ArrayList<>(ids);
+        try {
+            for (int from = 0; from < remaining.size(); from += Pagination.MAX_PAGE_SIZE) {
+                List<String> chunk = remaining.subList(from, Math.min(remaining.size(), from + Pagination.MAX_PAGE_SIZE));
+                QueryRequest query = new QueryRequest(new Pagination(1, chunk.size()), List.of(), List.of(),
+                        List.of(FilterCondition.in("id", chunk)));
+                QueryResult result = queryEngine.executeQuery(definition, query);
+                if (result == null || result.data() == null) {
+                    continue;
+                }
+                for (Map<String, Object> row : result.data()) {
+                    Map<String, Object> attributes = new LinkedHashMap<>(row);
+                    Object id = attributes.remove("id");
+                    if (id != null) {
+                        Map<String, Object> resource = new LinkedHashMap<>();
+                        resource.put("id", String.valueOf(id));
+                        resource.put("attributes", attributes);
+                        resources.add(resource);
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            log.warn("Could not load {} search-hit records for authorization: {}", definition.name(), e.toString());
+            return List.of();
+        }
+        return resources;
     }
 
     /**
