@@ -382,11 +382,167 @@ class PhysicalTableStorageAdapterTenantScopingTest {
                 "consistent with tenant-scoped collections, got: " + logAppender.list);
     }
 
-    @Test
-    @DisplayName("get-by-id of a tenant_id-scoped collection is unchanged — that stays router-side")
-    void getById_leavesTenantIdScopedCollectionsToTheRouter() {
-        TenantContext.callWithTenant(TENANT, () -> adapter.getById(users(), OTHER_TENANT));
+    // ---- PLT-708: by-id read, UPDATE and DELETE carry the tenant predicate --------------------
+    // With a tenant bound RLS already isolates these rows; the SQL predicate is what still holds
+    // when the connection runs as admin_bypass (app.current_tenant_id = '').
 
-        assertEquals("SELECT * FROM platform_user WHERE id = ?", capturedSelect());
+    private Object[] capturedUpdateParams(int times) {
+        ArgumentCaptor<Object[]> params = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate, org.mockito.Mockito.times(times)).update(anyString(), params.capture());
+        return params.getValue();
+    }
+
+    private String capturedUpdateSql(int times) {
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate, org.mockito.Mockito.times(times)).update(sql.capture(), any(Object[].class));
+        return sql.getValue();
+    }
+
+    private void withExistingRow(String id, String tenantId) {
+        when(jdbcTemplate.queryForList(anyString(), any(Object[].class))).thenAnswer(
+                inv -> new ArrayList<>(List.of(new java.util.HashMap<>(Map.of("id", id, "tenant_id", tenantId)))));
+    }
+
+    @Test
+    @DisplayName("get-by-id of a tenant_id-scoped collection is ANDed with tenant_id = caller")
+    void getById_scopesTenantIdScopedCollections() {
+        Optional<Map<String, Object>> result = TenantContext.callWithTenant(TENANT,
+                () -> adapter.getById(users(), "foreign-user"));
+
+        assertTrue(result.isEmpty(), "another tenant's row must read as absent");
+        assertEquals("SELECT * FROM platform_user WHERE id = ? AND tenant_id = ?", capturedSelect());
+        assertArrayEquals(new Object[]{"foreign-user", TENANT}, capturedSelectParams());
+    }
+
+    @Test
+    @DisplayName("get-by-id of 'collections' still admits the platform's shared rows")
+    void getById_sharesSystemRowsForCollections() {
+        TenantContext.callWithTenant(TENANT, () -> adapter.getById(collections(), "c1"));
+
+        assertEquals("SELECT * FROM collection WHERE id = ? AND tenant_id IN (?, ?)", capturedSelect());
+        assertArrayEquals(new Object[]{"c1", TENANT, SystemCollectionDefinitions.SYSTEM_TENANT_ID},
+                capturedSelectParams());
+    }
+
+    @Test
+    @DisplayName("UPDATE of a tenant_id-scoped collection carries tenant_id = caller itself, not only the pre-read")
+    void update_scopesTheUpdateStatement() {
+        withExistingRow("u1", TENANT);
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        TenantContext.callWithTenant(TENANT,
+                () -> adapter.update(users(), "u1", new java.util.HashMap<>(Map.of("email", "a@b.c"))));
+
+        String sql = capturedUpdateSql(1);
+        assertTrue(sql.startsWith("UPDATE platform_user SET "), "got: " + sql);
+        assertTrue(sql.endsWith(" WHERE id = ? AND tenant_id = ?"), "got: " + sql);
+        Object[] params = capturedUpdateParams(1);
+        assertEquals("u1", params[params.length - 2]);
+        assertEquals(TENANT, params[params.length - 1]);
+    }
+
+    @Test
+    @DisplayName("UPDATE that matches no row of the caller's tenant reports not-found")
+    void update_foreignRowIsNotFound() {
+        // The pre-read saw a row (as it would through admin_bypass); the UPDATE's own predicate
+        // still matches nothing in the caller's tenant.
+        withExistingRow("u1", OTHER_TENANT);
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+
+        Optional<Map<String, Object>> result = TenantContext.callWithTenant(TENANT,
+                () -> adapter.update(users(), "u1", new java.util.HashMap<>(Map.of("email", "a@b.c"))));
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("UPDATE of 'collections' keeps to the caller's own rows — shared rows are read-only")
+    void update_doesNotWidenToSharedSystemRows() {
+        withExistingRow("c1", TENANT);
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        TenantContext.callWithTenant(TENANT,
+                () -> adapter.update(collections(), "c1", new java.util.HashMap<>(Map.of("name", "x"))));
+
+        assertTrue(capturedUpdateSql(1).endsWith(" WHERE id = ? AND tenant_id = ?"),
+                "got: " + capturedUpdateSql(1));
+        assertFalse(java.util.Arrays.asList(capturedUpdateParams(1)).contains(SystemCollectionDefinitions.SYSTEM_TENANT_ID));
+    }
+
+    @Test
+    @DisplayName("DELETE of a tenant_id-scoped collection carries tenant_id = caller")
+    void delete_scopesTheDeleteStatement() {
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+
+        boolean deleted = TenantContext.callWithTenant(TENANT, () -> adapter.delete(users(), "foreign-user"));
+
+        assertFalse(deleted, "another tenant's row must not be deletable");
+        assertEquals("DELETE FROM platform_user WHERE id = ? AND tenant_id = ?", capturedUpdateSql(1));
+        assertArrayEquals(new Object[]{"foreign-user", TENANT}, capturedUpdateParams(1));
+    }
+
+    @Test
+    @DisplayName("a table without a tenant_id column (approval-steps) gets no tenant predicate on any by-id statement")
+    void byId_skipsTablesWithoutATenantColumn() {
+        withColumns("id", "approval_process_id", "name", "created_at");
+        withExistingRow("s1", TENANT);
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        TenantContext.runWithTenant(TENANT, "acme", () -> {
+            adapter.getById(approvalSteps(), "s1");
+            adapter.update(approvalSteps(), "s1", new java.util.HashMap<>(Map.of("name", "x")));
+            adapter.delete(approvalSteps(), "s1");
+        });
+
+        ArgumentCaptor<String> selects = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate, org.mockito.Mockito.atLeastOnce()).queryForList(selects.capture(), any(Object[].class));
+        assertTrue(selects.getAllValues().stream().allMatch("SELECT * FROM approval_step WHERE id = ?"::equals),
+                "got: " + selects.getAllValues());
+        ArgumentCaptor<String> writes = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> writeParams = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate, org.mockito.Mockito.times(2)).update(writes.capture(), writeParams.capture());
+        assertTrue(writes.getAllValues().get(0).endsWith(" WHERE id = ?"), "got: " + writes.getAllValues().get(0));
+        assertEquals("DELETE FROM approval_step WHERE id = ?", writes.getAllValues().get(1));
+        assertFalse(writeParams.getAllValues().stream().flatMap(p -> java.util.Arrays.stream(p))
+                .anyMatch(TENANT::equals), "the tenant must not be bound anywhere");
+    }
+
+    @Test
+    @DisplayName("no tenant bound (Flyway, schedulers, platform jobs): by-id read, UPDATE and DELETE stay unscoped")
+    void byId_unboundStaysUnscoped() {
+        withExistingRow("u1", OTHER_TENANT);
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        adapter.getById(users(), "u1");
+        adapter.update(users(), "u1", new java.util.HashMap<>(Map.of("email", "a@b.c")));
+        adapter.delete(users(), "u1");
+
+        ArgumentCaptor<String> selects = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate, org.mockito.Mockito.atLeastOnce()).queryForList(selects.capture(), any(Object[].class));
+        assertTrue(selects.getAllValues().stream().allMatch("SELECT * FROM platform_user WHERE id = ?"::equals),
+                "got: " + selects.getAllValues());
+        ArgumentCaptor<String> writes = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate, org.mockito.Mockito.times(2)).update(writes.capture(), any(Object[].class));
+        assertTrue(writes.getAllValues().get(0).endsWith(" WHERE id = ?"), "got: " + writes.getAllValues().get(0));
+        assertEquals("DELETE FROM platform_user WHERE id = ?", writes.getAllValues().get(1));
+    }
+
+    @Test
+    @DisplayName("a user collection's by-id statements are untouched — schema-per-tenant isolates it")
+    void byId_leavesUserCollectionsAlone() {
+        CollectionDefinition products = new CollectionDefinitionBuilder()
+                .name("products")
+                .displayName("Products")
+                .addField(FieldDefinition.requiredString("name"))
+                .build();
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        TenantContext.runWithTenant(TENANT, "acme", () -> {
+            adapter.getById(products, "p1");
+            adapter.delete(products, "p1");
+        });
+
+        assertFalse(capturedSelect().contains("tenant_id"), "got: " + capturedSelect());
+        assertFalse(capturedUpdateSql(1).contains("tenant_id"), "got: " + capturedUpdateSql(1));
     }
 }
