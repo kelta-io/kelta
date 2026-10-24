@@ -1,0 +1,1 @@
+- 2026-10-24 chore(ci): Dependabot moves all @opentelemetry/* npm packages together in one opentelemetry-js group
