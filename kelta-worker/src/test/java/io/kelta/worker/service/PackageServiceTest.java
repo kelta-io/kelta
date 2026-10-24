@@ -1,5 +1,7 @@
 package io.kelta.worker.service;
 
+import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.storage.CompositeUniqueConstraintService;
 import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -25,7 +27,8 @@ class PackageServiceTest {
         importService = mock(PackageImportService.class);
         when(repository.getJdbcTemplate()).thenReturn(mock(JdbcTemplate.class));
         objectMapper = new ObjectMapper();
-        service = new PackageService(repository, objectMapper, importService);
+        service = new PackageService(repository, objectMapper, importService, mock(CollectionRegistry.class),
+                mock(CompositeUniqueConstraintService.class));
     }
 
     private static PackageImportService.ImportReport report(PackageImportService.ItemResult... items) {

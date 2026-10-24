@@ -10,6 +10,8 @@ import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.query.QueryRequest;
 import io.kelta.runtime.query.QueryResult;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.storage.CompositeUniqueConstraintService;
+import io.kelta.runtime.storage.CompositeUniqueConstraintService.ConstraintInfo;
 import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
@@ -41,6 +43,7 @@ class PackageImportServiceTest {
     private JdbcTemplate jdbcTemplate;
     private DashboardTreeService dashboardTreeService;
     private PlatformTransactionManager transactionManager;
+    private CompositeUniqueConstraintService uniqueConstraintService;
     private PackageImportService service;
 
     @BeforeEach
@@ -60,11 +63,12 @@ class PackageImportServiceTest {
 
         dashboardTreeService = mock(DashboardTreeService.class);
         transactionManager = mock(PlatformTransactionManager.class);
+        uniqueConstraintService = mock(CompositeUniqueConstraintService.class);
         service = new PackageImportService(queryEngine, collectionRegistry, repository,
                 new ObjectMapper(), new JdbcUserIdResolver(jdbcTemplate), dashboardTreeService,
                 new DashboardComponentValidator(collectionRegistry, mock(CollectionLifecycleManager.class),
                         queryEngine),
-                transactionManager);
+                transactionManager, uniqueConstraintService);
     }
 
     // ------------------------------------------------------------------
@@ -1363,6 +1367,232 @@ class PackageImportServiceTest {
             assertThat(report.failed()).isEqualTo(1);
             assertThat(report.items().get(0).error())
                     .isEqualTo("records[0].key must be a non-empty array of field names");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Unique constraints, reports, approval processes
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("UNIQUE_CONSTRAINT, REPORT and APPROVAL_PROCESS")
+    class ConstraintsReportsApprovals {
+
+        private final CollectionDefinition orders = new CollectionDefinitionBuilder().name("orders")
+                .addField(FieldDefinition.string("region"))
+                .addField(FieldDefinition.string("code"))
+                .addField(FieldDefinition.string("owner"))
+                .build();
+
+        @BeforeEach
+        void seedTarget() {
+            seedCollections(Map.of("orders", "tgt-orders"));
+            when(jdbcTemplate.queryForList(contains("FROM field f "), eq(TENANT))).thenReturn(List.of(
+                    mapOf("id", "tgt-region", "name", "region", "coll", "orders"),
+                    mapOf("id", "tgt-code", "name", "code", "coll", "orders"),
+                    mapOf("id", "tgt-owner", "name", "owner", "coll", "orders")));
+            when(collectionRegistry.get("orders")).thenReturn(orders);
+            when(jdbcTemplate.queryForList(contains("lower(email)"), eq(TENANT), eq("ann@acme.io")))
+                    .thenReturn(List.of(Map.of("id", "tgt-ann")));
+            when(jdbcTemplate.queryForList(contains("FROM user_group"), eq(TENANT), eq("Finance")))
+                    .thenReturn(List.of(Map.of("id", "tgt-finance")));
+            when(queryEngine.create(any(), anyMap())).thenAnswer(inv ->
+                    Map.of("id", "tgt-" + inv.<CollectionDefinition>getArgument(0).name()));
+        }
+
+        private Map<String, Object> constraintData(String... fields) {
+            return mapOf("collection_name", "orders", "field_names", List.of(fields));
+        }
+
+        private Map<String, Object> reportData(String collection, String column) {
+            return mapOf("name", "Open orders", "report_type", "TABULAR",
+                    "primary_collection_name", collection,
+                    "columns", List.of(Map.of("fieldName", column)), "group_by", "region");
+        }
+
+        private Map<String, Object> step(int number, Object... kv) {
+            Map<String, Object> step = mapOf("step_number", number, "name", "Step " + number);
+            step.putAll(mapOf(kv));
+            return step;
+        }
+
+        private Map<String, Object> approvalData(List<Map<String, Object>> steps) {
+            return mapOf("collection_name", "orders", "name", "Discount", "active", true,
+                    "initial_submitter_field", "owner", "steps", steps);
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<Map<String, Object>> writes(String systemCollection) {
+            ArgumentCaptor<CollectionDefinition> defs = ArgumentCaptor.forClass(CollectionDefinition.class);
+            ArgumentCaptor<Map<String, Object>> data = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine, atLeast(0)).create(defs.capture(), data.capture());
+            List<Map<String, Object>> matching = new ArrayList<>();
+            for (int i = 0; i < defs.getAllValues().size(); i++) {
+                if (defs.getAllValues().get(i).name().equals(systemCollection)) {
+                    matching.add(data.getAllValues().get(i));
+                }
+            }
+            return matching;
+        }
+
+        @Test
+        @DisplayName("natural keys: sorted collection:fields, report name, collection:process name")
+        void naturalKeys() {
+            assertThat(PackageImportService.naturalKeyFor("UNIQUE_CONSTRAINT", constraintData("region", "code")))
+                    .isEqualTo("orders:code,region");
+            assertThat(PackageImportService.naturalKeyFor("REPORT", reportData("orders", "code")))
+                    .isEqualTo("Open orders");
+            assertThat(PackageImportService.naturalKeyFor("APPROVAL_PROCESS", approvalData(List.of())))
+                    .isEqualTo("orders:Discount");
+        }
+
+        @Test
+        @DisplayName("TYPE_ORDER places the three types after COLLECTION and FIELD")
+        void typeOrder() {
+            List<String> order = PackageImportService.supportedTypes();
+            for (String type : List.of("UNIQUE_CONSTRAINT", "REPORT", "APPROVAL_PROCESS")) {
+                assertThat(order.indexOf(type)).as(type)
+                        .isGreaterThan(order.indexOf("COLLECTION"))
+                        .isGreaterThan(order.indexOf("FIELD"));
+            }
+        }
+
+        @Test
+        @DisplayName("a unique constraint is created through the service on the target collection by field names")
+        void createsUniqueConstraint() {
+            when(uniqueConstraintService.create(eq(orders), anyList()))
+                    .thenReturn(new ConstraintInfo("uniq_orders_code_region", List.of("code", "region"),
+                            List.of("code", "region")));
+
+            var report = service.importPackage(TENANT, pkg(item("UNIQUE_CONSTRAINT", constraintData("region", "code"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.created()).as("%s", report.items()).isEqualTo(1);
+            assertThat(report.items().get(0).resourceId()).isEqualTo("uniq_orders_code_region");
+            verify(uniqueConstraintService).create(orders, List.of("code", "region"));
+        }
+
+        @Test
+        @DisplayName("a unique constraint whose field set already exists (in any order) is SKIPPED, even under OVERWRITE")
+        void existingUniqueConstraintSkipped() {
+            when(uniqueConstraintService.list(orders)).thenReturn(List.of(new ConstraintInfo(
+                    "uniq_orders_region_code", List.of("region", "code"), List.of("region", "code"))));
+
+            var report = service.importPackage(TENANT, pkg(item("UNIQUE_CONSTRAINT", constraintData("code", "region"))),
+                    new PackageImportService.ImportOptions(
+                            PackageImportService.ConflictMode.OVERWRITE, false, null, null, null));
+
+            assertThat(report.skipped()).isEqualTo(1);
+            verify(uniqueConstraintService, never()).create(any(), anyList());
+        }
+
+        @Test
+        @DisplayName("a report resolves its primary collection by name and checks its fields")
+        void reportResolvesCollection() {
+            var report = service.importPackage(TENANT, pkg(item("REPORT", reportData("orders", "code"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.created()).as("%s", report.items()).isEqualTo(1);
+            assertThat(writes("reports")).singleElement().satisfies(r -> assertThat(r)
+                    .containsEntry("primaryCollectionId", "tgt-orders")
+                    .containsEntry("name", "Open orders")
+                    .containsEntry("columns", List.of(Map.of("fieldName", "code"))));
+        }
+
+        @Test
+        @DisplayName("an approval step's USER approver resolves by email and GROUP approver by group name")
+        void approvalProcessResolvesApprovers() {
+            var report = service.importPackage(TENANT, pkg(item("APPROVAL_PROCESS", approvalData(List.of(
+                            step(1, "approver_type", "USER", "approver_email", "ann@acme.io"),
+                            step(2, "approver_type", "GROUP", "approver_group_name", "Finance"),
+                            step(3, "approver_type", "FIELD", "approver_field", "owner"))))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.created()).as("%s", report.items()).isEqualTo(1);
+            assertThat(report.items().get(0).naturalKey()).isEqualTo("orders:Discount");
+            assertThat(writes("approval-processes")).singleElement().satisfies(p -> assertThat(p)
+                    .containsEntry("collectionId", "tgt-orders")
+                    .containsEntry("tenantId", TENANT)
+                    .containsEntry("initialSubmitterField", "owner"));
+            var steps = writes("approval-steps");
+            assertThat(steps).extracting(s -> s.get("stepNumber")).containsExactly(1, 2, 3);
+            assertThat(steps).allSatisfy(s -> assertThat(s).containsEntry("approvalProcessId", "tgt-approval-processes"));
+            assertThat(steps.get(0)).containsEntry("approverId", "tgt-ann");
+            assertThat(steps.get(1)).containsEntry("approverId", "tgt-finance");
+            assertThat(steps.get(2)).containsEntry("approverField", "owner").containsEntry("approverId", null);
+        }
+
+        @Test
+        @DisplayName("OVERWRITE updates an existing process's steps by step number and adds new ones")
+        void overwriteMatchesStepsByNumber() {
+            when(jdbcTemplate.queryForList(contains("FROM approval_process ap"), eq(TENANT))).thenReturn(List.of(
+                    mapOf("id", "tgt-ap", "name", "Discount", "coll", "orders")));
+            when(jdbcTemplate.queryForList(contains("FROM approval_step WHERE"), eq("tgt-ap"))).thenReturn(List.of(
+                    mapOf("id", "tgt-step-1", "step_number", 1)));
+
+            var report = service.importPackage(TENANT, pkg(item("APPROVAL_PROCESS", approvalData(List.of(
+                            step(1, "approver_type", "USER", "approver_email", "ann@acme.io"),
+                            step(2, "approver_type", "GROUP", "approver_group_name", "Finance"))))),
+                    new PackageImportService.ImportOptions(
+                            PackageImportService.ConflictMode.OVERWRITE, false, null, null, null));
+
+            assertThat(report.updated()).as("%s", report.items()).isEqualTo(1);
+            verify(queryEngine).update(argThat(d -> d.name().equals("approval-processes")), eq("tgt-ap"), anyMap());
+            verify(queryEngine).update(argThat(d -> d.name().equals("approval-steps")), eq("tgt-step-1"),
+                    argThat(m -> "tgt-ann".equals(m.get("approverId"))));
+            assertThat(writes("approval-steps")).singleElement().satisfies(s -> assertThat(s)
+                    .containsEntry("stepNumber", 2).containsEntry("approvalProcessId", "tgt-ap"));
+        }
+
+        @Test
+        @DisplayName("an unresolved reference fails only that item, naming the missing reference")
+        void unresolvedReferencesFailOnlyThatItem() {
+            Map<String, Object> unknownUser = approvalData(List.of(
+                    step(1, "approver_type", "USER", "approver_email", "ghost@acme.io")));
+            Map<String, Object> unknownGroup = approvalData(List.of(
+                    step(1, "approver_type", "GROUP", "approver_group_name", "Nobody")));
+            unknownGroup.put("name", "Other");
+            Map<String, Object> unknownCollection = reportData("invoices", "code");
+            unknownCollection.put("name", "Invoices");
+            Map<String, Object> unknownField = constraintData("region", "zone");
+
+            var report = service.importPackage(TENANT, pkg(
+                            item("APPROVAL_PROCESS", unknownUser),
+                            item("APPROVAL_PROCESS", unknownGroup),
+                            item("REPORT", unknownCollection),
+                            item("UNIQUE_CONSTRAINT", unknownField),
+                            item("REPORT", reportData("orders", "code"))),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.failed()).isEqualTo(4);
+            assertThat(report.created()).as("the valid report still imports").isEqualTo(1);
+            Map<String, String> errors = new HashMap<>();
+            report.items().stream().filter(i -> "FAILED".equals(i.action()))
+                    .forEach(i -> errors.put(i.type() + ":" + i.naturalKey(), i.error()));
+            assertThat(errors.get("APPROVAL_PROCESS:orders:Discount")).contains("'ghost@acme.io' not found");
+            assertThat(errors.get("APPROVAL_PROCESS:orders:Other")).contains("group 'Nobody' not found");
+            assertThat(errors.get("REPORT:Invoices")).isEqualTo("Collection not found in target: invoices");
+            assertThat(errors.get("UNIQUE_CONSTRAINT:orders:region,zone"))
+                    .isEqualTo("Field not found in target: orders.zone");
+            assertThat(writes("approval-processes")).as("nothing half-applied").isEmpty();
+            assertThat(writes("approval-steps")).isEmpty();
+            verify(uniqueConstraintService, never()).create(any(), anyList());
+        }
+
+        @Test
+        @DisplayName("a report or approval process naming an unknown field fails with that field")
+        void unknownFieldFails() {
+            Map<String, Object> approval = approvalData(List.of(
+                    step(1, "approver_type", "FIELD", "approver_field", "manager")));
+
+            var report = service.importPackage(TENANT, pkg(
+                            item("REPORT", reportData("orders", "total")),
+                            item("APPROVAL_PROCESS", approval)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.items()).extracting(PackageImportService.ItemResult::error).containsExactly(
+                    "Field not found in target: orders.total",
+                    "Field not found in target: orders.manager");
         }
     }
 

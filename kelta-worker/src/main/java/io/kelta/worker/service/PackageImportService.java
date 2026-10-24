@@ -14,6 +14,7 @@ import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.router.AtomicOperationExecutor;
 import io.kelta.runtime.router.AtomicOperationExecutor.AtomicOperationException;
 import io.kelta.runtime.router.UserIdResolver;
+import io.kelta.runtime.storage.CompositeUniqueConstraintService;
 import io.kelta.runtime.workflow.BeforeSaveResult;
 import io.kelta.worker.repository.PackageRepository;
 import io.kelta.worker.service.DashboardTreeService.TreeValidationException;
@@ -48,6 +49,12 @@ import java.util.*;
  * user-collection rows last, one {@link AtomicOperationExecutor} batch per section (the
  * {@code records bulk} path); a row whose key fields match an existing record is skipped.
  *
+ * <p>Composite unique constraints have no system collection — they are Postgres indexes — and
+ * apply through {@link CompositeUniqueConstraintService}, matched on (collection, field set).
+ * Reports upsert on name, approval processes on (collection name, process name) with their
+ * steps nested in the item and matched on step number; a step's user approver travels as an
+ * email and a group approver as the group's name.
+ *
  * <p>Cross-tenant references are resolved by <b>natural key</b> (names), never
  * by source UUID: a field's {@code reference_collection_id} is re-pointed at
  * the target tenant's collection with the same name, a layout field finds its
@@ -74,7 +81,7 @@ public class PackageImportService {
             "COLLECTION", "GLOBAL_PICKLIST", "FIELD", "PICKLIST_VALUE",
             "VALIDATION_RULE", "PAGE_LAYOUT", "LAYOUT_SECTION", "LAYOUT_FIELD",
             "LAYOUT_RELATED_LIST", "FLOW", "UI_PAGE", "UI_MENU", "UI_MENU_ITEM",
-            "LIST_VIEW", "DASHBOARD", "RECORD");
+            "LIST_VIEW", "UNIQUE_CONSTRAINT", "REPORT", "APPROVAL_PROCESS", "DASHBOARD", "RECORD");
 
     /** Seed rows: the package's top-level {@code records} section, never an {@code items} entry. */
     static final String RECORD = "RECORD";
@@ -95,7 +102,12 @@ public class PackageImportService {
             Map.entry("UI_MENU", "ui-menus"),
             Map.entry("UI_MENU_ITEM", "ui-menu-items"),
             Map.entry("LIST_VIEW", "list-views"),
+            Map.entry("REPORT", "reports"),
+            Map.entry("APPROVAL_PROCESS", "approval-processes"),
             Map.entry("DASHBOARD", "dashboards"));
+
+    /** Approval steps are nested in their APPROVAL_PROCESS item, never an item of their own. */
+    private static final String APPROVAL_STEPS_COLLECTION = "approval-steps";
 
     /** Dashboard-tree document keys a DASHBOARD item may carry besides its name. */
     private static final List<String> DASHBOARD_TREE_KEYS =
@@ -146,6 +158,7 @@ public class PackageImportService {
     private final DashboardComponentValidator componentValidator;
     private final AtomicOperationExecutor atomicExecutor;
     private final TransactionTemplate transactionTemplate;
+    private final CompositeUniqueConstraintService uniqueConstraintService;
 
     public PackageImportService(QueryEngine queryEngine,
                                 CollectionRegistry collectionRegistry,
@@ -154,7 +167,8 @@ public class PackageImportService {
                                 UserIdResolver userIdResolver,
                                 DashboardTreeService dashboardTreeService,
                                 DashboardComponentValidator componentValidator,
-                                PlatformTransactionManager transactionManager) {
+                                PlatformTransactionManager transactionManager,
+                                CompositeUniqueConstraintService uniqueConstraintService) {
         this.queryEngine = queryEngine;
         this.collectionRegistry = collectionRegistry;
         this.repository = repository;
@@ -164,6 +178,7 @@ public class PackageImportService {
         this.componentValidator = componentValidator;
         this.atomicExecutor = new AtomicOperationExecutor(queryEngine, collectionRegistry);
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.uniqueConstraintService = uniqueConstraintService;
     }
 
     @SuppressWarnings("unchecked")
@@ -311,6 +326,9 @@ public class PackageImportService {
             case "UI_MENU" -> importSimpleByName(ctx, "UI_MENU", naturalKey, data, ctx.menuIdByName);
             case "UI_MENU_ITEM" -> importUiMenuItem(ctx, naturalKey, data);
             case "LIST_VIEW" -> importListView(ctx, naturalKey, data);
+            case "UNIQUE_CONSTRAINT" -> importUniqueConstraint(ctx, naturalKey, data);
+            case "REPORT" -> importReport(ctx, naturalKey, data);
+            case "APPROVAL_PROCESS" -> importApprovalProcess(ctx, naturalKey, data);
             case "DASHBOARD" -> importDashboard(ctx, naturalKey, data);
             default -> new ItemResult(type, naturalKey, "SKIPPED", "Unsupported item type");
         };
@@ -332,7 +350,16 @@ public class PackageImportService {
         return SYSTEM_COLLECTION_BY_TYPE.get(type);
     }
 
-    /** Cross-tenant identity of a package item — shared with environment diffing. */
+    /**
+     * Cross-tenant identity of a package item — shared with environment diffing.
+     * <ul>
+     *   <li>UNIQUE_CONSTRAINT: {@code <collection>:<field>,<field>} with the field names sorted —
+     *       never the index name, which embeds the source table name;</li>
+     *   <li>REPORT: {@code <name>} (the default case);</li>
+     *   <li>APPROVAL_PROCESS: {@code <collection>:<name>}; its nested steps are matched on
+     *       {@code <collection>:<name>:<stepNumber>}.</li>
+     * </ul>
+     */
     public static String naturalKeyFor(String type, Map<String, Object> data) {
         return switch (type) {
             case "FIELD" -> data.get("collection_name") + "." + data.get("name");
@@ -342,8 +369,10 @@ public class PackageImportService {
                         : data.get("field_collection_name") + "." + data.get("field_name");
                 yield source + ":" + data.get("value");
             }
-            case "VALIDATION_RULE", "PAGE_LAYOUT", "LIST_VIEW" ->
+            case "VALIDATION_RULE", "PAGE_LAYOUT", "LIST_VIEW", "APPROVAL_PROCESS" ->
                     data.get("collection_name") + ":" + data.get("name");
+            case "UNIQUE_CONSTRAINT" -> data.get("collection_name") + ":"
+                    + String.join(",", sortedFieldNames(data.get("field_names")));
             case "LAYOUT_SECTION" -> data.get("collection_name") + ":" + data.get("layout_name")
                     + ":" + data.get("sort_order");
             case "LAYOUT_FIELD" -> data.get("collection_name") + ":" + data.get("layout_name")
@@ -619,6 +648,222 @@ public class PackageImportService {
         String existingId = ctx.listViewIdByKey.get(key);
         return upsertViaEngine(ctx, "LIST_VIEW", key, def, existingId, mapped,
                 id -> ctx.listViewIdByKey.put(key, id));
+    }
+
+    /**
+     * A composite unique constraint is a Postgres index, not a row: it applies through
+     * {@link CompositeUniqueConstraintService} once its collection and fields exist, and is
+     * matched on the collection plus its field set (order-insensitive). An existing match is
+     * SKIPPED under either conflict mode — a field set has nothing to overwrite.
+     */
+    private ItemResult importUniqueConstraint(ImportContext ctx, String key, Map<String, Object> data) {
+        String collectionName = (String) data.get("collection_name");
+        List<String> fieldNames = sortedFieldNames(data.get("field_names"));
+        if (fieldNames.isEmpty()) {
+            throw new IllegalArgumentException("Unique constraint " + key + " names no field_names");
+        }
+        String collectionId = ctx.requireCollection(collectionName);
+        for (String fieldName : fieldNames) {
+            ctx.requireField(collectionName, fieldName);
+        }
+        if (ctx.options.dryRun() && collectionId.startsWith("dry-run:")) {
+            return new ItemResult("UNIQUE_CONSTRAINT", key, "CREATED", null, "dry-run:" + UUID.randomUUID());
+        }
+        CollectionDefinition def = collectionRegistry.get(collectionName);
+        if (def == null) {
+            throw new IllegalStateException("Collection not registered in target: " + collectionName);
+        }
+        for (var existing : uniqueConstraintService.list(def)) {
+            if (sortedFieldNames(existing.fieldNames()).equals(fieldNames)) {
+                return new ItemResult("UNIQUE_CONSTRAINT", key, "SKIPPED", null, existing.indexName());
+            }
+        }
+        if (ctx.options.dryRun()) {
+            return new ItemResult("UNIQUE_CONSTRAINT", key, "CREATED", null, "dry-run:" + UUID.randomUUID());
+        }
+        var created = uniqueConstraintService.create(def, fieldNames);
+        return new ItemResult("UNIQUE_CONSTRAINT", key, "CREATED", null, created.indexName());
+    }
+
+    private static List<String> sortedFieldNames(Object raw) {
+        if (!(raw instanceof Collection<?> names)) {
+            return List.of();
+        }
+        return names.stream().map(String::valueOf).sorted().toList();
+    }
+
+    /**
+     * A report is keyed on its name. Its primary collection travels as
+     * {@code primary_collection_name}; every plain field it names (columns, group-by, sort-by)
+     * must exist on that collection in the target. Its folder is matched by name and left unset
+     * when the target has no folder of that name.
+     */
+    @SuppressWarnings("unchecked")
+    private ItemResult importReport(ImportContext ctx, String key, Map<String, Object> data) {
+        CollectionDefinition def = systemDef("REPORT");
+        Map<String, Object> mapped = mapRowToFields(def, data);
+        String collectionName = (String) data.get("primary_collection_name");
+        if (collectionName == null) {
+            throw new IllegalArgumentException("Report '" + key + "' names no primary_collection_name");
+        }
+        mapped.put("primaryCollectionId", ctx.requireReferenceCollection(collectionName));
+
+        List<String> fieldNames = new ArrayList<>();
+        if (mapped.get("columns") instanceof List<?> columns) {
+            for (Object column : columns) {
+                if (column instanceof Map<?, ?> c && c.get("fieldName") != null) {
+                    fieldNames.add(String.valueOf(c.get("fieldName")));
+                }
+            }
+        }
+        for (String column : List.of("group_by", "sort_by")) {
+            if (data.get(column) != null) {
+                fieldNames.add(String.valueOf(data.get(column)));
+            }
+        }
+        for (String fieldName : fieldNames) {
+            if (!fieldName.contains(".")) { // a dotted name reads through relatedJoins
+                ctx.requireField(collectionName, fieldName);
+            }
+        }
+
+        mapped.remove("folderId");
+        Object folderName = data.get("folder_name");
+        if (folderName != null) {
+            String folderId = ctx.reportFolderId(String.valueOf(folderName));
+            if (folderId != null) {
+                mapped.put("folderId", folderId);
+            } else {
+                log.warn("Report folder '{}' not found in target, leaving report '{}' unfiled", folderName, key);
+            }
+        }
+
+        String existingId = ctx.reportIdByName.get(key);
+        return upsertViaEngine(ctx, "REPORT", key, def, existingId, mapped,
+                id -> ctx.reportIdByName.put(key, id));
+    }
+
+    /**
+     * An approval process is keyed on (collection name, process name) and carries its steps in
+     * {@code steps}, each matched on its {@code step_number}. Every reference — the collection,
+     * the submitter and approver fields, a USER approver's {@code approver_email}, a GROUP or
+     * QUEUE approver's {@code approver_group_name} — is resolved before anything is written, and
+     * the process and its steps are written in one transaction, so an unresolved reference fails
+     * the item with nothing half-applied. OVERWRITE updates matching steps and adds new ones;
+     * a target step the package does not carry is left in place.
+     */
+    @SuppressWarnings("unchecked")
+    private ItemResult importApprovalProcess(ImportContext ctx, String key, Map<String, Object> data) {
+        CollectionDefinition def = systemDef("APPROVAL_PROCESS");
+        CollectionDefinition stepDef = collectionRegistry.get(APPROVAL_STEPS_COLLECTION);
+        if (stepDef == null) {
+            throw new IllegalStateException("System collection not initialized: " + APPROVAL_STEPS_COLLECTION);
+        }
+        String collectionName = (String) data.get("collection_name");
+        Map<String, Object> mapped = mapRowToFields(def, data);
+        mapped.put("collectionId", ctx.requireReferenceCollection(collectionName));
+        if (data.get("initial_submitter_field") != null) {
+            ctx.requireField(collectionName, String.valueOf(data.get("initial_submitter_field")));
+        }
+
+        Object rawSteps = data.getOrDefault("steps", List.of());
+        if (!(rawSteps instanceof List<?> stepRows)) {
+            throw new IllegalArgumentException("Approval process " + key + ": 'steps' must be an array");
+        }
+        Map<Integer, Map<String, Object>> steps = new LinkedHashMap<>();
+        for (Object rawStep : stepRows) {
+            if (!(rawStep instanceof Map<?, ?> stepRow) || !(stepRow.get("step_number") instanceof Number number)) {
+                throw new IllegalArgumentException("Approval process " + key + ": every step needs a step_number");
+            }
+            String where = "Approval process " + key + " step " + number.intValue();
+            Map<String, Object> step = mapRowToFields(stepDef, (Map<String, Object>) stepRow);
+            step.remove("approvalProcessId");
+            step.put("approverId", resolveApprover(ctx, where, collectionName, (Map<String, Object>) stepRow));
+            if (steps.put(number.intValue(), step) != null) {
+                throw new IllegalArgumentException(where + " appears more than once");
+            }
+        }
+
+        String existingId = ctx.approvalProcessIdByKey.get(key);
+        if (existingId != null && ctx.options.conflictMode() == ConflictMode.SKIP) {
+            return new ItemResult("APPROVAL_PROCESS", key, "SKIPPED", null, existingId);
+        }
+        String action = existingId == null ? "CREATED" : "UPDATED";
+        if (ctx.options.dryRun()) {
+            String id = existingId != null ? existingId : "dry-run:" + UUID.randomUUID();
+            ctx.approvalProcessIdByKey.put(key, id);
+            return new ItemResult("APPROVAL_PROCESS", key, action, null, id);
+        }
+        mapped.put("tenantId", ctx.tenantId);
+        String processId = transactionTemplate.execute(status -> {
+            String id = existingId;
+            Map<Integer, String> stepIds = new HashMap<>();
+            if (id == null) {
+                id = String.valueOf(queryEngine.create(def, mapped).get("id"));
+            } else {
+                queryEngine.update(def, id, mapped);
+                repository.getJdbcTemplate().queryForList(
+                                "SELECT id, step_number FROM approval_step WHERE approval_process_id = ?", id)
+                        .forEach(r -> stepIds.put(((Number) r.get("step_number")).intValue(), (String) r.get("id")));
+            }
+            for (var step : steps.entrySet()) {
+                String stepId = stepIds.get(step.getKey());
+                if (stepId != null) {
+                    queryEngine.update(stepDef, stepId, step.getValue());
+                } else {
+                    Map<String, Object> created = new LinkedHashMap<>(step.getValue());
+                    created.put("approvalProcessId", id);
+                    queryEngine.create(stepDef, created);
+                }
+            }
+            return id;
+        });
+        ctx.approvalProcessIdByKey.put(key, processId);
+        return new ItemResult("APPROVAL_PROCESS", key, action, null, processId);
+    }
+
+    /**
+     * The target-tenant {@code approverId} of a step: a USER approver resolved by email, a GROUP
+     * or QUEUE approver by group name. Other approver types name no one directly (a FIELD
+     * approver's field must exist on the process's collection), so their id stays unset.
+     */
+    private String resolveApprover(ImportContext ctx, String where, String collectionName,
+                                   Map<String, Object> step) {
+        String type = String.valueOf(step.get("approver_type")).toUpperCase(Locale.ROOT);
+        switch (type) {
+            case "USER" -> {
+                Object email = step.get("approver_email");
+                if (email == null) {
+                    throw new IllegalArgumentException(where + ": USER approver carries no approver_email");
+                }
+                String userId = ctx.userIdByEmail(String.valueOf(email));
+                if (userId == null) {
+                    throw new IllegalStateException(where + ": approver user '" + email + "' not found in target");
+                }
+                return userId;
+            }
+            case "GROUP", "QUEUE" -> {
+                Object groupName = step.get("approver_group_name");
+                if (groupName == null) {
+                    throw new IllegalArgumentException(where + ": " + type + " approver carries no approver_group_name");
+                }
+                String groupId = ctx.groupIdByName(String.valueOf(groupName));
+                if (groupId == null) {
+                    throw new IllegalStateException(where + ": approver group '" + groupName + "' not found in target");
+                }
+                return groupId;
+            }
+            case "FIELD" -> {
+                if (step.get("approver_field") == null) {
+                    throw new IllegalArgumentException(where + ": FIELD approver carries no approver_field");
+                }
+                ctx.requireField(collectionName, String.valueOf(step.get("approver_field")));
+                return null;
+            }
+            default -> {
+                return null;
+            }
+        }
     }
 
     /**
@@ -1128,6 +1373,8 @@ public class PackageImportService {
         final Map<String, String> menuItemIdBySourceId = new HashMap<>();
         final Map<String, String> listViewIdByKey = new HashMap<>();
         final Map<String, String> dashboardIdByName = new HashMap<>();
+        final Map<String, String> reportIdByName = new HashMap<>();
+        final Map<String, String> approvalProcessIdByKey = new HashMap<>();
         /** Rows a dry run would seed (collection → attributes + placeholder id), for reference lookups. */
         final List<Map.Entry<String, Map<String, Object>>> dryRunRecords = new ArrayList<>();
 
@@ -1223,6 +1470,43 @@ public class PackageImportService {
                     .forEach(r -> listViewIdByKey.put(r.get("coll") + ":" + r.get("name"), (String) r.get("id")));
             jdbc.queryForList("SELECT id, name FROM dashboard WHERE tenant_id = ?", tenantId)
                     .forEach(r -> dashboardIdByName.putIfAbsent((String) r.get("name"), (String) r.get("id")));
+            jdbc.queryForList("SELECT id, name FROM report WHERE tenant_id = ?", tenantId)
+                    .forEach(r -> reportIdByName.putIfAbsent((String) r.get("name"), (String) r.get("id")));
+            jdbc.queryForList(
+                    "SELECT ap.id, ap.name, c.name AS coll FROM approval_process ap " +
+                            "JOIN collection c ON ap.collection_id = c.id WHERE ap.tenant_id = ?", tenantId)
+                    .forEach(r -> approvalProcessIdByKey.putIfAbsent(r.get("coll") + ":" + r.get("name"),
+                            (String) r.get("id")));
+        }
+
+        /** A field the package names, in the package, the target tenant, or a system collection. */
+        void requireField(String collectionName, String fieldName) {
+            if (AUDIT_FIELD_NAMES.contains(fieldName)
+                    || fieldIdByKey.containsKey(collectionName + "." + fieldName)) {
+                return;
+            }
+            CollectionDefinition def = systemCollectionIdByName.containsKey(collectionName)
+                    ? collectionRegistry.get(collectionName) : null;
+            if (def == null || def.getField(fieldName) == null) {
+                throw new IllegalStateException("Field not found in target: " + collectionName + "." + fieldName);
+            }
+        }
+
+        String userIdByEmail(String email) {
+            return firstId("SELECT id FROM platform_user WHERE tenant_id = ? AND lower(email) = lower(?)", email);
+        }
+
+        String groupIdByName(String name) {
+            return firstId("SELECT id FROM user_group WHERE tenant_id = ? AND name = ?", name);
+        }
+
+        String reportFolderId(String name) {
+            return firstId("SELECT id FROM report_folder WHERE tenant_id = ? AND name = ?", name);
+        }
+
+        private String firstId(String sql, String value) {
+            var rows = repository.getJdbcTemplate().queryForList(sql + " ORDER BY id LIMIT 1", tenantId, value);
+            return rows.isEmpty() ? null : (String) rows.get(0).get("id");
         }
 
         Map<String, String> collectionIdByName() {

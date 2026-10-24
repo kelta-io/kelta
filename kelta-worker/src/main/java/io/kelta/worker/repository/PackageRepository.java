@@ -410,6 +410,58 @@ public class PackageRepository {
         );
     }
 
+    /** Reports enriched with the primary collection's and the folder's names (natural-key remap). */
+    public List<Map<String, Object>> findReportsByIds(String tenantId, List<String> ids) {
+        if (ids.isEmpty()) return List.of();
+        String placeholders = String.join(",", ids.stream().map(i -> "?").toList());
+        Object[] params = new Object[ids.size() + 1];
+        params[0] = tenantId;
+        for (int i = 0; i < ids.size(); i++) params[i + 1] = ids.get(i);
+        return jdbcTemplate.queryForList(
+                "SELECT r.*, c.name AS primary_collection_name, rf.name AS folder_name FROM report r " +
+                        "JOIN collection c ON r.primary_collection_id = c.id " +
+                        "LEFT JOIN report_folder rf ON r.folder_id = rf.id " +
+                        "WHERE r.tenant_id = ? AND r.id IN (" + placeholders + ") ORDER BY r.name",
+                params
+        );
+    }
+
+    /** Approval processes enriched with the owning collection's name (natural-key remap). */
+    public List<Map<String, Object>> findApprovalProcessesByIds(String tenantId, List<String> ids) {
+        if (ids.isEmpty()) return List.of();
+        String placeholders = String.join(",", ids.stream().map(i -> "?").toList());
+        Object[] params = new Object[ids.size() + 1];
+        params[0] = tenantId;
+        for (int i = 0; i < ids.size(); i++) params[i + 1] = ids.get(i);
+        return jdbcTemplate.queryForList(
+                "SELECT ap.*, c.name AS collection_name FROM approval_process ap " +
+                        "JOIN collection c ON ap.collection_id = c.id " +
+                        "WHERE ap.tenant_id = ? AND ap.id IN (" + placeholders + ") ORDER BY c.name, ap.name",
+                params
+        );
+    }
+
+    /**
+     * Steps of the approval processes, each enriched with the email of the user and the name of
+     * the group its {@code approver_id} points at (whichever matches), in step order.
+     */
+    public List<Map<String, Object>> findApprovalStepsByProcessIds(String tenantId, List<String> processIds) {
+        if (processIds.isEmpty()) return List.of();
+        String placeholders = String.join(",", processIds.stream().map(i -> "?").toList());
+        Object[] params = new Object[processIds.size() + 1];
+        params[0] = tenantId;
+        for (int i = 0; i < processIds.size(); i++) params[i + 1] = processIds.get(i);
+        return jdbcTemplate.queryForList(
+                "SELECT s.*, u.email AS approver_email, g.name AS approver_group_name " +
+                        "FROM approval_step s JOIN approval_process ap ON s.approval_process_id = ap.id " +
+                        "LEFT JOIN platform_user u ON u.id = s.approver_id AND u.tenant_id = ap.tenant_id " +
+                        "LEFT JOIN user_group g ON g.id = s.approver_id AND g.tenant_id = ap.tenant_id " +
+                        "WHERE ap.tenant_id = ? AND s.approval_process_id IN (" + placeholders + ") " +
+                        "ORDER BY s.step_number",
+                params
+        );
+    }
+
     // ------------------------------------------------------------------
     // Collection-scoped export: what hangs off a set of collections
     // ------------------------------------------------------------------
@@ -426,6 +478,16 @@ public class PackageRepository {
 
     public List<String> findListViewIdsByCollectionIds(String tenantId, List<String> collectionIds) {
         return findIdsIn("SELECT id FROM list_view WHERE tenant_id = ? AND collection_id IN (%s)",
+                tenantId, collectionIds);
+    }
+
+    public List<String> findReportIdsByPrimaryCollectionIds(String tenantId, List<String> collectionIds) {
+        return findIdsIn("SELECT id FROM report WHERE tenant_id = ? AND primary_collection_id IN (%s)",
+                tenantId, collectionIds);
+    }
+
+    public List<String> findApprovalProcessIdsByCollectionIds(String tenantId, List<String> collectionIds) {
+        return findIdsIn("SELECT id FROM approval_process WHERE tenant_id = ? AND collection_id IN (%s)",
                 tenantId, collectionIds);
     }
 

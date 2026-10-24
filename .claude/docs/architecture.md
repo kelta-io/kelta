@@ -1086,6 +1086,42 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     seed rows on a collection that the same dry run would create.
   - Sandbox clone and promotion share this path, so a sandbox now gets the parent's list views and
     dashboards too.
+- **Package types `UNIQUE_CONSTRAINT`, `REPORT`, `APPROVAL_PROCESS` (2026-10-24, KLT-665):**
+  `TYPE_ORDER` now runs `… LIST_VIEW, UNIQUE_CONSTRAINT, REPORT, APPROVAL_PROCESS, DASHBOARD, RECORD`,
+  so all three apply after the `COLLECTION`/`FIELD` items they name. Every reference travels by name.
+  An unresolved one (an unknown collection, field, approver email or group) fails only that item,
+  and the message names what is missing.
+
+  | Type | Natural key | Carries | Applied through |
+  |------|-------------|---------|-----------------|
+  | `UNIQUE_CONSTRAINT` | `<collection>:<field>,<field>` (field names sorted) | `{collection_name, field_names}` | `CompositeUniqueConstraintService` (a Postgres `uniq_*` index, no system collection) |
+  | `REPORT` | `<name>` | the `report` row + `primary_collection_name`, `folder_name` | `upsertViaEngine` on `reports` |
+  | `APPROVAL_PROCESS` | `<collection>:<name>` | the `approval_process` row + `collection_name`, `steps: [...]` | `approval-processes` + nested `approval-steps`, one transaction |
+
+  - `UNIQUE_CONSTRAINT`: export lists each exported collection's `uniq_*` indexes. It never carries
+    the index name, because that embeds the source table. It leaves out a single-field index that
+    backs the field's own `unique` flag, since that travels with the `FIELD`. An existing index
+    over the same field set (any order) is `SKIPPED` under either conflict mode: a field set has
+    nothing to overwrite.
+  - `REPORT`: `primaryCollectionId` resolves by `primary_collection_name` (a platform system
+    collection such as `users` included). Each plain column `fieldName`, plus `group_by` and
+    `sort_by`, must be a field of that collection; dotted names read through `relatedJoins` and are
+    not checked. The folder is matched by `folder_name` and left unset when the target has no
+    folder of that name.
+  - `APPROVAL_PROCESS`: the steps are nested in the item and matched on `step_number`. A step's
+    `approver_id` is never exported. A USER approver travels as `approver_email` and resolves by
+    email (case-insensitive). A GROUP or QUEUE approver travels as `approver_group_name` and
+    resolves by `user_group.name`. A FIELD approver's `approver_field` must exist on the
+    collection. Every reference is resolved before the process and its steps are written. Under
+    OVERWRITE, matching steps are updated and new ones added; a target step the package does not
+    carry is left in place.
+  - Export: a `collectionNames` export adds the collections' reports and approval processes.
+    `excludeTypes` also accepts `REPORT` and `APPROVAL_PROCESS`. A whole-tenant request (`POST
+    /api/packages/export` with no ids) carries both. `exportAllOptions`, the sandbox-clone /
+    full-promotion / snapshot path, still carries **neither**, as before. A fresh sandbox holds
+    only its seeded admin, so USER/GROUP approvers could never resolve there, and one report naming
+    a since-deleted field would mark the whole clone `FAILED`. Unique constraints do ride along,
+    since they come with every exported collection.
 
 **Worker-side system-permission check — how (use the existing pattern, don't reinvent):**
 - Enforce a specific system permission **in the controller/service** with a DB lookup against
