@@ -407,5 +407,3 @@ export function ScriptsPage({ testId = 'scripts-page' }: ScriptsPageProps): Reac
     </AdminCrudPage>
   )
 }
-
-export default ScriptsPage

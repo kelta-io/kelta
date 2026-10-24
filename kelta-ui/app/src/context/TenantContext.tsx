@@ -12,7 +12,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
-export type TenantMode = 'slug' | 'custom-domain'
+type TenantMode = 'slug' | 'custom-domain'
 
 interface TenantContextValue {
   tenantSlug: string

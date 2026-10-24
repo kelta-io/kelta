@@ -358,5 +358,3 @@ export function ViewSelector({
     </div>
   )
 }
-
-export default ViewSelector

@@ -503,6 +503,3 @@ export function usePlugins(): PluginContextValue {
   }
   return context
 }
-
-// Export the context for testing purposes
-export { PluginContext }

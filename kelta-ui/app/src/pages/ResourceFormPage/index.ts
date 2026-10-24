@@ -4,5 +4,5 @@
  * The admin record create/edit page — a thin wrapper over the shared `RecordForm` core.
  */
 
-export { ResourceFormPage, default } from './ResourceFormPage'
+export { ResourceFormPage } from './ResourceFormPage'
 export type { ResourceFormPageProps } from './ResourceFormPage'

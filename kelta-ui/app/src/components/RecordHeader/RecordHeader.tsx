@@ -319,5 +319,3 @@ export function RecordHeader({
     </div>
   )
 }
-
-export default RecordHeader

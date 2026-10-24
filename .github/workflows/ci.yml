@@ -449,6 +449,12 @@ jobs:
         run: npm ci --no-audit --no-fund
         timeout-minutes: 5
 
+      # Fails on any unused file, export, type or dependency. Deliberate exceptions
+      # live in kelta-ui/app/knip.jsonc, one comment each.
+      - name: Knip (unused code) kelta-ui
+        working-directory: kelta-ui/app
+        run: npm run knip
+
       - name: Type check kelta-ui
         working-directory: kelta-ui/app
         run: npm run typecheck

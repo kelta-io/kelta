@@ -206,5 +206,3 @@ export function InlineFieldValue(props: InlineFieldValueProps): React.ReactEleme
     </div>
   )
 }
-
-export default InlineFieldValue

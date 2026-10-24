@@ -385,7 +385,7 @@ const queryClient = new QueryClient({
 /**
  * Props for the App component
  */
-export interface AppProps {
+interface AppProps {
   /** Optional plugins to load */
   plugins?: Plugin[]
 }

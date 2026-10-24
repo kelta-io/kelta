@@ -444,5 +444,3 @@ export function DetailTabBar({
     </section>
   )
 }
-
-export default DetailTabBar

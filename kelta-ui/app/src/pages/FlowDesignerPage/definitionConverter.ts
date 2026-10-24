@@ -20,7 +20,7 @@ import { FLOW_EDGE_TYPE } from './components/edges/FlowEdge'
 // ---------------------------------------------------------------------------
 
 /** Maps state type to React Flow node type. */
-export function getNodeType(stateType: string): string {
+function getNodeType(stateType: string): string {
   switch (stateType) {
     case 'Task':
       return 'task'

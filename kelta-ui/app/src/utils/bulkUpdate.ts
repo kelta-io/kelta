@@ -6,13 +6,13 @@
  */
 
 /** Interval between bulk-job status polls. */
-export const BULK_POLL_INTERVAL_MS = 2000
+const BULK_POLL_INTERVAL_MS = 2000
 
 /** Maximum number of status polls (~60s at 2s intervals). */
-export const BULK_MAX_POLL_ATTEMPTS = 30
+const BULK_MAX_POLL_ATTEMPTS = 30
 
 /** Bulk-job statuses that end polling. */
-export const TERMINAL_JOB_STATUSES = new Set(['COMPLETED', 'FAILED', 'ABORTED'])
+const TERMINAL_JOB_STATUSES = new Set(['COMPLETED', 'FAILED', 'ABORTED'])
 
 /** Minimal API surface needed (structural subset of services/apiClient.ApiClient). */
 export interface BulkJobApi {

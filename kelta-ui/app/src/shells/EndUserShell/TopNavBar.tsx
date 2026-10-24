@@ -68,7 +68,7 @@ export interface NavTab {
 }
 
 /** One entry in the app switcher (apps/nav v2) — an active ui-menu. */
-export interface AppSwitcherEntry {
+interface AppSwitcherEntry {
   id: string
   name: string
   /** Lucide icon name; unknown names fall back to a grid icon. */

@@ -38,17 +38,16 @@ import { FieldExpressionPicker } from '../FieldExpressionPicker'
 import type { FieldType } from '../../types/collections'
 
 /** Field type enumeration (canonical: `types/collections`). */
-export type { FieldType }
 
 /**
  * Validation rule type enumeration
  */
-export type ValidationRuleType = 'min' | 'max' | 'pattern' | 'email' | 'url' | 'custom'
+type ValidationRuleType = 'min' | 'max' | 'pattern' | 'email' | 'url' | 'custom'
 
 /**
  * Validation rule interface
  */
-export interface ValidationRule {
+interface ValidationRule {
   type: ValidationRuleType
   value?: unknown
   message?: string
@@ -88,7 +87,7 @@ export interface CollectionSummary {
 /**
  * Global picklist summary for picklist field dropdown
  */
-export interface PicklistSummary {
+interface PicklistSummary {
   id: string
   name: string
 }
@@ -96,13 +95,13 @@ export interface PicklistSummary {
 /**
  * Aggregate function options for rollup_summary fields.
  */
-export type RollupAggregateFunction = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX'
+type RollupAggregateFunction = 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX'
 
 /**
  * Return type options for formula fields. Immutable once the field exists,
  * because the dynamically-created column type depends on it.
  */
-export type FormulaReturnType = 'TEXT' | 'NUMBER' | 'BOOLEAN'
+type FormulaReturnType = 'TEXT' | 'NUMBER' | 'BOOLEAN'
 
 /**
  * Minimal field info exposed to the rollup config picker.
@@ -156,8 +155,7 @@ export interface FieldEditorProps {
 /**
  * All available field types
  */
-// eslint-disable-next-line react-refresh/only-export-components
-export const FIELD_TYPES: FieldType[] = [
+const FIELD_TYPES: FieldType[] = [
   'string',
   'number',
   'boolean',
@@ -188,8 +186,7 @@ export const FIELD_TYPES: FieldType[] = [
  * {@code FieldMaskingService.MASKABLE_TYPES}. Numbers/dates/etc. use HIDDEN
  * field permissions instead.
  */
-// eslint-disable-next-line react-refresh/only-export-components
-export const MASKABLE_FIELD_TYPES: readonly FieldType[] = [
+const MASKABLE_FIELD_TYPES: readonly FieldType[] = [
   'string',
   'rich_text',
   'email',
@@ -200,15 +197,14 @@ export const MASKABLE_FIELD_TYPES: readonly FieldType[] = [
 ]
 
 /** Masking strategy options offered in the FieldEditor. `NONE` clears the config. */
-export type MaskingType = 'NONE' | 'FULL' | 'LAST4' | 'EMAIL' | 'CUSTOM'
+type MaskingType = 'NONE' | 'FULL' | 'LAST4' | 'EMAIL' | 'CUSTOM'
 
 /**
  * Field types that can be media fields (`fieldTypeConfig.media`): the field holds the storage
  * key of an object uploaded through `POST /api/{collection}/upload-url`. Mirrors the backend
  * `MediaFieldConfig.ELIGIBLE_TYPES` (STRING/TEXT; the editor offers STRING as `string`).
  */
-// eslint-disable-next-line react-refresh/only-export-components
-export const MEDIA_FIELD_TYPES: readonly FieldType[] = ['string']
+const MEDIA_FIELD_TYPES: readonly FieldType[] = ['string']
 
 const BYTES_PER_MB = 1024 * 1024
 
@@ -229,8 +225,7 @@ function mediaFormValues(parsedConfig: Record<string, unknown>) {
 /**
  * Validation rule types available for each field type
  */
-// eslint-disable-next-line react-refresh/only-export-components
-export const VALIDATION_RULES_BY_TYPE: Record<FieldType, ValidationRuleType[]> = {
+const VALIDATION_RULES_BY_TYPE: Record<FieldType, ValidationRuleType[]> = {
   string: ['min', 'max', 'pattern', 'email', 'url'],
   number: ['min', 'max'],
   boolean: [],
@@ -268,8 +263,7 @@ const validationRuleSchema = z.object({
 /**
  * Zod validation schema for field form
  */
-// eslint-disable-next-line react-refresh/only-export-components
-export const fieldEditorSchema = z
+const fieldEditorSchema = z
   .object({
     name: z
       .string()
@@ -435,7 +429,7 @@ export const fieldEditorSchema = z
 /**
  * Type inferred from the Zod schema
  */
-export type FieldEditorFormData = z.infer<typeof fieldEditorSchema>
+type FieldEditorFormData = z.infer<typeof fieldEditorSchema>
 
 /**
  * Generate a unique ID for new fields
@@ -2105,5 +2099,3 @@ export function FieldEditor({
     </form>
   )
 }
-
-export default FieldEditor

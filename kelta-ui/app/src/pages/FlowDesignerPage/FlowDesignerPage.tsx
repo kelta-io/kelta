@@ -433,5 +433,3 @@ export function FlowDesignerPage() {
     </div>
   )
 }
-
-export default FlowDesignerPage

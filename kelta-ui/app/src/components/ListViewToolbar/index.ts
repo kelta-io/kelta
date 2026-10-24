@@ -1,1 +1,1 @@
-export { ListViewToolbar, type ListViewToolbarProps } from './ListViewToolbar'
+export { ListViewToolbar } from './ListViewToolbar'

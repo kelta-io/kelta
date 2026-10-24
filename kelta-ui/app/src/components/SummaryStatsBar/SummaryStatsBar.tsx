@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils'
 /**
  * A single filter condition applied to the data
  */
-export interface FilterCondition {
+interface FilterCondition {
   id: string
   field: string
   operator: string
@@ -30,7 +30,7 @@ export interface FilterCondition {
 /**
  * Definition of a field in the collection
  */
-export interface FieldDefinition {
+interface FieldDefinition {
   name: string
   displayName?: string
   type: string
@@ -276,5 +276,3 @@ export function SummaryStatsBar({
     </div>
   )
 }
-
-export default SummaryStatsBar

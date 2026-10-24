@@ -22,7 +22,7 @@ import { usePreferenceValue } from '../hooks/usePreferenceStore'
 
 // ---- Types ----
 
-export interface RecentItem {
+interface RecentItem {
   /** Record ID */
   id: string
   /** Collection API name */

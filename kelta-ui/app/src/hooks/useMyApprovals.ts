@@ -56,7 +56,7 @@ function attrOrRelId(resource: JsonApiResource, name: string): string | null {
   return typeof attr === 'string' ? attr : null
 }
 
-export const MY_APPROVALS_QUERY_KEY = 'my-approvals'
+const MY_APPROVALS_QUERY_KEY = 'my-approvals'
 
 /**
  * The caller's approval workload over the generic JSON:API system-collection routes:

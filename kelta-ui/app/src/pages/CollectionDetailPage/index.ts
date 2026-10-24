@@ -6,4 +6,3 @@
 
 export { CollectionDetailPage } from './CollectionDetailPage'
 export type { CollectionDetailPageProps } from './CollectionDetailPage'
-export { default } from './CollectionDetailPage'

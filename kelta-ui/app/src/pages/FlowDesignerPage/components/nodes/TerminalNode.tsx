@@ -5,7 +5,7 @@ import { CheckCircle, XCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { DebugStatusBadge, type DebugStatus } from './DebugStatusBadge'
 
-export type TerminalNodeData = {
+type TerminalNodeData = {
   label: string
   stateType: 'Succeed' | 'Fail'
   error?: string

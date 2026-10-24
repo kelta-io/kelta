@@ -495,10 +495,10 @@ feature would do this and publish the event.
 - Possible N+1 in `SearchIndexService` reindex (per-collection queries) — matters past ~1k collections.
 - **Bulk/related-list mass edit** is gated on `MANAGE_DATA` in the UI because bulk writes bypass
   per-record Cerbos; bulk UPDATE runs `QueryEngine.update` (hooks fire, write-FLS doesn't).
-- **`npm run knip` (kelta-ui) is not a CI gate.** After the 2026-10 dead-code batch it reports zero
-  unused files but still ~300 unused exports, ~300 unused exported types, ~100 default+named
-  duplicate exports and a few unlisted deps, so wiring it in would fail every build. Clear those
-  (or scope knip to `--include files,dependencies`) before adding it to `ci.yml`.
+- **`npm run knip` (kelta-ui) is a CI gate** (KLT-706, `Knip (unused code) kelta-ui` in `ci.yml`).
+  Any unused file, export, type or dependency fails the job: delete it rather than ignore it.
+  The few deliberate exceptions (CSS-loaded Tailwind packages, transitive imports, the Capacitor
+  CLI, vendored shadcn `components/ui/**`) live in `kelta-ui/app/knip.jsonc`, one comment each.
 - **Media fields — accepted v1 limits** (`MediaUploadController`; revisit before media carries
   anything but public images):
   - Declared `fileSize` is advisory — the presigned PUT signs `Content-Type`, not
@@ -741,9 +741,8 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **`useRecordMutation`'s `onSuccess` fires for every mutation** incl. inline-edit PATCHes —
   operation-specific side effects (navigate after delete, announcements) go in the specific
   handler via `mutateAsync().then(...)`.
-- **Toasts converged on `sonner`** (2026-10-12). `components/Toast` (`useToast().showToast`,
-  `ToastProvider`) is a deprecated adapter that forwards to `sonner`; nothing calls it any more
-  (only the `components/index.ts` re-export remains) — delete it. A test wrapper without a
+- **Toasts converged on `sonner`** (2026-10-12); the legacy `components/Toast` adapter was
+  deleted (KLT-706). A test wrapper without a
   `<Toaster />` (`components/ui/sonner.tsx`) shows nothing (assert on a `vi.mock('sonner')` spy,
   or use `createTestWrapper`, which mounts one). See `conventions.md` → Component reuse.
 

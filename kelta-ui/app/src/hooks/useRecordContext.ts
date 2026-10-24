@@ -36,7 +36,7 @@ export interface Attachment {
 /**
  * Combined record context response
  */
-export interface RecordContext {
+interface RecordContext {
   notes: Note[]
   attachments: Attachment[]
 }

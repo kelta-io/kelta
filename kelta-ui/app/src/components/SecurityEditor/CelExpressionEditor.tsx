@@ -130,5 +130,3 @@ export function CelExpressionEditor({
     </div>
   )
 }
-
-export default CelExpressionEditor

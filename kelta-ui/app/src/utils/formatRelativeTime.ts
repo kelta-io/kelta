@@ -22,7 +22,7 @@ export type RelativeTimeInput = string | number | Date
  * - `'weeks'` — whole weeks under 30 days ("2w ago"), the locale date after that
  * - `'units'` — weeks under 5, then months (30-day) under 12, then years (365-day)
  */
-export type RelativeTimeBeyondWeek = 'date' | 'days' | 'weeks' | 'units'
+type RelativeTimeBeyondWeek = 'date' | 'days' | 'weeks' | 'units'
 
 export interface RelativeTimeBucketOptions {
   /** Report exactly one day ago as `yesterday` rather than `day` × 1. Default `true`. */

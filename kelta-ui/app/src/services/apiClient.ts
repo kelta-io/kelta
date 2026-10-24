@@ -70,7 +70,7 @@ export class ApiError extends Error {
 }
 
 /** JSON:API error code the worker returns (as a 409) when a write's `If-Match` is stale. */
-export const STALE_WRITE_CODE = 'STALE_WRITE'
+const STALE_WRITE_CODE = 'STALE_WRITE'
 
 /**
  * Whether an error is an optimistic-locking conflict: the record changed since its ETag was read

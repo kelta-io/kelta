@@ -392,5 +392,3 @@ export function CreateEnvironmentDialog({
     </div>
   )
 }
-
-export default CreateEnvironmentDialog

@@ -553,5 +553,3 @@ export function PromotionHistory(): React.ReactElement {
     </div>
   )
 }
-
-export default PromotionHistory

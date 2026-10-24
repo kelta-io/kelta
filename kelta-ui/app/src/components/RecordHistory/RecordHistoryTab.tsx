@@ -199,5 +199,3 @@ export function RecordHistoryTab({
     </ol>
   )
 }
-
-export default RecordHistoryTab

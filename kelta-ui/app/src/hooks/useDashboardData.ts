@@ -35,7 +35,7 @@ export interface DashboardData {
   widgets: Record<string, WidgetPayload>
 }
 
-export const DASHBOARD_DATA_QUERY_KEY = 'dashboard-data'
+const DASHBOARD_DATA_QUERY_KEY = 'dashboard-data'
 
 function parseConfig(raw: unknown): Record<string, unknown> {
   if (raw && typeof raw === 'object') return raw as Record<string, unknown>

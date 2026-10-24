@@ -171,5 +171,3 @@ export function MfaPolicyPanel(): React.ReactElement {
     </div>
   )
 }
-
-export default MfaPolicyPanel

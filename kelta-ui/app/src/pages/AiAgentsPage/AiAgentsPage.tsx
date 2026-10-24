@@ -386,5 +386,3 @@ export function AiAgentsPage({ testId = 'ai-agents-page' }: AiAgentsPageProps): 
     </AdminCrudPage>
   )
 }
-
-export default AiAgentsPage

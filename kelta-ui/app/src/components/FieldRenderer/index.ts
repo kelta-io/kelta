@@ -1,1 +1,1 @@
-export { FieldRenderer, type FieldRendererProps } from './FieldRenderer'
+export { FieldRenderer } from './FieldRenderer'

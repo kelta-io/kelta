@@ -263,5 +263,3 @@ export function PicklistsPage({
     </AdminCrudPage>
   )
 }
-
-export default PicklistsPage
