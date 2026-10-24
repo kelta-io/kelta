@@ -44,6 +44,9 @@ public class GetCollectionSchemaTool implements UserTool, AdminTool {
                 .title("Get Collection Schema")
                 .description("Return the full schema for a collection: metadata + all field definitions "
                         + "(type, required, enum values, references, systemMaintained) plus its validation rules by default. "
+                        + "PICKLIST and MULTI_PICKLIST fields carry picklistValues — the active values, each "
+                        + "{value, label, isDefault, sortOrder}, in sortOrder — so write one of those values "
+                        + "instead of guessing. "
                         + "Wraps GET /api/collections/{name}/schema, and — when includeRules is true — "
                         + "GET /api/validation-rules for that collection. Use this before constructing a "
                         + "query or create_record call to know what attributes are available; a systemMaintained "

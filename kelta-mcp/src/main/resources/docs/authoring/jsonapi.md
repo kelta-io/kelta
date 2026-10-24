@@ -101,6 +101,34 @@ metadata apply` restores it; a package without the key applies the field
 with the flag `false`. To maintain the value, write it from a flow step
 (e.g. an update-record action), not from the API client.
 
+### Picklist values in the schema
+
+In the same response, every `PICKLIST` and `MULTI_PICKLIST` field of a
+tenant collection carries `picklistValues`: its active values, in
+`sortOrder`, whether the field owns them or is bound to a global picklist
+(`fieldTypeConfig.globalPicklistId`). Inactive values are left out. A
+picklist field with no active values has `picklistValues: []`; other
+fields have no `picklistValues` key. System collections keep listing their
+allowed values under `enum`.
+
+```json
+{
+  "name": "priority",
+  "type": "PICKLIST",
+  "required": false,
+  "isRelationship": false,
+  "description": null,
+  "systemMaintained": false,
+  "picklistValues": [
+    { "value": "LOW",  "label": "Low",  "isDefault": true,  "sortOrder": 1 },
+    { "value": "HIGH", "label": "High", "isDefault": false, "sortOrder": 2 }
+  ]
+}
+```
+
+Write a field's `value` (not its `label`) in a create or update; for a
+`MULTI_PICKLIST`, write an array of values.
+
 ## `--yes` on every non-GET
 
 Every CLI/API mutation is treated as requiring explicit confirmation:
@@ -143,3 +171,35 @@ The request envelope key is `"atomic:operations"` (not `data` or
   fails the whole batch.
 - Batch size defaults to 100 operations and cannot be configured above a
   hard ceiling of 500.
+
+### Which collections a batch may write
+
+- **Tenant collections** (every collection you define) are supported.
+- **Identity system collections** `users`, `group-memberships`,
+  `delegated-admin-scopes` and `user-permission-sets` are supported; their
+  writes are still checked by the identity write guard (`MANAGE_USERS`,
+  `MODIFY_ALL_DATA`, or `MANAGE_DELEGATED_ADMINS` for scopes).
+- **Every other system collection** (`fields`, `picklist-values`,
+  `collections`, `flows`, …) is rejected. These have their own endpoints,
+  which run side effects a batch would skip (DDL, registry refresh, cache
+  eviction); write them there instead.
+
+A rejected collection fails the whole batch with **400** before any
+operation runs, so nothing is written. The pointer names the first
+offending operation:
+
+```json
+{
+  "errors": [{
+    "status": "400",
+    "code": "UNSUPPORTED_COLLECTION",
+    "title": "Unsupported collection",
+    "detail": "Atomic operations do not support the system collection 'fields'; use POST /api/fields instead",
+    "source": { "pointer": "/atomic:operations/1" }
+  }]
+}
+```
+
+A failure while an operation executes is a different error: **422**
+`OPERATION_FAILED` (or **400** for a field validation failure) pointing at
+the failing operation, and the batch rolls back.
