@@ -123,7 +123,7 @@ jobs:
 
       - name: Filter paths
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: .github/path-filters.yml
           base: ${{ steps.base.outputs.base }}
