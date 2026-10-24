@@ -657,6 +657,19 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   bound FIELD, so a selective promotion of that field without its picklist fails loudly instead of
   pulling it in.
 
+- **Field constraints and picklist values are enforced on user collections since PLT-711.**
+  `CollectionLifecycleManager` used to build tenant `FieldDefinition`s with no `ValidationRules`
+  and no enum values, so `DefaultValidationEngine` never checked `field.constraints` or picklist
+  membership. Turning it on **rejects writes tenants previously got away with** (a picklist value
+  outside the active values, a string over its stored `max`, a `pattern` miss) — imports, flows and
+  integrations that relied on that now get `400`. Rows already holding such values stay; a PATCH
+  that does not write the field still succeeds (update validation runs on the patch only), but a
+  full-record write-back of the bad value fails. Picklist values are part of the cached
+  definition: `PicklistValueRefreshHook` broadcasts `collection.changed` for every collection a
+  changed value feeds — a picklist value written by raw SQL (not through the query engine) stays
+  invisible until the next refresh or restart. `email`/`url` (and `DATE` `min`/`max`) are stored
+  but not enforced; the worker logs a WARN per field on load.
+
 ### Auth and Cerbos
 
 - **Any new authorization-request validator must throw with a token whose redirect URI is null**
