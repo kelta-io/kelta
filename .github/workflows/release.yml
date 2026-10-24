@@ -222,7 +222,7 @@ jobs:
         image: ${{ fromJSON(needs.plan.outputs.images) }}
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: digests-${{ matrix.image.service }}-*
           path: ${{ runner.temp }}/digests
@@ -277,7 +277,7 @@ jobs:
       contents: write
     steps:
       - name: Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-notes
           path: ${{ runner.temp }}
