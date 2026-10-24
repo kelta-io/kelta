@@ -121,7 +121,7 @@ class TenantAdminInviteControllerTest {
     @DisplayName("200 with MANAGE_TENANTS: invites the managed tenant's admin and audits the actor")
     void invitesWithManageTenants() throws Exception {
         grant("MANAGE_TENANTS", true);
-        when(inviteService.inviteSeededAdmin(MANAGED_TENANT, "owner@example.com"))
+        when(inviteService.inviteSeededAdmin(MANAGED_TENANT, "owner@example.com", ACTOR))
                 .thenReturn(Optional.of(new TenantAdminInviteService.AdminInvite("admin-user", "owner@example.com")));
 
         try (MockedStatic<SecurityAuditLogger> audit = mockStatic(SecurityAuditLogger.class)) {
@@ -151,7 +151,7 @@ class TenantAdminInviteControllerTest {
     @DisplayName("404 when the tenant or its seeded admin does not exist")
     void notFoundWithoutSeededAdmin() throws Exception {
         grant("MANAGE_TENANTS", true);
-        when(inviteService.inviteSeededAdmin(MANAGED_TENANT, "owner@example.com")).thenReturn(Optional.empty());
+        when(inviteService.inviteSeededAdmin(MANAGED_TENANT, "owner@example.com", ACTOR)).thenReturn(Optional.empty());
 
         perform(invite("{\"email\":\"owner@example.com\"}")).andExpect(status().isNotFound());
     }
@@ -160,7 +160,7 @@ class TenantAdminInviteControllerTest {
     @DisplayName("409 passes through when the email belongs to another user")
     void conflictPassesThrough() throws Exception {
         grant("MANAGE_TENANTS", true);
-        when(inviteService.inviteSeededAdmin(MANAGED_TENANT, "owner@example.com"))
+        when(inviteService.inviteSeededAdmin(MANAGED_TENANT, "owner@example.com", ACTOR))
                 .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "taken"));
 
         perform(invite("{\"email\":\"owner@example.com\"}")).andExpect(status().isConflict());

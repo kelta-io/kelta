@@ -124,5 +124,3 @@ export function NotFoundPage({ title, message }: NotFoundPageProps): React.React
     </div>
   )
 }
-
-export default NotFoundPage

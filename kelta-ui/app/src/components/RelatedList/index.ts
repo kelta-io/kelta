@@ -1,1 +1,1 @@
-export { RelatedList, type RelatedListProps } from './RelatedList'
+export { RelatedList } from './RelatedList'

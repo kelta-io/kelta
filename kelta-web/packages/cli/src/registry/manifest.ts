@@ -1,8 +1,7 @@
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import type { ZodType } from 'zod';
 import { EXIT } from '../errors.js';
 import { OUTPUT_FORMATS } from '../render/render.js';
 import { VERSION } from '../version.js';
+import { commandInputJsonSchema } from './inputSchema.js';
 import type { RegisteredCommand } from './types.js';
 
 /**
@@ -22,6 +21,8 @@ export interface ManifestCommand {
   requiresAuth: boolean;
   positionals: { name: string; description: string; required: boolean }[];
   options: { flag: string; description: string; default?: unknown; repeatable?: boolean }[];
+  /** Runnable invocations, each parse-checked against this command (examples.test.ts). */
+  examples: { cmd: string; description?: string }[];
   /** JSON Schema of the validated handler input (positionals + option keys merged). */
   inputSchema: unknown;
 }
@@ -55,9 +56,8 @@ export function buildManifest(commands: RegisteredCommand[], group?: string): Ma
       requiresAuth: command.requiresAuth !== false,
       positionals: (command.positionals ?? []).map((positional) => ({ ...positional })),
       options: (command.options ?? []).map((option) => ({ ...option })),
-      inputSchema: zodToJsonSchema(command.input as unknown as ZodType, {
-        $refStrategy: 'none',
-      }),
+      examples: command.examples.map((example) => ({ ...example })),
+      inputSchema: commandInputJsonSchema(command),
     })),
   };
 }

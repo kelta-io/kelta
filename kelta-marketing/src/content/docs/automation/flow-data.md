@@ -74,18 +74,20 @@ every read of `$.input.customerId` is empty.
 Example — query, then use the count:
 
 ```json
-"CountOpen": {
-  "Type": "Task", "Resource": "QUERY_RECORDS",
-  "Parameters": { "targetCollectionName": "invoices",
-                  "filters": [ { "field": "customer", "operator": "eq", "value": "${$.record.data.id}" },
-                               { "field": "status", "operator": "eq", "value": "OPEN" } ] },
-  "ResultPath": "$.open",
-  "Next": "Decide"
-},
-"Decide": {
-  "Type": "Choice",
-  "Choices": [ { "Variable": "$.open.totalCount", "NumericGreaterThan": 3, "Next": "Escalate" } ],
-  "Default": "Done"
+{
+  "CountOpen": {
+    "Type": "Task", "Resource": "QUERY_RECORDS",
+    "Parameters": { "targetCollectionName": "invoices",
+                    "filters": [ { "field": "customer", "operator": "eq", "value": "${$.record.data.id}" },
+                                 { "field": "status", "operator": "eq", "value": "OPEN" } ] },
+    "ResultPath": "$.open",
+    "Next": "Decide"
+  },
+  "Decide": {
+    "Type": "Choice",
+    "Choices": [ { "Variable": "$.open.totalCount", "NumericGreaterThan": 3, "Next": "Escalate" } ],
+    "Default": "Done"
+  }
 }
 ```
 

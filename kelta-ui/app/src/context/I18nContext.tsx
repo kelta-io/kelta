@@ -27,7 +27,7 @@ import ptTranslations from '../i18n/translations/pt.json'
 /**
  * Text direction type
  */
-export type TextDirection = 'ltr' | 'rtl'
+type TextDirection = 'ltr' | 'rtl'
 
 /**
  * Supported locale codes
@@ -37,7 +37,7 @@ export type SupportedLocale = 'en' | 'ar' | 'fr' | 'de' | 'es' | 'pt'
 /**
  * Translation dictionary type (nested object with string values)
  */
-export type TranslationDictionary = {
+type TranslationDictionary = {
   [key: string]: string | TranslationDictionary
 }
 
@@ -508,13 +508,9 @@ export function useI18n(): I18nContextValue {
   return context
 }
 
-// Export the context for testing purposes
-export { I18nContext }
-
 /* eslint-disable react-refresh/only-export-components */
 export {
   getBrowserLocale,
-  getStoredLocale,
   storeLocale,
   getTextDirection,
   getNestedValue,

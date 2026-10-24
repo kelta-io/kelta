@@ -258,4 +258,24 @@ class SupersetDatabaseUserServiceTest {
         assertTrue(sql.stream().noneMatch(s -> s.contains("user_credential")), sql.toString());
         assertTrue(sql.stream().noneMatch(s -> s.contains("oauth2_")), sql.toString());
     }
+
+    @Test
+    @DisplayName("never grants anything on tenant_db_role — the pin is read through kelta_pinned_tenant()")
+    void neverGrantsOnTenantDbRole() {
+        when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class), anyString())).thenReturn(false);
+
+        service.ensureTenantUser(TENANT_UUID, "acme");
+
+        List<String> sql = executedSql();
+        assertTrue(sql.stream().noneMatch(s -> s.matches("(?is).*\\bGRANT\\b[^;]*\\bON\\s+(public\\.)?\"?tenant_db_role\\b.*")),
+                "no statement may grant on tenant_db_role: " + sql);
+        assertTrue(sql.stream().noneMatch(s -> s.contains("GRANT SELECT ON ALL TABLES IN SCHEMA public")),
+                "a blanket public grant would cover tenant_db_role: " + sql);
+        String grant = sql.stream()
+                .filter(s -> s.contains("GRANT SELECT ON public.%I TO %I"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no per-table public grant issued: " + sql));
+        assertTrue(grant.contains("c.relname <> 'tenant_db_role'"),
+                "the catalog-driven grant must exclude tenant_db_role: " + grant);
+    }
 }

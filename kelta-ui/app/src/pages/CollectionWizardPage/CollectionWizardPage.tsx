@@ -1293,5 +1293,3 @@ export function CollectionWizardPage({
     </div>
   )
 }
-
-export default CollectionWizardPage

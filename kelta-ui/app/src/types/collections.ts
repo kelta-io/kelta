@@ -94,15 +94,6 @@ export type FieldType =
   | 'rollup_summary'
 
 /**
- * Validation rule for a field
- */
-export interface ValidationRule {
-  type: 'min' | 'max' | 'pattern' | 'email' | 'url' | 'custom'
-  value?: unknown
-  message?: string
-}
-
-/**
  * Collection version for history tracking
  */
 export interface CollectionVersion {
@@ -155,21 +146,6 @@ export interface RecordTypePicklistOverride {
   /** JSON array of allowed values (a JSON-encoded string on legacy rows): read with `parseAvailableValues`. */
   availableValues: unknown
   defaultValue?: string | null
-}
-
-/**
- * Field history entry
- */
-export interface FieldHistoryEntry {
-  id: string
-  collectionId: string
-  recordId: string
-  fieldName: string
-  oldValue: unknown
-  newValue: unknown
-  changedBy: string
-  changedAt: string
-  changeSource: 'UI' | 'API' | 'WORKFLOW' | 'SYSTEM' | 'IMPORT'
 }
 
 /**

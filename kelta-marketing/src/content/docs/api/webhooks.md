@@ -18,15 +18,15 @@ are available when the deployment has Svix configured — Setup → Integration 
 
 ## Payload
 
-```json
+```jsonc
 {
   "eventType": "record.updated",
   "payload": {
     "recordId": "9d2c…",
     "collectionName": "invoices",
     "changeType": "UPDATED",
-    "data": { "number": "INV-1", "status": "PAID", … },
-    "previousData": { "status": "SENT", … },
+    "data": { "number": "INV-1", "status": "PAID" /* … */ },
+    "previousData": { "status": "SENT" /* … */ },
     "changedFields": ["status"],
     "timestamp": "2026-09-21T10:00:00Z"
   }

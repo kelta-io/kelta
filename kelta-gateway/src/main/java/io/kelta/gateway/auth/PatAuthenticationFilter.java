@@ -1,5 +1,7 @@
 package io.kelta.gateway.auth;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import io.kelta.gateway.error.ResponseHelpers;
@@ -24,11 +26,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Global filter for Personal Access Token (PAT) authentication.
@@ -41,12 +41,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * If Redis misses, the gateway calls the worker's validation endpoint
  * which re-caches the data in Redis.
  *
- * <p>Worker-outage resilience: every successfully resolved PAT JSON is stored
- * in a short-TTL in-memory grace cache (default 5 min). When the worker is
- * unreachable and Redis misses, the grace cache serves the last known-good
- * token data so callers ride out rolling restarts without spurious 401s.
- * Revocation is always checked first — a revoked token is rejected even when
- * the grace cache holds its data.
+ * <p>Worker-outage resilience: the JSON of every PAT this filter accepts is stored
+ * in a bounded, short-TTL in-memory grace cache (default 10,000 entries, 5 min
+ * after write). When the worker is unreachable and Redis misses, the grace cache
+ * serves the last known-good token data so callers ride out rolling restarts
+ * without spurious 401s. Revocation is always checked first — a revoked token is
+ * rejected and its grace entry evicted, even when the grace cache holds its data.
+ *
+ * <p>Last-used tracking: after a successful authentication the filter tells the worker
+ * ({@code POST /internal/tokens/{hash}/last-used}) to stamp {@code user_api_token.last_used_at},
+ * fire-and-forget, at most once per token per window on this replica (a bounded Caffeine cache
+ * keyed by token hash). The worker's UPDATE is itself conditional on the window, so replicas
+ * cannot stamp the same token twice in one window either.
  *
  * @since 1.0.0
  */
@@ -62,38 +68,49 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
     private static final String PAT_KEY_PREFIX = "pat:";
     private static final String REVOCATION_KEY_PREFIX = "pat:revoked:";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final Duration LAST_USED_TIMEOUT = Duration.ofSeconds(5);
 
     private final ReactiveStringRedisTemplate redisTemplate;
     private final WebClient workerClient;
     private final GatewayMetrics metrics;
-    private final Duration graceTtl;
     private final RedisRateLimiter redisRateLimiter;
+    private final long lastUsedWindowSeconds;
+    private final Cache<String, Boolean> lastUsedThrottle;
 
-    // Short-TTL in-memory fallback keyed by token hash. Populated on every
-    // successful PAT resolution (Redis hit or worker call) so requests can
-    // authenticate during worker outages without hitting Redis-only callers
-    // with spurious 401s. Revocation is always checked before this cache is
-    // ever consulted, so a revoked token cannot ride through stale fallback data.
-    private final ConcurrentHashMap<String, CachedPat> graceCache = new ConcurrentHashMap<>();
+    // In-memory fallback keyed by token hash, holding the PAT JSON. Written only once
+    // authenticateWithPat has accepted the token, so expired, unparseable and cross-tenant
+    // tokens never enter it. Bounded in size and expiring a fixed time after the write,
+    // so neither a flood of distinct tokens nor a long worker outage keeps data alive.
+    // Revocation is always checked before this cache is consulted, and a revoked hit
+    // evicts the entry.
+    private final Cache<String, String> graceCache;
 
-    private record CachedPat(String json, Instant cachedAt) {
-        boolean isExpired(Duration ttl) {
-            return cachedAt.plus(ttl).isBefore(Instant.now());
-        }
-    }
+    /** PAT JSON plus whether it came from the grace cache (which must not re-arm its TTL). */
+    private record PatLookup(String json, boolean fromGraceCache) {}
 
     public PatAuthenticationFilter(
             ReactiveStringRedisTemplate redisTemplate,
             WebClient.Builder webClientBuilder,
             @Value("${kelta.gateway.worker-service-url:http://kelta-worker:80}") String workerServiceUrl,
             @Value("${kelta.gateway.pat-grace-ttl-seconds:300}") int graceTtlSeconds,
+            @Value("${kelta.gateway.pat-grace-max-entries:10000}") long graceMaxEntries,
             GatewayMetrics metrics,
-            RedisRateLimiter redisRateLimiter) {
+            RedisRateLimiter redisRateLimiter,
+            @Value("${kelta.gateway.pat-last-used.window-seconds:300}") long lastUsedWindowSeconds,
+            @Value("${kelta.gateway.pat-last-used.max-tokens:10000}") long lastUsedMaxTokens) {
         this.redisTemplate = redisTemplate;
         this.workerClient = webClientBuilder.baseUrl(workerServiceUrl).build();
-        this.graceTtl = Duration.ofSeconds(graceTtlSeconds);
+        this.graceCache = Caffeine.newBuilder()
+                .maximumSize(graceMaxEntries)
+                .expireAfterWrite(Duration.ofSeconds(graceTtlSeconds))
+                .build();
         this.metrics = metrics;
         this.redisRateLimiter = redisRateLimiter;
+        this.lastUsedWindowSeconds = lastUsedWindowSeconds;
+        this.lastUsedThrottle = Caffeine.newBuilder()
+                .maximumSize(lastUsedMaxTokens)
+                .expireAfterWrite(Duration.ofSeconds(lastUsedWindowSeconds))
+                .build();
     }
 
     @Override
@@ -124,6 +141,7 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
                 .hasElement()
                 .flatMap(isRevoked -> {
                     if (Boolean.TRUE.equals(isRevoked)) {
+                        graceCache.invalidate(tokenHash);
                         log.warn("Revoked PAT used for path: {}", path);
                         metrics.recordAuthFailure(tenantSlug, "revoked_pat");
                         return unauthorized(exchange, "Token has been revoked");
@@ -138,11 +156,10 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
                     // which made the metric useless for spotting real ones. (The bogus 401 that
                     // followed was swallowed only because the response was already committed.)
                     return redisTemplate.opsForValue().get(PAT_KEY_PREFIX + tokenHash)
+                            .map(patJson -> new PatLookup(patJson, false))
                             .switchIfEmpty(fetchFromWorker(tokenHash))
-                            .doOnNext(patJson ->
-                                    graceCache.put(tokenHash, new CachedPat(patJson, Instant.now())))
-                            .flatMap(patJson ->
-                                    authenticateWithPat(patJson, exchange, chain, path, tenantSlug, tokenHash)
+                            .flatMap(lookup ->
+                                    authenticateWithPat(lookup, exchange, chain, path, tenantSlug, tokenHash)
                                             .thenReturn(Boolean.TRUE))
                             .defaultIfEmpty(Boolean.FALSE)
                             .flatMap(recognized -> {
@@ -165,11 +182,12 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
      * callers ride out a brief worker outage without receiving spurious 401s for valid tokens
      * that were successfully validated within the grace window.
      */
-    private Mono<String> fetchFromWorker(String tokenHash) {
+    private Mono<PatLookup> fetchFromWorker(String tokenHash) {
         return workerClient.get()
                 .uri("/api/me/tokens/validate/{hash}", tokenHash)
                 .retrieve()
                 .bodyToMono(String.class)
+                .map(patJson -> new PatLookup(patJson, false))
                 .onErrorResume(e -> {
                     if (e instanceof WebClientResponseException.NotFound) {
                         log.debug("Worker does not recognise this PAT hash");
@@ -177,19 +195,20 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
                         log.warn("Worker PAT validation is failing — PATs missing from the Redis "
                                 + "cache will be rejected as invalid until it recovers: {}",
                                 e.toString());
-                        CachedPat cached = graceCache.get(tokenHash);
-                        if (cached != null && !cached.isExpired(graceTtl)) {
+                        String cached = graceCache.getIfPresent(tokenHash);
+                        if (cached != null) {
                             log.debug("Serving PAT from grace cache during worker outage");
-                            return Mono.just(cached.json());
+                            return Mono.just(new PatLookup(cached, true));
                         }
                     }
                     return Mono.empty();
                 });
     }
 
-    private Mono<Void> authenticateWithPat(String patJson, ServerWebExchange exchange,
+    private Mono<Void> authenticateWithPat(PatLookup lookup, ServerWebExchange exchange,
                                             GatewayFilterChain chain, String path, String tenantSlug,
                                             String tokenHash) {
+        String patJson = lookup.json();
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> patData = OBJECT_MAPPER.readValue(patJson, Map.class);
@@ -243,16 +262,40 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
                     .build();
             mutatedExchange.getAttributes().put(PRINCIPAL_ATTRIBUTE, principal);
 
+            if (!lookup.fromGraceCache()) {
+                graceCache.put(tokenHash, patJson);
+            }
             log.debug("PAT authenticated user {} for path: {}", email, path);
             // Fire-and-forget, mirroring RateLimitFilter's incrementDailyCounter — must
             // not delay or fail the request if Redis is briefly unavailable.
             redisRateLimiter.incrementPatUsageCounter(tokenHash).subscribe();
+            recordLastUsed(tokenHash);
             return chain.filter(mutatedExchange);
         } catch (JacksonException e) {
             log.error("Failed to parse PAT data", e);
             metrics.recordAuthFailure(tenantSlug, "pat_parse_error");
             return unauthorized(exchange, "Authentication failed");
         }
+    }
+
+    /**
+     * Fire-and-forget: subscribed off the request chain, so a slow or failing worker never
+     * delays or fails the request. A failed call is not retried until the window expires.
+     */
+    private void recordLastUsed(String tokenHash) {
+        if (lastUsedThrottle.asMap().putIfAbsent(tokenHash, Boolean.TRUE) != null) {
+            return;
+        }
+        workerClient.post()
+                .uri(uri -> uri.path("/internal/tokens/{hash}/last-used")
+                        .queryParam("windowSeconds", lastUsedWindowSeconds)
+                        .build(tokenHash))
+                .retrieve()
+                .toBodilessEntity()
+                .timeout(LAST_USED_TIMEOUT)
+                .subscribe(
+                        response -> { },
+                        e -> log.warn("Failed to record PAT last-used time: {}", e.toString()));
     }
 
     private Mono<Void> unauthorized(ServerWebExchange exchange, String message) {
@@ -289,6 +332,10 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("SHA-256 not available", e);
         }
+    }
+
+    Cache<String, String> graceCache() {
+        return graceCache;
     }
 
     @Override

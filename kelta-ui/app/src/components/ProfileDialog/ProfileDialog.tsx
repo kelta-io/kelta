@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { useApi } from '@/context/ApiContext'
 import { useI18n, type SupportedLocale } from '@/context/I18nContext'
 
-export interface MyProfileAttributes {
+interface MyProfileAttributes {
   email: string | null
   firstName: string | null
   lastName: string | null
@@ -41,8 +41,7 @@ export interface ProfileDialogProps {
 const PROFILE_URL = '/api/me/profile'
 const MAX_NAME_LENGTH = 100
 
-// eslint-disable-next-line react-refresh/only-export-components
-export const MY_PROFILE_QUERY_KEY = ['my-profile'] as const
+const MY_PROFILE_QUERY_KEY = ['my-profile'] as const
 
 function timeZones(current: string): string[] {
   const zones =

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { RegisteredCommand } from '../registry/types.js';
+import { AUTHORING_DOCS } from '../docsgen/authoringDocs.js';
 import { docsCommands } from './docs.js';
 
 const def = docsCommands[0] as RegisteredCommand;
@@ -40,6 +41,12 @@ describe('kelta docs', () => {
     });
   });
 
+  it('`kelta docs packages` prints the metadata-packages topic', async () => {
+    const result = await run('packages');
+    expect(result.text).toBe(AUTHORING_DOCS.packages);
+    expect(result.text).toContain('# Authoring Metadata Packages');
+  });
+
   it('serves every documented topic', async () => {
     for (const topic of [
       'agent',
@@ -49,6 +56,7 @@ describe('kelta docs', () => {
       'dashboards',
       'ui-pages',
       'ui-menus',
+      'packages',
     ]) {
       const result = await run(topic);
       expect(result.text?.length ?? 0).toBeGreaterThan(0);

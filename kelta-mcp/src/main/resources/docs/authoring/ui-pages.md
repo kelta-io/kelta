@@ -16,7 +16,7 @@ they only take effect nested under `config`.
 
 ## `config` schema
 
-```json
+```jsonc
 {
   "schemaVersion": 2,
   "components": [ /* PageComponent tree, see below */ ],

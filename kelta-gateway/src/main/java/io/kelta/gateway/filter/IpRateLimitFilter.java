@@ -68,6 +68,13 @@ public class IpRateLimitFilter implements GlobalFilter, Ordered {
      * {@code /api/modules/webhooks} carries the same shape of traffic for
      * runtime-installed modules and gets the same budget.
      *
+     * <p>{@code /api/webhooks} covers unauthenticated flow webhooks
+     * ({@code POST /api/webhooks/{flowId}}), where each call starts a flow run; it
+     * gets the module-webhook budget. The bucket key is prefix + IP, so every flow
+     * webhook called from one IP shares that one budget. Longest-prefix matching
+     * keeps the inbound-mail ({@code /api/webhooks/mail}) and SES notification
+     * ({@code /api/webhooks/ses}) endpoints on their own, more generous buckets.
+     *
      * <p><b>The portal public paths are deliberately NOT here.</b> {@code /portal/**}
      * lives on kelta-auth, which has its own ingress and does not transit the
      * gateway — an entry for {@code /portal/api/signup} in this map would never
@@ -75,7 +82,8 @@ public class IpRateLimitFilter implements GlobalFilter, Ordered {
      * budgets are enforced by kelta-auth's own {@code PortalPublicRateLimitFilter}.
      */
     static final String DEFAULT_IP_PATHS =
-            "/actuator/health=100,/api/modules/webhooks=300,/api/webhooks/mail=600";
+            "/actuator/health=100,/api/modules/webhooks=300,/api/webhooks=300,"
+                    + "/api/webhooks/mail=600,/api/webhooks/ses=600";
 
     /** path prefix -> requests permitted per window, longest prefix first. */
     private final Map<String, Integer> pathBudgets;

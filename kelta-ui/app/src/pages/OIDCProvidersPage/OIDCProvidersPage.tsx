@@ -565,5 +565,3 @@ export function OIDCProvidersPage({
     </AdminCrudPage>
   )
 }
-
-export default OIDCProvidersPage

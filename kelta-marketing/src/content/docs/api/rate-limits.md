@@ -9,7 +9,7 @@ order: 50
 
 Every authenticated request counts against the tenant's `apiCallsPerDay` governor limit — one shared budget for
 all users, tokens and integrations of the tenant, reset daily. Past it, the gateway answers
-`429 RATE_LIMIT_EXCEEDED` with a `Retry-After` header. Current usage:
+`429 RATE_LIMIT_EXCEEDED` with a `Retry-After` header (see [Handling 429](#handling-429)). Current usage:
 
 ```http
 GET /api/governor-limits     # apiCallsUsed / apiCallsLimit, plus the other quotas
@@ -46,6 +46,41 @@ with it, refused or not. It is a usage readout, not a limit.
 | Flow `QUERY_RECORDS` `pageSize` / `SQL_QUERY` `maxRows` | 200 default / 1000 default, 10 000 max |
 
 ## Handling 429
+
+A rate-limited request gets the standard [error envelope](/docs/api/errors/):
+
+```http
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+Retry-After: 42
+X-RateLimit-Limit: 69
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1792828800
+```
+
+```json
+{
+  "errors": [
+    {
+      "status": "429",
+      "code": "RATE_LIMIT_EXCEEDED",
+      "title": "RATE_LIMIT_EXCEEDED",
+      "detail": "Rate limit exceeded. Retry after 42 seconds.",
+      "meta": { "requestId": "3f2b9c1e-…" }
+    }
+  ]
+}
+```
+
+| Header | Meaning |
+|---|---|
+| `Retry-After` | seconds until the window resets |
+| `X-RateLimit-Limit` | requests allowed in the current window |
+| `X-RateLimit-Remaining` | `0` on a 429; set on every allowed request too |
+| `X-RateLimit-Reset` | Unix time (seconds) the window resets |
+
+The per-user share and the tenant quota answer with the same body. `meta.requestId` is the request's
+`X-Correlation-ID`. The CLI exits `5` and prints a hint to wait `Retry-After` seconds.
 
 Honour `Retry-After`. Prefer fewer, larger requests: page at 200, use `include` instead of N+1 fetches, batch
 writes through `/api/operations`, and subscribe to realtime events instead of polling.

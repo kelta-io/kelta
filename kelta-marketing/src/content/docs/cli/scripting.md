@@ -18,8 +18,8 @@ order: 50
 
 On failure the CLI prints one JSON line on stderr:
 
-```json
-{"error":{"code":"VALIDATION_FAILED","status":400,"detail":"…","source":{"pointer":"/data/attributes/name"},"meta":{"requestId":"…"}},"errors":[…]}
+```jsonc
+{"error":{"code":"VALIDATION_FAILED","status":400,"detail":"…","source":{"pointer":"/data/attributes/name"},"meta":{"requestId":"…"}},"errors":[/* … */]}
 ```
 
 `error` is the first entry flattened for convenience; `errors` is the full JSON:API array. Branch on `code`.
@@ -28,10 +28,18 @@ On failure the CLI prints one JSON line on stderr:
 |---|---|
 | `0` | success |
 | `1` | API error (4xx/5xx other than the below) |
-| `2` | usage error, or a destructive command without `--yes` off-TTY (`CONFIRMATION_REQUIRED`) |
+| `2` | usage error (`INVALID_ARGUMENTS`), or a destructive command without `--yes` off-TTY (`CONFIRMATION_REQUIRED`) |
 | `3` | authentication required or failed |
 | `4` | not found |
 | `5` | conflict or rate limit |
+
+Argument errors use the same envelope. A missing required argument, an unknown option, an unknown command or an input that fails validation returns `INVALID_ARGUMENTS` and exit `2`; the `detail` is the parser's message, including any "Did you mean …?" suggestion:
+
+```jsonc
+{"error":{"code":"INVALID_ARGUMENTS","detail":"unknown command 'recrods'\n(Did you mean records?)"}}
+```
+
+On a terminal, the same failure prints as `Error [INVALID_ARGUMENTS]: unknown option '--colour'`. `--help` and `--version` exit `0`.
 
 ## Destructive commands
 
@@ -41,11 +49,12 @@ requires `--yes` otherwise. `kelta manifest` marks these `"dangerous": true`.
 ## Query grammar for list commands
 
 ```bash
+# --filter is field[.op]=value, repeatable, ANDed; --all instead of --page/--size (client cap 10 000 rows)
 kelta records list invoices \
-  --filter status=open --filter amount.gte=100 \   # field[.op]=value, repeatable, ANDed
+  --filter status=open --filter amount.gte=100 \
   --sort -createdAt,number \
   --fields number,amount --include customer \
-  --page 1 --size 200                              # or --all (client cap 10 000 rows)
+  --page 1 --size 200
 ```
 
 Operators: `eq neq gt gte lt lte isnull contains starts ends icontains istarts iends ieq in` (`any` = `in`).

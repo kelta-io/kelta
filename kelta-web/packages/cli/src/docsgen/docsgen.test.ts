@@ -36,6 +36,7 @@ describe('generated docs freshness', () => {
         'flows',
         'jsonapi',
         'list-views',
+        'packages',
         'page-layouts',
         'ui-menus',
         'ui-pages',

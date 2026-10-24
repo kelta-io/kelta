@@ -31,7 +31,8 @@ import java.util.stream.Collectors;
  *
  * <p>This is a second line behind Postgres RLS (which is a no-op for superuser DB roles — local
  * docker-compose, the test harness); user collections are scoped by RLS alone. It reads the
- * header rather than {@code TenantContext}, exactly as the router always has.
+ * header rather than {@code TenantContext}, exactly as the router always has; the static
+ * {@link #injectTenantId} takes the tenant id from its caller.
  */
 final class RecordTenantScope {
 
@@ -248,22 +249,40 @@ final class RecordTenantScope {
     }
 
     /**
-     * Injects tenant ID into record data for tenant-scoped system collections, unless the caller
-     * already supplied one.
+     * Injects {@code tenantId} into record data for tenant-scoped system collections, unless the
+     * caller already supplied one. A no-op for user collections, non-tenant-scoped system
+     * collections and a blank {@code tenantId} (an unbound platform path).
+     *
+     * <p>Takes the tenant id rather than the request so every create path shares it: the router
+     * passes the gateway-forwarded {@code X-Tenant-ID}, {@link AtomicOperationExecutor} the bound
+     * {@code TenantContext}. A request-origin stamp such as geo could take the same shape.
      *
      * @param data the record data
      * @param definition the collection definition
-     * @param request the HTTP servlet request (used to extract tenant ID)
+     * @param tenantId the request's tenant id, or null/blank when none is bound
      */
-    void injectTenantId(Map<String, Object> data, CollectionDefinition definition,
-                        HttpServletRequest request) {
-        if (!definition.systemCollection() || !definition.tenantScoped()) {
+    static void injectTenantId(Map<String, Object> data, CollectionDefinition definition, String tenantId) {
+        if (!stampsTenantId(definition, tenantId)) {
             return;
         }
+        data.putIfAbsent("tenantId", tenantId);
+    }
 
-        String tenantId = request.getHeader("X-Tenant-ID");
-        if (tenantId != null && !tenantId.isBlank() && !data.containsKey("tenantId")) {
-            data.put("tenantId", tenantId);
+    /**
+     * The caller-supplied {@code tenantId} in {@code data} when it names a tenant other than
+     * {@code tenantId}, for a collection {@link #injectTenantId} stamps; empty otherwise.
+     */
+    static Optional<String> foreignTenantId(Map<String, Object> data, CollectionDefinition definition,
+                                            String tenantId) {
+        if (!stampsTenantId(definition, tenantId) || data.get("tenantId") == null) {
+            return Optional.empty();
         }
+        String supplied = String.valueOf(data.get("tenantId"));
+        return tenantId.equals(supplied) ? Optional.empty() : Optional.of(supplied);
+    }
+
+    private static boolean stampsTenantId(CollectionDefinition definition, String tenantId) {
+        return definition.systemCollection() && definition.tenantScoped()
+                && tenantId != null && !tenantId.isBlank();
     }
 }

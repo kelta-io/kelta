@@ -4,9 +4,9 @@
 # =============================================================================
 # Stage 1: Install dependencies and build
 # =============================================================================
-# Node 20 (not 18, which is EOL): vite-plugin-pwa's Workbox needs the Web Crypto
-# API as a process global — Node 18 doesn't expose it, so the service-worker
-# generation step fails with "crypto is not defined".
+# Node 24 (LTS), the same major as CI's NODE_VERSION. Never below 20: vite-plugin-pwa's
+# Workbox needs the Web Crypto API as a process global — Node 18 doesn't expose it, so
+# the service-worker generation step fails with "crypto is not defined".
 #
 # Base-image registry is a build arg, as in the services' Dockerfile.jvm: the default is
 # the homelab pull-through cache CI and production use; the release workflow
@@ -14,7 +14,7 @@
 # must not depend on the homelab.
 ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
 
-FROM ${BASE_REGISTRY}/node:20-alpine AS builder
+FROM ${BASE_REGISTRY}/node:24.22-alpine3.24 AS builder
 
 WORKDIR /app
 
@@ -69,7 +69,7 @@ RUN npx vite build
 # =============================================================================
 # Stage 2: Runtime with Nginx
 # =============================================================================
-FROM ${BASE_REGISTRY}/nginx:1.25-alpine
+FROM ${BASE_REGISTRY}/nginx:1.30-alpine3.24
 
 LABEL org.opencontainers.image.title="Kelta Admin UI"
 LABEL org.opencontainers.image.description="Admin/Builder UI for Kelta Platform"

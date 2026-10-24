@@ -38,10 +38,14 @@ Setup → Integration → Modules (`MANAGE_CONNECTED_APPS`), or:
 
 ```http
 POST /api/modules/install-jar   (multipart: jar, manifest, signature?)
+POST /api/modules/install       (manifest only, no JAR)
 POST /api/modules/{id}/enable | /disable
 DELETE /api/modules/{id}
 GET  /api/modules, /api/modules/{id}/actions, /api/modules/{id}/health
+GET  /api/modules/{id}/provisioned-resources   (collections and fields it created or adopted)
 ```
+
+Install, enable, disable and uninstall check `CUSTOMIZE_APPLICATION` in the API.
 
 Installing **loads** the module immediately on every pod; enable/disable are bookkeeping around that. The JAR is
 stored in object storage with its SHA-256 checksum.
@@ -52,7 +56,9 @@ Set `KELTA_MODULES_SIGNING_REQUIRED=true` in production: a module runs arbitrary
 signature is the trust boundary.
 
 - Trust anchors are **per tenant**: `POST /api/modules/signing-keys` (`MANAGE_CREDENTIALS`) registers a public key;
-  several keys may be active so rotation is additive; keys can be retired and reactivated.
+  several keys may be active so rotation is additive; keys can be retired and reactivated
+  (`POST /api/modules/signing-keys/{id}/retire`, `/activate`), and a retired key deleted
+  (`DELETE /api/modules/signing-keys/{id}`). `GET /api/modules/signing-keys` lists them.
 - Algorithms: Ed25519 (default), SHA256withRSA, ECDSA.
 - The detached signature over the JAR bytes is verified at install and **re-verified on every load**, together
   with the checksum.

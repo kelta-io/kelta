@@ -1,3 +1,0 @@
-[
-  { "name": "All contacts", "columns": ["firstName", "lastName", "jobTitle", "account", "email", "phone"], "sort": "lastName", "default": true, "rowLimit": 25 }
-]

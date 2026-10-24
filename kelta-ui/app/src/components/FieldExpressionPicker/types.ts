@@ -21,7 +21,7 @@ export interface StaticNamespace {
 /**
  * Function category groupings used by the Functions tab.
  */
-export type FunctionCategory = 'logical' | 'text' | 'math' | 'date' | 'conversion'
+type FunctionCategory = 'logical' | 'text' | 'math' | 'date' | 'conversion'
 
 /**
  * Catalog entry describing a built-in formula function.

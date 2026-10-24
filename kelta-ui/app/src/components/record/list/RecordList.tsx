@@ -63,7 +63,7 @@ import {
   type RecordListModel,
 } from './useRecordListModel'
 
-export type RecordListVariant = ListShellVariant
+type RecordListVariant = ListShellVariant
 
 /** What chrome slots may read once the list has loaded. */
 export interface RecordListChromeContext {
@@ -72,9 +72,7 @@ export interface RecordListChromeContext {
 }
 
 /** Chrome rendered from the loaded list (a function receives {@link RecordListChromeContext}). */
-export type RecordListChromeSlot =
-  | React.ReactNode
-  | ((ctx: RecordListChromeContext) => React.ReactNode)
+type RecordListChromeSlot = React.ReactNode | ((ctx: RecordListChromeContext) => React.ReactNode)
 
 function renderSlot(
   slot: RecordListChromeSlot | undefined,

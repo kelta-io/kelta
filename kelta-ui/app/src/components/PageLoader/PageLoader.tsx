@@ -279,6 +279,3 @@ export function ContentLoader({
     </div>
   )
 }
-
-// Export default for convenience
-export default PageLoader

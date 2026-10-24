@@ -12,6 +12,13 @@ function auditCommand(name: string, summary: string, collection: string): Regist
       { flag: '--since <iso>', description: 'Only entries at/after this ISO timestamp' },
       { flag: '--size <n>', description: 'Page size (max 200)', default: '50' },
     ],
+    examples: [
+      { cmd: `kelta audit ${name} --size 20` },
+      {
+        cmd: `kelta audit ${name} --since 2026-10-01T00:00:00Z --output json`,
+        description: 'Entries since 1 October 2026 as JSON',
+      },
+    ],
     input: z.object({
       since: SINCE,
       size: z.coerce.number().int().positive().max(200).default(50),

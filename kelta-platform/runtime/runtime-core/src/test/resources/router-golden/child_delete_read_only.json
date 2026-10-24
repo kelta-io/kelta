@@ -1,6 +1,19 @@
 {
   "status" : 403,
-  "headers" : { },
-  "body" : null,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "READ_ONLY_COLLECTION",
+      "detail" : "Collection 'audit-logs' is read-only",
+      "meta" : {
+        "path" : "/api/accounts/acc-1/audit-logs/log-1",
+        "requestId" : "<requestId>"
+      },
+      "status" : "403",
+      "title" : "Forbidden"
+    } ]
+  },
   "calls" : [ ]
 }

@@ -658,5 +658,3 @@ export function EmailTemplatesPage({
     </AdminCrudPage>
   )
 }
-
-export default EmailTemplatesPage

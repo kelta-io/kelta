@@ -454,5 +454,3 @@ export function PicklistValuesEditor({
     </div>
   )
 }
-
-export default PicklistValuesEditor

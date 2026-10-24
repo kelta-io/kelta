@@ -232,25 +232,6 @@ public final class JsonApiRecordSerializer {
     }
 
     /**
-     * Builds the router's read-only-collection {@code 403} error document. Unlike
-     * {@code GlobalExceptionHandler}'s errors it has no {@code code} member and no
-     * {@code meta.requestId}; aligning it is a response change, tracked in {@code concerns.md}.
-     *
-     * @param message the error message
-     * @return a JSON:API error document
-     */
-    public static Map<String, Object> forbidden(String message) {
-        Map<String, Object> error = new java.util.HashMap<>();
-        error.put("status", "403");
-        error.put("title", "Forbidden");
-        error.put("detail", message);
-
-        Map<String, Object> response = new java.util.HashMap<>();
-        response.put("errors", List.of(error));
-        return response;
-    }
-
-    /**
      * Merges the caller-supplied relationships from a request into a response document so that
      * POST/PATCH responses always echo the relationships the caller asserted. Field-derived
      * relationships (REFERENCE/LOOKUP/MASTER_DETAIL columns picked up by {@link #resourceObject})

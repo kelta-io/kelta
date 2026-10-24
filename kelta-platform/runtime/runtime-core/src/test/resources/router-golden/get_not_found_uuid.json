@@ -1,7 +1,20 @@
 {
   "status" : 404,
-  "headers" : { },
-  "body" : null,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "NOT_FOUND",
+      "detail" : "Record '00000000-0000-0000-0000-000000000999' not found in collection 'accounts'",
+      "meta" : {
+        "path" : "/api/accounts/00000000-0000-0000-0000-000000000999",
+        "requestId" : "<requestId>"
+      },
+      "status" : "404",
+      "title" : "Not Found"
+    } ]
+  },
   "calls" : [ {
     "collection" : "accounts",
     "id" : "00000000-0000-0000-0000-000000000999",

@@ -620,5 +620,3 @@ export function TenantsPage({ testId = 'tenants-page' }: TenantsPageProps): Reac
     </AdminCrudPage>
   )
 }
-
-export default TenantsPage

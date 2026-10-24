@@ -247,5 +247,3 @@ export function ObjectPermissionMatrix({
     </div>
   )
 }
-
-export default ObjectPermissionMatrix

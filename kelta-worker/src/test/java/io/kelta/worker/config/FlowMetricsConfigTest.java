@@ -5,6 +5,9 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class FlowMetricsConfigTest {
@@ -183,5 +186,106 @@ class FlowMetricsConfigTest {
                 .counter();
         assertNotNull(failedCounter);
         assertEquals(1.0, failedCounter.count());
+    }
+
+    // ---------------------------------------------------------------------------
+    // flow_name resolution
+    // ---------------------------------------------------------------------------
+
+    @Test
+    void listenerTagsExecutionWithResolvedFlowName() {
+        metrics = new FlowMetricsConfig(meterRegistry, flowId -> Optional.of("Nightly Sync"));
+
+        metrics.onExecutionCompleted("flow-1", "COMPLETED", 100, false);
+
+        var counter = meterRegistry.find("kelta_flow_execution_total")
+                .tag("flow_id", "flow-1")
+                .tag("flow_name", "Nightly Sync")
+                .counter();
+        assertNotNull(counter);
+        assertEquals(1.0, counter.count());
+        assertNotNull(meterRegistry.find("kelta_flow_execution_duration_seconds")
+                .tag("flow_id", "flow-1")
+                .tag("flow_name", "Nightly Sync")
+                .timer());
+    }
+
+    @Test
+    void flowNameLookupIsCachedAcrossExecutions() {
+        AtomicInteger lookups = new AtomicInteger();
+        metrics = new FlowMetricsConfig(meterRegistry, flowId -> {
+            lookups.incrementAndGet();
+            return Optional.of("Nightly Sync");
+        });
+
+        for (int i = 0; i < 5; i++) {
+            metrics.onExecutionCompleted("flow-1", "COMPLETED", 100, false);
+        }
+
+        assertEquals(1, lookups.get());
+        assertEquals(5.0, meterRegistry.find("kelta_flow_execution_total")
+                .tag("flow_name", "Nightly Sync").counter().count());
+    }
+
+    @Test
+    void failedLookupFallsBackToUnknownWithoutThrowing() {
+        metrics = new FlowMetricsConfig(meterRegistry, flowId -> {
+            throw new IllegalStateException("database unavailable");
+        });
+
+        assertDoesNotThrow(() -> metrics.onExecutionCompleted("flow-1", "FAILED", 100, false));
+
+        var counter = meterRegistry.find("kelta_flow_execution_total")
+                .tag("flow_id", "flow-1")
+                .tag("flow_name", "unknown")
+                .tag("status", "FAILED")
+                .counter();
+        assertNotNull(counter);
+        assertEquals(1.0, counter.count());
+    }
+
+    @Test
+    void failedLookupIsNotCachedSoTheNextExecutionRetries() {
+        AtomicInteger lookups = new AtomicInteger();
+        metrics = new FlowMetricsConfig(meterRegistry, flowId -> {
+            if (lookups.incrementAndGet() == 1) {
+                throw new IllegalStateException("transient");
+            }
+            return Optional.of("Nightly Sync");
+        });
+
+        metrics.onExecutionCompleted("flow-1", "COMPLETED", 100, false);
+        metrics.onExecutionCompleted("flow-1", "COMPLETED", 100, false);
+
+        assertEquals(1.0, meterRegistry.find("kelta_flow_execution_total")
+                .tag("flow_name", "unknown").counter().count());
+        assertEquals(1.0, meterRegistry.find("kelta_flow_execution_total")
+                .tag("flow_name", "Nightly Sync").counter().count());
+    }
+
+    @Test
+    void missingFlowFallsBackToUnknown() {
+        metrics = new FlowMetricsConfig(meterRegistry, flowId -> Optional.empty());
+
+        metrics.onExecutionCompleted("flow-1", "COMPLETED", 100, false);
+
+        assertNotNull(meterRegistry.find("kelta_flow_execution_total")
+                .tag("flow_id", "flow-1")
+                .tag("flow_name", "unknown")
+                .counter());
+    }
+
+    @Test
+    void testExecutionsSkipTheNameLookup() {
+        AtomicInteger lookups = new AtomicInteger();
+        metrics = new FlowMetricsConfig(meterRegistry, flowId -> {
+            lookups.incrementAndGet();
+            return Optional.of("Nightly Sync");
+        });
+
+        metrics.onExecutionCompleted("flow-1", "COMPLETED", 100, true);
+
+        assertEquals(0, lookups.get());
+        assertNull(meterRegistry.find("kelta_flow_execution_total").counter());
     }
 }

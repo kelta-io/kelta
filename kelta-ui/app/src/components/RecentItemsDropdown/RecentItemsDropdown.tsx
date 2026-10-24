@@ -173,5 +173,3 @@ export function RecentItemsDropdown({
     </div>
   )
 }
-
-export default RecentItemsDropdown

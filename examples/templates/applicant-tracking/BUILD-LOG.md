@@ -198,42 +198,44 @@ MCP calls than the checked-in baseline. No model runs in CI: the build's calls a
 
 | File | What it is |
 |------|------------|
-| `mcp-replay/calls.json` | The build's tool calls in the order of the by-step table above, every argument spelled out. Generated: never edit it by hand |
+| `mcp-replay/calls.json` | The build's steps in the order of the by-step table above, on the hosted tools that do each in fewest calls, every argument spelled out. Generated: never edit it by hand |
 | `mcp-replay/generate.mjs` | Writes `calls.json` from `metadata.json`, `list-views/`, `dashboards/` and `seeds/`, so the replay builds what `install.sh` installs |
-| `mcp-replay/baseline.txt` | The `tools/call` count the replay measures: **94** |
+| `mcp-replay/generate.test.ts` | Checks the fixture's invariants (`node --test examples/templates/applicant-tracking/mcp-replay/generate.test.ts`): baseline = call count ≤ 55, no `expectError`, no `cli_` tool, one `apply_collection` per collection, every view on `apply_listview`, every seed record written |
+| `mcp-replay/baseline.txt` | The `tools/call` count the replay measures: **50** |
 | `ci/mcp-replay.sh` | Creates a fresh tenant and its PAT, replays `calls.json` through `kelta mcp serve --source remote --mcp-url http://kelta-mcp:8080 --toolset all` over stdio, counts every `tools/call` (retries included), then checks the four collections and their seed counts |
 | `ci/mcp-replay-compare.sh` | Fails when `count > baseline * 1.2` |
 
-**Why 94 and not 101.** The replay counts `tools/call` requests only, and it can serve only what
-the hosted kelta-mcp serves:
+**Why 50 and not 101.** The replay keeps the build's steps but not its calls: each step runs on
+the hosted kelta-mcp tool that does it in fewest calls, and the build's 5 error calls are not
+reproduced (the fixture has no `expectError`).
 
-- the 2 `tools/list` requests of the discovery step are not tool calls (the replay lists once,
-  to check that every tool it calls is there, and does not count it);
-- 5 calls were local CLI tools of the bridge (`cli_dashboards_validate` ×2,
-  `cli_dashboards_data` ×2, `cli_metadata_export`), which `--source remote` does not serve and
-  kelta-mcp has no equivalent of, so they are not replayed;
-- the 3 `cli_dashboards_list` calls are replayed as `query_collection` on `dashboards`, which
-  reads the same rows.
+| Step | Build | Replay | Replay tools |
+|------|------:|-------:|--------------|
+| Discovery and state check | 7 | 5 | `list_collections` ×2, `list_picklists`, `list_flows`, `query_collection` on `dashboards` (the 2 `tools/list` are not tool calls; `cli_dashboards_list` is read as `query_collection`) |
+| Collections, picklist fields and values, display fields | 51 | 4 | `apply_collection` per collection, with its fields, each picklist field's values and the display field inline |
+| Page layouts | 5 | 4 | `apply_layout` (the rejected `Job opening` call, error 5, goes) |
+| Flow | 1 | 1 | `create_flow` |
+| List views | 9 | 8 | `apply_listview`, the kanban board with `viewType`/`typeConfig` (error 6 goes) |
+| Dashboard | 1 | 1 | `apply_dashboard` |
+| Seed records | 4 | 4 | `bulk_apply` per collection |
+| Flow test | 3 | 3 | `update_record` ×2, `query_collection` |
+| Dashboard check | 2 | 2 | `validate_dashboard`, `dashboard_data` |
+| Export | 1 | 1 | `export_metadata` with `collections` |
+| Sandbox 2 state check | 4 | 4 | `list_collections`, `list_flows`, `query_collection` on `dashboards`, `list_picklists` |
+| Sandbox 2 verification | 13 | 13 | `query_collection` ×7, `get_collection_schema`, `update_record`, `get_record`, `query_collection` on `dashboards`, `validate_dashboard`, `dashboard_data` |
+| **Total** | **101** | **50** | |
 
-101 − 2 − 5 = 94. Everything else is replayed call for call, including the 5 calls that
-returned an error (marked `expectError` with the error's number from "Errors hit"). Error 1 was a
-partial success and is not reproduced: `create_collection` is sent without the picklist fields,
-which follow as `create_record` on `fields` as they did in the build. The failed `bulk_apply`
-batches (errors 2 and 3) and the duplicate picklist value (error 4) are sent after the rows they
-repeat, so they fail on `uk_field_collection_name` / `uq_picklist_value` even once atomic
-operations accept system collections. Sandbox 2's checks run in the same tenant; its
-verification moves Lena Vasquez-Hart to Hired instead of Rafael Duarte, who is already Hired by
-then.
+Sandbox 2's checks run in the same tenant; its verification moves Lena Vasquez-Hart to Hired
+instead of Rafael Duarte, who is already Hired by then.
 
 **Ids.** The fixture holds no id. A call's `save` keeps a value from its result (a jq expression
 on the result's JSON text), and an argument that is exactly `"{{name}}"` or `"{{name:key}}"` is
-replaced by it: the collection ids come from `update_collection`, the picklist field ids from
-`create_record`, and the seed references from the parent's `bulk_apply` result, keyed by the
+replaced by it: the seed references come from the parent's `bulk_apply` result, keyed by the
 natural key `install.sh` uses (`{{candidatesIds:ada.brightwater@example.com}}`).
 
 **Regenerating the fixture and the baseline.** After a change to the template files, or to the
 generator because the platform now needs fewer calls (for example once a follow-up below is
-fixed and a call or an `expectError` call can go):
+fixed and a call can go):
 
 1. `node examples/templates/applicant-tracking/mcp-replay/generate.mjs` rewrites `calls.json`;
    `--check` only verifies it is current.
@@ -249,7 +251,8 @@ fixed and a call or an `expectError` call can go):
    or with the CLI on `PATH` against a fresh tenant you can reach:
    `KELTA_URL=<gateway> KELTA_TENANT=<fresh slug> KELTA_TOKEN=klt_… MCP_URL=<kelta-mcp URL> MCP_REPLAY_COUNT_FILE=count.txt bash ci/mcp-replay.sh --in-container examples/templates/applicant-tracking`.
    It must pass and write the baseline to the count file.
-4. `bash ci/mcp-replay.test.sh` and `bash ci/mcp-replay-compare.test.sh`.
+4. `bash ci/mcp-replay.test.sh`, `bash ci/mcp-replay-compare.test.sh` and
+   `node --test examples/templates/applicant-tracking/mcp-replay/generate.test.ts`.
 
 Lower the baseline in the same change that makes the build cheaper, so the 20% margin is measured
 from the new number. Raising it needs a reason in the PR: that is the regression this job exists

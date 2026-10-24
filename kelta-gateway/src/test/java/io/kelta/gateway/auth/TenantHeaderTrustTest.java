@@ -90,8 +90,8 @@ class TenantHeaderTrustTest {
 
         tenantFilter = new TenantResolutionFilter(metrics, cacheManager);
         jwtFilter = new JwtAuthenticationFilter(jwtDecoder, principalExtractor, publicPathMatcher, metrics, cacheManager);
-        patFilter = new PatAuthenticationFilter(redis, WebClient.builder(), "http://localhost:1", 300,
-                metrics, rateLimiter);
+        patFilter = new PatAuthenticationFilter(redis, WebClient.builder(), "http://localhost:1", 300, 10_000,
+                metrics, rateLimiter, 300, 10000);
     }
 
     private void jwtWithTenantClaim(String tenantId) {
@@ -189,6 +189,19 @@ class TenantHeaderTrustTest {
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + JWT)
                     .header("X-Tenant-ID", TENANT_B)
                     .build()));
+        }
+
+        @Test
+        @DisplayName("a token without a tenant_id claim cannot use a URL-slug tenant either (PLT-707)")
+        void tokenWithoutTenantCannotUseUrlTenant() {
+            jwtWithTenantClaim(null);
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/accounts")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + JWT)
+                    .build());
+            urlSlugAlpha(exchange);
+
+            assertRejected(run(exchange));
+            verify(metrics).recordAuthFailure(any(), org.mockito.ArgumentMatchers.eq("missing_tenant_claim"));
         }
 
         @Test

@@ -19,11 +19,13 @@ npm install && npm run build          # builds formula, sdk, then components and
 ```ts
 import { KeltaClient } from '@kelta/sdk';
 
+interface Invoice { id: string; number: string; amount: number; status: string; dueDate: string }
+
 const client = new KeltaClient({
   baseUrl: 'https://api.example.com',
   tenantSlug: 'acme',                                     // becomes the /acme path prefix
-  tokenProvider: async () => process.env.KELTA_TOKEN!,   // a PAT, or a JWT from your OIDC session
-  retry: { maxRetries: 3 },
+  tokenProvider: { getToken: async () => process.env.KELTA_TOKEN ?? null },  // a PAT, or a JWT from your OIDC session
+  retry: { maxAttempts: 3 },
 });
 
 const invoices = client.resource<Invoice>('invoices');
@@ -33,9 +35,9 @@ const page = await invoices.list({
   size: 50,
   include: ['customer'],
 });
-const one = await invoices.get(id, { include: ['customer'] });
-await invoices.create({ number: 'INV-9', amount: 120 });
-await invoices.patch(id, { status: 'PAID' });
+const created = await invoices.create({ number: 'INV-9', amount: 120 });
+const one = await invoices.get(created.id, { include: ['customer'] });
+await invoices.patch(one.id, { status: 'PAID' });
 ```
 
 | Export | Role |

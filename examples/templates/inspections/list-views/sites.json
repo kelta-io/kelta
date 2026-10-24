@@ -1,3 +1,0 @@
-[
-  { "name": "All sites", "columns": ["name", "city", "country", "siteManager", "phone"], "sort": "name", "default": true, "rowLimit": 50 }
-]

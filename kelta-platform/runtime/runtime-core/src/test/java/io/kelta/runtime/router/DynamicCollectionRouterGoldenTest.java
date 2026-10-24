@@ -87,7 +87,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * puts in error {@code meta}; every id and timestamp is deterministic by construction.
  *
  * <p>These pin current behaviour, not intent — including divergences listed in
- * {@code concerns.md} → {@code DynamicCollectionRouter} internals. Changing one is a behaviour
+ * {@code concerns.md} → {@code DynamicCollectionRouter} internals. {@link RouterGoldenErrorShapeTest}
+ * checks every 4xx golden against the error-envelope rule. Changing one is a behaviour
  * change and must be a deliberate, reviewed golden update. Regenerate with
  * {@code -Drouter.golden.update=true} and review the diff.
  */
@@ -101,6 +102,8 @@ class DynamicCollectionRouterGoldenTest {
     private static final String SYS = SystemCollectionDefinitions.SYSTEM_TENANT_ID;
     private static final String USER_EMAIL = "alice@example.com";
     private static final String USER_UUID = "11111111-1111-1111-1111-111111111111";
+    /** {@code updatedAt} given to a seeded child row by tests that need it to carry an ETag. */
+    private static final String CHILD_VERSION = "2026-01-05T00:00:00Z";
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -723,10 +726,44 @@ class DynamicCollectionRouterGoldenTest {
                     """)));
         }
 
-        @Test void patchIgnoresIfMatch() throws Exception {
-            golden("child_patch_if_match_ignored", json(tenantA(patch("/api/accounts/acc-1/contacts/con-2"))
+        @Test void patchIfMatchMismatch() throws Exception {
+            engine.setVersion("contacts", "con-2", CHILD_VERSION);
+            golden("child_patch_if_match_mismatch", json(tenantA(patch("/api/accounts/acc-1/contacts/con-2"))
                     .header(HttpHeaders.IF_MATCH, "\"stale\""), """
                     {"data":{"attributes":{"firstName":"Bobby"}}}
+                    """));
+        }
+
+        @Test void putIfMatchMismatch() throws Exception {
+            engine.setVersion("contacts", "con-1", CHILD_VERSION);
+            golden("child_put_if_match_mismatch", json(tenantA(put("/api/accounts/acc-1/contacts/con-1"))
+                    .header(HttpHeaders.IF_MATCH, "\"stale\""), """
+                    {"data":{"attributes":{"firstName":"Stale"}}}
+                    """));
+        }
+
+        @Test void patchIfMatchMatches() throws Exception {
+            engine.setVersion("contacts", "con-2", CHILD_VERSION);
+            String etag = etagOf("/api/accounts/acc-1/contacts/con-2");
+            calls.clear();
+            golden("child_patch_if_match_match", json(tenantA(patch("/api/accounts/acc-1/contacts/con-2"))
+                    .header(HttpHeaders.IF_MATCH, etag), """
+                    {"data":{"attributes":{"firstName":"Locked"}}}
+                    """));
+        }
+
+        @Test void putIfMatchWildcard() throws Exception {
+            engine.setVersion("contacts", "con-1", CHILD_VERSION);
+            golden("child_put_if_match_wildcard", json(tenantA(put("/api/accounts/acc-1/contacts/con-1"))
+                    .header(HttpHeaders.IF_MATCH, "*"), """
+                    {"data":{"attributes":{"firstName":"Any"}}}
+                    """));
+        }
+
+        @Test void patchWithoutIfMatchOnVersionedChild() throws Exception {
+            engine.setVersion("contacts", "con-2", CHILD_VERSION);
+            golden("child_patch_no_if_match", json(tenantA(patch("/api/accounts/acc-1/contacts/con-2")), """
+                    {"data":{"attributes":{"firstName":"Unlocked"}}}
                     """));
         }
 
@@ -768,9 +805,18 @@ class DynamicCollectionRouterGoldenTest {
             golden("child_delete", tenantA(delete("/api/accounts/acc-1/contacts/con-2")));
         }
 
-        @Test void deleteIgnoresIfMatch() throws Exception {
-            golden("child_delete_if_match_ignored", tenantA(delete("/api/accounts/acc-1/contacts/con-1"))
+        @Test void deleteIfMatchMismatch() throws Exception {
+            engine.setVersion("contacts", "con-1", CHILD_VERSION);
+            golden("child_delete_if_match_mismatch", tenantA(delete("/api/accounts/acc-1/contacts/con-1"))
                     .header(HttpHeaders.IF_MATCH, "\"stale\""));
+        }
+
+        @Test void deleteIfMatchMatches() throws Exception {
+            engine.setVersion("contacts", "con-1", CHILD_VERSION);
+            String etag = etagOf("/api/accounts/acc-1/contacts/con-1");
+            calls.clear();
+            golden("child_delete_if_match_match", tenantA(delete("/api/accounts/acc-1/contacts/con-1"))
+                    .header(HttpHeaders.IF_MATCH, etag));
         }
 
         @Test void deleteNotFound() throws Exception {
@@ -799,6 +845,31 @@ class DynamicCollectionRouterGoldenTest {
         }
     }
 
+    // ==================== ETag ====================
+
+    /** Every get-by-id route sends the record's version as {@code ETag}, equal to {@link RecordETag#of}. */
+    @Nested
+    @DisplayName("ETag on get-by-id")
+    class ETagGoldens {
+        @Test void uncachedGet() throws Exception {
+            String etag = golden("etag_get_uncached", tenantA(get("/api/accounts/acc-2")));
+            assertEquals(RecordETag.of(engine.stored("accounts", "acc-2")), etag);
+        }
+
+        @Test void cachedSystemGet() throws Exception {
+            mockMvc.perform(tenantA(get("/api/ui-menus/menu-2")));
+            calls.clear();
+            String etag = golden("etag_get_system_cached", tenantA(get("/api/ui-menus/menu-2")));
+            assertEquals(RecordETag.of(engine.stored("ui-menus", "menu-2")), etag);
+        }
+
+        @Test void childGet() throws Exception {
+            engine.setVersion("contacts", "con-1", CHILD_VERSION);
+            String etag = golden("etag_child_get", tenantA(get("/api/accounts/acc-1/contacts/con-1")));
+            assertEquals(RecordETag.of(engine.stored("contacts", "con-1")), etag);
+        }
+    }
+
     // ==================== Routing / bad input ====================
 
     @Nested
@@ -819,7 +890,8 @@ class DynamicCollectionRouterGoldenTest {
 
     // ==================== Golden machinery ====================
 
-    private void golden(String name, MockHttpServletRequestBuilder request) throws Exception {
+    /** Records (or checks) the golden {@code name} and returns the response's {@code ETag}. */
+    private String golden(String name, MockHttpServletRequestBuilder request) throws Exception {
         int callStart = calls.size();
         MockHttpServletResponse response = mockMvc.perform(request).andReturn().getResponse();
 
@@ -853,7 +925,7 @@ class DynamicCollectionRouterGoldenTest {
         if (UPDATE) {
             Files.createDirectories(GOLDEN_DIR);
             Files.writeString(file, actual, StandardCharsets.UTF_8);
-            return;
+            return response.getHeader(HttpHeaders.ETAG);
         }
         if (!Files.exists(file)) {
             fail("Missing golden " + file + " — run with -Drouter.golden.update=true and review it.\n" + actual);
@@ -866,6 +938,7 @@ class DynamicCollectionRouterGoldenTest {
             Files.writeString(actualDir.resolve(name + ".json"), actual, StandardCharsets.UTF_8);
         }
         assertEquals(expected, actual, "golden mismatch: " + name);
+        return response.getHeader(HttpHeaders.ETAG);
     }
 
     /** Replaces the random per-error {@code requestId} that GlobalExceptionHandler generates. */
@@ -939,6 +1012,15 @@ class DynamicCollectionRouterGoldenTest {
             for (Map<String, Object> r : rows) {
                 table.put((String) r.get("id"), r);
             }
+        }
+
+        /** Gives a seeded row an {@code updatedAt} version, so it has an ETag to lock against. */
+        void setVersion(String collection, String id, String updatedAt) {
+            tables.get(collection).get(id).put("updatedAt", updatedAt);
+        }
+
+        Map<String, Object> stored(String collection, String id) {
+            return tables.get(collection).get(id);
         }
 
         private LinkedHashMap<String, Map<String, Object>> table(CollectionDefinition def) {
@@ -1127,6 +1209,6 @@ class DynamicCollectionRouterGoldenTest {
         }
     }
 
-    private static final long EXPECTED_GOLDEN_COUNT = 106;
+    private static final long EXPECTED_GOLDEN_COUNT = 114;
 
 }

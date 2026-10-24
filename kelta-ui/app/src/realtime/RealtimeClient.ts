@@ -20,7 +20,7 @@ export interface RecordChangedEvent {
 }
 
 /** Chat events (telehealth slice 3) — ids/state only, never bodies. */
-export interface ChatMessageEvent {
+interface ChatMessageEvent {
   event: 'chat.message'
   conversationId: string
   messageId?: string
@@ -30,7 +30,7 @@ export interface ChatMessageEvent {
   timestamp?: string
 }
 
-export interface ChatConversationEvent {
+interface ChatConversationEvent {
   event: 'chat.conversation'
   conversationId: string
   status?: string
@@ -64,7 +64,7 @@ export interface RealtimeClientOptions {
 const MAX_RECONNECT_DELAY_MS = 30_000
 export const MAX_SUBSCRIPTIONS = 50
 /** Server cap (SubscriptionManager.MAX_CONVERSATIONS_PER_SESSION). */
-export const MAX_JOINED_CONVERSATIONS = 20
+const MAX_JOINED_CONVERSATIONS = 20
 
 export class RealtimeClient {
   private readonly options: Required<Pick<RealtimeClientOptions, 'urlFactory' | 'onEvent'>> &

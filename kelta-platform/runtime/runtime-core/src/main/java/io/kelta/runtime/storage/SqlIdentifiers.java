@@ -49,6 +49,22 @@ final class SqlIdentifiers {
     }
 
     /**
+     * Builds the index DDL for an owner-scoped collection's owner column, which every
+     * owner-scoped read filters on ({@link TenantScopePolicy#ownerScope}).
+     *
+     * @param definition    the collection; its {@code ownerField} must be set
+     * @param qualifiedName the schema-qualified table name
+     * @return a {@code CREATE INDEX IF NOT EXISTS idx_owner_<table>_<column> ...} statement
+     */
+    static String buildOwnerIndexStatement(CollectionDefinition definition, String qualifiedName) {
+        String column = resolveColumnName(definition, definition.ownerField());
+        String idxName = buildBoundedIdentifier(
+                "idx_owner_", identifierPart(getBaseTableName(definition)), sanitizeIdentifier(column));
+        return "CREATE INDEX IF NOT EXISTS " + idxName
+                + " ON " + qualifiedName + "(" + quoteIdentifier(column) + ")";
+    }
+
+    /**
      * The bind placeholder for a field's column, casting where PostgreSQL needs it: {@code ?::jsonb}
      * for JSON/ARRAY (JSONB columns), {@code ?::vector} for VECTOR (pgvector parses the text
      * literal), plain {@code ?} otherwise.

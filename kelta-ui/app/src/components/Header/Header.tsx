@@ -144,5 +144,3 @@ export function Header({ branding, user, onLogout }: HeaderProps): React.ReactEl
     </>
   )
 }
-
-export default Header

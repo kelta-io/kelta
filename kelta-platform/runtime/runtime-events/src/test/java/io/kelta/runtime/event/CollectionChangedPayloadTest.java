@@ -3,6 +3,7 @@ package io.kelta.runtime.event;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.List;
@@ -35,7 +36,7 @@ class CollectionChangedPayloadTest {
             assertEquals("contacts", payload.getName());
             assertEquals("Contacts", payload.getDisplayName());
             assertEquals("Contact collection", payload.getDescription());
-            assertTrue(payload.isActive());
+            assertEquals(Boolean.TRUE, payload.getActive());
             assertEquals(3, payload.getCurrentVersion());
             assertEquals(now, payload.getCreatedAt());
             assertEquals(now, payload.getUpdatedAt());
@@ -49,12 +50,59 @@ class CollectionChangedPayloadTest {
             assertNull(payload.getName());
             assertNull(payload.getDisplayName());
             assertNull(payload.getDescription());
-            assertFalse(payload.isActive());
+            assertNull(payload.getActive());
             assertNull(payload.getCurrentVersion());
             assertNull(payload.getFields());
             assertNull(payload.getCreatedAt());
             assertNull(payload.getUpdatedAt());
             assertNull(payload.getChangeType());
+        }
+    }
+
+    @Nested
+    @DisplayName("JSON active flag")
+    class ActiveJson {
+
+        private final ObjectMapper mapper = new ObjectMapper();
+
+        @Test
+        void missingActiveKeyDeserialisesToNull() {
+            var payload = mapper.readValue(
+                    "{\"id\":\"col-1\",\"name\":\"contacts\",\"changeType\":\"UPDATED\"}",
+                    CollectionChangedPayload.class);
+
+            assertNull(payload.getActive());
+        }
+
+        @Test
+        void explicitActiveFalseDeserialisesToFalse() {
+            var payload = mapper.readValue(
+                    "{\"id\":\"col-1\",\"active\":false,\"changeType\":\"UPDATED\"}",
+                    CollectionChangedPayload.class);
+
+            assertEquals(Boolean.FALSE, payload.getActive());
+        }
+
+        @Test
+        void nullActiveIsOmittedFromJson() {
+            var payload = new CollectionChangedPayload();
+            payload.setId("col-1");
+            payload.setChangeType(ChangeType.UPDATED);
+
+            var tree = mapper.readTree(mapper.writeValueAsString(payload));
+
+            assertFalse(tree.has("active"));
+        }
+
+        @Test
+        void setActiveIsSerialised() {
+            var payload = new CollectionChangedPayload();
+            payload.setActive(false);
+
+            var tree = mapper.readTree(mapper.writeValueAsString(payload));
+
+            assertTrue(tree.has("active"));
+            assertFalse(tree.get("active").asBoolean());
         }
     }
 
@@ -155,6 +203,18 @@ class CollectionChangedPayloadTest {
             p2.setId("col-1");
             p2.setName("contacts");
             p2.setChangeType(ChangeType.DELETED);
+
+            assertNotEquals(p1, p2);
+        }
+
+        @Test
+        void shouldNotBeEqualWhenActiveIsUnsetOnOneSide() {
+            var p1 = new CollectionChangedPayload();
+            p1.setId("col-1");
+            p1.setActive(false);
+
+            var p2 = new CollectionChangedPayload();
+            p2.setId("col-1");
 
             assertNotEquals(p1, p2);
         }

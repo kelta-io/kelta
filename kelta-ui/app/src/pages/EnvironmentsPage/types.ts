@@ -44,7 +44,7 @@ export interface CreatedEnvironment extends Environment {
   adminInitialPassword?: string
 }
 
-export type DiffAction = 'ADD' | 'MODIFY' | 'REMOVE'
+type DiffAction = 'ADD' | 'MODIFY' | 'REMOVE'
 
 export interface DiffChange {
   action: DiffAction

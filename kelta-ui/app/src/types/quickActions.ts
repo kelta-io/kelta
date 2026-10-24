@@ -92,7 +92,7 @@ export interface RunScriptConfig {
   parameters?: ScriptParameter[]
 }
 
-export interface ScriptParameter {
+interface ScriptParameter {
   name: string
   label: string
   type: 'string' | 'number' | 'boolean' | 'date'

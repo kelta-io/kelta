@@ -8,6 +8,8 @@ import io.kelta.runtime.storage.StorageAdapter;
 import io.kelta.runtime.validation.ValidationRuleDefinition;
 import io.kelta.runtime.validation.ValidationRuleRegistry;
 import io.kelta.worker.config.WorkerMetricsConfig;
+import io.kelta.worker.repository.PicklistValueRepository;
+import io.kelta.worker.repository.PicklistValueRepository.PicklistOption;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -115,6 +117,24 @@ public class CollectionLifecycleManager {
             SELECT slug FROM tenant WHERE id = ?
             """;
 
+    /** Types whose {@code min}/{@code max} constraints bound the value rather than the length. */
+    private static final Set<FieldType> NUMERIC_TYPES = EnumSet.of(
+            FieldType.INTEGER, FieldType.LONG, FieldType.DOUBLE, FieldType.CURRENCY, FieldType.PERCENT);
+
+    /** Text types whose {@code min}/{@code max} constraints bound the length. */
+    private static final Set<FieldType> LENGTH_TYPES = EnumSet.of(
+            FieldType.STRING, FieldType.TEXT, FieldType.RICH_TEXT, FieldType.EMAIL, FieldType.URL,
+            FieldType.PHONE, FieldType.EXTERNAL_ID);
+
+    /**
+     * The {@code field.constraints} keys mapped onto {@link ValidationRules} or enum values. Both
+     * dialects are stored: the field editor writes {@code min}/{@code max}/{@code pattern} (and
+     * {@code email}/{@code url}, which are not enforced), {@code MigrationFieldRepository} the
+     * runtime names plus {@code enumValues}.
+     */
+    private static final Set<String> SUPPORTED_CONSTRAINT_KEYS = Set.of(
+            "min", "max", "minLength", "maxLength", "minValue", "maxValue", "pattern", "enumValues");
+
     private final CollectionRegistry collectionRegistry;
     private final StorageAdapter storageAdapter;
     private final JdbcTemplate jdbcTemplate;
@@ -125,6 +145,9 @@ public class CollectionLifecycleManager {
 
     /** Optional validation rule registry for storing custom validation rules. */
     private ValidationRuleRegistry validationRuleRegistry;
+
+    /** Source of the active picklist values enforced as user-collection fields' enum values. */
+    private PicklistValueRepository picklistValueRepository;
 
     /**
      * Optional metrics config for updating initializing collection count.
@@ -162,6 +185,11 @@ public class CollectionLifecycleManager {
     @Autowired(required = false)
     public void setValidationRuleRegistry(ValidationRuleRegistry validationRuleRegistry) {
         this.validationRuleRegistry = validationRuleRegistry;
+    }
+
+    @Autowired(required = false)
+    public void setPicklistValueRepository(PicklistValueRepository picklistValueRepository) {
+        this.picklistValueRepository = picklistValueRepository;
     }
 
     @Autowired(required = false)
@@ -550,7 +578,8 @@ public class CollectionLifecycleManager {
                 .apiConfig(ApiConfig.allEnabled("/api/" + collectionName));
 
         // Parse fields from the database
-        List<FieldDefinition> fields = loadFieldsFromDb(collectionId);
+        List<FieldDefinition> fields = loadFieldsFromDb(
+                collectionId, collectionName, (String) data.get("tenant_id"));
         if (fields.isEmpty()) {
             fields.add(FieldDefinition.string("name"));
         }
@@ -638,11 +667,13 @@ public class CollectionLifecycleManager {
     /**
      * Loads field definitions from the database for a given collection.
      */
-    private List<FieldDefinition> loadFieldsFromDb(String collectionId) {
+    private List<FieldDefinition> loadFieldsFromDb(String collectionId, String collectionName, String tenantId) {
         List<FieldDefinition> fields = new ArrayList<>();
 
         List<Map<String, Object>> fieldRows = jdbcTemplate.queryForList(
                 SELECT_FIELDS_BY_COLLECTION, collectionId);
+        Map<String, List<PicklistOption>> picklistValues = loadActivePicklistValues(
+                fieldRows, collectionName, tenantId);
 
         for (Map<String, Object> row : fieldRows) {
             String fieldName = (String) row.get("name");
@@ -717,15 +748,169 @@ public class CollectionLifecycleManager {
             }
 
             Object parsedDefaultValue = parseJsonbValue(row.get("default_value"), fieldName, "default_value");
+            Map<String, Object> constraints = parseConstraints(row.get("constraints"), fieldName);
+            ValidationRules validationRules = toValidationRules(constraints, fieldName, fieldType);
+            List<String> enumValues = toEnumValues(picklistValues.get(fieldName), constraints);
 
             FieldDefinition fieldDef = new FieldDefinition(
                     fieldName, fieldType, !required, immutable, unique,
-                    parsedDefaultValue, null, null, refConfig, parsedFieldTypeConfig, columnName, trackHistory,
+                    parsedDefaultValue, validationRules, enumValues, refConfig, parsedFieldTypeConfig, columnName, trackHistory,
                     (String) row.get("description"), false, systemMaintained);
             fields.add(fieldDef);
         }
 
         return fields;
+    }
+
+    /**
+     * Active picklist values of the collection's fields, keyed by field name — one query for the
+     * whole collection, skipped when no field is a picklist. A lookup failure degrades to no enum
+     * enforcement rather than failing the load.
+     */
+    private Map<String, List<PicklistOption>> loadActivePicklistValues(
+            List<Map<String, Object>> fieldRows, String collectionName, String tenantId) {
+        if (picklistValueRepository == null || tenantId == null || tenantId.isBlank()
+                || fieldRows.stream().noneMatch(row -> isPicklistType((String) row.get("type")))) {
+            return Map.of();
+        }
+        try {
+            return picklistValueRepository.findActiveValuesByCollection(tenantId, collectionName);
+        } catch (Exception ex) {
+            log.warn("Failed to load picklist values for collection '{}': {}", collectionName, ex.getMessage());
+            return Map.of();
+        }
+    }
+
+    private static boolean isPicklistType(String typeStr) {
+        return typeStr != null
+                && ("picklist".equalsIgnoreCase(typeStr) || "multi_picklist".equalsIgnoreCase(typeStr));
+    }
+
+    /**
+     * Decodes the {@code constraints} JSONB column into a map. The field editor sends the object
+     * as a JSON string, which the {@code fields} JSON column stores as a JSONB string — so a
+     * decoded string is parsed once more.
+     */
+    private Map<String, Object> parseConstraints(Object raw, String fieldName) {
+        Object parsed = raw;
+        for (int decode = 0; decode < 2 && !(parsed instanceof Map); decode++) {
+            String text = parsed instanceof String s ? s
+                    : parsed != null && "org.postgresql.util.PGobject".equals(parsed.getClass().getName())
+                            ? parsed.toString() : null;
+            if (text == null || text.isBlank()) {
+                return Map.of();
+            }
+            try {
+                parsed = objectMapper.readValue(text, Object.class);
+            } catch (Exception ex) {
+                log.warn("Ignoring unparseable constraints for field '{}': {}", fieldName, ex.getMessage());
+                return Map.of();
+            }
+        }
+        if (parsed instanceof Map<?, ?> map) {
+            Map<String, Object> constraints = new LinkedHashMap<>();
+            map.forEach((key, value) -> constraints.put(String.valueOf(key), value));
+            return constraints;
+        }
+        return Map.of();
+    }
+
+    /**
+     * Maps stored constraints onto {@link ValidationRules}: {@code minLength}/{@code maxLength}/
+     * {@code minValue}/{@code maxValue}/{@code pattern} as named, and the field editor's
+     * {@code min}/{@code max} to the value bounds of a numeric field or the length bounds of a text
+     * field (other types, e.g. {@code DATE}, ignore them). An explicit runtime name wins over
+     * {@code min}/{@code max}. Unsupported keys (e.g.
+     * {@code email}, {@code url}) and malformed values are ignored with one WARN per field.
+     * Package-private for unit testing.
+     */
+    ValidationRules toValidationRules(Map<String, Object> constraints, String fieldName, FieldType fieldType) {
+        if (constraints.isEmpty()) {
+            return null;
+        }
+        List<String> ignored = new ArrayList<>();
+        for (String key : constraints.keySet()) {
+            if (!SUPPORTED_CONSTRAINT_KEYS.contains(key)) {
+                ignored.add(key);
+            }
+        }
+        Double minValue = toDouble(constraints, "minValue", ignored);
+        Double maxValue = toDouble(constraints, "maxValue", ignored);
+        Integer minLength = toInteger(constraints, "minLength", ignored);
+        Integer maxLength = toInteger(constraints, "maxLength", ignored);
+        if (NUMERIC_TYPES.contains(fieldType)) {
+            minValue = minValue != null ? minValue : toDouble(constraints, "min", ignored);
+            maxValue = maxValue != null ? maxValue : toDouble(constraints, "max", ignored);
+        } else if (LENGTH_TYPES.contains(fieldType)) {
+            minLength = minLength != null ? minLength : toInteger(constraints, "min", ignored);
+            maxLength = maxLength != null ? maxLength : toInteger(constraints, "max", ignored);
+        } else {
+            // e.g. a DATE range: the engine has no date bounds, so min/max are not enforced.
+            for (String key : List.of("min", "max")) {
+                if (constraints.containsKey(key)) {
+                    ignored.add(key);
+                }
+            }
+        }
+        String pattern = null;
+        Object rawPattern = constraints.get("pattern");
+        if (rawPattern instanceof String p && !p.isBlank()) {
+            pattern = p;
+        } else if (rawPattern != null) {
+            ignored.add("pattern");
+        }
+        if (!ignored.isEmpty()) {
+            log.warn("Field '{}': constraints {} are not enforced and were ignored", fieldName, ignored);
+        }
+        if (minValue == null && maxValue == null && minLength == null && maxLength == null && pattern == null) {
+            return null;
+        }
+        return new ValidationRules(minValue, maxValue, minLength, maxLength, pattern);
+    }
+
+    private static Double toDouble(Map<String, Object> constraints, String key, List<String> ignored) {
+        Object value = constraints.get(key);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Double.valueOf(text.trim());
+            } catch (NumberFormatException ex) {
+                // fall through to ignored
+            }
+        }
+        ignored.add(key);
+        return null;
+    }
+
+    private static Integer toInteger(Map<String, Object> constraints, String key, List<String> ignored) {
+        Double value = toDouble(constraints, key, ignored);
+        if (value == null) {
+            return null;
+        }
+        if (value < 0 || value != Math.floor(value) || value > Integer.MAX_VALUE) {
+            ignored.add(key);
+            return null;
+        }
+        return value.intValue();
+    }
+
+    /**
+     * The field's active picklist values (field-level or its global picklist); a field with none
+     * falls back to a stored {@code constraints.enumValues} list. {@code null} when neither exists.
+     */
+    private static List<String> toEnumValues(List<PicklistOption> options, Map<String, Object> constraints) {
+        if (options != null && !options.isEmpty()) {
+            return options.stream().map(PicklistOption::value).toList();
+        }
+        if (constraints.get("enumValues") instanceof List<?> stored && !stored.isEmpty()) {
+            return stored.stream().filter(Objects::nonNull).map(String::valueOf).toList();
+        }
+        return null;
     }
 
     /**

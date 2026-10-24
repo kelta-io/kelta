@@ -76,5 +76,3 @@ export function RecordConflictDialog({
     </AlertDialog>
   )
 }
-
-export default RecordConflictDialog

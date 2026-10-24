@@ -1,10 +1,17 @@
 # Kelta Web UI Dockerfile
 # Multi-stage build: Node.js build -> Nginx runtime
 
+# Base-image registry is a build arg. The DEFAULT is the homelab pull-through cache
+# that CI and production builds use (LAN speed, and no Docker Hub rate limits when
+# several images build in parallel) — builds that pass no args behave exactly as
+# before. Outside the homelab pass the public source:
+#   --build-arg BASE_REGISTRY=docker.io/library
+ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
+
 # =============================================================================
 # Stage 1: Install dependencies and build
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/node:18-alpine AS builder
+FROM ${BASE_REGISTRY}/node:24.22-alpine3.24 AS builder
 
 WORKDIR /app
 
@@ -26,7 +33,7 @@ RUN npm run build
 # =============================================================================
 # Stage 2: Runtime with Nginx
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/nginx:1.25-alpine AS runtime
+FROM ${BASE_REGISTRY}/nginx:1.30-alpine3.24 AS runtime
 
 LABEL org.opencontainers.image.title="Kelta Web UI"
 LABEL org.opencontainers.image.description="Admin UI for Kelta Platform"

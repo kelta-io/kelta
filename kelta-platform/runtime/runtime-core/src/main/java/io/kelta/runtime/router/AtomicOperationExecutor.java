@@ -2,6 +2,8 @@ package io.kelta.runtime.router;
 
 import io.kelta.jsonapi.AtomicOperation;
 import io.kelta.jsonapi.AtomicResult;
+import io.kelta.runtime.context.GeoStamp;
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
@@ -53,7 +55,10 @@ public class AtomicOperationExecutor {
     /**
      * Executes all operations sequentially, stamping {@code createdBy}/{@code updatedBy}
      * with {@code actingUserId} the way {@link DynamicCollectionRouter} does for a single
-     * write — overwriting any client-supplied value.
+     * write — overwriting any client-supplied value. An {@code add} on a tenant-scoped system
+     * collection is stamped with the bound {@code TenantContext} tenant, as the router stamps
+     * {@code X-Tenant-ID}; a client-supplied {@code tenantId} naming another tenant fails that
+     * operation.
      *
      * @param operations   the list of atomic operations to execute
      * @param actingUserId the caller's {@code platform_user} UUID, or null to stamp nothing
@@ -62,6 +67,22 @@ public class AtomicOperationExecutor {
      * @throws AtomicOperationException if any operation fails (caller should rollback)
      */
     public List<AtomicResult> execute(List<AtomicOperation> operations, String actingUserId) {
+        return execute(operations, actingUserId, Optional.empty());
+    }
+
+    /**
+     * As {@link #execute(List, String)}, also stamping {@code createdGeo}/{@code updatedGeo} on
+     * {@code captureGeo} collections from {@code geo} the way {@link DynamicCollectionRouter} does
+     * from the request's {@code X-Geo-*} headers — null when {@code geo} is empty.
+     *
+     * @param operations   the list of atomic operations to execute
+     * @param actingUserId the caller's {@code platform_user} UUID, or null to stamp nothing
+     * @param geo          the request-origin geolocation, or empty when the origin has none
+     * @return the list of results, one per operation
+     * @throws AtomicOperationException if any operation fails (caller should rollback)
+     */
+    public List<AtomicResult> execute(List<AtomicOperation> operations, String actingUserId,
+                                      Optional<GeoStamp> geo) {
         // Validate all operations first
         for (int i = 0; i < operations.size(); i++) {
             operations.get(i).validate(i);
@@ -73,7 +94,7 @@ public class AtomicOperationExecutor {
         for (int i = 0; i < operations.size(); i++) {
             AtomicOperation op = operations.get(i);
             try {
-                AtomicResult result = executeOne(op, i, lidMap, actingUserId);
+                AtomicResult result = executeOne(op, i, lidMap, actingUserId, geo);
                 results.add(result);
             } catch (AtomicOperationException e) {
                 throw e; // Already has operation index
@@ -86,17 +107,17 @@ public class AtomicOperationExecutor {
     }
 
     private AtomicResult executeOne(AtomicOperation op, int index, Map<String, String> lidMap,
-                                    String actingUserId) {
+                                    String actingUserId, Optional<GeoStamp> geo) {
         return switch (op.op()) {
-            case "add" -> executeAdd(op, index, lidMap, actingUserId);
-            case "update" -> executeUpdate(op, index, lidMap, actingUserId);
+            case "add" -> executeAdd(op, index, lidMap, actingUserId, geo);
+            case "update" -> executeUpdate(op, index, lidMap, actingUserId, geo);
             case "remove" -> executeRemove(op, index, lidMap);
             default -> throw new AtomicOperationException(index, op.op(), "Unknown operation: " + op.op());
         };
     }
 
     private AtomicResult executeAdd(AtomicOperation op, int index, Map<String, String> lidMap,
-                                    String actingUserId) {
+                                    String actingUserId, Optional<GeoStamp> geo) {
         String type = op.data().type();
         CollectionDefinition definition = resolveCollection(type, index);
 
@@ -111,6 +132,14 @@ public class AtomicOperationExecutor {
             attributes.put("createdBy", actingUserId);
             attributes.put("updatedBy", actingUserId);
         }
+        GeoStamping.stamp(attributes, definition, geo, true);
+
+        String tenantId = TenantContext.get();
+        RecordTenantScope.foreignTenantId(attributes, definition, tenantId).ifPresent(supplied -> {
+            throw new AtomicOperationException(index, "add",
+                    "tenantId '" + supplied + "' does not match the request's tenant for type " + type);
+        });
+        RecordTenantScope.injectTenantId(attributes, definition, tenantId);
 
         Map<String, Object> created = queryEngine.create(definition, attributes);
         String id = (String) created.get("id");
@@ -125,7 +154,7 @@ public class AtomicOperationExecutor {
     }
 
     private AtomicResult executeUpdate(AtomicOperation op, int index, Map<String, String> lidMap,
-                                       String actingUserId) {
+                                       String actingUserId, Optional<GeoStamp> geo) {
         String type = op.ref().type();
         String id = resolveId(op.ref(), lidMap, index);
         CollectionDefinition definition = resolveCollection(type, index);
@@ -139,6 +168,7 @@ public class AtomicOperationExecutor {
         if (actingUserId != null) {
             attributes.put("updatedBy", actingUserId);
         }
+        GeoStamping.stamp(attributes, definition, geo, false);
 
         Optional<Map<String, Object>> updated = queryEngine.update(definition, id, attributes);
         if (updated.isEmpty()) {
