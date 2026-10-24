@@ -18,8 +18,8 @@ order: 50
 
 On failure the CLI prints one JSON line on stderr:
 
-```json
-{"error":{"code":"VALIDATION_FAILED","status":400,"detail":"…","source":{"pointer":"/data/attributes/name"},"meta":{"requestId":"…"}},"errors":[…]}
+```jsonc
+{"error":{"code":"VALIDATION_FAILED","status":400,"detail":"…","source":{"pointer":"/data/attributes/name"},"meta":{"requestId":"…"}},"errors":[/* … */]}
 ```
 
 `error` is the first entry flattened for convenience; `errors` is the full JSON:API array. Branch on `code`.
