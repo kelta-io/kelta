@@ -1,0 +1,1 @@
+- 2026-10-24 chore(ci): Dependabot ignores Spring Boot / Spring Cloud and allows only patch bumps for org.graalvm.* (platform upgrades are planned tasks)
