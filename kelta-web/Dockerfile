@@ -33,7 +33,7 @@ RUN npm run build
 # =============================================================================
 # Stage 2: Runtime with Nginx
 # =============================================================================
-FROM ${BASE_REGISTRY}/nginx:1.25-alpine AS runtime
+FROM ${BASE_REGISTRY}/nginx:1.30-alpine3.24 AS runtime
 
 LABEL org.opencontainers.image.title="Kelta Web UI"
 LABEL org.opencontainers.image.description="Admin UI for Kelta Platform"

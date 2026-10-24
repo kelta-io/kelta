@@ -28,7 +28,7 @@ ENV PUBLIC_WAITLIST_ENDPOINT=$PUBLIC_WAITLIST_ENDPOINT
 RUN npm run build
 
 # Production stage — serve static files with nginx
-FROM ${BASE_REGISTRY}/nginx:1.27-alpine
+FROM ${BASE_REGISTRY}/nginx:1.30-alpine3.24
 COPY --from=build /app/kelta-marketing/dist /usr/share/nginx/html
 COPY kelta-marketing/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

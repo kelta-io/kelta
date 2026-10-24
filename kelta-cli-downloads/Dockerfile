@@ -54,7 +54,7 @@ RUN bun scripts/build-binaries.mjs \
 # =============================================================================
 # Stage 3: nginx static server
 # =============================================================================
-FROM ${BASE_REGISTRY}/nginx:1.25-alpine
+FROM ${BASE_REGISTRY}/nginx:1.30-alpine3.24
 
 COPY kelta-cli-downloads/nginx.conf /etc/nginx/conf.d/default.conf
 COPY kelta-cli-downloads/install.sh /usr/share/nginx/html/cli/install.sh

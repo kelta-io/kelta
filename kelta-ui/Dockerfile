@@ -69,7 +69,7 @@ RUN npx vite build
 # =============================================================================
 # Stage 2: Runtime with Nginx
 # =============================================================================
-FROM ${BASE_REGISTRY}/nginx:1.25-alpine
+FROM ${BASE_REGISTRY}/nginx:1.30-alpine3.24
 
 LABEL org.opencontainers.image.title="Kelta Admin UI"
 LABEL org.opencontainers.image.description="Admin/Builder UI for Kelta Platform"
