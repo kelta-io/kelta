@@ -7,7 +7,7 @@
 - **AssertJ** fluent assertions
 - **Mockito** 5.21.0
 - **jqwik** 1.8.2 — property-based testing
-- **Testcontainers** 1.21.4 everywhere (`kelta-platform`, `kelta-{worker,auth,ai}`, `kelta-test-harness`) — Docker-based integration tests. **1.21.4 specifically** is required on hosts running Docker Engine 29+ (min API 1.44): earlier versions ping `/v1.32`, get a 400, and report "Could not find a valid Docker environment" — which `@Testcontainers(disabledWithoutDocker = true)` turns into a silent skip. The fix is Testcontainers' own API-version negotiation (testcontainers-java #11346, first released in 1.21.4), not a docker-java bump. Spring Boot 4.0.5's BOM would pull Testcontainers 2.0.x; each module pins 1.21.x on purpose, because 2.0 renames the modules (`postgresql` → `testcontainers-postgresql`) and moves packages — a migration of its own.
+- **Testcontainers** 2.0.5 everywhere (`kelta-platform`, `kelta-{worker,auth,ai,gateway}`, `kelta-test-harness`) — Docker-based integration tests. 2.x names every module `testcontainers-*` (`testcontainers-postgresql`, `testcontainers-junit-jupiter`) and moves container classes into per-module packages: use `org.testcontainers.postgresql.PostgreSQLContainer` (no type parameter), not the deprecated `org.testcontainers.containers.PostgreSQLContainer<?>`. Hosts running Docker Engine 29+ (min API 1.44) need Testcontainers' API-version negotiation (testcontainers-java #11346, in 2.0.3+): without it Testcontainers pings `/v1.32`, gets a 400, and reports "Could not find a valid Docker environment" — which `@Testcontainers(disabledWithoutDocker = true)` turns into a silent skip. Keep every module on the same 2.0.3+ release; the version is a `testcontainers.version` property next to each module's `testcontainers-bom` import.
 - **MockWebServer** — HTTP service mocks
 - **Awaitility** — async assertions
 
@@ -28,7 +28,7 @@ they are **skipped**, not failed. In CI that is caught by `scripts/ci/assert-int
 which fails the job when an `*IntegrationTest` suite skipped every test; CI also sets
 `TESTCONTAINERS_RYUK_DISABLED=true`, since Ryuk is unreachable on the k8s-runner's shared daemon and
 Testcontainers otherwise reports Docker as unavailable. (Docker Engine 29+ needs Testcontainers
-1.21.4, which every module pins.) kelta-gateway is different: its pom excludes `*IntegrationTest`
+2.0.3+; every module is on 2.0.5.) kelta-gateway is different: its pom excludes `*IntegrationTest`
 from surefire and runs them through failsafe under `-Pintegration-tests`, which CI's `test-java`
 passes for gateway only (`matrix.mvn_args`). Its `@SpringBootTest` suites extend
 `integration/GatewayContainers`, which starts real Redis and NATS (JetStream) and wires them in via
