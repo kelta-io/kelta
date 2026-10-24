@@ -1,10 +1,8 @@
 package io.kelta.gateway.config;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.lang.Nullable;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -31,21 +29,16 @@ public class GatewayConfig {
      * caller in the gateway injects this builder and customizes (e.g. sets a
      * baseUrl).
      *
-     * <p>When the {@code internal-auth} rollout flag is on, the builder also
-     * carries an {@link ExchangeFilterFunction} from
-     * {@link InternalServiceAuthConfig} that attaches a short-lived bearer
-     * token to any request whose URL path starts with {@code /internal/}. The
-     * filter is path-aware, so non-internal traffic (e.g. OIDC discovery, JWKS,
-     * health probes against other services) is untouched.
+     * <p>The builder carries the {@link ExchangeFilterFunction} from
+     * {@link InternalServiceAuthConfig}. When the {@code internal-auth} rollout
+     * flag is on, it attaches a short-lived bearer token to any request whose URL
+     * path starts with {@code /internal/}; when off, it passes requests through.
+     * The filter is path-aware, so non-internal traffic (e.g. OIDC discovery,
+     * JWKS, health probes against other services) is untouched.
      */
     @Bean
     public WebClient.Builder webClientBuilder(
-            @Autowired(required = false) @Qualifier("internalBearerExchangeFilter")
-            @Nullable ExchangeFilterFunction internalAuthFilter) {
-        WebClient.Builder builder = WebClient.builder();
-        if (internalAuthFilter != null) {
-            builder.filter(internalAuthFilter);
-        }
-        return builder;
+            @Qualifier("internalBearerExchangeFilter") ExchangeFilterFunction internalAuthFilter) {
+        return WebClient.builder().filter(internalAuthFilter);
     }
 }

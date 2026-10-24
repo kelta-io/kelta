@@ -93,6 +93,14 @@ kelta:
     # Worker service URL (used for routing AND internal API calls)
     worker-service-url: ${WORKER_SERVICE_URL:http://emf-worker:80}
 
+    # Service-to-service OAuth2 for calls into the worker's /internal/** (rollout flag, off by
+    # default). Bound by InternalAuthProperties and read at run time, not by a @Conditional:
+    # the native image freezes conditions at build time, so an env flip would be ignored.
+    # client-secret must match kelta-auth's kelta.auth.internal-clients.<client-id>.secret.
+    internal-auth:
+      enabled: ${KELTA_GATEWAY_INTERNAL_AUTH_ENABLED:false}
+      client-id: ${KELTA_GATEWAY_INTERNAL_AUTH_CLIENT_ID:gateway-internal}
+      client-secret: ${KELTA_GATEWAY_INTERNAL_AUTH_CLIENT_SECRET:}
     # PAT grace cache (PatAuthenticationFilter): the last accepted PAT data per token hash,
     # served only when Redis misses AND the worker validation call fails (non-404), so
     # valid tokens ride out worker restarts. Entries are written only after a token is

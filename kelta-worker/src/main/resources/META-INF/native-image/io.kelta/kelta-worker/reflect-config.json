@@ -139,5 +139,11 @@
     "methods": [
       { "name": "getDefault", "parameterTypes": [] }
     ]
+  },
+  {
+    "name": "io.kelta.worker.config.InternalAuthProperties",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
   }
 ]
