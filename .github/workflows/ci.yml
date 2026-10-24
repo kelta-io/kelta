@@ -1064,6 +1064,9 @@ jobs:
   #    listed in ci/templates-roundtrip-exclusions.txt (each with the task that removes it)
   #    are left out of the diff and named in the output. It runs in the image check 1 built
   #    and also runs when check 1 failed, so one run shows both checks' failing types.
+  # 3. First-app tutorial (ci/first-app-runnable.sh): runs the ```bash runnable blocks of
+  #    kelta-marketing/src/content/docs/getting-started/first-app.md in one shell against a
+  #    new empty sandbox, then re-runs each `kelta … apply` and fails unless it is unchanged.
   #
   # Same compose stack and fresh `default` tenant as the quickstart job, but built from
   # HEAD like the e2e job: a template is written against the current CLI and API, and
@@ -1157,6 +1160,17 @@ jobs:
         timeout-minutes: 10
         run: bash ci/templates-roundtrip-check.sh
 
+      # Runs the ```bash runnable blocks of the first-app tutorial in a fresh empty sandbox
+      # (KLT-747). Same gate as the round trip: it needs only the stack, not a green install.
+      - name: Run the first-app tutorial's runnable blocks
+        if: ${{ !cancelled() && (steps.install.outcome == 'success' || steps.install.outcome == 'failure') }}
+        timeout-minutes: 5
+        env:
+          FIRST_APP_DOC: kelta-marketing/src/content/docs/getting-started/first-app.md
+          SANDBOX_NAME: first-app
+          TENANT_SLUG: default
+        run: bash ci/first-app-runnable.sh
+
       - name: Dump compose logs on failure
         if: failure()
         run: |
@@ -1178,9 +1192,9 @@ jobs:
       - name: Stop stack + remove volumes
         if: always()
         run: |
-          docker rm -f "${COMPOSE_PROJECT_NAME}_templates" "${COMPOSE_PROJECT_NAME}_roundtrip" 2>/dev/null || true
+          docker rm -f "${COMPOSE_PROJECT_NAME}_templates" "${COMPOSE_PROJECT_NAME}_roundtrip" "${COMPOSE_PROJECT_NAME}_first_app" 2>/dev/null || true
           docker compose down -v --rmi local || true
-          docker image rm "kelta-templates-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
+          docker image rm "kelta-templates-runner:${COMPOSE_PROJECT_NAME}" "kelta-first-app-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
           # `down --rmi local` skips images with a custom `image:` tag, so cerbos goes explicitly.
           docker image rm "kelta-cerbos-ci:${CERBOS_CI_TAG}" 2>/dev/null || true
 
