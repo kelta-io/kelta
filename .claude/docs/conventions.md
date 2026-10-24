@@ -457,6 +457,15 @@ when only the platform's own UI or services call it; then run `node ci/endpoint-
 unclassified may only go down: `ci/endpoint-index.baseline.json` holds it, and the test fails
 above it and asks you to lower it when you classify more.
 
+## System collections reference page
+
+`docs/authoring/system-collections.md` (published at `/docs/reference/system-collections/`) is
+generated from `SystemCollectionDefinitions.all()` by runtime-core's `SystemCollectionsReferenceTest`.
+**Adding a system collection (or changing its name, display name, description, API path, flags or
+required fields) means regenerating the page in the same PR** — run that test with
+`-Dkelta.docs.write=true` (command in `testing.md` → Generated reference: system collections). Never
+hand-edit the page.
+
 ## TypeScript
 
 ### Naming

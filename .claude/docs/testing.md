@@ -399,6 +399,19 @@ the script.
 The script's own tests are `ci/update-snapshots.test.ts` (`node --test`, Node ≥ 24). They run
 in the `test-ci-scripts` job, against a local bare repo and a fake `docker`.
 
+## Generated reference: system collections
+
+`SystemCollectionsReferenceTest` (runtime-core, `model/system/`) renders
+`docs/authoring/system-collections.md` from `SystemCollectionDefinitions.all()` and fails when the
+committed page differs or its table row count is not `all().size()`. **Adding, renaming or
+re-describing a system collection means regenerating the page in the same PR:**
+
+```bash
+mvn -f kelta-platform/pom.xml -pl runtime/runtime-core test -Dtest=SystemCollectionsReferenceTest -Dkelta.docs.write=true
+```
+
+It runs in the `test-runtime` job; the `runtime` path filter lists the page, so a hand edit is checked too.
+
 ## CI script tests
 
 **A `ci/` script's tests live next to it as `ci/<name>.test.ts` or `ci/<name>.test.sh`.** The

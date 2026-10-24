@@ -6,8 +6,11 @@
 # flattens one level of nested YAML anchors, so we anchor list patterns and
 # splice them via `*alias` references below.
 
+# docs/authoring/system-collections.md is generated and checked by runtime-core's
+# SystemCollectionsReferenceTest, so a hand edit to it re-runs the runtime tests.
 runtime: &runtime
   - 'kelta-platform/**'
+  - 'docs/authoring/system-collections.md'
 
 gateway:
   - *runtime

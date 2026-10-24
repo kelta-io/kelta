@@ -85,6 +85,13 @@ export const externalMeta: Record<`authoring/${string}` | `cli/${string}`, Exter
     order: 100,
     tocDepth: 2,
   },
+  'authoring/system-collections': {
+    title: 'System Collections Reference',
+    description: 'Every system collection the platform defines, with its API path, tenant-scoped and read-only flags and key fields — generated from the runtime system-collection registry.',
+    section: 'reference',
+    order: 110,
+    tocDepth: 2,
+  },
   'cli/commands': {
     title: 'kelta CLI — Command Reference',
     description: 'Every kelta command group, command, flag and default — generated from the CLI command registry.',
