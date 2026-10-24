@@ -234,10 +234,6 @@ mailbox to a high-volume public address.
 - **`/api/oidc-providers` reads skip record filtering**: `CerbosRecordAuthorizationAdvice`'s own
   `isMetadataPath` matches `/api/oidc` as a raw prefix. Writes are gated (PLT-656); the client
   secret is server-only.
-- `GET /api/profiles/{id}?include=profile-system-permissions,…` returns grant rows at
-  `API_ACCESS`; the `profile-*-permissions` routes' own object check does not apply to an include,
-  and #1772's include filtering never runs because `/api/profiles` is in the advice's
-  `isMetadataPath`.
 - **Approval instances/steps are tenant-visible to every user** (accepted 2026-07-08).
   `approval-instances`/`approval-step-instances` (incl. `comments`) have no row-level read
   restriction beyond tenant RLS. Owner scoping doesn't fit (submitter **or** assignee); needs a
@@ -945,6 +941,7 @@ One line each; full write-ups are in git history.
 - PLT-330 (2026-10-04) — any token (and, via the public path, anyone) could list every tenant; gateway narrowing (#1603/#1604) + self-scoped storage predicate.
 - PLT-331 (2026-10-04) — static routes for `users`/`profiles`/`collections` skipped the collection check; `COLLECTION_CHECKED_STATIC_ROUTES` + advice count correction.
 - PLT-656 (2026-10-24) — writes to `page-layouts`, `list-views`, `ui-menus`, `ui-pages`, `global-picklists`, `oidc-providers`, `email-templates`, `scripts`, `connected-apps`, `flows`, `approval-processes`, `reports` and `dashboards` ran at `API_ACCESS` (any user could create a script, flow, OIDC provider or connected app); each is now a writes-only `COLLECTION_CHECKED_STATIC_ROUTES` row with its setup page's permission as override, and generic `flows`/`connected-apps` reads get record filtering. Left out: `webhooks` (no collection behind `/api/webhooks/**` — inbound receivers that authenticate the sender). Exempt end-user actions: flow/script/report execute, dashboard data (flow execute still open, above).
+- PLT-657 (2026-10-24) — `GET /api/profiles/{id}?include=profile-system-permissions,…` returned every grant row at `API_ACCESS`, because `CerbosRecordAuthorizationAdvice` skipped metadata paths before its include filtering; `/api/profiles` responses now get `restrictIncluded` on `included[]` (denied rows dropped, no 403) while the profiles themselves stay unfiltered and `ApiPaths.METADATA_PREFIXES` (FLS/masking) is unchanged. `CerbosRecordAuthorizationAdviceTest` → profile includes.
 - 2026-10-12 (child-route-authz) — child-resource paths `/api/{parent}/{parentId}/{child}[/{childId}]` were authorized against the parent collection only; the gateway now also requires the child's own decision (parent needs `read`), and the record/field-write advices use the child collection.
 - 2026-10-12 (include-record-authz) — `CerbosRecordAuthorizationAdvice` applies each included collection's record read authorization (collection-level read, record-level rules, shares) to `included[]`, per type; a single record that is not readable carries no `included`.
 - 2026-10-12 (child-authz-static-and-create) — the worker authorizes the router's generic child handlers against the child collection under every parent, `static-` ones included (`CerbosSubResourceAuthorizer`); field write rules apply to creates (top-level, child, `/api/operations`) and to to-one relationships, as to updates.

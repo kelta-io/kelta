@@ -241,6 +241,24 @@ describe('ProfileDetailPage', () => {
     expect(screen.getByTestId('system-permissions-section')).toBeInTheDocument()
   })
 
+  it('renders a profile whose response carries no included grants', async () => {
+    // The worker drops included grant rows the caller may not read (PLT-657), and an
+    // envelope whose includes were all dropped has no `included` member at all.
+    mockAxios.get.mockImplementation((url: string) => {
+      if (url.includes('/api/collections')) return Promise.resolve({ data: mockCollections })
+      if (url.includes('/api/profiles/')) {
+        const { data } = makeProfileResponse(mockProfileAttrs, [], [])
+        return Promise.resolve({ data: { data } })
+      }
+      return Promise.resolve({ data: {} })
+    })
+    render(<ProfileDetailPage />, { wrapper: createTestWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText('Standard User')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('system-permissions-section')).toBeInTheDocument()
+  })
+
   it('shows edit permissions button for non-system profiles', async () => {
     setupMocks()
     render(<ProfileDetailPage />, { wrapper: createTestWrapper() })
