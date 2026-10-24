@@ -1,6 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createMarkdownProcessor } from '@astrojs/markdown-remark';
+import type { Code } from 'mdast';
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import { gfmFromMarkdown } from 'mdast-util-gfm';
+import { gfm } from 'micromark-extension-gfm';
+import { visit } from 'unist-util-visit';
 import { describe, expect, it } from 'vitest';
+import astroConfig from '../astro.config.mjs';
 import { externalMeta } from '../src/docs/externalMeta';
 import { SECTIONS, SECTION_IDS } from '../src/docs/sidebar';
 
@@ -49,6 +56,45 @@ function localDocs(): LocalDoc[] {
       const id = file.slice(contentRoot.length + 1).replace(/\.md$/, '').replace(/\/index$/, '');
       return { file, id, ...parseFrontmatter(readFileSync(file, 'utf8')) };
     });
+}
+
+/** A page as the links and JSON checks see it: where it is published and the markdown Astro renders. */
+interface CheckedPage {
+  label: string;
+  href: string;
+  markdown: string;
+}
+
+const hrefOf = (externalKey: string) =>
+  externalKey.startsWith('authoring/') ? `/docs/reference/${externalKey.slice('authoring/'.length)}/` : `/docs/${externalKey}/`;
+
+/** Frontmatter blanked line-for-line, so mdast positions are file line numbers and `---` cannot read as a setext heading. */
+const blankFrontmatter = (source: string) => source.replace(/^---\n[\s\S]*?\n---\n/, (fm) => fm.replace(/[^\n]/g, ''));
+
+function authoringPages(): CheckedPage[] {
+  return readdirSync(join(repoRoot, 'docs', 'authoring'))
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => ({
+      label: `docs/authoring/${f}`,
+      href: hrefOf(`authoring/${f.replace(/\.md$/, '')}`),
+      markdown: read('docs', 'authoring', f),
+    }));
+}
+
+const decodeAttr = (value: string) => value.replace(/&#x26;|&amp;/g, '&').replace(/&#x22;|&quot;/g, '"');
+
+/** Every `id` and `href` in a page as Astro renders it — heading slugs come from Astro's own rehypeHeadingIds. */
+async function renderedAnchors(pages: CheckedPage[]): Promise<Map<string, { ids: Set<string>; hrefs: string[] }>> {
+  const processor = await createMarkdownProcessor(astroConfig.markdown);
+  const rendered = new Map<string, { ids: Set<string>; hrefs: string[] }>();
+  for (const page of pages) {
+    const { code } = await processor.render(page.markdown);
+    rendered.set(page.href, {
+      ids: new Set([...code.matchAll(/\sid="([^"]*)"/g)].map((m) => decodeAttr(m[1]))),
+      hrefs: [...code.matchAll(/\shref="([^"]*)"/g)].map((m) => decodeAttr(m[1])),
+    });
+  }
+  return rendered;
 }
 
 /** First `# ` heading outside fenced code blocks (a bash `# comment` inside a fence is not a heading). */
@@ -147,18 +193,53 @@ describe('docs content', () => {
     }
   });
 
-  it('links only to docs pages that exist', () => {
-    const hrefs = new Set<string>([
-      '/docs/',
-      ...docs.map((d) => `/docs/${d.id}/`),
-      ...Object.keys(externalMeta).map((k) => (k.startsWith('authoring/') ? `/docs/reference/${k.slice('authoring/'.length)}/` : `/docs/${k}/`)),
-    ]);
-    for (const doc of docs) {
-      const source = readFileSync(doc.file, 'utf8');
-      for (const match of source.matchAll(/\]\((\/docs\/[^)#\s]*)(#[^)\s]*)?\)/g)) {
-        expect(hrefs.has(match[1]), `${doc.id} links to missing page ${match[1]}`).toBe(true);
+  const localPages: CheckedPage[] = docs.map((d) => ({
+    label: d.file.slice(repoRoot.length + 1),
+    href: `/docs/${d.id}/`,
+    markdown: blankFrontmatter(readFileSync(d.file, 'utf8')),
+  }));
+  const sourcePages = [...localPages, ...authoringPages()];
+
+  // Links in local pages and docs/authoring/*.md must reach a page that exists and, when they
+  // carry a #fragment (same-page or /docs/...#x), an id that page renders.
+  it('links only to docs pages and anchors that exist', async () => {
+    const cliPages = Object.keys(externalMeta)
+      .filter((k) => !k.startsWith('authoring/'))
+      .map((k) => ({ label: EXTERNAL_SOURCES[k], href: hrefOf(k), markdown: read(EXTERNAL_SOURCES[k]) }));
+    const rendered = await renderedAnchors([...sourcePages, ...cliPages]);
+    const pages = new Set(['/docs/', ...rendered.keys(), ...Object.keys(externalMeta).map(hrefOf)]);
+    const broken: string[] = [];
+
+    for (const page of sourcePages) {
+      for (const href of rendered.get(page.href)!.hrefs) {
+        if (!href.startsWith('#') && !href.startsWith('/docs/')) continue;
+        const [path, fragment] = href.startsWith('#') ? [page.href, href.slice(1)] : [href.split('#')[0], href.split('#')[1]];
+        if (!pages.has(path)) {
+          broken.push(`${page.label} links to missing page ${path}`);
+        } else if (fragment !== undefined && !rendered.get(path)?.ids.has(decodeURIComponent(fragment))) {
+          broken.push(`${page.label} links to missing anchor ${href}`);
+        }
       }
     }
+    expect(broken).toEqual([]);
+  });
+
+  it('has only valid JSON in ```json blocks (use ```jsonc for annotated examples)', () => {
+    const invalid: string[] = [];
+    for (const page of sourcePages) {
+      const blocks: Code[] = [];
+      visit(fromMarkdown(page.markdown, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }), 'code', (node: Code) => {
+        if (node.lang === 'json') blocks.push(node);
+      });
+      for (const block of blocks) {
+        try {
+          JSON.parse(block.value);
+        } catch (e) {
+          invalid.push(`${page.label}:${block.position?.start.line} json block: ${(e as Error).message}`);
+        }
+      }
+    }
+    expect(invalid).toEqual([]);
   });
 });
 

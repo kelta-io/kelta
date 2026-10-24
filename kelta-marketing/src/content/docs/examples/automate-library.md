@@ -309,14 +309,14 @@ c8777714-0fed-4399-9031-994fe876597e  52ac0536-105f-43f0-88d0-e707f13a5307  Mark
 kelta flows run 95cd9654-bc94-4da7-9d25-7d1bd02cdb40 --steps
 ```
 
-```json
+```jsonc
   {
     "id": "e49f2ddd-c36f-4a37-a2ed-a00239366c23",
     "stateId": "Reject",
     "stateName": "Reject",
     "stateType": "Fail",
     "status": "FAILED",
-    …
+    // …
     "errorMessage": "Missing or wrong scanner key",
     "errorCode": "Unauthorized",
     "attemptNumber": 1,
@@ -329,28 +329,30 @@ kelta flows run 95cd9654-bc94-4da7-9d25-7d1bd02cdb40 --steps
 and the accepted call's `RecordReturn` step, whose output is the updated loan:
 
 ```json
-    "outputSnapshot": {
-      "record": {
-        "id": "52ac0536-105f-43f0-88d0-e707f13a5307",
-        "book": "3232b8a4-efd0-4dc6-a9cb-cf0caffa5e8a",
-        "name": null,
-        "due_on": "2026-10-19T00:00:00.000Z",
-        "member": "dad55720-dece-4e0c-9149-0c5c51961de0",
-        "createdAt": "2026-10-05T00:58:50.286673Z",
-        "createdBy": "13de168a-ab36-4ec0-a811-647e447f1827",
-        "loaned_on": "2026-10-05T00:00:00.000Z",
-        "updatedAt": "2026-10-05T00:59:35.796753Z",
-        "updatedBy": "13de168a-ab36-4ec0-a811-647e447f1827",
-        "returned_on": "2026-10-12T00:00:00.000Z",
-        "recordTypeId": null
-      },
-      "updatedFields": {
-        "updatedBy": "13de168a-ab36-4ec0-a811-647e447f1827",
-        "returned_on": "2026-10-12"
-      },
-      "targetRecordId": "52ac0536-105f-43f0-88d0-e707f13a5307",
-      "targetCollectionName": "loans"
+{
+  "outputSnapshot": {
+    "record": {
+      "id": "52ac0536-105f-43f0-88d0-e707f13a5307",
+      "book": "3232b8a4-efd0-4dc6-a9cb-cf0caffa5e8a",
+      "name": null,
+      "due_on": "2026-10-19T00:00:00.000Z",
+      "member": "dad55720-dece-4e0c-9149-0c5c51961de0",
+      "createdAt": "2026-10-05T00:58:50.286673Z",
+      "createdBy": "13de168a-ab36-4ec0-a811-647e447f1827",
+      "loaned_on": "2026-10-05T00:00:00.000Z",
+      "updatedAt": "2026-10-05T00:59:35.796753Z",
+      "updatedBy": "13de168a-ab36-4ec0-a811-647e447f1827",
+      "returned_on": "2026-10-12T00:00:00.000Z",
+      "recordTypeId": null
     },
+    "updatedFields": {
+      "updatedBy": "13de168a-ab36-4ec0-a811-647e447f1827",
+      "returned_on": "2026-10-12"
+    },
+    "targetRecordId": "52ac0536-105f-43f0-88d0-e707f13a5307",
+    "targetCollectionName": "loans"
+  }
+}
 ```
 
 > **The key is in the step log.** Each step's `inputSnapshot` holds the whole state, including `$.input.key` — the

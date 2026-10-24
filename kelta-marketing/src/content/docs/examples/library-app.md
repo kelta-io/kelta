@@ -221,17 +221,20 @@ kelta pages apply library-desk.json --yes
 kelta pages publish /library-desk
 ```
 
-```json
+```jsonc
+// --dry-run
 {
   "valid": true,
   "errors": []
 }
+// --yes
 {
   "action": "created",
   "id": "e7bd3df9-9bf6-417e-9813-cf7303c27147",
   "path": "/library-desk",
   "published": false
 }
+// publish
 {
   "action": "published",
   "id": "e7bd3df9-9bf6-417e-9813-cf7303c27147",
@@ -278,13 +281,15 @@ kelta menus apply --file library-menu.json
 
 Every `apply` converges. The second run of the page and the menu:
 
-```json
+```jsonc
+// page
 {
   "action": "unchanged",
   "id": "e7bd3df9-9bf6-417e-9813-cf7303c27147",
   "path": "/library-desk",
   "published": true
 }
+// menu
 {
   "menuId": "280e295f-9422-4673-b884-ea3566f0fef2",
   "name": "Library",

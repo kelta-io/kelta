@@ -33,8 +33,8 @@ Read the relevant `kelta://docs/*` resource before writing filters, layouts, pag
 
 Each call reports:
 
-```json
-{ "action": "created" | "updated" | "unchanged", "id": "…", "changed": ["columns", "sort"] }
+```jsonc
+{ "action": "updated", "id": "…", "changed": ["columns", "sort"] }   // action: created | updated | unchanged
 ```
 
 Tools that manage children (`apply_collection`, `apply_picklist`, `apply_menu`, `apply_dashboard`) nest one such

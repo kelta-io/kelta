@@ -53,6 +53,12 @@ marketing:
   - 'kelta-web/packages/cli/AGENTS.md'
   - 'README.md'
 
+# SDK doc pages — the "test-frontend" job type-checks their ```ts / ```tsx blocks
+# against kelta-web/packages/*/src (npm run check:doc-snippets).
+sdk_docs:
+  - 'kelta-marketing/src/content/docs/sdk/**'
+  - 'docs/**/sdk/**'
+
 # Any Java service change triggers integration tests.
 any_java:
   - *runtime

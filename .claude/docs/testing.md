@@ -408,6 +408,27 @@ this job cannot run must be named in a comment in the job with the reason and th
 it. Before this job, `ci/update-snapshots.test.ts` ran only when a workflow changed, so #1675's
 change to the script skipped its tests and broke it.
 
+## Docs checks
+
+The published docs (`kelta-marketing/src/content/docs/**` plus `docs/authoring/*.md`) have two
+static checks; both run without a stack.
+
+- **SDK snippet type-check** — `cd kelta-web && npm run check:doc-snippets`
+  (`scripts/check-doc-snippets.mjs`, run by the `test-frontend` job after "Type check"; the
+  `sdk_docs` path filter triggers that job on SDK doc edits). Every ```` ```ts ```` / ```` ```tsx ````
+  block in `kelta-marketing/src/content/docs/sdk/*.md` (and any `docs/**/sdk/*.md`) is written as
+  its own module into a temp project whose tsconfig extends `kelta-web/tsconfig.json`, so
+  `@kelta/*` resolve to `packages/*/src`, and checked with `tsc --noEmit` under `strict`
+  (unused locals/parameters allowed). Errors are reported as `<md file>:<line>:<col>`. A snippet
+  must be self-contained: declare the types and values it uses. To skip one, put
+  `<!-- not-compiled: <reason> -->` on the line directly above its fence; an empty reason fails.
+- **Links, anchors and JSON** — `kelta-marketing/test/docs-engine.test.ts` (`npm test`, job
+  `test-marketing`). Each local page and authoring page is rendered with Astro's own markdown
+  pipeline (`astro.config.mjs` → `markdown`), so heading ids are the slugs the site serves; every
+  `/docs/...` link must reach a page and every `#fragment` (same-page or cross-page) an id on the
+  target. Every ```` ```json ```` block must `JSON.parse`; an annotated example (comments, bare
+  `…`, several documents, a fragment) is fenced ```` ```jsonc ````, which the check skips.
+
 ## MCP smoke test (CI)
 
 The `e2e` job runs kelta-mcp in its compose stack (`docker-compose.ci.yml`, under the `mcp`
