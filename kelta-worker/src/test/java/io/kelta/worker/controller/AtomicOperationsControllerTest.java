@@ -4,6 +4,7 @@ import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.CollectionDefinitionBuilder;
 import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.DefaultQueryEngine;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
@@ -17,6 +18,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpStatus;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.ResponseEntity;
@@ -40,6 +43,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -376,5 +380,76 @@ class AtomicOperationsControllerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(txManager.committed).isTrue();
         assertThat(txManager.rolledBack).isFalse();
+    }
+
+    // ---- Unsupported system collections (PLT-660) --------------------------------------
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"fields", "picklist-values"})
+    @DisplayName("an operation on a system collection with its own controller is rejected with 400 before anything runs")
+    @SuppressWarnings("unchecked")
+    void rejectsUnsupportedSystemCollection(String systemCollection) {
+        CollectionDefinition contacts = mock(CollectionDefinition.class);
+        when(registry.get("contacts")).thenReturn(contacts);
+        when(registry.get(systemCollection)).thenReturn(SystemCollectionDefinitions.byName().get(systemCollection));
+        when(lifecycleManager.getCollectionIdByName(anyString())).thenReturn("uuid-x");
+        when(authzService.checkCollectionAccess(anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(true);
+        when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "rec-1", "name", "x"));
+
+        ResponseEntity<?> response = controller.executeOperations(
+                Map.of("atomic:operations", List.of(addOp("contacts"), addOp(systemCollection))), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        List<Map<String, Object>> errors = (List<Map<String, Object>>) ((Map<String, Object>) response.getBody())
+                .get("errors");
+        assertThat(errors).hasSize(1);
+        Map<String, Object> err = errors.get(0);
+        assertThat(err.get("status")).isEqualTo("400");
+        assertThat(err.get("code")).isEqualTo("UNSUPPORTED_COLLECTION");
+        assertThat(err.get("detail")).isEqualTo("Atomic operations do not support the system collection '"
+                + systemCollection + "'; use POST /api/" + systemCollection + " instead");
+        assertThat(err.get("source")).isEqualTo(Map.of("pointer", "/atomic:operations/1"));
+        verifyNoInteractions(queryEngine);
+        verifyNoInteractions(authzService);
+    }
+
+    @Test
+    @DisplayName("an unsupported system collection on an update or remove is rejected too")
+    @SuppressWarnings("unchecked")
+    void rejectsUnsupportedSystemCollectionOnRemove() {
+        when(registry.get("fields")).thenReturn(SystemCollectionDefinitions.byName().get("fields"));
+
+        ResponseEntity<?> response = controller.executeOperations(Map.of("atomic:operations", List.of(
+                Map.of("op", "remove", "ref", Map.of("type", "fields", "id", "f-1")))), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        Map<String, Object> err = ((List<Map<String, Object>>) ((Map<String, Object>) response.getBody())
+                .get("errors")).get(0);
+        assertThat(err.get("code")).isEqualTo("UNSUPPORTED_COLLECTION");
+        assertThat(err.get("source")).isEqualTo(Map.of("pointer", "/atomic:operations/0"));
+        verifyNoInteractions(queryEngine);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"users", "user-permission-sets", "group-memberships", "delegated-admin-scopes"})
+    @DisplayName("identity system collections guarded by IdentityCollectionGuardHook stay writable")
+    void identityCollectionsStayAccepted(String identityCollection) {
+        // `user-permission-sets` has no platform definition today; the guard hook still names it.
+        CollectionDefinition definition = SystemCollectionDefinitions.byName().getOrDefault(identityCollection,
+                new CollectionDefinitionBuilder().name(identityCollection).displayName(identityCollection)
+                        .addField(FieldDefinition.string("name")).systemCollection(true).build());
+        assertThat(definition.systemCollection()).isTrue();
+        when(registry.get(identityCollection)).thenReturn(definition);
+        when(lifecycleManager.getCollectionIdByName(identityCollection)).thenReturn("uuid-id");
+        when(authzService.checkCollectionAccess(anyString(), anyString(), anyString(), eq("uuid-id"), eq("create")))
+                .thenReturn(true);
+        when(queryEngine.create(eq(definition), anyMap())).thenReturn(Map.of("id", "rec-1"));
+
+        ResponseEntity<?> response = controller.executeOperations(
+                Map.of("atomic:operations", List.of(addOp(identityCollection))), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(queryEngine).create(eq(definition), anyMap());
     }
 }
