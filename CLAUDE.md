@@ -154,8 +154,8 @@ visual system.
 | Layer | Tech | Version | Source of truth |
 |-------|------|---------|-----------------|
 | Language | Java | **25** (GraalVM Community 25.0.2) | `.tool-versions`, `kelta-platform/pom.xml` |
-| Framework | Spring Boot | **4.0.5** | `kelta-platform/pom.xml` |
-| Gateway | Spring Cloud | **2025.1.1** | `kelta-gateway/pom.xml` |
+| Framework | Spring Boot | **4.0.9** | `kelta-platform/pom.xml` |
+| Gateway | Spring Cloud | **2025.1.4** | `kelta-gateway/pom.xml` |
 | Build | Maven | 3.9.9 (no wrapper) | CI `JAVA_VERSION`/`MAVEN_VERSION` |
 | DB | PostgreSQL | 15 (RLS, per-tenant schemas) | `docker-compose.yml` |
 | Cache | Redis | 7 | `docker-compose.yml` |

@@ -8,7 +8,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.5</version>
+        <version>4.0.9</version>
         <relativePath/>
     </parent>
 
@@ -20,7 +20,7 @@
 
     <properties>
         <java.version>25</java.version>
-        <spring-cloud.version>2025.1.1</spring-cloud.version>
+        <spring-cloud.version>2025.1.4</spring-cloud.version>
         <protobuf.version>4.32.0</protobuf.version>
         <!-- Same pin as the other modules (1.21.4 = Docker Engine 29 support); see testing.md. -->
         <testcontainers.version>1.21.4</testcontainers.version>
