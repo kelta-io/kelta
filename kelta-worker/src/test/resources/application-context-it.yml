@@ -1,0 +1,76 @@
+# Test profile for WorkerApplicationContextIntegrationTest (@ActiveProfiles("context-it")).
+# The container endpoints (spring.datasource.url/username/password, spring.data.redis.host/port,
+# kelta.nats.url) come from its @DynamicPropertySource. Everything else the worker needs is set
+# here explicitly, not left to runtime-core's packaged application.properties defaults.
+
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 1
+      connection-timeout: 20000
+      pool-name: kelta-worker-context-it
+  flyway:
+    # Off in application.yml (the migrate Job owns it); the test database starts empty.
+    enabled: true
+
+kelta:
+  # Test-only secrets. The worker refuses to start without each of them.
+  encryption:
+    key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=   # base64 of 32 bytes
+  internal:
+    token: context-it-internal-token
+  telehealth:
+    visit-secret: context-it-visit-secret
+    reminders:
+      enabled: false
+  campaigns:
+    tracking-secret: context-it-campaign-tracking-secret
+    runner-enabled: false
+  mailbox:
+    verp-secret: context-it-mailbox-verp-secret
+  email:
+    enabled: false
+  scheduler:
+    enabled: false
+  flow:
+    retention:
+      enabled: false
+  record-version:
+    retention:
+      enabled: false
+  modules:
+    load-retry:
+      enabled: false
+  auth:
+    # The baseline issuer, so BaselineIdentityProviderReconciler finds nothing to repair. Nothing
+    # fetches it: the /internal/** JWT chain stays off (kelta.worker.internal-auth.enabled unset).
+    issuer-uri: https://auth.kelta.io
+    internal-url: http://kelta-auth.invalid
+  worker:
+    cerbos:
+      # CerbosBlockingClient and CerbosPolicySyncService are @MockitoBean in the test.
+      host: cerbos.invalid
+  svix:
+    # Blank keeps SvixConfig (and every Svix bean) unregistered.
+    auth-token: ""
+  superset:
+    # Blank keeps SupersetConfig unregistered.
+    url: ""
+  storage:
+    schema-bootstrap:
+      enabled: false
+    s3:
+      enabled: false
+    media:
+      enabled: false
+
+management:
+  tracing:
+    export:
+      enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false

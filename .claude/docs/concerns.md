@@ -915,11 +915,6 @@ its own change with a full compose run.
 
 ## Test Coverage Gaps
 
-- **No worker Spring-context test** — bean-wiring bugs compile, pass unit tests and fail at pod
-  start. **A `@Component` with a second (test) constructor needs `@Autowired` on the production
-  one**; a second bean of an injected type needs `@Primary` or qualifiers. Copy
-  `PushProviderWiringTest` (`ApplicationContextRunner` over the beans involved). A whole-worker
-  context test is still owed.
 - **Harness Cerbos is allow-all** — object/record policy deny paths are verified only by
   `CerbosGeneratedPolicyIT` against generated goldens; geo rules and `/api/operations` denies only
   on a live stack.
@@ -1047,6 +1042,7 @@ One line each; full write-ups are in git history.
 - Older: federated users stuck PENDING_ACTIVATION; password reset sent no email; `EmptyResultDataAccessException` and null `reset_token_expires_at` in `PasswordController`.
 
 **Tech debt / test infrastructure**
+- KLT-749 (2026-10-24) — no worker Spring-context test: bean-wiring bugs compiled, passed unit tests and failed only at pod start. `WorkerApplicationContextIntegrationTest` boots the whole `WorkerApplication` context on Testcontainers Postgres/Redis/NATS (Flyway on, Cerbos `@MockitoBean`) and serves `GET /api/profiles`. Narrow bean-level wiring still belongs in an `ApplicationContextRunner` test (`PushProviderWiringTest`); a `@Component` with a second (test) constructor needs `@Autowired` on the production one.
 - KLT-741 (2026-10-24) — gateway rate-limit window semantics were mocked (no test reached a 429, window expiry or a shared counter on real Redis); `RateLimitWindowIntegrationTest` drives `RateLimitFilter` over real `RedisRateLimiter`s (`GatewayContainers`): N allowed then a JSON:API 429 with `Retry-After`, reopening after expiry, one budget across two connection factories.
 - #1815 (2026-10-19) — kelta-gateway integration tests never ran (failsafe needed `-Pintegration-tests`, which CI never passed, plus `@Tag("integration")`); ten dead suites targeting a pre-Kelta stack deleted, the five live suites (27 tests) run in `test-java` on `k8s-runner-integration` over `GatewayContainers` (real Redis + NATS).
 - 2026-10-12 — `SystemCollectionDefinitions.java` (~3,400 lines, the biggest merge hotspot) split into 17 per-section `<Area>SystemCollections` classes in `model/system/` plus `SystemCollectionBuilders`; it keeps only `all()` / `byName()` / `SYSTEM_TENANT_ID`.
