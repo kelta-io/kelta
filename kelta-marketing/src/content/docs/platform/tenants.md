@@ -54,6 +54,9 @@ POST /api/tenants/{id}/bootstrap-token
 - The response carries the plaintext `token` once, with `tokenPrefix`, `name`, `tenantId`, `userId` and
   `expiresAt`. The token is named `bootstrap-<actor>-<timestamp>`, so the target user sees it in their token list
   and can revoke it.
+- Inviting the tenant's admin (`POST /api/tenants/{id}/admin-invite`) revokes every bootstrap token of that tenant
+  still live, so access handed out before the owner takes over ends there. Each one is audited as
+  `TENANT_BOOTSTRAP_TOKEN_REVOKED`.
 - Every attempt, refused or not, is audited as `TENANT_BOOTSTRAP_TOKEN_ISSUED` with the actor, the target tenant
   and the target user ([Audit logs](/docs/security/audit-log/)).
 

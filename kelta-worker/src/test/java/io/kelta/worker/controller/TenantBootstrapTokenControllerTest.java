@@ -97,7 +97,7 @@ class TenantBootstrapTokenControllerTest {
         PersonalAccessTokenController patController =
                 new PersonalAccessTokenController(jdbcTemplate, redisTemplate, userIdResolver);
         TenantAdminInviteService tenantUsers =
-                new TenantAdminInviteService(jdbcTemplate, mock(UserInviteService.class));
+                new TenantAdminInviteService(jdbcTemplate, mock(UserInviteService.class), patController);
 
         mvc = MockMvcBuilders.standaloneSetup(
                 new TenantBootstrapTokenController(tenantUsers, patController, permissionResolver, bootstrapRepository),
