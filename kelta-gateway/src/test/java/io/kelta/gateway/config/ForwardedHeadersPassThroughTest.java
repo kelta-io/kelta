@@ -10,7 +10,6 @@ import org.springframework.cloud.gateway.filter.headers.TrustedProxies;
 import org.springframework.cloud.gateway.filter.headers.XForwardedHeadersFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.io.FileSystemResource;
@@ -87,7 +86,8 @@ class ForwardedHeadersPassThroughTest {
         }
     }
 
-    @Configuration(proxyBeanMethods = false)
+    // Not @Configuration: component scanning would pull it into every @SpringBootTest context,
+    // where its xForwardedHeadersFilter collides with GatewayAutoConfiguration's.
     @EnableConfigurationProperties
     static class GatewayHeaderFilters {
 
