@@ -152,6 +152,60 @@ class MyNotificationsControllerTest {
         }
 
         @Test
+        @DisplayName("unread=true returns only the caller's unread notifications; unreadCount keeps its meaning")
+        void unreadOnly() throws Exception {
+            Instant now = Instant.now();
+            String oldest = send(USER_A, "first", now.minusSeconds(300));
+            String middle = send(USER_A, "second", now.minusSeconds(200));
+            String newest = send(USER_A, "third", now.minusSeconds(100));
+            send(USER_B, "for B", now);
+            service.markRead(TENANT, USER_A, middle);
+
+            perform(CALLER_A, get("/api/me/notifications").param("unread", "true"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data", hasSize(2)))
+                    .andExpect(jsonPath("$.data[0].id").value(newest))
+                    .andExpect(jsonPath("$.data[0].attributes.readAt").value(nullValue()))
+                    .andExpect(jsonPath("$.data[1].id").value(oldest))
+                    .andExpect(jsonPath("$.data[1].attributes.readAt").value(nullValue()))
+                    .andExpect(jsonPath("$.meta.totalCount").value(2))
+                    .andExpect(jsonPath("$.meta.unreadCount").value(2));
+        }
+
+        @Test
+        @DisplayName("without unread (or unread=false) returns read and unread notifications")
+        void defaultReturnsAll() throws Exception {
+            Instant now = Instant.now();
+            send(USER_A, "first", now.minusSeconds(200));
+            String read = send(USER_A, "second", now.minusSeconds(100));
+            service.markRead(TENANT, USER_A, read);
+
+            perform(CALLER_A, get("/api/me/notifications"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data", hasSize(2)))
+                    .andExpect(jsonPath("$.data[0].id").value(read))
+                    .andExpect(jsonPath("$.meta.totalCount").value(2))
+                    .andExpect(jsonPath("$.meta.unreadCount").value(1));
+
+            perform(CALLER_A, get("/api/me/notifications").param("unread", "false"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data", hasSize(2)));
+        }
+
+        @Test
+        @DisplayName("unread=true is still recipient-scoped")
+        void unreadOnlyIsRecipientScoped() throws Exception {
+            send(USER_A, "for A", Instant.now());
+            String forB = send(USER_B, "for B", Instant.now());
+
+            perform(CALLER_B, get("/api/me/notifications").param("unread", "true"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data", hasSize(1)))
+                    .andExpect(jsonPath("$.data[0].id").value(forB))
+                    .andExpect(jsonPath("$.meta.unreadCount").value(1));
+        }
+
+        @Test
         @DisplayName("paginates with page[number] / page[size]")
         void paginates() throws Exception {
             Instant now = Instant.now();

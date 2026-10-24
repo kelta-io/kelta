@@ -1210,6 +1210,22 @@ Vector similarity search within one collection (needs a VECTOR field)
 kelta records semantic-search orders 'late delivery complaints' --limit 3
 ```
 
+## notifications
+
+### `kelta notifications list`
+
+List your own in-app notifications, newest first
+
+- `--unread` — Only unread notifications
+- `--page <n>` — Page number (default: "1")
+- `--size <n>` — Page size (max 200) (default: "20")
+
+```bash
+kelta notifications list
+# Only what is still unread
+kelta notifications list --unread --size 50
+```
+
 ## metadata
 
 ### `kelta metadata export`
