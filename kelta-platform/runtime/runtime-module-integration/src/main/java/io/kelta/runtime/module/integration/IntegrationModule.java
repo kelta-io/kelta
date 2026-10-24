@@ -7,6 +7,7 @@ import io.kelta.runtime.module.integration.spi.ApiSpecStore;
 import io.kelta.runtime.module.integration.spi.CredentialResolverPort;
 import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.runtime.module.integration.spi.IdempotencyStore;
+import io.kelta.runtime.module.integration.spi.NotificationStore;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor;
 import io.kelta.runtime.module.integration.spi.noop.LoggingEmailService;
 import io.kelta.runtime.module.integration.spi.noop.LoggingScriptExecutor;
@@ -27,7 +28,8 @@ import java.util.List;
  * <ul>
  *   <li><b>HTTP_CALLOUT</b> — Makes HTTP requests with response capture</li>
  *   <li><b>OUTBOUND_MESSAGE</b> — Sends outbound webhook messages</li>
- *   <li><b>SEND_NOTIFICATION</b> — Sends in-app notifications</li>
+ *   <li><b>SEND_NOTIFICATION</b> — Writes an in-app notification (needs the
+ *       {@link NotificationStore} extension)</li>
  *   <li><b>PUBLISH_EVENT</b> — Publishes a tenant-scoped custom event (needs the
  *       {@link PublishEventActionHandler.EventPublisher} extension)</li>
  *   <li><b>DELAY</b> — Retired: fails, pointing at the {@code Wait} state</li>
@@ -82,8 +84,9 @@ public class IntegrationModule implements KeltaModule {
         handlers.add(new HttpCalloutActionHandler(objectMapper, urlGuard));
         handlers.add(new OutboundMessageActionHandler(objectMapper, urlGuard));
 
-        // Simple handlers (ObjectMapper only)
-        handlers.add(new SendNotificationActionHandler(objectMapper));
+        // In-app notifications — without a NotificationStore extension every execution fails
+        handlers.add(new SendNotificationActionHandler(objectMapper,
+            context.getExtension(NotificationStore.class)));
 
         // Event publishing — without an EventPublisher extension every execution fails
         PublishEventActionHandler.EventPublisher eventPublisher =

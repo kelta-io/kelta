@@ -279,8 +279,10 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
 (writes via `QueryEngine`). Anything else is **not** narrowed:
 - **Raw-JDBC member-data paths** — `WatchRepository`/`WatchTargetRepository`,
   `AlertRepository`/`AlertDeliveryRepository`, `PushRepository`, `WinController`, `ChatService`,
-  `AppointmentService` — keep their in-code scoping
-  (`SelfScopedController`, in-controller caller checks).
+  `AppointmentService`, `NotificationRepository` (`/api/me/notifications`) — keep their in-code
+  scoping (`SelfScopedController`, in-controller caller checks). RLS on `notification` is
+  tenant-only; per-user isolation is the `recipient_id = caller` predicate in every
+  `NotificationRepository` query, so a new query there must carry it too.
 - **Connected-app machine identities** bind no `CallerContext`, so the guard admits their writes
   as the internal tier. Their reach is bounded by Cerbos grants; don't grant one write on an
   owner-scoped collection it shouldn't edit freely.

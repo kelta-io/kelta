@@ -643,6 +643,17 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `users` **update** of that id touching only those fields (+ the engine's `updatedAt`); every other
   write under it is judged as unbound. Works for INTERNAL and PORTAL callers, JWT or PAT; the UI is
   `ProfileDialog` (user menu → Profile); external portals: `playbooks.md` §9.
+- **In-app notifications** (`notification` table, V214; `GET /api/me/notifications`,
+  `POST /api/me/notifications/{id}/read`, `POST /api/me/notifications/read-all`,
+  `MyNotificationsController` → `NotificationService` → `NotificationRepository`). Rows are written
+  by the `SEND_NOTIFICATION` flow step through the `NotificationStore` SPI (runtime-module-integration;
+  `NotificationService` is the worker implementation, handed to `IntegrationModule` as a module
+  extension in `FlowConfig.moduleRegistry()`; no store wired → the step fails). The recipient must
+  be a `platform_user` of the tenant (id or email). Same `/api/me/**` model as the self-profile: the
+  recipient is `CallerContext.current().userId()` only, every query filters
+  `tenant_id` **and** `recipient_id`, so another user's id → **404** with the row untouched; tenant
+  RLS (`tenant_isolation`/`admin_bypass`) underneath. The list is newest first, JSON:API
+  `page[number]`/`page[size]`, with `meta.unreadCount`.
 - **User preferences** (`/api/user-ui-preferences`, generic route): ownership metadata
   (`ownerField=userId`, `ownerScope=ALL`, `ownerScopeReads=true`) — reads return only the caller's
   rows and writes are owner-only (foreign update/delete 404), unless the caller holds
