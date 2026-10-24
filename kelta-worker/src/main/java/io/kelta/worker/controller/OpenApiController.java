@@ -1,5 +1,6 @@
 package io.kelta.worker.controller;
 
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.service.OpenApiGenerator;
@@ -21,6 +22,8 @@ import java.util.Map;
  *
  * <p>The spec is dynamically generated from the tenant's collection definitions.
  * Both endpoints require authentication to prevent schema information leakage.
+ * The server URL carries the tenant slug bound by {@code TenantContextFilter}, so a client
+ * generated from the document calls {@code <host>/<slug>/api/...}.
  *
  * @since 1.0.0
  */
@@ -52,7 +55,7 @@ public class OpenApiController {
 
         List<CollectionDefinition> collections = collectionRegistry.getAllForCurrentTenant();
 
-        Map<String, Object> spec = openApiGenerator.generate(collections, serverUrl);
+        Map<String, Object> spec = openApiGenerator.generate(collections, serverUrl, TenantContext.getSlug());
         return ResponseEntity.ok(spec);
     }
 
