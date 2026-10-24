@@ -40,7 +40,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link TenantIpAllowlistFilter}: per-tenant IP allowlist enforcement,
- * "match anywhere in the chain" semantics, admin bypass, and the fail-open paths.
+ * forwarding-header trust, admin bypass, and the fail-open paths.
  */
 @ExtendWith(MockitoExtension.class)
 class TenantIpAllowlistFilterTest {
@@ -143,15 +143,18 @@ class TenantIpAllowlistFilterTest {
     // ── Chain / spoofing semantics ────────────────────────────────────────
 
     @Test
-    void matchInMiddleForwardedForHop_allowed() {
+    void noTrustedProxies_spoofedAllowedForwardedFor_forbidden() {
         restrictTo("10.0.0.0/8");
-        // socket + first hop are outside; a middle hop is inside → allowed.
-        ServerWebExchange exchange = exchange("203.0.113.5", "8.8.8.8, 10.0.0.7, 203.0.113.5");
+        when(cerbos.checkSystemPermission(any(GatewayPrincipal.class), eq("MANAGE_TENANTS")))
+                .thenReturn(Mono.just(false));
+        // Default config (trust-forwarded-for on, no trusted proxies): an allowed IP named in
+        // X-Forwarded-For / X-Real-IP must not let an out-of-range peer through.
+        ServerWebExchange exchange = exchange("203.0.113.5", "8.8.8.8, 10.0.0.7, 203.0.113.5", "10.0.0.8");
 
         StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
 
-        verify(chain).filter(exchange);
-        verify(cerbos, never()).checkSystemPermission(any(), anyString());
+        verify(chain, never()).filter(any());
+        assertEquals(HttpStatus.FORBIDDEN, exchange.getResponse().getStatusCode());
     }
 
     @Test
@@ -204,6 +207,19 @@ class TenantIpAllowlistFilterTest {
         filter = newFilter(true, trustingIngress());
         restrictTo("198.51.100.0/24");
         ServerWebExchange exchange = exchange("10.42.0.7", "198.51.100.1");
+
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        verify(chain).filter(exchange);
+        verify(cerbos, never()).checkSystemPermission(any(), anyString());
+    }
+
+    @Test
+    void trustedProxies_trustedPeerWithAllowedRightMostUntrustedHop_allowed() {
+        filter = newFilter(true, trustingIngress());
+        restrictTo("198.51.100.0/24");
+        // client → edge proxy (10.42.1.1, appends) → ingress (10.42.0.7, peer)
+        ServerWebExchange exchange = exchange("10.42.0.7", "203.0.113.9, 198.51.100.1, 10.42.1.1");
 
         StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
 

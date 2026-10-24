@@ -35,10 +35,11 @@ import java.util.List;
  *       literal, else the peer.</li>
  * </ul>
  *
- * <p><b>Legacy mode</b> (list empty, the default): unchanged pre-PLT-341 behaviour. When
- * {@code kelta.gateway.ip-allowlist.trust-forwarded-for} is true the left-most
- * {@code X-Forwarded-For} hop is taken as the client — client-spoofable whenever the
- * edge proxy appends rather than replaces — otherwise the socket peer.
+ * <p><b>Legacy mode</b> (list empty, the default): {@link #resolve} keeps the pre-PLT-341
+ * behaviour. When {@code kelta.gateway.ip-allowlist.trust-forwarded-for} is true the
+ * left-most {@code X-Forwarded-For} hop is taken as the client — client-spoofable whenever
+ * the edge proxy appends rather than replaces — otherwise the socket peer. The tenant IP
+ * allowlist is strict in this mode: {@link #allowlistCandidates} is the socket peer only.
  */
 @Component
 public class ClientIpResolver {
@@ -69,8 +70,8 @@ public class ClientIpResolver {
         this.trustedProxies = parseTrustedProxies(trustedProxies);
         if (this.trustedProxies.isEmpty()) {
             log.info("Client IP resolution: legacy mode (kelta.security.trusted-proxies unset) — "
-                    + "{}", trustForwardedFor
-                    ? "left-most X-Forwarded-For hop trusted; client-spoofable"
+                    + "{}; tenant IP allowlist judges the socket peer only", trustForwardedFor
+                    ? "left-most X-Forwarded-For hop trusted for audit/geo/rate limits; client-spoofable"
                     : "socket peer only");
         } else {
             log.info("Client IP resolution: trusted-proxy mode — {} trusted range(s); "
@@ -123,29 +124,13 @@ public class ClientIpResolver {
 
     /**
      * Every address the tenant IP allowlist should judge. In trusted-proxy mode that is
-     * exactly {@link #resolve} — one answer, not spoofable. In legacy mode it is the
-     * documented any-hop set (peer, plus every {@code X-Forwarded-For} hop and
-     * {@code X-Real-IP} when {@code trust-forwarded-for} is on), kept so existing
-     * deployments behave identically until the trusted-proxy list is set.
+     * exactly {@link #resolve} — one answer, not spoofable. In legacy mode it is the socket
+     * peer only: forwarding headers cannot be verified without a trusted-proxy list, so
+     * {@code trust-forwarded-for} does not apply here (it still drives {@link #resolve}).
      */
     public List<String> allowlistCandidates(ServerWebExchange exchange) {
-        List<String> ips = new ArrayList<>();
-        if (isTrustedProxyMode()) {
-            addDistinct(ips, resolve(exchange));
-            return ips;
-        }
-        addDistinct(ips, peerAddress(exchange));
-        if (trustForwardedFor) {
-            HttpHeaders headers = exchange.getRequest().getHeaders();
-            String xff = headers.getFirst(X_FORWARDED_FOR);
-            if (xff != null && !xff.isBlank()) {
-                for (String hop : xff.split(",")) {
-                    addDistinct(ips, normalizeIp(hop));
-                }
-            }
-            addDistinct(ips, normalizeIp(headers.getFirst(X_REAL_IP)));
-        }
-        return ips;
+        String ip = isTrustedProxyMode() ? resolve(exchange) : peerAddress(exchange);
+        return ip == null ? List.of() : List.of(ip);
     }
 
     private String resolveThroughTrustedProxies(String peer, HttpHeaders headers) {
@@ -209,12 +194,6 @@ public class ClientIpResolver {
             return normalizeIp(remote.getAddress().getHostAddress());
         }
         return null;
-    }
-
-    private static void addDistinct(List<String> ips, String ip) {
-        if (ip != null && !ips.contains(ip)) {
-            ips.add(ip);
-        }
     }
 
     /**
