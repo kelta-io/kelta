@@ -410,6 +410,56 @@ class PackageImportServiceTest {
         }
 
         @Test
+        @DisplayName("a second import SKIPS the existing collection and field without re-patching display field or ownership")
+        void secondImportSkipsWithoutPatching() {
+            seedCollections(Map.of("orders", "tgt-orders"));
+            when(jdbcTemplate.queryForList(contains("FROM field f"), eq(TENANT)))
+                    .thenReturn(List.of(Map.of("id", "tgt-field", "name", "name", "coll", "orders")));
+
+            Map<String, Object> collection = collectionData("orders");
+            collection.put("display_field_id", "src-field-1");
+            collection.put("display_field_name", "name");
+            collection.put("owner_field", "member");
+            collection.put("owner_scope", "PORTAL");
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("id", "src-field-1");
+            field.put("collection_name", "orders");
+            field.put("name", "name");
+            field.put("type", "STRING");
+
+            var report = service.importPackage(TENANT,
+                    pkg(item("COLLECTION", collection), item("FIELD", field)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.items()).extracting(PackageImportService.ItemResult::action)
+                    .containsExactly("SKIPPED", "SKIPPED");
+            assertThat(report.created()).isZero();
+            assertThat(report.updated()).isZero();
+            verify(queryEngine, never()).create(any(), anyMap());
+            verify(queryEngine, never()).update(any(), anyString(), anyMap());
+        }
+
+        @Test
+        @DisplayName("OVERWRITE of an existing collection still patches its display field")
+        void overwritePatchesDisplayField() {
+            seedCollections(Map.of("orders", "tgt-orders"));
+            when(jdbcTemplate.queryForList(contains("FROM field f"), eq(TENANT)))
+                    .thenReturn(List.of(Map.of("id", "tgt-field", "name", "name", "coll", "orders")));
+            when(queryEngine.update(any(), anyString(), anyMap()))
+                    .thenReturn(Optional.of(Map.of("id", "tgt-orders")));
+
+            Map<String, Object> collection = collectionData("orders");
+            collection.put("display_field_name", "name");
+
+            var report = service.importPackage(TENANT, pkg(item("COLLECTION", collection)),
+                    new PackageImportService.ImportOptions(
+                            PackageImportService.ConflictMode.OVERWRITE, false, null, null, null));
+
+            assertThat(report.updated()).isEqualTo(1);
+            verify(queryEngine).update(any(), eq("tgt-orders"), eq(Map.of("displayFieldId", "tgt-field")));
+        }
+
+        @Test
         @DisplayName("skips the patch for a dry run — nothing was actually written")
         void dryRunSkipsPatch() {
             Map<String, Object> collection = collectionData("orders");

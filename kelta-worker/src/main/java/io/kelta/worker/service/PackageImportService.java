@@ -214,7 +214,8 @@ public class PackageImportService {
             }
         }
 
-        patchDisplayFields(ctx, byType.getOrDefault("COLLECTION", List.of()), options);
+        patchDisplayFields(ctx, byType.getOrDefault("COLLECTION", List.of()), written("COLLECTION", results),
+                options);
         results.addAll(importRecords(ctx, pkg.get("records")));
 
         int created = 0, updated = 0, skipped = 0, failed = 0;
@@ -240,12 +241,13 @@ public class PackageImportService {
      *       {@code ownerScopeReads}) — {@code CollectionOwnershipValidationHook} rejects a
      *       LOOKUP owner field that does not exist yet.</li>
      * </ul>
-     * Skipped for a collection whose own import failed or was excluded by a filter, and entirely
-     * for dry runs (nothing was actually written).
+     * Skipped for a collection whose own import failed, was excluded by a filter or was SKIPPED
+     * (an existing collection under SKIP is left untouched, so a re-apply writes nothing), and
+     * entirely for dry runs (nothing was actually written).
      */
     @SuppressWarnings("unchecked")
     private void patchDisplayFields(ImportContext ctx, List<Map<String, Object>> collectionItems,
-                                    ImportOptions options) {
+                                    Set<String> writtenCollections, ImportOptions options) {
         if (options.dryRun() || collectionItems.isEmpty()) {
             return;
         }
@@ -253,7 +255,7 @@ public class PackageImportService {
         for (var item : collectionItems) {
             Map<String, Object> data = (Map<String, Object>) item.get("data");
             String collectionName = (String) data.get("name");
-            if (!included("COLLECTION", collectionName, options)) {
+            if (!writtenCollections.contains(collectionName)) {
                 continue;
             }
             String collectionId = ctx.collectionIdByName().get(collectionName);
@@ -273,6 +275,17 @@ public class PackageImportService {
             }
             patchOwnership(def, collectionId, collectionName, data);
         }
+    }
+
+    /** Natural keys of the items of {@code type} this import created or updated. */
+    private static Set<String> written(String type, List<ItemResult> results) {
+        Set<String> keys = new HashSet<>();
+        for (var r : results) {
+            if (type.equals(r.type()) && ("CREATED".equals(r.action()) || "UPDATED".equals(r.action()))) {
+                keys.add(r.naturalKey());
+            }
+        }
+        return keys;
     }
 
     private void patchOwnership(CollectionDefinition def, String collectionId, String collectionName,
