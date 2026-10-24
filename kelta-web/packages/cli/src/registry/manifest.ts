@@ -1,8 +1,7 @@
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import type { ZodType } from 'zod';
 import { EXIT } from '../errors.js';
 import { OUTPUT_FORMATS } from '../render/render.js';
 import { VERSION } from '../version.js';
+import { commandInputJsonSchema } from './inputSchema.js';
 import type { RegisteredCommand } from './types.js';
 
 /**
@@ -55,9 +54,7 @@ export function buildManifest(commands: RegisteredCommand[], group?: string): Ma
       requiresAuth: command.requiresAuth !== false,
       positionals: (command.positionals ?? []).map((positional) => ({ ...positional })),
       options: (command.options ?? []).map((option) => ({ ...option })),
-      inputSchema: zodToJsonSchema(command.input as unknown as ZodType, {
-        $refStrategy: 'none',
-      }),
+      inputSchema: commandInputJsonSchema(command),
     })),
   };
 }

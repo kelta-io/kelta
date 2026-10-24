@@ -1,7 +1,6 @@
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import type { ZodType } from 'zod';
 import { buildContext } from '../context.js';
 import { flattenBody } from '../render/flatten.js';
+import { commandInputJsonSchema } from '../registry/inputSchema.js';
 import type { RegisteredCommand } from '../registry/types.js';
 
 /**
@@ -57,7 +56,7 @@ export function toMcpTool(command: RegisteredCommand): McpToolSpec {
   return {
     name: localToolName(command),
     description: command.summary,
-    inputSchema: zodToJsonSchema(command.input as unknown as ZodType, { $refStrategy: 'none' }),
+    inputSchema: commandInputJsonSchema(command),
     annotations: {
       destructiveHint: Boolean(command.dangerous),
       readOnlyHint: command.name === 'list' || command.name === 'status' || command.name === 'show',

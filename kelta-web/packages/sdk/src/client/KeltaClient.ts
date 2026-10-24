@@ -149,7 +149,7 @@ export class KeltaClient {
       if (this.validationEnabled) {
         const parseResult = DiscoveryResponseSchema.safeParse({ resources });
         if (!parseResult.success) {
-          const errorMessages = parseResult.error.errors.map(
+          const errorMessages = parseResult.error.issues.map(
             (e) => `${e.path.join('.')}: ${e.message}`
           );
           throw new ValidationError(`Invalid discovery response: ${errorMessages.join(', ')}`, {

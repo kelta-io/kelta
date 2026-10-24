@@ -1,4 +1,4 @@
-import type { ZodType, ZodTypeDef } from 'zod';
+import type { ZodType } from 'zod';
 import type { KeltaClient } from '@kelta/sdk';
 import type { ResolvedProfile } from '../config/resolve.js';
 import type { HandlerResult, OutputFormat } from '../render/render.js';
@@ -50,7 +50,7 @@ export interface CommandDef<I = unknown> {
   positionals?: PositionalSpec[];
   options?: OptionSpec[];
   /** Validates the merged positionals+options object; failures exit 2. */
-  input: ZodType<I, ZodTypeDef, unknown>;
+  input: ZodType<I, unknown>;
   /**
    * Destructive: confirm on a TTY, require --yes otherwise. A predicate makes
    * the gate input-dependent (e.g. `metadata apply --dry-run` is safe).
