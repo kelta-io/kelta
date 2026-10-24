@@ -1,9 +1,13 @@
 package io.kelta.worker.service;
 
 import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.CollectionDefinitionBuilder;
+import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.storage.CompositeUniqueConstraintService;
+import io.kelta.runtime.storage.CompositeUniqueConstraintService.ConstraintInfo;
 import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -36,7 +40,8 @@ class PackageRoundTripTest {
             "collection_name", "reference_collection_name", "layout_name", "section_sort_order",
             "field_name", "field_collection_name", "picklist_name", "related_collection_name",
             "relationship_field_name", "relationship_field_collection_name",
-            "menu_name", "parent_label", "global_picklist_name");
+            "menu_name", "parent_label", "global_picklist_name", "primary_collection_name",
+            "folder_name", "approver_email", "approver_group_name");
 
     /** Owned by the engine (ids) or by the export (stripped before the item is built). */
     private static final Set<String> NON_ROUND_TRIP_COLUMNS = Set.of(
@@ -49,6 +54,8 @@ class PackageRoundTripTest {
     private JdbcTemplate importJdbc;
     private PackageImportService importService;
     private DashboardTreeService dashboardTreeService;
+    /** Composite unique constraints the import created on the target, as the service lists them. */
+    private List<ConstraintInfo> targetConstraints;
 
     /** Every create the importer made, in order: system collection → written record. */
     private List<Map.Entry<String, Map<String, Object>>> creates;
@@ -58,20 +65,44 @@ class PackageRoundTripTest {
     void setUp() {
         exportRepository = mock(PackageRepository.class);
         when(exportRepository.getJdbcTemplate()).thenReturn(mock(JdbcTemplate.class));
+        CollectionDefinition orders = new CollectionDefinitionBuilder().name("orders")
+                .addField(FieldDefinition.string("status"))
+                .addField(FieldDefinition.string("stage"))
+                .build();
+        CollectionRegistry exportRegistry = mock(CollectionRegistry.class);
+        when(exportRegistry.get("orders")).thenReturn(orders);
+        CompositeUniqueConstraintService exportConstraints = mock(CompositeUniqueConstraintService.class);
+        when(exportConstraints.list(orders)).thenReturn(List.of(new ConstraintInfo(
+                "uniq_src_orders_status_stage", List.of("status", "stage"), List.of("status", "stage"))));
         packageService = new PackageService(exportRepository, new ObjectMapper(),
-                mock(PackageImportService.class));
+                mock(PackageImportService.class), exportRegistry, exportConstraints);
         stubSourceTenant();
 
         queryEngine = mock(QueryEngine.class);
         CollectionRegistry registry = mock(CollectionRegistry.class);
         when(registry.get(anyString())).thenAnswer(inv ->
                 SystemCollectionDefinitions.byName().get(inv.<String>getArgument(0)));
+        when(registry.get("orders")).thenReturn(orders);
+        targetConstraints = new ArrayList<>();
+        CompositeUniqueConstraintService importConstraints = mock(CompositeUniqueConstraintService.class);
+        when(importConstraints.list(orders)).thenAnswer(inv -> List.copyOf(targetConstraints));
+        when(importConstraints.create(eq(orders), anyList())).thenAnswer(inv -> {
+            List<String> fieldNames = inv.getArgument(1);
+            ConstraintInfo info = new ConstraintInfo("uniq_tgt_orders_" + String.join("_", fieldNames),
+                    fieldNames, fieldNames);
+            targetConstraints.add(info);
+            return info;
+        });
         PackageRepository importRepository = mock(PackageRepository.class);
         importJdbc = mock(JdbcTemplate.class);
         when(importRepository.getJdbcTemplate()).thenReturn(importJdbc);
         when(importJdbc.queryForList(anyString(), any(Object.class))).thenReturn(List.of());
         when(importJdbc.queryForList(contains("FROM platform_user"), eq(TARGET)))
                 .thenReturn(List.of(Map.of("id", "tgt-user")));
+        when(importJdbc.queryForList(contains("lower(email)"), eq(TARGET), eq("ann@acme.io")))
+                .thenReturn(List.of(Map.of("id", "tgt-ann")));
+        when(importJdbc.queryForList(contains("FROM user_group"), eq(TARGET), eq("Finance")))
+                .thenReturn(List.of(Map.of("id", "tgt-finance")));
 
         creates = new ArrayList<>();
         createdIds = new IdentityHashMap<>();
@@ -92,7 +123,7 @@ class PackageRoundTripTest {
         importService = new PackageImportService(queryEngine, registry, importRepository,
                 new ObjectMapper(), (identifier, tenantId) -> identifier, dashboardTreeService,
                 new DashboardComponentValidator(registry, mock(CollectionLifecycleManager.class), queryEngine),
-                mock(PlatformTransactionManager.class));
+                mock(PlatformTransactionManager.class), importConstraints);
     }
 
     // ------------------------------------------------------------------
@@ -120,6 +151,8 @@ class PackageRoundTripTest {
         when(exportRepository.findAllIds("global_picklist", SOURCE)).thenReturn(List.of("src-picklist"));
         when(exportRepository.findAllIds("list_view", SOURCE)).thenReturn(List.of("src-view"));
         when(exportRepository.findAllIds("dashboard", SOURCE)).thenReturn(List.of("src-dash"));
+        when(exportRepository.findAllIds("report", SOURCE)).thenReturn(List.of("src-report"));
+        when(exportRepository.findAllIds("approval_process", SOURCE)).thenReturn(List.of("src-approval"));
 
         when(exportRepository.findCollectionsByIds(SOURCE, collectionIds)).thenReturn(List.of(
                 row("id", "src-orders", "name", "orders", "display_name", "Orders", "active", true),
@@ -193,6 +226,21 @@ class PackageRoundTripTest {
                         "component_type", "chart", "title", "By status", "column_position", 1,
                         "row_position", 1, "column_span", 2, "row_span", 1, "sort_order", 0,
                         "config", Map.of("groupByField", "status"))));
+        when(exportRepository.findReportsByIds(SOURCE, List.of("src-report"))).thenReturn(List.of(
+                row("id", "src-report", "name", "Orders by stage", "report_type", "SUMMARY",
+                        "primary_collection_id", "src-orders", "primary_collection_name", "orders",
+                        "columns", List.of(Map.of("fieldName", "status"), Map.of("fieldName", "stage")),
+                        "group_by", "stage", "access_level", "PUBLIC", "created_by", "src-user")));
+        when(exportRepository.findApprovalProcessesByIds(SOURCE, List.of("src-approval"))).thenReturn(List.of(
+                row("id", "src-approval", "collection_id", "src-orders", "collection_name", "orders",
+                        "name", "Large order", "active", true, "record_editability", "LOCKED")));
+        when(exportRepository.findApprovalStepsByProcessIds(SOURCE, List.of("src-approval"))).thenReturn(List.of(
+                row("id", "src-step-1", "approval_process_id", "src-approval", "step_number", 1,
+                        "name", "Manager", "approver_type", "USER", "approver_id", "src-ann",
+                        "approver_email", "ann@acme.io", "approver_group_name", null),
+                row("id", "src-step-2", "approval_process_id", "src-approval", "step_number", 2,
+                        "name", "Finance", "approver_type", "GROUP", "approver_id", "src-finance",
+                        "approver_email", null, "approver_group_name", "Finance")));
     }
 
     @SuppressWarnings("unchecked")
@@ -225,21 +273,53 @@ class PackageRoundTripTest {
     void exportedColumnsAllSurviveTheImport() {
         for (var item : exportItems()) {
             String type = (String) item.get("type");
-            if ("DASHBOARD".equals(type)) {
-                continue; // a dashboard tree document, not table columns — dashboardTreeRoundTrips
+            if ("DASHBOARD".equals(type) || "UNIQUE_CONSTRAINT".equals(type)) {
+                continue; // a tree document / an index, not table columns
             }
-            CollectionDefinition def = SystemCollectionDefinitions.byName()
-                    .get(PackageImportService.systemCollectionFor(type));
-            Set<String> storable = new HashSet<>();
-            def.fields().forEach(f -> storable.add(f.effectiveColumnName()));
-
-            Set<String> lost = new LinkedHashSet<>(((Map<String, Object>) item.get("data")).keySet());
-            lost.removeAll(storable);
-            lost.removeAll(NATURAL_KEY_COLUMNS);
-            lost.removeAll(NON_ROUND_TRIP_COLUMNS);
-
-            assertThat(lost).as("%s columns dropped on import", type).isEmpty();
+            Map<String, Object> data = new LinkedHashMap<>((Map<String, Object>) item.get("data"));
+            if ("APPROVAL_PROCESS".equals(type)) {
+                for (var step : (List<Map<String, Object>>) data.remove("steps")) {
+                    assertThat(lostColumns("approval-steps", step)).as("approval step columns dropped on import")
+                            .isEmpty();
+                }
+            }
+            assertThat(lostColumns(PackageImportService.systemCollectionFor(type), data))
+                    .as("%s columns dropped on import", type).isEmpty();
         }
+    }
+
+    private static Set<String> lostColumns(String systemCollection, Map<String, Object> data) {
+        CollectionDefinition def = SystemCollectionDefinitions.byName().get(systemCollection);
+        Set<String> lost = new LinkedHashSet<>(data.keySet());
+        def.fields().forEach(f -> lost.remove(f.effectiveColumnName()));
+        lost.removeAll(NATURAL_KEY_COLUMNS);
+        lost.removeAll(NON_ROUND_TRIP_COLUMNS);
+        return lost;
+    }
+
+    @Test
+    @DisplayName("unique constraints, reports and approval processes round-trip with every reference resolved by name")
+    void constraintsReportsAndApprovalProcessesRoundTrip() {
+        var report = importService.importPackage(TARGET, Map.of("items", exportItems()),
+                PackageImportService.ImportOptions.defaults());
+        assertThat(report.failed()).as("%s", report.items()).isZero();
+
+        assertThat(targetConstraints).extracting(ConstraintInfo::fieldNames)
+                .containsExactly(List.of("stage", "status"));
+        assertThat(written("reports"))
+                .containsEntry("name", "Orders by stage")
+                .containsEntry("primaryCollectionId", idOf("collections", "orders"))
+                .containsEntry("groupBy", "stage")
+                .doesNotContainKeys("folderId", "createdBy");
+        Map<String, Object> process = written("approval-processes");
+        assertThat(process)
+                .containsEntry("collectionId", idOf("collections", "orders"))
+                .containsEntry("name", "Large order");
+        assertThat(written("approval-steps", r -> Integer.valueOf(1).equals(r.get("stepNumber"))))
+                .containsEntry("approvalProcessId", createdIds.get(process))
+                .containsEntry("approverId", "tgt-ann");
+        assertThat(written("approval-steps", r -> Integer.valueOf(2).equals(r.get("stepNumber"))))
+                .containsEntry("approverId", "tgt-finance");
     }
 
     @Test
@@ -338,9 +418,14 @@ class PackageRoundTripTest {
                 new PackageImportService.ImportOptions(
                         PackageImportService.ConflictMode.OVERWRITE, false, null, null, null));
 
+        long constraints = items.stream().filter(i -> "UNIQUE_CONSTRAINT".equals(i.get("type"))).count();
         assertThat(report.failed()).as("%s", report.items()).isZero();
         assertThat(report.created()).isZero();
-        assertThat(report.updated()).isEqualTo(items.size());
+        assertThat(report.updated()).isEqualTo(items.size() - constraints);
+        assertThat(report.skipped()).as("a field set has nothing to overwrite").isEqualTo(constraints);
+        assertThat(creates.stream().filter(c -> c.getKey().equals("approval-steps")))
+                .as("existing approval steps are updated by step number, not added again")
+                .hasSize(2);
     }
 
     @Test
@@ -352,6 +437,8 @@ class PackageRoundTripTest {
                 row("id", "src-status", "collection_id", "src-orders", "collection_name", "orders",
                         "name", "status", "type", "PICKLIST",
                         "field_type_config", jsonb("{\"restricted\":true}")),
+                row("id", "src-stage", "collection_id", "src-orders", "collection_name", "orders",
+                        "name", "stage", "type", "STRING"),
                 row("id", "src-order", "collection_id", "src-lines", "collection_name", "order_lines",
                         "name", "order", "type", "LOOKUP",
                         "reference_collection_id", "src-orders", "reference_collection_name", "orders")));
@@ -385,6 +472,8 @@ class PackageRoundTripTest {
                         "name", "failure_count", "type", "INTEGER", "system_maintained", true),
                 row("id", "src-status", "collection_id", "src-orders", "collection_name", "orders",
                         "name", "status", "type", "PICKLIST", "system_maintained", false),
+                row("id", "src-stage", "collection_id", "src-orders", "collection_name", "orders",
+                        "name", "stage", "type", "STRING", "system_maintained", false),
                 row("id", "src-order", "collection_id", "src-lines", "collection_name", "order_lines",
                         "name", "order", "type", "LOOKUP", "system_maintained", false,
                         "reference_collection_id", "src-orders", "reference_collection_name", "orders")));
@@ -530,6 +619,17 @@ class PackageRoundTripTest {
                 mockingDetails(dashboardTreeService).getInvocations().stream()
                         .filter(inv -> inv.getMethod().getName().equals("applyTree"))
                         .map(inv -> row("id", "tgt-dashboard-" + inv.getArgument(0), "name", inv.getArgument(0)))
+                        .toList());
+        seed("FROM report WHERE", "reports",
+                r -> row("id", createdIds.get(r), "name", r.get("name")));
+        seed("FROM approval_process ap", "approval-processes",
+                r -> row("id", createdIds.get(r), "name", r.get("name"),
+                        "coll", nameOf("collections", r.get("collectionId"))));
+        when(importJdbc.queryForList(contains("FROM approval_step WHERE"), anyString())).thenAnswer(inv ->
+                creates.stream()
+                        .filter(c -> c.getKey().equals("approval-steps")
+                                && inv.getArgument(1).equals(c.getValue().get("approvalProcessId")))
+                        .map(c -> row("id", createdIds.get(c.getValue()), "step_number", c.getValue().get("stepNumber")))
                         .toList());
         seed("FROM ui_menu_item mi", "ui-menu-items",
                 r -> row("id", createdIds.get(r), "label", r.get("label"),

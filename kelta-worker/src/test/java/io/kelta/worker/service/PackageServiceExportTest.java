@@ -1,5 +1,11 @@
 package io.kelta.worker.service;
 
+import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.CollectionDefinitionBuilder;
+import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.storage.CompositeUniqueConstraintService;
+import io.kelta.runtime.storage.CompositeUniqueConstraintService.ConstraintInfo;
 import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.*;
 import org.postgresql.util.PGobject;
@@ -27,6 +33,8 @@ class PackageServiceExportTest {
     private PackageRepository repository;
     private PackageImportService importService;
     private JdbcTemplate jdbcTemplate;
+    private CollectionRegistry collectionRegistry;
+    private CompositeUniqueConstraintService uniqueConstraintService;
     private PackageService service;
 
     @BeforeEach
@@ -37,7 +45,10 @@ class PackageServiceExportTest {
         when(repository.getJdbcTemplate()).thenReturn(jdbcTemplate);
         when(jdbcTemplate.queryForList(anyString(), eq(String.class), eq(TENANT)))
                 .thenReturn(List.of());
-        service = new PackageService(repository, new ObjectMapper(), importService);
+        collectionRegistry = mock(CollectionRegistry.class);
+        uniqueConstraintService = mock(CompositeUniqueConstraintService.class);
+        service = new PackageService(repository, new ObjectMapper(), importService, collectionRegistry,
+                uniqueConstraintService);
     }
 
     private static Map<String, Object> row(Object... kv) {
@@ -483,6 +494,8 @@ class PackageServiceExportTest {
         when(repository.findAllIds("global_picklist", TENANT)).thenReturn(List.of("gp1"));
         when(repository.findAllIds("list_view", TENANT)).thenReturn(List.of("lv1"));
         when(repository.findAllIds("dashboard", TENANT)).thenReturn(List.of("d1"));
+        when(repository.findAllIds("report", TENANT)).thenReturn(List.of("r1"));
+        when(repository.findAllIds("approval_process", TENANT)).thenReturn(List.of("ap1"));
 
         var options = service.exportAllOptions(TENANT, "sandbox-clone", "1.0.0");
 
@@ -499,10 +512,28 @@ class PackageServiceExportTest {
                 .containsEntry("globalPicklistIds", List.of("gp1"))
                 .containsEntry("listViewIds", List.of("lv1"))
                 .containsEntry("dashboardIds", List.of("d1"))
+                .doesNotContainKey("reportIds")
+                .doesNotContainKey("approvalProcessIds")
                 .doesNotContainKey("roleIds")
                 .doesNotContainKey("policyIds");
         verify(repository, never()).findAllIds("role", TENANT);
         verify(repository, never()).findAllIds("policy", TENANT);
+    }
+
+    @Test
+    @DisplayName("a whole-tenant export request adds reports and approval processes, which sandbox clones leave out")
+    void wholeTenantRequestAddsApprovalProcesses() {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.of("acme"));
+        when(repository.findAllIds("approval_process", TENANT)).thenReturn(List.of("ap1"));
+        when(repository.findAllIds("report", TENANT)).thenReturn(List.of("r1"));
+
+        var options = service.resolveExportOptions(TENANT, Map.of());
+
+        assertThat(options)
+                .containsEntry("approvalProcessIds", List.of("ap1"))
+                .containsEntry("reportIds", List.of("r1"));
+        assertThat(service.exportAllOptions(TENANT, "sandbox-clone", "1.0.0"))
+                .doesNotContainKeys("reportIds", "approvalProcessIds");
     }
 
     @Test
@@ -576,5 +607,99 @@ class PackageServiceExportTest {
                     assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
                     assertThat(e.getReason()).contains("COLLECTION").contains("LIST_VIEW");
                 });
+    }
+
+    @Test
+    @DisplayName("exports unique constraints, reports and approval processes by name, carrying no tenant-specific ids")
+    @SuppressWarnings("unchecked")
+    void exportsConstraintsReportsAndApprovalProcessesByName() throws Exception {
+        when(repository.findTenantSlug(TENANT)).thenReturn(Optional.of("acme"));
+        when(repository.findCollectionsByIds(TENANT, List.of("c1"))).thenReturn(List.of(
+                row("id", "c1", "name", "orders", "tenant_id", TENANT)));
+        CollectionDefinition orders = new CollectionDefinitionBuilder().name("orders")
+                .addField(FieldDefinition.string("sku").withUnique(true))
+                .addField(FieldDefinition.string("region"))
+                .addField(FieldDefinition.string("code"))
+                .build();
+        when(collectionRegistry.get("orders")).thenReturn(orders);
+        when(uniqueConstraintService.list(orders)).thenReturn(List.of(
+                new ConstraintInfo("uniq_tbl_c1_region_code", List.of("region", "code"), List.of("region", "code")),
+                new ConstraintInfo("uniq_tbl_c1_sku", List.of("sku"), List.of("sku")),
+                new ConstraintInfo("uniq_tbl_c1_code", List.of("code"), List.of("code"))));
+        when(repository.findReportsByIds(TENANT, List.of("r1"))).thenReturn(List.of(
+                row("id", "r1", "tenant_id", TENANT, "name", "Open orders", "report_type", "TABULAR",
+                        "primary_collection_id", "c1", "primary_collection_name", "orders",
+                        "folder_id", "rf1", "folder_name", "Sales",
+                        "columns", jsonb("[{\"fieldName\":\"region\"}]"), "created_by", "u-9")));
+        when(repository.findApprovalProcessesByIds(TENANT, List.of("ap1"))).thenReturn(List.of(
+                row("id", "ap1", "tenant_id", TENANT, "collection_id", "c1", "collection_name", "orders",
+                        "name", "Discount approval", "created_by", "u-9")));
+        when(repository.findApprovalStepsByProcessIds(TENANT, List.of("ap1"))).thenReturn(List.of(
+                row("id", "s1", "approval_process_id", "ap1", "step_number", 1, "name", "Manager",
+                        "approver_type", "USER", "approver_id", "u-42",
+                        "approver_email", "ann@acme.io", "approver_group_name", null),
+                row("id", "s2", "approval_process_id", "ap1", "step_number", 2, "name", "Finance",
+                        "approver_type", "GROUP", "approver_id", "g-7",
+                        "approver_email", null, "approver_group_name", "Finance"),
+                row("id", "s3", "approval_process_id", "ap1", "step_number", 3, "name", "Owner",
+                        "approver_type", "FIELD", "approver_id", null, "approver_field", "owner")));
+
+        var pkg = service.exportPackage(TENANT, Map.of("collectionIds", List.of("c1"),
+                "reportIds", List.of("r1"), "approvalProcessIds", List.of("ap1")), false);
+
+        var items = (List<Map<String, Object>>) pkg.get("items");
+        var constraints = items.stream().filter(i -> "UNIQUE_CONSTRAINT".equals(i.get("type")))
+                .map(i -> (Map<String, Object>) i.get("data")).toList();
+        assertThat(constraints)
+                .as("the index name is not carried; sku's index backs the field's own unique flag")
+                .containsExactly(
+                        Map.of("collection_name", "orders", "field_names", List.of("region", "code")),
+                        Map.of("collection_name", "orders", "field_names", List.of("code")));
+
+        var report = (Map<String, Object>) items.stream().filter(i -> "REPORT".equals(i.get("type")))
+                .findFirst().orElseThrow().get("data");
+        assertThat(report)
+                .containsEntry("name", "Open orders")
+                .containsEntry("primary_collection_name", "orders")
+                .containsEntry("folder_name", "Sales")
+                .containsEntry("columns", List.of(Map.of("fieldName", "region")))
+                .doesNotContainKeys("id", "tenant_id", "primary_collection_id", "folder_id", "created_by");
+
+        var process = (Map<String, Object>) items.stream().filter(i -> "APPROVAL_PROCESS".equals(i.get("type")))
+                .findFirst().orElseThrow().get("data");
+        assertThat(process)
+                .containsEntry("name", "Discount approval")
+                .containsEntry("collection_name", "orders")
+                .doesNotContainKeys("id", "tenant_id", "collection_id", "created_by");
+        var steps = (List<Map<String, Object>>) process.get("steps");
+        assertThat(steps).hasSize(3);
+        assertThat(steps).allSatisfy(step -> assertThat(step)
+                .doesNotContainKeys("id", "approval_process_id", "approver_id"));
+        assertThat(steps.get(0)).containsEntry("approver_email", "ann@acme.io")
+                .doesNotContainKey("approver_group_name");
+        assertThat(steps.get(1)).containsEntry("approver_group_name", "Finance")
+                .doesNotContainKey("approver_email");
+        assertThat(steps.get(2)).containsEntry("approver_field", "owner")
+                .doesNotContainKeys("approver_email", "approver_group_name");
+
+        assertThat(new ObjectMapper().writeValueAsString(items))
+                .as("no source-tenant id survives in the new types")
+                .doesNotContain("u-42").doesNotContain("g-7").doesNotContain("\"rf1\"")
+                .doesNotContain("\"ap1\"").doesNotContain("uniq_tbl_c1");
+    }
+
+    @Test
+    @DisplayName("collectionNames pulls in the collections' reports and approval processes")
+    void collectionNamesPullsReportsAndApprovalProcesses() {
+        when(repository.findCollectionsByNames(TENANT, List.of("orders"))).thenReturn(List.of(
+                row("id", "c1", "name", "orders", "system_collection", false)));
+        when(repository.findReportIdsByPrimaryCollectionIds(TENANT, List.of("c1"))).thenReturn(List.of("r1"));
+        when(repository.findApprovalProcessIdsByCollectionIds(TENANT, List.of("c1"))).thenReturn(List.of("ap1"));
+
+        var options = service.resolveExportOptions(TENANT, Map.of("collectionNames", List.of("orders")));
+
+        assertThat(options)
+                .containsEntry("reportIds", List.of("r1"))
+                .containsEntry("approvalProcessIds", List.of("ap1"));
     }
 }

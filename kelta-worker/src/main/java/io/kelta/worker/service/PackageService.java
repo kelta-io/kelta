@@ -1,5 +1,9 @@
 package io.kelta.worker.service;
 
+import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.storage.CompositeUniqueConstraintService;
 import io.kelta.worker.repository.PackageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +23,8 @@ public class PackageService {
     /** Option keys naming the ids to export; none present means "the whole tenant". */
     private static final List<String> ID_OPTION_KEYS = List.of(
             "collectionIds", "uiPageIds", "uiMenuIds", "flowIds", "pageLayoutIds",
-            "validationRuleIds", "globalPicklistIds", "listViewIds", "dashboardIds");
+            "validationRuleIds", "globalPicklistIds", "listViewIds", "dashboardIds",
+            "reportIds", "approvalProcessIds");
 
     /** Collection API names whose collections and dependents (rules, layouts, flows, picklists, views) to export. */
     private static final String COLLECTION_NAMES_OPTION = "collectionNames";
@@ -29,6 +34,8 @@ public class PackageService {
 
     private static final Map<String, String> ID_OPTION_BY_EXCLUDABLE_TYPE = Map.of(
             "LIST_VIEW", "listViewIds",
+            "REPORT", "reportIds",
+            "APPROVAL_PROCESS", "approvalProcessIds",
             "DASHBOARD", "dashboardIds",
             "FLOW", "flowIds",
             "PAGE_LAYOUT", "pageLayoutIds",
@@ -42,17 +49,22 @@ public class PackageService {
     private final PackageRepository repository;
     private final ObjectMapper objectMapper;
     private final PackageImportService importService;
+    private final CollectionRegistry collectionRegistry;
+    private final CompositeUniqueConstraintService uniqueConstraintService;
 
     public PackageService(PackageRepository repository, ObjectMapper objectMapper,
-                          PackageImportService importService) {
+                          PackageImportService importService, CollectionRegistry collectionRegistry,
+                          CompositeUniqueConstraintService uniqueConstraintService) {
         this.repository = repository;
         this.objectMapper = objectMapper;
         this.importService = importService;
+        this.collectionRegistry = collectionRegistry;
+        this.uniqueConstraintService = uniqueConstraintService;
     }
 
     /**
-     * Gathers export options covering every packageable item in the tenant.
-     * Used by sandbox cloning and full promotions.
+     * Gathers export options covering every packageable item in the tenant except reports and
+     * approval processes. Used by sandbox cloning, full promotions and snapshots.
      */
     public Map<String, Object> exportAllOptions(String tenantId, String name, String version) {
         Map<String, Object> options = new LinkedHashMap<>();
@@ -73,6 +85,10 @@ public class PackageService {
         options.put("globalPicklistIds", repository.findAllIds("global_picklist", tenantId));
         options.put("listViewIds", repository.findAllIds("list_view", tenantId));
         options.put("dashboardIds", repository.findAllIds("dashboard", tenantId));
+        // Reports and approval processes are left out, as they always were: a sandbox starts with
+        // only its seeded admin, so a USER/GROUP approver can never resolve there, and one report
+        // naming a since-deleted field would fail the whole clone. A whole-tenant
+        // `metadata export` adds both (resolveExportOptions).
         return options;
     }
 
@@ -101,9 +117,14 @@ public class PackageService {
 
         boolean scoped = options.containsKey(COLLECTION_NAMES_OPTION)
                 || ID_OPTION_KEYS.stream().anyMatch(options::containsKey);
-        Map<String, Object> resolved = scoped
-                ? new LinkedHashMap<>(options)
-                : exportAllOptions(tenantId, name, version);
+        Map<String, Object> resolved;
+        if (scoped) {
+            resolved = new LinkedHashMap<>(options);
+        } else {
+            resolved = exportAllOptions(tenantId, name, version);
+            resolved.put("reportIds", repository.findAllIds("report", tenantId));
+            resolved.put("approvalProcessIds", repository.findAllIds("approval_process", tenantId));
+        }
         resolved.putAll(options);
         if (options.containsKey(COLLECTION_NAMES_OPTION)) {
             addCollectionDependents(tenantId, getStringList(options, COLLECTION_NAMES_OPTION), resolved);
@@ -125,9 +146,9 @@ public class PackageService {
     /**
      * Resolves {@code collectionNames} to ids (unioned with any explicit
      * {@code collectionIds}) and fills each dependent id list the caller did not
-     * pass: the collections' validation rules, page layouts and list views, the flows
-     * they trigger, the global picklists their fields are bound to, and the dashboards
-     * with a widget on one of them. UI pages and menus are never pulled in implicitly.
+     * pass: the collections' validation rules, page layouts, list views, reports and approval
+     * processes, the flows they trigger, the global picklists their fields are bound to, and
+     * the dashboards with a widget on one of them. UI pages and menus are never pulled in implicitly.
      */
     private void addCollectionDependents(String tenantId, List<String> names, Map<String, Object> resolved) {
         List<String> distinctNames = names.stream().distinct().toList();
@@ -161,6 +182,10 @@ public class PackageService {
                 k -> repository.findListViewIdsByCollectionIds(tenantId, namedIds));
         resolved.computeIfAbsent("dashboardIds",
                 k -> repository.findDashboardIdsByComponentCollections(tenantId, distinctNames));
+        resolved.computeIfAbsent("reportIds",
+                k -> repository.findReportIdsByPrimaryCollectionIds(tenantId, namedIds));
+        resolved.computeIfAbsent("approvalProcessIds",
+                k -> repository.findApprovalProcessIdsByCollectionIds(tenantId, namedIds));
     }
 
     @SuppressWarnings("unchecked")
@@ -180,6 +205,8 @@ public class PackageService {
         List<String> globalPicklistIds = getStringList(options, "globalPicklistIds");
         List<String> listViewIds = getStringList(options, "listViewIds");
         List<String> dashboardIds = getStringList(options, "dashboardIds");
+        List<String> reportIds = getStringList(options, "reportIds");
+        List<String> approvalProcessIds = getStringList(options, "approvalProcessIds");
 
         Map<String, Object> pkg = new LinkedHashMap<>();
         pkg.put("formatVersion", 2);
@@ -207,6 +234,9 @@ public class PackageService {
         var fields = repository.findFieldsWithNamesByCollectionIds(tenantId, collectionIds);
         for (var field : fields) {
             items.add(buildItem("FIELD", field));
+        }
+        for (var col : collections) {
+            items.addAll(uniqueConstraintItems((String) col.get("name")));
         }
 
         // Global picklists + values (GLOBAL-source and FIELD-source)
@@ -267,6 +297,12 @@ public class PackageService {
         for (var lv : repository.findListViewsByIds(tenantId, listViewIds)) {
             items.add(buildItem("LIST_VIEW", lv));
         }
+        for (var report : repository.findReportsByIds(tenantId, reportIds)) {
+            Map<String, Object> item = buildItem("REPORT", report);
+            stripIds(item, "id", "primary_collection_id", "folder_id");
+            items.add(item);
+        }
+        items.addAll(approvalProcessItems(tenantId, approvalProcessIds));
         items.addAll(dashboardItems(tenantId, dashboardIds));
 
         pkg.put("items", items);
@@ -486,6 +522,82 @@ public class PackageService {
         return items;
     }
 
+    /**
+     * A collection's composite unique constraints, named by collection and field names — the
+     * index name embeds the source table and is not carried. A single-field index backing a
+     * field's own {@code unique} flag travels with that FIELD and is left out here.
+     */
+    private List<Map<String, Object>> uniqueConstraintItems(String collectionName) {
+        CollectionDefinition def = collectionRegistry.get(collectionName);
+        if (def == null) {
+            log.warn("Collection '{}' is not registered; its unique constraints are not exported", collectionName);
+            return List.of();
+        }
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (var constraint : uniqueConstraintService.list(def)) {
+            List<String> fieldNames = constraint.fieldNames();
+            if (fieldNames.size() == 1) {
+                FieldDefinition field = def.getField(fieldNames.get(0));
+                if (field != null && field.unique()) {
+                    continue;
+                }
+            }
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("collection_name", collectionName);
+            data.put("field_names", fieldNames);
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("type", "UNIQUE_CONSTRAINT");
+            item.put("data", data);
+            items.add(item);
+        }
+        return items;
+    }
+
+    /**
+     * Approval processes with their steps nested under {@code steps}. A step's
+     * {@code approver_id} is a source-tenant id, so it travels as the approver's email (USER) or
+     * group name (GROUP/QUEUE) and is dropped for every other approver type.
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> approvalProcessItems(String tenantId, List<String> processIds) {
+        Map<String, List<Map<String, Object>>> stepsByProcess = new HashMap<>();
+        for (var row : repository.findApprovalStepsByProcessIds(tenantId, processIds)) {
+            Map<String, Object> step = new LinkedHashMap<>(row);
+            String processId = (String) step.get("approval_process_id");
+            String type = String.valueOf(step.get("approver_type")).toUpperCase(Locale.ROOT);
+            if (!"USER".equals(type)) {
+                step.remove("approver_email");
+            }
+            if (!"GROUP".equals(type) && !"QUEUE".equals(type)) {
+                step.remove("approver_group_name");
+            }
+            for (String column : List.of("id", "approval_process_id", "approver_id",
+                    "created_by", "updated_by")) {
+                step.remove(column);
+            }
+            step.replaceAll((column, value) -> jsonColumnValue(value));
+            stepsByProcess.computeIfAbsent(processId, k -> new ArrayList<>()).add(step);
+        }
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (var row : repository.findApprovalProcessesByIds(tenantId, processIds)) {
+            String processId = (String) row.get("id");
+            Map<String, Object> item = buildItem("APPROVAL_PROCESS", row);
+            stripIds(item, "id", "collection_id");
+            ((Map<String, Object>) item.get("data")).put("steps", stepsByProcess.getOrDefault(processId, List.of()));
+            items.add(item);
+        }
+        return items;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void stripIds(Map<String, Object> item, String... columns) {
+        Map<String, Object> data = (Map<String, Object>) item.get("data");
+        for (String column : columns) {
+            data.remove(column);
+        }
+    }
+
     private static void putIfPresent(Map<String, Object> target, String key, Object value) {
         if (value != null) {
             target.put(key, value);
@@ -556,6 +668,9 @@ public class PackageService {
             case "GLOBAL_PICKLIST", "PICKLIST_VALUE" -> "picklist";
             case "LIST_VIEW" -> "list-view";
             case "DASHBOARD" -> "dashboard";
+            case "UNIQUE_CONSTRAINT" -> "unique-constraint";
+            case "REPORT" -> "report";
+            case "APPROVAL_PROCESS" -> "approval-process";
             case "RECORD" -> "record";
             default -> type.toLowerCase();
         };
