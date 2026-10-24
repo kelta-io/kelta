@@ -67,6 +67,8 @@ jobs:
       sdk_docs: ${{ steps.filter.outputs.sdk_docs }}
       cli_docs: ${{ steps.filter.outputs.cli_docs }}
       any_java: ${{ steps.filter.outputs.any_java }}
+      integration: ${{ steps.filter.outputs.integration }}
+      maven_settings: ${{ steps.filter.outputs.maven_settings }}
       e2e: ${{ steps.filter.outputs.e2e }}
       runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
       quickstart: ${{ steps.filter.outputs.quickstart }}
@@ -131,24 +133,26 @@ jobs:
       matrix:
         include:
           - service: gateway
-            changed: ${{ needs.changes.outputs.gateway }}
+            changed: ${{ (needs.changes.outputs.gateway == 'true' || needs.changes.outputs.maven_settings == 'true') && 'true' || 'false' }}
             # Its @SpringBootTest integration suites (real Redis + NATS via Testcontainers) run
             # through failsafe, which the pom enables only under -Pintegration-tests.
             runner: k8s-runner-integration
             mvn_args: -Pintegration-tests
           - service: worker
-            changed: ${{ needs.changes.outputs.worker }}
+            changed: ${{ (needs.changes.outputs.worker == 'true' || needs.changes.outputs.maven_settings == 'true') && 'true' || 'false' }}
             runner: k8s-runner-integration
           - service: auth
-            changed: ${{ needs.changes.outputs.auth }}
+            changed: ${{ (needs.changes.outputs.auth == 'true' || needs.changes.outputs.maven_settings == 'true') && 'true' || 'false' }}
             runner: k8s-runner-integration
           - service: ai
-            changed: ${{ needs.changes.outputs.ai }}
+            changed: ${{ (needs.changes.outputs.ai == 'true' || needs.changes.outputs.maven_settings == 'true') && 'true' || 'false' }}
             runner: k8s-runner-integration
           - service: mcp
-            changed: ${{ needs.changes.outputs.mcp }}
+            changed: ${{ (needs.changes.outputs.mcp == 'true' || needs.changes.outputs.maven_settings == 'true') && 'true' || 'false' }}
             runner: k8s-runner
-    if: needs.changes.outputs.any_java == 'true' || needs.changes.outputs.workflows == 'true'
+    # `integration`, not `any_java`: integration-tests needs this job, so a harness-only change
+    # must start it (every entry then takes the cheap skip step) or the harness is skipped too.
+    if: needs.changes.outputs.integration == 'true' || needs.changes.outputs.workflows == 'true'
     steps:
       - name: Skip if unchanged
         if: matrix.changed != 'true' && needs.changes.outputs.workflows != 'true'
@@ -252,7 +256,7 @@ jobs:
     name: Test Runtime Modules
     needs: changes
     runs-on: k8s-runner-integration   # Testcontainers ITs — see test-java
-    if: needs.changes.outputs.runtime == 'true' || needs.changes.outputs.workflows == 'true'
+    if: needs.changes.outputs.runtime == 'true' || needs.changes.outputs.maven_settings == 'true' || needs.changes.outputs.workflows == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -500,13 +504,13 @@ jobs:
 
   # ===========================================================================
   # Cross-service integration tests (Testcontainers harness)
-  # Skipped on docs / frontend-only PRs. Runtime or any Java service change
-  # forces a full integration run via the any_java filter.
+  # Skipped on docs / frontend-only PRs. Runtime, any Java service, the harness
+  # itself or ci/maven-settings.xml forces a full run via the integration filter.
   # ===========================================================================
   integration-tests:
     name: Integration Tests
     needs: [changes, test-java]
-    if: needs.changes.outputs.any_java == 'true' || needs.changes.outputs.workflows == 'true'
+    if: needs.changes.outputs.integration == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: k8s-runner-integration
     timeout-minutes: 20
     steps:
