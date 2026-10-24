@@ -121,7 +121,10 @@ kelta:
       # Matched by longest prefix; each prefix gets its own per-IP bucket.
       # /api/webhooks/mail is generous on purpose: SNS delivers in bursts from a small
       # pool of AWS IPs, so a tight budget drops real customer mail rather than abuse.
-      ip-paths: ${RATE_LIMIT_IP_PATHS:/actuator/health=100,/api/modules/webhooks=300,/api/webhooks/mail=600}
+      # /api/webhooks covers flow webhooks (POST /api/webhooks/{flowId}); all flow
+      # webhooks from one IP share that bucket. /api/webhooks/ses keeps a mail-like budget.
+      # Keep this fallback equal to IpRateLimitFilter.DEFAULT_IP_PATHS (pinned by a test).
+      ip-paths: ${RATE_LIMIT_IP_PATHS:/actuator/health=100,/api/modules/webhooks=300,/api/webhooks=300,/api/webhooks/mail=600,/api/webhooks/ses=600}
       # IPs / CIDR ranges exempt from ALL rate limiting (per-IP and per-tenant).
       # For trusted infrastructure whose traffic is legitimately bursty: uptime
       # probes, in-cluster callers, a payment processor's webhook egress ranges.
