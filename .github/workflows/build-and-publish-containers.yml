@@ -439,7 +439,7 @@ jobs:
 
       - name: Build and push ${{ matrix.service }}
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
