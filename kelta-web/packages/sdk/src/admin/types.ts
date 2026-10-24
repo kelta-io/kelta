@@ -1093,8 +1093,7 @@ export interface TransformLayoutRule extends BaseLayoutRule {
   kind: 'transform';
   target: string;
   transform:
-    | { type: 'upper' | 'lower' | 'trim' | 'titleCase' }
-    | { type: 'formula'; formula: string };
+    { type: 'upper' | 'lower' | 'trim' | 'titleCase' } | { type: 'formula'; formula: string };
 }
 
 /**
@@ -1468,13 +1467,7 @@ export interface CreateEmailTemplateRequest {
 // --- Email Campaigns ---
 
 export type CampaignStatus =
-  | 'DRAFT'
-  | 'SCHEDULED'
-  | 'QUEUED'
-  | 'SENDING'
-  | 'SENT'
-  | 'FAILED'
-  | 'CANCELLED';
+  'DRAFT' | 'SCHEDULED' | 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED' | 'CANCELLED';
 
 /** A single filter condition applied to the target collection. */
 export interface CampaignFilterCondition {
@@ -2196,6 +2189,16 @@ export interface PersonalAccessTokenCreated {
   name: string;
   tokenPrefix: string;
   scopes: string[];
+  expiresAt: string;
+}
+
+/** A managed user's live token as an admin sees it (`GET /api/admin/users/{id}/tokens`). */
+export interface AdminUserPersonalAccessToken {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  scopes: string[];
+  createdAt: string;
   expiresAt: string;
 }
 

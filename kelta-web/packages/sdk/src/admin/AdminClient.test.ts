@@ -274,6 +274,43 @@ describe('AdminClient users.tokens.create', () => {
   });
 });
 
+describe('AdminClient users.tokens.list / revoke', () => {
+  let axios: AxiosInstance;
+  let client: AdminClient;
+
+  beforeEach(() => {
+    axios = createMockAxios();
+    client = new AdminClient(axios);
+  });
+
+  it("GETs the target user's live tokens and unwraps data", async () => {
+    const token = {
+      id: 'tok-1',
+      name: 'CI bot',
+      tokenPrefix: 'klt_abc1',
+      scopes: ['api'],
+      createdAt: '2026-10-01T00:00:00Z',
+      expiresAt: '2026-12-30T00:00:00Z',
+    };
+    const mockGet = axios.get as ReturnType<typeof vi.fn>;
+    mockGet.mockResolvedValue({ data: { data: [token] } });
+
+    const result = await client.users.tokens.list('user-1');
+
+    expect(mockGet).toHaveBeenCalledWith('/api/admin/users/user-1/tokens');
+    expect(result).toEqual([token]);
+  });
+
+  it("DELETEs the target user's token", async () => {
+    const mockDelete = axios.delete as ReturnType<typeof vi.fn>;
+    mockDelete.mockResolvedValue({ data: { status: 'revoked', tokenId: 'tok-1' } });
+
+    await client.users.tokens.revoke('user-1', 'tok-1');
+
+    expect(mockDelete).toHaveBeenCalledWith('/api/admin/users/user-1/tokens/tok-1');
+  });
+});
+
 describe('AdminClient recordTypes', () => {
   let axios: AxiosInstance;
   let client: AdminClient;
