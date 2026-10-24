@@ -192,6 +192,19 @@ class TenantHeaderTrustTest {
         }
 
         @Test
+        @DisplayName("a token without a tenant_id claim cannot use a URL-slug tenant either (PLT-707)")
+        void tokenWithoutTenantCannotUseUrlTenant() {
+            jwtWithTenantClaim(null);
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/accounts")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + JWT)
+                    .build());
+            urlSlugAlpha(exchange);
+
+            assertRejected(run(exchange));
+            verify(metrics).recordAuthFailure(any(), org.mockito.ArgumentMatchers.eq("missing_tenant_claim"));
+        }
+
+        @Test
         @DisplayName("a header naming the token's own tenant is accepted")
         void headerMatchingTokenAccepted() {
             jwtWithTenantClaim(TENANT_A);

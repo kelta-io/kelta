@@ -6,6 +6,10 @@ import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
@@ -34,6 +38,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DynamicReactiveJwtDecoder implements ReactiveJwtDecoder {
 
     private static final Logger log = LoggerFactory.getLogger(DynamicReactiveJwtDecoder.class);
+
+    private static final String TOKEN_TYPE_CLAIM = "token_type";
+    private static final String REFRESH_TOKEN_TYPE = "refresh";
 
     private final String primaryIssuer;
     private final Duration clockSkew;
@@ -98,11 +105,28 @@ public class DynamicReactiveJwtDecoder implements ReactiveJwtDecoder {
         return delegates.computeIfAbsent(issuer, iss -> {
             String jwksUri = iss + "/oauth2/jwks";
             NimbusReactiveJwtDecoder nimbus = NimbusReactiveJwtDecoder.withJwkSetUri(jwksUri).build();
-            nimbus.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
-                    List.of(new JwtTimestampValidator(clockSkew))));
+            nimbus.setJwtValidator(bearerTokenValidator(clockSkew));
             log.debug("Initialized JWKS decoder for {}", jwksUri);
             return nimbus;
         });
+    }
+
+    /**
+     * Validates a JWT presented as a bearer credential: timestamps, and not a refresh token.
+     * kelta-auth's direct-login refresh token ({@code token_type=refresh}) is signed by the
+     * same key as access tokens, so without this check it would authenticate as one.
+     */
+    static OAuth2TokenValidator<Jwt> bearerTokenValidator(Duration clockSkew) {
+        return new DelegatingOAuth2TokenValidator<>(
+                List.of(new JwtTimestampValidator(clockSkew), DynamicReactiveJwtDecoder::rejectRefreshToken));
+    }
+
+    private static OAuth2TokenValidatorResult rejectRefreshToken(Jwt jwt) {
+        if (REFRESH_TOKEN_TYPE.equals(jwt.getClaimAsString(TOKEN_TYPE_CLAIM))) {
+            return OAuth2TokenValidatorResult.failure(new OAuth2Error(
+                    OAuth2ErrorCodes.INVALID_TOKEN, "A refresh token is not a bearer token", null));
+        }
+        return OAuth2TokenValidatorResult.success();
     }
 
     private static String stripTrailingSlash(String s) {
