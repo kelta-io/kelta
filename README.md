@@ -211,7 +211,22 @@ dependencies from Maven Central. The `Dockerfile.jvm` files default to the proje
 pull-through caches (`harbor.rzware.com`, `nexus.rzware.com`), which is what CI and
 production builds use; the JVM overlay overrides that with the `BASE_REGISTRY` and
 `MAVEN_MIRROR` build args, so a local build neither needs those hosts to be reachable nor
-downloads the whole dependency tree through them.
+downloads the whole dependency tree through them. Every other Dockerfile takes the same
+args with the same homelab defaults, so to build one by hand outside the homelab pass the
+public values:
+
+| Build arg | Homelab default | Public value | Dockerfiles |
+|-----------|-----------------|--------------|-------------|
+| `BASE_REGISTRY` | `harbor.rzware.com/dockerhub-cache/library` | `docker.io/library` | all |
+| `MAVEN_MIRROR` | `nexus` (copies `ci/maven-settings.xml`) | `central` | every Java image |
+| `MAVEN_DIST_URL` | `https://nexus.rzware.com/repository/maven-public` | `https://repo.maven.apache.org/maven2` | native `kelta-{worker,auth,gateway}/Dockerfile`, `kelta-worker/Dockerfile.migrate` |
+| `BUN_IMAGE` | `harbor.rzware.com/dockerhub-cache/oven/bun:1.2.19` | `oven/bun:1.2.19` | `kelta-cli-downloads/Dockerfile` |
+
+```bash
+docker build -f kelta-worker/Dockerfile \
+  --build-arg BASE_REGISTRY=docker.io/library --build-arg MAVEN_MIRROR=central \
+  --build-arg MAVEN_DIST_URL=https://repo.maven.apache.org/maven2 .
+```
 
 ### Debugging a service in the IDE (hybrid mode)
 
