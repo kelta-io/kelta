@@ -110,8 +110,23 @@ function retryAfterSeconds(headers: unknown): number | undefined {
   return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
-function hintFor(code: string, headers: unknown): string | undefined {
-  if (code !== 'RATE_LIMIT_EXCEEDED') return undefined;
+/** What to do next for the statuses every command can hit; keyed on HTTP status, not the server's code. */
+const STATUS_HINTS: Record<number, string> = {
+  401: 'Run `kelta auth login` to sign in again, or check that KELTA_TOKEN holds a valid token.',
+  403: "The token's user lacks permission for this on the tenant; check the profile and tenant with `kelta auth status`.",
+  404: 'Check the id or name, and that the tenant slug is right (`kelta auth status`).',
+};
+
+/** Hint for a failure that never reached the server. */
+const NETWORK_HINT =
+  "Check the profile's API URL with `kelta profile show` and that it is reachable from here.";
+
+function statusHint(status: number | undefined): string | undefined {
+  return status !== undefined ? STATUS_HINTS[status] : undefined;
+}
+
+function hintFor(code: string, status: number, headers: unknown): string | undefined {
+  if (code !== 'RATE_LIMIT_EXCEEDED') return statusHint(status);
   const seconds = retryAfterSeconds(headers);
   const wait =
     seconds !== undefined
@@ -141,7 +156,7 @@ export function errorFromResponse(status: number, data: unknown, headers?: unkno
       source: first?.source,
       meta: first?.meta,
       errors: entries.length > 0 ? entries : undefined,
-      hint: hintFor(code, headers),
+      hint: hintFor(code, status, headers),
     }
   );
 }
@@ -176,6 +191,7 @@ export function mapError(error: unknown): CliError {
       return new CliError(error.message || 'Network error', {
         code: 'NETWORK_ERROR',
         exitCode: EXIT.API,
+        hint: NETWORK_HINT,
       });
     }
     return errorFromResponse(error.response.status, error.response.data, error.response.headers);
@@ -187,6 +203,7 @@ export function mapError(error: unknown): CliError {
       code: status !== undefined ? codeForStatus(status) : 'API_ERROR',
       exitCode: status !== undefined ? exitCodeForStatus(status) : EXIT.API,
       status,
+      hint: statusHint(status),
     });
   }
 

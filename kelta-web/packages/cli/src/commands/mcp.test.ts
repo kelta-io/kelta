@@ -7,7 +7,8 @@ import axios from 'axios';
 import { setConfigDirForTesting, setLegacyRcForTesting } from '../config/paths.js';
 import { resolveProfile } from '../config/resolve.js';
 import { saveConfig, setToken } from '../config/store.js';
-import { applyTenantSelector, resolveRemotes } from './mcp.js';
+import { deriveMcpUrl } from '../mcp/remote.js';
+import { applyTenantSelector, mcpCommands, resolveRemotes } from './mcp.js';
 
 vi.mock('axios', () => ({ default: { post: vi.fn() } }));
 
@@ -142,5 +143,26 @@ describe('kelta mcp serve tenant selector', () => {
 
   it('source local resolves no hosted endpoint', () => {
     expect(resolveRemotes('prod', 'admin', undefined, 'local')).toEqual([]);
+  });
+});
+
+describe('kelta mcp serve --mcp-url default', () => {
+  const mcpUrlOption = mcpCommands
+    .find((command) => command.name === 'serve')
+    ?.options?.find((option) => option.flag === '--mcp-url <url>');
+
+  it("documents the default as the profile's API origin", () => {
+    expect(mcpUrlOption?.description).toBe(
+      "Hosted MCP base URL (default: the profile's API origin)"
+    );
+    expect(mcpUrlOption?.description).not.toMatch(/mcp\./);
+  });
+
+  it('bridges to deriveMcpUrl(apiUrl), the API origin, when --mcp-url is omitted', async () => {
+    const [user] = resolveRemotes('prod', 'user', undefined, 'auto');
+    expect(deriveMcpUrl('https://api.kelta.io')).toBe('https://api.kelta.io');
+    expect((await requestOf(user)).url).toBe(
+      `${deriveMcpUrl('https://api.kelta.io')}/acme/mcp/user`
+    );
   });
 });
