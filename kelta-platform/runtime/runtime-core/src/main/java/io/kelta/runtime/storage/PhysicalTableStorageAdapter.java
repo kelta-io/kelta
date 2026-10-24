@@ -8,7 +8,7 @@ import static io.kelta.runtime.storage.SqlIdentifiers.resolveColumnName;
 import static io.kelta.runtime.storage.SqlQueryBuilder.buildOrderByClause;
 import static io.kelta.runtime.storage.SqlQueryBuilder.buildSelectClause;
 import static io.kelta.runtime.storage.StorageConstraintErrors.classifyDataAccessException;
-import static io.kelta.runtime.storage.StorageConstraintErrors.extractCompositeConstraintName;
+import static io.kelta.runtime.storage.StorageConstraintErrors.extractConstraintName;
 import static io.kelta.runtime.storage.StorageConstraintErrors.extractViolatedColumns;
 import static io.kelta.runtime.storage.StorageConstraintErrors.isForeignKeyViolation;
 import static io.kelta.runtime.storage.TenantScopePolicy.refusesAnonymousRead;
@@ -39,10 +39,11 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Storage adapter that maps each collection to a physical PostgreSQL table
@@ -497,10 +498,7 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             });
             return data;
         } catch (DuplicateKeyException e) {
-            // Determine which field caused the violation
-            String fieldName = detectUniqueViolationField(definition, data, e);
-            throw new UniqueConstraintViolationException(
-                definition.name(), fieldName, data.get(fieldName), e);
+            throw uniqueViolation(definition, data, e);
         } catch (DataAccessException e) {
             throw classifyDataAccessException(e, "Failed to create record in collection: " + definition.name(),
                     data, definition);
@@ -603,9 +601,7 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
             // Return the updated record
             return getById(definition, id);
         } catch (DuplicateKeyException e) {
-            String fieldName = detectUniqueViolationField(definition, data, e);
-            throw new UniqueConstraintViolationException(
-                definition.name(), fieldName, data.get(fieldName), e);
+            throw uniqueViolation(definition, data, e);
         } catch (DataAccessException e) {
             throw classifyDataAccessException(e, "Failed to update record in collection: " + definition.name(),
                     data, definition);
@@ -1041,15 +1037,20 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
     }
 
     /**
-     * Attempts to detect which field caused a unique constraint violation.
-     *
-     * @param definition the collection definition
-     * @param data the data that was being inserted/updated
-     * @param e the exception
-     * @return the field name that likely caused the violation, or "unknown"
+     * Builds the exception for a duplicate-key failure, naming every field of the violated
+     * constraint and each one's conflicting value (withheld for server-only, encrypted and
+     * masked fields).
      */
-    private String detectUniqueViolationField(CollectionDefinition definition, Map<String, Object> data,
-            DuplicateKeyException e) {
+    private UniqueConstraintViolationException uniqueViolation(CollectionDefinition definition,
+            Map<String, Object> data, DuplicateKeyException e) {
+        Map<String, String> fieldByColumn = new LinkedHashMap<>();
+        for (FieldDefinition field : definition.fields()) {
+            fieldByColumn.put(getColumnName(definition, field), field.name());
+        }
+        fieldByColumn.putIfAbsent("id", "id");
+
+        List<String> detailValues = List.of();
+        List<String> fieldNames;
         // Best source: the Postgres error detail names the violated columns exactly —
         // "Key (country, slug)=(..., erasmus-plus) already exists." Map the physical
         // columns back to field names so the client learns the real field set, for
@@ -1057,38 +1058,141 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         // whose field no longer carries unique=true in metadata).
         List<String> violatedColumns = extractViolatedColumns(e);
         if (!violatedColumns.isEmpty()) {
-            Map<String, String> fieldByColumn = new LinkedHashMap<>();
-            for (FieldDefinition field : definition.fields()) {
-                fieldByColumn.put(getColumnName(definition, field), field.name());
-            }
-            fieldByColumn.putIfAbsent("id", "id");
-            return violatedColumns.stream()
+            detailValues = StorageConstraintErrors.extractViolatedValues(e, violatedColumns.size());
+            fieldNames = violatedColumns.stream()
                     .map(column -> fieldByColumn.getOrDefault(column, column))
-                    .collect(Collectors.joining(", "));
+                    .toList();
+        } else {
+            // Postgres names the violated constraint even without the detail; map the
+            // platform's naming conventions back to columns.
+            fieldNames = constraintColumns(definition, extractConstraintName(e), fieldByColumn.keySet())
+                    .stream().map(fieldByColumn::get).toList();
+            if (fieldNames.isEmpty()) {
+                fieldNames = probeDuplicateField(definition, data);
+            }
         }
 
-        // Composite unique indexes created by CompositeUniqueConstraintService use the
-        // "uniq_<table>_<col1>_<col2>" naming convention — surface that instead of
-        // pretending the duplicate belongs to a single field.
-        String compositeName = extractCompositeConstraintName(e);
-        if (compositeName != null) {
-            return compositeName;
+        Map<String, Object> values = new LinkedHashMap<>();
+        for (int i = 0; i < fieldNames.size(); i++) {
+            String fieldName = fieldNames.get(i);
+            if (isValueWithheld(definition, fieldName)) {
+                continue;
+            }
+            if (data.containsKey(fieldName)) {
+                values.put(fieldName, data.get(fieldName));
+            } else if (!detailValues.isEmpty()) {
+                values.put(fieldName, detailValues.get(i));
+            }
         }
+        return new UniqueConstraintViolationException(definition.name(), fieldNames, values, e);
+    }
 
-        // Check each unique field to see which one has a duplicate
-        for (FieldDefinition field : definition.fields()) {
-            if (field.unique() && data.containsKey(field.name())) {
-                if (!isUnique(definition, field.name(), data.get(field.name()), (String) data.get("id"))) {
-                    return field.name();
+    /**
+     * Maps a violated constraint name to its columns using the names the platform (and
+     * Postgres) give unique constraints: {@code <table>_pkey} (the primary key),
+     * {@code <table>_<col>_key} (inline {@code UNIQUE}), {@code uniq_<table>_<col>}
+     * (added by {@link SchemaMigrationEngine}), {@code idx_<table>_<col>} (EXTERNAL_ID) and
+     * {@code uniq_<table>_<col1>_<col2>...} (composite, {@link CompositeUniqueConstraintService}).
+     * Returns an empty list when the name matches none of them.
+     */
+    private static List<String> constraintColumns(CollectionDefinition definition, String constraintName,
+            Set<String> columns) {
+        if (constraintName == null) {
+            return List.of();
+        }
+        String name = constraintName.toLowerCase(Locale.ROOT);
+        String baseTable = getBaseTableName(definition);
+        if (name.equals((baseTable + "_pkey").toLowerCase(Locale.ROOT))) {
+            return List.of("id");
+        }
+        String tablePart;
+        try {
+            tablePart = SqlIdentifiers.identifierPart(baseTable);
+        } catch (IllegalArgumentException ex) {
+            return List.of();
+        }
+        for (String column : columns) {
+            if ("id".equals(column)) {
+                continue;
+            }
+            String inlineUnique = baseTable + "_" + column + "_key";
+            String migrationUnique = "uniq_" + tablePart + "_" + column;
+            boolean matches = Stream.of(
+                    inlineUnique,
+                    migrationUnique.length() > 63 ? migrationUnique.substring(0, 63) : migrationUnique,
+                    SqlIdentifiers.buildBoundedIdentifier("uniq_", tablePart, column),
+                    SqlIdentifiers.buildBoundedIdentifier("idx_", tablePart, column))
+                    .anyMatch(candidate -> candidate.equalsIgnoreCase(name));
+            if (matches) {
+                return List.of(column);
+            }
+        }
+        String compositePrefix = (CompositeUniqueConstraintService.INDEX_PREFIX + tablePart + "_")
+                .toLowerCase(Locale.ROOT);
+        if (name.startsWith(compositePrefix)) {
+            List<String> segmented = segmentColumns(name.substring(compositePrefix.length()), columns);
+            if (segmented != null) {
+                return segmented;
+            }
+        }
+        return List.of();
+    }
+
+    /**
+     * Splits an underscore-joined column list ({@code country_slug}) back into known columns,
+     * which may themselves contain underscores. Returns null when no split uses only known columns.
+     */
+    private static List<String> segmentColumns(String joined, Set<String> columns) {
+        if (joined.isEmpty()) {
+            return List.of();
+        }
+        for (String column : columns) {
+            String lower = column.toLowerCase(Locale.ROOT);
+            if (joined.equals(lower)) {
+                return List.of(column);
+            }
+            if (joined.startsWith(lower + "_")) {
+                List<String> rest = segmentColumns(joined.substring(lower.length() + 1), columns);
+                if (rest != null) {
+                    List<String> result = new ArrayList<>();
+                    result.add(column);
+                    result.addAll(rest);
+                    return result;
                 }
             }
         }
+        return null;
+    }
 
-        // Check if it's the primary key
-        if (data.containsKey("id")) {
-            return "id";
+    /**
+     * Last resort when the error names neither columns nor a recognizable constraint:
+     * re-query each unique-backed field (unique, or EXTERNAL_ID) for an existing row
+     * holding the submitted value.
+     */
+    private List<String> probeDuplicateField(CollectionDefinition definition, Map<String, Object> data) {
+        for (FieldDefinition field : definition.fields()) {
+            if ((field.unique() || field.type() == FieldType.EXTERNAL_ID)
+                    && data.get(field.name()) != null) {
+                try {
+                    if (!isUnique(definition, field.name(), data.get(field.name()), (String) data.get("id"))) {
+                        return List.of(field.name());
+                    }
+                } catch (RuntimeException ex) {
+                    log.debug("Uniqueness probe for '{}.{}' failed: {}", definition.name(), field.name(),
+                            ex.getMessage());
+                }
+            }
         }
+        return List.of();
+    }
 
-        return "unknown";
+    /** True when a conflicting value must not be echoed to the client. */
+    private static boolean isValueWithheld(CollectionDefinition definition, String fieldName) {
+        FieldDefinition field = definition.getField(fieldName);
+        return field != null && (field.serverOnly()
+                || field.type() == FieldType.ENCRYPTED
+                || (field.fieldTypeConfig() != null
+                        && field.fieldTypeConfig().get("masking") instanceof Map<?, ?> masking
+                        && !masking.isEmpty()));
     }
 }

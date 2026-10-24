@@ -198,13 +198,33 @@ public class GlobalExceptionHandler {
         String requestId = generateRequestId();
         logger.warn("Unique constraint violation [requestId={}]: {}", requestId, ex.getMessage());
 
-        JsonApiError error = new JsonApiError(
-            "409", "UNIQUE_VIOLATION", "Conflict",
-            ex.getMessage() != null ? ex.getMessage() : "Unique constraint violation");
-        error.setSource(Map.of("pointer", "/data/attributes/" + ex.getFieldName()));
-        error.setMeta(Map.of("requestId", requestId));
+        List<String> fieldNames = ex.getFieldNames();
+        if (fieldNames.isEmpty()) {
+            JsonApiError error = new JsonApiError(
+                "409", "UNIQUE_VIOLATION", "Conflict",
+                ex.getMessage() != null ? ex.getMessage() : "Unique constraint violation");
+            error.setMeta(Map.of("requestId", requestId));
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(errorBody(error));
+        }
 
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorBody(error));
+        // One error object per field of the violated constraint, each with its own pointer;
+        // a composite constraint also lists the whole field set in meta.fields.
+        List<JsonApiError> errors = new ArrayList<>();
+        for (String fieldName : fieldNames) {
+            JsonApiError error = new JsonApiError(
+                "409", "UNIQUE_VIOLATION", "Conflict",
+                fieldNames.size() == 1 && ex.getMessage() != null ? ex.getMessage() : ex.describeField(fieldName));
+            error.setSource(Map.of("pointer", "/data/attributes/" + fieldName));
+            Map<String, Object> meta = new LinkedHashMap<>();
+            meta.put("requestId", requestId);
+            if (fieldNames.size() > 1) {
+                meta.put("fields", fieldNames);
+            }
+            error.setMeta(meta);
+            errors.add(error);
+        }
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorBody(errors));
     }
 
     /**

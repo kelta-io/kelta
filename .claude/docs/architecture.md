@@ -2105,9 +2105,14 @@ constraints are issued separately at runtime via
 Index names are clamped to PostgreSQL's 63-char limit by
 `PhysicalTableStorageAdapter.buildBoundedIdentifier`. Duplicate inserts on the
 constrained tuple bubble up as `DuplicateKeyException` →
-`UniqueConstraintViolationException` → JSON:API 409 via `GlobalExceptionHandler`;
-the originating index name is parsed out of the Postgres error message so the
-409 payload identifies the violated composite. The `create_unique_constraint`
+`UniqueConstraintViolationException` → JSON:API 409 via `GlobalExceptionHandler`.
+`PhysicalTableStorageAdapter` names every field of the violated constraint, from the
+Postgres `Key (cols)=(vals)` detail, else from the constraint name (`<table>_pkey` →
+`id`, `<table>_<col>_key`, `uniq_<table>_<cols>`, `idx_<table>_<col>`), else by probing
+unique/EXTERNAL_ID fields; it never guesses `id`. The 409 carries one `UNIQUE_VIOLATION`
+error per field (`source.pointer` `/data/attributes/<field>`, composite ones list the set in
+`meta.fields`) whose `detail` names the conflicting value — except for server-only,
+ENCRYPTED and masked fields, whose value is withheld. The `create_unique_constraint`
 MCP admin tool wraps the same endpoint.
 
 ### Field types and pgvector

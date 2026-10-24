@@ -7,11 +7,13 @@ import io.kelta.mcp.client.GatewayHttpClient;
 import io.kelta.mcp.config.McpProperties;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
 
+import java.util.List;
 import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
@@ -94,5 +96,27 @@ class CreateRecordToolTest {
 
         wm.verify(WireMock.postRequestedFor(urlEqualTo("/api/contacts"))
                 .withRequestBody(matchingJsonPath("$.data.relationships.account.data.id", equalTo("a1"))));
+    }
+
+    @Test
+    void relaysGatewayUniqueViolationNamingFieldAndValue() {
+        wm.stubFor(post(urlEqualTo("/api/codes"))
+                .willReturn(aResponse().withStatus(409).withBody(
+                        "{\"errors\":[{\"status\":\"409\",\"code\":\"UNIQUE_VIOLATION\",\"title\":\"Conflict\","
+                                + "\"detail\":\"Unique constraint violation: field 'code' in collection 'codes' "
+                                + "already has value 'A-1'\",\"source\":{\"pointer\":\"/data/attributes/code\"}}]}")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("create_record", Map.of(
+                        "collection", "codes",
+                        "attributes", Map.of("code", "A-1")), null));
+
+        assertThat(result.isError()).isEqualTo(Boolean.TRUE);
+        String text = ((TextContent) result.content().get(0)).text();
+        assertThat(text).contains("409").contains("'code'").contains("'A-1'");
+        Map<?, ?> structured = (Map<?, ?>) result.structuredContent();
+        Map<?, ?> error = (Map<?, ?>) ((List<?>) structured.get("errors")).get(0);
+        assertThat(error.get("code")).isEqualTo("UNIQUE_VIOLATION");
+        assertThat(error.get("source")).isEqualTo(Map.of("pointer", "/data/attributes/code"));
     }
 }
