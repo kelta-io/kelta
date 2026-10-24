@@ -1,6 +1,19 @@
 {
   "status" : 404,
-  "headers" : { },
-  "body" : null,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "NOT_FOUND",
+      "detail" : "Collection 'accounts/acc-1/nope' not found",
+      "meta" : {
+        "path" : "/api/accounts/acc-1/nope",
+        "requestId" : "<requestId>"
+      },
+      "status" : "404",
+      "title" : "Not Found"
+    } ]
+  },
   "calls" : [ ]
 }

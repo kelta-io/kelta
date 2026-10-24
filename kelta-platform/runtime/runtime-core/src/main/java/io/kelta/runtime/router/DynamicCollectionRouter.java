@@ -192,7 +192,7 @@ public class DynamicCollectionRouter {
             CollectionDefinition definition = collections.resolve(collectionName, request);
             if (definition == null) {
                 logger.debug("Collection '{}' not found", collectionName);
-                return ResponseEntity.notFound().build();
+                return GlobalExceptionHandler.collectionNotFound(collectionName, request);
             }
 
             QueryRequest queryRequest = QueryRequest.fromParams(params);
@@ -262,7 +262,7 @@ public class DynamicCollectionRouter {
             CollectionDefinition definition = collections.resolve(collectionName, request);
             if (definition == null) {
                 logger.debug("Collection '{}' not found", collectionName);
-                return ResponseEntity.notFound().build();
+                return GlobalExceptionHandler.collectionNotFound(collectionName, request);
             }
 
             // Parse JSON:API ?include= up front so cache lookup can match the put guard:
@@ -278,7 +278,8 @@ public class DynamicCollectionRouter {
                         tenantId, collectionName, id);
                 if (cached.isPresent()) {
                     logger.debug("Cache hit for system collection get: {}/{}", collectionName, id);
-                    return ResponseEntity.ok(projectSparseFieldset(cached.get(), sparseFields));
+                    return withETag(ResponseEntity.ok(), RecordETag.ofDocument(cached.get()))
+                            .body(projectSparseFieldset(cached.get(), sparseFields));
                 }
             }
 
@@ -295,7 +296,7 @@ public class DynamicCollectionRouter {
             // docker-compose, the test harness). It also applies the shared-system-row rule
             // the list path applies, before anything is cached under the caller's tenant.
             if (record.isEmpty() || !tenantScope.visibleToTenant(record.get(), definition, request)) {
-                return ResponseEntity.notFound().build();
+                return GlobalExceptionHandler.recordNotFound(collectionName, id, request);
             }
 
             Map<String, Object> response = JsonApiRecordSerializer.document(record.get(), collectionName, definition);
@@ -317,14 +318,23 @@ public class DynamicCollectionRouter {
                 systemCollectionCache.putByIdResponse(tenantId, collectionName, id, response);
             }
 
-            // Optimistic-locking version token (unified record experience, slice 5).
-            String etag = RecordETag.of(record.get());
-            ResponseEntity.BodyBuilder ok = ResponseEntity.ok();
-            if (etag != null) {
-                ok.header(HttpHeaders.ETAG, etag);
-            }
-            return ok.body(projectSparseFieldset(response, sparseFields));
+            return withETag(ResponseEntity.ok(), record.get()).body(projectSparseFieldset(response, sparseFields));
         });
+    }
+
+    /**
+     * Adds the record's optimistic-locking version token (unified record experience, slice 5) as
+     * {@code ETag}, when it has one.
+     */
+    private static ResponseEntity.BodyBuilder withETag(ResponseEntity.BodyBuilder builder, Map<String, Object> record) {
+        return withETag(builder, RecordETag.of(record));
+    }
+
+    private static ResponseEntity.BodyBuilder withETag(ResponseEntity.BodyBuilder builder, String etag) {
+        if (etag != null) {
+            builder.header(HttpHeaders.ETAG, etag);
+        }
+        return builder;
     }
 
     /**
@@ -377,7 +387,7 @@ public class DynamicCollectionRouter {
             CollectionDefinition definition = collections.resolve(collectionName, request);
             if (definition == null) {
                 logger.debug("Collection '{}' not found", collectionName);
-                return ResponseEntity.notFound().build();
+                return GlobalExceptionHandler.collectionNotFound(collectionName, request);
             }
             return writePipeline.create(WriteTarget.collection(definition, collectionName), requestBody, request);
         });
@@ -449,7 +459,7 @@ public class DynamicCollectionRouter {
             CollectionDefinition definition = collections.resolve(collectionName, request);
             if (definition == null) {
                 logger.debug("Collection '{}' not found", collectionName);
-                return ResponseEntity.notFound().build();
+                return GlobalExceptionHandler.collectionNotFound(collectionName, request);
             }
             return writePipeline.update(WriteTarget.collection(definition, collectionName), id, requestBody, request);
         });
@@ -474,7 +484,7 @@ public class DynamicCollectionRouter {
             CollectionDefinition definition = collections.resolve(collectionName, request);
             if (definition == null) {
                 logger.debug("Collection '{}' not found", collectionName);
-                return ResponseEntity.notFound().build();
+                return GlobalExceptionHandler.collectionNotFound(collectionName, request);
             }
             return writePipeline.delete(WriteTarget.collection(definition, collectionName), id, request);
         });
@@ -509,7 +519,7 @@ public class DynamicCollectionRouter {
         return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = collections.resolveSubResource(parentName, childName, request);
             if (relation == null || !authorizeSubResource(relation, parentId, null, Operation.READ, request)) {
-                return ResponseEntity.notFound().build();
+                return subResourceNotFound(parentName, parentId, childName, request);
             }
 
             QueryRequest queryRequest = QueryRequest.fromParams(params);
@@ -554,15 +564,17 @@ public class DynamicCollectionRouter {
         return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = collections.resolveSubResource(parentName, childName, request);
             if (relation == null || !authorizeSubResource(relation, parentId, childId, Operation.READ, request)) {
-                return ResponseEntity.notFound().build();
+                return GlobalExceptionHandler.recordNotFound(childName, childId, request);
             }
 
             // Absent, not visible to the caller's tenant, or under another parent: all read as 404.
             Optional<Map<String, Object>> record = tenantScope.findChild(
                     relation.childDef(), relation.parentRefFieldName(), parentId, childId, request);
-            return record.map(r -> ResponseEntity.ok(
-                            JsonApiRecordSerializer.document(r, childName, relation.childDef())))
-                         .orElse(ResponseEntity.notFound().build());
+            if (record.isEmpty()) {
+                return GlobalExceptionHandler.recordNotFound(childName, childId, request);
+            }
+            return withETag(ResponseEntity.ok(), record.get())
+                    .body(JsonApiRecordSerializer.document(record.get(), childName, relation.childDef()));
         });
     }
 
@@ -592,7 +604,7 @@ public class DynamicCollectionRouter {
         return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = collections.resolveSubResource(parentName, childName, request);
             if (relation == null || !authorizeSubResource(relation, parentId, null, Operation.CREATE, request)) {
-                return ResponseEntity.notFound().build();
+                return subResourceNotFound(parentName, parentId, childName, request);
             }
             return writePipeline.create(WriteTarget.child(relation, childName, parentId), requestBody, request);
         });
@@ -659,7 +671,7 @@ public class DynamicCollectionRouter {
         return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = collections.resolveSubResource(parentName, childName, request);
             if (relation == null || !authorizeSubResource(relation, parentId, childId, Operation.EDIT, request)) {
-                return ResponseEntity.notFound().build();
+                return GlobalExceptionHandler.recordNotFound(childName, childId, request);
             }
             return writePipeline.update(WriteTarget.child(relation, childName, parentId), childId,
                     requestBody, request);
@@ -690,10 +702,19 @@ public class DynamicCollectionRouter {
         return inRequestTenantScope(request, () -> {
             SubResourceRelation relation = collections.resolveSubResource(parentName, childName, request);
             if (relation == null || !authorizeSubResource(relation, parentId, childId, Operation.DELETE, request)) {
-                return ResponseEntity.notFound().build();
+                return GlobalExceptionHandler.recordNotFound(childName, childId, request);
             }
             return writePipeline.delete(WriteTarget.child(relation, childName, parentId), childId, request);
         });
+    }
+
+    /**
+     * The {@code 404} for a collection-level sub-resource request (list, create) whose parent/child
+     * pair has no relationship or that the {@link SubResourceAuthorizer} hides.
+     */
+    private static <T> ResponseEntity<T> subResourceNotFound(String parentName, String parentId, String childName,
+                                                             HttpServletRequest request) {
+        return GlobalExceptionHandler.collectionNotFound(parentName + "/" + parentId + "/" + childName, request);
     }
 
     /**

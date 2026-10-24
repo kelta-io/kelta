@@ -1,7 +1,20 @@
 {
   "status" : 404,
-  "headers" : { },
-  "body" : null,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "NOT_FOUND",
+      "detail" : "Record 'con-2' not found in collection 'contacts'",
+      "meta" : {
+        "path" : "/api/accounts/acc-2/contacts/con-2",
+        "requestId" : "<requestId>"
+      },
+      "status" : "404",
+      "title" : "Not Found"
+    } ]
+  },
   "calls" : [ {
     "collection" : "contacts",
     "id" : "con-2",
