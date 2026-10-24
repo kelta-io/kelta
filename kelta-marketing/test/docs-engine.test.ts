@@ -26,6 +26,7 @@ const EXTERNAL_SOURCES: Record<string, string> = {
   'authoring/ui-menus': 'docs/authoring/ui-menus.md',
   'authoring/flows': 'docs/authoring/flows.md',
   'authoring/mcp-admin-coverage': 'docs/authoring/mcp-admin-coverage.md',
+  'authoring/endpoints': 'docs/authoring/endpoints.md',
   'cli/commands': 'kelta-web/packages/cli/COMMANDS.md',
   'cli/agents': 'kelta-web/packages/cli/AGENTS.md',
 };

@@ -54,6 +54,15 @@ Files attach to any record through the `attachments` system collection. Storage 
 3. **Delete** — `DELETE /api/attachments/{id}` removes the object and the row. Deleting the parent record removes
    its attachments too.
 
+### Media fields
+
+A text field with media enabled (`fieldTypeConfig.media.enabled: true`) stores an object key instead of a file
+record. `POST /api/<collection>/upload-url` with `{ fileName, contentType, fileSize, field? }` returns a presigned
+`PUT` URL and the `storageKey`; upload the bytes, then create or update the record with the field set to that key.
+`GET /api/<collection>/download/<storageKey>` answers `302` to a short-lived presigned URL, so an `<img src>` works
+without a bearer token — but only for a key a record of that collection references and the caller can read.
+Uploads need `create` on the collection, downloads `read`.
+
 ### Image transforms
 
 Images can be resized on the fly:

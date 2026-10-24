@@ -51,4 +51,7 @@ signed-in user's identity, so the app can do exactly what that user can. Access 
 
 Every issued token — both grants — is recorded in `connected-app-tokens` with its `jti`, and a `TOKEN_ISSUED`
 security-audit event is written. The app's *Tokens* tab shows issuance, last use and revocations; `lastUsedAt` on
-the app reflects real activity.
+the app reflects real activity. Over the API: `GET /api/connected-apps/{appId}/tokens` lists them,
+`DELETE /api/connected-apps/{appId}/tokens/{tokenId}` revokes one, and `GET /api/connected-apps/{appId}/audit` is the
+app's audit trail. `POST /api/connected-apps/{appId}/tokens` is retired and answers `410 Gone`: tokens come only
+from the auth server's grants above.

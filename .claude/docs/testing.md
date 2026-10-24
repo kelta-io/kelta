@@ -402,11 +402,19 @@ in the `test-ci-scripts` job, against a local bare repo and a fake `docker`.
 ## CI script tests
 
 **A `ci/` script's tests live next to it as `ci/<name>.test.ts` or `ci/<name>.test.sh`.** The
-`test-ci-scripts` job in `ci.yml` (job detail: `ci-cd.md`) runs whenever `ci/**`, `scripts/ci/**`
-or the workflows change, and picks tests up by glob — `node --test ci/*.test.ts` and `bash` on
+`test-ci-scripts` job in `ci.yml` (job detail: `ci-cd.md`) runs whenever `ci/**`, `scripts/ci/**`,
+the endpoint index's inputs (below) or the workflows change, and picks tests up by glob — `node --test ci/*.test.ts` and `bash` on
 each `ci/*.test.sh` — so a new test needs no workflow edit. It also runs `bash -n` and
 `shellcheck` 0.10.0 (pinned; default severity) over every `ci/*.sh` and `scripts/ci/*.sh` — use
 the same release locally, since older distro builds report findings the job does not. Locally:
+
+`ci/endpoint-index.test.ts` is the one test here that guards platform source rather than a
+script: it re-renders the public endpoint index and fails when `docs/authoring/endpoints.md` is
+stale (run `node ci/endpoint-index.ts --write`), when an `internal` classification has no reason,
+when a docs link names a page or heading the site does not publish, or when the unclassified count
+moves off `ci/endpoint-index.baseline.json`. The `ci_scripts` filter therefore also lists every
+generator input (controllers, the gateway route table and `application.yml`, kelta-auth's security
+config, the system-collection definitions, `docs/authoring/**` and the docs pages it links to).
 
 ```bash
 node --test ci/*.test.ts          # Node >= 24 (native type stripping)

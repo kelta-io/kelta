@@ -72,6 +72,13 @@ export const externalMeta: Record<`authoring/${string}` | `cli/${string}`, Exter
     section: 'reference',
     order: 90,
   },
+  'authoring/endpoints': {
+    title: 'Public Endpoint Index',
+    description: 'Every HTTP endpoint reachable from outside the platform, with its method, path, required permission and the page that documents it — generated from the controller mappings and the gateway route table.',
+    section: 'reference',
+    order: 100,
+    tocDepth: 2,
+  },
   'cli/commands': {
     title: 'kelta CLI — Command Reference',
     description: 'Every kelta command group, command, flag and default — generated from the CLI command registry.',
