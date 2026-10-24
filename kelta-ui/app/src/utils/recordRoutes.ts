@@ -25,7 +25,7 @@ export type RecordStackVariant = 'admin' | 'enduser'
  * A query for a list / new URL: a pre-built query string (with or without the leading `?`),
  * `URLSearchParams`, or a plain key → value map. Empty queries add nothing.
  */
-export type RecordRouteQuery = string | URLSearchParams | Record<string, string>
+type RecordRouteQuery = string | URLSearchParams | Record<string, string>
 
 // Members are function-typed properties, not method signatures: `new(...)` in an interface
 // would declare a construct signature.
@@ -85,7 +85,7 @@ export function recordRoutes(variant: RecordStackVariant, tenantSlug: string): R
 }
 
 /** Which record page a URL is. */
-export type RecordPageKind = 'list' | 'new' | 'detail' | 'edit'
+type RecordPageKind = 'list' | 'new' | 'detail' | 'edit'
 
 /** A record page URL read back into its parts (see {@link parseRecordPath}). */
 export interface ParsedRecordPath {

@@ -70,12 +70,12 @@ fi
 FAKE
 chmod +x "$TMP/bin/curl"
 
-# A two-collection template: a is seeded with two records, b has no seed file.
-mkdir -p "$TMP/tpl/seeds" "$TMP/tpl/mcp-replay"
+# A two-collection template: a is seeded with two records, b has no records section.
+mkdir -p "$TMP/tpl/mcp-replay"
 cat > "$TMP/tpl/metadata.json" <<'JSON'
-{"items": [{"type": "COLLECTION", "data": {"name": "a"}}, {"type": "COLLECTION", "data": {"name": "b"}}]}
+{"items": [{"type": "COLLECTION", "data": {"name": "a"}}, {"type": "COLLECTION", "data": {"name": "b"}}],
+ "records": [{"collection": "a", "key": ["key"], "rows": [{"key": "k1"}, {"key": "k2"}]}]}
 JSON
-echo '[{"key": "k1"}, {"key": "k2"}]' > "$TMP/tpl/seeds/a.json"
 cat > "$TMP/tpl/mcp-replay/calls.json" <<'JSON'
 {"calls": [
   {"step": "s", "tool": "create_collection", "arguments": {"name": "a"}, "save": {"aId": ".data.id"}},
@@ -141,8 +141,8 @@ pass "happy path → {{aId}} replaced by the id create_collection returned"
   || fail_test "happy path: {{aIds:k2}} was not replaced by the id of k2"
 pass "happy path → {{aIds:k2}} replaced by the id bulk_apply returned for k2"
 expect_output "expected error (the build hit this too)" "happy path → the expected error is logged"
-expect_output "a: exists, 2 records (seeds/a.json: 2)" "happy path → seed count checked"
-expect_output "b: exists (0 records, no seed file)" "happy path → unseeded collection checked for existence"
+expect_output "a: exists, 2 records (metadata.json records: 2)" "happy path → seed count checked"
+expect_output "b: exists (0 records, no records section)" "happy path → unseeded collection checked for existence"
 grep -qxF "http://gateway.test/acme/api/b?page%5Bsize%5D=1" "$TMP/curl.log" \
   || fail_test "happy path: collection b was not read through the tenant's gateway path"
 pass "happy path → collections read at KELTA_URL/KELTA_TENANT/api/<collection>"
@@ -185,7 +185,7 @@ pass "missing tool → no tools/call sent"
 # Case 7: a seed count mismatch fails.
 run_replay "$TMP/tpl" FAKE_COUNTS='{"a": 1, "b": 0}'
 expect_status 1 "seed count mismatch"
-expect_output "a holds 1 records, seeds/a.json has 2" "seed count mismatch → reported"
+expect_output "a holds 1 records, the metadata.json records sections have 2" "seed count mismatch → reported"
 
 # Case 8: a template collection that does not exist fails.
 run_replay "$TMP/tpl" FAKE_COUNTS='{"a": 2}'
@@ -205,6 +205,17 @@ jq '.calls[0].save = {"aId": ".data.missing"}' "$TMP/tpl/mcp-replay/calls.json" 
 run_replay "$TMP/tpl" MCP_REPLAY_FIXTURE="$TMP/bad.json"
 expect_status 1 "empty save"
 expect_output "save aId: .data.missing is null" "empty save → named"
+
+# Case 11: a call to a local-only cli_* tool fails before the bridge starts, naming the step.
+jq '.calls[3].tool = "cli_metadata_export" | .calls[3].step = "Export"' "$TMP/tpl/mcp-replay/calls.json" > "$TMP/bad.json"
+run_replay "$TMP/tpl" MCP_REPLAY_FIXTURE="$TMP/bad.json"
+expect_status 1 "cli_ tool in fixture"
+expect_output "::error::mcp-replay: call 4/5 cli_metadata_export (Export): cli_ tools are local CLI tools" \
+  "cli_ tool in fixture → ::error:: names the call and its step"
+if [ -s "$TMP/calls" ] || [ -s "$TMP/args" ]; then
+  fail_test "cli_ tool in fixture: the bridge ran anyway"
+fi
+pass "cli_ tool in fixture → kelta mcp serve not started, no tools/call sent"
 
 # --- the checked-in applicant-tracking fixture -------------------------------------------
 FIXTURE="$REAL_TEMPLATE/mcp-replay/calls.json"
@@ -241,9 +252,7 @@ pass "applicant-tracking: baseline.txt ($BASELINE) is the number of calls in the
 
 # The whole fixture against the fakes: every substitution resolves and the replay sends
 # exactly the baseline (the fakes never fail a call, so the expected errors only warn).
-SEED_COUNTS="$(for seed in "$REAL_TEMPLATE"/seeds/*.json; do
-  jq -n --arg c "$(basename "$seed" .json)" --argjson n "$(jq length "$seed")" '{($c): $n}'
-done | jq -sc 'add')"
+SEED_COUNTS="$(jq -c '[.records[] | {(.collection): (.rows | length)}] | add' "$REAL_TEMPLATE/metadata.json")"
 run_replay "$REAL_TEMPLATE" FAKE_TOOLS="$FIXTURE_TOOLS" FAKE_COUNTS="$SEED_COUNTS"
 expect_status 0 "applicant-tracking full replay"
 expect_count "$BASELINE" "applicant-tracking full replay"

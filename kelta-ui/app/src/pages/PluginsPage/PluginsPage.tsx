@@ -24,7 +24,7 @@ export interface PluginSettings {
   values?: Record<string, unknown>
 }
 
-export interface PluginSettingsProps {
+interface PluginSettingsProps {
   values: Record<string, unknown>
   onChange: (values: Record<string, unknown>) => void
   isSaving?: boolean
@@ -459,5 +459,3 @@ export function PluginsPage({ testId = 'plugins-page' }: PluginsPageProps): Reac
     </div>
   )
 }
-
-export default PluginsPage

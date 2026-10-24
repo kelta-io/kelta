@@ -1,3 +1,0 @@
-[
-  { "name": "All checklist items", "columns": ["code", "question", "template", "sortOrder"], "sort": "code", "default": true, "rowLimit": 100 }
-]

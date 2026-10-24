@@ -26,8 +26,6 @@ import type { FileViewerAttachment } from './FileViewer'
 import type { Attachment } from '../../hooks/useRecordContext'
 import { formatRelativeTime } from '../../utils/formatRelativeTime'
 
-export type { Attachment }
-
 /**
  * Props for the AttachmentsSection component
  */
@@ -351,5 +349,3 @@ export function AttachmentsSection({
     </section>
   )
 }
-
-export default AttachmentsSection

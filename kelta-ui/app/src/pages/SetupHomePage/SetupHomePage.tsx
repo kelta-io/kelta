@@ -1105,5 +1105,3 @@ function CategoryCard({
     </div>
   )
 }
-
-export default SetupHomePage

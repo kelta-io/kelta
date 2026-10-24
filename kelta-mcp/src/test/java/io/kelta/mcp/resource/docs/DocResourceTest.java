@@ -25,10 +25,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DocResourceTest {
 
     private static final List<String> TOPICS = List.of(
-            "jsonapi", "page-layouts", "list-views", "dashboards", "ui-pages", "ui-menus", "flows");
+            "jsonapi", "page-layouts", "list-views", "dashboards", "ui-pages", "ui-menus", "flows",
+            "packages");
 
     @ParameterizedTest
-    @ValueSource(strings = {"jsonapi", "page-layouts", "list-views", "dashboards", "ui-pages", "ui-menus", "flows"})
+    @ValueSource(strings = {"jsonapi", "page-layouts", "list-views", "dashboards", "ui-pages", "ui-menus", "flows",
+            "packages"})
     void classpathCopyMatchesRepoRootSource(String topic) {
         String classpathBody = DocResource.readClasspathDoc(topic);
         String repoRootBody = readRepoRootDoc(topic);

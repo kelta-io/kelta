@@ -383,5 +383,3 @@ export function ValidationRuleEditor({
     </form>
   )
 }
-
-export default ValidationRuleEditor

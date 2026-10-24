@@ -32,11 +32,12 @@ concurrency:
 
 env:
   JAVA_VERSION: '25'
-  # 20 to match kelta-ui/Dockerfile (node:20-alpine) — CI was validating against a Node
-  # the shipped image is not built with. It is also the floor for kelta-ui/app's vitest
-  # suite: on 18, jsdom's html-encoding-sniffer require()s an ES module, so all 223 test
-  # files fail to start (ERR_REQUIRE_ESM) before a single test runs.
-  NODE_VERSION: '20'
+  # Must equal the node major of the kelta-ui/Dockerfile and kelta-web/Dockerfile builder
+  # stages (node:24.x-alpine) — CI was once validating against a Node the shipped images
+  # were not built with. Move all three together. Never below 20.19 (kelta-ui/app's
+  # engines): on 18, jsdom's html-encoding-sniffer require()s an ES module, so all 223
+  # test files fail to start (ERR_REQUIRE_ESM) before a single test runs.
+  NODE_VERSION: '24'
   MAVEN_VERSION: '3.9.9'
   # Survive transient Maven Central 429 / 503 / connection resets. Both the
   # legacy wagon HTTP transport and the newer Aether connector retry up to 10
@@ -63,6 +64,8 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       ui: ${{ steps.filter.outputs.ui }}
       marketing: ${{ steps.filter.outputs.marketing }}
+      sdk_docs: ${{ steps.filter.outputs.sdk_docs }}
+      cli_docs: ${{ steps.filter.outputs.cli_docs }}
       any_java: ${{ steps.filter.outputs.any_java }}
       e2e: ${{ steps.filter.outputs.e2e }}
       runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
@@ -385,7 +388,7 @@ jobs:
   test-frontend:
     name: Test Frontend
     needs: changes
-    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.workflows == 'true'
+    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.sdk_docs == 'true' || needs.changes.outputs.cli_docs == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: k8s-runner
     defaults:
       run:
@@ -417,6 +420,10 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      # Every ```ts / ```tsx block in the SDK docs compiles against packages/*/src.
+      - name: Type check SDK doc snippets
+        run: npm run check:doc-snippets
+
       - name: Format check
         run: npm run format:check
 
@@ -443,6 +450,12 @@ jobs:
         working-directory: kelta-ui/app
         run: npm ci --no-audit --no-fund
         timeout-minutes: 5
+
+      # Fails on any unused file, export, type or dependency. Deliberate exceptions
+      # live in kelta-ui/app/knip.jsonc, one comment each.
+      - name: Knip (unused code) kelta-ui
+        working-directory: kelta-ui/app
+        run: npm run knip
 
       - name: Type check kelta-ui
         working-directory: kelta-ui/app
@@ -1036,10 +1049,25 @@ jobs:
           if [ -f ci/docker-reclaim.sh ]; then bash ci/docker-reclaim.sh; else echo "ci/docker-reclaim.sh not on this ref, skipping"; fi
 
   # ===========================================================================
-  # Tenant templates — installs every examples/templates/*/ (metadata package, list
-  # views, dashboards, seed records, via its install.sh and the kelta CLI) into one
-  # fresh tenant and checks each collection's record count against the length of its
-  # seeds/<collection>.json (ci/templates-install-check.sh).
+  # Tenant templates — two checks on one HEAD-built stack:
+  #
+  # 1. Install (ci/templates-install-check.sh): installs every examples/templates/*/ into
+  #    one fresh tenant through its install.sh, which is the one `kelta metadata apply
+  #    metadata.json --yes` (the package carries the collections, LIST_VIEW and DASHBOARD
+  #    items and the seed rows in its `records` sections), checks each seeded collection's
+  #    record count against the rows of its `records` sections, then applies the template's
+  #    metadata.json a second time and fails unless that re-apply exits 0 with created 0 and
+  #    failed 0 — a re-apply must change nothing, seed rows included (KLT-666).
+  # 2. Round trip (ci/templates-roundtrip-check.sh): for each installed template, exports
+  #    its collections (`kelta metadata export --collections`), applies the export to a new
+  #    empty sandbox, re-exports from the sandbox and fails on any difference between the two
+  #    exports once ci/templates-roundtrip-normalise.jq has stripped ids and timestamps. Types
+  #    listed in ci/templates-roundtrip-exclusions.txt (each with the task that removes it)
+  #    are left out of the diff and named in the output. It runs in the image check 1 built
+  #    and also runs when check 1 failed, so one run shows both checks' failing types.
+  # 3. First-app tutorial (ci/first-app-runnable.sh): runs the ```bash runnable blocks of
+  #    kelta-marketing/src/content/docs/getting-started/first-app.md in one shell against a
+  #    new empty sandbox, then re-runs each `kelta … apply` and fails unless it is unchanged.
   #
   # Same compose stack and fresh `default` tenant as the quickstart job, but built from
   # HEAD like the e2e job: a template is written against the current CLI and API, and
@@ -1048,8 +1076,8 @@ jobs:
   #
   # Bounded at every level: each install.sh runs under `timeout 300` inside the runner
   # container (capped at 1 GiB / 512 pids, so a runaway script fails the job instead of
-  # the node), the install step has its own timeout-minutes, and so does the job. A
-  # timed-out step is a failure, so the compose-log dump below still runs.
+  # the node), the install and round-trip steps each have their own timeout-minutes, and so
+  # does the job. A timed-out step is a failure, so the compose-log dump below still runs.
   # ===========================================================================
   templates:
     name: Template Install Check
@@ -1058,7 +1086,7 @@ jobs:
       needs.changes.outputs.templates == 'true' || needs.changes.outputs.workflows == 'true'
       || github.event_name == 'schedule'
     runs-on: k8s-runner-integration
-    timeout-minutes: 40
+    timeout-minutes: 50
     concurrency:
       group: templates-${{ github.head_ref || github.ref }}
       cancel-in-progress: true
@@ -1121,8 +1149,28 @@ jobs:
       # Each install.sh is capped at 300s inside the container; this cap covers the image
       # build, the script's own tests and up to three templates at their full 300s.
       - name: Install every template and check its seeded record counts
+        id: install
         timeout-minutes: 20
         run: bash ci/templates-install-check.sh
+
+      # Runs after a failed install step too (but not a cancelled or skipped one): a
+      # re-apply that changed something fails that step without saying anything about the
+      # round trip. Three exports, three empty sandboxes and three applies.
+      - name: Template round-trip check
+        if: ${{ !cancelled() && (steps.install.outcome == 'success' || steps.install.outcome == 'failure') }}
+        timeout-minutes: 10
+        run: bash ci/templates-roundtrip-check.sh
+
+      # Runs the ```bash runnable blocks of the first-app tutorial in a fresh empty sandbox
+      # (KLT-747). Same gate as the round trip: it needs only the stack, not a green install.
+      - name: Run the first-app tutorial's runnable blocks
+        if: ${{ !cancelled() && (steps.install.outcome == 'success' || steps.install.outcome == 'failure') }}
+        timeout-minutes: 5
+        env:
+          FIRST_APP_DOC: kelta-marketing/src/content/docs/getting-started/first-app.md
+          SANDBOX_NAME: first-app
+          TENANT_SLUG: default
+        run: bash ci/first-app-runnable.sh
 
       - name: Dump compose logs on failure
         if: failure()
@@ -1145,9 +1193,9 @@ jobs:
       - name: Stop stack + remove volumes
         if: always()
         run: |
-          docker rm -f "${COMPOSE_PROJECT_NAME}_templates" 2>/dev/null || true
+          docker rm -f "${COMPOSE_PROJECT_NAME}_templates" "${COMPOSE_PROJECT_NAME}_roundtrip" "${COMPOSE_PROJECT_NAME}_first_app" 2>/dev/null || true
           docker compose down -v --rmi local || true
-          docker image rm "kelta-templates-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
+          docker image rm "kelta-templates-runner:${COMPOSE_PROJECT_NAME}" "kelta-first-app-runner:${COMPOSE_PROJECT_NAME}" 2>/dev/null || true
           # `down --rmi local` skips images with a custom `image:` tag, so cerbos goes explicitly.
           docker image rm "kelta-cerbos-ci:${CERBOS_CI_TAG}" 2>/dev/null || true
 
@@ -1655,7 +1703,8 @@ jobs:
   #
   # Every ci/*.test.* file runs here. Some also run elsewhere, on purpose:
   #   - ci/templates-install-check.test.ts also runs inside the templates job's runner
-  #     container (ci/templates-install-check.sh), before it installs any template.
+  #     container (ci/templates-install-check.sh), before it installs any template, and
+  #     ci/templates-roundtrip-check.test.ts in the same image before the round trip.
   #   - ci/upgrade-verify.test.sh also runs in the upgrade job's seed/verify image,
   #     before that job boots a stack.
   # shellcheck (pinned release, not the runner's apt package) runs at its default
@@ -1678,7 +1727,7 @@ jobs:
           node-version: '24'
 
       # ci/templates-install-check.test.ts drives its script with bash, curl, jq and
-      # timeout; ci/upgrade-verify.test.sh needs jq. xz unpacks the shellcheck release.
+      # timeout (ci/templates-roundtrip-check.test.ts with bash, curl, jq and diff); ci/upgrade-verify.test.sh needs jq. xz unpacks the shellcheck release.
       - name: Install script dependencies
         run: |
           missing=()
@@ -1738,8 +1787,8 @@ jobs:
           shellcheck "${scripts[@]}"
 
   # ===========================================================================
-  # Marketing site (kelta.io) — Astro static build + route guards. Node 22 to
-  # match kelta-marketing/Dockerfile, which is what actually ships the site.
+  # Marketing site (kelta.io) — Astro static build + route guards. NODE_VERSION
+  # matches kelta-marketing/Dockerfile, which is what actually ships the site.
   # ===========================================================================
   test-marketing:
     name: Test Marketing Site
@@ -1756,7 +1805,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund

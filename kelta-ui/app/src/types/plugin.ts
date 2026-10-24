@@ -87,13 +87,3 @@ export interface LoadedPlugin {
   /** Error message if loading failed */
   error?: string
 }
-
-/**
- * Component registry for field renderers and page components
- */
-export interface ComponentRegistry {
-  /** Map of field type to renderer component */
-  fieldRenderers: Map<string, ComponentType<FieldRendererProps>>
-  /** Map of component name to page component */
-  pageComponents: Map<string, ComponentType<PageComponentProps>>
-}

@@ -124,5 +124,3 @@ export function OfflineIndicator(): React.ReactElement | null {
     </div>
   )
 }
-
-export default OfflineIndicator

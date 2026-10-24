@@ -540,5 +540,3 @@ export function ScheduledJobsPage({
     </AdminCrudPage>
   )
 }
-
-export default ScheduledJobsPage

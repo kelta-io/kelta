@@ -25,8 +25,12 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 
 /**
@@ -118,26 +122,50 @@ public class PackageImportService {
 
     public enum ConflictMode { SKIP, OVERWRITE }
 
+    /**
+     * {@code compareExisting} (dry runs only — the import preview) compares every item that
+     * already exists in the target with the package's copy and reports the differing attributes
+     * in {@link ItemResult#changes()}.
+     */
     public record ImportOptions(ConflictMode conflictMode,
                                 boolean dryRun,
                                 Set<String> typeFilter,
                                 Set<String> itemKeyFilter,
-                                String executingUserId) {
+                                String executingUserId,
+                                boolean compareExisting) {
+
+        public ImportOptions(ConflictMode conflictMode, boolean dryRun, Set<String> typeFilter,
+                             Set<String> itemKeyFilter, String executingUserId) {
+            this(conflictMode, dryRun, typeFilter, itemKeyFilter, executingUserId, false);
+        }
 
         public static ImportOptions defaults() {
             return new ImportOptions(ConflictMode.SKIP, false, null, null, null);
+        }
+
+        /** Read-only dry run that classifies every existing item as changed or unchanged. */
+        public static ImportOptions preview() {
+            return new ImportOptions(ConflictMode.SKIP, true, null, null, null, true);
         }
     }
 
     /**
      * One item's outcome. {@code resourceId} is the target row the item created, updated or
      * skipped over (a {@code dry-run:} placeholder on a dry-run create), and null when it failed.
+     * {@code changes} is set only by a {@link ImportOptions#compareExisting()} run, on an item
+     * that already exists: the attributes (package column names) whose value in the package
+     * differs from the target's — empty when the item is unchanged.
      */
     public record ItemResult(String type, String naturalKey, String action, String error,
-                             String resourceId) {
+                             String resourceId, List<String> changes) {
+
+        public ItemResult(String type, String naturalKey, String action, String error,
+                          String resourceId) {
+            this(type, naturalKey, action, error, resourceId, null);
+        }
 
         public ItemResult(String type, String naturalKey, String action, String error) {
-            this(type, naturalKey, action, error, null);
+            this(type, naturalKey, action, error, null, null);
         }
     }
 
@@ -214,7 +242,8 @@ public class PackageImportService {
             }
         }
 
-        patchDisplayFields(ctx, byType.getOrDefault("COLLECTION", List.of()), options);
+        patchDisplayFields(ctx, byType.getOrDefault("COLLECTION", List.of()), written("COLLECTION", results),
+                options);
         results.addAll(importRecords(ctx, pkg.get("records")));
 
         int created = 0, updated = 0, skipped = 0, failed = 0;
@@ -240,12 +269,13 @@ public class PackageImportService {
      *       {@code ownerScopeReads}) — {@code CollectionOwnershipValidationHook} rejects a
      *       LOOKUP owner field that does not exist yet.</li>
      * </ul>
-     * Skipped for a collection whose own import failed or was excluded by a filter, and entirely
-     * for dry runs (nothing was actually written).
+     * Skipped for a collection whose own import failed, was excluded by a filter or was SKIPPED
+     * (an existing collection under SKIP is left untouched, so a re-apply writes nothing), and
+     * entirely for dry runs (nothing was actually written).
      */
     @SuppressWarnings("unchecked")
     private void patchDisplayFields(ImportContext ctx, List<Map<String, Object>> collectionItems,
-                                    ImportOptions options) {
+                                    Set<String> writtenCollections, ImportOptions options) {
         if (options.dryRun() || collectionItems.isEmpty()) {
             return;
         }
@@ -253,7 +283,7 @@ public class PackageImportService {
         for (var item : collectionItems) {
             Map<String, Object> data = (Map<String, Object>) item.get("data");
             String collectionName = (String) data.get("name");
-            if (!included("COLLECTION", collectionName, options)) {
+            if (!writtenCollections.contains(collectionName)) {
                 continue;
             }
             String collectionId = ctx.collectionIdByName().get(collectionName);
@@ -273,6 +303,17 @@ public class PackageImportService {
             }
             patchOwnership(def, collectionId, collectionName, data);
         }
+    }
+
+    /** Natural keys of the items of {@code type} this import created or updated. */
+    private static Set<String> written(String type, List<ItemResult> results) {
+        Set<String> keys = new HashSet<>();
+        for (var r : results) {
+            if (type.equals(r.type()) && ("CREATED".equals(r.action()) || "UPDATED".equals(r.action()))) {
+                keys.add(r.naturalKey());
+            }
+        }
+        return keys;
     }
 
     private void patchOwnership(CollectionDefinition def, String collectionId, String collectionName,
@@ -401,6 +442,12 @@ public class PackageImportService {
         Map<String, Object> mapped = mapRowToFields(def, data);
         mapped.put("tenantId", ctx.tenantId);
         mapped.put("systemCollection", false);
+        // Compared as a whole (ownership included); the display field by name, like the patch.
+        Map<String, Object> compared = new LinkedHashMap<>(mapped);
+        compared.remove("displayFieldId");
+        if (data.get("display_field_name") != null) {
+            compared.put("displayFieldId", ctx.fieldIdByKey().get(name + "." + data.get("display_field_name")));
+        }
         // The source tenant's raw field UUID never resolves in the target, and
         // FIELD imports strictly after COLLECTION per TYPE_ORDER anyway — leave
         // it unset here and patch it once fields exist (patchDisplayFields).
@@ -411,7 +458,7 @@ public class PackageImportService {
         mapped.remove("ownerScope");
         mapped.remove("ownerScopeReads");
 
-        return upsertViaEngine(ctx, "COLLECTION", key, def, existingId, mapped,
+        return upsertViaEngine(ctx, "COLLECTION", key, def, existingId, mapped, compared,
                 id -> ctx.collectionIdByName().put(name, id));
     }
 
@@ -653,12 +700,16 @@ public class PackageImportService {
     /**
      * A composite unique constraint is a Postgres index, not a row: it applies through
      * {@link CompositeUniqueConstraintService} once its collection and fields exist, and is
-     * matched on the collection plus its field set (order-insensitive). An existing match is
-     * SKIPPED under either conflict mode — a field set has nothing to overwrite.
+     * matched on the collection plus its field set (order-insensitive). The index is created
+     * with its columns in the package's {@code field_names} order — the one attribute the
+     * natural key leaves out. An existing match in the same order is SKIPPED under either
+     * conflict mode; one in another order is re-created in the package's order under OVERWRITE
+     * (new index first, then the old one dropped, so uniqueness holds throughout).
      */
     private ItemResult importUniqueConstraint(ImportContext ctx, String key, Map<String, Object> data) {
         String collectionName = (String) data.get("collection_name");
-        List<String> fieldNames = sortedFieldNames(data.get("field_names"));
+        List<String> declared = fieldNames(data.get("field_names"));
+        List<String> fieldNames = declared.stream().sorted().toList();
         if (fieldNames.isEmpty()) {
             throw new IllegalArgumentException("Unique constraint " + key + " names no field_names");
         }
@@ -674,22 +725,39 @@ public class PackageImportService {
             throw new IllegalStateException("Collection not registered in target: " + collectionName);
         }
         for (var existing : uniqueConstraintService.list(def)) {
-            if (sortedFieldNames(existing.fieldNames()).equals(fieldNames)) {
-                return new ItemResult("UNIQUE_CONSTRAINT", key, "SKIPPED", null, existing.indexName());
+            if (!sortedFieldNames(existing.fieldNames()).equals(fieldNames)) {
+                continue;
             }
+            boolean reordered = !existing.fieldNames().equals(declared);
+            List<String> changes = ctx.comparing() ? (reordered ? List.of("field_names") : List.of()) : null;
+            if (!reordered || ctx.options.conflictMode() == ConflictMode.SKIP) {
+                return new ItemResult("UNIQUE_CONSTRAINT", key, "SKIPPED", null, existing.indexName(), changes);
+            }
+            if (ctx.options.dryRun()) {
+                return new ItemResult("UNIQUE_CONSTRAINT", key, "UPDATED", null, existing.indexName(), changes);
+            }
+            var recreated = uniqueConstraintService.create(def, declared);
+            if (!recreated.indexName().equals(existing.indexName())) {
+                uniqueConstraintService.drop(def, existing.indexName());
+            }
+            return new ItemResult("UNIQUE_CONSTRAINT", key, "UPDATED", null, recreated.indexName());
         }
         if (ctx.options.dryRun()) {
             return new ItemResult("UNIQUE_CONSTRAINT", key, "CREATED", null, "dry-run:" + UUID.randomUUID());
         }
-        var created = uniqueConstraintService.create(def, fieldNames);
+        var created = uniqueConstraintService.create(def, declared);
         return new ItemResult("UNIQUE_CONSTRAINT", key, "CREATED", null, created.indexName());
     }
 
-    private static List<String> sortedFieldNames(Object raw) {
+    private static List<String> fieldNames(Object raw) {
         if (!(raw instanceof Collection<?> names)) {
             return List.of();
         }
-        return names.stream().map(String::valueOf).sorted().toList();
+        return names.stream().map(String::valueOf).toList();
+    }
+
+    private static List<String> sortedFieldNames(Object raw) {
+        return fieldNames(raw).stream().sorted().toList();
     }
 
     /**
@@ -785,14 +853,16 @@ public class PackageImportService {
         }
 
         String existingId = ctx.approvalProcessIdByKey.get(key);
+        List<String> changes = existingId != null && ctx.comparing()
+                ? approvalProcessChanges(def, stepDef, existingId, mapped, steps) : null;
         if (existingId != null && ctx.options.conflictMode() == ConflictMode.SKIP) {
-            return new ItemResult("APPROVAL_PROCESS", key, "SKIPPED", null, existingId);
+            return new ItemResult("APPROVAL_PROCESS", key, "SKIPPED", null, existingId, changes);
         }
         String action = existingId == null ? "CREATED" : "UPDATED";
         if (ctx.options.dryRun()) {
             String id = existingId != null ? existingId : "dry-run:" + UUID.randomUUID();
             ctx.approvalProcessIdByKey.put(key, id);
-            return new ItemResult("APPROVAL_PROCESS", key, action, null, id);
+            return new ItemResult("APPROVAL_PROCESS", key, action, null, id, changes);
         }
         mapped.put("tenantId", ctx.tenantId);
         String processId = transactionTemplate.execute(status -> {
@@ -802,9 +872,7 @@ public class PackageImportService {
                 id = String.valueOf(queryEngine.create(def, mapped).get("id"));
             } else {
                 queryEngine.update(def, id, mapped);
-                repository.getJdbcTemplate().queryForList(
-                                "SELECT id, step_number FROM approval_step WHERE approval_process_id = ?", id)
-                        .forEach(r -> stepIds.put(((Number) r.get("step_number")).intValue(), (String) r.get("id")));
+                stepIds.putAll(approvalStepIds(id));
             }
             for (var step : steps.entrySet()) {
                 String stepId = stepIds.get(step.getKey());
@@ -820,6 +888,38 @@ public class PackageImportService {
         });
         ctx.approvalProcessIdByKey.put(key, processId);
         return new ItemResult("APPROVAL_PROCESS", key, action, null, processId);
+    }
+
+    private Map<Integer, String> approvalStepIds(String processId) {
+        Map<Integer, String> stepIds = new HashMap<>();
+        repository.getJdbcTemplate().queryForList(
+                        "SELECT id, step_number FROM approval_step WHERE approval_process_id = ?", processId)
+                .forEach(r -> stepIds.put(((Number) r.get("step_number")).intValue(), (String) r.get("id")));
+        return stepIds;
+    }
+
+    /**
+     * The process's changed attributes, then each step's as {@code steps[<n>].<column>} — or
+     * {@code steps[<n>]} for a step the target does not have. A target step the package does
+     * not carry is not reported: no import removes it.
+     */
+    private List<String> approvalProcessChanges(CollectionDefinition def, CollectionDefinition stepDef,
+                                                String processId, Map<String, Object> mapped,
+                                                Map<Integer, Map<String, Object>> steps) {
+        List<String> changes = new ArrayList<>(changedAttributes(def, processId, mapped));
+        Map<Integer, String> stepIds = approvalStepIds(processId);
+        for (var step : steps.entrySet()) {
+            String stepId = stepIds.get(step.getKey());
+            String prefix = "steps[" + step.getKey() + "]";
+            if (stepId == null) {
+                changes.add(prefix);
+                continue;
+            }
+            for (String attribute : changedAttributes(stepDef, stepId, step.getValue())) {
+                changes.add(prefix + "." + attribute);
+            }
+        }
+        return changes;
     }
 
     /**
@@ -881,14 +981,16 @@ public class PackageImportService {
         validateComponents(ctx, name, (List<Object>) components);
 
         String existingId = ctx.dashboardIdByName.get(name);
+        List<String> changes = existingId != null && ctx.comparing()
+                ? dashboardChanges(name, data, (List<Object>) components) : null;
         if (existingId != null && ctx.options.conflictMode() == ConflictMode.SKIP) {
-            return new ItemResult("DASHBOARD", name, "SKIPPED", null, existingId);
+            return new ItemResult("DASHBOARD", name, "SKIPPED", null, existingId, changes);
         }
         String action = existingId == null ? "CREATED" : "UPDATED";
         if (ctx.options.dryRun()) {
             String id = existingId != null ? existingId : "dry-run:" + UUID.randomUUID();
             ctx.dashboardIdByName.put(name, id);
-            return new ItemResult("DASHBOARD", name, action, null, id);
+            return new ItemResult("DASHBOARD", name, action, null, id, changes);
         }
 
         Map<String, Object> tree = new LinkedHashMap<>();
@@ -908,6 +1010,48 @@ public class PackageImportService {
         }
         ctx.dashboardIdByName.put(name, applied.dashboardId());
         return new ItemResult("DASHBOARD", name, action, null, applied.dashboardId());
+    }
+
+    /**
+     * The dashboard's changed tree keys, then its widgets matched on title: a changed widget as
+     * {@code components[<title>].<key>}, one the target lacks — or one only the target has, which
+     * OVERWRITE removes — as {@code components[<title>]}.
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> dashboardChanges(String name, Map<String, Object> data, List<Object> components) {
+        Map<String, Object> current = dashboardTreeService.readTree(name);
+        List<String> changes = new ArrayList<>();
+        for (String key : DASHBOARD_TREE_KEYS) {
+            if (data.containsKey(key) && !sameValue(data.get(key), current.get(key))) {
+                changes.add(key);
+            }
+        }
+        Map<String, Map<String, Object>> currentByTitle = new LinkedHashMap<>();
+        if (current.get("components") instanceof List<?> currentComponents) {
+            for (Object c : currentComponents) {
+                if (c instanceof Map<?, ?> component) {
+                    currentByTitle.put(String.valueOf(component.get("title")), (Map<String, Object>) component);
+                }
+            }
+        }
+        for (Object raw : components) {
+            if (!(raw instanceof Map<?, ?> component)) {
+                continue;
+            }
+            String title = String.valueOf(component.get("title"));
+            Map<String, Object> target = currentByTitle.remove(title);
+            if (target == null) {
+                changes.add("components[" + title + "]");
+                continue;
+            }
+            for (var entry : ((Map<String, Object>) component).entrySet()) {
+                if (!sameValue(entry.getValue(), target.get(entry.getKey()))) {
+                    changes.add("components[" + title + "]." + entry.getKey());
+                }
+            }
+        }
+        currentByTitle.keySet().forEach(title -> changes.add("components[" + title + "]"));
+        return changes;
     }
 
     /**
@@ -1050,7 +1194,9 @@ public class PackageImportService {
                 }
                 String existingId = def == null ? null : findExistingRecord(def, section.key(), attributes);
                 if (existingId != null) {
-                    results.add(new ItemResult(RECORD, naturalKey, "SKIPPED", null, existingId));
+                    // Insert-only: an existing seed row is never changed, so it compares unchanged.
+                    results.add(new ItemResult(RECORD, naturalKey, "SKIPPED", null, existingId,
+                            ctx.comparing() ? List.of() : null));
                     continue;
                 }
                 pending.add(new PendingRow(naturalKey, attributes, results.size()));
@@ -1172,6 +1318,14 @@ public class PackageImportService {
                                        CollectionDefinition def, String existingId,
                                        Map<String, Object> mapped,
                                        java.util.function.Consumer<String> register) {
+        return upsertViaEngine(ctx, type, key, def, existingId, mapped, mapped, register);
+    }
+
+    /** {@code compared} is what a preview holds against the target row — {@code mapped} by default. */
+    private ItemResult upsertViaEngine(ImportContext ctx, String type, String key,
+                                       CollectionDefinition def, String existingId,
+                                       Map<String, Object> mapped, Map<String, Object> compared,
+                                       java.util.function.Consumer<String> register) {
         // Tenant-scoped system collections (ui-menus, layout-sections, picklist-
         // values, …) need tenant_id: the storage adapter writes it only when the
         // record carries "tenantId" (the JSON:API layer injects it on the HTTP
@@ -1184,13 +1338,14 @@ public class PackageImportService {
             // Register even when skipping: later items resolve their references
             // through these maps and must see the item that is already there.
             register.accept(existingId);
+            List<String> changes = ctx.comparing() ? changedAttributes(def, existingId, compared) : null;
             if (ctx.options.conflictMode() == ConflictMode.SKIP) {
-                return new ItemResult(type, key, "SKIPPED", null, existingId);
+                return new ItemResult(type, key, "SKIPPED", null, existingId, changes);
             }
             if (!ctx.options.dryRun()) {
                 queryEngine.update(def, existingId, mapped);
             }
-            return new ItemResult(type, key, "UPDATED", null, existingId);
+            return new ItemResult(type, key, "UPDATED", null, existingId, changes);
         }
         if (ctx.options.dryRun()) {
             String placeholderId = "dry-run:" + UUID.randomUUID();
@@ -1203,6 +1358,95 @@ public class PackageImportService {
         return new ItemResult(type, key, "CREATED", null, createdId);
     }
 
+
+    // ------------------------------------------------------------------
+    // Preview comparison (ImportOptions.compareExisting)
+    // ------------------------------------------------------------------
+
+    /**
+     * The attributes of {@code expected} — the package item mapped the way the import would
+     * write it, references already resolved to target ids — whose value differs from the target
+     * row's, named by package column. An attribute the package leaves out is not compared: no
+     * import writes it. Engine-owned audit fields and {@code tenantId} never count.
+     */
+    private List<String> changedAttributes(CollectionDefinition def, String id, Map<String, Object> expected) {
+        Map<String, Object> current = queryEngine.getById(def, id).orElse(Map.of());
+        List<String> changes = new ArrayList<>();
+        for (var entry : expected.entrySet()) {
+            String field = entry.getKey();
+            if (AUDIT_FIELD_NAMES.contains(field) || "tenantId".equals(field)) {
+                continue;
+            }
+            FieldDefinition fd = def.getField(field);
+            String column = fd != null ? fd.effectiveColumnName() : field;
+            if (!sameValue(entry.getValue(), normalizeValue(column, current.get(field)))) {
+                changes.add(column);
+            }
+        }
+        return changes;
+    }
+
+    /**
+     * Value equality across the shapes a package (JSON) and the engine (JDBC) produce for the
+     * same stored value: numbers by magnitude, temporals by instant, maps ignoring null entries,
+     * other scalars by their string form.
+     */
+    static boolean sameValue(Object a, Object b) {
+        if (a instanceof Map<?, ?> left && b instanceof Map<?, ?> right) {
+            Set<Object> keys = new HashSet<>();
+            left.forEach((k, v) -> { if (v != null) keys.add(k); });
+            right.forEach((k, v) -> { if (v != null) keys.add(k); });
+            return keys.stream().allMatch(k -> sameValue(left.get(k), right.get(k)));
+        }
+        if (a instanceof List<?> left && b instanceof List<?> right) {
+            if (left.size() != right.size()) {
+                return false;
+            }
+            for (int i = 0; i < left.size(); i++) {
+                if (!sameValue(left.get(i), right.get(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (a == null || b == null || a instanceof Map || b instanceof Map
+                || a instanceof List || b instanceof List) {
+            return Objects.equals(a, b);
+        }
+        if (a instanceof Number l && b instanceof Number r) {
+            return new BigDecimal(l.toString()).compareTo(new BigDecimal(r.toString())) == 0;
+        }
+        if (String.valueOf(a).equals(String.valueOf(b))) {
+            return true;
+        }
+        BigDecimal left = epochMillis(a);
+        BigDecimal right = epochMillis(b);
+        return left != null && right != null && left.compareTo(right) == 0;
+    }
+
+    /** A temporal (or an ISO-8601 instant string, or epoch millis) in epoch millis; else null. */
+    private static BigDecimal epochMillis(Object value) {
+        Instant instant = switch (value) {
+            case Instant i -> i;
+            case java.util.Date d -> Instant.ofEpochMilli(d.getTime());
+            case OffsetDateTime o -> o.toInstant();
+            case ZonedDateTime z -> z.toInstant();
+            case String s -> parseInstant(s);
+            default -> null;
+        };
+        if (instant != null) {
+            return BigDecimal.valueOf(instant.toEpochMilli());
+        }
+        return value instanceof Number n ? new BigDecimal(n.toString()) : null;
+    }
+
+    private static Instant parseInstant(String value) {
+        try {
+            return OffsetDateTime.parse(value).toInstant();
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
 
     // ------------------------------------------------------------------
     // Row → system-collection field mapping
@@ -1507,6 +1751,10 @@ public class PackageImportService {
         private String firstId(String sql, String value) {
             var rows = repository.getJdbcTemplate().queryForList(sql + " ORDER BY id LIMIT 1", tenantId, value);
             return rows.isEmpty() ? null : (String) rows.get(0).get("id");
+        }
+
+        boolean comparing() {
+            return options.dryRun() && options.compareExisting();
         }
 
         Map<String, String> collectionIdByName() {

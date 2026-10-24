@@ -252,5 +252,3 @@ export function ProfilesPage({ testId = 'profiles-page' }: ProfilesPageProps): R
     </AdminCrudPage>
   )
 }
-
-export default ProfilesPage

@@ -15,7 +15,11 @@ GET /api/_search?q=acme&limit=20
 ```
 
 - `q` must be at least 3 characters; `limit` is clamped to 1–100 (default 20).
-- Results carry the collection, record id, display value and a snippet, ordered by rank.
+- Results carry the collection, record id, display value and rank, ordered by rank.
+- Search returns only hits the caller can read. Each hit is checked against its own collection and
+  record, the same way as `GET /api/<collection>/<id>`: collection read access, record-level rules and
+  manual shares all apply. Hits the caller cannot read are left out before the limit is applied, and
+  `meta.total` is the number of hits returned.
 - The end-user app exposes it as global search (`Cmd/Ctrl+K`, `/app/search`); the MCP user toolset as `search`.
 - Fields with a masking configuration are never indexed.
 
@@ -53,6 +57,15 @@ Files attach to any record through the `attachments` system collection. Storage 
    `GET /api/files/{storageKey}` streams server-side with `Range` support.
 3. **Delete** — `DELETE /api/attachments/{id}` removes the object and the row. Deleting the parent record removes
    its attachments too.
+
+### Media fields
+
+A text field with media enabled (`fieldTypeConfig.media.enabled: true`) stores an object key instead of a file
+record. `POST /api/<collection>/upload-url` with `{ fileName, contentType, fileSize, field? }` returns a presigned
+`PUT` URL and the `storageKey`; upload the bytes, then create or update the record with the field set to that key.
+`GET /api/<collection>/download/<storageKey>` answers `302` to a short-lived presigned URL, so an `<img src>` works
+without a bearer token — but only for a key a record of that collection references and the caller can read.
+Uploads need `create` on the collection, downloads `read`.
 
 ### Image transforms
 

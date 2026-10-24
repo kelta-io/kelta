@@ -1,5 +1,7 @@
 package io.kelta.runtime.event;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -16,7 +18,12 @@ public class CollectionChangedPayload {
     private String name;
     private String displayName;
     private String description;
-    private boolean active;
+    /**
+     * {@code null} when the publisher does not know the collection's state (field, rule
+     * and layout hooks reuse this payload); consumers must not read a missing flag as false.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean active;
     private Integer currentVersion;
     private List<FieldPayload> fields;
     private Instant createdAt;
@@ -61,11 +68,11 @@ public class CollectionChangedPayload {
         this.description = description;
     }
 
-    public boolean isActive() {
+    public Boolean getActive() {
         return active;
     }
 
-    public void setActive(boolean active) {
+    public void setActive(Boolean active) {
         this.active = active;
     }
 
@@ -114,7 +121,7 @@ public class CollectionChangedPayload {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         CollectionChangedPayload that = (CollectionChangedPayload) o;
-        return active == that.active &&
+        return Objects.equals(active, that.active) &&
                 Objects.equals(id, that.id) &&
                 Objects.equals(name, that.name) &&
                 Objects.equals(description, that.description) &&

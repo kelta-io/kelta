@@ -72,6 +72,7 @@ const layoutList = defineCommand({
   name: 'list',
   summary: 'List page layouts of a collection',
   positionals: [{ name: 'collection', description: 'Collection name or id', required: true }],
+  examples: [{ cmd: 'kelta layouts list customers' }],
   input: z.object({ collection: z.string().min(1) }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
@@ -100,6 +101,7 @@ const layoutCreate = defineCommand({
     { flag: '--default', description: 'Mark as the default layout' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [{ cmd: "kelta layouts create customers --name 'Customer detail' --default" }],
   input: z.object({
     collection: z.string().min(1),
     name: z.string().min(1),
@@ -140,6 +142,13 @@ const layoutGet = defineCommand({
         'the document `layouts apply --file` accepts.',
     },
   ],
+  examples: [
+    { cmd: 'kelta layouts get lay_123' },
+    {
+      cmd: 'kelta layouts get lay_123 --tree --output json',
+      description: 'Fetch the full tree, the shape layouts apply accepts',
+    },
+  ],
   input: z.object({ layoutId: z.string().min(1), tree: z.boolean().default(false) }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
@@ -171,6 +180,13 @@ const layoutApply = defineCommand({
     },
   ],
   positionals: [{ name: 'collection', description: 'Collection name (not id)', required: true }],
+  examples: [
+    { cmd: 'kelta layouts apply customers --file customer-layout.json' },
+    {
+      cmd: "kelta layouts apply customers --file customer-layout.json --name 'Customer detail'",
+      description: 'Override the layout name from the file',
+    },
+  ],
   input: z.object({
     collection: z.string().min(1),
     file: z.string().min(1),
@@ -230,6 +246,7 @@ const layoutUpdate = defineCommand({
     { flag: '--default <bool>', description: 'true|false' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [{ cmd: "kelta layouts update lay_123 --name 'Customer summary' --default true" }],
   input: z.object({
     layoutId: z.string().min(1),
     name: z.string().optional(),
@@ -258,6 +275,7 @@ const layoutDelete = defineCommand({
   summary: 'Delete a page layout',
   dangerous: true,
   positionals: [{ name: 'layoutId', description: 'Layout id', required: true }],
+  examples: [{ cmd: 'kelta layouts delete lay_123 --yes' }],
   input: z.object({ layoutId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client.getAxiosInstance().delete(`/api/page-layouts/${input.layoutId}`);
@@ -274,6 +292,7 @@ const listViewList = defineCommand({
   name: 'list',
   summary: 'List saved list views of a collection',
   positionals: [{ name: 'collection', description: 'Collection name or id', required: true }],
+  examples: [{ cmd: 'kelta list-views list orders' }],
   input: z.object({ collection: z.string().min(1) }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
@@ -316,6 +335,16 @@ const listViewCreate = defineCommand({
     { flag: '--lane-field <field>', description: 'Kanban lane field (a picklist field)' },
     { flag: '--card-fields <list>', description: 'Kanban card fields, comma-separated' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
+  ],
+  examples: [
+    {
+      cmd: "kelta list-views create orders --name 'Open orders' --columns order_number,customer,amount,status --filter status=open --sort -createdAt",
+      description: 'Table view of open orders, newest first',
+    },
+    {
+      cmd: "kelta list-views create orders --name 'Order board' --columns order_number,amount --view-type KANBAN --lane-field status --card-fields customer,amount",
+      description: 'Kanban board laned by status',
+    },
   ],
   input: z.object({
     collection: z.string().min(1),
@@ -389,6 +418,12 @@ const listViewApply = defineCommand({
     { flag: '--lane-field <field>', description: 'Kanban lane field (a picklist field)' },
     { flag: '--card-fields <list>', description: 'Kanban card fields, comma-separated' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
+  ],
+  examples: [
+    {
+      cmd: 'kelta list-views apply invoices --name Overdue --columns invoice_number,customer,amount,due_date --filter status=unpaid --filter due_date.lt=2026-11-01 --sort due_date --visibility PUBLIC',
+      description: 'Create or update the shared Overdue view',
+    },
   ],
   input: z.object({
     collection: z.string().min(1),
@@ -497,6 +532,9 @@ const listViewUpdate = defineCommand({
     { flag: '--card-fields <list>', description: 'Kanban card fields, comma-separated' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [
+    { cmd: 'kelta list-views update lv_123 --columns order_number,customer,status --sort -amount' },
+  ],
   input: z.object({
     listViewId: z.string().min(1),
     name: z.string().optional(),
@@ -558,6 +596,7 @@ const listViewGet = defineCommand({
   name: 'get',
   summary: 'Get a saved list view by id',
   positionals: [{ name: 'listViewId', description: 'List view id', required: true }],
+  examples: [{ cmd: 'kelta list-views get lv_123' }],
   input: z.object({ listViewId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client
@@ -573,6 +612,7 @@ const listViewDelete = defineCommand({
   summary: 'Delete a saved list view',
   dangerous: true,
   positionals: [{ name: 'listViewId', description: 'List view id', required: true }],
+  examples: [{ cmd: 'kelta list-views delete lv_123 --yes' }],
   input: z.object({ listViewId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client.getAxiosInstance().delete(`/api/list-views/${input.listViewId}`);

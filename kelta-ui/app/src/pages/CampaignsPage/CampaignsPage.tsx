@@ -737,5 +737,3 @@ export function CampaignsPage({
     </AdminCrudPage>
   )
 }
-
-export default CampaignsPage

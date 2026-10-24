@@ -171,6 +171,3 @@ export function PageTransition({
 
 // eslint-disable-next-line react-refresh/only-export-components
 export { usePrefersReducedMotion }
-
-// Export default for convenience
-export default PageTransition

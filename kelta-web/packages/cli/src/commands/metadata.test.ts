@@ -6,6 +6,7 @@ import type { AxiosInstance } from 'axios';
 import type { CommandContext } from '../registry/types.js';
 import {
   metadataCommands,
+  renderDiff,
   runApply,
   runDiff,
   runExport,
@@ -192,6 +193,65 @@ describe('runDiff / runApply', () => {
     writeFileSync(file, '{}');
     const post = vi.fn().mockResolvedValue({ status: 400, data: { error: 'bad package' } });
     await expect(runApply(client(post), file, {})).rejects.toThrow(/bad package/);
+  });
+});
+
+describe('kelta metadata diff output', () => {
+  const preview = {
+    creates: [{ type: 'LIST_VIEW', name: 'orders:Open' }],
+    updates: [
+      { type: 'UNIQUE_CONSTRAINT', name: 'orders:code,region', changes: ['field_names'] },
+      { type: 'REPORT', name: 'Open orders', changes: ['group_by', 'columns'] },
+      { type: 'APPROVAL_PROCESS', name: 'orders:Discount', changes: ['steps[2].approver_id'] },
+    ],
+    unchanged: [
+      { type: 'COLLECTION', name: 'orders' },
+      { type: 'FIELD', name: 'orders.code' },
+      { type: 'FIELD', name: 'orders.region' },
+    ],
+    conflicts: [
+      {
+        item: { type: 'APPROVAL_PROCESS', name: 'orders:Other' },
+        error: "approver user 'ghost@acme.io' not found in target",
+      },
+    ],
+  };
+
+  it('names each changed unique constraint, report and approval step with its changed attributes', async () => {
+    const file = join(dir, 'pkg.json');
+    writeFileSync(file, '{}');
+    const post = vi.fn().mockResolvedValue({ status: 200, data: preview });
+    const def = metadataCommands.find((c) => c.name === 'diff');
+    if (!def) throw new Error('no diff command');
+    const ctx = { client: { getAxiosInstance: () => client(post) } } as unknown as CommandContext;
+
+    const out = await def.handler(ctx, def.input.parse({ file }) as never);
+
+    expect(out.data).toEqual(preview);
+    expect(out.human).toContain('~ UNIQUE_CONSTRAINT orders:code,region: field_names');
+    expect(out.human).toContain('~ REPORT Open orders: group_by, columns');
+    expect(out.human).toContain('~ APPROVAL_PROCESS orders:Discount: steps[2].approver_id');
+  });
+
+  it('renders creates, updates, unchanged counts per type and conflicts', () => {
+    expect(renderDiff(preview)).toBe(
+      [
+        'creates (1):',
+        '  + LIST_VIEW orders:Open',
+        'updates (3):',
+        '  ~ UNIQUE_CONSTRAINT orders:code,region: field_names',
+        '  ~ REPORT Open orders: group_by, columns',
+        '  ~ APPROVAL_PROCESS orders:Discount: steps[2].approver_id',
+        'unchanged (3): COLLECTION 1, FIELD 2',
+        'conflicts (1):',
+        "  ! APPROVAL_PROCESS orders:Other: approver user 'ghost@acme.io' not found in target",
+        '',
+      ].join('\n')
+    );
+  });
+
+  it('renders an empty preview as zero counts', () => {
+    expect(renderDiff({})).toBe('creates (0)\nupdates (0)\nunchanged (0)\nconflicts (0)\n');
   });
 });
 

@@ -41,21 +41,6 @@ export interface StoredTokens {
 }
 
 /**
- * OIDC provider configuration for authentication
- */
-export interface OIDCProviderConfig {
-  id: string
-  name: string
-  issuer: string
-  clientId: string
-  scopes: string[]
-  authorizationEndpoint?: string
-  tokenEndpoint?: string
-  userinfoEndpoint?: string
-  endSessionEndpoint?: string
-}
-
-/**
  * OIDC discovery document
  */
 export interface OIDCDiscoveryDocument {
@@ -73,7 +58,7 @@ export interface OIDCDiscoveryDocument {
 /**
  * Authentication state
  */
-export interface AuthState {
+interface AuthState {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean

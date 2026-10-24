@@ -18,13 +18,17 @@ scoped without knowing it. `aggregate()`, `semanticSearch()` and the `COUNT(*)` 
 read path including `getById` (PLT-330). `DynamicCollectionRouter` keeps its own injection as a
 second layer (`RecordTenantScope`); both read the shared-rows list from `SystemCollectionTenancy`.
 
+By-id statements are scoped in the adapter too (PLT-708): `getById`, the `UPDATE` in `update`
+and the `DELETE` in `delete` AND in `TenantScopePolicy.tenantScope` (reads) /
+`tenantWriteScope` (writes — the same predicate minus the shared system rows, which RLS only
+lets a tenant `SELECT`) for every `tenant_id`-scoped system collection, so with a tenant bound a
+foreign id matches no row even on a connection that runs as `admin_bypass`. The `UPDATE` carries
+its own predicate rather than trusting the `getById` check before it (TOCTOU). No tenant bound
+→ unscoped, as before; tables without a `tenant_id` column (`hasTenantColumn`) get nothing.
+No caller was found that binds one tenant and legitimately writes another's row by id through the
+adapter (cross-tenant copiers — provisioning, promotion — use raw JDBC under each tenant in turn).
+
 **Still open:**
-- **By-id and write paths remain router-only** for `tenant_id`-scoped system collections:
-  `getById`, `update` and `delete` take no tenant predicate, so `RecordTenantScope.visibleToTenant` (`GET /:id` and the sub-resource routes)
-  and `RecordTenantScope.injectTenantId` (creates) are the only application-layer check. A direct caller can load a
-  single foreign system record by guessing its id. Closing it needs a pass over the
-  cross-tenant write paths (provisioning, promotion, the create read-back) that legitimately
-  touch another tenant.
 - **Eleven tenant-data child collections are `.tenantScoped(false)`** (`package-items`,
   `record-type-picklists`, `script-triggers`, `approval-steps`, `approval-step-instances`,
   `connected-app-tokens`, `job-execution-logs`, `bulk-job-results`, `collection-versions`,
@@ -41,6 +45,24 @@ second layer (`RecordTenantScope`); both read the shared-rows list from `SystemC
   self-scoped collection becomes `WHERE FALSE` (PLT-354, `refusesAnonymousRead`); an
   authenticated no-tenant read still runs unscoped.
 - The in-code predicate is the first line of defence; RLS is the backstop.
+
+### `admin_bypass` — the empty GUC opens every tenant
+
+`admin_bypass` (V201, every tenant table) admits all rows when `app.current_tenant_id = ''`,
+and `TenantAwareDataSource` issues `SET app.current_tenant_id = ''` whenever `TenantContext` is
+empty. That is right for Flyway, bootstrap, schedulers and NATS consumers, and catastrophic for a
+request thread that lost its tenant (a hop the `ScopedValue` did not follow, a filter that did not
+bind): RLS then isolates nothing, and only the app-layer predicates above stand. Two guards:
+- **Fail closed on a tenant request with no tenant (PLT-708).** When the thread serves an HTTP
+  request carrying `X-Tenant-ID` (`RequestContextHolder`) yet `TenantContext` is empty, the borrow
+  throws and WARNs with the method and path instead of issuing `''`. Exempt: a request bound
+  `RequestAuthentication.PLATFORM_SCOPED` (`TenantManagementScopeFilter`'s `MANAGE_TENANTS`
+  listing, unbound on purpose), and kelta-auth, which binds from its session, not the header
+  (`TenantAwareDataSourcePostProcessor(false)`). It cannot see a request whose work hopped to a
+  thread with neither the `ScopedValue` nor the request bound — those reach `''` as before.
+- **App-layer predicates** in `TenantScopePolicy` (lists, counts, aggregates, by-id read/update/delete).
+
+Raw `JdbcTemplate` SQL issued with no tenant bound still relies on its own `WHERE` alone.
 
 ### RLS invariants
 
@@ -62,7 +84,11 @@ RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205). Rules
   `field_version`, whose policies key strictly on the parent's `tenant_id`.
 - **Superset logins** are granted table by table on RLS-enforced `tenant_id` tables only
   (`supersetRoleIsGrantedOnlyTenantScopedTables`); pinned roles cannot hop tenants via the GUC
-  (V201).
+  (V201). Tenant roles hold **no privilege on `tenant_db_role`** (it has no RLS — reading it lists
+  every tenant's id and DB role): the pin works through `kelta_pinned_tenant()`, SECURITY
+  DEFINER with a fixed `search_path`. V215 revoked it from every pinned and `superset_%` role and
+  applied the narrowing to roles provisioned before it (blanket public grant until next rotation);
+  an unpinned `superset_%` role keeps no public grant (`v215NarrowsAPreNarrowingSupersetRole`).
 - **Hand-rolled JDBC must write `AND tenant_id = ?` on the table that owns the row** — RLS is
   not a substitute (see `PageLayoutTreeService` in the archive) — and test with a second tenant.
 
@@ -176,9 +202,11 @@ mailbox to a high-volume public address.
   `CerbosAuthorizationService.checkCollectionAccess`, keyed on the collection **UUID**
   (`getCollectionIdByName`) — keep it UUID-keyed; any denial fails the whole batch; missing
   identity or Cerbos error denies. Each add/update op then gets the field write rules
-  (`FieldWriteGuard`, shared with `CerbosFieldWriteSecurityAdvice`). It stamps `createdBy`/`updatedBy` (KLT-500) but, unlike the
-  router, never stamps `createdGeo`/`updatedGeo` and doesn't inject `tenantId` for tenant-scoped
-  system collections when the client omits it.
+  (`FieldWriteGuard`, shared with `CerbosFieldWriteSecurityAdvice`). Like the router, it stamps
+  `createdBy`/`updatedBy` (KLT-500), `tenantId` on tenant-scoped system collections (PLT-710) and
+  `createdGeo`/`updatedGeo` on `captureGeo` collections from the request's `X-Geo-*` headers
+  (KLT-740; the rule is `GeoStamping`, shared with `RecordWritePipeline`). `PackageImportService`
+  seeds through the two-argument `execute`, so seeded rows get null geo stamps.
 - **Delegated administration (V157):** `DelegatedAdminScopeValidationHook` rejection of
   privileged profiles; `DelegatedAdminService.effectiveScope` **request-time re-filter** (don't
   cache it away); `DelegatedUserAdminController` field whitelist (email/managerId/mfa immutable,
@@ -198,9 +226,14 @@ mailbox to a high-volume public address.
   change is a security change): default 1 h / max 24 h (`MAX_LIFETIME`), Redis `pat:<hash>`
   cached for exactly the remaining lifetime; the PAT is rejected on any other tenant's URL; the
   platform tenant → 403, non-UUID ids → 404; user lookup tenant-filtered; every attempt logged as
-  `TENANT_BOOTSTRAP_TOKEN_ISSUED` on `security.audit` (log-only, not a table row). Residual: the
-  token is never auto-revoked when the tenant is claimed; expired tokens no longer count against
-  the 10-live cap.
+  `TENANT_BOOTSTRAP_TOKEN_ISSUED` on `security.audit` (log-only, not a table row). Claiming the
+  tenant (`POST /api/tenants/{id}/admin-invite` → `TenantAdminInviteService.inviteSeededAdmin`)
+  revokes every live `bootstrap-*` token in that tenant, whichever user holds it
+  (`PersonalAccessTokenController#revokeBootstrapTokens`, tenant-filtered: DB `revoked`, Redis
+  `pat:<hash>` dropped + `pat:revoked:<hash>` set, each audited `TENANT_BOOTSTRAP_TOKEN_REVOKED`
+  with the inviting actor; a Redis outage is logged and the DB revoke still stands). Residual: a
+  bootstrap token minted *after* the invite lives until it expires (≤ 24 h); a token renamed
+  away from `bootstrap-` escapes the sweep; expired tokens no longer count against the 10-live cap.
 - **Server-only fields:** secret material on system collections (`credentials.dataEnc`,
   `credential-oauth-tokens.accessTokenEnc`/`refreshTokenEnc`, `oidc-providers.clientSecretEnc`,
   `connected-apps.clientSecretHash`, `connected-app-tokens.tokenHash`) is declared
@@ -232,10 +265,6 @@ mailbox to a high-volume public address.
 - **`/api/oidc-providers` reads skip record filtering**: `CerbosRecordAuthorizationAdvice`'s own
   `isMetadataPath` matches `/api/oidc` as a raw prefix. Writes are gated (PLT-656); the client
   secret is server-only.
-- `GET /api/profiles/{id}?include=profile-system-permissions,…` returns grant rows at
-  `API_ACCESS`; the `profile-*-permissions` routes' own object check does not apply to an include,
-  and #1772's include filtering never runs because `/api/profiles` is in the advice's
-  `isMetadataPath`.
 - **Approval instances/steps are tenant-visible to every user** (accepted 2026-07-08).
   `approval-instances`/`approval-step-instances` (incl. `comments`) have no row-level read
   restriction beyond tenant RLS. Owner scoping doesn't fit (submitter **or** assignee); needs a
@@ -279,8 +308,10 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
 (writes via `QueryEngine`). Anything else is **not** narrowed:
 - **Raw-JDBC member-data paths** — `WatchRepository`/`WatchTargetRepository`,
   `AlertRepository`/`AlertDeliveryRepository`, `PushRepository`, `WinController`, `ChatService`,
-  `AppointmentService` — keep their in-code scoping
-  (`SelfScopedController`, in-controller caller checks).
+  `AppointmentService`, `NotificationRepository` (`/api/me/notifications`) — keep their in-code
+  scoping (`SelfScopedController`, in-controller caller checks). RLS on `notification` is
+  tenant-only; per-user isolation is the `recipient_id = caller` predicate in every
+  `NotificationRepository` query, so a new query there must carry it too.
 - **Connected-app machine identities** bind no `CallerContext`, so the guard admits their writes
   as the internal tier. Their reach is bounded by Cerbos grants; don't grant one write on an
   owner-scoped collection it shouldn't edit freely.
@@ -290,7 +321,6 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
   so `/api/_search` can return a foreign record's id + `display_value`. Semantic search *is*
   scoped. Keep sensitive data out of an owner-scoped collection's display field.
 - **Realtime** — invalidation-only, but every subscriber still learns collection + id.
-- **Performance** — index the owner field on large collections (no generic index migration).
 - **Cross-pod window on an ownership change** — other pods keep the previous definition until they
   consume `kelta.config.collection.changed`. Enable ownership before members write, or accept the lag.
 - **Same-pod refresh ordering** — `CollectionLifecycleManager` holds a per-collection monitor across
@@ -493,10 +523,10 @@ feature would do this and publish the event.
 - Possible N+1 in `SearchIndexService` reindex (per-collection queries) — matters past ~1k collections.
 - **Bulk/related-list mass edit** is gated on `MANAGE_DATA` in the UI because bulk writes bypass
   per-record Cerbos; bulk UPDATE runs `QueryEngine.update` (hooks fire, write-FLS doesn't).
-- **`npm run knip` (kelta-ui) is not a CI gate.** After the 2026-10 dead-code batch it reports zero
-  unused files but still ~300 unused exports, ~300 unused exported types, ~100 default+named
-  duplicate exports and a few unlisted deps, so wiring it in would fail every build. Clear those
-  (or scope knip to `--include files,dependencies`) before adding it to `ci.yml`.
+- **`npm run knip` (kelta-ui) is a CI gate** (KLT-706, `Knip (unused code) kelta-ui` in `ci.yml`).
+  Any unused file, export, type or dependency fails the job: delete it rather than ignore it.
+  The few deliberate exceptions (CSS-loaded Tailwind packages, transitive imports, the Capacitor
+  CLI, vendored shadcn `components/ui/**`) live in `kelta-ui/app/knip.jsonc`, one comment each.
 - **Media fields — accepted v1 limits** (`MediaUploadController`; revisit before media carries
   anything but public images):
   - Declared `fileSize` is advisory — the presigned PUT signs `Content-Type`, not
@@ -558,11 +588,6 @@ sub-resource routes consult — see `architecture.md` → Worker Layers.
   envelope, `LinkedHashMap` documents, a `code` on errors), and the router's output was kept
   rather than bent to fit. Only `PaginationLinks` is shared. Converging means extending the library
   to this shape, then deleting the router copy.
-- **Known divergences pinned as-is** (each fix is a deliberate golden update): the read-only `403`
-  body has no `code` or `meta.requestId` (`conventions.md` requires `code` on every 4xx); a cached
-  system-collection get-by-id omits the `ETag` header the uncached path sends; the sub-resource
-  update/delete routes do not apply `If-Match`, and `GET /{parent}/{parentId}/{child}/{childId}`
-  sends no `ETag`.
 
 ### `DynamicCollectionRouter` shadows any `/**` mapping under `/api` (every method but POST)
 
@@ -601,9 +626,9 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   generic route's per-resource Cerbos.
 - **Routes are keyed by (path, tenant)** — collection names are unique only per tenant (sandboxes
   clone every name). `RouteRegistry` resolves the caller's tenant, then a `static-` route, then any
-  tenant's route so authorization still runs. A collection turning `active=false` keeps its route
-  until the next bootstrap (the field, validation-rule and approval-process hooks send UPDATED
-  without the flag).
+  tenant's route so authorization still runs. `CollectionChangedPayload.active` is a nullable
+  `Boolean`: only an explicit `false` on UPDATED removes the route, because the field, rule and
+  layout hooks reuse the payload without the flag — never default it on a publisher.
 - **Never publish `RefreshRoutesEvent` directly** — go through `RouteRefresher.refresh()`, which
   serializes fetch-and-store; concurrent refreshes stored stale snapshots (new collections 404'd).
 - **Any state the gateway loads only at startup needs a retry.** `RouteInitializer` retries the
@@ -640,10 +665,10 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   `collection(id)` without an `ON DELETE` action.
 - **Destructive schema-migration execute** (`MigrationExecutionService` +
   `SchemaMigrationEngine.migrateSchemaDestructive`) is the only path that `DROP COLUMN`s tenant
-  data. Other pods refresh via NATS and then try to deprecate the already-dropped column with
-  `COMMENT ON COLUMN`; that fails harmlessly after re-registration (one `StorageException` log per
-  removed field). Make deprecate tolerant of a missing column as a follow-up. Security — not
-  auto-merged.
+  data. Other pods refresh via NATS and run the non-destructive `migrateSchema`, whose deprecate
+  checks `information_schema.columns` first: an already-dropped column skips the `COMMENT ON
+  COLUMN` with one INFO line, the `DEPRECATE_COLUMN` history row is still recorded, and the other
+  migrations in the call still run. Security — not auto-merged.
 - **runtime-core's jar-packaged `application.properties` becomes config for worker/ai/mcp/auth.**
   Never put operational settings there (it once forced JDBC DEBUG = 92% of all log volume); it
   still ships datasource/Hikari/Redis/actuator values each service must override.
@@ -652,10 +677,20 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   `KELTA_ENCRYPTION_KEY` fail startup when unset. A `log.warn` is not a control.
 - **Exporters that read rows with `queryForList` must convert `PGobject`** before the value leaves
   the service (KLT-479); **any id stored inside a JSON config column** is a source-tenant id —
-  export a natural key beside it and remap on import (KLT-480). Open gap:
-  `MetadataPromotionService.parentKeys` doesn't list `GLOBAL_PICKLIST:<name>` as a parent of a
-  bound FIELD, so a selective promotion of that field without its picklist fails loudly instead of
-  pulling it in.
+  export a natural key beside it and remap on import (KLT-480).
+
+- **Field constraints and picklist values are enforced on user collections since PLT-711.**
+  `CollectionLifecycleManager` used to build tenant `FieldDefinition`s with no `ValidationRules`
+  and no enum values, so `DefaultValidationEngine` never checked `field.constraints` or picklist
+  membership. Turning it on **rejects writes tenants previously got away with** (a picklist value
+  outside the active values, a string over its stored `max`, a `pattern` miss) — imports, flows and
+  integrations that relied on that now get `400`. Rows already holding such values stay; a PATCH
+  that does not write the field still succeeds (update validation runs on the patch only), but a
+  full-record write-back of the bad value fails. Picklist values are part of the cached
+  definition: `PicklistValueRefreshHook` broadcasts `collection.changed` for every collection a
+  changed value feeds — a picklist value written by raw SQL (not through the query engine) stays
+  invisible until the next refresh or restart. `email`/`url` (and `DATE` `min`/`max`) are stored
+  but not enforced; the worker logs a WARN per field on load.
 
 ### Auth and Cerbos
 
@@ -726,9 +761,8 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **`useRecordMutation`'s `onSuccess` fires for every mutation** incl. inline-edit PATCHes —
   operation-specific side effects (navigate after delete, announcements) go in the specific
   handler via `mutateAsync().then(...)`.
-- **Toasts converged on `sonner`** (2026-10-12). `components/Toast` (`useToast().showToast`,
-  `ToastProvider`) is a deprecated adapter that forwards to `sonner`; nothing calls it any more
-  (only the `components/index.ts` re-export remains) — delete it. A test wrapper without a
+- **Toasts converged on `sonner`** (2026-10-12); the legacy `components/Toast` adapter was
+  deleted (KLT-706). A test wrapper without a
   `<Toaster />` (`components/ui/sonner.tsx`) shows nothing (assert on a `vi.mock('sonner')` spy,
   or use `createTestWrapper`, which mounts one). See `conventions.md` → Component reuse.
 
@@ -769,7 +803,8 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   (reachable from `BootstrapConfig`; a miss once took the whole API down —
   `RouteConfigService.refreshRoutes` now registers static routes independently); **every NATS
   event payload in both worker and gateway** (`EventPayloadReflectConfigTest` checks the worker
-  file only — the gateway's list is unchecked); `io.kelta.jsonapi` atomic-operation records;
+  file; `GatewayReflectConfigDriftTest` checks the gateway's against the payloads its class files
+  reference); `io.kelta.jsonapi` atomic-operation records;
   GeoLite2 models (`io.kelta.gateway.geo.model.*`); GraalJS host classes (`java.util.Locale`,
   `Locale$Category`, `TimeZone` — a `MissingReflectionRegistrationError` message prints the exact
   entry to add).
@@ -838,10 +873,6 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **`kelta-marketing` installs only because of an `overrides` pin** (`@astrojs/tailwind@6` peer vs
   Astro 6). Real fix: move to `@tailwindcss/vite` + CSS-first `@theme` (visual-regression risk).
   Don't remove the override until then.
-- **pgvector:** `CollectionTableDdl` (via `initializeCollection`) creates the `vector` extension
-  lazily when a collection's table is created with a VECTOR field; adding a VECTOR field to an
-  existing collection (`SchemaMigrationEngine`) does not. Production Postgres must have the
-  extension available (or pre-created) before any tenant defines one.
 - Multiple BOM version overrides in `kelta-worker/pom.xml` raise transitive conflict risk — audit
   on every Spring Boot bump.
 
@@ -872,7 +903,7 @@ Follow-up: alert on `numbackends / max_connections > 0.8`.
 
 `TenantAwareDataSource` (runtime-core, registered by worker, auth and ai) scopes
 `app.current_tenant_id` per transaction with `SET LOCAL`, so it survives PgBouncer
-`pool_mode = transaction`; unbound connections keep the session `''` sentinel (`admin_bypass`).
+`pool_mode = transaction`; unbound connections keep the session `''` sentinel (`admin_bypass`) — except a request carrying `X-Tenant-ID` with no tenant bound, which is refused (see Security Risks → `admin_bypass`).
 Guards: `TenantAwareDataSourceTest`, `RowLevelSecurityIntegrationTest`, `TenantBindingIntegrationTest`.
 
 **Open — compose healthchecks for kelta-worker and kelta-ai can never fail.** Both use
@@ -889,16 +920,14 @@ its own change with a full compose run.
   one**; a second bean of an injected type needs `@Primary` or qualifiers. Copy
   `PushProviderWiringTest` (`ApplicationContextRunner` over the beans involved). A whole-worker
   context test is still owed.
-- **Rate-limit window semantics are mocked** — `EndToEndRequestFlowIntegrationTest` runs the
-  gateway limiter against real Redis (`GatewayContainers`) but only asserts the remaining budget
-  drops; nothing reaches a 429 or window expiry, or proves two replicas share a counter, and the
-  window guard is still a text assertion on the script source (`RedisRateLimiterTest`).
 - **Harness Cerbos is allow-all** — object/record policy deny paths are verified only by
   `CerbosGeneratedPolicyIT` against generated goldens; geo rules and `/api/operations` denies only
   on a live stack.
-- `SchemaMigrationEngine.migrateSchema` (non-destructive deprecate branch) is covered on H2 only
-  (`SchemaMigrationEngineTest`), with no real-Postgres scenario; the destructive path has unit
-  tests + `SchemaMigrationScenarioTest`.
+- `SchemaMigrationEngine.migrateSchema` (non-destructive deprecate branch) is covered on H2
+  (`SchemaMigrationEngineTest`) and on real Postgres only for the dropped-column / schema-qualified
+  deprecate (`SchemaMigrationEngineDeprecateIntegrationTest`, skipped without Docker); ADD and
+  ALTER TYPE have no Postgres scenario. The destructive path has unit tests +
+  `SchemaMigrationScenarioTest`.
 - SQL filter operator mappings (`SqlQueryBuilder`, runtime-core) are tested only through the
   adapter (`PhysicalTableStorageAdapterTest` filter-operator cases on H2; `ISNULL`/`IN` on real
   Postgres for temporal fields only).
@@ -945,6 +974,7 @@ One line each; full write-ups are in git history.
 - PLT-330 (2026-10-04) — any token (and, via the public path, anyone) could list every tenant; gateway narrowing (#1603/#1604) + self-scoped storage predicate.
 - PLT-331 (2026-10-04) — static routes for `users`/`profiles`/`collections` skipped the collection check; `COLLECTION_CHECKED_STATIC_ROUTES` + advice count correction.
 - PLT-656 (2026-10-24) — writes to `page-layouts`, `list-views`, `ui-menus`, `ui-pages`, `global-picklists`, `oidc-providers`, `email-templates`, `scripts`, `connected-apps`, `flows`, `approval-processes`, `reports` and `dashboards` ran at `API_ACCESS` (any user could create a script, flow, OIDC provider or connected app); each is now a writes-only `COLLECTION_CHECKED_STATIC_ROUTES` row with its setup page's permission as override, and generic `flows`/`connected-apps` reads get record filtering. Left out: `webhooks` (no collection behind `/api/webhooks/**` — inbound receivers that authenticate the sender). Exempt end-user actions: flow/script/report execute, dashboard data (flow execute still open, above).
+- PLT-657 (2026-10-24) — `GET /api/profiles/{id}?include=profile-system-permissions,…` returned every grant row at `API_ACCESS`, because `CerbosRecordAuthorizationAdvice` skipped metadata paths before its include filtering; `/api/profiles` responses now get `restrictIncluded` on `included[]` (denied rows dropped, no 403) while the profiles themselves stay unfiltered and `ApiPaths.METADATA_PREFIXES` (FLS/masking) is unchanged. `CerbosRecordAuthorizationAdviceTest` → profile includes.
 - 2026-10-12 (child-route-authz) — child-resource paths `/api/{parent}/{parentId}/{child}[/{childId}]` were authorized against the parent collection only; the gateway now also requires the child's own decision (parent needs `read`), and the record/field-write advices use the child collection.
 - 2026-10-12 (include-record-authz) — `CerbosRecordAuthorizationAdvice` applies each included collection's record read authorization (collection-level read, record-level rules, shares) to `included[]`, per type; a single record that is not readable carries no `included`.
 - 2026-10-12 (child-authz-static-and-create) — the worker authorizes the router's generic child handlers against the child collection under every parent, `static-` ones included (`CerbosSubResourceAuthorizer`); field write rules apply to creates (top-level, child, `/api/operations`) and to to-one relationships, as to updates.
@@ -964,6 +994,11 @@ One line each; full write-ups are in git history.
 - Older: Superset SQL injection hardening; gateway actuator requires JWT except health/info; `/internal/**` JWT auth (flag-gated); schema-name sanitization in `SchemaLifecycleModule`.
 
 **Bugs**
+- KLT-745 (2026-10-24) — a collection turning `active=false` kept its gateway route until the next bootstrap (`CollectionChangedPayload.active` was a primitive, so hooks that never set it sent `false`); the flag is now a nullable `Boolean` omitted when unset, `CollectionConfigEventPublisher` no longer defaults it to `true`, and `ConfigEventListener` removes the route on UPDATED with `active:false`. `ConfigEventListenerTest` (`shouldRemoveRouteWhenCollectionDeactivated`, `deactivationRemovesRouteFromRegistry`, `routeStaysRegisteredWhenUpdatedEventCarriesNoActiveKey`), `CollectionChangedPayloadTest$ActiveJson`, `CollectionConfigEventPublisherTest` (`deactivatedCollectionPublishesActiveFalse`, `otherPublishersSendNoActiveKey`).
+- KLT-700 / KLT-740 (2026-10-24) — the router divergences `DynamicCollectionRouterGoldenTest` had pinned as-is are fixed (KLT-700): the read-only `403` carries `code` + `meta.requestId`, a cached system-collection get-by-id and the child get-by-id send `ETag`, and child update/delete enforce `If-Match`. `POST /api/operations` now geo-stamps `captureGeo` collections like the router (KLT-740, shared `GeoStamping`), its last behavioural divergence. `AtomicOperationExecutorTest`, `AtomicOperationsControllerTest`.
+- KLT-739 (2026-10-24) — adding a VECTOR field to an existing collection failed with `type "vector" does not exist`: only table creation enabled pgvector. `SchemaMigrationEngine.ensureVectorExtension` is now shared by `CollectionTableDdl` and the `migrateSchema`/destructive add-or-retype paths (same actionable error when `CREATE EXTENSION` is refused). `SchemaMigrationEngineVectorIntegrationTest`.
+- KLT-739 (2026-10-24) — owner-scoped reads filter on `ownerField`, but its column was never indexed; `CollectionTableDdl` and `migrateSchema` (when `ownerField` is set or changed) now emit `CREATE INDEX IF NOT EXISTS idx_owner_<table>_<column>`. `OwnerColumnIndexIntegrationTest`.
+- KLT-500 (2026-10-10) — records written through atomic operations (`POST /api/operations`: `kelta records bulk`, the MCP `seed_records` tool) carried `createdBy`/`updatedBy` = `null` while single-record writes carried the user id (CRM template `BUILD-LOG.md` error #12); `AtomicOperationsController` now stamps both. Moved here from the `docs/authoring/mcp-admin-coverage.md` follow-ups (KLT-734).
 - 2026-10-12 — kelta-auth `/auth/password/change`, `/auth/password/reset-request` and `/auth/password/reset` answered 500 on PostgreSQL: they bound `java.time.Instant` parameters, which the PostgreSQL driver cannot infer a type for (H2 in the unit tests accepts them). Now bound as `java.sql.Timestamp`; `BaselineAdminPasswordIntegrationTest.passwordEndpointsOnPostgres` runs them on the real migrated schema.
 - 2026-10-12 — kelta-auth error responses: errors on the sign-in pages rendered Spring Boot's JSON error map into a response already marked `text/html` ("No converter for [class java.util.LinkedHashMap] with preset Content-Type 'text/html'"). `AuthErrorController` (replaces `BasicErrorController`, whitelabel off) and `HtmlErrorPageResolver` render `templates/error.html` (status, neutral message, request id) for browsers and page handlers, and JSON for API callers. `AuthErrorHandlingTest`.
 - 2026-10-12 — kelta-auth session cookies on plain http: `Secure` followed the host name (any non-loopback host), so a plain-http install on a LAN host name got a cookie the browser dropped and could not sign in. `Secure` now follows the scheme the browser used (`X-Forwarded-Proto`, else the request), with `KELTA_AUTH_SESSION_COOKIE_SECURE` to override.
@@ -1000,6 +1035,7 @@ One line each; full write-ups are in git history.
 - 2026-10-07 — gateway served only static routes after starting before the worker; bootstrap retry; error bodies serialized empty (PLT-456).
 - KLT-479 — metadata export wrote JSON columns as `PGobject` beans.
 - KLT-480 — metadata apply kept the source tenant's global picklist id.
+- KLT-746 — selective promotion of a picklist-bound FIELD failed the field because `MetadataPromotionService.parentKeys` didn't list its `GLOBAL_PICKLIST`; it now pulls the picklist and its values, and `filterPackage` emits items in the importer's type order. `MetadataPromotionServiceTest.parentKeysListsBoundGlobalPicklist`, `PicklistBoundField.pullsPicklistAndValues`, `PicklistBoundField.matchesExistingTargetPicklistByName`.
 - PLT-266 / PLT-521 — `FieldEditor`/`CollectionForm` async-submit test races (sync zod resolver, test-owned deferred).
 - homelab-argo #312 (2026-09-21, PLT-307/309) — kelta.io apex/www/downloads SERVFAIL'd from inside the cluster (CoreDNS `hosts … fallthrough` with no `forward`).
 - PLT-278 / PLT-282 / PLT-477 — marketing manifest named nonexistent namespace/class/issuer; smoke deadlines shared; rollout dropped requests to a terminating pod.
@@ -1011,6 +1047,7 @@ One line each; full write-ups are in git history.
 - Older: federated users stuck PENDING_ACTIVATION; password reset sent no email; `EmptyResultDataAccessException` and null `reset_token_expires_at` in `PasswordController`.
 
 **Tech debt / test infrastructure**
+- KLT-741 (2026-10-24) — gateway rate-limit window semantics were mocked (no test reached a 429, window expiry or a shared counter on real Redis); `RateLimitWindowIntegrationTest` drives `RateLimitFilter` over real `RedisRateLimiter`s (`GatewayContainers`): N allowed then a JSON:API 429 with `Retry-After`, reopening after expiry, one budget across two connection factories.
 - #1815 (2026-10-19) — kelta-gateway integration tests never ran (failsafe needed `-Pintegration-tests`, which CI never passed, plus `@Tag("integration")`); ten dead suites targeting a pre-Kelta stack deleted, the five live suites (27 tests) run in `test-java` on `k8s-runner-integration` over `GatewayContainers` (real Redis + NATS).
 - 2026-10-12 — `SystemCollectionDefinitions.java` (~3,400 lines, the biggest merge hotspot) split into 17 per-section `<Area>SystemCollections` classes in `model/system/` plus `SystemCollectionBuilders`; it keeps only `all()` / `byName()` / `SYSTEM_TENANT_ID`.
 - #1222 — `CreateValidationRuleTool` (kelta-mcp) had no test; `CreateValidationRuleToolTest` asserts the wire body with WireMock JSON-path matchers.

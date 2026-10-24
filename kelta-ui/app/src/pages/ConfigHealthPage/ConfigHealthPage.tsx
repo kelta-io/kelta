@@ -150,5 +150,3 @@ export function ConfigHealthPage({ queryKey = 'config-health' }: ConfigHealthPag
     </div>
   )
 }
-
-export default ConfigHealthPage

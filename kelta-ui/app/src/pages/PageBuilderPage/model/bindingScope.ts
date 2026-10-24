@@ -23,8 +23,6 @@ export interface BindingScope {
   item?: Record<string, unknown>
 }
 
-export const EMPTY_SCOPE: BindingScope = {}
-
 /** Tokens that could traverse the prototype chain — refused (return null) per parent §"Security". */
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
@@ -54,9 +52,5 @@ export function getPath(scope: BindingScope, path: string): unknown {
   return cur === undefined ? null : cur
 }
 
-/** The set of valid root identifiers — used to build picker namespaces and validate `$bind`. */
-export const SCOPE_ROOTS = ['record', 'vars', 'page', 'item', 'data'] as const
-export type ScopeRoot = (typeof SCOPE_ROOTS)[number]
-
-// Re-export the real resolver (and its bridge) so the 2a render path's import is unchanged.
-export { resolveBindings, resolveBinding, flattenScopeForExpr } from './resolveBindings'
+// Re-export the real resolver so the 2a render path's import is unchanged.
+export { resolveBindings } from './resolveBindings'

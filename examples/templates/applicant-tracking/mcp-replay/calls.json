@@ -35,18 +35,70 @@
       }
     },
     {
-      "step": "Collections and display fields",
-      "tool": "create_collection",
+      "step": "Collections",
+      "tool": "apply_collection",
       "arguments": {
         "name": "job-openings",
         "displayName": "Job openings",
         "description": "Open roles the team is hiring for",
         "fields": [
           {
+            "fieldName": "department",
+            "type": "PICKLIST",
+            "displayName": "Department",
+            "required": false,
+            "values": [
+              {
+                "value": "ENGINEERING",
+                "label": "Engineering"
+              },
+              {
+                "value": "PRODUCT",
+                "label": "Product"
+              },
+              {
+                "value": "DESIGN",
+                "label": "Design"
+              },
+              {
+                "value": "SALES",
+                "label": "Sales"
+              },
+              {
+                "value": "OPERATIONS",
+                "label": "Operations"
+              },
+              {
+                "value": "PEOPLE",
+                "label": "People"
+              }
+            ]
+          },
+          {
             "fieldName": "description",
             "type": "TEXT",
             "displayName": "Description",
             "required": false
+          },
+          {
+            "fieldName": "employmentType",
+            "type": "PICKLIST",
+            "displayName": "Employment type",
+            "required": false,
+            "values": [
+              {
+                "value": "FULL_TIME",
+                "label": "Full-time"
+              },
+              {
+                "value": "PART_TIME",
+                "label": "Part-time"
+              },
+              {
+                "value": "CONTRACT",
+                "label": "Contract"
+              }
+            ]
           },
           {
             "fieldName": "headcount",
@@ -74,18 +126,43 @@
             "required": false
           },
           {
+            "fieldName": "status",
+            "type": "PICKLIST",
+            "displayName": "Status",
+            "required": true,
+            "values": [
+              {
+                "value": "OPEN",
+                "label": "Open"
+              },
+              {
+                "value": "ON_HOLD",
+                "label": "On hold"
+              },
+              {
+                "value": "FILLED",
+                "label": "Filled"
+              },
+              {
+                "value": "CLOSED",
+                "label": "Closed"
+              }
+            ]
+          },
+          {
             "fieldName": "title",
             "type": "STRING",
             "displayName": "Title",
             "required": true,
             "unique": true
           }
-        ]
+        ],
+        "displayFieldName": "title"
       }
     },
     {
-      "step": "Collections and display fields",
-      "tool": "create_collection",
+      "step": "Collections",
+      "tool": "apply_collection",
       "arguments": {
         "name": "candidates",
         "displayName": "Candidates",
@@ -133,13 +210,42 @@
             "type": "URL",
             "displayName": "Profile URL",
             "required": false
+          },
+          {
+            "fieldName": "source",
+            "type": "PICKLIST",
+            "displayName": "Source",
+            "required": false,
+            "values": [
+              {
+                "value": "REFERRAL",
+                "label": "Referral"
+              },
+              {
+                "value": "CAREERS_SITE",
+                "label": "Careers site"
+              },
+              {
+                "value": "JOB_BOARD",
+                "label": "Job board"
+              },
+              {
+                "value": "AGENCY",
+                "label": "Agency"
+              },
+              {
+                "value": "EVENT",
+                "label": "Event"
+              }
+            ]
           }
-        ]
+        ],
+        "displayFieldName": "fullName"
       }
     },
     {
-      "step": "Collections and display fields",
-      "tool": "create_collection",
+      "step": "Collections",
+      "tool": "apply_collection",
       "arguments": {
         "name": "job-applications",
         "displayName": "Applications",
@@ -200,17 +306,50 @@
             "required": false
           },
           {
+            "fieldName": "stage",
+            "type": "PICKLIST",
+            "displayName": "Stage",
+            "required": true,
+            "values": [
+              {
+                "value": "APPLIED",
+                "label": "Applied"
+              },
+              {
+                "value": "SCREENING",
+                "label": "Screening"
+              },
+              {
+                "value": "INTERVIEW",
+                "label": "Interview"
+              },
+              {
+                "value": "OFFER",
+                "label": "Offer"
+              },
+              {
+                "value": "HIRED",
+                "label": "Hired"
+              },
+              {
+                "value": "REJECTED",
+                "label": "Rejected"
+              }
+            ]
+          },
+          {
             "fieldName": "stageChangedAt",
             "type": "DATETIME",
             "displayName": "Stage changed at",
             "required": false
           }
-        ]
+        ],
+        "displayFieldName": "name"
       }
     },
     {
-      "step": "Collections and display fields",
-      "tool": "create_collection",
+      "step": "Collections",
+      "tool": "apply_collection",
       "arguments": {
         "name": "interviews",
         "displayName": "Interviews",
@@ -244,6 +383,58 @@
             "required": false
           },
           {
+            "fieldName": "interviewType",
+            "type": "PICKLIST",
+            "displayName": "Interview type",
+            "required": false,
+            "values": [
+              {
+                "value": "PHONE_SCREEN",
+                "label": "Phone screen"
+              },
+              {
+                "value": "TECHNICAL",
+                "label": "Technical"
+              },
+              {
+                "value": "ONSITE",
+                "label": "Onsite"
+              },
+              {
+                "value": "FINAL",
+                "label": "Final"
+              }
+            ]
+          },
+          {
+            "fieldName": "outcome",
+            "type": "PICKLIST",
+            "displayName": "Outcome",
+            "required": false,
+            "values": [
+              {
+                "value": "PENDING",
+                "label": "Pending"
+              },
+              {
+                "value": "STRONG_YES",
+                "label": "Strong yes"
+              },
+              {
+                "value": "YES",
+                "label": "Yes"
+              },
+              {
+                "value": "NO",
+                "label": "No"
+              },
+              {
+                "value": "STRONG_NO",
+                "label": "Strong no"
+              }
+            ]
+          },
+          {
             "fieldName": "scheduledAt",
             "type": "DATETIME",
             "displayName": "Scheduled at",
@@ -256,896 +447,16 @@
             "required": true,
             "unique": true
           }
-        ]
-      }
-    },
-    {
-      "step": "Collections and display fields",
-      "tool": "update_collection",
-      "arguments": {
-        "id": "job-openings",
+        ],
         "displayFieldName": "title"
-      },
-      "save": {
-        "jobOpeningsCollectionId": ".data.id"
       }
-    },
-    {
-      "step": "Collections and display fields",
-      "tool": "update_collection",
-      "arguments": {
-        "id": "candidates",
-        "displayFieldName": "fullName"
-      },
-      "save": {
-        "candidatesCollectionId": ".data.id"
-      }
-    },
-    {
-      "step": "Collections and display fields",
-      "tool": "update_collection",
-      "arguments": {
-        "id": "job-applications",
-        "displayFieldName": "name"
-      },
-      "save": {
-        "jobApplicationsCollectionId": ".data.id"
-      }
-    },
-    {
-      "step": "Collections and display fields",
-      "tool": "update_collection",
-      "arguments": {
-        "id": "interviews",
-        "displayFieldName": "title"
-      },
-      "save": {
-        "interviewsCollectionId": ".data.id"
-      }
-    },
-    {
-      "step": "Picklist fields",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "fields",
-        "attributes": {
-          "collectionId": "{{jobOpeningsCollectionId}}",
-          "name": "department",
-          "type": "PICKLIST",
-          "displayName": "Department",
-          "required": false
-        }
-      },
-      "save": {
-        "jobOpenings.department.fieldId": ".data.id"
-      }
-    },
-    {
-      "step": "Picklist fields",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "fields",
-        "attributes": {
-          "collectionId": "{{jobOpeningsCollectionId}}",
-          "name": "employmentType",
-          "type": "PICKLIST",
-          "displayName": "Employment type",
-          "required": false
-        }
-      },
-      "save": {
-        "jobOpenings.employmentType.fieldId": ".data.id"
-      }
-    },
-    {
-      "step": "Picklist fields",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "fields",
-        "attributes": {
-          "collectionId": "{{jobOpeningsCollectionId}}",
-          "name": "status",
-          "type": "PICKLIST",
-          "displayName": "Status",
-          "required": true
-        }
-      },
-      "save": {
-        "jobOpenings.status.fieldId": ".data.id"
-      }
-    },
-    {
-      "step": "Picklist fields",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "fields",
-        "attributes": {
-          "collectionId": "{{candidatesCollectionId}}",
-          "name": "source",
-          "type": "PICKLIST",
-          "displayName": "Source",
-          "required": false
-        }
-      },
-      "save": {
-        "candidates.source.fieldId": ".data.id"
-      }
-    },
-    {
-      "step": "Picklist fields",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "fields",
-        "attributes": {
-          "collectionId": "{{jobApplicationsCollectionId}}",
-          "name": "stage",
-          "type": "PICKLIST",
-          "displayName": "Stage",
-          "required": true
-        }
-      },
-      "save": {
-        "jobApplications.stage.fieldId": ".data.id"
-      }
-    },
-    {
-      "step": "Picklist fields",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "fields",
-        "attributes": {
-          "collectionId": "{{interviewsCollectionId}}",
-          "name": "interviewType",
-          "type": "PICKLIST",
-          "displayName": "Interview type",
-          "required": false
-        }
-      },
-      "save": {
-        "interviews.interviewType.fieldId": ".data.id"
-      }
-    },
-    {
-      "step": "Picklist fields",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "fields",
-        "attributes": {
-          "collectionId": "{{interviewsCollectionId}}",
-          "name": "outcome",
-          "type": "PICKLIST",
-          "displayName": "Outcome",
-          "required": false
-        }
-      },
-      "save": {
-        "interviews.outcome.fieldId": ".data.id"
-      }
-    },
-    {
-      "step": "Picklist fields",
-      "tool": "bulk_apply",
-      "arguments": {
-        "operations": [
-          {
-            "op": "add",
-            "type": "fields",
-            "attributes": {
-              "collectionId": "{{jobOpeningsCollectionId}}",
-              "name": "department",
-              "type": "PICKLIST",
-              "displayName": "Department",
-              "required": false
-            }
-          },
-          {
-            "op": "add",
-            "type": "fields",
-            "attributes": {
-              "collectionId": "{{jobOpeningsCollectionId}}",
-              "name": "employmentType",
-              "type": "PICKLIST",
-              "displayName": "Employment type",
-              "required": false
-            }
-          },
-          {
-            "op": "add",
-            "type": "fields",
-            "attributes": {
-              "collectionId": "{{jobOpeningsCollectionId}}",
-              "name": "status",
-              "type": "PICKLIST",
-              "displayName": "Status",
-              "required": true
-            }
-          }
-        ]
-      },
-      "expectError": "BUILD-LOG.md error 2: atomic operations on the fields system collection answered 422 OPERATION_FAILED"
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-          "value": "ENGINEERING",
-          "label": "Engineering",
-          "sortOrder": 0,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-          "value": "PRODUCT",
-          "label": "Product",
-          "sortOrder": 1,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-          "value": "DESIGN",
-          "label": "Design",
-          "sortOrder": 2,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-          "value": "SALES",
-          "label": "Sales",
-          "sortOrder": 3,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-          "value": "OPERATIONS",
-          "label": "Operations",
-          "sortOrder": 4,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-          "value": "PEOPLE",
-          "label": "People",
-          "sortOrder": 5,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-          "value": "ENGINEERING",
-          "label": "Engineering",
-          "sortOrder": 0,
-          "isActive": true
-        }
-      },
-      "expectError": "BUILD-LOG.md error 4: the first department value re-sent; 409 UNIQUE_VIOLATION (uq_picklist_value)"
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.employmentType.fieldId}}",
-          "value": "FULL_TIME",
-          "label": "Full-time",
-          "sortOrder": 0,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.employmentType.fieldId}}",
-          "value": "PART_TIME",
-          "label": "Part-time",
-          "sortOrder": 1,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.employmentType.fieldId}}",
-          "value": "CONTRACT",
-          "label": "Contract",
-          "sortOrder": 2,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.status.fieldId}}",
-          "value": "OPEN",
-          "label": "Open",
-          "sortOrder": 0,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.status.fieldId}}",
-          "value": "ON_HOLD",
-          "label": "On hold",
-          "sortOrder": 1,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.status.fieldId}}",
-          "value": "FILLED",
-          "label": "Filled",
-          "sortOrder": 2,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobOpenings.status.fieldId}}",
-          "value": "CLOSED",
-          "label": "Closed",
-          "sortOrder": 3,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{candidates.source.fieldId}}",
-          "value": "REFERRAL",
-          "label": "Referral",
-          "sortOrder": 0,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{candidates.source.fieldId}}",
-          "value": "CAREERS_SITE",
-          "label": "Careers site",
-          "sortOrder": 1,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{candidates.source.fieldId}}",
-          "value": "JOB_BOARD",
-          "label": "Job board",
-          "sortOrder": 2,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{candidates.source.fieldId}}",
-          "value": "AGENCY",
-          "label": "Agency",
-          "sortOrder": 3,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{candidates.source.fieldId}}",
-          "value": "EVENT",
-          "label": "Event",
-          "sortOrder": 4,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobApplications.stage.fieldId}}",
-          "value": "APPLIED",
-          "label": "Applied",
-          "sortOrder": 0,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobApplications.stage.fieldId}}",
-          "value": "SCREENING",
-          "label": "Screening",
-          "sortOrder": 1,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobApplications.stage.fieldId}}",
-          "value": "INTERVIEW",
-          "label": "Interview",
-          "sortOrder": 2,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobApplications.stage.fieldId}}",
-          "value": "OFFER",
-          "label": "Offer",
-          "sortOrder": 3,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobApplications.stage.fieldId}}",
-          "value": "HIRED",
-          "label": "Hired",
-          "sortOrder": 4,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{jobApplications.stage.fieldId}}",
-          "value": "REJECTED",
-          "label": "Rejected",
-          "sortOrder": 5,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{interviews.interviewType.fieldId}}",
-          "value": "PHONE_SCREEN",
-          "label": "Phone screen",
-          "sortOrder": 0,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{interviews.interviewType.fieldId}}",
-          "value": "TECHNICAL",
-          "label": "Technical",
-          "sortOrder": 1,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{interviews.interviewType.fieldId}}",
-          "value": "ONSITE",
-          "label": "Onsite",
-          "sortOrder": 2,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{interviews.interviewType.fieldId}}",
-          "value": "FINAL",
-          "label": "Final",
-          "sortOrder": 3,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{interviews.outcome.fieldId}}",
-          "value": "PENDING",
-          "label": "Pending",
-          "sortOrder": 0,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{interviews.outcome.fieldId}}",
-          "value": "STRONG_YES",
-          "label": "Strong yes",
-          "sortOrder": 1,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{interviews.outcome.fieldId}}",
-          "value": "YES",
-          "label": "Yes",
-          "sortOrder": 2,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{interviews.outcome.fieldId}}",
-          "value": "NO",
-          "label": "No",
-          "sortOrder": 3,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "create_record",
-      "arguments": {
-        "collection": "picklist-values",
-        "attributes": {
-          "picklistSourceType": "FIELD",
-          "picklistSourceId": "{{interviews.outcome.fieldId}}",
-          "value": "STRONG_NO",
-          "label": "Strong no",
-          "sortOrder": 4,
-          "isActive": true
-        }
-      }
-    },
-    {
-      "step": "Picklist values",
-      "tool": "bulk_apply",
-      "arguments": {
-        "operations": [
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-              "value": "ENGINEERING",
-              "label": "Engineering",
-              "sortOrder": 0,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-              "value": "PRODUCT",
-              "label": "Product",
-              "sortOrder": 1,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-              "value": "DESIGN",
-              "label": "Design",
-              "sortOrder": 2,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-              "value": "SALES",
-              "label": "Sales",
-              "sortOrder": 3,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-              "value": "OPERATIONS",
-              "label": "Operations",
-              "sortOrder": 4,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.department.fieldId}}",
-              "value": "PEOPLE",
-              "label": "People",
-              "sortOrder": 5,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.employmentType.fieldId}}",
-              "value": "FULL_TIME",
-              "label": "Full-time",
-              "sortOrder": 0,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.employmentType.fieldId}}",
-              "value": "PART_TIME",
-              "label": "Part-time",
-              "sortOrder": 1,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.employmentType.fieldId}}",
-              "value": "CONTRACT",
-              "label": "Contract",
-              "sortOrder": 2,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.status.fieldId}}",
-              "value": "OPEN",
-              "label": "Open",
-              "sortOrder": 0,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.status.fieldId}}",
-              "value": "ON_HOLD",
-              "label": "On hold",
-              "sortOrder": 1,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.status.fieldId}}",
-              "value": "FILLED",
-              "label": "Filled",
-              "sortOrder": 2,
-              "isActive": true
-            }
-          },
-          {
-            "op": "add",
-            "type": "picklist-values",
-            "attributes": {
-              "picklistSourceType": "FIELD",
-              "picklistSourceId": "{{jobOpenings.status.fieldId}}",
-              "value": "CLOSED",
-              "label": "Closed",
-              "sortOrder": 3,
-              "isActive": true
-            }
-          }
-        ]
-      },
-      "expectError": "BUILD-LOG.md error 3: atomic operations on picklist-values answered 422 OPERATION_FAILED"
     },
     {
       "step": "Page layouts",
       "tool": "apply_layout",
       "arguments": {
         "collectionName": "job-openings",
-        "name": "Job opening",
+        "name": "Opening",
         "layoutType": "DETAIL",
         "isDefault": true,
         "headerConfig": {
@@ -1220,8 +531,7 @@
             "rowLimit": 10
           }
         ]
-      },
-      "expectError": "BUILD-LOG.md error 5: a layout name with a space is sent as 'Job+opening' in the path and rejected"
+      }
     },
     {
       "step": "Page layouts",
@@ -1460,88 +770,6 @@
       }
     },
     {
-      "step": "Page layouts",
-      "tool": "apply_layout",
-      "arguments": {
-        "collectionName": "job-openings",
-        "name": "Opening",
-        "layoutType": "DETAIL",
-        "isDefault": true,
-        "headerConfig": {
-          "titleFields": [
-            "title"
-          ]
-        },
-        "sections": [
-          {
-            "heading": "Role",
-            "columns": 2,
-            "collapsed": false,
-            "fields": [
-              {
-                "name": "title",
-                "column": 0
-              },
-              {
-                "name": "status",
-                "column": 1
-              },
-              {
-                "name": "department",
-                "column": 0
-              },
-              {
-                "name": "employmentType",
-                "column": 1
-              },
-              {
-                "name": "location",
-                "column": 0
-              },
-              {
-                "name": "headcount",
-                "column": 1
-              },
-              {
-                "name": "hiringManager",
-                "column": 0
-              },
-              {
-                "name": "openedOn",
-                "column": 1
-              }
-            ]
-          },
-          {
-            "heading": "Description",
-            "columns": 1,
-            "collapsed": false,
-            "fields": [
-              {
-                "name": "description",
-                "column": 0
-              }
-            ]
-          }
-        ],
-        "relatedLists": [
-          {
-            "collection": "job-applications",
-            "relationshipField": "job",
-            "displayColumns": [
-              "name",
-              "candidate",
-              "stage",
-              "appliedOn"
-            ],
-            "sortField": "appliedOn",
-            "sortDirection": "DESC",
-            "rowLimit": 10
-          }
-        ]
-      }
-    },
-    {
       "step": "Flow",
       "tool": "create_flow",
       "arguments": {
@@ -1714,40 +942,18 @@
     },
     {
       "step": "List views",
-      "tool": "create_listview",
+      "tool": "apply_listview",
       "arguments": {
         "collectionName": "job-applications",
         "name": "Hiring pipeline",
-        "visibility": "PUBLIC",
-        "isDefault": false,
-        "rowLimit": 100,
-        "viewType": "KANBAN",
-        "typeConfig": {
-          "kanban": {
-            "laneField": "stage",
-            "cardFields": [
-              "name",
-              "job",
-              "rating"
-            ]
-          }
-        },
-        "displayedFields": [
+        "columns": [
           "name",
           "candidate",
           "job",
           "stage",
           "rating"
-        ]
-      },
-      "expectError": "BUILD-LOG.md error 6: displayedFields sent as an array is stringified; Unknown field '[name'"
-    },
-    {
-      "step": "List views",
-      "tool": "create_listview",
-      "arguments": {
-        "collectionName": "job-applications",
-        "name": "Hiring pipeline",
+        ],
+        "filters": [],
         "visibility": "PUBLIC",
         "isDefault": false,
         "rowLimit": 100,
@@ -1761,8 +967,7 @@
               "rating"
             ]
           }
-        },
-        "displayedFields": "name,candidate,job,stage,rating"
+        }
       }
     },
     {
@@ -2712,6 +1917,32 @@
       }
     },
     {
+      "step": "Dashboard check",
+      "tool": "validate_dashboard",
+      "arguments": {
+        "dashboard": "Hiring overview"
+      }
+    },
+    {
+      "step": "Dashboard check",
+      "tool": "dashboard_data",
+      "arguments": {
+        "dashboard": "Hiring overview"
+      }
+    },
+    {
+      "step": "Export",
+      "tool": "export_metadata",
+      "arguments": {
+        "collections": [
+          "job-openings",
+          "candidates",
+          "job-applications",
+          "interviews"
+        ]
+      }
+    },
+    {
       "step": "Second state check",
       "tool": "list_collections",
       "arguments": {
@@ -2843,6 +2074,20 @@
             "EQ": "Hiring overview"
           }
         }
+      }
+    },
+    {
+      "step": "Verification",
+      "tool": "validate_dashboard",
+      "arguments": {
+        "dashboard": "Hiring overview"
+      }
+    },
+    {
+      "step": "Verification",
+      "tool": "dashboard_data",
+      "arguments": {
+        "dashboard": "Hiring overview"
       }
     }
   ]

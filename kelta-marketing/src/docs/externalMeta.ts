@@ -66,11 +66,31 @@ export const externalMeta: Record<`authoring/${string}` | `cli/${string}`, Exter
     section: 'reference',
     order: 80,
   },
+  'authoring/packages': {
+    title: 'Authoring Metadata Packages',
+    description: 'The package file kelta metadata export, diff and apply move between tenants: every item type with its natural key, how references resolve by name, and what diff reports.',
+    section: 'reference',
+    order: 85,
+  },
   'authoring/mcp-admin-coverage': {
     title: 'Authoring a Template Through the Admin MCP Toolset',
     description: 'Pointing kelta mcp serve at a sandbox, and the MCP tool behind each step of building a template app.',
     section: 'reference',
     order: 90,
+  },
+  'authoring/endpoints': {
+    title: 'Public Endpoint Index',
+    description: 'Every HTTP endpoint reachable from outside the platform, with its method, path, required permission and the page that documents it — generated from the controller mappings and the gateway route table.',
+    section: 'reference',
+    order: 100,
+    tocDepth: 2,
+  },
+  'authoring/system-collections': {
+    title: 'System Collections Reference',
+    description: 'Every system collection the platform defines, with its API path, tenant-scoped and read-only flags and key fields — generated from the runtime system-collection registry.',
+    section: 'reference',
+    order: 110,
+    tocDepth: 2,
   },
   'cli/commands': {
     title: 'kelta CLI — Command Reference',

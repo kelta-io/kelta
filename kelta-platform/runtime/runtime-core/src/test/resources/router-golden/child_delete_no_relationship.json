@@ -1,6 +1,19 @@
 {
   "status" : 404,
-  "headers" : { },
-  "body" : null,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "NOT_FOUND",
+      "detail" : "Record 'reg-1' not found in collection 'regions'",
+      "meta" : {
+        "path" : "/api/accounts/acc-1/regions/reg-1",
+        "requestId" : "<requestId>"
+      },
+      "status" : "404",
+      "title" : "Not Found"
+    } ]
+  },
   "calls" : [ ]
 }

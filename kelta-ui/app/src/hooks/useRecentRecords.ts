@@ -11,7 +11,7 @@ import { useTenantStorageScope } from '../context/TenantContext'
 /**
  * A recently viewed record entry
  */
-export interface RecentRecord {
+interface RecentRecord {
   id: string
   collectionName: string
   collectionDisplayName: string

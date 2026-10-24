@@ -161,5 +161,3 @@ export function EndpointPerformancePage({ className }: EndpointPerformancePagePr
     </div>
   )
 }
-
-export default EndpointPerformancePage

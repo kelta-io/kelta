@@ -70,6 +70,16 @@ const list = defineCommand({
     { flag: '--size <number>', description: 'Page size (max 200)', default: '25' },
     { flag: '--all', description: 'Auto-paginate through every page (client cap 10k records)' },
   ],
+  examples: [
+    {
+      cmd: 'kelta records list customers --filter status=active --sort -createdAt --size 50',
+      description: 'Newest 50 active customers',
+    },
+    {
+      cmd: 'kelta records list orders --filter amount.gte=100 --fields id,amount,status --all',
+      description: 'Every order of 100 or more, three fields each',
+    },
+  ],
   input: listInput,
   handler: async (ctx, input) => {
     const resource = ctx.client.resource(input.collection);
@@ -124,6 +134,7 @@ const get = defineCommand({
     { flag: '--include <rels>', description: 'Related resources to include' },
     { flag: '--fields <fields>', description: 'Sparse fieldset, comma-separated' },
   ],
+  examples: [{ cmd: 'kelta records get orders rec_123 --include customer' }],
   input: z.object({
     collection: z.string().min(1),
     id: z.string().min(1),
@@ -148,6 +159,13 @@ const create = defineCommand({
   summary: 'Create a record',
   positionals: [{ name: 'collection', description: 'Collection name', required: true }],
   options: [{ flag: '--data <json>', description: 'Attributes as JSON, @file, or - for stdin' }],
+  examples: [
+    { cmd: 'kelta records create customers --data \'{"name": "Acme Ltd", "status": "active"}\'' },
+    {
+      cmd: 'kelta records create orders --data @order.json',
+      description: 'Attributes from a file',
+    },
+  ],
   input: z.object({ collection: z.string().min(1), data: z.string().min(1) }),
   handler: async (ctx, input) => {
     const attributes = readDataArgument(input.data);
@@ -165,6 +183,7 @@ const update = defineCommand({
     { name: 'id', description: 'Record id', required: true },
   ],
   options: [{ flag: '--data <json>', description: 'Attributes as JSON, @file, or - for stdin' }],
+  examples: [{ cmd: 'kelta records update orders rec_123 --data \'{"status": "shipped"}\'' }],
   input: z.object({
     collection: z.string().min(1),
     id: z.string().min(1),
@@ -186,6 +205,7 @@ const remove = defineCommand({
     { name: 'collection', description: 'Collection name', required: true },
     { name: 'id', description: 'Record id', required: true },
   ],
+  examples: [{ cmd: 'kelta records delete customers rec_123 --yes' }],
   input: z.object({ collection: z.string().min(1), id: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client.resource(input.collection).delete(input.id);
@@ -206,6 +226,12 @@ const bulk = defineCommand({
     {
       flag: '--data <json>',
       description: 'Body as JSON, @file, or - : {"atomic:operations":[{op,data|ref},…]} (required)',
+    },
+  ],
+  examples: [
+    {
+      cmd: 'kelta records bulk --data @ops.json --yes',
+      description: 'Apply a JSON:API atomic:operations document, all-or-nothing',
     },
   ],
   input: z.object({ data: z.string().min(1) }),
@@ -231,6 +257,7 @@ const search = defineCommand({
   summary: 'Full-text search across collections (query min 3 chars)',
   positionals: [{ name: 'query', description: 'Search text', required: true }],
   options: [{ flag: '--limit <n>', description: 'Max results (max 100)', default: '20' }],
+  examples: [{ cmd: 'kelta records search acme --limit 5' }],
   input: z.object({
     query: z.string().min(3),
     limit: z.coerce.number().int().positive().max(100).default(20),
@@ -262,6 +289,7 @@ const semanticSearch = defineCommand({
     { name: 'query', description: 'Query text', required: true },
   ],
   options: [{ flag: '--limit <n>', description: 'Max results', default: '10' }],
+  examples: [{ cmd: "kelta records semantic-search orders 'late delivery complaints' --limit 3" }],
   input: z.object({
     collection: z.string().min(1),
     query: z.string().min(1),

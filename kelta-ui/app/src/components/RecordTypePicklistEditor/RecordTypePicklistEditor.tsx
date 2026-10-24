@@ -509,5 +509,3 @@ export function RecordTypePicklistEditor({
     </div>
   )
 }
-
-export default RecordTypePicklistEditor

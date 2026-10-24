@@ -36,7 +36,7 @@ engine discovers them through the module SPI:
   dependencies via `context.getExtension(Type.class)`. The worker registers these extensions in
   `FlowConfig.moduleRegistry()`: `FlowEngine`, `RollupSummaryService`, `JdbcTemplate`,
   `TransactionTemplate`, `EmailService`, `ScriptExecutor`, `ApiSpecStore`, **`CredentialResolverPort`**,
-  `IdempotencyStore`, **`OutboundUrlGuard`**.
+  `IdempotencyStore`, `NotificationStore`, **`OutboundUrlGuard`**.
   - A handler that fetches a **tenant-configured URL** uses runtime-core's `OutboundHttpClient`
     with the `OutboundUrlGuard` extension (the worker registers it; `IntegrationModule` falls back
     to a guard that allows no private range) — see `HttpCalloutActionHandler`,

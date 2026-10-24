@@ -5,7 +5,7 @@ import { Cog } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { DebugStatusBadge, type DebugStatus } from './DebugStatusBadge'
 
-export type TaskNodeData = {
+type TaskNodeData = {
   label: string
   resource?: string
   stateType: string

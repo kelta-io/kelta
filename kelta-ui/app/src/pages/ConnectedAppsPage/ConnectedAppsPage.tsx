@@ -818,5 +818,3 @@ export function ConnectedAppsPage({
     </AdminCrudPage>
   )
 }
-
-export default ConnectedAppsPage

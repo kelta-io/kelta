@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 const MAX_RECENT = 5
 
-export interface RecentEntry {
+interface RecentEntry {
   path: string
   visitedAt: number
 }

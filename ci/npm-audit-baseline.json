@@ -4,8 +4,7 @@
   "packages": {
     "kelta-web": {
       "GHSA-chx6-hx7r-mcp5": "high | react-router | React Router: Unauthenticated Denial of Service via Inefficient Route Matching",
-      "GHSA-qwww-vcr4-c8h2": "high | react-router | React Router: RSC Mode CSRF Bypass Allows Action Execution Before 400 Response",
-      "GHSA-mrhx-c7xc-m3w5": "high | zod | Zod can exhaust memory while validating oversized constrained collections"
+      "GHSA-qwww-vcr4-c8h2": "high | react-router | React Router: RSC Mode CSRF Bypass Allows Action Execution Before 400 Response"
     },
     "kelta-ui/app": {
       "GHSA-j95f-988m-3j2f": "high | @tiptap/core | Tiptap: Quadratic ReDoS in block and inline Markdown attribute parsing",

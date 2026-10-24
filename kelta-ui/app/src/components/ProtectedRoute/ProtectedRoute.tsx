@@ -120,5 +120,3 @@ export function ProtectedRoute({
   // User is authenticated and authorized, render children
   return <>{children}</>
 }
-
-export default ProtectedRoute

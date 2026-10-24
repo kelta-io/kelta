@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -21,6 +22,10 @@ public class FlowRepository {
     private static final String SELECT_FLOW_BY_ID = """
             SELECT id, tenant_id, name, definition, trigger_config, flow_type, active
             FROM flow WHERE id = ?
+            """;
+
+    private static final String SELECT_FLOW_NAME_BY_ID = """
+            SELECT name FROM flow WHERE id = ?
             """;
 
     private static final String SELECT_MAX_VERSION_NUMBER = """
@@ -68,6 +73,15 @@ public class FlowRepository {
         row.computeIfPresent("definition", (k, v) -> v != null ? v.toString() : null);
         row.computeIfPresent("trigger_config", (k, v) -> v != null ? v.toString() : null);
         return Optional.of(row);
+    }
+
+    /**
+     * Returns a flow's display name. RLS scopes the lookup to the current tenant.
+     */
+    public Optional<String> findFlowNameById(String flowId) {
+        return jdbcTemplate.queryForList(SELECT_FLOW_NAME_BY_ID, String.class, flowId).stream()
+                .filter(Objects::nonNull)
+                .findFirst();
     }
 
     /**

@@ -628,5 +628,3 @@ export function ApprovalProcessesPage({
     </AdminCrudPage>
   )
 }
-
-export default ApprovalProcessesPage

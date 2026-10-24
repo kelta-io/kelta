@@ -10,8 +10,8 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.springframework.stereotype.Component;
+import org.springframework.web.util.UriUtils;
 
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -176,9 +176,9 @@ public class ApplyLayoutTool implements AdminTool {
         if (args.get("relatedLists") instanceof List<?> relatedLists) body.put("relatedLists", relatedLists);
 
         String path = layoutId != null
-                ? "/api/page-layouts/" + URLEncoder.encode(layoutId, StandardCharsets.UTF_8) + "/tree"
-                : "/api/collections/" + URLEncoder.encode(collectionName, StandardCharsets.UTF_8)
-                        + "/layouts/" + URLEncoder.encode(name, StandardCharsets.UTF_8) + "/tree";
+                ? "/api/page-layouts/" + UriUtils.encodePathSegment(layoutId, StandardCharsets.UTF_8) + "/tree"
+                : "/api/collections/" + UriUtils.encodePathSegment(collectionName, StandardCharsets.UTF_8)
+                        + "/layouts/" + UriUtils.encodePathSegment(name, StandardCharsets.UTF_8) + "/tree";
 
         GatewayHttpClient.Response response;
         try {

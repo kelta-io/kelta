@@ -1,24 +1,38 @@
 ARG MAVEN_VERSION=3.9.9
 ARG JDK_IMAGE=eclipse-temurin:25-jdk
 
+# Base-image registry and Maven mirror are build args. The DEFAULTS are the homelab
+# pull-through caches that CI and production builds use (LAN speed, and no Docker Hub /
+# Maven Central rate limits when several images build in parallel) — builds that pass no
+# args behave exactly as before. Outside the homelab pass the public sources:
+#   --build-arg BASE_REGISTRY=docker.io/library \
+#   --build-arg MAVEN_MIRROR=central \
+#   --build-arg MAVEN_DIST_URL=https://repo.maven.apache.org/maven2
+ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
+ARG MAVEN_DIST_URL=https://nexus.rzware.com/repository/maven-public
+
 # =============================================================================
 # Stage 1: Build runtime-platform dependencies
 # =============================================================================
 FROM ${JDK_IMAGE} AS runtime-builder
 
 ARG MAVEN_VERSION
+ARG MAVEN_DIST_URL
 
 WORKDIR /kelta-platform
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL --retry 8 --retry-delay 5 --retry-connrefused --retry-all-errors \
-      "https://nexus.rzware.com/repository/maven-public/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" | \
+      "${MAVEN_DIST_URL}/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" | \
     tar xzf - -C /opt && \
     ln -sf /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
 # Route Maven Central through Google's GCS mirror to dodge 429 rate limits.
-COPY ci/maven-settings.xml /root/.m2/settings.xml
+ARG MAVEN_MIRROR=nexus
+COPY ci/maven-settings.xml /tmp/maven-settings.xml
+RUN mkdir -p /root/.m2 && \
+    if [ "$MAVEN_MIRROR" = "nexus" ]; then cp /tmp/maven-settings.xml /root/.m2/settings.xml; fi
 
 COPY kelta-platform/pom.xml ./
 COPY kelta-platform/runtime/pom.xml ./runtime/
@@ -52,18 +66,22 @@ RUN mvn clean install -DskipTests -B \
 FROM ${JDK_IMAGE} AS builder
 
 ARG MAVEN_VERSION
+ARG MAVEN_DIST_URL
 
 WORKDIR /build
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL --retry 8 --retry-delay 5 --retry-connrefused --retry-all-errors \
-      "https://nexus.rzware.com/repository/maven-public/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" | \
+      "${MAVEN_DIST_URL}/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" | \
     tar xzf - -C /opt && \
     ln -sf /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
 # Route Maven Central through Google's GCS mirror to dodge 429 rate limits.
-COPY ci/maven-settings.xml /root/.m2/settings.xml
+ARG MAVEN_MIRROR=nexus
+COPY ci/maven-settings.xml /tmp/maven-settings.xml
+RUN mkdir -p /root/.m2 && \
+    if [ "$MAVEN_MIRROR" = "nexus" ]; then cp /tmp/maven-settings.xml /root/.m2/settings.xml; fi
 
 COPY --from=runtime-builder /root/.m2/repository /root/.m2/repository
 
@@ -76,7 +94,7 @@ RUN mvn package -DskipTests -B
 # =============================================================================
 # Stage 3: JRE runtime
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/eclipse-temurin:25-jre
+FROM ${BASE_REGISTRY}/eclipse-temurin:25-jre
 
 WORKDIR /app
 

@@ -99,4 +99,15 @@ class UpdateCollectionToolTest {
 
         assertThat(result.isError()).isEqualTo(Boolean.TRUE);
     }
+
+    @Test
+    void rejectsNonStringIdInsteadOfSendingItsToString() {
+        CallToolResult result = tool.toSpecification().callHandler().apply(
+                null, new CallToolRequest("update_collection", Map.of(
+                        "id", 123,
+                        "displayName", "Projects"), null));
+
+        assertThat(result.isError()).isEqualTo(Boolean.TRUE);
+        wm.verify(0, WireMock.anyRequestedFor(WireMock.anyUrl()));
+    }
 }

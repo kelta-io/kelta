@@ -24,7 +24,6 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * Global error handler for the API Gateway.
@@ -60,7 +59,7 @@ public class GlobalErrorHandler implements ErrorWebExceptionHandler {
     @Override
     public Mono<Void> handle(ServerWebExchange exchange, Throwable ex) {
         String path = exchange.getRequest().getPath().value();
-        String correlationId = getOrCreateCorrelationId(exchange);
+        String correlationId = ResponseHelpers.correlationId(exchange);
 
         log.debug("Handling error for path: {}, correlationId: {}, exception: {}",
             path, correlationId, ex.getClass().getSimpleName());
@@ -173,6 +172,7 @@ public class GlobalErrorHandler implements ErrorWebExceptionHandler {
         meta.put("timestamp", Instant.now());
         meta.put("path", path);
         meta.put("correlationId", correlationId);
+        meta.put("requestId", correlationId);
         error.setMeta(meta);
 
         // Set response status and headers — abandon if the response was already
@@ -224,28 +224,5 @@ public class GlobalErrorHandler implements ErrorWebExceptionHandler {
             return "No route found for path: " + path;
         }
         return ex.getReason() != null ? ex.getReason() : status.getReasonPhrase();
-    }
-
-    /**
-     * Gets the correlation ID from the exchange attributes or creates a new one.
-     *
-     * @param exchange the server web exchange
-     * @return the correlation ID
-     */
-    private String getOrCreateCorrelationId(ServerWebExchange exchange) {
-        // Try to get from exchange attributes first
-        String correlationId = exchange.getAttribute("correlationId");
-
-        if (correlationId == null) {
-            // Try to get from request header
-            correlationId = exchange.getRequest().getHeaders().getFirst("X-Correlation-ID");
-        }
-
-        if (correlationId == null) {
-            // Generate new correlation ID
-            correlationId = UUID.randomUUID().toString();
-        }
-
-        return correlationId;
     }
 }

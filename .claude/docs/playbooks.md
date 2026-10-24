@@ -456,7 +456,10 @@ boundary. Pin the role instead — `INSERT INTO tenant_db_role (role_name, tenan
 what the session sets (`kelta_pinned_tenant()`, V201; `SupersetDatabaseUserService` pins its
 roles automatically). Grant such a role `SELECT` only on tables that have a `tenant_id`
 column (RLS-scoped) — never `ALL TABLES IN SCHEMA public`, which includes `user_credential`,
-`oauth2_*` and the tenant-less child/log tables RLS cannot scope.
+`oauth2_*` and the tenant-less child/log tables RLS cannot scope. Never grant it anything on
+`tenant_db_role` either: it has no RLS, and the pin needs no privilege because
+`kelta_pinned_tenant()` is SECURITY DEFINER (owned by the migrating role, fixed `search_path`).
+V215 revoked it from every existing tenant role.
 
 ---
 

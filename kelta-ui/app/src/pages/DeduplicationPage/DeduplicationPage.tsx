@@ -345,5 +345,3 @@ export function DeduplicationPage({
     </div>
   )
 }
-
-export default DeduplicationPage

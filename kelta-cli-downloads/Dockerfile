@@ -6,10 +6,19 @@
 # five targets from linux), so this image slots into the shared build matrix
 # with no special workflow steps — only the CLI_VERSION/GIT_SHA build args.
 
+# Base-image registry and bun image are build args. The DEFAULTS are the homelab
+# pull-through cache that CI and production builds use (LAN speed, and no Docker Hub
+# rate limits when several images build in parallel) — builds that pass no args
+# behave exactly as before. Outside the homelab pass the public sources:
+#   --build-arg BASE_REGISTRY=docker.io/library \
+#   --build-arg BUN_IMAGE=oven/bun:1.2.19
+ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
+ARG BUN_IMAGE=harbor.rzware.com/dockerhub-cache/oven/bun:1.2.19
+
 # =============================================================================
 # Stage 1: install workspace deps and build the SDK the CLI links against
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/node:20-alpine AS builder
+FROM ${BASE_REGISTRY}/node:24.22-alpine3.24 AS builder
 
 WORKDIR /app/kelta-web
 COPY kelta-web/package.json kelta-web/package-lock.json* kelta-web/tsconfig.json ./
@@ -28,7 +37,7 @@ RUN npm run build --workspace=packages/formula \
 # =============================================================================
 # Stage 2: cross-compile the five release binaries + manifest with bun
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/oven/bun:1.2.19 AS compiler
+FROM ${BUN_IMAGE} AS compiler
 
 ARG CLI_VERSION=0.0.0
 ARG GIT_SHA=unknown
@@ -45,7 +54,7 @@ RUN bun scripts/build-binaries.mjs \
 # =============================================================================
 # Stage 3: nginx static server
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/nginx:1.25-alpine
+FROM ${BASE_REGISTRY}/nginx:1.30-alpine3.24
 
 COPY kelta-cli-downloads/nginx.conf /etc/nginx/conf.d/default.conf
 COPY kelta-cli-downloads/install.sh /usr/share/nginx/html/cli/install.sh

@@ -76,5 +76,3 @@ export function MonitoringLayout() {
     </div>
   )
 }
-
-export default MonitoringLayout

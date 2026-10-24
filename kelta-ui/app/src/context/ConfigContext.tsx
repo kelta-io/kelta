@@ -319,6 +319,3 @@ export function useConfig(): ConfigContextValue {
   }
   return context
 }
-
-// Export the context for testing purposes
-export { ConfigContext }

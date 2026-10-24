@@ -1,12 +1,16 @@
 package io.kelta.worker.controller;
 
 import io.kelta.jsonapi.JsonApiResponseBuilder;
+import io.kelta.worker.repository.BootstrapRepository;
+import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.FlowActorResolver;
 import io.kelta.runtime.flow.*;
 import io.kelta.worker.repository.FlowRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,22 +31,31 @@ public class FlowExecutionController {
 
     private static final Logger log = LoggerFactory.getLogger(FlowExecutionController.class);
 
+    /** Lets a test run start an inactive flow; the gateway exempts {@code /execute} from it. */
+    static final String MANAGE_WORKFLOWS = "MANAGE_WORKFLOWS";
+
     private final FlowEngine flowEngine;
     private final FlowActorResolver flowActorResolver;
     private final FlowStore flowStore;
     private final InitialStateBuilder initialStateBuilder;
     private final FlowRepository flowRepository;
+    private final CerbosPermissionResolver permissionResolver;
+    private final BootstrapRepository bootstrapRepository;
 
     public FlowExecutionController(FlowEngine flowEngine,
                                     FlowStore flowStore,
                                     InitialStateBuilder initialStateBuilder,
                                     FlowRepository flowRepository,
-                                    FlowActorResolver flowActorResolver) {
+                                    FlowActorResolver flowActorResolver,
+                                    CerbosPermissionResolver permissionResolver,
+                                    BootstrapRepository bootstrapRepository) {
         this.flowEngine = flowEngine;
         this.flowActorResolver = flowActorResolver;
         this.flowStore = flowStore;
         this.initialStateBuilder = initialStateBuilder;
         this.flowRepository = flowRepository;
+        this.permissionResolver = permissionResolver;
+        this.bootstrapRepository = bootstrapRepository;
     }
 
     /**
@@ -55,7 +68,8 @@ public class FlowExecutionController {
             @PathVariable String flowId,
             @RequestBody(required = false) Map<String, Object> body,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-User-ID", required = false) String userId) {
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            HttpServletRequest request) {
 
         log.debug("Execute flow request: flowId={}, tenantId={}", flowId, tenantId);
 
@@ -72,13 +86,19 @@ public class FlowExecutionController {
                     JsonApiResponseBuilder.error("400", "Bad Request", "Flow has no definition"));
         }
 
+        boolean isTest = body != null && Boolean.TRUE.equals(body.get("test"));
+        if (!Boolean.TRUE.equals(flow.get("active")) && !(isTest && holdsManageWorkflows(request))) {
+            log.warn("Execute rejected for inactive flow: flowId={}", flowId);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                    JsonApiResponseBuilder.error("409", "FLOW_INACTIVE", "Conflict", "Flow is not active"));
+        }
+
         // If no tenantId from header, use the flow's tenant
         if (tenantId == null || tenantId.isBlank()) {
             tenantId = (String) flow.get("tenant_id");
         }
 
         // Build initial state
-        boolean isTest = body != null && Boolean.TRUE.equals(body.get("test"));
         String executionId = UUID.randomUUID().toString();
 
         Map<String, Object> initialState;
@@ -425,6 +445,16 @@ public class FlowExecutionController {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    private boolean holdsManageWorkflows(HttpServletRequest request) {
+        String profileId = permissionResolver.getProfileId(request);
+        if (profileId == null || profileId.isBlank()) {
+            return false;
+        }
+        return bootstrapRepository.findProfileSystemPermissions(profileId).stream()
+                .anyMatch(p -> MANAGE_WORKFLOWS.equals(p.get("permission_name"))
+                        && Boolean.TRUE.equals(p.get("granted")));
+    }
 
     private Map<String, Object> executionToMap(FlowExecutionData exec) {
         Map<String, Object> map = new LinkedHashMap<>();

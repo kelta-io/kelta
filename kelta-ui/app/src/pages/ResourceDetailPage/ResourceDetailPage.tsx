@@ -1032,5 +1032,3 @@ export function ResourceDetailPage({
     />
   )
 }
-
-export default ResourceDetailPage

@@ -51,6 +51,7 @@ const echo = defineCommand({
     { flag: '--count <n>', description: 'count', default: '1' },
     { flag: '--tag <tag>', description: 'tags', repeatable: true },
   ],
+  examples: [{ cmd: 'kelta things echo abc --count 3 --tag x', description: 'Echo abc' }],
   input: z.object({
     target: z.string(),
     count: z.coerce.number().int(),
@@ -64,6 +65,7 @@ const multiInvalid = defineCommand({
   name: 'multi-invalid',
   summary: 'fails with two validation errors',
   requiresAuth: false,
+  examples: [{ cmd: 'kelta things multi-invalid' }],
   input: z.object({}),
   handler: () => {
     throw new CliError('name is required', {
@@ -93,6 +95,7 @@ const boom = defineCommand({
   summary: 'destructive',
   requiresAuth: false,
   dangerous: true,
+  examples: [{ cmd: 'kelta things boom --yes' }],
   input: z.object({}),
   handler: () => Promise.resolve({ message: 'boomed' }),
 });

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useApi } from '../context/ApiContext'
 
-export interface ReportColumn {
+interface ReportColumn {
   fieldName: string
   label: string
   type: string
@@ -21,7 +21,7 @@ export interface ReportExecutionResult {
   totalPages: number
 }
 
-export const REPORT_EXECUTION_QUERY_KEY = 'report-execution'
+const REPORT_EXECUTION_QUERY_KEY = 'report-execution'
 
 /**
  * Runs a report via POST /api/reports/{id}/execute with pagination. A 400 carries the

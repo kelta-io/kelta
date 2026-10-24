@@ -12,7 +12,7 @@ export interface RecordApprovalState {
   invalidate: () => void
 }
 
-export const RECORD_APPROVAL_QUERY_KEY = 'record-approval-state'
+const RECORD_APPROVAL_QUERY_KEY = 'record-approval-state'
 
 /**
  * Approval affordance state for a record detail page: whether a submit button should

@@ -31,7 +31,7 @@ import {
 import { useApi } from '@/context/ApiContext'
 import { FilterBuilder, type FilterExpression, type FieldOption } from '@/components/FilterBuilder'
 
-export interface ListColumn {
+interface ListColumn {
   /** Editor-local id. Server-issued id once saved. */
   id: string
   /** Field UUID this column renders. */
@@ -46,7 +46,7 @@ export interface ListColumn {
   serverId?: string
 }
 
-export interface LayoutEditorListInitialData {
+interface LayoutEditorListInitialData {
   layoutId: string
   collectionId: string
   layoutName: string

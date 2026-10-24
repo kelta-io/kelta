@@ -1,0 +1,34 @@
+{
+  "status" : 200,
+  "headers" : {
+    "ETag" : "\"MjAyNi0wMS0wM1QwMDowMDowMFo\"",
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : {
+      "attributes" : {
+        "amount" : null,
+        "createdAt" : "2026-01-01T00:00:00Z",
+        "createdBy" : "user-1",
+        "name" : "Beta",
+        "region" : null,
+        "slug" : "beta",
+        "updatedAt" : "2026-01-03T00:00:00Z",
+        "updatedBy" : "user-1"
+      },
+      "id" : "acc-2",
+      "relationships" : {
+        "region" : {
+          "data" : null
+        }
+      },
+      "type" : "accounts"
+    }
+  },
+  "calls" : [ {
+    "collection" : "accounts",
+    "id" : "acc-2",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  } ]
+}

@@ -17,12 +17,12 @@ import { cn } from '@/lib/utils'
 /**
  * Error type variants
  */
-export type ErrorType = 'network' | 'validation' | 'generic' | 'notFound' | 'forbidden' | 'server'
+type ErrorType = 'network' | 'validation' | 'generic' | 'notFound' | 'forbidden' | 'server'
 
 /**
  * Display variant for the error message
  */
-export type ErrorVariant = 'default' | 'compact' | 'inline'
+type ErrorVariant = 'default' | 'compact' | 'inline'
 
 /**
  * Props for the ErrorMessage component
@@ -299,6 +299,3 @@ export function ErrorMessage({
     </div>
   )
 }
-
-// Export default for convenience
-export default ErrorMessage

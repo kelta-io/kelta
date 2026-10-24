@@ -25,6 +25,13 @@ const api = defineCommand({
       repeatable: true,
     },
   ],
+  examples: [
+    { cmd: "kelta api GET '/api/customers?page[size]=5'" },
+    {
+      cmd: 'kelta api PATCH /api/customers/rec_123 --data \'{"data":{"type":"customers","id":"rec_123","attributes":{"status":"active"}}}\' --yes',
+      description: 'Update a record with a raw JSON:API body',
+    },
+  ],
   // sugar-level validation is bypassed BY DESIGN — the gateway and Cerbos
   // remain the enforcement layer, exactly as for any other API client
   input: z.object({
