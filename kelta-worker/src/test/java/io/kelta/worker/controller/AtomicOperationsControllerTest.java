@@ -1,6 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.CallerContext;
+import io.kelta.runtime.context.GeoHeaders;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.CollectionDefinitionBuilder;
 import io.kelta.runtime.model.FieldDefinition;
@@ -241,6 +242,38 @@ class AtomicOperationsControllerTest {
         assertThat(attributes)
                 .doesNotContainKey("createdBy")
                 .doesNotContainKey("updatedBy");
+    }
+
+    // ---- Geo stamping (KLT-740) -----------------------------------------------------
+
+    @Test
+    @DisplayName("forwards the request's X-Geo-* stamp, parsed by GeoHeaders, to a captureGeo add")
+    @SuppressWarnings("unchecked")
+    void forwardsRequestGeoToExecutor() {
+        CollectionDefinition visits = new CollectionDefinitionBuilder()
+                .name("visits").displayName("Visits")
+                .addField(FieldDefinition.string("name"))
+                .captureGeo(true)
+                .build();
+        when(registry.get("visits")).thenReturn(visits);
+        when(lifecycleManager.getCollectionIdByName("visits")).thenReturn("uuid-v");
+        when(authzService.checkCollectionAccess(anyString(), anyString(), anyString(), eq("uuid-v"), eq("create")))
+                .thenReturn(true);
+        when(queryEngine.create(eq(visits), anyMap())).thenReturn(Map.of("id", "rec-1"));
+        when(request.getHeader("X-Geo-Country")).thenReturn("de");
+        when(request.getHeader("X-Geo-City")).thenReturn("M%C3%BCnchen");
+        Map<String, Object> expected = GeoHeaders.parse(request).orElseThrow().toMap();
+        assertThat(expected).containsEntry("country", "DE").containsEntry("city", "München");
+
+        ResponseEntity<?> response = controller.executeOperations(
+                Map.of("atomic:operations", List.of(addOp("visits"))), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(queryEngine).create(eq(visits), captor.capture());
+        assertThat(captor.getValue())
+                .containsEntry("createdGeo", expected)
+                .containsEntry("updatedGeo", expected);
     }
 
     // ---- Field-level write rules ---------------------------------------------------
