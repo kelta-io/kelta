@@ -386,7 +386,9 @@ Maven root); GitHub Actions majors share one PR. Majors have a 7-day `cooldown`
 (`semver-major-days`) so a just-released x.0.0 is not proposed. The maven entry ignores
 `org.springframework.boot:*` and `org.springframework.cloud:*` entirely (platform upgrades are
 planned tasks: a Spring Boot patch bump broke tenant creation, PLT-767) and allows only patch
-bumps for `org.graalvm.*:*` (the polyglot/js runtime tracks the GraalVM JDK line). A `FROM`
+bumps for `org.graalvm.*:*` (the polyglot/js runtime tracks the GraalVM JDK line). The npm entry has an `opentelemetry-js` group,
+listed first, so every `@opentelemetry/*` package (all update types) moves in one PR: the 0.x
+instrumentation packages pin the stable core they were built with. A `FROM`
 whose image comes from a build `ARG` (`FROM ${GRAALVM_IMAGE}`, `FROM ${BASE_REGISTRY}/...`)
 cannot be resolved by Dependabot and is not updated. Dependabot PRs run the normal `ci.yml`
 and are merged by a human, like any other PR. Security updates (Dependabot alerts) are a

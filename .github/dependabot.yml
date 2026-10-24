@@ -66,6 +66,13 @@ updates:
     labels:
       - dependencies
     groups:
+      # OpenTelemetry JS packages must move as one set: their experimental 0.x packages
+      # (instrumentation-*, exporter-*) pin the stable 1.x/2.x core they were built with, so a
+      # 0.52 -> 0.300 "minor" bump alone breaks npm ci on peer ranges (kelta#1916). Listed first
+      # so @opentelemetry/* never lands in npm-minor-patch or npm-major.
+      opentelemetry-js:
+        patterns:
+          - "@opentelemetry/*"
       npm-minor-patch:
         patterns:
           - "*"
