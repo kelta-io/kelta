@@ -457,6 +457,16 @@ this job cannot run must be named in a comment in the job with the reason and th
 it. Before this job, `ci/update-snapshots.test.ts` ran only when a workflow changed, so #1675's
 change to the script skipped its tests and broke it.
 
+**Every test job's path filter must include its module's own build file and every shared build
+input it reads**, and the Maven jobs must also run on a `kelta-test-harness/**` change. Integration
+Tests and the `test-java` job it `needs` run on the `integration` filter (`any_java` +
+`kelta-test-harness/**` + `ci/maven-settings.xml`), not `any_java`, which also decides image
+publishing; `maven_settings` re-runs every runner-side Maven job. `ci/path-filters.test.ts`
+checks `.github/path-filters.yml` against the job `if:`s in `ci.yml` (each module's
+`pom.xml`/`package.json` triggers its job, the harness and `ci/maven-settings.xml` trigger
+Integration Tests), so add a case there with any new test job or build input. Before it, kelta#1928
+bumped Testcontainers in the harness pom alone, Integration Tests skipped, and main broke.
+
 ## Docs checks
 
 The published docs (`kelta-marketing/src/content/docs/**` plus `docs/authoring/*.md`) have three
