@@ -459,7 +459,7 @@ column (RLS-scoped) — never `ALL TABLES IN SCHEMA public`, which includes `use
 `oauth2_*` and the tenant-less child/log tables RLS cannot scope. Never grant it anything on
 `tenant_db_role` either: it has no RLS, and the pin needs no privilege because
 `kelta_pinned_tenant()` is SECURITY DEFINER (owned by the migrating role, fixed `search_path`).
-V214 revoked it from every existing tenant role.
+V215 revoked it from every existing tenant role.
 
 ---
 

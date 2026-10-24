@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
@@ -16,10 +17,12 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -119,5 +122,33 @@ class DirectLoginControllerTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> body = (Map<String, Object>) response.getBody();
         assertThat(body).containsEntry("access_token", "token-value");
+    }
+
+    @Test
+    @DisplayName("access token carries tenant_id; refresh token is token_type=refresh with no tenant_id")
+    void tokenShapesTheGatewayRelies() {
+        KeltaUserDetails userDetails = new KeltaUserDetails(
+                "user-1", "sbx-admin@kelta.local", "tenant-1", "profile-1", "Admin",
+                "Admin", "{bcrypt}hash", true, false, false);
+        when(authenticationManager.authenticate(any())).thenReturn(authentication);
+        when(authentication.getPrincipal()).thenReturn(userDetails);
+        Jwt jwt = Jwt.withTokenValue("token-value").header("alg", "RS256").claim("sub", "user-1")
+                .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(3600)).build();
+        ArgumentCaptor<JwtEncoderParameters> encoded = ArgumentCaptor.forClass(JwtEncoderParameters.class);
+        when(jwtEncoder.encode(encoded.capture())).thenReturn(jwt);
+
+        controller.login(new DirectLoginController.DirectLoginRequest("sbx-admin", "correct-password", "sbx"),
+                session, httpRequest);
+
+        List<JwtClaimsSet> claims = encoded.getAllValues().stream().map(JwtEncoderParameters::getClaims).toList();
+        assertThat(claims).hasSize(3);
+        JwtClaimsSet access = claims.get(0);
+        JwtClaimsSet refresh = claims.get(2);
+        assertThat((Object) access.getClaim("tenant_id")).isEqualTo("tenant-1");
+        assertThat((Object) access.getClaim("token_type")).isNull();
+        // The gateway's bearer validator (DynamicReactiveJwtDecoder.bearerTokenValidator)
+        // rejects this shape; its test builds a token with exactly these claims.
+        assertThat((Object) refresh.getClaim("token_type")).isEqualTo("refresh");
+        assertThat(refresh.getClaims()).doesNotContainKey("tenant_id");
     }
 }

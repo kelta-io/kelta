@@ -36,12 +36,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Each tenant has an admin account (password {@code password}); see {@code AuthFixture}.
  *
  * <p>The gateway-level isolation above is backed by row-level security underneath, and the
- * last two tests assert that layer directly: they connect as {@code KeltaStack.APP_ROLE}, a
- * NOBYPASSRLS role carrying the application's privilege set, so the policies are evaluated
- * rather than bypassed. (The service containers themselves still connect as the image's
- * bootstrap superuser — see {@code KeltaStack.APP_ROLE}'s javadoc for why, and
- * {@code RowLevelSecurityIntegrationTest} for the policy coverage that does not depend on
- * the full stack.)
+ * last two tests assert that layer directly: they connect as {@code KeltaStack.APP_ROLE}, the
+ * NOBYPASSRLS role the service containers themselves connect as, so the policies are evaluated
+ * rather than bypassed ({@code ServiceDatabaseRoleScenarioTest} guards that the services really
+ * do).
  */
 @DisplayName("Tenant Isolation Scenario")
 class TenantIsolationScenarioTest extends ScenarioBase {
