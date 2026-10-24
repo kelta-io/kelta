@@ -81,7 +81,7 @@ jobs:
       update_snapshots: ${{ steps.snapshots.outputs.update_snapshots }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # paths-filter needs full history to diff against PR base
           fetch-depth: 0
@@ -162,11 +162,11 @@ jobs:
 
       - name: Checkout code
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
@@ -186,7 +186,7 @@ jobs:
 
       - name: Cache Maven dependencies
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
@@ -220,7 +220,7 @@ jobs:
         # hosted runner — don't let that mask a green test run.
         continue-on-error: true
         if: always() && (matrix.changed == 'true' || needs.changes.outputs.workflows == 'true')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-test-results-${{ matrix.service }}
           path: |
@@ -232,7 +232,7 @@ jobs:
       - name: Upload coverage report
         continue-on-error: true
         if: always() && (matrix.changed == 'true' || needs.changes.outputs.workflows == 'true')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-coverage-${{ matrix.service }}
           path: kelta-${{ matrix.service }}/target/site/jacoco/
@@ -259,10 +259,10 @@ jobs:
     if: needs.changes.outputs.runtime == 'true' || needs.changes.outputs.maven_settings == 'true' || needs.changes.outputs.workflows == 'true'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
@@ -277,7 +277,7 @@ jobs:
           cp ci/maven-settings.xml ~/.m2/settings.xml
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
@@ -300,7 +300,7 @@ jobs:
         # hosted runner — don't let that mask a green test run.
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-test-results-runtime
           path: kelta-platform/runtime/*/target/surefire-reports/
@@ -327,10 +327,10 @@ jobs:
     if: needs.changes.outputs.runtime_modules == 'true' || needs.changes.outputs.workflows == 'true'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
@@ -345,7 +345,7 @@ jobs:
           cp ci/maven-settings.xml ~/.m2/settings.xml
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
@@ -378,7 +378,7 @@ jobs:
         # hosted runner — don't let that mask a green test run.
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-test-results-runtime-modules
           path: kelta-modules/*/target/surefire-reports/
@@ -399,15 +399,15 @@ jobs:
         working-directory: kelta-web
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Cache npm dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('kelta-web/package-lock.json') }}
@@ -495,7 +495,7 @@ jobs:
       - name: Upload coverage report
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-coverage
           path: kelta-web/coverage/
@@ -515,10 +515,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
@@ -536,7 +536,7 @@ jobs:
           cp ci/maven-settings.xml ~/.m2/settings.xml
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
@@ -613,7 +613,7 @@ jobs:
       - name: Upload harness reports
         continue-on-error: true
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: harness-failsafe-reports
           path: kelta-test-harness/target/failsafe-reports/
@@ -676,7 +676,7 @@ jobs:
       # A baseline-regeneration dispatch builds and tests the target branch; on every other
       # event update_snapshots_ref is empty and checkout keeps its default (the PR merge ref).
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.update_snapshots_ref }}
 
@@ -696,7 +696,7 @@ jobs:
         run: make setup
 
       - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -871,7 +871,7 @@ jobs:
       - name: Upload e2e artifacts
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-report
           path: |
@@ -935,7 +935,7 @@ jobs:
       BUILDX_BUILDER: kelta-ci
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # A named builder on the node's Docker daemon (the runner mounts the host socket)
       # outlives the job, so its layer cache and the Dockerfiles' per-service ~/.m2 cache
@@ -950,7 +950,7 @@ jobs:
           docker buildx inspect --bootstrap kelta-ci
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           # 24 runs the .ts helpers directly (native type stripping) — no install step.
           node-version: 24
@@ -1030,7 +1030,7 @@ jobs:
       - name: Upload logs
         continue-on-error: true
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: quickstart-logs
           path: _logs/
@@ -1106,7 +1106,7 @@ jobs:
       ADMIN_PASSWORD: ci-templates-Kp7-Wq3-Zt9
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx (persistent kelta-ci builder)
         run: |
@@ -1118,7 +1118,7 @@ jobs:
         run: make setup
 
       - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -1187,7 +1187,7 @@ jobs:
       - name: Upload logs
         continue-on-error: true
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: templates-logs
           path: _logs/
@@ -1251,7 +1251,7 @@ jobs:
       ADMIN_PASSWORD: ci-mcpr-Kp7-Wq3-Zt9
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx (persistent kelta-ci builder)
         run: |
@@ -1263,7 +1263,7 @@ jobs:
         run: make setup
 
       - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -1341,7 +1341,7 @@ jobs:
       - name: Upload logs
         continue-on-error: true
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mcp-replay-logs
           path: _logs/
@@ -1421,7 +1421,7 @@ jobs:
       ADMIN_PASSWORD: ci-upgrade-Kp7-Wq3-Zt9
     steps:
       - name: Checkout code (full history + tags, for the release lookup)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -1554,7 +1554,7 @@ jobs:
       - name: Upload logs and seed data
         continue-on-error: true
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: upgrade-test-logs
           path: |
@@ -1593,7 +1593,7 @@ jobs:
     name: Worker image is JVM
     runs-on: k8s-runner
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Assert the worker builds from Dockerfile.jvm
         run: |
           set -euo pipefail
@@ -1637,10 +1637,10 @@ jobs:
     if: needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.workflows == 'true'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -1677,7 +1677,7 @@ jobs:
     if: needs.changes.outputs.workflows == 'true'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install actionlint
         run: |
@@ -1723,10 +1723,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node.js 24 (the ci/*.test.ts files strip types natively)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
 
@@ -1804,10 +1804,10 @@ jobs:
         working-directory: kelta-marketing
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -1831,7 +1831,7 @@ jobs:
     if: needs.changes.outputs.dora == 'true'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Run tests
         run: node --test scripts/dora/lib.test.mjs
