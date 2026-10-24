@@ -10,13 +10,17 @@ import io.kelta.gateway.route.RouteDefinition;
 import io.kelta.gateway.filter.TenantResolutionFilter;
 import io.kelta.gateway.route.RouteRegistry;
 import io.kelta.gateway.route.StaticCollectionCheck;
+import io.kelta.gateway.service.RouteConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -34,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -1000,6 +1005,214 @@ class RouteAuthorizationFilterTest {
             run(exchange);
 
             verify(filterChain).filter(any());
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+        }
+    }
+
+    // ================================================================
+    // Setup-metadata static routes (PLT-656): writes collection-checked
+    // ================================================================
+
+    @Nested
+    @DisplayName("Setup-metadata static routes: writes need the collection grant or the override")
+    class SetupMetadataStaticRouteTests {
+
+        private final RouteRegistry registry = new RouteRegistry();
+        private RouteAuthorizationFilter filter;
+        private GatewayPrincipal principal;
+
+        @BeforeEach
+        void setUp() {
+            // The production table, wired as RouteConfigService registers it, with each system
+            // collection's bootstrap route under the platform tenant behind it.
+            RouteConfigService.COLLECTION_CHECKED_STATIC_ROUTES.forEach((name, check) -> {
+                registry.addRoute(new RouteDefinition("static-" + name, "/api/" + name + "/**",
+                        "http://worker:80", name).withCollectionCheck(check));
+                registry.addRoute(new RouteDefinition(name + "-uuid", "/api/" + name + "/**",
+                        "http://worker:80", name, null, 0, "platform-tenant").withSystemCollection(true));
+            });
+            filter = new RouteAuthorizationFilter(
+                    registry, true, publicPathMatcher, metrics, new ObjectMapper(), cerbosService);
+            principal = principalWithIdentity("member@test.com");
+            lenient().when(cerbosService.checkSystemPermission(principal, "API_ACCESS")).thenReturn(Mono.just(true));
+            lenient().when(cerbosService.checkSystemPermission(eq(principal), argThat(p -> !"API_ACCESS".equals(p))))
+                    .thenReturn(Mono.just(false));
+            lenient().when(cerbosService.checkObjectPermission(eq(principal), any(), any()))
+                    .thenReturn(Mono.just(false));
+        }
+
+        private MockServerWebExchange run(GatewayPrincipal caller, HttpMethod method, String path) {
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.method(method, path)
+                    .contentType(MediaType.APPLICATION_JSON).body("{}"));
+            exchange.getAttributes().put(PRINCIPAL_ATTR, caller);
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-1");
+            StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+            return exchange;
+        }
+
+        private MockServerWebExchange run(HttpMethod method, String path) {
+            return run(principal, method, path);
+        }
+
+        /** The filter forwards a decorated exchange; it shares the original's attribute map. */
+        private ServerWebExchange forwarded(MockServerWebExchange exchange) {
+            return argThat(e -> e.getAttributes() == exchange.getAttributes());
+        }
+
+        private void assertForwarded(MockServerWebExchange exchange) {
+            assertThat(exchange.getResponse().getStatusCode()).isNull();
+            verify(filterChain).filter(forwarded(exchange));
+        }
+
+        private void assertForbidden(MockServerWebExchange exchange) {
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            verify(filterChain, never()).filter(forwarded(exchange));
+        }
+
+        /** Every collection PLT-656 covers, with the setup-page permission that overrides its writes. */
+        static Stream<Arguments> covered() {
+            return Stream.of(
+                    Arguments.of("page-layouts", "CUSTOMIZE_APPLICATION"),
+                    Arguments.of("list-views", "MANAGE_LISTVIEWS"),
+                    Arguments.of("ui-menus", "CUSTOMIZE_APPLICATION"),
+                    Arguments.of("ui-pages", "CUSTOMIZE_APPLICATION"),
+                    Arguments.of("global-picklists", "CUSTOMIZE_APPLICATION"),
+                    Arguments.of("oidc-providers", "MANAGE_CONNECTED_APPS"),
+                    Arguments.of("email-templates", "MANAGE_EMAIL_TEMPLATES"),
+                    Arguments.of("scripts", "MANAGE_CONNECTED_APPS"),
+                    Arguments.of("connected-apps", "MANAGE_CONNECTED_APPS"),
+                    Arguments.of("flows", "MANAGE_WORKFLOWS"),
+                    Arguments.of("approval-processes", "MANAGE_APPROVALS"),
+                    Arguments.of("reports", "MANAGE_REPORTS"),
+                    Arguments.of("dashboards", "MANAGE_REPORTS"));
+        }
+
+        @Test
+        @DisplayName("the production table checks writes only, for exactly these collections and overrides")
+        void tableMatchesCoveredList() {
+            covered().forEach(args -> {
+                String name = (String) args.get()[0];
+                StaticCollectionCheck check = RouteConfigService.COLLECTION_CHECKED_STATIC_ROUTES.get(name);
+                assertThat(check).as(name).isNotNull();
+                assertThat(check.includeReads()).as(name).isFalse();
+                assertThat(check.writeOverridePermission()).as(name).isEqualTo(args.get()[1]);
+            });
+            assertThat(RouteConfigService.COLLECTION_CHECKED_STATIC_ROUTES).doesNotContainKey("webhooks");
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("covered")
+        @DisplayName("API_ACCESS only: POST, PATCH, PUT and DELETE are 403")
+        void apiAccessOnlyWritesForbidden(String name, String override) {
+            String collectionPath = "/api/" + name;
+            assertForbidden(run(HttpMethod.POST, collectionPath));
+            assertForbidden(run(HttpMethod.PATCH, collectionPath + "/r-1"));
+            assertForbidden(run(HttpMethod.PUT, collectionPath + "/r-1"));
+            assertForbidden(run(HttpMethod.DELETE, collectionPath + "/r-1"));
+            verify(cerbosService).checkObjectPermission(principal, name + "-uuid", "create");
+            verify(cerbosService, times(2)).checkObjectPermission(principal, name + "-uuid", "edit");
+            verify(cerbosService).checkObjectPermission(principal, name + "-uuid", "delete");
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("covered")
+        @DisplayName("the collection's object create/edit/delete grant admits the write")
+        void objectGrantAdmitsWrites(String name, String override) {
+            for (String action : List.of("create", "edit", "delete")) {
+                when(cerbosService.checkObjectPermission(principal, name + "-uuid", action))
+                        .thenReturn(Mono.just(true));
+            }
+            String collectionPath = "/api/" + name;
+            assertForwarded(run(HttpMethod.POST, collectionPath));
+            assertForwarded(run(HttpMethod.PATCH, collectionPath + "/r-1"));
+            assertForwarded(run(HttpMethod.PUT, collectionPath + "/r-1"));
+            assertForwarded(run(HttpMethod.DELETE, collectionPath + "/r-1"));
+        }
+
+        @ParameterizedTest(name = "{0} via {1}")
+        @MethodSource("covered")
+        @DisplayName("the override system permission alone admits the write")
+        void overrideAdmitsWrites(String name, String override) {
+            when(cerbosService.checkSystemPermission(principal, override)).thenReturn(Mono.just(true));
+            String collectionPath = "/api/" + name;
+            assertForwarded(run(HttpMethod.POST, collectionPath));
+            assertForwarded(run(HttpMethod.PATCH, collectionPath + "/r-1"));
+            assertForwarded(run(HttpMethod.PUT, collectionPath + "/r-1"));
+            assertForwarded(run(HttpMethod.DELETE, collectionPath + "/r-1"));
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("covered")
+        @DisplayName("System Administrator keeps full access")
+        void systemAdministratorAllowed(String name, String override) {
+            GatewayPrincipal admin = new GatewayPrincipal("admin@test.com", List.of("ADMIN"), Map.of())
+                    .withProfileId("profile-admin")
+                    .withProfileName("System Administrator")
+                    .withTenantId("tenant-1");
+            // The System Administrator profile holds every system permission and, through
+            // MODIFY_ALL_DATA / VIEW_ALL_DATA, every object action.
+            when(cerbosService.checkSystemPermission(eq(admin), any())).thenReturn(Mono.just(true));
+            lenient().when(cerbosService.checkObjectPermission(eq(admin), any(), any())).thenReturn(Mono.just(true));
+            String collectionPath = "/api/" + name;
+            for (HttpMethod method : List.of(HttpMethod.GET, HttpMethod.POST)) {
+                assertForwarded(run(admin, method, collectionPath));
+            }
+            for (HttpMethod method : List.of(HttpMethod.PATCH, HttpMethod.PUT, HttpMethod.DELETE)) {
+                assertForwarded(run(admin, method, collectionPath + "/r-1"));
+            }
+        }
+
+        @ParameterizedTest(name = "GET /api/{0}")
+        @ValueSource(strings = {
+                "page-layouts", "list-views", "ui-menus", "ui-pages", "global-picklists"})
+        @DisplayName("the app shell's reads stay open to an end user holding only API_ACCESS")
+        void appShellReadsStayOpen(String name) {
+            assertForwarded(run(HttpMethod.GET, "/api/" + name));
+            assertForwarded(run(HttpMethod.GET, "/api/" + name + "/r-1"));
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+        }
+
+        @ParameterizedTest(name = "{0} {1}")
+        @CsvSource({
+                "POST, /api/flows/f-1/execute",
+                "POST, /api/scripts/s-1/execute",
+                "POST, /api/reports/r-1/execute",
+                "POST, /api/dashboards/d-1/data",
+                "POST, /api/dashboards/d-1/components/c-1/data"
+        })
+        @DisplayName("end-user runs and dashboard data loads are exempt (gated in their controllers)")
+        void endUserActionsExempt(String method, String path) {
+            assertForwarded(run(HttpMethod.valueOf(method), path));
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+        }
+
+        @ParameterizedTest(name = "{0} {1}")
+        @CsvSource({
+                "POST, /api/flows/f-1/publish, flows",
+                "POST, /api/flows/executions/e-1/cancel, flows",
+                "POST, /api/flows/executions/e-1/retry, flows",
+                "POST, /api/connected-apps/app-1/tokens, connected-apps",
+                "DELETE, /api/connected-apps/app-1/tokens/t-1, connected-apps",
+                "PUT, /api/page-layouts/l-1/tree, page-layouts",
+                "PUT, /api/ui-menus/main/tree, ui-menus",
+                "PUT, /api/dashboards/sales/tree, dashboards",
+                "POST, /api/dashboards/d-1/validate, dashboards",
+                "POST, /api/ui-pages/validate, ui-pages",
+                "POST, /api/scripts/s-1/execute/extra, scripts"
+        })
+        @DisplayName("other dedicated-controller writes under a covered route are checked")
+        void dedicatedWritesChecked(String method, String path, String name) {
+            assertForbidden(run(HttpMethod.valueOf(method), path));
+            verify(cerbosService).checkObjectPermission(eq(principal), eq(name + "-uuid"), any());
+        }
+
+        @Test
+        @DisplayName("inbound /api/webhooks receivers keep API_ACCESS-only (no collection behind them)")
+        void webhooksUnchecked() {
+            registry.addRoute(new RouteDefinition("static-webhooks", "/api/webhooks/**", "http://worker:80",
+                    "webhooks"));
+            assertForwarded(run(HttpMethod.POST, "/api/webhooks/f-1"));
             verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
         }
     }

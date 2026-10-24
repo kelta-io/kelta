@@ -189,11 +189,24 @@ class CerbosSubResourceAuthorizerTest {
         @Test
         @DisplayName("an API_ACCESS-only static child needs no object permission")
         void apiAccessOnlyChild() {
+            CollectionDefinition history = collection("login-history", true);
+
+            assertThat(authorize(collections, history, null, Operation.READ).allowed()).isTrue();
+            assertThat(authorize(collections, history, null, Operation.CREATE).allowed()).isTrue();
+            verifyNoInteractions(authz);
+        }
+
+        @Test
+        @DisplayName("a setup-metadata child: reads stay open, writes need the grant or the override")
+        void setupMetadataChild() {
             CollectionDefinition layouts = collection("page-layouts", true);
 
             assertThat(authorize(collections, layouts, null, Operation.READ).allowed()).isTrue();
+            assertThat(authorize(collections, layouts, null, Operation.CREATE).detail())
+                    .isEqualTo("Insufficient permissions for create on page-layouts");
+
+            grantSystem("CUSTOMIZE_APPLICATION");
             assertThat(authorize(collections, layouts, null, Operation.CREATE).allowed()).isTrue();
-            verifyNoInteractions(authz);
         }
 
         @Test

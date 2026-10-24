@@ -3,7 +3,10 @@ package io.kelta.worker.interceptor;
 import io.kelta.worker.controller.BulkOperationsController;
 import io.kelta.worker.controller.ChatController;
 import io.kelta.worker.controller.DataExportController;
+import io.kelta.runtime.router.DynamicCollectionRouter;
+import io.kelta.worker.controller.ConnectedAppTokenController;
 import io.kelta.worker.controller.EmailLogController;
+import io.kelta.worker.controller.FlowExecutionController;
 import io.kelta.worker.controller.GovernorLimitsController;
 import io.kelta.worker.controller.MailboxAdminController;
 import io.kelta.worker.controller.MailboxController;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.MethodParameter;
@@ -440,18 +444,6 @@ class CerbosRecordAuthorizationAdviceTest {
     void shouldSkipCredentialsPaths() {
         var request = createRequest("/api/credentials/types");
         Map<String, Object> body = Map.of("data", List.of(Map.of("id", "1", "name", "Basic Auth")));
-
-        Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
-
-        assertThat(result).isSameAs(body);
-        verify(authzService, never()).batchCheckRecordAccess(any(), any(), any(), any(), anyList(), any());
-    }
-
-    @Test
-    @DisplayName("Should skip /api/connected-apps paths")
-    void shouldSkipConnectedAppsPaths() {
-        var request = createRequest("/api/connected-apps/app-1/tokens");
-        Map<String, Object> body = Map.of("data", List.of(Map.of("id", "1")));
 
         Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
 
@@ -1121,6 +1113,128 @@ class CerbosRecordAuthorizationAdviceTest {
                     null, MediaType.APPLICATION_JSON, null, request, null);
 
             assertThat(included(result)).extracting(r -> r.get("id")).containsExactly("p1");
+        }
+    }
+
+    @Nested
+    @DisplayName("flows and connected-apps (PLT-656)")
+    class FlowsAndConnectedApps {
+
+        private MethodParameter handler(Class<?> controller, String name) {
+            return Arrays.stream(controller.getDeclaredMethods())
+                    .filter(m -> m.getName().equals(name))
+                    .findFirst()
+                    .map(m -> new MethodParameter(m, -1))
+                    .orElseThrow(() -> new AssertionError(controller.getSimpleName() + "." + name + " not found"));
+        }
+
+        private ServletServerHttpRequest request(String method, String path) {
+            var request = createRequest(path);
+            ((MockHttpServletRequest) request.getServletRequest()).setMethod(method);
+            return request;
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @ValueSource(strings = {"flows", "connected-apps"})
+        @DisplayName("a generic list is emptied for a caller without read on the collection")
+        void listFilteredWithoutRead(String collection) {
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), eq(collection), anyList(), eq("read")))
+                    .thenReturn(Set.of());
+            Map<String, Object> body = Map.of("data", List.of(
+                    Map.of("type", collection, "id", "r-1", "attributes", Map.of("name", "n"))));
+
+            Object result = advice.beforeBodyWrite(body, handler(DynamicCollectionRouter.class, "list"),
+                    MediaType.APPLICATION_JSON, null, request("GET", "/api/" + collection), null);
+
+            assertThat((List<?>) ((Map<?, ?>) result).get("data")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a generic single flow read is nulled for a caller without read on flows")
+        void singleFlowNulledWithoutRead() {
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("flows"), eq("read")))
+                    .thenReturn(false);
+            when(recordShareAccessService.widen(any(), eq("flows"), any(), eq("read"))).thenReturn(Set.of());
+            Map<String, Object> body = Map.of("data",
+                    Map.of("type", "flows", "id", "f-1", "attributes", Map.of("definition", "{}")));
+
+            Object result = advice.beforeBodyWrite(body, handler(DynamicCollectionRouter.class, "get"),
+                    MediaType.APPLICATION_JSON, null, request("GET", "/api/flows/f-1"), null);
+
+            assertThat(((Map<?, ?>) result).get("data")).isNull();
+        }
+
+        @Test
+        @DisplayName("a generic flow read is kept for a caller with read on flows")
+        void flowKeptWithRead() {
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), eq("flows"), anyList(), eq("read")))
+                    .thenReturn(Set.of("f-1"));
+            Map<String, Object> body = Map.of("data", List.of(
+                    Map.of("type", "flows", "id", "f-1", "attributes", Map.of())));
+
+            Object result = advice.beforeBodyWrite(body, handler(DynamicCollectionRouter.class, "list"),
+                    MediaType.APPLICATION_JSON, null, request("GET", "/api/flows"), null);
+
+            assertThat((List<?>) ((Map<?, ?>) result).get("data")).hasSize(1);
+        }
+
+        static Stream<Arguments> dedicatedHandlers() {
+            return Stream.of(
+                    Arguments.of(FlowExecutionController.class, "executeFlow", "POST", "/api/flows/f-1/execute"),
+                    Arguments.of(FlowExecutionController.class, "getExecution", "GET",
+                            "/api/flows/executions/e-1"),
+                    Arguments.of(ConnectedAppTokenController.class, "listTokens", "GET",
+                            "/api/connected-apps/app-1/tokens"));
+        }
+
+        @ParameterizedTest(name = "{0}.{1}")
+        @MethodSource("dedicatedHandlers")
+        @DisplayName("a dedicated controller's body is not checked as a record of the collection")
+        void dedicatedControllerUntouched(Class<?> controller, String name, String method, String path) {
+            Map<String, Object> resource = Map.of("type", "flow-executions", "id", "e-1",
+                    "attributes", Map.of("status", "RUNNING"));
+            Map<String, Object> body = "GET".equals(method) && path.endsWith("tokens")
+                    ? Map.of("data", List.of(resource))
+                    : Map.of("data", resource);
+
+            Object result = advice.beforeBodyWrite(body, handler(controller, name),
+                    MediaType.APPLICATION_JSON, null, request(method, path), null);
+
+            assertThat(result).isSameAs(body);
+            verifyNoInteractions(authzService);
+        }
+
+        @Test
+        @DisplayName("a tenant collection whose name starts with flows is filtered like any other")
+        void flowsPrefixedTenantCollectionFiltered() {
+            when(authzService.batchCheckRecordAccess(any(), any(), any(), eq("flowsheets"), anyList(), eq("read")))
+                    .thenReturn(Set.of());
+            Map<String, Object> body = Map.of("data", List.of(Map.of("id", "r-1")));
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null,
+                    request("GET", "/api/flowsheets"), null);
+
+            assertThat((List<?>) ((Map<?, ?>) result).get("data")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("an included flow is dropped for a caller without read on flows")
+        void includedFlowFiltered() {
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("orders"), eq("read")))
+                    .thenReturn(true);
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq("flows"), eq("read")))
+                    .thenReturn(false);
+            when(recordShareAccessService.widen(any(), eq("flows"), any(), eq("read"))).thenReturn(Set.of());
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("data", List.of(Map.of("type", "orders", "id", "o-1", "attributes", Map.of())));
+            body.put("included", List.of(Map.of("type", "flows", "id", "f-1", "attributes", Map.of())));
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null,
+                    request("GET", "/api/orders"), null);
+
+            assertThat(((Map<?, ?>) result).containsKey("included")).isFalse();
         }
     }
 }

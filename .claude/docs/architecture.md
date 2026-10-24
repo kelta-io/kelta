@@ -469,8 +469,9 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   unauthorized. The `IdentityCollectionGuardHook` still guards identity-collection writes underneath
   (see "Delegated administration" below).
 - **Static routes that front a system collection** (`users`, `profiles`, `collections`,
-  `scheduled-jobs`): these are `static-` routes, yet `/api/users`, `/api/profiles`,
-  `/api/collections` and `/api/scheduled-jobs` are served by the generic `DynamicCollectionRouter`
+  `scheduled-jobs`, and since PLT-656 the setup-metadata collections in the table below): these
+  are `static-` routes, yet `/api/users`, `/api/profiles`, `/api/collections`, `/api/flows`, … are
+  served by the generic `DynamicCollectionRouter`
   (plus any dedicated controllers under the prefix), which has no permission check of its own (only `readOnly`) —
   so before 2026-10-04 a least-privilege PAT reached body validation (`POST /api/users` answered a
   field-by-field 400) and list counts on them. The system collection's own bootstrap route sits at
@@ -487,8 +488,19 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   | `/api/profiles/**` | writes | `MANAGE_USERS` | **intentionally `API_ACCESS`-only**: the user admin pages (gated on `MANAGE_USERS`, not a collection grant) list profiles, and the grants themselves live in `profile-*-permissions`, whose own routes are object-checked |
   | `/api/collections/**` | writes, except `/{name}/import`, `/duplicates`, `/merge` | `CUSTOMIZE_APPLICATION` (the setup pages' gate) | **intentionally `API_ACCESS`-only**: every record page, form and list reads collection and field metadata. The exempt sub-paths act on the named collection's records, not on the collections collection |
   | `/api/scheduled-jobs/**` | writes, incl. `ScheduledJobActionsController`'s `/{id}/pause\|resume\|execute` and `/validate-cron` (POST → `create`) | `MANAGE_WORKFLOWS` (the scheduled-jobs page and flow designer's gate) | `API_ACCESS`-only, unchanged: only those `MANAGE_WORKFLOWS` pages call the route. The action endpoints check no permission themselves — this row is their authorization |
+  | `/api/page-layouts/**`, `/api/ui-menus/**`, `/api/ui-pages/**`, `/api/global-picklists/**` | writes, incl. the `PUT /{id}/tree` endpoints and `POST /api/ui-pages/validate` | `CUSTOMIZE_APPLICATION` | **intentionally `API_ACCESS`-only**: the app shell reads layouts, menus, pages and picklists for every user |
+  | `/api/list-views/**` | writes | `MANAGE_LISTVIEWS` | **intentionally `API_ACCESS`-only**: record lists read the admin-published shared views |
+  | `/api/oidc-providers/**`, `/api/connected-apps/**` | writes, incl. `ConnectedAppTokenController`'s token writes | `MANAGE_CONNECTED_APPS` | `API_ACCESS` at the gateway; generic `connected-apps` reads are record-filtered in the worker |
+  | `/api/scripts/**` | writes, except `POST /{id}/execute` | `MANAGE_CONNECTED_APPS` | `API_ACCESS`; record-filtered. Execute is exempt: record quick actions run scripts for end users and `ScriptExecutionController` enforces the script's `requiredPermission` |
+  | `/api/email-templates/**` | writes | `MANAGE_EMAIL_TEMPLATES` | `API_ACCESS`; record-filtered |
+  | `/api/flows/**` | writes, incl. `/{id}/publish` and `/executions/{id}/cancel\|retry`, except `POST /{id}/execute` | `MANAGE_WORKFLOWS` | `API_ACCESS`; generic reads record-filtered. Execute is exempt: page actions (`runFlow`) start flows for end users (open gap — `concerns.md`) |
+  | `/api/approval-processes/**` | writes | `MANAGE_APPROVALS` | `API_ACCESS`; record-filtered. Submitting/deciding is `/api/approvals/**`, a separate route |
+  | `/api/reports/**`, `/api/dashboards/**` | writes, incl. `PUT /api/dashboards/{name}/tree` and `POST /{id}/validate`, except `POST /api/reports/{id}/execute` and `POST /api/dashboards/{id}/data`, `/{id}/components/{cid}/data` | `MANAGE_REPORTS` | `API_ACCESS`; record-filtered. The exempt POSTs are reads by `VIEW_ANALYTICS` viewers, gated in their controllers |
 
-  Every other static route still stops at `API_ACCESS`. Adding a row is a security decision —
+  `/api/webhooks/**` has no row: it fronts no collection (inbound receivers that authenticate the
+  sender), so a check there would fail closed. Every other static route still stops at
+  `API_ACCESS`. The worker mirrors the table in `GatewayStaticRoutes.COLLECTION_CHECKS`
+  (`GatewayStaticRoutesSyncTest` fails on drift). Adding a row is a security decision —
   check which UI flows read the route under an ordinary profile first; most seeded profiles
   ("Standard User") hold neither `VIEW_ALL_DATA` nor per-collection grants on system collections.
 - **Tenant admin invite** (`POST /api/tenants/{id}/admin-invite` with `{"email"}`,
@@ -1085,6 +1097,12 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   on missing identity rather than hard-deny, so write the explicit deny yourself). The worker
   does **not** make a Cerbos call for system permissions — Cerbos `system_feature` policies back
   the *gateway's* blanket `API_ACCESS` check; per-endpoint admin gating is the DB check above.
+- **`/api/flows/**` and `/api/connected-apps/**` are record-filtered only for the generic router**
+  (PLT-656). The advice filters `DynamicCollectionRouter`'s responses there like any system
+  collection's, and leaves the dedicated controllers' bodies alone (`FlowExecutionController`,
+  `FlowScheduleStatusController`, `FlowWebhookController`, `ConnectedAppTokenController` — flow
+  executions are not `flows` records). Field-level security and masking keep skipping both
+  (`ApiPaths.isMetadataPath`).
 - **Outside `/api/admin/`, the record advice still runs on a permission-gated controller.**
   `CerbosRecordAuthorizationAdvice` reads any `data` object/list under `/api/<segment>` as records
   of collection `<segment>`, so a caller holding the controller's permission but no grant on
