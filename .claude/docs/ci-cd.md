@@ -351,6 +351,40 @@ service from `config --services`) for both the release (`_logs/release/`) and HE
 (`_logs/head/`) containers, plus `_upgrade/seed.json`; the HEAD worker's log tail is also
 printed inline (it carries the Flyway run). `down -v` and the runner image removal run always.
 
+## `codeql.yml` — CodeQL code scanning
+
+- Triggers: push to `main`, `pull_request` to `main`, and weekly (Monday 06:17 UTC) so new
+  CodeQL queries run even when `main` is quiet.
+- One `analyze` job per language (`java-kotlin`, `javascript-typescript`; `fail-fast: false`)
+  on GitHub-hosted `ubuntu-latest`, each uploading under its own `category`
+  (`/language:<lang>`). Results land in Security → Code scanning.
+- `build-mode: none` for both. Java is extracted from source without compiling, which avoids
+  building `kelta-platform` and then every service root (there is no root `pom.xml`); the repo
+  has no Kotlin, the one JVM language `none` cannot cover. JS/TS only supports `none`.
+- `github/codeql-action/{init,analyze}@v4`. Permissions: workflow `contents: read`; the job adds
+  only `security-events: write`.
+- Free on a public repository (code scanning on private repos needs GitHub Advanced
+  Security). It is not a Quality Gate dependency; alerts are triaged in the Security tab,
+  not suppressed in the workflow.
+
+## `.github/dependabot.yml` — dependency update PRs
+
+Weekly version-update PRs, labelled `dependencies`, at most 5 open per ecosystem:
+
+| Ecosystem | Directories |
+|-----------|-------------|
+| `maven` | every Maven root: `kelta-platform`, `kelta-gateway`, `kelta-worker`, `kelta-auth`, `kelta-ai`, `kelta-mcp`, `kelta-test-harness`, `kelta-modules/billing` |
+| `npm` | every real lockfile: `kelta-web`, `kelta-ui`, `kelta-ui/app`, `kelta-marketing`, `e2e-tests` (the root `package-lock.json` is an empty stub and is skipped) |
+| `docker` | every directory holding a `Dockerfile*`: `.github/runner`, `docker/bootstrap`, `docker/cerbos`, `kelta-{ai,auth,cli-downloads,gateway,marketing,mcp,ui,web,worker}` |
+| `github-actions` | `/` (`.github/workflows/`) |
+
+Each ecosystem has one group matching `update-types: [minor, patch]`, so those arrive as one
+weekly PR per ecosystem; a major bump matches no group and arrives as its own PR. A `FROM`
+whose image comes from a build `ARG` (`FROM ${GRAALVM_IMAGE}`, `FROM ${BASE_REGISTRY}/...`)
+cannot be resolved by Dependabot and is not updated. Dependabot PRs run the normal `ci.yml`
+and are merged by a human, like any other PR. Security updates (Dependabot alerts) are a
+repository setting, not part of this file.
+
 ## Other workflows
 
 - `build-runner-image.yml` — builds the self-hosted CI runner image.

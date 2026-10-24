@@ -1,0 +1,96 @@
+# Dependabot version updates. Documented in .claude/docs/ci-cd.md → Dependabot.
+#
+# Every ecosystem gets one weekly group for minor + patch bumps. Major bumps match no
+# group, so each arrives as its own PR and can be reviewed (and tested) on its own.
+#
+# There is no root pom.xml: each Maven root below is built separately. The root
+# package-lock.json is an empty stub with no package.json, so "/" is not an npm entry.
+version: 2
+updates:
+  - package-ecosystem: maven
+    directories:
+      - /kelta-platform
+      - /kelta-gateway
+      - /kelta-worker
+      - /kelta-auth
+      - /kelta-ai
+      - /kelta-mcp
+      - /kelta-test-harness
+      - /kelta-modules/billing
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      maven-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directories:
+      - /kelta-web
+      - /kelta-ui
+      - /kelta-ui/app
+      - /kelta-marketing
+      - /e2e-tests
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      npm-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # Covers Dockerfile and the Dockerfile.* variants (.jvm, .migrate, .ci). A FROM whose
+  # image comes from a build ARG (FROM ${GRAALVM_IMAGE}, FROM ${BASE_REGISTRY}/...)
+  # cannot be resolved by Dependabot and is left alone.
+  - package-ecosystem: docker
+    directories:
+      - /.github/runner
+      - /docker/bootstrap
+      - /docker/cerbos
+      - /kelta-ai
+      - /kelta-auth
+      - /kelta-cli-downloads
+      - /kelta-gateway
+      - /kelta-marketing
+      - /kelta-mcp
+      - /kelta-ui
+      - /kelta-web
+      - /kelta-worker
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      github-actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
