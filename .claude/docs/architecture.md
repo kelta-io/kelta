@@ -1274,6 +1274,13 @@ statement as the platform session and their RLS policies never evaluated — see
 `concerns.md`. Adding a fourth JDBC service means adding this bean and a tenant resolution
 for it, not just a `ScopedValue`.
 
+Direct database logins (per-tenant `superset_<slug>` roles) never go through this binder: they
+are pinned by `session_user` in `tenant_db_role` (V201), which every policy prefers over the
+GUC. That table has no RLS, so tenant roles hold **no privilege on it** — the pin is read
+through `kelta_pinned_tenant()`, SECURITY DEFINER with a fixed `search_path` — and are granted
+SELECT in `public` only on RLS tables with a `tenant_id` column (V214 applied this to roles
+provisioned before the narrowing).
+
 ## Worker Layers
 
 - **Controllers**: `kelta-worker/src/main/java/io/kelta/controller/` — Admin REST endpoints
