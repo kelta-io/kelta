@@ -8,6 +8,7 @@ import { gfm } from 'micromark-extension-gfm';
 import { visit } from 'unist-util-visit';
 import { describe, expect, it } from 'vitest';
 import astroConfig from '../astro.config.mjs';
+import { unifiedOptions } from './markdown-config';
 import { externalMeta } from '../src/docs/externalMeta';
 import { SECTIONS, SECTION_IDS } from '../src/docs/sidebar';
 
@@ -92,7 +93,7 @@ const decodeAttr = (value: string) => value.replace(/&#x26;|&amp;/g, '&').replac
 
 /** Every `id` and `href` in a page as Astro renders it — heading slugs come from Astro's own rehypeHeadingIds. */
 async function renderedAnchors(pages: CheckedPage[]): Promise<Map<string, { ids: Set<string>; hrefs: string[] }>> {
-  const processor = await createMarkdownProcessor(astroConfig.markdown);
+  const processor = await createMarkdownProcessor({ ...astroConfig.markdown, ...unifiedOptions() });
   const rendered = new Map<string, { ids: Set<string>; hrefs: string[] }>();
   for (const page of pages) {
     const { code } = await processor.render(page.markdown);
