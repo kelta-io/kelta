@@ -639,10 +639,10 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   `collection(id)` without an `ON DELETE` action.
 - **Destructive schema-migration execute** (`MigrationExecutionService` +
   `SchemaMigrationEngine.migrateSchemaDestructive`) is the only path that `DROP COLUMN`s tenant
-  data. Other pods refresh via NATS and then try to deprecate the already-dropped column with
-  `COMMENT ON COLUMN`; that fails harmlessly after re-registration (one `StorageException` log per
-  removed field). Make deprecate tolerant of a missing column as a follow-up. Security — not
-  auto-merged.
+  data. Other pods refresh via NATS and run the non-destructive `migrateSchema`, whose deprecate
+  checks `information_schema.columns` first: an already-dropped column skips the `COMMENT ON
+  COLUMN` with one INFO line, the `DEPRECATE_COLUMN` history row is still recorded, and the other
+  migrations in the call still run. Security — not auto-merged.
 - **runtime-core's jar-packaged `application.properties` becomes config for worker/ai/mcp/auth.**
   Never put operational settings there (it once forced JDBC DEBUG = 92% of all log volume); it
   still ships datasource/Hikari/Redis/actuator values each service must override.
@@ -897,9 +897,11 @@ its own change with a full compose run.
 - **Harness Cerbos is allow-all** — object/record policy deny paths are verified only by
   `CerbosGeneratedPolicyIT` against generated goldens; geo rules and `/api/operations` denies only
   on a live stack.
-- `SchemaMigrationEngine.migrateSchema` (non-destructive deprecate branch) is covered on H2 only
-  (`SchemaMigrationEngineTest`), with no real-Postgres scenario; the destructive path has unit
-  tests + `SchemaMigrationScenarioTest`.
+- `SchemaMigrationEngine.migrateSchema` (non-destructive deprecate branch) is covered on H2
+  (`SchemaMigrationEngineTest`) and on real Postgres only for the dropped-column / schema-qualified
+  deprecate (`SchemaMigrationEngineDeprecateIntegrationTest`, skipped without Docker); ADD and
+  ALTER TYPE have no Postgres scenario. The destructive path has unit tests +
+  `SchemaMigrationScenarioTest`.
 - SQL filter operator mappings (`SqlQueryBuilder`, runtime-core) are tested only through the
   adapter (`PhysicalTableStorageAdapterTest` filter-operator cases on H2; `ISNULL`/`IN` on real
   Postgres for temporal fields only).
