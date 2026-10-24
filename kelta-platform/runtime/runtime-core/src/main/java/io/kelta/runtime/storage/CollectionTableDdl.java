@@ -3,6 +3,7 @@ package io.kelta.runtime.storage;
 import static io.kelta.runtime.storage.PhysicalTableStorageAdapter.SYSTEM_COLUMNS;
 import static io.kelta.runtime.storage.SqlIdentifiers.buildBoundedIdentifier;
 import static io.kelta.runtime.storage.SqlIdentifiers.buildHnswIndexStatement;
+import static io.kelta.runtime.storage.SqlIdentifiers.buildOwnerIndexStatement;
 import static io.kelta.runtime.storage.SqlIdentifiers.getBaseTableName;
 import static io.kelta.runtime.storage.SqlIdentifiers.getColumnName;
 import static io.kelta.runtime.storage.SqlIdentifiers.identifierPart;
@@ -187,20 +188,14 @@ final class CollectionTableDdl {
 
         // The pgvector extension must exist before a vector(N) column can be created. Emit it
         // lazily — only when the collection actually has a VECTOR field — so collections without
-        // vectors never require pgvector. A failure here is surfaced with actionable guidance
-        // rather than a cryptic "type vector does not exist" on the CREATE TABLE below.
-        boolean hasVector = definition.fields().stream()
-                .anyMatch(f -> f.type() == FieldType.VECTOR);
-        if (hasVector) {
-            try {
-                jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS vector");
-            } catch (DataAccessException e) {
-                throw new StorageException(
-                        "Collection '" + definition.name() + "' has a VECTOR field but the pgvector "
-                                + "extension could not be enabled. Install pgvector on the database "
-                                + "(a pgvector-enabled image, or `CREATE EXTENSION vector` by an admin) "
-                                + "and ensure the worker's DB role may use it. Cause: " + e.getMessage(), e);
-            }
+        // vectors never require pgvector.
+        if (definition.fields().stream().anyMatch(f -> f.type() == FieldType.VECTOR)) {
+            SchemaMigrationEngine.ensureVectorExtension(jdbcTemplate, definition.name());
+        }
+
+        // Owner-scoped reads filter on the owner column; index it so they don't scan.
+        if (definition.ownerField() != null) {
+            postCreateStatements.add(buildOwnerIndexStatement(definition, qualifiedName));
         }
 
         try {
