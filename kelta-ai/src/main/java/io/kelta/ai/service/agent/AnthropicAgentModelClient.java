@@ -81,9 +81,9 @@ public class AnthropicAgentModelClient implements AgentModelClient {
             if (blocks.isEmpty()) {
                 continue;
             }
-            MessageParam.Role role = "user".equals(msg.role())
-                    ? MessageParam.Role.USER : MessageParam.Role.ASSISTANT;
-            messages.add(MessageParam.builder().role(role).contentOfBlockParams(blocks).build());
+            messages.add("user".equals(msg.role())
+                    ? MessageParam.ofUserOfContentBlockParams(blocks)
+                    : MessageParam.ofAssistantOfContentBlockParams(blocks));
         }
         return messages;
     }
