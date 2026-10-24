@@ -92,6 +92,14 @@ kelta:
     # Worker service URL (used for routing AND internal API calls)
     worker-service-url: ${WORKER_SERVICE_URL:http://emf-worker:80}
 
+    # PAT grace cache (PatAuthenticationFilter): the last accepted PAT data per token hash,
+    # served only when Redis misses AND the worker validation call fails (non-404), so
+    # valid tokens ride out worker restarts. Entries are written only after a token is
+    # accepted, expire ttl-seconds after that write, are evicted when the token is seen
+    # revoked, and the cache holds at most max-entries tokens per pod.
+    pat-grace-ttl-seconds: ${KELTA_GATEWAY_PAT_GRACE_TTL_SECONDS:300}
+    pat-grace-max-entries: ${KELTA_GATEWAY_PAT_GRACE_MAX_ENTRIES:10000}
+
     # When the startup bootstrap fetch fails (worker not up yet), RouteInitializer keeps
     # retrying it in the background: first after initial-delay-ms, doubling up to
     # max-delay-ms, until it succeeds. Without it the gateway serves only static routes
