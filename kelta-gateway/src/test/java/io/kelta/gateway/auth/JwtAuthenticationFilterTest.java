@@ -3,6 +3,8 @@ package io.kelta.gateway.auth;
 import io.kelta.gateway.cache.GatewayCacheManager;
 import io.kelta.gateway.metrics.GatewayMetrics;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -26,6 +28,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -335,7 +338,7 @@ class JwtAuthenticationFilterTest {
             "user123",
             List.of("USER", "ADMIN"),
             Map.of("sub", "user123", "roles", List.of("USER", "ADMIN"))
-        );
+        ).withTenantId("tenant-1");
 
         when(jwtDecoder.decode(token, "tenant-1")).thenReturn(Mono.just(jwt));
         when(principalExtractor.extractPrincipal(jwt)).thenReturn(principal);
@@ -368,7 +371,7 @@ class JwtAuthenticationFilterTest {
             "user123",
             List.of("USER"),
             Map.of("sub", "user123")
-        );
+        ).withTenantId("tenant-1");
 
         when(jwtDecoder.decode(token, "tenant-1")).thenReturn(Mono.just(jwt));
         when(principalExtractor.extractPrincipal(jwt)).thenReturn(principal);
@@ -456,6 +459,135 @@ class JwtAuthenticationFilterTest {
         assertThat(body).contains("\"title\":\"Unauthorized\"");
         assertThat(body).contains("\"detail\":");
         assertThat(body).contains("/api/widgets");
+    }
+
+    @Nested
+    @DisplayName("tenant_id claim on a tenant route (PLT-707)")
+    class TenantClaim {
+
+        private static final String TOKEN = "header.payload.sig";
+
+        @BeforeEach
+        void useRealPrincipalExtractor() {
+            PrincipalExtractor real = new PrincipalExtractor();
+            lenient().when(principalExtractor.extractPrincipal(any(Jwt.class)))
+                .thenAnswer(inv -> real.extractPrincipal(inv.getArgument(0)));
+        }
+
+        @Test
+        @DisplayName("a JWT without tenant_id on a URL-slug tenant is rejected with 401")
+        void tenantlessJwtOnUrlSlugTenantRejected() {
+            MockServerWebExchange exchange = bearerExchange();
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-1");
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_SLUG_ATTR, "acme");
+            decodesTo(jwtClaims(null));
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(filterChain, never()).filter(any());
+            verify(metrics).recordAuthFailure("acme", "missing_tenant_claim");
+        }
+
+        @Test
+        @DisplayName("a JWT with an empty tenant_id on a custom-domain tenant is rejected with 401")
+        void emptyTenantJwtOnCustomDomainTenantRejected() {
+            // CustomDomainFilter leaves the tenant on the exchange the same way a URL slug does.
+            MockServerWebExchange exchange = bearerExchange();
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-1");
+            decodesTo(jwtClaims(""));
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(filterChain, never()).filter(any());
+        }
+
+        @Test
+        @DisplayName("a JWT without tenant_id on a header-claimed tenant is rejected with 401")
+        void tenantlessJwtOnHeaderTenantRejected() {
+            MockServerWebExchange exchange = bearerExchange();
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-1");
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_SOURCE_ATTR,
+                TenantResolutionFilter.TENANT_SOURCE_HEADER);
+            decodesTo(jwtClaims(null));
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(filterChain, never()).filter(any());
+            verify(metrics).recordAuthFailure(any(), eq("missing_tenant_claim"));
+        }
+
+        @Test
+        @DisplayName("a JWT whose tenant_id matches the request tenant passes to the chain")
+        void matchingTenantPasses() {
+            MockServerWebExchange exchange = bearerExchange();
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-1");
+            decodesTo(jwtClaims("tenant-1"));
+            when(filterChain.filter(any(ServerWebExchange.class))).thenAnswer(inv -> {
+                GatewayPrincipal stored = JwtAuthenticationFilter.getPrincipal(inv.getArgument(0));
+                assertThat(stored.getTenantId()).isEqualTo("tenant-1");
+                return Mono.empty();
+            });
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            assertThat(exchange.getResponse().getStatusCode()).isNotEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(filterChain).filter(any(ServerWebExchange.class));
+        }
+
+        @Test
+        @DisplayName("a JWT whose tenant_id names another tenant is rejected with 401")
+        void mismatchedTenantRejected() {
+            MockServerWebExchange exchange = bearerExchange();
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-1");
+            decodesTo(jwtClaims("tenant-2"));
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(filterChain, never()).filter(any());
+            verify(metrics).recordAuthFailure(any(), eq("tenant_mismatch"));
+        }
+
+        @Test
+        @DisplayName("a direct-login refresh token presented as a bearer is rejected with 401")
+        void directLoginRefreshTokenRejected() {
+            // Claims exactly as DirectLoginController builds its refresh token: no tenant_id.
+            MockServerWebExchange exchange = bearerExchange();
+            exchange.getAttributes().put(TenantResolutionFilter.TENANT_ID_ATTR, "tenant-1");
+            decodesTo(Jwt.withTokenValue(TOKEN).header("alg", "RS256")
+                .issuer("https://auth.kelta.io").subject("user-1")
+                .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(3600))
+                .jti("refresh-jti").claim("token_type", "refresh")
+                .build());
+
+            StepVerifier.create(filter.filter(exchange, filterChain)).verifyComplete();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(filterChain, never()).filter(any());
+        }
+
+        private MockServerWebExchange bearerExchange() {
+            return MockServerWebExchange.from(MockServerHttpRequest.get("/api/accounts")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN)
+                .build());
+        }
+
+        private void decodesTo(Jwt jwt) {
+            when(jwtDecoder.decode(TOKEN, "tenant-1")).thenReturn(Mono.just(jwt));
+        }
+
+        private Jwt jwtClaims(String tenantId) {
+            Jwt.Builder builder = Jwt.withTokenValue(TOKEN).header("alg", "RS256")
+                .issuer("https://auth.kelta.io").subject("user-1").claim("preferred_username", "u@x.io")
+                .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(300));
+            if (tenantId != null) {
+                builder.claim("tenant_id", tenantId);
+            }
+            return builder.build();
+        }
     }
 
     /**
