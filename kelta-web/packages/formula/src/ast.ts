@@ -9,20 +9,7 @@ export type FormulaAst =
   | { kind: 'functionCall'; functionName: string; arguments: FormulaAst[] };
 
 export type BinaryOperator =
-  | '+'
-  | '-'
-  | '*'
-  | '/'
-  | '>'
-  | '<'
-  | '>='
-  | '<='
-  | '='
-  | '=='
-  | '!='
-  | '<>'
-  | '&&'
-  | '||';
+  '+' | '-' | '*' | '/' | '>' | '<' | '>=' | '<=' | '=' | '==' | '!=' | '<>' | '&&' | '||';
 
 export type UnaryOperator = '-' | '!';
 

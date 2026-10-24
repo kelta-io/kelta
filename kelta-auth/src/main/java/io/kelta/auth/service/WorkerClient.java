@@ -2,14 +2,11 @@ package io.kelta.auth.service;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import io.kelta.auth.config.AuthProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
-import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -27,31 +24,15 @@ public class WorkerClient {
     private final ObjectMapper objectMapper;
     private final String internalToken;
 
-    public WorkerClient(AuthProperties properties,
-                        ObjectMapper objectMapper,
-                        RestClient.Builder restClientBuilder,
+    /**
+     * @param restClient worker client from {@code InternalWorkerClientConfig}: based at
+     *                   {@code kelta.auth.worker-url} and, with the internal-auth rollout
+     *                   flag on, attaching a client_credentials bearer to {@code /internal/**}
+     */
+    public WorkerClient(ObjectMapper objectMapper,
                         @Value("${kelta.internal.token:}") String internalToken,
-                        @Autowired(required = false) @Qualifier("internalWorkerRestClient")
-                        @Nullable RestClient internalRestClient) {
-        // When the internal-auth rollout flag is on, InternalWorkerClientConfig
-        // provides a RestClient pre-wired with a client_credentials interceptor
-        // that attaches a bearer token to every /internal/** request. Fall back
-        // to a plain RestClient otherwise so the service keeps working while
-        // the flag is off or during rollout.
-        //
-        // Both paths now use the Spring-managed RestClient.Builder bean rather
-        // than RestClient.builder() static factory: the managed bean is
-        // auto-instrumented by Spring Boot's OTel starter so outbound calls
-        // get traceparent headers and a CLIENT span. The static factory does
-        // not, which previously broke the gateway→auth→worker trace.
-        if (internalRestClient != null) {
-            log.info("WorkerClient using OAuth2 client_credentials for /internal/** calls");
-            this.restClient = internalRestClient;
-        } else {
-            this.restClient = restClientBuilder
-                    .baseUrl(properties.getWorkerUrl())
-                    .build();
-        }
+                        @Qualifier("internalWorkerRestClient") RestClient restClient) {
+        this.restClient = restClient;
         this.objectMapper = objectMapper;
         this.internalToken = internalToken;
     }
