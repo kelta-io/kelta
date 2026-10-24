@@ -3,7 +3,7 @@
 # Eliminates per-job downloads of:
 #   - JDK 21 (~190 MB via actions/setup-java)
 #   - Maven 3.9.9 (~10 MB via curl)
-#   - Node.js 18 (~30 MB via actions/setup-node)
+#   - Node.js 24 (~30 MB via actions/setup-node)
 #
 # Build:
 #   docker build -t ghcr.io/cklinker/kelta-runner:latest .github/runner/
@@ -40,8 +40,8 @@ ARG MAVEN_VERSION=3.9.9
 RUN curl -fsSL https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz | tar xz -C /opt && \
     ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
-# ---- Node.js 18 + npm ----
-ARG NODE_VERSION=18
+# ---- Node.js 24 + npm ----
+ARG NODE_VERSION=24
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*

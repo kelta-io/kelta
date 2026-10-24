@@ -5,7 +5,7 @@
 #   --build-arg BASE_REGISTRY=docker.io/library
 ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
 
-FROM ${BASE_REGISTRY}/alpine:3.19
+FROM ${BASE_REGISTRY}/alpine:3.24
 RUN apk add --no-cache bash curl jq
 WORKDIR /scripts
 COPY seed.sh .

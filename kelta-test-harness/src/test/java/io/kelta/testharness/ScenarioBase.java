@@ -44,13 +44,13 @@ public abstract class ScenarioBase {
     }
 
     /**
-     * Opens a direct JDBC connection to the harness database as the service DB
-     * user, for asserting DB state the API doesn't expose. Caller closes it.
+     * Opens a direct JDBC connection to the harness database as the Postgres bootstrap
+     * superuser, for planting fixtures and asserting DB state the API doesn't expose.
+     * Caller closes it.
      *
-     * <p>Note: this user is the Postgres bootstrap superuser (both the local
-     * Testcontainers PG and the CI pool use the image's), so it <em>bypasses RLS</em>
-     * even on FORCE'd tables — useful for planting and inspecting fixtures. Assertions
-     * about RLS must connect as {@link #openAppDbConnection()} instead.
+     * <p>Note: this is <em>not</em> the role the services connect as, and it
+     * <em>bypasses RLS</em> even on FORCE'd tables. Assertions about RLS must connect as
+     * {@link #openAppDbConnection()} instead.
      */
     protected Connection openDbConnection() throws SQLException {
         return DriverManager.getConnection(
@@ -58,10 +58,10 @@ public abstract class ScenarioBase {
     }
 
     /**
-     * Opens a direct JDBC connection as the harness's NOBYPASSRLS application role, which
-     * carries the privilege set a worker pod has — so the policies are evaluated rather than
-     * bypassed. Bind a tenant with {@code SET LOCAL app.current_tenant_id} to see what that
-     * tenant sees. Caller closes it. Read-only: the role is granted SELECT, not write.
+     * Opens a direct JDBC connection as the NOBYPASSRLS application role kelta-worker and
+     * kelta-auth connect as — so the policies are evaluated rather than bypassed. Bind a tenant
+     * with {@code SET LOCAL app.current_tenant_id} to see what that tenant sees. Caller closes
+     * it. The role owns the schema, so roll back anything the assertion does not mean to keep.
      */
     protected Connection openAppDbConnection() throws SQLException {
         return DriverManager.getConnection(

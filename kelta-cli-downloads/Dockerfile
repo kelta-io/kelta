@@ -18,7 +18,7 @@ ARG BUN_IMAGE=harbor.rzware.com/dockerhub-cache/oven/bun:1.2.19
 # =============================================================================
 # Stage 1: install workspace deps and build the SDK the CLI links against
 # =============================================================================
-FROM ${BASE_REGISTRY}/node:20-alpine AS builder
+FROM ${BASE_REGISTRY}/node:24.22-alpine3.24 AS builder
 
 WORKDIR /app/kelta-web
 COPY kelta-web/package.json kelta-web/package-lock.json* kelta-web/tsconfig.json ./
@@ -54,7 +54,7 @@ RUN bun scripts/build-binaries.mjs \
 # =============================================================================
 # Stage 3: nginx static server
 # =============================================================================
-FROM ${BASE_REGISTRY}/nginx:1.25-alpine
+FROM ${BASE_REGISTRY}/nginx:1.30-alpine3.24
 
 COPY kelta-cli-downloads/nginx.conf /etc/nginx/conf.d/default.conf
 COPY kelta-cli-downloads/install.sh /usr/share/nginx/html/cli/install.sh
