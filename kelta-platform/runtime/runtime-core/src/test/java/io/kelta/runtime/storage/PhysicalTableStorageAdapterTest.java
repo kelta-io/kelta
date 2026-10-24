@@ -1276,6 +1276,140 @@ class PhysicalTableStorageAdapterTest {
     }
 
     @Nested
+    @DisplayName("Duplicate-key failures name the violated field(s) and value(s)")
+    class UniqueViolationReporting {
+
+        private final CollectionDefinition codes = new CollectionDefinition(
+            "codes", "Codes", null,
+            List.of(
+                new FieldDefinition("name", FieldType.STRING, true, false, false, null, null, null, null, null),
+                new FieldDefinition("code", FieldType.STRING, false, false, true, null, null, null, null, null),
+                new FieldDefinition("country", FieldType.STRING, true, false, false, null, null, null, null, null),
+                new FieldDefinition("slug", FieldType.STRING, true, false, false, null, null, null, null, null),
+                new FieldDefinition("apiToken", FieldType.STRING, true, false, true, null, null, null, null, null)
+                    .withServerOnly(true)),
+            new StorageConfig("codes", Map.of()), null, null, 1L, Instant.now(), Instant.now());
+
+        private JdbcTemplate failing;
+
+        private UniqueConstraintViolationException createFailingWith(String driverMessage) {
+            failing = org.mockito.Mockito.mock(JdbcTemplate.class);
+            org.mockito.Mockito.when(failing.update(org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(Object[].class)))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("duplicate key",
+                    new java.sql.SQLException(driverMessage, "23505")));
+            PhysicalTableStorageAdapter failingAdapter = new PhysicalTableStorageAdapter(failing, migrationEngine,
+                    new tools.jackson.databind.ObjectMapper());
+            Map<String, Object> data = new HashMap<>();
+            data.put("id", "generated-id-1");
+            data.put("name", "First");
+            data.put("code", "A-1");
+            data.put("country", "us");
+            data.put("slug", "erasmus-plus");
+            data.put("apiToken", "s3cret-token");
+            return assertThrows(UniqueConstraintViolationException.class,
+                    () -> failingAdapter.create(codes, data));
+        }
+
+        @Test
+        @DisplayName("no Key detail: the constraint name maps to the unique field, never to the generated id")
+        void noDetailUsesConstraintName() {
+            UniqueConstraintViolationException ex = createFailingWith(
+                "ERROR: duplicate key value violates unique constraint \"codes_code_key\"");
+
+            assertEquals(List.of("code"), ex.getFieldNames());
+            assertEquals("code", ex.getFieldName());
+            assertEquals("A-1", ex.getValue());
+            assertTrue(ex.getMessage().contains("'code'") && ex.getMessage().contains("'A-1'"), ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("no Key detail and no constraint name: the unique-field probe finds the field")
+        void noDetailNoNameProbesUniqueFields() {
+            UniqueConstraintViolationException ex = createFailingWith(
+                "Unique index or primary key violation: \"PUBLIC.CONSTRAINT_INDEX_4 ON PUBLIC.CODES(CODE)\"");
+            // createFailingWith built a fresh mock; stub its probe and retry through it.
+            assertTrue(ex.getFieldNames().isEmpty(), "an unanswered probe must not fall back to id");
+
+            org.mockito.Mockito.when(failing.queryForObject(org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.eq(Integer.class), org.mockito.ArgumentMatchers.any(Object[].class)))
+                .thenReturn(1);
+            PhysicalTableStorageAdapter probing = new PhysicalTableStorageAdapter(failing, migrationEngine,
+                    new tools.jackson.databind.ObjectMapper());
+            Map<String, Object> data = new HashMap<>(Map.of("id", "generated-id-2", "code", "A-1"));
+            UniqueConstraintViolationException probed = assertThrows(UniqueConstraintViolationException.class,
+                    () -> probing.create(codes, data));
+
+            assertEquals(List.of("code"), probed.getFieldNames());
+            assertEquals("A-1", probed.getValue());
+        }
+
+        @Test
+        @DisplayName("Postgres Key detail names the field and its value")
+        void detailNamesFieldAndValue() {
+            UniqueConstraintViolationException ex = createFailingWith(
+                "ERROR: duplicate key value violates unique constraint \"codes_code_key\"\n"
+                    + "  Detail: Key (code)=(A-1) already exists.");
+
+            assertEquals(List.of("code"), ex.getFieldNames());
+            assertEquals(Map.of("code", "A-1"), ex.getValues());
+        }
+
+        @Test
+        @DisplayName("composite Key detail carries every field and its value")
+        void compositeDetailCarriesAllFields() {
+            UniqueConstraintViolationException ex = createFailingWith(
+                "ERROR: duplicate key value violates unique constraint \"uniq_codes_country_slug\"\n"
+                    + "  Detail: Key (country, slug)=(us, erasmus-plus) already exists.");
+
+            assertEquals(List.of("country", "slug"), ex.getFieldNames());
+            assertEquals(Map.of("country", "us", "slug", "erasmus-plus"), ex.getValues());
+        }
+
+        @Test
+        @DisplayName("composite uniq_<table>_<col1>_<col2> index without a detail carries every field")
+        void compositeIndexNameCarriesAllFields() {
+            UniqueConstraintViolationException ex = createFailingWith(
+                "ERROR: duplicate key value violates unique constraint \"uniq_codes_country_slug\"");
+
+            assertEquals(List.of("country", "slug"), ex.getFieldNames());
+            assertEquals(Map.of("country", "us", "slug", "erasmus-plus"), ex.getValues());
+            assertTrue(ex.getMessage().contains("country='us'") && ex.getMessage().contains("slug='erasmus-plus'"),
+                ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("id is reported only for the primary key: <table>_pkey or a Key (id) detail")
+        void idOnlyForPrimaryKey() {
+            UniqueConstraintViolationException byName = createFailingWith(
+                "ERROR: duplicate key value violates unique constraint \"codes_pkey\"");
+            assertEquals(List.of("id"), byName.getFieldNames());
+            assertEquals("generated-id-1", byName.getValue());
+
+            UniqueConstraintViolationException byDetail = createFailingWith(
+                "ERROR: duplicate key value violates unique constraint \"codes_pkey\"\n"
+                    + "  Detail: Key (id)=(generated-id-1) already exists.");
+            assertEquals(List.of("id"), byDetail.getFieldNames());
+
+            UniqueConstraintViolationException other = createFailingWith(
+                "ERROR: duplicate key value violates unique constraint \"some_legacy_index\"");
+            assertFalse(other.getFieldNames().contains("id"), "an unrecognized constraint is not the primary key");
+        }
+
+        @Test
+        @DisplayName("a server-only field is named but its value is withheld")
+        void serverOnlyValueWithheld() {
+            UniqueConstraintViolationException ex = createFailingWith(
+                "ERROR: duplicate key value violates unique constraint \"codes_api_token_key\"\n"
+                    + "  Detail: Key (api_token)=(s3cret-token) already exists.");
+
+            assertEquals(List.of("apiToken"), ex.getFieldNames());
+            assertTrue(ex.getValues().isEmpty());
+            assertFalse(ex.getMessage().contains("s3cret-token"), ex.getMessage());
+        }
+    }
+
+    @Nested
     @DisplayName("Delete blocked by a restricting foreign key (SQL state 23503)")
     class DeleteForeignKeyConflict {
 

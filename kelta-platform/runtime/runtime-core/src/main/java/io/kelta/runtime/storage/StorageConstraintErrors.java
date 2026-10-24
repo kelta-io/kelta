@@ -214,6 +214,51 @@ final class StorageConstraintErrors {
         return List.of();
     }
 
+    private static final java.util.regex.Pattern DUPLICATE_KEY_VALUES =
+            java.util.regex.Pattern.compile("Key \\(.+?\\)=\\((.*)\\) already exists");
+
+    /**
+     * Pulls the conflicting values out of a Postgres duplicate-key error detail, aligned
+     * with {@link #extractViolatedColumns}. Returns an empty list when there is no detail or
+     * when the values cannot be split unambiguously (a value containing {@code ", "}).
+     */
+    static List<String> extractViolatedValues(DuplicateKeyException e, int columnCount) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            String msg = cause.getMessage();
+            if (msg != null) {
+                var matcher = DUPLICATE_KEY_VALUES.matcher(msg);
+                if (matcher.find()) {
+                    List<String> values = List.of(matcher.group(1).split(", ", -1));
+                    return values.size() == columnCount ? values : List.of();
+                }
+            }
+        }
+        return List.of();
+    }
+
+    /**
+     * Pulls the violated constraint or index name out of a Postgres duplicate-key error
+     * message ({@code duplicate key value violates unique constraint "<name>"}) — Postgres
+     * names it even when the {@code Key (...)=(...)} detail is absent. Returns null when the
+     * message names no constraint (e.g. H2's message format).
+     */
+    static String extractConstraintName(DuplicateKeyException e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            String msg = cause.getMessage();
+            if (msg != null) {
+                int idx = msg.indexOf("unique constraint \"");
+                if (idx >= 0) {
+                    int start = idx + "unique constraint \"".length();
+                    int end = msg.indexOf('"', start);
+                    if (end > start) {
+                        return msg.substring(start, end);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     /**
      * Pulls a Kelta-managed composite-unique index name out of a Postgres
      * duplicate-key error message. Returns null when the violation is not on a

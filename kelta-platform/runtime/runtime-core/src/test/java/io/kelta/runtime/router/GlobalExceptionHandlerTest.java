@@ -482,6 +482,67 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void uniqueConstraintViolation_detailNamesFieldAndConflictingValue() {
+        UniqueConstraintViolationException ex = new UniqueConstraintViolationException(
+                "codes", List.of("code"), Map.of("code", "A-1"), null);
+
+        ResponseEntity<Map<String, Object>> response = handler.handleUniqueConstraintViolation(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(errors(response)).hasSize(1);
+        Map<String, Object> e = firstError(response);
+        assertThat(str(e, "status")).isEqualTo("409");
+        assertThat(str(e, "code")).isEqualTo("UNIQUE_VIOLATION");
+        assertThat(source(e)).containsEntry("pointer", "/data/attributes/code");
+        assertThat(str(e, "detail")).contains("'code'").contains("'A-1'");
+    }
+
+    @Test
+    void uniqueConstraintViolation_compositeEmitsOneErrorPerField() {
+        Map<String, Object> values = new java.util.LinkedHashMap<>();
+        values.put("country", "us");
+        values.put("slug", "erasmus-plus");
+        UniqueConstraintViolationException ex = new UniqueConstraintViolationException(
+                "programs", List.of("country", "slug"), values, null);
+
+        ResponseEntity<Map<String, Object>> response = handler.handleUniqueConstraintViolation(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        List<Map<String, Object>> errors = errors(response);
+        assertThat(errors).hasSize(2);
+        assertThat(source(errors.get(0))).containsEntry("pointer", "/data/attributes/country");
+        assertThat(str(errors.get(0), "detail")).contains("'country'").contains("'us'").contains("'slug'");
+        assertThat(source(errors.get(1))).containsEntry("pointer", "/data/attributes/slug");
+        assertThat(str(errors.get(1), "detail")).contains("'slug'").contains("'erasmus-plus'").contains("'country'");
+        for (Map<String, Object> e : errors) {
+            assertThat(str(e, "code")).isEqualTo("UNIQUE_VIOLATION");
+            assertThat(meta(e)).containsEntry("fields", List.of("country", "slug"));
+        }
+    }
+
+    @Test
+    void uniqueConstraintViolation_withheldValueIsNotEchoed() {
+        UniqueConstraintViolationException ex = new UniqueConstraintViolationException(
+                "codes", List.of("apiToken"), Map.of(), null);
+
+        Map<String, Object> e = firstError(handler.handleUniqueConstraintViolation(ex, request));
+
+        assertThat(source(e)).containsEntry("pointer", "/data/attributes/apiToken");
+        assertThat(str(e, "detail")).contains("'apiToken'").contains("already has that value");
+    }
+
+    @Test
+    void uniqueConstraintViolation_unidentifiedConstraintHasNoPointer() {
+        UniqueConstraintViolationException ex = new UniqueConstraintViolationException(
+                "codes", List.of(), Map.of(), null);
+
+        Map<String, Object> e = firstError(handler.handleUniqueConstraintViolation(ex, request));
+
+        assertThat(str(e, "code")).isEqualTo("UNIQUE_VIOLATION");
+        assertThat(e).doesNotContainKey("source");
+    }
+
+    @Test
     void hookConflict_emits409WithCodeAndMeta() {
         io.kelta.runtime.workflow.HookConflictException ex = new io.kelta.runtime.workflow.HookConflictException(
                 "DEFAULT_VIEW_EXISTS", "isDefault",
