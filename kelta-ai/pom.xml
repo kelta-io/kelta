@@ -24,7 +24,7 @@
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <anthropic-sdk.version>2.18.0</anthropic-sdk.version>
+        <anthropic-sdk.version>3.0.0</anthropic-sdk.version>
         <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
 
