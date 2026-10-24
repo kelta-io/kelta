@@ -52,8 +52,12 @@ COPY kelta-ui/app/index.html ./
 COPY kelta-ui/app/src ./src
 COPY kelta-ui/app/public ./public
 
-# Set API base URL for production (frontend calls gateway directly, no nginx proxy)
-ARG VITE_API_BASE_URL=https://api.kelta.io
+# Gateway origin the UI calls. Empty (the default) makes the UI call the API on
+# its own origin (relative `/api/...` URLs), which works behind a reverse proxy
+# that routes `/api` to the gateway; the bundled nginx.conf does not proxy
+# `/api`. Hosted (build-and-publish-containers.yml) and release (release.yml)
+# builds pass the URL explicitly.
+ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 # Build the Vite app. tsc is skipped here on purpose — the image build stays a
