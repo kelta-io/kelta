@@ -283,7 +283,10 @@ mailbox to a high-volume public address.
   `login_history.source_ip` use the client-controlled leftmost hop. Fix: set the list to the
   ingress CIDR (and kelta-auth's), then flip the default to strict once quickstart/compose set it.
   The worker trusts the gateway-stamped `X-Kelta-Client-Ip` like `X-User-Id`; the filter is
-  fail-open by design — pair it with network controls.
+  fail-open by design — pair it with network controls. The per-mailbox `inbound_allowed_cidrs`
+  check (`MailboxWebhookController`, fail-closed: an out-of-range source is dropped before
+  signature verification) also relies on it, so until trusted-proxies is set it is only as
+  strong as the gateway's resolution of that header; it ignores `X-Forwarded-For` (KLT-783).
 - **Network-level defense-in-depth (out of tree):** worker/auth/ai must be reachable only via the
   gateway — enforced by NetworkPolicy + mTLS in the cluster, not by app code. No NetworkPolicy in
   this repo; verify on the cluster.

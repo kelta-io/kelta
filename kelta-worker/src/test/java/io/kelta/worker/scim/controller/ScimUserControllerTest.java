@@ -23,7 +23,7 @@ class ScimUserControllerTest {
     @BeforeEach
     void setUp() {
         userService = mock(ScimUserService.class);
-        controller = new ScimUserController(userService);
+        controller = new ScimUserController(userService, "https://api.kelta.test/");
         request = new MockHttpServletRequest();
         request.setScheme("https");
         request.setServerName("example.com");
@@ -96,5 +96,54 @@ class ScimUserControllerTest {
         controller.listUsers("t1", null, 1, 5000, request);
 
         verify(userService).listUsers(anyString(), any(), anyInt(), eq(1000), anyString());
+    }
+
+    /** Stubs the service to build meta.location from the base URL, as {@code mapUser} does. */
+    private void stubLocationFromBaseUrl() {
+        when(userService.getUser(eq("t1"), eq("id-1"), anyString())).thenAnswer(inv -> {
+            ScimUser resource = new ScimUser();
+            resource.setId("id-1");
+            resource.setMeta(new ScimMeta("User", null, null,
+                    inv.getArgument(2) + "/scim/v2/Users/id-1"));
+            return resource;
+        });
+    }
+
+    @Test
+    @DisplayName("meta.location starts with the configured public URL, not the request host")
+    void locationComesFromConfiguredPublicUrl() {
+        stubLocationFromBaseUrl();
+
+        var response = controller.getUser("t1", "id-1", request);
+
+        assertThat(response.getBody().getMeta().getLocation())
+                .isEqualTo("https://api.kelta.test/scim/v2/Users/id-1");
+    }
+
+    @Test
+    @DisplayName("X-Forwarded-Host / -Proto do not change meta.location")
+    void forwardedHeadersAreIgnored() {
+        stubLocationFromBaseUrl();
+        request.addHeader("X-Forwarded-Host", "evil.example");
+        request.addHeader("X-Forwarded-Proto", "http");
+
+        var response = controller.getUser("t1", "id-1", request);
+
+        assertThat(response.getBody().getMeta().getLocation())
+                .startsWith("https://api.kelta.test/")
+                .doesNotContain("evil.example");
+    }
+
+    @Test
+    @DisplayName("blank public URL falls back to the request's own scheme/host/port, never forwarded headers")
+    void blankPublicUrlFallsBackToRequest() {
+        controller = new ScimUserController(userService, " ");
+        stubLocationFromBaseUrl();
+        request.addHeader("X-Forwarded-Host", "evil.example");
+
+        var response = controller.getUser("t1", "id-1", request);
+
+        assertThat(response.getBody().getMeta().getLocation())
+                .isEqualTo("https://example.com:443/scim/v2/Users/id-1");
     }
 }

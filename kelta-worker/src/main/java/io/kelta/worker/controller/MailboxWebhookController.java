@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.InetAddress;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Collections;
@@ -61,6 +62,9 @@ public class MailboxWebhookController {
 
     /** Hard cap before any parsing. SES tops out at 40 MB; this is headroom, not a limit. */
     private static final int MAX_BODY_BYTES = 45 * 1024 * 1024;
+
+    /** Gateway-resolved client address; same header {@code LoginTrackingFilter} reads. */
+    static final String CLIENT_IP_HEADER = "X-Kelta-Client-Ip";
 
     private final MailboxRepository mailboxRepository;
     private final MailboxInboundEventRepository eventRepository;
@@ -123,8 +127,18 @@ public class MailboxWebhookController {
             return ResponseEntity.ok().build();
         }
 
+        String clientIp = clientIp(request);
+        String allowedCidrs = (String) mailbox.get("inbound_allowed_cidrs");
+        if (allowedCidrs != null && !allowedCidrs.isBlank() && !isAllowedSource(clientIp, allowedCidrs)) {
+            // Same 200-and-drop as a failed signature: a caller outside the allowlist will not
+            // succeed on retry either.
+            log.warn("Discarding inbound delivery for mailbox {}: source {} is outside inbound_allowed_cidrs",
+                    mailbox.get("id"), clientIp);
+            return ResponseEntity.ok().build();
+        }
+
         InboundMailAdapter.InboundRequest inbound =
-                new InboundMailAdapter.InboundRequest(body, headersOf(request), clientIp(request));
+                new InboundMailAdapter.InboundRequest(body, headersOf(request), clientIp);
         InboundMailAdapter.MailboxRef ref = refOf(mailbox);
 
         return TenantContext.callWithTenant(tenantId, () ->
@@ -237,18 +251,64 @@ public class MailboxWebhookController {
     }
 
     /**
-     * Best-effort client IP.
-     *
-     * <p>Read from the rightmost {@code X-Forwarded-For} entry, not the leftmost: the left end is
-     * client-supplied and anyone can prepend whatever address they like. Used only for logging
-     * and the optional CIDR allowlist, never as an authentication factor.
+     * The caller's address: {@value #CLIENT_IP_HEADER}, which the gateway resolves through
+     * {@code kelta.security.trusted-proxies} and stamps on every request after stripping any
+     * client-sent copy. {@code X-Forwarded-For} is deliberately not read — the gateway no longer
+     * forwards it, and where it arrives it is client-controlled.
      */
-    private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            String[] parts = forwarded.split(",");
-            return parts[parts.length - 1].trim();
+    static String clientIp(HttpServletRequest request) {
+        String gatewayResolved = request.getHeader(CLIENT_IP_HEADER);
+        if (gatewayResolved != null && !gatewayResolved.isBlank()) {
+            return gatewayResolved.trim();
         }
         return request.getRemoteAddr();
+    }
+
+    /**
+     * Whether {@code ip} falls inside one of the comma-separated CIDRs (or bare addresses).
+     * Fails closed: an unparseable caller address or entry never matches.
+     */
+    static boolean isAllowedSource(String ip, String allowedCidrs) {
+        byte[] candidate;
+        try {
+            candidate = InetAddress.ofLiteral(ip).getAddress();
+        } catch (RuntimeException e) {
+            return false;
+        }
+        for (String entry : allowedCidrs.split(",")) {
+            String trimmed = entry.trim();
+            if (!trimmed.isEmpty() && cidrContains(trimmed, candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean cidrContains(String cidr, byte[] candidate) {
+        int slash = cidr.indexOf('/');
+        byte[] network;
+        int prefix;
+        try {
+            network = InetAddress.ofLiteral(slash < 0 ? cidr : cidr.substring(0, slash).trim()).getAddress();
+            prefix = slash < 0 ? network.length * 8 : Integer.parseInt(cidr.substring(slash + 1).trim());
+        } catch (RuntimeException e) {
+            log.warn("Ignoring unparseable inbound_allowed_cidrs entry '{}'", cidr);
+            return false;
+        }
+        if (network.length != candidate.length || prefix < 0 || prefix > network.length * 8) {
+            return false;
+        }
+        int fullBytes = prefix / 8;
+        for (int i = 0; i < fullBytes; i++) {
+            if (candidate[i] != network[i]) {
+                return false;
+            }
+        }
+        int remainingBits = prefix % 8;
+        if (remainingBits == 0) {
+            return true;
+        }
+        int mask = (0xFF << (8 - remainingBits)) & 0xFF;
+        return (candidate[fullBytes] & mask) == (network[fullBytes] & mask);
     }
 }

@@ -193,6 +193,13 @@ Gateway code that needs the caller's address calls `ClientIpResolver.resolve(exc
 `X-Forwarded-For` split; `ClientIpResolverTest` fails the build if a gateway class mentions
 `"X-Forwarded-For"` / `"X-Real-IP"`. Services behind the gateway read the gateway-stamped
 `X-Kelta-Client-Ip` header (stripped inbound, set by `ClientIpForwardingFilter`), not XFF.
+**Worker code reads the client IP from `X-Kelta-Client-Ip` and public URLs from configuration,
+never from `X-Forwarded-For` / `-Proto` / `-Host`**: Spring Cloud Gateway 5.0.2+ drops every
+`X-Forwarded-*` header to backends (no `trusted-proxies` set), and where one does arrive it is
+client-controlled. Fall back to `getRemoteAddr()` (IP) or the request's own scheme/host/port
+(URL, local dev only) when the header/property is blank — e.g. `MailboxWebhookController.clientIp`,
+`kelta.scim.public-url` in the SCIM controllers. The `X-Forwarded-User/-Groups/-Roles` identity
+headers are Kelta's own (stripped inbound, re-set by `IdentityHeaderForwardingFilter`) and stay.
 kelta-auth, which has its own ingress, keeps a behaviourally identical copy of the rule in
 `PortalPublicRateLimitFilter`. Range lists are CIDRs or bare IPs parsed literal-only (no DNS).
 

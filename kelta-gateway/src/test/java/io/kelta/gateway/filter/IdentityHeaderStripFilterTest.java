@@ -186,4 +186,28 @@ class IdentityHeaderStripFilterTest {
         assertThat(headers.getFirst("X-Geo-City")).isNull();
         assertThat(headers.getFirst("X-Geo-Lat")).isNull();
     }
+
+    @Test
+    @DisplayName("Should strip a client-sent X-Kelta-Client-Ip before downstream filters")
+    void shouldStripClientSentClientIpHeader() {
+        MockServerHttpRequest request = MockServerHttpRequest
+                .post("/api/webhooks/mail/some-key")
+                .header("X-Kelta-Client-Ip", "203.0.113.7")
+                .header(HttpHeaders.CONTENT_TYPE, "text/plain")
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+        final ServerWebExchange[] capturedExchange = new ServerWebExchange[1];
+        when(chain.filter(any(ServerWebExchange.class))).thenAnswer(invocation -> {
+            capturedExchange[0] = invocation.getArgument(0);
+            return Mono.empty();
+        });
+
+        StepVerifier.create(filter.filter(exchange, chain))
+                .verifyComplete();
+
+        HttpHeaders headers = capturedExchange[0].getRequest().getHeaders();
+        assertThat(headers.getFirst("X-Kelta-Client-Ip")).isNull();
+        assertThat(headers.getFirst(HttpHeaders.CONTENT_TYPE)).isEqualTo("text/plain");
+    }
 }

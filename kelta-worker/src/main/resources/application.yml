@@ -303,6 +303,12 @@ kelta:
     # (https://app.kelta.io), not the gateway; falls back to external-base-url only so local
     # single-host setups keep working.
     app-base-url: ${KELTA_MAILBOX_APP_BASE_URL:${EXTERNAL_BASE_URL:http://localhost:8080}}
+  # SCIM meta.location base (the public API origin, e.g. https://api.kelta.io). /scim is a
+  # platform path, so one URL serves every tenant. Never derived from X-Forwarded-Proto/-Host
+  # (client-controlled; the gateway does not forward them). Blank = the request's own
+  # scheme/host/port, for local dev only.
+  scim:
+    public-url: ${KELTA_SCIM_PUBLIC_URL:${EXTERNAL_BASE_URL:}}
 
 management:
   endpoints:

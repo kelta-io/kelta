@@ -6,6 +6,7 @@ import io.kelta.worker.scim.model.ScimListResponse;
 import io.kelta.worker.scim.model.ScimPatchOp;
 import io.kelta.worker.scim.service.ScimGroupService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,9 +16,13 @@ import org.springframework.web.bind.annotation.*;
 public class ScimGroupController {
 
     private final ScimGroupService scimGroupService;
+    /** {@code kelta.scim.public-url}; blank falls back to the request's own address. */
+    private final String publicUrl;
 
-    public ScimGroupController(ScimGroupService scimGroupService) {
+    public ScimGroupController(ScimGroupService scimGroupService,
+                               @Value("${kelta.scim.public-url:}") String publicUrl) {
         this.scimGroupService = scimGroupService;
+        this.publicUrl = publicUrl == null ? "" : publicUrl.strip().replaceAll("/+$", "");
     }
 
     @GetMapping(produces = ScimConstants.CONTENT_TYPE_SCIM)
@@ -76,10 +81,11 @@ public class ScimGroupController {
     }
 
     private String getBaseUrl(HttpServletRequest request) {
-        String scheme = request.getHeader("X-Forwarded-Proto");
-        if (scheme == null) scheme = request.getScheme();
-        String host = request.getHeader("X-Forwarded-Host");
-        if (host == null) host = request.getServerName() + ":" + request.getServerPort();
-        return scheme + "://" + host;
+        if (!publicUrl.isEmpty()) {
+            return publicUrl;
+        }
+        // Local dev only: X-Forwarded-Proto/-Host are never read (client-controlled, and the
+        // gateway does not forward them).
+        return request.getScheme() + "://" + request.getServerName() + ":" + request.getServerPort();
     }
 }
