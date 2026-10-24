@@ -3,6 +3,7 @@ package io.kelta.worker.controller;
 import tools.jackson.databind.ObjectMapper;
 import io.kelta.jsonapi.AtomicOperation;
 import io.kelta.jsonapi.AtomicResult;
+import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.query.QueryEngine;
@@ -31,6 +32,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * JSON:API Atomic Operations endpoint.
@@ -50,7 +52,17 @@ public class AtomicOperationsController {
 
     private static final int HARD_CEILING = 500;
 
+    /**
+     * System collections a batch may write. The executor calls the query engine directly, so a
+     * system collection whose lifecycle lives in its own controller (DDL, registry refresh, caches)
+     * would be written without it. These identity collections have no such side effects and are
+     * written through this endpoint on purpose, behind {@code IdentityCollectionGuardHook}.
+     */
+    static final Set<String> SUPPORTED_SYSTEM_COLLECTIONS = Set.of(
+            "users", "user-permission-sets", "group-memberships", "delegated-admin-scopes");
+
     private final AtomicOperationExecutor executor;
+    private final CollectionRegistry collectionRegistry;
     private final CollectionLifecycleManager lifecycleManager;
     private final CerbosAuthorizationService authzService;
     private final CerbosPermissionResolver permissionResolver;
@@ -66,6 +78,7 @@ public class AtomicOperationsController {
             FieldWriteGuard fieldWriteGuard,
             @Value("${kelta.api.max-batch-operations:100}") int maxOperations) {
         this.executor = new AtomicOperationExecutor(queryEngine, collectionRegistry);
+        this.collectionRegistry = collectionRegistry;
         this.lifecycleManager = lifecycleManager;
         this.authzService = authzService;
         this.permissionResolver = permissionResolver;
@@ -107,6 +120,11 @@ public class AtomicOperationsController {
                     "422", "TOO_MANY_OPERATIONS", "Too many operations",
                     "Request contains " + operations.size() + " operations, maximum is " + maxOperations,
                     null));
+        }
+
+        ResponseEntity<?> unsupported = rejectUnsupportedCollections(operations);
+        if (unsupported != null) {
+            return unsupported;
         }
 
         // Per-operation object-level authorization. The gateway applies its
@@ -155,6 +173,29 @@ public class AtomicOperationsController {
                     "500", "INTERNAL_ERROR", "Internal error",
                     "An unexpected error occurred", null));
         }
+    }
+
+    /**
+     * Returns a 400 pointing at the first operation that targets a system collection outside
+     * {@link #SUPPORTED_SYSTEM_COLLECTIONS}, or {@code null}. Runs before any operation executes,
+     * so a rejected batch writes nothing. Unknown collections are left to the executor.
+     */
+    private ResponseEntity<?> rejectUnsupportedCollections(List<AtomicOperation> operations) {
+        for (int i = 0; i < operations.size(); i++) {
+            String collectionName = collectionOf(operations.get(i));
+            if (collectionName == null || SUPPORTED_SYSTEM_COLLECTIONS.contains(collectionName)) {
+                continue;
+            }
+            CollectionDefinition definition = collectionRegistry.get(collectionName);
+            if (definition != null && definition.systemCollection()) {
+                return ResponseEntity.badRequest().body(errorResponse(
+                        "400", "UNSUPPORTED_COLLECTION", "Unsupported collection",
+                        "Atomic operations do not support the system collection '" + collectionName
+                                + "'; use POST /api/" + collectionName + " instead",
+                        "/atomic:operations/" + i));
+            }
+        }
+        return null;
     }
 
     /**
