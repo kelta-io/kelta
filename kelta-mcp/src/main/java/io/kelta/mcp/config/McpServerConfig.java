@@ -104,8 +104,10 @@ public class McpServerConfig {
             Kelta control-plane MCP server: define collections, fields, layouts, flows, \
             picklists, and validation rules for the current tenant.
 
-            Typical build order for a new object: create_collection (optionally with an \
-            inline initial field set) -> add_field (repeat per additional field) -> \
+            Typical build order for a new object: apply_collection (the collection, its \
+            fields, field-scoped picklist values and display field in one idempotent call; \
+            or create_collection with an inline initial field set -> add_field per \
+            additional field) -> \
             create_validation_rule / create_unique_constraint as needed -> for picklist \
             fields, either apply_picklist first and reference it from add_field via \
             picklistSourceId (global picklist), or add_field with picklistSourceType FIELD \
@@ -116,19 +118,22 @@ public class McpServerConfig {
             its id). delete_ counterparts exist for every create_ tool; update_ counterparts \
             exist for collection, flow, layout, listview, and validation_rule.
 
-            Idempotent apply: apply_layout, apply_listview, apply_picklist, \
+            Idempotent apply: apply_collection, apply_layout, apply_listview, apply_picklist, \
             apply_field_picklist, apply_menu, \
             apply_dashboard and apply_page are create-or-update, keyed on a natural key \
-            (collection+name for layouts/list views, name for picklists/menus/dashboards, \
+            (name for collections, collection+fieldName for each of its fields, \
+            collection+name for layouts/list views, name for picklists/menus/dashboards, \
             title within the dashboard for each component, path — falling back to slug — for \
             pages) rather than an id — re-running the same setup script is safe. Each reports \
             {"action": "created"|"updated"|"unchanged", \
-            "id": ..., "changed": [...] } (apply_picklist, apply_menu and apply_dashboard nest \
-            one such result per value/item/component plus "pruned" when prune:true removed \
+            "id": ..., "changed": [...] } (apply_collection nests one per field, \
+            apply_picklist, apply_menu and apply_dashboard \
+            one per value/item/component plus "pruned" when prune:true removed \
             extras — deactivated for picklist values, hard-deleted for menu items and \
             dashboard components; without prune:true, apply_menu/apply_dashboard report absent \
             items as "stale" instead of touching them); prefer these over \
-            create_listview/create_picklist/add_picklist_value for anything you expect to \
+            create_collection/add_field/create_listview/create_picklist/add_picklist_value \
+            for anything you expect to \
             re-apply. The one-shot create_/add_ tools remain for one-off scripting.
 
             Menus: apply_menu takes a whole ui-menu ("app") and its items/groups in one \

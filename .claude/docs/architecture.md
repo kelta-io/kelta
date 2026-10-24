@@ -1595,6 +1595,22 @@ creates nothing. Each batch is atomic; a failure after the first batch reports t
 count in the error's `structuredContent.created`. Step-by-step coverage of a template build:
 `docs/authoring/mcp-admin-coverage.md`.
 
+**`apply_collection` (KLT-668)** composes the pieces above into one idempotent call: the
+collection is upserted on `name`, then each inline field on `(collectionId, name)` with the body
+`FieldBodyBuilder` assembles from create_collection's friendly field shape (relationships such as
+`referenceCollectionId` folded in as plain values, which is how the worker reads them anyway); a
+picklist field carrying inline `values` is created `picklistSourceType=FIELD` and its values go
+through `PicklistValueApplier` with the new field's id (optional per-field `prune`).
+`displayFieldName` is resolved to the field's UUID once the fields exist and written as
+`displayFieldId` in a second collection upsert, so it PATCHes only when it differs. Fields not named
+in the call are never touched. A failing field (builder error or gateway 4xx/5xx mapped by
+`McpErrorMapper`) is reported as `action: failed` with its error beside the collection and the
+fields that succeeded, and the result is flagged `isError`; the top-level `action` is `unchanged`
+only when the collection, every field, every value and the display field were. `AdminLookups.diff`
+compares values structurally with numbers by value, so a nested JSON attribute (e.g. a list view's
+`typeConfig`, which `apply_listview` now writes alongside `viewType` when supplied) read back with
+reordered keys or a different numeric type is still `unchanged`.
+
 **Targeting a sandbox from the stdio bridge (KLT-628).** `kelta mcp serve --tenant <slug>
 --token-env <VAR>` (`kelta-web/packages/cli/src/commands/mcp.ts` → `applyTenantSelector`) writes
 the slug and the named variable's token into `KELTA_TENANT`/`KELTA_TOKEN` before anything resolves

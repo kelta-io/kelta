@@ -14,6 +14,7 @@ Collections and fields:
 | `list_collections` | list collections (also on the user endpoint) |
 | `get_collection_schema` | fields, types, relationships of one collection (also on user) |
 | `create_collection` | create a collection, optionally with an initial field set |
+| `apply_collection` | create-or-update a collection with its fields, field-scoped picklist `values` and `displayFieldName` in one call, keyed on name (fields on `fieldName`); fields not named are left alone |
 | `update_collection` | display name, display field, description |
 | `delete_collection` | drop a collection and its records — irreversible |
 | `add_field` | add a field; friendly type aliases, picklist and lookup payloads assembled for you |
@@ -37,7 +38,7 @@ User experience:
 |---|---|
 | `apply_layout` | whole page-layout tree, keyed on collection + name (`create_layout` is deprecated) |
 | `update_layout`, `delete_layout` | layout metadata / removal |
-| `list_listviews`, `create_listview`, `apply_listview`, `update_listview`, `delete_listview` | shared list views; `viewType`/`typeConfig` on create and update only |
+| `list_listviews`, `create_listview`, `apply_listview`, `update_listview`, `delete_listview` | shared list views; `viewType`/`typeConfig` on create, apply and update |
 | `apply_page` | validate-then-upsert a page-builder page, keyed on path |
 | `apply_menu` | whole app/menu tree, keyed on menu name and item labels |
 | `apply_dashboard` | dashboard and its components, keyed on name and component titles |
@@ -85,7 +86,7 @@ Plus `ping`.
 
 ## Typical build order
 
-`create_collection` → `add_field` → `apply_picklist` → `create_validation_rule` / `create_unique_constraint` →
+`apply_collection` (or `create_collection` → `add_field` → `apply_field_picklist`) → `create_validation_rule` / `create_unique_constraint` →
 `apply_layout` → `apply_listview` → `apply_menu` → `apply_page` → `create_flow` → `apply_dashboard` → `seed_records`.
 To build in a sandbox, start the bridge with `kelta mcp serve --tenant <sandbox-slug> --token-env <VAR>`
 ([coverage map](/docs/reference/mcp-admin-coverage/)). The
