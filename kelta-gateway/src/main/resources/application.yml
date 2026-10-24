@@ -92,6 +92,14 @@ kelta:
     # Worker service URL (used for routing AND internal API calls)
     worker-service-url: ${WORKER_SERVICE_URL:http://emf-worker:80}
 
+    # PAT grace cache (PatAuthenticationFilter): the last accepted PAT data per token hash,
+    # served only when Redis misses AND the worker validation call fails (non-404), so
+    # valid tokens ride out worker restarts. Entries are written only after a token is
+    # accepted, expire ttl-seconds after that write, are evicted when the token is seen
+    # revoked, and the cache holds at most max-entries tokens per pod.
+    pat-grace-ttl-seconds: ${KELTA_GATEWAY_PAT_GRACE_TTL_SECONDS:300}
+    pat-grace-max-entries: ${KELTA_GATEWAY_PAT_GRACE_MAX_ENTRIES:10000}
+
     # When the startup bootstrap fetch fails (worker not up yet), RouteInitializer keeps
     # retrying it in the background: first after initial-delay-ms, doubling up to
     # max-delay-ms, until it succeeds. Without it the gateway serves only static routes
@@ -121,7 +129,10 @@ kelta:
       # Matched by longest prefix; each prefix gets its own per-IP bucket.
       # /api/webhooks/mail is generous on purpose: SNS delivers in bursts from a small
       # pool of AWS IPs, so a tight budget drops real customer mail rather than abuse.
-      ip-paths: ${RATE_LIMIT_IP_PATHS:/actuator/health=100,/api/modules/webhooks=300,/api/webhooks/mail=600}
+      # /api/webhooks covers flow webhooks (POST /api/webhooks/{flowId}); all flow
+      # webhooks from one IP share that bucket. /api/webhooks/ses keeps a mail-like budget.
+      # Keep this fallback equal to IpRateLimitFilter.DEFAULT_IP_PATHS (pinned by a test).
+      ip-paths: ${RATE_LIMIT_IP_PATHS:/actuator/health=100,/api/modules/webhooks=300,/api/webhooks=300,/api/webhooks/mail=600,/api/webhooks/ses=600}
       # IPs / CIDR ranges exempt from ALL rate limiting (per-IP and per-tenant).
       # For trusted infrastructure whose traffic is legitimately bursty: uptime
       # probes, in-cluster callers, a payment processor's webhook egress ranges.

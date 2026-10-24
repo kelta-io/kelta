@@ -23,13 +23,16 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Row-scoping predicates for {@link PhysicalTableStorageAdapter} reads: the {@code tenant_id}
- * (or self-scoped {@code id}) predicate for tenant-scoped system collections, the owner
+ * Row-scoping predicates for {@link PhysicalTableStorageAdapter} reads and by-id writes: the
+ * {@code tenant_id} (or self-scoped {@code id}) predicate for tenant-scoped system collections, the owner
  * predicate for owner-scoped collections, and the fail-closed rule for anonymous reads with no
  * tenant bound.
  *
  * <p>Security-critical. Extracted from {@code PhysicalTableStorageAdapter} verbatim; every read
- * path in the adapter still routes through here.
+ * path in the adapter, and the by-id UPDATE and DELETE, route through here. With a tenant bound
+ * this repeats what row-level security already enforces; it is what still holds when a connection
+ * carries {@code app.current_tenant_id = ''} (the {@code admin_bypass} policy) — see
+ * {@code concerns.md} → "admin_bypass".
  */
 final class TenantScopePolicy {
 
@@ -123,6 +126,22 @@ final class TenantScopePolicy {
                     List.of(tenantId, SystemCollectionDefinitions.SYSTEM_TENANT_ID));
         }
         return new TenantScope("tenant_id = ?", List.of(tenantId));
+    }
+
+    /**
+     * The tenant predicate for an UPDATE or DELETE of one row of {@code definition}: {@link #tenantScope}
+     * with the platform's shared rows taken back out. {@code collections} and {@code fields} let a tenant
+     * read the system tenant's rows ({@code tenant_id IN (?, ?)}), but the RLS write policy only ever
+     * admitted the tenant's own ({@code system_rows_read} is {@code FOR SELECT}), so a write keeps to
+     * {@code tenant_id = ?}. Everything else — self-scoped, no tenant column, no tenant bound, the
+     * anonymous refusal — is exactly {@link #tenantScope}.
+     */
+    TenantScope tenantWriteScope(CollectionDefinition definition, TableRef tableRef) {
+        TenantScope scope = tenantScope(definition, tableRef);
+        if (scope == null || scope == NO_ROWS || !SystemCollectionTenancy.sharesSystemRows(definition)) {
+            return scope;
+        }
+        return new TenantScope("tenant_id = ?", List.of(scope.params().get(0)));
     }
 
     /**

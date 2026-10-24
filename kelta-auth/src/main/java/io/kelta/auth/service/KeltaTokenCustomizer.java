@@ -1,12 +1,18 @@
 package io.kelta.auth.service;
 
+import io.kelta.auth.config.AuthProperties;
+import io.kelta.auth.config.InternalClientRegistrar;
 import io.kelta.auth.model.KeltaUserDetails;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.oidc.endpoint.OidcParameterNames;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.stereotype.Component;
@@ -14,6 +20,16 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Adds Kelta claims to tokens minted by the authorization server.
+ *
+ * <p>Fails closed on {@code tenant_id}: the gateway rejects every JWT without one on a tenant
+ * route, so an access token for a tenant-scoped principal that cannot be given a tenant is
+ * refused here rather than issued. The one tenant-less access token is the platform-scoped
+ * {@code client_credentials} token of an internal service client registered by
+ * {@link InternalClientRegistrar}, which calls the worker's {@code /internal/**} directly and
+ * never reaches a gateway tenant route.
+ */
 @Component
 public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingContext> {
 
@@ -21,10 +37,13 @@ public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingCo
 
     private final JdbcTemplate jdbcTemplate;
     private final ConnectedAppTokenRecorder tokenRecorder;
+    private final AuthProperties authProperties;
 
-    public KeltaTokenCustomizer(JdbcTemplate jdbcTemplate, ConnectedAppTokenRecorder tokenRecorder) {
+    public KeltaTokenCustomizer(JdbcTemplate jdbcTemplate, ConnectedAppTokenRecorder tokenRecorder,
+                                AuthProperties authProperties) {
         this.jdbcTemplate = jdbcTemplate;
         this.tokenRecorder = tokenRecorder;
+        this.authProperties = authProperties;
     }
 
     @Override
@@ -43,8 +62,15 @@ public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingCo
             if (context.getTokenType().getValue().equals(OidcParameterNames.ID_TOKEN)) {
                 customizeIdToken(context, userDetails);
             } else if (context.getTokenType().getValue().equals("access_token")) {
+                if (isBlank(userDetails.getTenantId())) {
+                    throw tenantlessToken("User " + userDetails.getId() + " has no tenant");
+                }
                 customizeAccessToken(context, userDetails);
             }
+        } else if (context.getTokenType().getValue().equals("access_token")) {
+            Object unsupported = principal.getPrincipal();
+            throw tenantlessToken("Unsupported principal type "
+                    + (unsupported != null ? unsupported.getClass().getSimpleName() : null));
         }
     }
 
@@ -62,13 +88,19 @@ public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingCo
         );
 
         if (results.isEmpty()) {
-            log.warn("No active connected app found for client_id={}", clientId);
-            return;
+            if (isInternalPlatformClient(context.getRegisteredClient())) {
+                log.debug("Issuing platform-scoped token for internal client {}", clientId);
+                return;
+            }
+            throw tenantlessToken("No active connected app for client " + clientId);
         }
 
         Map<String, Object> app = results.get(0);
         String appId = String.valueOf(app.get("id"));
         String tenantId = app.get("tenant_id") != null ? app.get("tenant_id").toString() : null;
+        if (isBlank(tenantId)) {
+            throw tenantlessToken("Connected app " + appId + " has no tenant");
+        }
         Object scopes = app.get("scopes");
         String scopesJson = scopes != null ? scopes.toString() : null;
 
@@ -155,6 +187,28 @@ public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingCo
             // audit trail (the same promise client_credentials already keeps).
             tokenRecorder.recordIssuedToken(appId, tenantId, scopesJson, jti, accessTtl, "authorization_code");
         }
+    }
+
+    /**
+     * An internal service client is one {@link InternalClientRegistrar} provisions: configured
+     * under {@code kelta.auth.internal-clients} with a secret, and holding the {@code internal}
+     * scope. Its tokens are platform-scoped, so they legitimately carry no {@code tenant_id}.
+     */
+    private boolean isInternalPlatformClient(RegisteredClient client) {
+        AuthProperties.InternalClient configured = authProperties.getInternalClients().get(client.getClientId());
+        return configured != null
+                && !isBlank(configured.getSecret())
+                && client.getScopes().contains(InternalClientRegistrar.INTERNAL_SCOPE);
+    }
+
+    private static OAuth2AuthenticationException tenantlessToken(String reason) {
+        log.warn("Refusing to issue an access token without tenant_id: {}", reason);
+        return new OAuth2AuthenticationException(new OAuth2Error(OAuth2ErrorCodes.ACCESS_DENIED,
+                "Access token cannot be issued without a tenant", null));
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     /** Returns the active connected app for a client_id (id, tenant_id, scopes), or null. */

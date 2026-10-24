@@ -29,7 +29,9 @@ each endpoint's permission, is the [public endpoint index](/docs/reference/endpo
 ## Gateway limits
 
 - `RATE_LIMIT_IP_PATHS` — per-IP budgets on the public prefixes above. Tune per endpoint; each prefix is its own
-  bucket.
+  bucket. Default `/actuator/health=100,/api/modules/webhooks=300,/api/webhooks=300,/api/webhooks/mail=600,/api/webhooks/ses=600`
+  (requests per minute per IP). `/api/webhooks` covers flow webhooks, and all of them called from one IP share
+  that one bucket. Setting the variable replaces the whole list, so keep every entry you still want.
 - The tenant window is the tenant's `apiCallsPerDay`; `RATE_LIMIT_USER_SHARE` caps one member. Tighten the
   share for tenants with many members.
 - `RATE_LIMIT_EXEMPT_CIDRS` bypasses **both** limiters. Never list private ranges in production; keep it to

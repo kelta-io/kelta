@@ -150,15 +150,19 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 GatewayPrincipal principal = principalExtractor.extractPrincipal(jwt);
                 log.debug("Successfully authenticated user: {} for path: {}", principal.getUsername(), path);
 
-                // Enforce that the JWT's tenant_id matches the slug-resolved tenant.
-                // This prevents cross-tenant access: a token issued for tenant A must not
-                // be accepted on tenant B's slug.
-                // A tenant claimed only by the X-Tenant-ID / X-Tenant-Slug header must be proven
-                // by the token itself, so a token without a tenant_id claim cannot use it either.
+                // Every tenant route requires a tenant_id claim equal to the resolved tenant,
+                // whatever the tenant source (URL slug, custom domain or header). A token
+                // issued for tenant A must not be accepted on tenant B, and a token with no
+                // tenant at all must not be accepted anywhere: isolation must not rest on the
+                // downstream username lookup happening to fail (PLT-707).
                 String jwtTenantId = principal.getTenantId();
-                boolean hasJwtTenant = jwtTenantId != null && !jwtTenantId.isEmpty();
-                if ((hasJwtTenant && !jwtTenantId.equals(tenantId))
-                        || (!hasJwtTenant && TenantResolutionFilter.isHeaderSourced(exchange))) {
+                if (jwtTenantId == null || jwtTenantId.isBlank()) {
+                    log.warn("JWT without tenant_id claim on tenant route: request tenant={} path={}",
+                            tenantId, path);
+                    metrics.recordAuthFailure(TenantResolutionFilter.getTenantSlug(exchange), "missing_tenant_claim");
+                    throw new JwtException("JWT has no tenant_id claim");
+                }
+                if (!jwtTenantId.equals(tenantId)) {
                     log.warn("Cross-tenant access attempt: JWT tenant={} request tenant={} path={}",
                             jwtTenantId, tenantId, path);
                     metrics.recordAuthFailure(TenantResolutionFilter.getTenantSlug(exchange), "tenant_mismatch");

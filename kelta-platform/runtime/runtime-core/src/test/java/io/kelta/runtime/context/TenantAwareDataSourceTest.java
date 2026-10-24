@@ -1,8 +1,15 @@
 package io.kelta.runtime.context;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -11,6 +18,9 @@ import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -81,7 +91,7 @@ class TenantAwareDataSourceTest {
     }
 
     @Test
-    @DisplayName("no tenant in context keeps the legacy session SET '' (admin/bypass path unchanged)")
+    @DisplayName("no tenant and no request on the thread keeps the legacy session SET '' (admin/bypass path unchanged)")
     void noTenantUsesSessionSet() throws Exception {
         when(conn.getAutoCommit()).thenReturn(true);
 
@@ -144,6 +154,90 @@ class TenantAwareDataSourceTest {
         borrowAs("ten'ant");
 
         verify(stmt).execute("SET LOCAL app.current_tenant_id = 'ten''ant'");
+    }
+
+    // ---- PLT-708: a tenant's HTTP request never runs as the platform session -------------------
+
+    @AfterEach
+    void clearRequest() {
+        RequestContextHolder.resetRequestAttributes();
+    }
+
+    private static void bindRequest(String method, String uri, String tenantHeader) {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        if (tenantHeader != null) {
+            request.addHeader("X-Tenant-ID", tenantHeader);
+        }
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+    }
+
+    @Test
+    @DisplayName("request carrying X-Tenant-ID with no TenantContext fails closed: no SET '', WARN names the path")
+    void tenantRequestWithoutContextFailsClosed() throws Exception {
+        bindRequest("GET", "/api/users/u1", "tenant-abc");
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(TenantAwareDataSource.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertThrows(SQLException.class, () -> tenantDataSource.getConnection());
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        verify(stmt, never()).execute(anyString());
+        verify(conn).close(); // the borrowed connection goes straight back to the pool
+        assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
+                        && e.getFormattedMessage().contains("GET /api/users/u1")
+                        && e.getFormattedMessage().contains("tenant-abc")),
+                "the WARN must name the request, got: " + appender.list);
+    }
+
+    @Test
+    @DisplayName("request carrying X-Tenant-ID with its tenant bound still gets SET LOCAL")
+    void tenantRequestWithContextIsScoped() throws Exception {
+        bindRequest("GET", "/api/users/u1", "tenant-abc");
+        when(conn.getAutoCommit()).thenReturn(true, false);
+
+        borrowAs("tenant-abc");
+
+        verify(stmt).execute("SET LOCAL app.current_tenant_id = 'tenant-abc'");
+    }
+
+    @Test
+    @DisplayName("a tenant-less request (no X-Tenant-ID) keeps SET ''")
+    void requestWithoutTenantHeaderKeepsSessionSet() throws Exception {
+        bindRequest("POST", "/internal/bootstrap", null);
+
+        Connection borrowed = tenantDataSource.getConnection();
+
+        verify(stmt).execute("SET app.current_tenant_id = ''");
+        assertSame(conn, borrowed);
+    }
+
+    @Test
+    @DisplayName("a service that opted out (kelta-auth) keeps SET '' even for a request carrying X-Tenant-ID")
+    void optedOutServiceKeepsSessionSet() throws Exception {
+        bindRequest("POST", "/auth/session", "tenant-abc");
+        TenantAwareDataSource optedOut = new TenantAwareDataSource(delegate, false);
+
+        Connection borrowed = optedOut.getConnection();
+
+        verify(stmt).execute("SET app.current_tenant_id = ''");
+        assertSame(conn, borrowed);
+    }
+
+    @Test
+    @DisplayName("a request deliberately unbound as PLATFORM_SCOPED (MANAGE_TENANTS listing) keeps SET ''")
+    void platformScopedRequestKeepsSessionSet() throws Exception {
+        bindRequest("GET", "/api/tenants", "tenant-abc");
+
+        Connection borrowed = ScopedValue.where(RequestAuthentication.CURRENT, RequestAuthentication.PLATFORM_SCOPED)
+                .call(() -> tenantDataSource.getConnection());
+
+        verify(stmt).execute("SET app.current_tenant_id = ''");
+        assertSame(conn, borrowed);
     }
 
     /** Borrows a connection the way a caller inside a tenant scope would. */

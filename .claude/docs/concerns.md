@@ -18,13 +18,17 @@ scoped without knowing it. `aggregate()`, `semanticSearch()` and the `COUNT(*)` 
 read path including `getById` (PLT-330). `DynamicCollectionRouter` keeps its own injection as a
 second layer (`RecordTenantScope`); both read the shared-rows list from `SystemCollectionTenancy`.
 
+By-id statements are scoped in the adapter too (PLT-708): `getById`, the `UPDATE` in `update`
+and the `DELETE` in `delete` AND in `TenantScopePolicy.tenantScope` (reads) /
+`tenantWriteScope` (writes — the same predicate minus the shared system rows, which RLS only
+lets a tenant `SELECT`) for every `tenant_id`-scoped system collection, so with a tenant bound a
+foreign id matches no row even on a connection that runs as `admin_bypass`. The `UPDATE` carries
+its own predicate rather than trusting the `getById` check before it (TOCTOU). No tenant bound
+→ unscoped, as before; tables without a `tenant_id` column (`hasTenantColumn`) get nothing.
+No caller was found that binds one tenant and legitimately writes another's row by id through the
+adapter (cross-tenant copiers — provisioning, promotion — use raw JDBC under each tenant in turn).
+
 **Still open:**
-- **By-id and write paths remain router-only** for `tenant_id`-scoped system collections:
-  `getById`, `update` and `delete` take no tenant predicate, so `RecordTenantScope.visibleToTenant` (`GET /:id` and the sub-resource routes)
-  and `RecordTenantScope.injectTenantId` (creates) are the only application-layer check. A direct caller can load a
-  single foreign system record by guessing its id. Closing it needs a pass over the
-  cross-tenant write paths (provisioning, promotion, the create read-back) that legitimately
-  touch another tenant.
 - **Eleven tenant-data child collections are `.tenantScoped(false)`** (`package-items`,
   `record-type-picklists`, `script-triggers`, `approval-steps`, `approval-step-instances`,
   `connected-app-tokens`, `job-execution-logs`, `bulk-job-results`, `collection-versions`,
@@ -41,6 +45,24 @@ second layer (`RecordTenantScope`); both read the shared-rows list from `SystemC
   self-scoped collection becomes `WHERE FALSE` (PLT-354, `refusesAnonymousRead`); an
   authenticated no-tenant read still runs unscoped.
 - The in-code predicate is the first line of defence; RLS is the backstop.
+
+### `admin_bypass` — the empty GUC opens every tenant
+
+`admin_bypass` (V201, every tenant table) admits all rows when `app.current_tenant_id = ''`,
+and `TenantAwareDataSource` issues `SET app.current_tenant_id = ''` whenever `TenantContext` is
+empty. That is right for Flyway, bootstrap, schedulers and NATS consumers, and catastrophic for a
+request thread that lost its tenant (a hop the `ScopedValue` did not follow, a filter that did not
+bind): RLS then isolates nothing, and only the app-layer predicates above stand. Two guards:
+- **Fail closed on a tenant request with no tenant (PLT-708).** When the thread serves an HTTP
+  request carrying `X-Tenant-ID` (`RequestContextHolder`) yet `TenantContext` is empty, the borrow
+  throws and WARNs with the method and path instead of issuing `''`. Exempt: a request bound
+  `RequestAuthentication.PLATFORM_SCOPED` (`TenantManagementScopeFilter`'s `MANAGE_TENANTS`
+  listing, unbound on purpose), and kelta-auth, which binds from its session, not the header
+  (`TenantAwareDataSourcePostProcessor(false)`). It cannot see a request whose work hopped to a
+  thread with neither the `ScopedValue` nor the request bound — those reach `''` as before.
+- **App-layer predicates** in `TenantScopePolicy` (lists, counts, aggregates, by-id read/update/delete).
+
+Raw `JdbcTemplate` SQL issued with no tenant bound still relies on its own `WHERE` alone.
 
 ### RLS invariants
 
@@ -62,7 +84,11 @@ RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205). Rules
   `field_version`, whose policies key strictly on the parent's `tenant_id`.
 - **Superset logins** are granted table by table on RLS-enforced `tenant_id` tables only
   (`supersetRoleIsGrantedOnlyTenantScopedTables`); pinned roles cannot hop tenants via the GUC
-  (V201).
+  (V201). Tenant roles hold **no privilege on `tenant_db_role`** (it has no RLS — reading it lists
+  every tenant's id and DB role): the pin works through `kelta_pinned_tenant()`, SECURITY
+  DEFINER with a fixed `search_path`. V215 revoked it from every pinned and `superset_%` role and
+  applied the narrowing to roles provisioned before it (blanket public grant until next rotation);
+  an unpinned `superset_%` role keeps no public grant (`v215NarrowsAPreNarrowingSupersetRole`).
 - **Hand-rolled JDBC must write `AND tenant_id = ?` on the table that owns the row** — RLS is
   not a substitute (see `PageLayoutTreeService` in the archive) — and test with a second tenant.
 
@@ -877,7 +903,7 @@ Follow-up: alert on `numbackends / max_connections > 0.8`.
 
 `TenantAwareDataSource` (runtime-core, registered by worker, auth and ai) scopes
 `app.current_tenant_id` per transaction with `SET LOCAL`, so it survives PgBouncer
-`pool_mode = transaction`; unbound connections keep the session `''` sentinel (`admin_bypass`).
+`pool_mode = transaction`; unbound connections keep the session `''` sentinel (`admin_bypass`) — except a request carrying `X-Tenant-ID` with no tenant bound, which is refused (see Security Risks → `admin_bypass`).
 Guards: `TenantAwareDataSourceTest`, `RowLevelSecurityIntegrationTest`, `TenantBindingIntegrationTest`.
 
 **Open — compose healthchecks for kelta-worker and kelta-ai can never fail.** Both use
