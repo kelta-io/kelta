@@ -161,7 +161,7 @@ in production.
 
 ## Dependencies
 
-- Java 25, Spring Boot 4.0.5
+- Java 25, Spring Boot 4.0.9
 - All `runtime-*` modules (core, events, jsonapi, module-core, module-integration, module-schema)
 - PostgreSQL + Flyway, NATS (jnats), Spring Data Redis
 - Persistence via Java records + `JdbcTemplate` raw SQL (no Spring Data JPA)

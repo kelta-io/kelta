@@ -146,7 +146,7 @@ in production.
 
 ## Dependencies
 
-- Java 25, Spring Boot 4.0.5, Spring Cloud 2025.1.1
+- Java 25, Spring Boot 4.0.9, Spring Cloud 2025.1.4
 - `runtime-events`, `runtime-jsonapi` (Kelta platform modules)
 - Spring Cloud Gateway, Spring WebFlux (reactive)
 - Spring Security OAuth2 Resource Server
