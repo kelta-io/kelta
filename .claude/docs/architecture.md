@@ -566,7 +566,14 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   four segments deep under `/api`, so a looser pattern would lose every request to it
   (`concerns.md` → Fragile Areas; `CollectionSchemaControllerTest` registers the router stand-in).
   The generated OpenAPI document (`GET /api/docs/openapi.json`) covers system collections for the
-  same reason.
+  same reason. `OpenApiController` passes the bound `TenantContext.getSlug()` to `OpenApiGenerator`,
+  which appends it to `servers[0].url` (`kelta.api.docs.server-url` + `/<slug>`, or the relative
+  `/<slug>` when that is unset; no slug bound ⇒ no prefix) while paths stay `/api/...` — the gateway
+  strips the slug, so server + path is the public `/<slug>/api/...`. Security declares `bearerAuth`
+  (JWT) and `patAuth` (`klt_` PAT, also HTTP bearer) as alternatives. Each list-enabled collection
+  also gets `GET /api/{c}/aggregate` and `GET /api/{c}/latest`, mirroring runtime-core's
+  `CollectionAggregateController` / `LatestRecordController`. `OpenApiSpecValidationTest` runs the
+  document (with every system collection) through swagger-parser and requires zero messages.
 - **CSV import** (`POST /api/collections/{name}/import/csv`, `CsvImportController`): also rides
   `static-collections` (its sub-path is exempt from that route's collection check), so the
   controller authorizes it as a create on the target collection — the decision a direct

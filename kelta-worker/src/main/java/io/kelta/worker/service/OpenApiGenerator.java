@@ -19,6 +19,10 @@ import java.util.*;
  * <b>400</b>, a unique-constraint clash with 409, and only custom (formula) validation rules
  * fail with 422.
  *
+ * <p>Paths are written as the worker serves them ({@code /api/...}); the tenant slug the gateway
+ * strips goes on {@code servers[0].url} instead, so a generated client calls
+ * {@code <host>/<slug>/api/...} without the slug repeated in every path.
+ *
  * @since 1.0.0
  */
 @Service
@@ -32,7 +36,8 @@ public class OpenApiGenerator {
             Map.entry(FieldType.BOOLEAN, Map.of("type", "boolean")),
             Map.entry(FieldType.DATE, Map.of("type", "string", "format", "date")),
             Map.entry(FieldType.DATETIME, Map.of("type", "string", "format", "date-time")),
-            Map.entry(FieldType.JSON, Map.of("type", "object"))
+            // Any JSON value: system collections store arrays as well as objects here.
+            Map.entry(FieldType.JSON, Map.of())
     );
 
     /** Canonical filter operators, read off the enum so the document cannot drift from the parser. */
@@ -45,9 +50,19 @@ public class OpenApiGenerator {
             + " code; an API create that supplies it or an update that changes it returns 400.";
 
     /**
-     * Generates an OpenAPI 3.0 specification from the given collections.
+     * Generates an OpenAPI 3.0 specification from the given collections, without a tenant prefix.
      */
     public Map<String, Object> generate(Collection<CollectionDefinition> collections, String serverUrl) {
+        return generate(collections, serverUrl, null);
+    }
+
+    /**
+     * Generates an OpenAPI 3.0 specification from the given collections. A non-blank
+     * {@code tenantSlug} is appended to {@code serverUrl} (or becomes the relative server
+     * {@code /<slug>} when no URL is configured).
+     */
+    public Map<String, Object> generate(Collection<CollectionDefinition> collections, String serverUrl,
+                                        String tenantSlug) {
         var spec = new LinkedHashMap<String, Object>();
         spec.put("openapi", "3.0.3");
         spec.put("info", Map.of(
@@ -56,25 +71,42 @@ public class OpenApiGenerator {
                 "version", "1.0.0"
         ));
 
-        if (serverUrl != null && !serverUrl.isBlank()) {
-            spec.put("servers", List.of(Map.of("url", serverUrl)));
+        String server = serverUrl(serverUrl, tenantSlug);
+        if (server != null) {
+            spec.put("servers", List.of(Map.of("url", server)));
         }
 
-        var components = new LinkedHashMap<String, Object>();
-        components.put("securitySchemes", Map.of(
-                "bearerAuth", Map.of(
-                        "type", "http",
-                        "scheme", "bearer",
-                        "bearerFormat", "JWT"
-                )
+        var securitySchemes = new LinkedHashMap<String, Object>();
+        securitySchemes.put("bearerAuth", Map.of(
+                "type", "http",
+                "scheme", "bearer",
+                "bearerFormat", "JWT",
+                "description", "Access token (JWT) issued by the tenant's OIDC sign-in"
         ));
+        securitySchemes.put("patAuth", Map.of(
+                "type", "http",
+                "scheme", "bearer",
+                "description", "Personal access token: the klt_-prefixed token, sent as"
+                        + " Authorization: Bearer klt_..."
+        ));
+        var components = new LinkedHashMap<String, Object>();
+        components.put("securitySchemes", securitySchemes);
         components.put("schemas", generateSchemas(collections));
         spec.put("components", components);
-        spec.put("security", List.of(Map.of("bearerAuth", List.of())));
+        // Separate requirement objects are alternatives: either scheme alone authorizes a call.
+        spec.put("security", List.of(Map.of("bearerAuth", List.of()), Map.of("patAuth", List.of())));
 
         spec.put("paths", generatePaths(collections));
 
         return spec;
+    }
+
+    private static String serverUrl(String serverUrl, String tenantSlug) {
+        String base = serverUrl == null ? "" : serverUrl.strip().replaceAll("/+$", "");
+        if (tenantSlug == null || tenantSlug.isBlank()) {
+            return base.isEmpty() ? null : base;
+        }
+        return base + "/" + tenantSlug.strip();
     }
 
     private Map<String, Object> generatePaths(Collection<CollectionDefinition> collections) {
@@ -98,6 +130,11 @@ public class OpenApiGenerator {
                 itemOps.put("delete", deleteOperation(col));
             }
             paths.put(basePath + "/{id}", itemOps);
+
+            if (col.apiConfig() == null || col.apiConfig().listEnabled()) {
+                paths.put(basePath + "/aggregate", Map.of("get", aggregateOperation(col)));
+                paths.put(basePath + "/latest", Map.of("get", latestOperation(col)));
+            }
         }
 
         paths.put("/api/operations", Map.of("post", atomicOperationsEndpoint()));
@@ -116,10 +153,7 @@ public class OpenApiGenerator {
                         "Page size (default 20, clamped to 200 — check meta.pageSizeClamped)"),
                 queryParam("sort", "string", "Sort field (prefix with - for descending)"),
                 queryParam("include", "string", "Related resources to include (comma-separated)"),
-                queryParam("filter[{field}][{op}]", "string",
-                        "Filter on a field. {op} is one of: " + String.join(" ", FILTER_OPERATORS)
-                                + ". `in` accepts the parameter repeated once per value; the shorthand"
-                                + " filter[{field}]=value means eq."),
+                filterParam(),
                 sparseFieldsetParam()
         ));
         op.put("responses", responses(
@@ -140,6 +174,75 @@ public class OpenApiGenerator {
                 errorResponse("404", "Not found")
         ));
         return op;
+    }
+
+    /** Mirrors runtime-core {@code CollectionAggregateController}. */
+    private Map<String, Object> aggregateOperation(CollectionDefinition col) {
+        var group = new LinkedHashMap<String, Object>();
+        group.put("type", "object");
+        group.put("properties", Map.of(
+                "key", Map.of("type", "string", "description", "Distinct value of the groupBy field"),
+                "count", Map.of("type", "integer", "format", "int64"),
+                "avg", Map.of("type", "number", "format", "double", "nullable", true,
+                        "description", "Average of the avg field, one decimal; null when not requested"
+                                + " or no numeric value in the group")
+        ));
+        var body = Map.<String, Object>of("type", "object", "properties", Map.of(
+                "totalCount", Map.of("type", "integer", "description", "Rows aggregated (at most 1000)"),
+                "groups", Map.of("type", "array", "items", group,
+                        "description", "One entry per distinct groupBy value, by count descending")
+        ));
+
+        var op = new LinkedHashMap<String, Object>();
+        op.put("summary", "Aggregate " + col.displayName());
+        op.put("description", "Count (and optionally average) per distinct value of a field, over"
+                + " up to 1000 filtered rows. Returns only counts and averages, never rows.");
+        op.put("tags", List.of(col.displayName()));
+        op.put("parameters", List.of(
+                requiredQueryParam("groupBy", "Field to group by"),
+                queryParam("avg", "string", "Numeric field to average per group"),
+                filterParam()
+        ));
+        op.put("responses", responses(
+                jsonResponse("200", "Groups of " + col.name() + " records", body),
+                Map.entry("400", Map.of("description", "groupBy is missing")),
+                Map.entry("404", Map.of("description", "Unknown collection"))
+        ));
+        return op;
+    }
+
+    /** Mirrors runtime-core {@code LatestRecordController}. */
+    private Map<String, Object> latestOperation(CollectionDefinition col) {
+        var record = new LinkedHashMap<String, Object>();
+        record.put("type", "object");
+        record.put("nullable", true);
+        record.put("description", "The requested fields of the newest matching record, plus"
+                + " recordedAt (its createdAt); null when nothing matches");
+        record.put("properties", Map.of("recordedAt", Map.of("type", "string", "format", "date-time")));
+        record.put("additionalProperties", true);
+
+        var op = new LinkedHashMap<String, Object>();
+        op.put("summary", "Latest " + col.displayName());
+        op.put("description", "The requested fields of the most recently created matching record.");
+        op.put("tags", List.of(col.displayName()));
+        op.put("parameters", List.of(
+                requiredQueryParam("fields", "Comma-separated field names to return"),
+                filterParam()
+        ));
+        op.put("responses", responses(
+                jsonResponse("200", "Latest " + col.name() + " record",
+                        Map.of("type", "object", "properties", Map.of("record", record))),
+                Map.entry("400", Map.of("description", "fields is missing or empty")),
+                Map.entry("404", Map.of("description", "Unknown collection"))
+        ));
+        return op;
+    }
+
+    private Map<String, Object> filterParam() {
+        return queryParam("filter[{field}][{op}]", "string",
+                "Filter on a field. {op} is one of: " + String.join(" ", FILTER_OPERATORS)
+                        + ". `in` accepts the parameter repeated once per value; the shorthand"
+                        + " filter[{field}]=value means eq.");
     }
 
     private Map<String, Object> sparseFieldsetParam() {
@@ -417,6 +520,13 @@ public class OpenApiGenerator {
         ));
     }
 
+    private Map.Entry<String, Object> jsonResponse(String status, String description, Map<String, Object> schema) {
+        return Map.entry(status, Map.of(
+                "description", description,
+                "content", Map.of("application/json", Map.of("schema", schema))
+        ));
+    }
+
     private Map.Entry<String, Object> errorResponse(String status, String description) {
         return response(status, description, schemaRef(ERROR_SCHEMA));
     }
@@ -428,6 +538,11 @@ public class OpenApiGenerator {
     private Map<String, Object> queryParam(String name, String type, String description) {
         return Map.of("name", name, "in", "query", "required", false,
                 "schema", Map.of("type", type), "description", description);
+    }
+
+    private Map<String, Object> requiredQueryParam(String name, String description) {
+        return Map.of("name", name, "in", "query", "required", true,
+                "schema", Map.of("type", "string"), "description", description);
     }
 
     private Map<String, Object> pathParam(String name, String description) {
