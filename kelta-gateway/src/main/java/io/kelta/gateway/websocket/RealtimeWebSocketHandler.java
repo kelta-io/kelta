@@ -101,9 +101,16 @@ public class RealtimeWebSocketHandler implements WebSocketHandler {
         if (expiresAt != null) {
             Duration ttl = Duration.between(Instant.now(), expiresAt);
             if (ttl.isPositive()) {
+                // The close is subscribed on its own, outside the zip below: sending it
+                // discards the inbound receiver, which completes `inbound` and makes the
+                // zip cancel its siblings. Cancelled mid-write, reactor-netty's close Mono
+                // releases the CloseWebSocketFrame its queued write then releases again
+                // (IllegalReferenceCountException). Building the frame lazily also stops a
+                // frame being allocated per connection and dropped unreleased when the
+                // client leaves before the token expires.
                 expirationCheck = Mono.delay(ttl)
-                        .then(session.close(TOKEN_EXPIRED))
-                        .then();
+                        .doOnNext(tick -> session.close(TOKEN_EXPIRED).subscribe())
+                        .then(Mono.never());
             }
         }
 
