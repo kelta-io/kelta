@@ -365,8 +365,14 @@ describe('ErrorBoundary', () => {
         </ErrorBoundary>
       )
 
-      // Tab through the buttons
+      // In development/test the stack-trace <summary> comes first in tab order. Browsers
+      // focus <summary>, and user-event does too since 14.6.x, so step past it when it has
+      // focus; the three action buttons follow in order either way.
       await user.tab()
+      const summary = screen.queryByTestId('error-stack-trace')?.querySelector('summary')
+      if (summary && document.activeElement === summary) {
+        await user.tab()
+      }
       expect(screen.getByTestId('try-again-button')).toHaveFocus()
 
       await user.tab()
