@@ -54,6 +54,24 @@ spring:
           max-connections: ${GATEWAY_HTTPCLIENT_MAX_CONNECTIONS:2000}
           max-idle-time: ${GATEWAY_HTTPCLIENT_MAX_IDLE_TIME:30s}
           acquire-timeout: ${GATEWAY_HTTPCLIENT_ACQUIRE_TIMEOUT_MS:5000}
+      # Spring Cloud Gateway 5.0.4 strips every X-Forwarded-* request header unless the
+      # peer matches trusted-proxies — including the identity headers HeaderTransformationFilter
+      # sets (X-Forwarded-User/-Groups/-Roles) and the X-Forwarded-Proto/-Host/-For that
+      # kelta-auth, SCIM and the mailbox webhook read. Trusting every peer with all header
+      # additions disabled keeps the pre-5.0.4 pass-through; client-supplied identity headers
+      # are still dropped by IdentityHeaderStripFilter. Condition-gated, so it lives here, not
+      # in an env var (native AOT). Guarded by ForwardedHeadersPassThroughTest.
+      server:
+        webflux:
+          trusted-proxies: ".*"
+          x-forwarded:
+            for-enabled: false
+            host-enabled: false
+            port-enabled: false
+            proto-enabled: false
+            prefix-enabled: false
+          forwarded:
+            enabled: false
 
 
 # Kelta Gateway specific configuration
