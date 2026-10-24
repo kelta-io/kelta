@@ -57,3 +57,8 @@ verified against the module's signature, and evaluated to register components th
 
 Page-builder pages that use plugin or module components render in the browser, but the server-side page
 validator does not know those component types yet — see [Page builder](/docs/console/page-builder/#widgets).
+
+## Full API reference
+
+Every export of `@kelta/plugin-sdk` with its TypeScript signature and doc summary, generated from the package source:
+[@kelta/plugin-sdk — API Reference](/docs/reference/api-plugin-sdk/).

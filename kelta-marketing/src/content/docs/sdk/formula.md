@@ -41,3 +41,8 @@ REGEX DATEDIFF`. Details: [Formula and roll-up fields](/docs/data-model/formula-
 
 A custom function registered client-side has no server counterpart; keep client-only functions to display
 logic.
+
+## Full API reference
+
+Every export of `@kelta/formula` with its TypeScript signature and doc summary, generated from the package source:
+[@kelta/formula — API Reference](/docs/reference/api-formula/).

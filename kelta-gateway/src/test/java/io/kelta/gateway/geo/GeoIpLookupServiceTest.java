@@ -8,8 +8,10 @@ import io.kelta.gateway.geo.model.GeoLocation;
 import io.kelta.gateway.geo.model.GeoSubdivision;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.net.InetAddress;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -100,5 +102,41 @@ class GeoIpLookupServiceTest {
         when(reader.get(any(InetAddress.class), eq(GeoCityData.class)))
                 .thenThrow(new IllegalStateException("closed during hot-swap"));
         assertThat(service.lookup("203.0.113.50")).isEmpty();
+    }
+
+    // ---- real MMDB decoded by com.maxmind.db.Reader (no mocked reader) ----
+
+    @Test
+    @DisplayName("decodes a database hit into every GeoResult field")
+    void decodesRealDatabaseHit(@TempDir Path dir) throws Exception {
+        GeoIpLookupService realService = serviceOver(TestMmdbWriter.write(dir.resolve("city.mmdb"),
+                "203.0.113.0", 24, TestMmdbWriter.cityRecord(), GeoIpDatabaseManagerTest.BUILD_EPOCH));
+
+        assertThat(realService.lookup("203.0.113.50"))
+                .contains(new GeoResult("PT", "Lisbon", "Cascais", 38.6979, -9.4207, 20));
+    }
+
+    @Test
+    @DisplayName("returns empty for an IP not in the database")
+    void returnsEmptyForRealDatabaseMiss(@TempDir Path dir) throws Exception {
+        GeoIpLookupService realService = serviceOver(TestMmdbWriter.write(dir.resolve("city.mmdb"),
+                "203.0.113.0", 24, TestMmdbWriter.cityRecord(), GeoIpDatabaseManagerTest.BUILD_EPOCH));
+
+        assertThat(realService.lookup("198.51.100.7")).isEmpty();
+        assertThat(realService.lookup("203.0.114.1")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("fails open (no geo result, so no X-Geo-* headers) when the database file is missing")
+    void failsOpenWhenDatabaseFileMissing(@TempDir Path dir) {
+        GeoIpLookupService realService = serviceOver(dir.resolve("missing.mmdb"));
+
+        assertThat(realService.lookup("203.0.113.50")).isEmpty();
+    }
+
+    private static GeoIpLookupService serviceOver(Path dbPath) {
+        GeoIpDatabaseManager realManager = GeoIpDatabaseManagerTest.localOnlyManager(dbPath);
+        realManager.refresh();
+        return new GeoIpLookupService(realManager);
     }
 }
