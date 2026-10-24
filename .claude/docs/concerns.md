@@ -599,9 +599,9 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   generic route's per-resource Cerbos.
 - **Routes are keyed by (path, tenant)** — collection names are unique only per tenant (sandboxes
   clone every name). `RouteRegistry` resolves the caller's tenant, then a `static-` route, then any
-  tenant's route so authorization still runs. A collection turning `active=false` keeps its route
-  until the next bootstrap (the field, validation-rule and approval-process hooks send UPDATED
-  without the flag).
+  tenant's route so authorization still runs. `CollectionChangedPayload.active` is a nullable
+  `Boolean`: only an explicit `false` on UPDATED removes the route, because the field, rule and
+  layout hooks reuse the payload without the flag — never default it on a publisher.
 - **Never publish `RefreshRoutesEvent` directly** — go through `RouteRefresher.refresh()`, which
   serializes fetch-and-store; concurrent refreshes stored stale snapshots (new collections 404'd).
 - **Any state the gateway loads only at startup needs a retry.** `RouteInitializer` retries the
@@ -967,6 +967,7 @@ One line each; full write-ups are in git history.
 - Older: Superset SQL injection hardening; gateway actuator requires JWT except health/info; `/internal/**` JWT auth (flag-gated); schema-name sanitization in `SchemaLifecycleModule`.
 
 **Bugs**
+- KLT-745 (2026-10-24) — a collection turning `active=false` kept its gateway route until the next bootstrap (`CollectionChangedPayload.active` was a primitive, so hooks that never set it sent `false`); the flag is now a nullable `Boolean` omitted when unset, `CollectionConfigEventPublisher` no longer defaults it to `true`, and `ConfigEventListener` removes the route on UPDATED with `active:false`. `ConfigEventListenerTest` (`shouldRemoveRouteWhenCollectionDeactivated`, `deactivationRemovesRouteFromRegistry`, `routeStaysRegisteredWhenUpdatedEventCarriesNoActiveKey`), `CollectionChangedPayloadTest$ActiveJson`, `CollectionConfigEventPublisherTest` (`deactivatedCollectionPublishesActiveFalse`, `otherPublishersSendNoActiveKey`).
 - KLT-700 / KLT-740 (2026-10-24) — the router divergences `DynamicCollectionRouterGoldenTest` had pinned as-is are fixed (KLT-700): the read-only `403` carries `code` + `meta.requestId`, a cached system-collection get-by-id and the child get-by-id send `ETag`, and child update/delete enforce `If-Match`. `POST /api/operations` now geo-stamps `captureGeo` collections like the router (KLT-740, shared `GeoStamping`), its last behavioural divergence. `AtomicOperationExecutorTest`, `AtomicOperationsControllerTest`.
 - KLT-739 (2026-10-24) — adding a VECTOR field to an existing collection failed with `type "vector" does not exist`: only table creation enabled pgvector. `SchemaMigrationEngine.ensureVectorExtension` is now shared by `CollectionTableDdl` and the `migrateSchema`/destructive add-or-retype paths (same actionable error when `CREATE EXTENSION` is refused). `SchemaMigrationEngineVectorIntegrationTest`.
 - KLT-739 (2026-10-24) — owner-scoped reads filter on `ownerField`, but its column was never indexed; `CollectionTableDdl` and `migrateSchema` (when `ownerField` is set or changed) now emit `CREATE INDEX IF NOT EXISTS idx_owner_<table>_<column>`. `OwnerColumnIndexIntegrationTest`.
