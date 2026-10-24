@@ -20,6 +20,18 @@ const SANDBOX_PASSWORD = 'one-time-secret';
 const SANDBOX_TOKEN = 'sandbox-token-456';
 /** A fake install.sh line that tells the stand-in its tenant now holds the template. */
 const MARK_INSTALLED = 'curl -fsS -X POST "$KELTA_URL/$KELTA_TENANT/__installed"';
+/** What the stub `kelta metadata apply` prints when nothing changed. */
+const NO_OP_APPLY = {
+  success: true,
+  created: 0,
+  updated: 0,
+  skipped: 2,
+  failed: 0,
+  items: [
+    { type: 'COLLECTION', naturalKey: 'accounts', action: 'SKIPPED' },
+    { type: 'FIELD', naturalKey: 'accounts.name', action: 'SKIPPED' },
+  ],
+};
 
 let server: Server;
 let baseUrl: string;
@@ -29,6 +41,7 @@ let sandboxAttributes: Record<string, unknown>;
 let sandboxInstalled: boolean;
 let environmentRequests: unknown[];
 let createError: string | undefined;
+let stubBin: string;
 
 interface Template {
   install: string;
@@ -40,6 +53,7 @@ function writeTemplates(templates: Record<string, Template>): string {
   for (const [name, t] of Object.entries(templates)) {
     mkdirSync(join(dir, name, 'seeds'), { recursive: true });
     writeFileSync(join(dir, name, 'install.sh'), `set -euo pipefail\n${t.install}\n`);
+    writeFileSync(join(dir, name, 'metadata.json'), '{"items": []}');
     for (const [collection, rows] of Object.entries(t.seeds ?? {})) {
       writeFileSync(join(dir, name, 'seeds', `${collection}.json`), JSON.stringify(rows));
     }
@@ -47,6 +61,11 @@ function writeTemplates(templates: Record<string, Template>): string {
   return dir;
 }
 
+/**
+ * Runs the script with a stub `kelta` first on PATH. The stub logs each call (args, cwd and
+ * tenant) to KELTA_LOG and prints APPLY_REPLY, or APPLY_REPLY_<tenant with - as _> when set,
+ * exiting APPLY_EXIT.
+ */
 function run(dir: string, env: Record<string, string> = {}): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
     execFile(
@@ -54,11 +73,13 @@ function run(dir: string, env: Record<string, string> = {}): Promise<{ code: num
       [SCRIPT, '--in-container', dir],
       {
         env: {
-          PATH: process.env.PATH ?? '',
+          PATH: `${stubBin}:${process.env.PATH ?? ''}`,
           AUTH_URL: baseUrl,
           GATEWAY_URL: baseUrl,
           ADMIN_PASSWORD: PASSWORD,
           LOG: join(dir, 'log'),
+          KELTA_LOG: join(dir, 'kelta-log'),
+          APPLY_REPLY: JSON.stringify(NO_OP_APPLY),
           ...env,
         },
       },
@@ -71,6 +92,20 @@ function run(dir: string, env: Record<string, string> = {}): Promise<{ code: num
 
 before(async () => {
   root = mkdtempSync(join(tmpdir(), 'templates-install-check-'));
+  stubBin = join(root, 'bin');
+  mkdirSync(stubBin);
+  writeFileSync(
+    join(stubBin, 'kelta'),
+    [
+      '#!/usr/bin/env bash',
+      'echo "$* | $(basename "$PWD") | $KELTA_TENANT" >>"$KELTA_LOG"',
+      'reply_var="APPLY_REPLY_${KELTA_TENANT//-/_}"',
+      'printf "%s\\n" "${!reply_var:-$APPLY_REPLY}"',
+      'exit "${APPLY_EXIT:-0}"',
+      '',
+    ].join('\n'),
+    { mode: 0o755 }
+  );
   server = createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => (body += chunk));
@@ -189,6 +224,80 @@ describe('templates-install-check.sh --in-container', () => {
       `a ${baseUrl} default ${TOKEN}\nb ${baseUrl} default ${TOKEN}\n` +
         `a ${baseUrl} ${SANDBOX_SLUG} ${SANDBOX_TOKEN}\n`
     );
+  });
+
+  it('applies metadata.json a second time after each install.sh and passes when it changes nothing', async () => {
+    counts = { accounts: 2 };
+    const dir = writeTemplates({
+      a: { install: MARK_INSTALLED, seeds: { accounts: [{}, {}] } },
+      b: { install: 'true' },
+    });
+
+    const result = await run(dir);
+
+    assert.equal(result.code, 0, result.out);
+    assert.equal(
+      readFileSync(join(dir, 'kelta-log'), 'utf8'),
+      'metadata apply metadata.json --yes --output json | a | default\n' +
+        'metadata apply metadata.json --yes --output json | b | default\n' +
+        `metadata apply metadata.json --yes --output json | a | ${SANDBOX_SLUG}\n`
+    );
+    assert.match(result.out, /a: second apply of metadata\.json changed nothing: \{"created":0,"updated":0,"skipped":2,"failed":0\}/);
+    assert.match(result.out, /Every second apply of metadata\.json changed nothing/);
+  });
+
+  it('fails, naming the template and the items, when the second apply creates an item', async () => {
+    const dir = writeTemplates({ a: { install: MARK_INSTALLED }, b: { install: 'true' } });
+    const reply = {
+      ...NO_OP_APPLY,
+      created: 1,
+      skipped: 1,
+      items: [
+        { type: 'COLLECTION', naturalKey: 'accounts', action: 'SKIPPED' },
+        { type: 'PICKLIST_VALUE', naturalKey: 'accounts.industry:SOFTWARE', action: 'CREATED' },
+      ],
+    };
+
+    const result = await run(dir, { APPLY_REPLY_default: JSON.stringify(reply) });
+
+    assert.equal(result.code, 1, result.out);
+    assert.match(result.out, /::error::a: the second apply of metadata\.json was not a no-op \(exit 0\): \{"created":1,/);
+    assert.match(result.out, /a: items the second apply did not skip:\n {2}PICKLIST_VALUE accounts\.industry:SOFTWARE: CREATED\n/);
+    assert.doesNotMatch(result.out, /COLLECTION accounts: SKIPPED/);
+    // Every template and the sandbox still install, so one run reports every re-apply.
+    assert.match(result.out, /::error::b: the second apply/);
+    assert.match(result.out, /a installed into the empty sandbox/);
+    assert.match(result.out, /::error::a second apply of metadata\.json changed or failed items in: a b \(see/);
+  });
+
+  it('fails when the second apply reports a failed item', async () => {
+    const dir = writeTemplates({ a: { install: MARK_INSTALLED } });
+    const reply = {
+      ...NO_OP_APPLY,
+      success: false,
+      skipped: 1,
+      failed: 1,
+      items: [
+        { type: 'COLLECTION', naturalKey: 'accounts', action: 'SKIPPED' },
+        { type: 'FLOW', naturalKey: 'Stamp closed deals', action: 'FAILED', error: 'duplicate key' },
+      ],
+    };
+
+    const result = await run(dir, { APPLY_REPLY_default: JSON.stringify(reply) });
+
+    assert.equal(result.code, 1, result.out);
+    assert.match(result.out, /::error::a: the second apply of metadata\.json was not a no-op \(exit 0\): \{"created":0,"updated":0,"skipped":1,"failed":1\}/);
+    assert.match(result.out, / {2}FLOW Stamp closed deals: FAILED — duplicate key/);
+    assert.match(result.out, /changed or failed items in: a \(see/);
+  });
+
+  it('fails when the second apply exits non-zero, even with a zero report', async () => {
+    const dir = writeTemplates({ a: { install: MARK_INSTALLED } });
+
+    const result = await run(dir, { APPLY_EXIT: '1' });
+
+    assert.equal(result.code, 1, result.out);
+    assert.match(result.out, /::error::a: the second apply of metadata\.json was not a no-op \(exit 1\)/);
   });
 
   it('installs the first template into an empty sandbox created with cloneMetadata: false', async () => {

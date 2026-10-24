@@ -1,0 +1,15 @@
+# Package types ci/templates-roundtrip-check.sh leaves out of its export → apply → re-export
+# diff, one per line:
+#
+#   <PACKAGE_TYPE> <task or brief that removes the line> <why it is excluded>
+#
+# e.g. `REPORT KLT-665 not exported or imported yet`. The check removes these types from both
+# exports before diffing and prints every excluded type, with its task and its item count, in
+# its output. A line without a task fails the check. Remove a line in the change that makes the
+# type round-trip.
+#
+# Empty on purpose: UNIQUE_CONSTRAINT, REPORT and APPROVAL_PROCESS, the types the K-15 brief
+# expected to be missing, are exported and imported since KLT-665 (#1843), and KLT-666 found no
+# other type in PackageService/PackageImportService that cannot round-trip by reading them. CI is
+# the first real run: a type it shows failing gets a line here only with the follow-up task that
+# fixes it.
