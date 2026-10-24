@@ -51,15 +51,8 @@ toolset. `cli_` tools are local to `kelta mcp serve`.
 | Flows | #3 (no delete), #11, I#5 | `create_flow`, `update_flow`, `delete_flow`, `list_flows`; reference `kelta://docs/flows` | covered |
 | Flow test runs | Inspections counter flow; CRM "Stamp closed deals" | *(user)* `update_record` to trigger, `get_flow_run`, `execute_flow` | covered |
 | Dashboard | #10 (widget `config` keys undocumented) | `apply_dashboard` (idempotent); reference `kelta://docs/dashboards` | covered |
-| Dashboard validate / data | I#8 (`kelta api POST …/validate` needed `--yes`) | `cli_dashboards_validate`, `cli_dashboards_data` | covered |
-| Seed records with parent references | `install.sh` step 4: `records bulk` plus a jq natural-key → id mapping (`REFS`) | `seed_records` (`references: {"account": "accounts.name"}` resolves keys before writing; batches of 100) | covered; records still carry `createdBy: null` (#12, a platform gap in atomic operations, not in the tool) |
-| Install a package | `install.sh` step 1: `kelta metadata apply metadata.json` | `cli_metadata_apply`, `cli_metadata_diff` (act on the `--tenant` tenant) | covered |
-| Export | #13, I#6 (whole tenant exported, filtered with jq) | `cli_metadata_export` with `collections` (only those collections and what hangs off them); runs against the `--tenant` tenant and writes the file on the machine running `kelta mcp serve` | covered; no hosted admin tool returns the package, so a remote-only client cannot export — follow-up: an `export_metadata` admin tool returning the package JSON |
+| Dashboard validate / data | I#8 (`kelta api POST …/validate` needed `--yes`) | `validate_dashboard`, `dashboard_data` (hosted admin tools, take a dashboard name or id); local alternative: `cli_dashboards_validate`, `cli_dashboards_data` | covered |
+| Seed records with parent references | `install.sh` step 4: `records bulk` plus a jq natural-key → id mapping (`REFS`) | `seed_records` (`references: {"account": "accounts.name"}` resolves keys before writing; batches of 100) | covered; atomic operations stamp `createdBy`/`updatedBy` since KLT-500 (#12, recorded in `.claude/docs/concerns.md`) |
+| Install a package | `install.sh` step 1: `kelta metadata apply metadata.json` | `apply_metadata` (`dryRun`, `conflictMode`) and `diff_metadata` (preview, no writes), hosted admin tools taking the package JSON; local alternative: `cli_metadata_apply`, `cli_metadata_diff` (read the package from a file, act on the `--tenant` tenant) | covered |
+| Export | #13, I#6 (whole tenant exported, filtered with jq) | `export_metadata` with `collections` (only those collections and what hangs off them), a hosted admin tool returning the package JSON in its result; local alternative: `cli_metadata_export`, which writes the file on the machine running `kelta mcp serve` | covered |
 | Sandbox lifecycle | both logs: `sandbox create` / `sandbox delete` | `cli_sandbox_create`, `cli_sandbox_list`, `cli_sandbox_delete` (from a server bound to the parent) | covered |
-
-## Follow-ups
-
-- An `export_metadata` admin tool that returns the package JSON (with the `collections` scope of
-  `cli_metadata_export`), for clients that connect to the hosted endpoint directly.
-- Atomic operations should stamp `createdBy` / `updatedBy` (CRM #12); `seed_records` inherits the
-  gap.

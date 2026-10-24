@@ -22,6 +22,11 @@ Microservices + Event-Driven + Dynamic Configuration Platform. Multi-tenant with
 - Spring Authorization Server for OAuth2. Federated user mapping from external IdPs.
 - Entry: `kelta-auth/src/main/java/io/kelta/auth/AuthApplication.java`
 
+**MCP server** (`kelta-mcp/`):
+- Stateless MCP over HTTP at `/{tenantSlug}/mcp/user` and `/{tenantSlug}/mcp/admin`; PAT auth, every tool call forwarded through the gateway (`GatewayHttpClient`), which authorizes it.
+- Tools are `UserTool` / `AdminTool` beans auto-registered by `McpServerConfig`; each has a `<ClassName>Test` (`ToolTestCoverageGuardTest`).
+- Admin tools include hosted parity with the CLI's package and dashboard commands (KLT-734): `export_metadata` (`POST /api/packages/export`, package JSON returned as text), `diff_metadata` (`POST /api/packages/import/preview`), `apply_metadata` (`POST /api/packages/import`; both send the package as a raw JSON body, not the CLI's multipart upload), `validate_dashboard` and `dashboard_data` (`POST /api/dashboards/{id}/validate|data`, name resolved to id).
+
 **Runtime Libraries** (`kelta-platform/runtime/`):
 - `runtime-core` — Collection model, query engine, storage, validation, flow execution
 - `runtime-events` — Shared event classes (PlatformEvent<T>)

@@ -12,6 +12,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Gateway-backed name/id resolution shared by the admin tools.
@@ -26,6 +27,8 @@ import java.util.Map;
 final class AdminLookups {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Pattern UUID_PATTERN = Pattern.compile(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 
     private final GatewayHttpClient gateway;
 
@@ -86,6 +89,16 @@ final class AdminLookups {
      */
     String idByNaturalKey(String collection, Map<String, Object> naturalKey) {
         return findExisting(collection, naturalKey);
+    }
+
+    /**
+     * Passes a dashboard id through, or resolves a dashboard name to its id ({@code
+     * filter[name][eq]}), as {@code kelta dashboards validate|data} do. Returns null when no
+     * dashboard has that name.
+     */
+    String dashboardIdByNameOrId(String nameOrId) {
+        if (UUID_PATTERN.matcher(nameOrId).matches()) return nameOrId;
+        return findExisting("dashboards", Map.of("name", nameOrId));
     }
 
     /** Resolves a collection UUID to its name, or null when not found. */

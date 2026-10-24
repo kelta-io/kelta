@@ -206,6 +206,17 @@ run_replay "$TMP/tpl" MCP_REPLAY_FIXTURE="$TMP/bad.json"
 expect_status 1 "empty save"
 expect_output "save aId: .data.missing is null" "empty save → named"
 
+# Case 11: a call to a local-only cli_* tool fails before the bridge starts, naming the step.
+jq '.calls[3].tool = "cli_metadata_export" | .calls[3].step = "Export"' "$TMP/tpl/mcp-replay/calls.json" > "$TMP/bad.json"
+run_replay "$TMP/tpl" MCP_REPLAY_FIXTURE="$TMP/bad.json"
+expect_status 1 "cli_ tool in fixture"
+expect_output "::error::mcp-replay: call 4/5 cli_metadata_export (Export): cli_ tools are local CLI tools" \
+  "cli_ tool in fixture → ::error:: names the call and its step"
+if [ -s "$TMP/calls" ] || [ -s "$TMP/args" ]; then
+  fail_test "cli_ tool in fixture: the bridge ran anyway"
+fi
+pass "cli_ tool in fixture → kelta mcp serve not started, no tools/call sent"
+
 # --- the checked-in applicant-tracking fixture -------------------------------------------
 FIXTURE="$REAL_TEMPLATE/mcp-replay/calls.json"
 BASELINE="$(tr -d '[:space:]' < "$REAL_TEMPLATE/mcp-replay/baseline.txt")"

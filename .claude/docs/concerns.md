@@ -176,7 +176,7 @@ mailbox to a high-volume public address.
   `CerbosAuthorizationService.checkCollectionAccess`, keyed on the collection **UUID**
   (`getCollectionIdByName`) — keep it UUID-keyed; any denial fails the whole batch; missing
   identity or Cerbos error denies. Each add/update op then gets the field write rules
-  (`FieldWriteGuard`, shared with `CerbosFieldWriteSecurityAdvice`). It stamps `createdBy`/`updatedBy` (KLT-500) but, unlike the
+  (`FieldWriteGuard`, shared with `CerbosFieldWriteSecurityAdvice`). It stamps `createdBy`/`updatedBy` (KLT-500, CRM build-log #12) but, unlike the
   router, never stamps `createdGeo`/`updatedGeo` and doesn't inject `tenantId` for tenant-scoped
   system collections when the client omits it.
 - **Delegated administration (V157):** `DelegatedAdminScopeValidationHook` rejection of
@@ -979,6 +979,7 @@ One line each; full write-ups are in git history.
 - Older: Superset SQL injection hardening; gateway actuator requires JWT except health/info; `/internal/**` JWT auth (flag-gated); schema-name sanitization in `SchemaLifecycleModule`.
 
 **Bugs**
+- KLT-500 (2026-10-10) — records written through atomic operations (`POST /api/operations`: `kelta records bulk`, the MCP `seed_records` tool) carried `createdBy`/`updatedBy` = `null` while single-record writes carried the user id (CRM template `BUILD-LOG.md` error #12); `AtomicOperationsController` now stamps both. Moved here from the `docs/authoring/mcp-admin-coverage.md` follow-ups (KLT-734).
 - 2026-10-12 — kelta-auth `/auth/password/change`, `/auth/password/reset-request` and `/auth/password/reset` answered 500 on PostgreSQL: they bound `java.time.Instant` parameters, which the PostgreSQL driver cannot infer a type for (H2 in the unit tests accepts them). Now bound as `java.sql.Timestamp`; `BaselineAdminPasswordIntegrationTest.passwordEndpointsOnPostgres` runs them on the real migrated schema.
 - 2026-10-12 — kelta-auth error responses: errors on the sign-in pages rendered Spring Boot's JSON error map into a response already marked `text/html` ("No converter for [class java.util.LinkedHashMap] with preset Content-Type 'text/html'"). `AuthErrorController` (replaces `BasicErrorController`, whitelabel off) and `HtmlErrorPageResolver` render `templates/error.html` (status, neutral message, request id) for browsers and page handlers, and JSON for API callers. `AuthErrorHandlingTest`.
 - 2026-10-12 — kelta-auth session cookies on plain http: `Secure` followed the host name (any non-loopback host), so a plain-http install on a LAN host name got a cookie the browser dropped and could not sign in. `Secure` now follows the scheme the browser used (`X-Forwarded-Proto`, else the request), with `KELTA_AUTH_SESSION_COOKIE_SECURE` to override.
