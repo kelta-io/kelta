@@ -166,5 +166,3 @@ export function ObservabilitySettingsPage({ className }: ObservabilitySettingsPa
     </div>
   )
 }
-
-export default ObservabilitySettingsPage

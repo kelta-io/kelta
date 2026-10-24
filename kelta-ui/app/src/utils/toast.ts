@@ -3,8 +3,8 @@
  *
  * Call `toast.success/error/info/warning(message)` from `sonner` directly when the variant is
  * known at the call site. {@link showToast} is only for a variant chosen at run time (a page
- * action's `level`, a pass/fail result) and for the deprecated `useToast` adapter. Toasts render
- * in the `<Toaster />` viewport mounted once in `App` (`components/ui/sonner.tsx`).
+ * action's `level`, a pass/fail result). Toasts render in the `<Toaster />` viewport mounted once
+ * in `App` (`components/ui/sonner.tsx`).
  */
 import { toast } from 'sonner'
 
@@ -14,7 +14,7 @@ export type ToastType = 'success' | 'error' | 'warning' | 'info'
 export interface ShowToastOptions {
   /**
    * Auto-dismiss delay in ms. Omitted ⇒ the `<Toaster />` default; `0` (or negative) ⇒ the
-   * toast stays until closed, matching the old `useToast` contract.
+   * toast stays until closed.
    */
   duration?: number
   /** Explicit id, so a later `toast.dismiss(id)` can close this toast. */

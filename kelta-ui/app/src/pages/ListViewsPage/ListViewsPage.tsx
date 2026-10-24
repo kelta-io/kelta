@@ -539,5 +539,3 @@ export function ListViewsPage({
     </AdminCrudPage>
   )
 }
-
-export default ListViewsPage

@@ -256,5 +256,3 @@ export function RecordActionsBar({
     </div>
   )
 }
-
-export default RecordActionsBar

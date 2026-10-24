@@ -9,7 +9,7 @@
  * origin and needs no suffix.
  */
 
-export const TOKENS_STORAGE_KEY = 'kelta_auth_tokens'
+const TOKENS_STORAGE_KEY = 'kelta_auth_tokens'
 
 /** localStorage key for a tenant's tokens; `null` means the origin itself is the tenant. */
 export function tenantTokensKey(slug: string | null): string {

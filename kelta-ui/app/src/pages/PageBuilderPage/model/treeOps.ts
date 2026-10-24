@@ -46,7 +46,7 @@ function mapTree(
 }
 
 /** True if `maybeChildId` is `ancestorId` itself or lives anywhere inside its subtree. */
-export function isDescendant(
+function isDescendant(
   tree: PageComponent[],
   ancestorId: string,
   maybeChildId: string | null

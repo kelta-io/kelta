@@ -86,7 +86,7 @@ export interface MailboxMessage {
   attachments?: MailboxAttachment[]
 }
 
-export interface MailboxEscalation {
+interface MailboxEscalation {
   id: string
   clock: string
   level: string

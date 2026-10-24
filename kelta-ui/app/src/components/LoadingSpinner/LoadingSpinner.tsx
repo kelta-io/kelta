@@ -139,6 +139,3 @@ export function LoadingSpinner({
     </div>
   )
 }
-
-// Export default for convenience
-export default LoadingSpinner

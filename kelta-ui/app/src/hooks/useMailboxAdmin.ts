@@ -53,14 +53,14 @@ export interface EscalationContact {
   channels: string[] | string
 }
 
-export interface AutoReplyBreakdownRow {
+interface AutoReplyBreakdownRow {
   outcome: string
   veto_reason?: string | null
   matched_category?: string | null
   count: number
 }
 
-export interface AutoReplyDecision {
+interface AutoReplyDecision {
   id: string
   threadId: string
   subject?: string | null

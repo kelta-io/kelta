@@ -122,5 +122,3 @@ export function EnvironmentsPage({ testId }: EnvironmentsPageProps): React.React
     </div>
   )
 }
-
-export default EnvironmentsPage

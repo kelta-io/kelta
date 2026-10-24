@@ -194,5 +194,3 @@ export function PolicyTestPanel({
     </div>
   )
 }
-
-export default PolicyTestPanel

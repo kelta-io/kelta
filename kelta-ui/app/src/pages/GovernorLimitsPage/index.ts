@@ -1,2 +1,2 @@
-export { GovernorLimitsPage, default } from './GovernorLimitsPage'
+export { GovernorLimitsPage } from './GovernorLimitsPage'
 export type { GovernorLimitsPageProps } from './GovernorLimitsPage'

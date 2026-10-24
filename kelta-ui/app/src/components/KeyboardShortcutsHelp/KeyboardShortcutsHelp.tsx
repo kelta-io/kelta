@@ -134,5 +134,3 @@ export function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelp
     </Dialog>
   )
 }
-
-export default KeyboardShortcutsHelp

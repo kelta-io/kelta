@@ -8,7 +8,7 @@ import { useApi } from '../context/ApiContext'
  * the MANAGE_DATA system permission.
  */
 
-export type ArchiveSourceType = 'CONVERSATION' | 'VIDEO_SESSION'
+type ArchiveSourceType = 'CONVERSATION' | 'VIDEO_SESSION'
 
 export interface ArchiveSummary {
   id: string
@@ -24,7 +24,7 @@ export interface ArchiveSummary {
   purgedAt?: string | null
 }
 
-export interface ArchiveArtifact {
+interface ArchiveArtifact {
   id: string
   fileName: string
   contentType: string
@@ -111,19 +111,6 @@ export function useSetLegalHold() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['telehealth-archives'] })
-    },
-  })
-}
-
-export function useCreateArchive() {
-  const { apiClient } = useApi()
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (input: { sourceType: ArchiveSourceType; sourceId: string }) =>
-      apiClient.post<ArchiveSummary>('/api/telehealth/archives', input),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['telehealth-archives'] })
-      void queryClient.invalidateQueries({ queryKey: ['chat-conversations'] })
     },
   })
 }

@@ -13,7 +13,7 @@ import { Node, mergeAttributes } from '@tiptap/core'
  * existing HTML — bare `{{...}}` text runs (handled by the editor's
  * {@code htmlToDoc} pre-pass before content is set).
  */
-export interface MergeTagAttributes {
+interface MergeTagAttributes {
   expression: string
 }
 

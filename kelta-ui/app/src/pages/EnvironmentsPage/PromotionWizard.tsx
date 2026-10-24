@@ -637,5 +637,3 @@ export function PromotionWizard({ onClose }: PromotionWizardProps): React.ReactE
     </div>
   )
 }
-
-export default PromotionWizard
