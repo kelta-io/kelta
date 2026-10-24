@@ -2,6 +2,7 @@ package io.kelta.runtime.router;
 
 import io.kelta.jsonapi.AtomicOperation;
 import io.kelta.jsonapi.AtomicResult;
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
@@ -53,7 +54,10 @@ public class AtomicOperationExecutor {
     /**
      * Executes all operations sequentially, stamping {@code createdBy}/{@code updatedBy}
      * with {@code actingUserId} the way {@link DynamicCollectionRouter} does for a single
-     * write — overwriting any client-supplied value.
+     * write — overwriting any client-supplied value. An {@code add} on a tenant-scoped system
+     * collection is stamped with the bound {@code TenantContext} tenant, as the router stamps
+     * {@code X-Tenant-ID}; a client-supplied {@code tenantId} naming another tenant fails that
+     * operation.
      *
      * @param operations   the list of atomic operations to execute
      * @param actingUserId the caller's {@code platform_user} UUID, or null to stamp nothing
@@ -111,6 +115,13 @@ public class AtomicOperationExecutor {
             attributes.put("createdBy", actingUserId);
             attributes.put("updatedBy", actingUserId);
         }
+
+        String tenantId = TenantContext.get();
+        RecordTenantScope.foreignTenantId(attributes, definition, tenantId).ifPresent(supplied -> {
+            throw new AtomicOperationException(index, "add",
+                    "tenantId '" + supplied + "' does not match the request's tenant for type " + type);
+        });
+        RecordTenantScope.injectTenantId(attributes, definition, tenantId);
 
         Map<String, Object> created = queryEngine.create(definition, attributes);
         String id = (String) created.get("id");
