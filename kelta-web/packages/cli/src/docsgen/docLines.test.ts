@@ -17,6 +17,7 @@ import {
   tokenize,
   type AllowlistEntry,
   type DocLine,
+  type ExtractedLine,
 } from './docLines.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url));
@@ -46,7 +47,7 @@ function docFiles(): string[] {
   return [...files].sort();
 }
 
-function extractAll(): DocLine[] {
+function extractAll(): ExtractedLine[] {
   return docFiles().flatMap((path) => {
     const file = relative(REPO_ROOT, path);
     const content = readFileSync(path, 'utf-8');
@@ -250,8 +251,8 @@ describe('doc-line checker', () => {
 
   it('flags allowlist entries that went stale', () => {
     const lines = [
-      { file: 'a.md', line: 1, text: 'kelta records list invoices' },
-      { file: 'a.md', line: 2, text: 'kelta frobnicate' },
+      { file: 'a.md', line: 1, text: 'kelta records list invoices', inline: false },
+      { file: 'a.md', line: 2, text: 'kelta frobnicate', inline: false },
     ];
     const problems = checkDocLines(lines, index);
     const entry = (line: DocLine) => ({ ...line, reason: 'cli is wrong' });
