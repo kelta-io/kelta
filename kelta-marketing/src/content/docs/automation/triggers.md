@@ -98,8 +98,10 @@ The JSON body becomes `$.input` and the request headers `$.headers`; `trigger.ty
   to the system that should call it; rotate by recreating the flow.
 - There is **no signature verification**. If the source signs its requests, verify the signature inside the flow
   (`INVOKE_SCRIPT` or `CALL_API` to a verifier) before acting on the body.
-- The gateway applies a per-IP rate limit to unauthenticated paths, and the endpoint is exempt from the tenant IP
-  allowlist.
+- The gateway rate-limits the endpoint per client IP: by default 300 requests per minute per IP, shared by **all**
+  flow webhooks called from that IP (the bucket is the `/api/webhooks` prefix plus the IP). Over budget the call
+  gets `429` with a `Retry-After` header. The budget is configurable per deployment via `RATE_LIMIT_IP_PATHS`
+  (see [Configuration](/docs/deploy/configuration/)). The endpoint is exempt from the tenant IP allowlist.
 - A flow that is not `AUTOLAUNCHED` or not active answers `400`.
 
 For webhooks that carry the record events Kelta itself emits, see [Outbound webhooks](/docs/api/webhooks/).
