@@ -26,7 +26,11 @@ export default defineConfig({
     // fails fast.
     testTimeout: 20_000,
     hookTimeout: 20_000,
-    include: ['packages/**/*.{test,spec}.{ts,tsx}', 'packages/**/*.property.test.{ts,tsx}'],
+    include: [
+      'packages/**/*.{test,spec}.{ts,tsx}',
+      'packages/**/*.property.test.{ts,tsx}',
+      'scripts/**/*.test.ts',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

@@ -18,7 +18,8 @@
     "format:check": "prettier --check \"packages/**/*.{ts,tsx,json,md}\"",
     "typecheck": "tsc --noEmit",
     "check:doc-snippets": "node scripts/check-doc-snippets.mjs",
-    "gen:docs": "npm run build -w packages/cli && node scripts/gen-docs.mjs"
+    "gen:docs": "npm run build -w packages/cli && node scripts/gen-docs.mjs",
+    "gen:api-reference": "node scripts/gen-api-reference.mjs"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.4.2",
