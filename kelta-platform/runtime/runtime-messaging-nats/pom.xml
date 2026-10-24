@@ -16,7 +16,7 @@
     <description>NATS JetStream messaging implementation for Kelta platform events</description>
 
     <properties>
-        <jnats.version>2.25.1</jnats.version>
+        <jnats.version>2.26.4</jnats.version>
     </properties>
 
     <dependencies>
