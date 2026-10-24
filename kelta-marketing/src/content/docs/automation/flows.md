@@ -98,17 +98,19 @@ The envelope's shape and the all-important `$.input.<key>` rule are on [Flow dat
 ## Map
 
 ```json
-"NotifyEach": {
-  "Type": "Map",
-  "ItemsPath": "$.lookup.records",
-  "MaxConcurrency": 5,
-  "FailOnPartial": true,
-  "Iterator": {
-    "StartAt": "Email",
-    "States": { "Email": { "Type": "Task", "Resource": "EMAIL_ALERT", "Parameters": { "to": "${$.email}", "subject": "Hello" }, "End": true } }
-  },
-  "ResultPath": "$.notified",
-  "End": true
+{
+  "NotifyEach": {
+    "Type": "Map",
+    "ItemsPath": "$.lookup.records",
+    "MaxConcurrency": 5,
+    "FailOnPartial": true,
+    "Iterator": {
+      "StartAt": "Email",
+      "States": { "Email": { "Type": "Task", "Resource": "EMAIL_ALERT", "Parameters": { "to": "${$.email}", "subject": "Hello" }, "End": true } }
+    },
+    "ResultPath": "$.notified",
+    "End": true
+  }
 }
 ```
 
@@ -118,12 +120,14 @@ failures are collected in the result.
 ## Invoke another flow
 
 ```json
-"Enrich": {
-  "Type": "InvokeFlow",
-  "FlowName": "enrich-customer",
-  "Input": { "customerId": "${$.record.data.customer}" },
-  "ResultPath": "$.enriched",
-  "Next": "Continue"
+{
+  "Enrich": {
+    "Type": "InvokeFlow",
+    "FlowName": "enrich-customer",
+    "Input": { "customerId": "${$.record.data.customer}" },
+    "ResultPath": "$.enriched",
+    "Next": "Continue"
+  }
 }
 ```
 

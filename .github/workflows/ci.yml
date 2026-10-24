@@ -63,6 +63,7 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       ui: ${{ steps.filter.outputs.ui }}
       marketing: ${{ steps.filter.outputs.marketing }}
+      sdk_docs: ${{ steps.filter.outputs.sdk_docs }}
       any_java: ${{ steps.filter.outputs.any_java }}
       e2e: ${{ steps.filter.outputs.e2e }}
       runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
@@ -385,7 +386,7 @@ jobs:
   test-frontend:
     name: Test Frontend
     needs: changes
-    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.workflows == 'true'
+    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.sdk_docs == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: k8s-runner
     defaults:
       run:
@@ -416,6 +417,10 @@ jobs:
 
       - name: Type check
         run: npm run typecheck
+
+      # Every ```ts / ```tsx block in the SDK docs compiles against packages/*/src.
+      - name: Type check SDK doc snippets
+        run: npm run check:doc-snippets
 
       - name: Format check
         run: npm run format:check

@@ -219,7 +219,7 @@ directly or through other flows, therefore stops after ten hops.
 
 ### `SUBMIT_FOR_APPROVAL` *(record-scoped)*
 
-```json
+```jsonc
 { "processId": "<approval process id>" }   // optional — auto-detects the collection's process
 ```
 

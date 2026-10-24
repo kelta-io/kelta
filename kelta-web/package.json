@@ -17,6 +17,7 @@
     "format": "prettier --write \"packages/**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"packages/**/*.{ts,tsx,json,md}\"",
     "typecheck": "tsc --noEmit",
+    "check:doc-snippets": "node scripts/check-doc-snippets.mjs",
     "gen:docs": "npm run build -w packages/cli && node scripts/gen-docs.mjs"
   },
   "devDependencies": {

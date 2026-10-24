@@ -16,7 +16,8 @@ token expires — reconnect with a fresh one. The tenant comes from the token.
 
 ## Client messages
 
-```json
+```jsonc
+// one message per frame
 { "action": "subscribe",   "collection": "invoices" }
 { "action": "unsubscribe", "collection": "invoices" }
 { "action": "presence.join",  "resource": "record:invoices/9d2c…" }
@@ -27,12 +28,13 @@ token expires — reconnect with a fresh one. The tenant comes from the token.
 
 ## Server messages
 
-```json
+```jsonc
+// one message per frame
 { "action": "subscribed", "collection": "invoices" }
 { "action": "error", "message": "Subscription limit reached" }
 
 { "event": "record.changed", "collection": "invoices", "changeType": "UPDATED",
-  "recordId": "9d2c…", "data": { … }, "timestamp": "2026-09-21T10:00:00Z" }
+  "recordId": "9d2c…", "data": { /* the record */ }, "timestamp": "2026-09-21T10:00:00Z" }
 
 { "event": "presence.changed", "resource": "record:invoices/9d2c…", "users": [ { "id": "…", "email": "…" } ], "timestamp": "…" }
 ```
