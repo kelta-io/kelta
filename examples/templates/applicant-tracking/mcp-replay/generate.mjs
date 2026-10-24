@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// Writes calls.json: the MCP tool calls of this template's build (BUILD-LOG.md, "The 101 MCP
-// calls by step"), in build order, with every argument spelled out. The arguments are read from
-// the template's own files (metadata.json, list-views/, dashboards/, seeds/), so the replay
+// Writes calls.json: the steps of this template's MCP build (BUILD-LOG.md, "The 101 MCP calls by
+// step"), in build order, on the hosted kelta-mcp tools that now do each step in fewest calls
+// (apply_collection, apply_listview, validate_dashboard, dashboard_data, export_metadata), with
+// every argument spelled out. The build's error calls are not reproduced. The arguments are read
+// from the template's own files (metadata.json, list-views/, dashboards/, seeds/), so the replay
 // builds exactly what install.sh installs.
 //
 //   node examples/templates/applicant-tracking/mcp-replay/generate.mjs           rewrite calls.json
@@ -12,8 +14,6 @@
 //   calls[].arguments    the tools/call arguments
 //   calls[].save         {"<var>": "<jq expression>"}: evaluated on the JSON text of a successful
 //                        result; the value is kept under <var>
-//   calls[].expectError  why this call returned an error in the build; the replay tolerates an
-//                        error here (and warns if the call succeeds)
 //   "{{var}}" / "{{var:key}}"  an argument string that is exactly this is replaced by the saved
 //                        value (or by its member "key"), so ids minted earlier in the run are
 //                        never written into the fixture
@@ -43,17 +43,11 @@ const SEED_REFS = {
 };
 
 const camel = (name) => name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-const collectionVar = (name) => `${camel(name)}CollectionId`;
-const fieldVar = (collection, field) => `${camel(collection)}.${field}.fieldId`;
 const seedVar = (collection) => `${camel(collection)}Ids`;
 
 const collections = Object.fromEntries(items('COLLECTION').map((c) => [c.name, c]));
 const fields = items('FIELD');
 const fieldsOf = (collection) => fields.filter((f) => f.collection_name === collection);
-const picklistFields = COLLECTION_ORDER.flatMap((c) =>
-  fieldsOf(c).filter((f) => f.type === 'PICKLIST')
-);
-const fieldById = Object.fromEntries(fields.map((f) => [f.id, f]));
 const valuesOf = (field) =>
   items('PICKLIST_VALUE')
     .filter((v) => v.picklist_source_type === 'FIELD' && v.picklist_source_id === field.id)
@@ -73,9 +67,11 @@ step(DISCOVERY, { tool: 'list_picklists', arguments: {} });
 step(DISCOVERY, { tool: 'list_flows', arguments: {} });
 step(DISCOVERY, { tool: 'query_collection', arguments: { collection: 'dashboards', pageSize: 50 } });
 
-// --- Collections and display fields --------------------------------------------------------
-// Picklist fields are not created inline: the build's first create_collection could not create
-// them (BUILD-LOG.md error 1), so all seven went through create_record on `fields` below.
+// --- Collections ---------------------------------------------------------------------------
+// One apply_collection per collection: its fields, each picklist field's own (FIELD-scoped)
+// values and the display field, inline. The build took create_collection, a create_record on
+// `fields` per picklist field, one per picklist value and an update_collection per display field
+// (BUILD-LOG.md errors 1-4 and "Observed").
 const fieldArgs = (f) => {
   const args = { fieldName: f.name, type: f.type, displayName: f.display_name, required: f.required };
   if (f.unique_constraint) args.unique = true;
@@ -85,105 +81,38 @@ const fieldArgs = (f) => {
     args.referenceCollection = f.reference_collection_name;
     if (f.relationship_name) args.relationshipName = f.relationship_name;
   }
+  if (f.type === 'PICKLIST') {
+    args.values = valuesOf(f).map((v) => {
+      const value = { value: v.value, label: v.label };
+      if (v.color) value.color = v.color;
+      if (v.description) value.description = v.description;
+      return value;
+    });
+  }
   return args;
 };
 for (const name of COLLECTION_ORDER) {
   const c = collections[name];
-  step('Collections and display fields', {
-    tool: 'create_collection',
+  step('Collections', {
+    tool: 'apply_collection',
     arguments: {
       name,
       displayName: c.display_name,
       description: c.description,
-      fields: fieldsOf(name).filter((f) => f.type !== 'PICKLIST').map(fieldArgs),
+      fields: fieldsOf(name).map(fieldArgs),
+      displayFieldName: c.display_field_name,
     },
   });
 }
-// create_collection leaves displayFieldId null when displayFieldName names an inline field
-// (BUILD-LOG.md, "Observed"), so each display field is set afterwards.
-for (const name of COLLECTION_ORDER) {
-  step('Collections and display fields', {
-    tool: 'update_collection',
-    arguments: { id: name, displayFieldName: collections[name].display_field_name },
-    save: { [collectionVar(name)]: '.data.id' },
-  });
-}
-
-// --- Picklist fields -----------------------------------------------------------------------
-const fieldRow = (f) => ({
-  collectionId: `{{${collectionVar(f.collection_name)}}}`,
-  name: f.name,
-  type: 'PICKLIST',
-  displayName: f.display_name,
-  required: f.required,
-});
-for (const f of picklistFields) {
-  step('Picklist fields', {
-    tool: 'create_record',
-    arguments: { collection: 'fields', attributes: fieldRow(f) },
-    save: { [fieldVar(f.collection_name, f.name)]: '.data.id' },
-  });
-}
-// Sent after the rows it repeats, so it fails on uk_field_collection_name even once atomic
-// operations accept system collections: the count stays the build's either way.
-const openingPicklists = picklistFields.filter((f) => f.collection_name === 'job-openings');
-step('Picklist fields', {
-  tool: 'bulk_apply',
-  arguments: {
-    operations: openingPicklists.map((f) => ({ op: 'add', type: 'fields', attributes: fieldRow(f) })),
-  },
-  expectError:
-    'BUILD-LOG.md error 2: atomic operations on the fields system collection answered 422 OPERATION_FAILED',
-});
-
-// --- Picklist values -----------------------------------------------------------------------
-const valueRow = (v) => {
-  const f = fieldById[v.picklist_source_id];
-  return {
-    picklistSourceType: 'FIELD',
-    picklistSourceId: `{{${fieldVar(f.collection_name, f.name)}}}`,
-    value: v.value,
-    label: v.label,
-    sortOrder: v.sort_order,
-    isActive: true,
-  };
-};
-for (const f of picklistFields) {
-  const values = valuesOf(f);
-  for (const v of values) {
-    step('Picklist values', {
-      tool: 'create_record',
-      arguments: { collection: 'picklist-values', attributes: valueRow(v) },
-    });
-  }
-  if (f.collection_name === 'job-openings' && f.name === 'department') {
-    step('Picklist values', {
-      tool: 'create_record',
-      arguments: { collection: 'picklist-values', attributes: valueRow(values[0]) },
-      expectError:
-        'BUILD-LOG.md error 4: the first department value re-sent; 409 UNIQUE_VIOLATION (uq_picklist_value)',
-    });
-  }
-}
-step('Picklist values', {
-  tool: 'bulk_apply',
-  arguments: {
-    operations: openingPicklists.flatMap((f) =>
-      valuesOf(f).map((v) => ({ op: 'add', type: 'picklist-values', attributes: valueRow(v) }))
-    ),
-  },
-  expectError:
-    'BUILD-LOG.md error 3: atomic operations on picklist-values answered 422 OPERATION_FAILED',
-});
 
 // --- Page layouts --------------------------------------------------------------------------
 const layouts = items('PAGE_LAYOUT');
 const sections = items('LAYOUT_SECTION');
 const layoutFields = items('LAYOUT_FIELD');
 const relatedLists = items('LAYOUT_RELATED_LIST');
-const layoutArgs = (layout, name = layout.name) => ({
+const layoutArgs = (layout) => ({
   collectionName: layout.collection_name,
-  name,
+  name: layout.name,
   layoutType: layout.layout_type,
   isDefault: layout.is_default,
   headerConfig: layout.header_config,
@@ -211,15 +140,10 @@ const layoutArgs = (layout, name = layout.name) => ({
       rowLimit: r.row_limit,
     })),
 });
-const layoutOf = (collection) => layouts.find((l) => l.collection_name === collection);
-step('Page layouts', {
-  tool: 'apply_layout',
-  arguments: layoutArgs(layoutOf('job-openings'), 'Job opening'),
-  expectError:
-    "BUILD-LOG.md error 5: a layout name with a space is sent as 'Job+opening' in the path and rejected",
-});
-for (const collection of ['candidates', 'job-applications', 'interviews', 'job-openings']) {
-  step('Page layouts', { tool: 'apply_layout', arguments: layoutArgs(layoutOf(collection)) });
+// The build's first apply_layout, named 'Job opening', was rejected (BUILD-LOG.md error 5).
+for (const collection of COLLECTION_ORDER) {
+  const layout = layouts.find((l) => l.collection_name === collection);
+  step('Page layouts', { tool: 'apply_layout', arguments: layoutArgs(layout) });
 }
 
 // --- Flow ----------------------------------------------------------------------------------
@@ -247,30 +171,6 @@ const listViewFiles = readdirSync(join(TEMPLATE, 'list-views')).filter((f) => f.
 for (const file of listViewFiles) {
   const collectionName = file.replace(/\.json$/, '');
   for (const view of readJson(`list-views/${file}`)) {
-    if (view.viewType === 'KANBAN') {
-      // apply_listview has no viewType/typeConfig, so the board takes create_listview, whose
-      // displayedFields is a comma-separated string: the build first sent an array.
-      const kanban = {
-        collectionName,
-        name: view.name,
-        visibility: view.visibility ?? 'PUBLIC',
-        isDefault: view.default ?? false,
-        rowLimit: view.rowLimit,
-        viewType: view.viewType,
-        typeConfig: { kanban: { laneField: view.laneField, cardFields: view.cardFields } },
-      };
-      step('List views', {
-        tool: 'create_listview',
-        arguments: { ...kanban, displayedFields: view.columns },
-        expectError:
-          "BUILD-LOG.md error 6: displayedFields sent as an array is stringified; Unknown field '[name'",
-      });
-      step('List views', {
-        tool: 'create_listview',
-        arguments: { ...kanban, displayedFields: view.columns.join(',') },
-      });
-      continue;
-    }
     const args = {
       collectionName,
       name: view.name,
@@ -281,6 +181,10 @@ for (const file of listViewFiles) {
     };
     if (view.sort) args.sort = view.sort;
     if (view.rowLimit) args.rowLimit = view.rowLimit;
+    if (view.viewType) {
+      args.viewType = view.viewType;
+      args.typeConfig = { kanban: { laneField: view.laneField, cardFields: view.cardFields } };
+    }
     step('List views', { tool: 'apply_listview', arguments: args });
   }
 }
@@ -336,9 +240,12 @@ step('Flow test', {
     fields: 'name,stage,stageChangedAt,hiredAt',
   },
 });
-// BUILD-LOG.md's "Dashboard check" (cli_dashboards_validate, cli_dashboards_data) and "Export"
-// (cli_metadata_export) are local CLI tools: `--source remote` does not serve them and kelta-mcp
-// has no equivalent, so those 3 calls are not replayed.
+
+// --- Dashboard check and export ------------------------------------------------------------
+const DASHBOARD = 'Hiring overview';
+step('Dashboard check', { tool: 'validate_dashboard', arguments: { dashboard: DASHBOARD } });
+step('Dashboard check', { tool: 'dashboard_data', arguments: { dashboard: DASHBOARD } });
+step('Export', { tool: 'export_metadata', arguments: { collections: COLLECTION_ORDER } });
 
 // --- Second state check and verification ---------------------------------------------------
 step('Second state check', { tool: 'list_collections', arguments: { includeSystem: false } });
@@ -367,12 +274,13 @@ step('Verification', {
   tool: 'query_collection',
   arguments: { collection: 'job-applications', filter: { stage: { EQ: 'HIRED' } }, fields: 'name,stage,hiredAt' },
 });
-// cli_dashboards_list in the build; cli_dashboards_validate and cli_dashboards_data are not
-// replayed (see above).
+// cli_dashboards_list in the build.
 step('Verification', {
   tool: 'query_collection',
-  arguments: { collection: 'dashboards', filter: { name: { EQ: 'Hiring overview' } } },
+  arguments: { collection: 'dashboards', filter: { name: { EQ: DASHBOARD } } },
 });
+step('Verification', { tool: 'validate_dashboard', arguments: { dashboard: DASHBOARD } });
+step('Verification', { tool: 'dashboard_data', arguments: { dashboard: DASHBOARD } });
 
 const fixture = {
   template: 'applicant-tracking',
