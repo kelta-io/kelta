@@ -97,19 +97,23 @@ before(() => {
   root = mkdtempSync(join(tmpdir(), 'templates-roundtrip-check-'));
   stubBin = join(root, 'bin');
   mkdirSync(stubBin);
-  // `kelta metadata export ... --name <n> --out <f>` copies $EXPORTS/<tenant>/<n>.json to <f>;
-  // `kelta metadata apply <f>` prints $APPLY_REPLY (exit $APPLY_EXIT). Every call is logged.
+  // `kelta metadata export ... --name <n> --out <f>` copies $EXPORTS/<tenant>/<n>.json to <f>
+  // (a missing one is an error on stderr, exit 1); `kelta metadata apply <f>` prints
+  // $APPLY_REPLY (exit $APPLY_EXIT). Like the real CLI, a `--version` anywhere prints the CLI
+  // version and exits 0 without running the command. Every call is logged.
   writeFileSync(
     join(stubBin, 'kelta'),
     [
       '#!/usr/bin/env bash',
       'set -euo pipefail',
       'echo "$KELTA_TENANT $KELTA_TOKEN | $*" >>"$KELTA_LOG"',
+      'for arg in "$@"; do [ "$arg" != --version ] || { echo 0.0.0-stub; exit 0; }; done',
       'if [ "$2" = export ]; then',
       '  args=("$@"); out=""; name=""',
       '  for ((i = 0; i < ${#args[@]}; i++)); do',
       '    case "${args[$i]}" in --out) out="${args[$((i + 1))]}" ;; --name) name="${args[$((i + 1))]}" ;; esac',
       '  done',
+      '  [ -f "$EXPORTS/$KELTA_TENANT/$name.json" ] || { echo "Unknown collection(s) in collectionNames" >&2; exit 1; }',
       '  cp "$EXPORTS/$KELTA_TENANT/$name.json" "$out"',
       '  echo "{\\"file\\": \\"$out\\"}"',
       'else',
@@ -317,7 +321,7 @@ describe('templates-roundtrip-check.sh --in-container', () => {
     );
     const log = readFileSync(join(dir, 'kelta-log'), 'utf8').trim().split('\n');
     assert.equal(log.length, 3, log.join('\n'));
-    assert.match(log[0], new RegExp(`^default ${TOKEN} \\| metadata export --collections accounts,contacts --name a --version 1\\.0\\.0 --out \\S+/export\\.json --output json$`));
+    assert.match(log[0], new RegExp(`^default ${TOKEN} \\| metadata export --collections accounts,contacts --name a --out \\S+/export\\.json --output json$`));
     assert.match(log[1], new RegExp(`^default--roundtrip-a ${SANDBOX_TOKEN} \\| metadata apply \\S+/export\\.json --yes --output json$`));
     assert.match(log[2], new RegExp(`^default--roundtrip-a ${SANDBOX_TOKEN} \\| metadata export --collections accounts,contacts --name a .*re-export\\.json`));
     assert.match(result.out, /a: the re-export matches the export/);
@@ -342,6 +346,17 @@ describe('templates-roundtrip-check.sh --in-container', () => {
     assert.match(result.out, /^\+\s+"display_field_name": null,?$/m);
     assert.match(result.out, /b: the re-export matches the export/);
     assert.match(result.out, /::error::export → apply → re-export did not round-trip for: a \(diffs above\)/);
+  });
+
+  it("fails naming the template and printing the CLI's error when an export fails", async () => {
+    const dir = setUp({ default: { a: exportOf('default') } });
+    rmSync(join(dir, 'exports', 'default', 'a.json'));
+
+    const result = await run(dir);
+
+    assert.equal(result.code, 1, result.out);
+    assert.match(result.out, /kelta metadata export exited 1: Unknown collection\(s\) in collectionNames/);
+    assert.match(result.out, /::error::a: kelta metadata export from default failed/);
   });
 
   it('reports the items a failed apply could not import and still diffs', async () => {

@@ -105,7 +105,6 @@ if [ "${1:-}" = "--in-container" ]; then
   ADMIN_USERNAME="${ADMIN_USERNAME:-admin@kelta.local}"
   SANDBOX_PREFIX="${SANDBOX_PREFIX:-roundtrip-}"
   READY_ATTEMPTS="${READY_ATTEMPTS:-60}"
-  PACKAGE_VERSION="1.0.0"
   : "${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set}"
   read_exclusions
 
@@ -126,10 +125,21 @@ if [ "${1:-}" = "--in-container" ]; then
     printf '%s' "$token"
   }
 
-  # export_to <file> <collections> <name> — `kelta metadata export` from KELTA_TENANT.
+  # export_to <file> <collections> <name> — `kelta metadata export` from KELTA_TENANT; on
+  # failure prints the CLI's output. No `--version`: the CLI's own `kelta --version` claims
+  # that flag after the subcommand too, prints the CLI version and exits 0 without exporting
+  # (the server's default package version is the same on both sides).
   export_to() {
-    kelta metadata export --collections "$2" --name "$3" --version "$PACKAGE_VERSION" \
-      --out "$1" --output json </dev/null >/dev/null && [ -s "$1" ]
+    local output status
+    set +e
+    output="$(kelta metadata export --collections "$2" --name "$3" --out "$1" --output json \
+      </dev/null 2>&1)"
+    status=$?
+    set -e
+    [ "$status" -eq 0 ] && [ -s "$1" ] && return 0
+    echo "  kelta metadata export exited $status${output:+: $output}" >&2
+    [ "$status" -ne 0 ] || echo "  and wrote no package to $1" >&2
+    return 1
   }
 
   # roundtrip <template dir> — steps 1-4 for one template; returns 1 on any failure.
