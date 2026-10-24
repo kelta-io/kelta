@@ -114,3 +114,31 @@ describe('fetchBootstrapConfig — tenant translations', () => {
     await expect(fetchBootstrapConfig()).resolves.toBeDefined()
   })
 })
+
+describe('fetchBootstrapConfig — API base URL', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.resetModules()
+  })
+
+  it('calls the API on its own origin when VITE_API_BASE_URL is empty', async () => {
+    // BASE_URL is read at module load, so stub first and import a fresh copy.
+    vi.stubEnv('VITE_API_BASE_URL', '')
+    vi.resetModules()
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({ ok: true, status: 200, json: async () => ({ data: [] }) } as Response)
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const fresh = await import('./bootstrapCache')
+
+    await fresh.fetchBootstrapConfig()
+
+    const urls = fetchMock.mock.calls.map((call) => String((call as unknown[])[0]))
+    expect(urls).toContain('/default/api/ui-pages?page[size]=500')
+    for (const url of urls) {
+      expect(url).toMatch(/^\/[^/]+\/api\//)
+    }
+    fresh.clearBootstrapCache()
+  })
+})

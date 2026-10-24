@@ -131,7 +131,12 @@ which forces every leg to build — so merging a change to this file redeploys e
    regression stops images from building rather than shipping.
 2. **`build-and-push`** — matrix `[gateway, worker, worker-migrate, auth, ui, ai, mcp,
    cli-downloads, marketing]`. Docker buildx → pushes to
-   `harbor.rzware.com/emf/emf-<svc>:latest` and `:main-<short-sha>`. Every leg builds from the
+   `harbor.rzware.com/emf/emf-<svc>:latest` and `:main-<short-sha>`. The shared `build-args`
+   block passes `VITE_API_BASE_URL=https://api.kelta.io`, which only the `ui` leg reads: that is
+   where the hosted kelta.io UI gets its gateway URL. `kelta-ui/Dockerfile`'s own default is
+   empty, i.e. same-origin (relative `/api/...`; the bundled `nginx.conf` does not proxy `/api`,
+   so a bare build needs a reverse proxy in front), so an image built from source with no args
+   never points at the hosted API. Every leg builds from the
    repo root (`context: .` — `marketing` used to override it to its module dir, and stopped when
    its docs engine started reading `docs/authoring/` and the generated CLI docs from outside the
    module; see *Marketing site*. actionlint rejects `matrix.context` once no entry defines it).
@@ -265,7 +270,9 @@ used; the workflow default is `permissions: {}`.
 build args (`BASE_REGISTRY=docker.io/library`, `MAVEN_MIRROR=central` — the Dockerfile defaults
 are the homelab Harbor/Nexus, unreachable from GitHub), and `kelta-ui` with compose's
 `VITE_API_BASE_URL=http://localhost:8080` plus `BASE_REGISTRY=docker.io/library` (the arg exists in
-`kelta-ui/Dockerfile` for this; its default is still Harbor). JVM, not native: a native image
+`kelta-ui/Dockerfile` for this; its default is still Harbor). The Dockerfile's
+`VITE_API_BASE_URL` default is empty (same-origin), so this explicit value is what the released
+image runs with. JVM, not native: a native image
 bakes Netty's clock origin in at build time (kelta#1627). `kelta-ai` (profile `ai`) and
 `kelta-bootstrap` (profile `seed`) are not released.
 
