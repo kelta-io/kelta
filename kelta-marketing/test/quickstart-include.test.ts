@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { createMarkdownProcessor } from '@astrojs/markdown-remark';
 import { describe, expect, it } from 'vitest';
 import astroConfig from '../astro.config.mjs';
+import { unifiedOptions } from './markdown-config';
 import { remarkInclude } from '../src/docs/remark-include';
 import { extractSection, QUICKSTART_ANCHORS, readmeQuickstart, rewriteAnchors } from '../src/docs/readme-section';
 
@@ -35,7 +36,7 @@ function renderedCodeLines(html: string): string[] {
 }
 
 async function render(markdown: string, sources: Record<string, string>): Promise<string> {
-  const processor = await createMarkdownProcessor({ ...astroConfig.markdown, remarkPlugins: [[remarkInclude, { sources }]] });
+  const processor = await createMarkdownProcessor({ ...astroConfig.markdown, ...unifiedOptions(), remarkPlugins: [[remarkInclude, { sources }]] });
   return (await processor.render(markdown)).code;
 }
 
@@ -94,7 +95,7 @@ describe('README quickstart section', () => {
 
 describe('docs quickstart page', () => {
   it('is wired to README.md through astro.config.mjs', () => {
-    const plugins = astroConfig.markdown?.remarkPlugins ?? [];
+    const plugins = unifiedOptions().remarkPlugins;
     const include = plugins.find((p) => Array.isArray(p) && p[0] === remarkInclude) as [unknown, { sources: Record<string, string> }];
     expect(include, 'remarkInclude is not registered').toBeDefined();
     expect(include[1].sources['readme-quickstart']).toBe(readmeQuickstart(readmePath));
