@@ -31,7 +31,7 @@ export interface ObjectPermissions {
 /**
  * Field visibility level.
  */
-export type FieldVisibility = 'VISIBLE' | 'READ_ONLY' | 'HIDDEN'
+type FieldVisibility = 'VISIBLE' | 'READ_ONLY' | 'HIDDEN'
 
 export interface UseCollectionPermissionsReturn {
   /** Object-level CRUD permission flags */

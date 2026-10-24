@@ -39,6 +39,7 @@ const list = defineCommand({
   name: 'list',
   summary: 'List the fields of a collection',
   positionals: [{ name: 'collection', description: 'Collection name or id', required: true }],
+  examples: [{ cmd: 'kelta fields list customers' }],
   input: z.object({ collection: z.string().min(1) }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
@@ -93,6 +94,16 @@ const add = defineCommand({
     { flag: '--relationship-name <name>', description: 'Relationship name (reference types)' },
     { flag: '--dimension <n>', description: 'Vector dimension (vector type)' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
+  ],
+  examples: [
+    {
+      cmd: 'kelta fields add invoices --name amount --type currency --required',
+      description: 'Add a required currency field',
+    },
+    {
+      cmd: 'kelta fields add orders --name status --type picklist --values draft,submitted,shipped --default draft',
+      description: 'Picklist field with field-scoped values',
+    },
   ],
   input: z.object({
     collection: z.string().min(1),
@@ -185,6 +196,7 @@ const update = defineCommand({
     { flag: '--description <text>', description: 'Description' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [{ cmd: "kelta fields update fld_123 --display-name 'Due Date' --required true" }],
   input: z.object({
     fieldId: z.string().min(1),
     displayName: z.string().optional(),
@@ -217,6 +229,7 @@ const remove = defineCommand({
   summary: 'Remove a field and its data',
   dangerous: true,
   positionals: [{ name: 'fieldId', description: 'Field id', required: true }],
+  examples: [{ cmd: 'kelta fields remove fld_123 --yes' }],
   input: z.object({ fieldId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client.getAxiosInstance().delete(`/api/fields/${input.fieldId}`);

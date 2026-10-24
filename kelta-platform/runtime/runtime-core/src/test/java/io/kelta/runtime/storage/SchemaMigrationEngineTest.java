@@ -1,6 +1,7 @@
 package io.kelta.runtime.storage;
 
 import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.CollectionDefinitionBuilder;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.FieldType;
 import io.kelta.runtime.model.StorageConfig;
@@ -13,15 +14,22 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 /**
  * Unit tests for SchemaMigrationEngine.
@@ -661,6 +669,33 @@ class SchemaMigrationEngineTest {
         }
         
         @Test
+        @DisplayName("Should skip deprecate but still record it when another pod already dropped the column")
+        void shouldTolerateAlreadyDroppedColumnOnDeprecate() {
+            List<FieldDefinition> oldFields = List.of(
+                new FieldDefinition("name", FieldType.STRING, false, false, false, null, null, null, null, null),
+                new FieldDefinition("old_field", FieldType.STRING, true, false, false, null, null, null, null, null)
+            );
+            setupTestTable("test_data", oldFields);
+
+            // Another pod's destructive migration dropped the column before this pod refreshed
+            jdbcTemplate.execute("ALTER TABLE test_data DROP COLUMN old_field");
+
+            List<FieldDefinition> newFields = List.of(
+                new FieldDefinition("name", FieldType.STRING, false, false, false, null, null, null, null, null),
+                new FieldDefinition("new_field", FieldType.STRING, true, false, false, null, null, null, null, null)
+            );
+            CollectionDefinition oldDef = createCollection("test_data", oldFields);
+            CollectionDefinition newDef = createCollection("test_data", newFields);
+
+            assertDoesNotThrow(() -> migrationEngine.migrateSchema(oldDef, newDef, TableRef.publicSchema("test_data")));
+
+            assertTrue(migrationEngine.getExistingColumns("test_data").contains("new_field"));
+            List<MigrationRecord> history = migrationEngine.getMigrationHistory("test_data");
+            assertEquals(1, history.stream().filter(r -> r.migrationType() == MigrationType.ADD_COLUMN).count());
+            assertEquals(1, history.stream().filter(r -> r.migrationType() == MigrationType.DEPRECATE_COLUMN).count());
+        }
+
+        @Test
         @DisplayName("Should alter column type for compatible changes")
         void shouldAlterColumnTypeForCompatibleChanges() {
             // Create initial table with INTEGER field
@@ -1114,6 +1149,98 @@ class SchemaMigrationEngineTest {
             insertRow("b", "de", "erasmus-plus");
             // Same (country, slug) pair: still rejected by the composite index.
             assertThrows(DataAccessException.class, () -> insertRow("c", "de", "erasmus-plus"));
+        }
+    }
+
+    @Nested
+    @DisplayName("pgvector extension on the add-field path")
+    class VectorExtensionTests {
+
+        private final FieldDefinition embedding = new FieldDefinition("embedding", FieldType.VECTOR,
+            true, false, false, null, null, null, null, Map.of("dimension", 3), null);
+
+        @Test
+        @DisplayName("a refused CREATE EXTENSION fails with the create path's message and skips the ALTER")
+        void refusedExtensionIsActionable() {
+            JdbcTemplate jdbc = mock(JdbcTemplate.class);
+            doThrow(new BadSqlGrammarException(
+                    "create extension", "CREATE EXTENSION IF NOT EXISTS vector",
+                    new SQLException("permission denied to create extension \"vector\"")))
+                .when(jdbc).execute("CREATE EXTENSION IF NOT EXISTS vector");
+            SchemaMigrationEngine engine = new SchemaMigrationEngine(jdbc);
+            CollectionDefinition oldDef = createCollection("vec_add", List.of(FieldDefinition.string("title")));
+            CollectionDefinition newDef = createCollection("vec_add",
+                List.of(FieldDefinition.string("title"), embedding));
+
+            StorageException ex = assertThrows(StorageException.class,
+                () -> engine.migrateSchema(oldDef, newDef));
+
+            assertTrue(ex.getMessage().startsWith("Collection 'vec_add' has a VECTOR field but the pgvector "
+                + "extension could not be enabled. Install pgvector on the database"), ex.getMessage());
+            assertInstanceOf(BadSqlGrammarException.class, ex.getCause());
+            verify(jdbc, never())
+                .execute(contains("ADD COLUMN"));
+        }
+
+        @Test
+        @DisplayName("no VECTOR field added → the extension is never requested")
+        void noVectorNoExtension() {
+            JdbcTemplate jdbc = mock(JdbcTemplate.class);
+            SchemaMigrationEngine engine = new SchemaMigrationEngine(jdbc);
+            CollectionDefinition oldDef = createCollection("vec_add", List.of(embedding));
+            CollectionDefinition newDef = createCollection("vec_add",
+                List.of(embedding, FieldDefinition.string("title")));
+
+            engine.migrateSchema(oldDef, newDef);
+
+            verify(jdbc, never())
+                .execute("CREATE EXTENSION IF NOT EXISTS vector");
+        }
+    }
+
+    @Nested
+    @DisplayName("Owner-field index")
+    class OwnerIndexTests {
+
+        private static final String TABLE = "owned_items";
+
+        private CollectionDefinition owned(String ownerField) {
+            return new CollectionDefinitionBuilder().name(TABLE)
+                .addField(FieldDefinition.string("title"))
+                .addField(FieldDefinition.lookup("owner", "users", "Owner"))
+                .ownerField(ownerField)
+                .build();
+        }
+
+        private int ownerIndexCount() {
+            Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.indexes WHERE LOWER(index_name) = 'idx_owner_owned_items_owner'",
+                Integer.class);
+            return count == null ? 0 : count;
+        }
+
+        @BeforeEach
+        void createTable() {
+            jdbcTemplate.execute("DROP TABLE IF EXISTS " + TABLE);
+            jdbcTemplate.execute("CREATE TABLE " + TABLE + " (id VARCHAR(36) PRIMARY KEY, "
+                + "created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, title TEXT, owner VARCHAR(36))");
+        }
+
+        @Test
+        @DisplayName("setting ownerField creates the index; redelivery is a no-op")
+        void settingOwnerFieldIndexes() {
+            migrationEngine.migrateSchema(owned(null), owned("owner"));
+            migrationEngine.migrateSchema(owned(null), owned("owner"));
+
+            assertEquals(1, ownerIndexCount());
+        }
+
+        @Test
+        @DisplayName("unchanged ownerField emits no index DDL")
+        void unchangedOwnerFieldIsNoOp() {
+            migrationEngine.migrateSchema(owned("owner"), owned("owner"));
+
+            assertEquals(0, ownerIndexCount());
         }
     }
 }

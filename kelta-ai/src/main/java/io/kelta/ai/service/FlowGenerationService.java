@@ -71,7 +71,10 @@ public class FlowGenerationService {
             - Data: CREATE_RECORD, UPDATE_RECORD, DELETE_RECORD, QUERY_RECORDS, FIELD_UPDATE, SQL_QUERY
             - Communication: EMAIL_ALERT, SEND_NOTIFICATION, OUTBOUND_MESSAGE
             - Integration: CALL_API, HTTP_CALLOUT, PUBLISH_EVENT, INVOKE_SCRIPT
-            - Utility: LOG_MESSAGE, TRANSFORM_DATA
+            - Utility: LOG_MESSAGE, TRIGGER_FLOW (start another flow), DECISION (prefer a Choice state)
+
+            Never use DELAY (use a Wait state) or CREATE_TASK (use CREATE_RECORD into the task \
+            collection): the platform rejects both at save.
 
             ## Choice Step (branching)
             ```json

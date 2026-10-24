@@ -74,17 +74,17 @@ export interface DashboardData {
 /**
  * Time range options for metrics display
  */
-export type TimeRangeValue = '5m' | '15m' | '1h' | '6h' | '24h'
+type TimeRangeValue = '5m' | '15m' | '1h' | '6h' | '24h'
 
 /**
  * Auto-refresh interval options
  */
-export type RefreshIntervalValue = '10s' | '30s' | '1m' | '5m' | 'off'
+type RefreshIntervalValue = '10s' | '30s' | '1m' | '5m' | 'off'
 
 /**
  * Time range option configuration
  */
-export interface TimeRangeOption {
+interface TimeRangeOption {
   value: TimeRangeValue
   label: string
   minutes: number
@@ -93,7 +93,7 @@ export interface TimeRangeOption {
 /**
  * Refresh interval option configuration
  */
-export interface RefreshIntervalOption {
+interface RefreshIntervalOption {
   value: RefreshIntervalValue
   label: string
   milliseconds: number | null
@@ -745,5 +745,3 @@ export function DashboardPage({
     </div>
   )
 }
-
-export default DashboardPage

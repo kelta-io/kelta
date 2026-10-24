@@ -136,5 +136,3 @@ export function RecordSectionNav({
     </nav>
   )
 }
-
-export default RecordSectionNav

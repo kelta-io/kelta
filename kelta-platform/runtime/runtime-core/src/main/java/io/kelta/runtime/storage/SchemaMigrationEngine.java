@@ -273,7 +273,7 @@ public class SchemaMigrationEngine {
         // Detect removed fields (mark as deprecated, don't drop)
         for (FieldDefinition oldField : oldDefinition.fields()) {
             if (newDefinition.getField(oldField.name()) == null) {
-                migrations.add(createDeprecateColumnMigration(qualifiedName, newDefinition, oldField));
+                migrations.add(createDeprecateColumnMigration(tableRef, newDefinition, oldField));
             }
         }
 
@@ -286,9 +286,19 @@ public class SchemaMigrationEngine {
             }
         }
 
+        ensureVectorExtensionForNewVectorColumns(oldDefinition, newDefinition);
+
         // Execute all migrations
         for (MigrationAction migration : migrations) {
             executeMigration(migration);
+        }
+
+        // Owner field set or changed → index the owner column that owner-scoped reads
+        // filter on. Runs after the ADD COLUMNs above, so a just-added owner LOOKUP exists.
+        if (newDefinition.ownerField() != null
+                && !newDefinition.ownerField().equals(oldDefinition.ownerField())
+                && !newDefinition.systemCollection()) {
+            ensureOwnerIndex(newDefinition, qualifiedName);
         }
 
         // captureGeo turned on → ensure the geo system columns exist. Tables created
@@ -332,6 +342,59 @@ public class SchemaMigrationEngine {
         jdbcTemplate.execute(geoSql);
         recordMigration(collectionName, MigrationType.ADD_COLUMN, geoSql);
         log.info("Ensured geo system columns on '{}' (captureGeo enabled)", qualifiedTableName);
+    }
+
+    /**
+     * Creates the index on an owner-scoped collection's owner column. Idempotent
+     * ({@code IF NOT EXISTS}) under event redelivery and multi-pod refresh.
+     */
+    void ensureOwnerIndex(CollectionDefinition definition, String qualifiedTableName) {
+        String sql = SqlIdentifiers.buildOwnerIndexStatement(definition, qualifiedTableName);
+        try {
+            jdbcTemplate.execute(sql);
+        } catch (DataAccessException e) {
+            if (!StorageConstraintErrors.isConcurrentDdlDuplicate(e)) {
+                throw new StorageException("Failed to index owner field '" + definition.ownerField()
+                        + "' of collection '" + definition.name() + "': " + e.getMessage(), e);
+            }
+        }
+        recordMigration(definition.name(), MigrationType.ADD_COLUMN, sql);
+        log.info("Ensured owner-field index on '{}' ({})", qualifiedTableName, definition.ownerField());
+    }
+
+    /**
+     * Enables the pgvector extension, which must exist before a {@code vector(N)} column can be
+     * created or added. Shared by table creation ({@code CollectionTableDdl}) and the add/retype
+     * column paths here. {@code CREATE EXTENSION} may be refused to a non-superuser role (production
+     * provisioning pre-installs it); the refusal is reported with actionable guidance instead of
+     * a cryptic {@code type "vector" does not exist} on the DDL that follows.
+     *
+     * @param jdbcTemplate   the template to run the DDL on
+     * @param collectionName the collection whose VECTOR field needs the extension
+     * @throws StorageException when the extension cannot be enabled
+     */
+    static void ensureVectorExtension(JdbcTemplate jdbcTemplate, String collectionName) {
+        try {
+            jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS vector");
+        } catch (DataAccessException e) {
+            throw new StorageException(
+                    "Collection '" + collectionName + "' has a VECTOR field but the pgvector "
+                            + "extension could not be enabled. Install pgvector on the database "
+                            + "(a pgvector-enabled image, or `CREATE EXTENSION vector` by an admin) "
+                            + "and ensure the worker's DB role may use it. Cause: " + e.getMessage(), e);
+        }
+    }
+
+    /** Ensures pgvector when {@code newDefinition} adds a VECTOR column or retypes one to VECTOR. */
+    private void ensureVectorExtensionForNewVectorColumns(CollectionDefinition oldDefinition,
+                                                          CollectionDefinition newDefinition) {
+        boolean newVectorColumn = newDefinition.fields().stream()
+                .filter(f -> f.type() == FieldType.VECTOR)
+                .map(f -> oldDefinition.getField(f.name()))
+                .anyMatch(old -> old == null || old.type() != FieldType.VECTOR);
+        if (newVectorColumn) {
+            ensureVectorExtension(jdbcTemplate, newDefinition.name());
+        }
     }
 
     /**
@@ -481,6 +544,8 @@ public class SchemaMigrationEngine {
                 planned.add(new AppliedChange("MODIFY_FIELD", newField.name(), a.type(), a.sql()));
             }
         }
+
+        ensureVectorExtensionForNewVectorColumns(oldDefinition, newDefinition);
 
         for (AppliedChange change : planned) {
             try {
@@ -965,22 +1030,40 @@ public class SchemaMigrationEngine {
     }
 
     /**
-     * Creates a DEPRECATE COLUMN migration action.
-     * The tableIdentifier may be a bare name or schema-qualified SQL expression.
+     * Creates a DEPRECATE COLUMN migration action. The comment is applied only if the column
+     * still exists at execution time: another pod may already have dropped it through
+     * {@link #migrateSchemaDestructive} before this pod's NATS refresh diffs the definitions.
      */
-    private MigrationAction createDeprecateColumnMigration(String tableIdentifier, CollectionDefinition definition,
+    private MigrationAction createDeprecateColumnMigration(TableRef tableRef, CollectionDefinition definition,
             FieldDefinition field) {
         String columnName = resolvePhysicalColumnName(definition, field);
         // Mark column as deprecated by adding a comment
         // We don't drop the column to preserve data
         String sql = String.format(
             "COMMENT ON COLUMN %s.%s IS 'DEPRECATED: This column is no longer in use as of %s'",
-            tableIdentifier,
+            tableRef.toSql(),
             quoteIdentifier(columnName),
             Instant.now().toString()
         );
 
-        return new MigrationAction(definition.name(), MigrationType.DEPRECATE_COLUMN, sql);
+        return new MigrationAction(definition.name(), MigrationType.DEPRECATE_COLUMN, sql, tableRef, columnName);
+    }
+
+    /**
+     * Whether {@code columnName} exists on the table. A {@code public} {@link TableRef} renders as a
+     * bare name that resolves through the search path, so it is looked up in {@code current_schema()}.
+     */
+    private boolean columnExists(TableRef tableRef, String columnName) {
+        String schemaPredicate = tableRef.isPublicSchema()
+            ? "LOWER(table_schema) = LOWER(current_schema())"
+            : "LOWER(table_schema) = LOWER(?)";
+        String sql = "SELECT COUNT(*) FROM information_schema.columns WHERE " + schemaPredicate
+            + " AND LOWER(table_name) = LOWER(?) AND LOWER(column_name) = LOWER(?)";
+        Object[] args = tableRef.isPublicSchema()
+            ? new Object[] {tableRef.tableName(), columnName}
+            : new Object[] {tableRef.schema(), tableRef.tableName(), columnName};
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, args);
+        return count != null && count > 0;
     }
 
     /**
@@ -1040,7 +1123,13 @@ public class SchemaMigrationEngine {
     
     private void executeMigration(MigrationAction migration) {
         try {
-            jdbcTemplate.execute(migration.sql());
+            if (migration.requiredColumn() != null
+                    && !columnExists(migration.tableRef(), migration.requiredColumn())) {
+                log.info("Skipping {} for collection '{}': column '{}' no longer exists",
+                    migration.type(), migration.collectionName(), migration.requiredColumn());
+            } else {
+                jdbcTemplate.execute(migration.sql());
+            }
             recordMigration(migration.collectionName(), migration.type(), migration.sql());
             log.debug("Executed migration: {} - {}", migration.type(), migration.sql());
         } catch (Exception e) {
@@ -1053,13 +1142,20 @@ public class SchemaMigrationEngine {
     // ==================== Inner Classes ====================
     
     /**
-     * Represents a migration action to be executed.
+     * Represents a migration action to be executed. When {@code requiredColumn} is set, the SQL
+     * runs only if that column exists on {@code tableRef}; the action is recorded either way.
      */
     private record MigrationAction(
         String collectionName,
         MigrationType type,
-        String sql
-    ) {}
+        String sql,
+        TableRef tableRef,
+        String requiredColumn
+    ) {
+        MigrationAction(String collectionName, MigrationType type, String sql) {
+            this(collectionName, type, sql, null, null);
+        }
+    }
 
     /**
      * A single change applied by {@link #migrateSchemaDestructive}, returned so callers can record

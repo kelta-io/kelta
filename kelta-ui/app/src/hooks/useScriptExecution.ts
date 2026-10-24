@@ -26,7 +26,7 @@ import type {
   QuickActionExecutionContext,
 } from '@/types/quickActions'
 
-export interface ExecuteScriptParams {
+interface ExecuteScriptParams {
   /** Script ID to execute */
   scriptId: string
   /** Execution context (record, collection, etc.) */

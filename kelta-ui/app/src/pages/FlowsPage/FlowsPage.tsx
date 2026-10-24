@@ -445,5 +445,3 @@ export function FlowsPage({ testId = 'flows-page' }: FlowsPageProps): React.Reac
     </div>
   )
 }
-
-export default FlowsPage

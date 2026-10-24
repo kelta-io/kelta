@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 
-export interface ChartSeriesEntry {
+interface ChartSeriesEntry {
   label: string
   /** Raw group-by value (e.g. the referenced record's id) when the label was resolved
    *  from a LOOKUP/MASTER_DETAIL field's display value. Absent for older cached payloads

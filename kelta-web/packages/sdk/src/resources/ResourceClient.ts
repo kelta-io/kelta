@@ -35,7 +35,7 @@ export class ResourceClient<T = unknown> {
       const listSchema = ListResponseSchema(z.unknown());
       const parseResult = listSchema.safeParse(response.data);
       if (!parseResult.success) {
-        const errorMessages = parseResult.error.errors.map(
+        const errorMessages = parseResult.error.issues.map(
           (e) => `${e.path.join('.')}: ${e.message}`
         );
         throw new ValidationError(

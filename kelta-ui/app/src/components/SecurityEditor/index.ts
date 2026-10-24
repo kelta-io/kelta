@@ -7,34 +7,17 @@
 
 // System Permission Checklist
 export { SystemPermissionChecklist } from './SystemPermissionChecklist'
-export type { SystemPermissionChecklistProps } from './SystemPermissionChecklist'
 
 // Object Permission Matrix
 export { ObjectPermissionMatrix } from './ObjectPermissionMatrix'
-export type { ObjectPermissionMatrixProps, ObjectPermission } from './ObjectPermissionMatrix'
+export type { ObjectPermission } from './ObjectPermissionMatrix'
 
 // Field Permission Editor
 export { FieldPermissionEditor } from './FieldPermissionEditor'
-export type {
-  FieldPermissionEditorProps,
-  FieldVisibility,
-  CollectionRef,
-  FieldRef,
-  FieldPermission,
-} from './FieldPermissionEditor'
-
-// Effective Permissions Panel
-export { EffectivePermissionsPanel } from './EffectivePermissionsPanel'
-export type { EffectivePermissionsPanelProps } from './EffectivePermissionsPanel'
+export type { CollectionRef, FieldRef, FieldPermission } from './FieldPermissionEditor'
 
 // Custom Policy Editor
 export { CustomPolicyEditor } from './CustomPolicyEditor'
-export type { CustomPolicyEditorProps } from './CustomPolicyEditor'
-
-// CEL Expression Editor
-export { CelExpressionEditor } from './CelExpressionEditor'
-export type { CelExpressionEditorProps } from './CelExpressionEditor'
 
 // Policy Test Panel
 export { PolicyTestPanel } from './PolicyTestPanel'
-export type { PolicyTestPanelProps } from './PolicyTestPanel'

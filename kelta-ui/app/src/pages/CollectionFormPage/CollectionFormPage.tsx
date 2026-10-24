@@ -218,5 +218,3 @@ export function CollectionFormPage({
     </div>
   )
 }
-
-export default CollectionFormPage

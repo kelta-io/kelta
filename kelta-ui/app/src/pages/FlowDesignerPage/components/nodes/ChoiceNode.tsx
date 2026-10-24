@@ -5,7 +5,7 @@ import { GitBranch } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { DebugStatusBadge, type DebugStatus } from './DebugStatusBadge'
 
-export type ChoiceNodeData = {
+type ChoiceNodeData = {
   label: string
   ruleCount?: number
   stateType: string

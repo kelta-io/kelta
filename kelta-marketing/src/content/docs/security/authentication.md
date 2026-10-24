@@ -61,6 +61,35 @@ whether or not the email exists.
 The app's logout goes through the auth server's end-session endpoint. For SAML-federated sessions the platform
 initiates Single Logout at the identity provider first, then ends its own session, then returns to the app.
 
+## Auth server endpoints
+
+The auth server is its own host (`https://auth.example.com`), not behind the API gateway. Besides the standard
+OIDC endpoints (`/oauth2/authorize`, `/oauth2/token`, discovery), it serves the sign-in pages and a few JSON
+endpoints. "Open" means no session is needed; "signed in" needs the auth-server session or a bearer token.
+
+| Endpoint | Access | Purpose |
+|---|---|---|
+| `GET /login` | open | Email + password sign-in page. |
+| `GET /oauth2/consent` | signed in | Consent screen a [connected app](/docs/security/connected-apps/) shows on first authorization. |
+| `GET`/`POST /mfa-challenge`, `POST /mfa-challenge/recovery` | open (mid sign-in) | Second factor after the password, or a recovery code. |
+| `GET`/`POST /mfa-setup`, `POST /mfa-setup/complete` | open (mid sign-in) | Enrol a TOTP factor when MFA is required. |
+| `POST /auth/sms/send`, `POST /auth/sms/verify` | signed in | Send and check an SMS one-time code (the SMS factor). |
+| `GET`/`POST /change-password` | open (mid sign-in) | The forced password change after sign-in (new account, admin reset). |
+| `POST /auth/password/change` | signed in | Change your own password; checked against the tenant's password policy and history. |
+| `GET`/`POST /forgot-password`, `GET`/`POST /reset-password` | open | Signed-out password reset pages: request a link, then set a new password. |
+| `POST /auth/password/reset-request`, `POST /auth/password/reset` | open | The same reset as JSON for an external frontend; the request always answers the same, account or not. |
+| `POST /auth/email/send-verification`, `GET /auth/email/verify` | signed in | Email-ownership verification; the emailed link is valid for 48 hours. |
+| `POST /auth/direct-login` | open, off by default | Username + password in, tokens out, for headless test runs. Enabled only with `kelta.auth.direct-login.enabled=true`. |
+| `POST`/`DELETE /auth/session` | open | Exchange a federated provider's token for an auth-server session cookie, and end it. |
+| `GET /logout/saml2/initiate` | open | Starts SAML Single Logout at the identity provider ([SSO](/docs/security/sso/)). |
+| `GET /portal/login`, `POST /portal/login/request`, `GET /portal/login/verify` | open | Portal magic-link pages: request a link, then open it. |
+| `POST /portal/api/login/request`, `POST /portal/api/login/verify` | open | The magic-link flow as JSON for a headless portal; the redirect URI must be on the tenant's allowlist. |
+| `POST /portal/api/signup` | open, off by default | Portal self-sign-up, enabled per tenant; always answers `202`. |
+| `GET /portal/api/challenge` | open | A proof-of-work challenge for sign-up and link requests; `404` when the deployment does not require one. |
+
+The headless portal's redirect allowlist is `GET`/`PUT /api/admin/tenant/portal-auth-settings` on the API host
+(`MANAGE_USERS`): `redirectUris`, plus the `inviteRedirectUri` invitation links land on.
+
 ## Tenant IP allowlist
 
 A tenant can restrict API access to known networks. Under **Setup → Security → Network access** (requires

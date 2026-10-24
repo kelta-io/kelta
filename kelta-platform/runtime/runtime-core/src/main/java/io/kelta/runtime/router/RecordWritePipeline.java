@@ -1,7 +1,6 @@
 package io.kelta.runtime.router;
 
 import io.kelta.runtime.context.GeoHeaders;
-import io.kelta.runtime.context.GeoStamp;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.router.jsonapi.JsonApiRecordSerializer;
@@ -28,7 +27,7 @@ import java.util.regex.Pattern;
  * here, in this fixed order — it is the order the goldens in
  * {@code DynamicCollectionRouterGoldenTest} pin, so do not reorder:
  * <ol>
- *   <li>read-only collection → {@code 403} (JSON:API error body for create/update, empty for delete);</li>
+ *   <li>read-only collection → {@code 403 READ_ONLY_COLLECTION};</li>
  *   <li>sub-resource update/delete only: the child must exist, be visible to the caller's tenant and
  *       reference the URL's parent ({@link RecordTenantScope#findChild}) — else {@code 404} with
  *       nothing written;</li>
@@ -37,13 +36,15 @@ import java.util.regex.Pattern;
  *       ({@code createdBy}+{@code updatedBy} on create, {@code updatedBy} on update);</li>
  *   <li>geo stamp ({@code createdGeo}/{@code updatedGeo}) for {@code captureGeo} collections;</li>
  *   <li>create: {@code tenantId} for tenant-scoped system collections;
- *       update/delete: the {@code If-Match} optimistic-lock check (top-level routes only);</li>
+ *       update/delete: the {@code If-Match} optimistic-lock check;</li>
  *   <li>the storage call (which runs before-save hooks, validation and the record-changed event);</li>
  *   <li>system-collection cache eviction — after the write, and only when it took effect;</li>
  *   <li>the JSON:API response, echoing the caller's relationships.</li>
  * </ol>
  *
- * <p>Per-route differences are explicit in {@link WriteTarget}, not branches on the URL shape.
+ * <p>Every 4xx it answers itself carries the {@link GlobalExceptionHandler} error shape
+ * ({@code code} + {@code meta.requestId}). Per-route differences are explicit in
+ * {@link WriteTarget}, not branches on the URL shape.
  */
 final class RecordWritePipeline {
 
@@ -61,19 +62,16 @@ final class RecordWritePipeline {
      * @param parentRefField on a sub-resource route, the child's field referencing the parent
      *        ({@code null} on top-level routes)
      * @param parentId on a sub-resource route, the URL's parent id ({@code null} on top-level routes)
-     * @param optimisticLocking whether {@code If-Match} is enforced on update/delete. True for
-     *        top-level routes; the sub-resource routes have never checked it.
      */
     record WriteTarget(CollectionDefinition definition, String resourceType,
-                       String parentRefField, String parentId, boolean optimisticLocking) {
+                       String parentRefField, String parentId) {
 
         static WriteTarget collection(CollectionDefinition definition, String collectionName) {
-            return new WriteTarget(definition, collectionName, null, null, true);
+            return new WriteTarget(definition, collectionName, null, null);
         }
 
         static WriteTarget child(SubResourceRelation relation, String childName, String parentId) {
-            return new WriteTarget(relation.childDef(), childName, relation.parentRefFieldName(),
-                    parentId, false);
+            return new WriteTarget(relation.childDef(), childName, relation.parentRefFieldName(), parentId);
         }
     }
 
@@ -95,7 +93,7 @@ final class RecordWritePipeline {
                                                HttpServletRequest request) {
         CollectionDefinition definition = target.definition();
         if (definition.readOnly()) {
-            return readOnly(target);
+            return GlobalExceptionHandler.readOnlyCollection(target.resourceType(), request);
         }
 
         Map<String, Object> data = storageData(requestBody);
@@ -110,10 +108,10 @@ final class RecordWritePipeline {
             data.put("createdBy", userId);
             data.put("updatedBy", userId);
         }
-        stampGeo(data, definition, request, true);
+        GeoStamping.stamp(data, definition, GeoHeaders.parse(request), true);
 
         // Inject tenant ID for tenant-scoped system collections
-        tenantScope.injectTenantId(data, definition, request);
+        RecordTenantScope.injectTenantId(data, definition, request.getHeader("X-Tenant-ID"));
 
         Map<String, Object> created = queryEngine.create(definition, data);
 
@@ -129,10 +127,10 @@ final class RecordWritePipeline {
                                                HttpServletRequest request) {
         CollectionDefinition definition = target.definition();
         if (definition.readOnly()) {
-            return readOnly(target);
+            return GlobalExceptionHandler.readOnlyCollection(target.resourceType(), request);
         }
         if (!childInScope(target, id, request)) {
-            return ResponseEntity.notFound().build();
+            return GlobalExceptionHandler.recordNotFound(target.resourceType(), id, request);
         }
 
         Map<String, Object> data = storageData(requestBody);
@@ -142,12 +140,10 @@ final class RecordWritePipeline {
         if (userId != null) {
             data.put("updatedBy", userId);
         }
-        stampGeo(data, definition, request, false);
+        GeoStamping.stamp(data, definition, GeoHeaders.parse(request), false);
 
-        if (target.optimisticLocking()) {
-            // Optimistic locking: reject a stale If-Match before mutating (slice 5).
-            enforceIfMatch(definition, id, request);
-        }
+        // Optimistic locking: reject a stale If-Match before mutating (slice 5).
+        enforceIfMatch(definition, id, request);
 
         Optional<Map<String, Object>> updated = queryEngine.update(definition, id, data);
 
@@ -163,23 +159,21 @@ final class RecordWritePipeline {
                     JsonApiRecordSerializer.mergeRequestRelationships(response, rawRels);
                     return ResponseEntity.ok(response);
                 })
-                .orElse(ResponseEntity.notFound().build());
+                .orElseGet(() -> GlobalExceptionHandler.recordNotFound(target.resourceType(), id, request));
     }
 
     ResponseEntity<Void> delete(WriteTarget target, String id, HttpServletRequest request) {
         CollectionDefinition definition = target.definition();
         // Reject deletes on read-only collections
         if (definition.readOnly()) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            return GlobalExceptionHandler.readOnlyCollection(target.resourceType(), request);
         }
         if (!childInScope(target, id, request)) {
-            return ResponseEntity.notFound().build();
+            return GlobalExceptionHandler.recordNotFound(target.resourceType(), id, request);
         }
 
-        if (target.optimisticLocking()) {
-            // Optimistic locking: reject a stale If-Match before deleting (slice 5).
-            enforceIfMatch(definition, id, request);
-        }
+        // Optimistic locking: reject a stale If-Match before deleting (slice 5).
+        enforceIfMatch(definition, id, request);
 
         boolean deleted = queryEngine.delete(definition, id);
 
@@ -189,7 +183,7 @@ final class RecordWritePipeline {
         }
 
         return deleted ? ResponseEntity.noContent().build()
-                       : ResponseEntity.notFound().build();
+                       : GlobalExceptionHandler.recordNotFound(target.resourceType(), id, request);
     }
 
     /**
@@ -203,11 +197,6 @@ final class RecordWritePipeline {
         }
         return tenantScope.findChild(target.definition(), target.parentRefField(), target.parentId(), id, request)
                 .isPresent();
-    }
-
-    private static ResponseEntity<Map<String, Object>> readOnly(WriteTarget target) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
-                JsonApiRecordSerializer.forbidden("Collection '" + target.resourceType() + "' is read-only"));
     }
 
     /** Attributes plus relationship ids, merged into a fresh mutable map for storage. */
@@ -259,25 +248,6 @@ final class RecordWritePipeline {
             }
         }
         return userId;
-    }
-
-    /**
-     * Stamps the request-origin geolocation (gateway {@code X-Geo-*} headers) into
-     * {@code createdGeo}/{@code updatedGeo} for collections with {@code captureGeo}
-     * enabled. Stamps null when the origin has no geolocation — on update this
-     * intentionally clears a previous stamp, so the value always describes the
-     * origin of the LAST write, never a stale one.
-     */
-    private static void stampGeo(Map<String, Object> data, CollectionDefinition definition,
-                                 HttpServletRequest request, boolean isCreate) {
-        if (!definition.captureGeo() || definition.systemCollection()) {
-            return;
-        }
-        Map<String, Object> geo = GeoHeaders.parse(request).map(GeoStamp::toMap).orElse(null);
-        if (isCreate) {
-            data.put("createdGeo", geo);
-        }
-        data.put("updatedGeo", geo);
     }
 
     /**

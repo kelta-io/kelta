@@ -59,8 +59,8 @@ public class CollectionSchemaController {
     private CollectionOnDemandLoader onDemandLoader;
 
     /**
-     * Optional picklist value source: tenant fields are loaded with no {@code enumValues}, so
-     * their selectable values come from {@code picklist_value} instead.
+     * Optional picklist value source: a tenant field's {@code enumValues} carry only the active
+     * values, so labels, defaults and sort order come from {@code picklist_value}.
      */
     private PicklistValueRepository picklistValues;
 

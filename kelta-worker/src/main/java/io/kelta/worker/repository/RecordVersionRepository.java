@@ -4,6 +4,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -42,6 +44,36 @@ public class RecordVersionRepository {
             WHERE tenant_id = ? AND collection_id = ? AND record_id = ?
             """;
 
+    /** Versions changed before the retention cutoff. */
+    static final String DUE_BY_AGE = "changed_at < ?";
+
+    /**
+     * Versions changed before the cutoff, or ranked past the per-record cap by
+     * {@code version_number DESC}. A record's newest version always ranks 1, so a cap of at least
+     * 1 never removes it. A window function cannot share a query level with {@code FOR UPDATE},
+     * so the ranking sits in a sub-select and the caller locks the ids it returns.
+     */
+    static final String DUE_BY_AGE_OR_CAP = """
+            id IN (SELECT id FROM (
+                       SELECT id, changed_at,
+                              row_number() OVER (PARTITION BY tenant_id, collection_id, record_id
+                                                 ORDER BY version_number DESC) AS version_rank
+                         FROM record_version) ranked
+                    WHERE changed_at < ? OR version_rank > ?)
+            """;
+
+    static final String COUNT_DUE = "SELECT COUNT(*) FROM record_version WHERE ";
+
+    static final String DELETE_DUE = """
+            DELETE FROM record_version
+             WHERE id IN (
+                   SELECT id FROM record_version
+                    WHERE %s
+                    ORDER BY changed_at, id
+                    LIMIT ?
+                    FOR UPDATE SKIP LOCKED)
+            """;
+
     private final JdbcTemplate jdbc;
 
     public RecordVersionRepository(JdbcTemplate jdbc) {
@@ -65,5 +97,29 @@ public class RecordVersionRepository {
                 UUID.randomUUID().toString(), tenantId, collectionId, recordId,
                 changeType, snapshotJson, changedFieldsJson, changedBy, changeSource,
                 tenantId, collectionId, recordId);
+    }
+
+    /**
+     * Counts versions due for retention: changed before {@code cutoff}, or (when
+     * {@code maxVersionsPerRecord > 0}) beyond the newest {@code maxVersionsPerRecord} of their
+     * record. With no tenant bound, RLS's {@code admin_bypass} makes this span every tenant.
+     */
+    public long countDueForRetention(Instant cutoff, int maxVersionsPerRecord) {
+        Long count = maxVersionsPerRecord > 0
+                ? jdbc.queryForObject(COUNT_DUE + DUE_BY_AGE_OR_CAP, Long.class,
+                        Timestamp.from(cutoff), maxVersionsPerRecord)
+                : jdbc.queryForObject(COUNT_DUE + DUE_BY_AGE, Long.class, Timestamp.from(cutoff));
+        return count == null ? 0L : count;
+    }
+
+    /**
+     * Deletes up to {@code batchSize} due versions, oldest first; returns rows removed. Rows are
+     * claimed with {@code FOR UPDATE SKIP LOCKED}, so concurrent pods delete disjoint batches.
+     */
+    public int deleteDueForRetentionBatch(Instant cutoff, int maxVersionsPerRecord, int batchSize) {
+        return maxVersionsPerRecord > 0
+                ? jdbc.update(DELETE_DUE.formatted(DUE_BY_AGE_OR_CAP),
+                        Timestamp.from(cutoff), maxVersionsPerRecord, batchSize)
+                : jdbc.update(DELETE_DUE.formatted(DUE_BY_AGE), Timestamp.from(cutoff), batchSize);
     }
 }

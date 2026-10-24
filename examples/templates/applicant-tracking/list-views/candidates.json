@@ -1,3 +1,0 @@
-[
-  { "name": "All candidates", "columns": ["fullName", "email", "currentTitle", "location", "source"], "sort": "fullName", "default": true, "rowLimit": 25 }
-]

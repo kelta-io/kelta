@@ -345,6 +345,13 @@ const sandboxCreate = defineCommand({
         'default profiles and the admin only (it cannot be refreshed)',
     },
   ],
+  examples: [
+    { cmd: "kelta sandbox create --name staging --description 'Pre-release testing'" },
+    {
+      cmd: 'kelta sandbox create --name uat --empty',
+      description: "Create a sandbox without cloning the parent's metadata",
+    },
+  ],
   input: z.object({
     name: z.string().min(1),
     description: z.string().optional(),
@@ -382,6 +389,7 @@ const sandboxList = defineCommand({
   group: 'sandbox',
   name: 'list',
   summary: 'List environments',
+  examples: [{ cmd: 'kelta sandbox list --output json' }],
   input: z.object({}),
   handler: async (ctx) => {
     const envs = await runSandboxList(ctx.client.getAxiosInstance());
@@ -404,6 +412,9 @@ const sandboxStatus = defineCommand({
   summary: 'Show environment status (with --wait, poll until ACTIVE or FAILED)',
   positionals: [{ name: 'envId', description: 'Environment id', required: true }],
   options: [{ flag: '--wait', description: 'Poll until the environment reaches ACTIVE or FAILED' }],
+  examples: [
+    { cmd: 'kelta sandbox status env_123 --wait', description: 'Wait until the sandbox is ready' },
+  ],
   input: z.object({ envId: z.string().min(1), wait: z.boolean().default(false) }),
   handler: async (ctx, input) => {
     const env = await runSandboxStatus(ctx.client.getAxiosInstance(), input.envId, {
@@ -419,6 +430,7 @@ const sandboxRefresh = defineCommand({
   summary: 'Refresh a sandbox environment from its source (an --empty sandbox is refused with 409)',
   dangerous: true,
   positionals: [{ name: 'envId', description: 'Environment id', required: true }],
+  examples: [{ cmd: 'kelta sandbox refresh env_123 --yes' }],
   input: z.object({ envId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await runSandboxRefresh(ctx.client.getAxiosInstance(), input.envId);
@@ -432,6 +444,7 @@ const sandboxDelete = defineCommand({
   summary: 'Delete a sandbox environment (archives it; decommissions the backing tenant)',
   dangerous: true,
   positionals: [{ name: 'envId', description: 'Environment id', required: true }],
+  examples: [{ cmd: 'kelta sandbox delete env_123 --yes' }],
   input: z.object({ envId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await runSandboxDelete(ctx.client.getAxiosInstance(), input.envId);
@@ -452,6 +465,16 @@ const promoteCreate = defineCommand({
       flag: '--item <spec>',
       description: 'Item to promote as TYPE:name (repeatable, for SELECTIVE promotions)',
       repeatable: true,
+    },
+  ],
+  examples: [
+    {
+      cmd: 'kelta promote create --source env_123 --target env_456',
+      description: 'Full promotion',
+    },
+    {
+      cmd: 'kelta promote create --source env_123 --target env_456 --type SELECTIVE --item collection:orders --item collection:invoices --conflict overwrite',
+      description: 'Promote two collections, overwriting existing ones',
     },
   ],
   input: z.object({
@@ -482,6 +505,7 @@ const promotePreview = defineCommand({
   name: 'preview',
   summary: 'Preview the changes a promotion from a source environment would make',
   options: [{ flag: '-s, --source <envId>', description: 'Source environment id' }],
+  examples: [{ cmd: 'kelta promote preview --source env_123' }],
   input: z.object({ source: z.string().min(1) }),
   handler: async (ctx, input) => {
     const preview = await runPromotePreview(ctx.client.getAxiosInstance(), input.source);
@@ -507,6 +531,7 @@ const promoteApprove = defineCommand({
   name: 'approve',
   summary: 'Approve a promotion (a promotion cannot be approved by its creator)',
   positionals: [{ name: 'id', description: 'Promotion id', required: true }],
+  examples: [{ cmd: 'kelta promote approve prm_123' }],
   input: z.object({ id: z.string().min(1) }),
   handler: async (ctx, input) => {
     const promotion = await runPromoteApprove(ctx.client.getAxiosInstance(), input.id);
@@ -526,6 +551,12 @@ const promoteExecute = defineCommand({
   positionals: [{ name: 'id', description: 'Promotion id', required: true }],
   options: [
     { flag: '--wait', description: 'Poll until the promotion reaches COMPLETED or FAILED' },
+  ],
+  examples: [
+    {
+      cmd: 'kelta promote execute prm_123 --wait --yes',
+      description: 'Execute and wait for COMPLETED or FAILED',
+    },
   ],
   input: z.object({ id: z.string().min(1), wait: z.boolean().default(false) }),
   handler: async (ctx, input) => {
@@ -550,6 +581,7 @@ const promoteStatus = defineCommand({
   name: 'status',
   summary: 'Show a promotion and its item counts',
   positionals: [{ name: 'id', description: 'Promotion id', required: true }],
+  examples: [{ cmd: 'kelta promote status prm_123' }],
   input: z.object({ id: z.string().min(1) }),
   handler: async (ctx, input) => {
     const promotion = await runPromoteStatus(ctx.client.getAxiosInstance(), input.id);
@@ -563,6 +595,7 @@ const promoteRollback = defineCommand({
   summary: 'Roll back an executed promotion',
   dangerous: true,
   positionals: [{ name: 'id', description: 'Promotion id', required: true }],
+  examples: [{ cmd: 'kelta promote rollback prm_123 --yes' }],
   input: z.object({ id: z.string().min(1) }),
   handler: async (ctx, input) => {
     await runPromoteRollback(ctx.client.getAxiosInstance(), input.id);

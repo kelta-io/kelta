@@ -103,7 +103,9 @@ class McpApplicationTest {
                 "execute_flow",
                 "get_flow_run",
                 "submit_for_approval",
-                "list_approvals"
+                "list_approvals",
+                "list_notifications",
+                "mark_notification_read"
         );
     }
 
@@ -121,7 +123,8 @@ class McpApplicationTest {
                 "kelta://docs/dashboards",
                 "kelta://docs/ui-pages",
                 "kelta://docs/ui-menus",
-                "kelta://docs/flows"
+                "kelta://docs/flows",
+                "kelta://docs/packages"
         );
     }
 
@@ -140,7 +143,8 @@ class McpApplicationTest {
                 "kelta://docs/dashboards",
                 "kelta://docs/ui-pages",
                 "kelta://docs/ui-menus",
-                "kelta://docs/flows"
+                "kelta://docs/flows",
+                "kelta://docs/packages"
         );
     }
 
@@ -206,7 +210,13 @@ class McpApplicationTest {
                 "import_api_spec",
                 "materialize_api_collection",
                 // template seed data
-                "seed_records");
+                "seed_records",
+                // metadata packages + dashboard checks (hosted parity with kelta metadata/dashboards)
+                "export_metadata",
+                "diff_metadata",
+                "apply_metadata",
+                "validate_dashboard",
+                "dashboard_data");
     }
 
     @Test
@@ -245,7 +255,7 @@ class McpApplicationTest {
         Set<String> readOnlyTools = Set.of(
                 "list_collections", "get_collection_schema", "query_collection",
                 "get_record", "search", "describe_api", "get_flow_run",
-                "list_approvals");
+                "list_approvals", "list_notifications");
         for (UserTool ut : userTools) {
             Tool t = ut.toSpecification().tool();
             if (!readOnlyTools.contains(t.name())) continue;
@@ -261,7 +271,8 @@ class McpApplicationTest {
                 "list_collections", "get_collection_schema",
                 "list_picklists", "get_picklist",
                 "list_validation_rules", "list_unique_constraints",
-                "list_flows", "list_listviews");
+                "list_flows", "list_listviews",
+                "export_metadata", "diff_metadata", "validate_dashboard", "dashboard_data");
         for (AdminTool at : adminTools) {
             Tool t = at.toSpecification().tool();
             if (!adminReads.contains(t.name())) continue;
@@ -289,7 +300,7 @@ class McpApplicationTest {
                 "update_validation_rule", "delete_validation_rule",
                 "delete_unique_constraint",
                 "update_listview", "delete_listview", "apply_listview", "apply_picklist",
-                "apply_menu");
+                "apply_menu", "apply_metadata");
         for (UserTool ut : userTools) {
             Tool t = ut.toSpecification().tool();
             if (!destructive.contains(t.name())) continue;
@@ -419,7 +430,8 @@ class McpApplicationTest {
         // Hard guarantee: no write-side user tool can appear on the admin server.
         assertThat(adminNames).doesNotContain(
                 "create_record", "update_record", "delete_record", "bulk_apply",
-                "execute_flow", "submit_for_approval", "list_approvals");
+                "execute_flow", "submit_for_approval", "list_approvals",
+                "list_notifications", "mark_notification_read");
     }
 
     @Test

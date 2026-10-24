@@ -58,6 +58,7 @@ const pageList = defineCommand({
   group: 'pages',
   name: 'list',
   summary: 'List UI pages (screen builder)',
+  examples: [{ cmd: 'kelta pages list' }],
   input: z.object({}),
   handler: async (ctx) => {
     const response = await ctx.client.getAxiosInstance().get<unknown>('/api/ui-pages');
@@ -78,6 +79,7 @@ const pageGet = defineCommand({
   name: 'get',
   summary: 'Get a UI page by id',
   positionals: [{ name: 'pageId', description: 'Page id', required: true }],
+  examples: [{ cmd: 'kelta pages get page_123 --output json' }],
   input: z.object({ pageId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client
@@ -101,6 +103,12 @@ const pageCreate = defineCommand({
     },
     { flag: '--active <bool>', description: 'true|false (default true)' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
+  ],
+  examples: [
+    {
+      cmd: "kelta pages create --name Home --path /home --title 'Welcome' --config @home-config.json",
+      description: 'Create a draft page at /home',
+    },
   ],
   input: z.object({
     name: z.string().min(1),
@@ -145,6 +153,16 @@ const pageApply = defineCommand({
     },
   ],
   options: [{ flag: '--dry-run', description: 'Validate config only; write nothing' }],
+  examples: [
+    {
+      cmd: 'kelta pages apply home-page.json --dry-run',
+      description: 'Validate the page config without writing',
+    },
+    {
+      cmd: 'kelta pages apply home-page.json --yes',
+      description: 'Create or update the page keyed on its path',
+    },
+  ],
   input: z.object({
     file: z.string().min(1),
     dryRun: z.boolean().default(false),
@@ -264,6 +282,7 @@ const pageUpdate = defineCommand({
     { flag: '--published <bool>', description: 'true|false' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [{ cmd: "kelta pages update page_123 --title 'Customer home' --published true" }],
   input: z.object({
     pageId: z.string().min(1),
     name: z.string().optional(),
@@ -304,6 +323,7 @@ const pageDelete = defineCommand({
   summary: 'Delete a UI page',
   dangerous: true,
   positionals: [{ name: 'pageId', description: 'Page id', required: true }],
+  examples: [{ cmd: 'kelta pages delete page_123 --yes' }],
   input: z.object({ pageId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client.getAxiosInstance().delete(`/api/ui-pages/${input.pageId}`);
@@ -322,6 +342,7 @@ const pagePublish = defineCommand({
     'Publish the UI page served at a route path (sets published=true). ' +
     'Returns {action: "published"|"unchanged", id, path}.',
   positionals: [{ name: 'path', description: 'Route the page is served at', required: true }],
+  examples: [{ cmd: 'kelta pages publish /home' }],
   input: z.object({ path: z.string().min(1) }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();

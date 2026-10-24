@@ -28,7 +28,7 @@ interface PicklistValueDto {
 }
 
 /** One active picklist value, in display order, with its authored label/color/description. */
-export interface PicklistOptionEntry {
+interface PicklistOptionEntry {
   value: string
   label: string
   color?: string
@@ -126,10 +126,7 @@ export function usePicklistOptions(
 }
 
 /** Raw value → authored `{label, color, description}` for one picklist/multi_picklist field. */
-export type PicklistDisplayMap = Map<
-  string,
-  { label: string; color?: string; description?: string }
->
+type PicklistDisplayMap = Map<string, { label: string; color?: string; description?: string }>
 
 export interface UsePicklistDisplayMapResult {
   displayMap: PicklistDisplayMap

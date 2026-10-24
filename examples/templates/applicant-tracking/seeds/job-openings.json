@@ -1,8 +1,0 @@
-[
-  {"title":"Backend Engineer","department":"ENGINEERING","location":"Remote","employmentType":"FULL_TIME","status":"OPEN","headcount":2,"hiringManager":"Priya Okafor","openedOn":"2026-08-18","description":"Build and run the services behind the product: APIs, data pipelines and the jobs that keep them healthy."},
-  {"title":"Product Designer","department":"DESIGN","location":"Lisbon","employmentType":"FULL_TIME","status":"OPEN","headcount":1,"hiringManager":"Tomas Reyes","openedOn":"2026-09-01","description":"Own the end-to-end design of new workflows, from research through high-fidelity prototypes."},
-  {"title":"Account Executive","department":"SALES","location":"Chicago","employmentType":"FULL_TIME","status":"OPEN","headcount":2,"hiringManager":"Dana Whitfield","openedOn":"2026-09-08","description":"Run the full sales cycle for mid-market customers."},
-  {"title":"Product Manager","department":"PRODUCT","location":"Remote","employmentType":"FULL_TIME","status":"ON_HOLD","headcount":1,"hiringManager":"Marcus Lindqvist","openedOn":"2026-07-21","description":"Lead discovery and delivery for the reporting area."},
-  {"title":"People Operations Coordinator","department":"PEOPLE","location":"Chicago","employmentType":"PART_TIME","status":"FILLED","headcount":1,"hiringManager":"Grace Nakamura","openedOn":"2026-06-30","description":"Coordinate onboarding, benefits enrolment and team events."},
-  {"title":"Data Analyst (contract)","department":"OPERATIONS","location":"Remote","employmentType":"CONTRACT","status":"OPEN","headcount":1,"hiringManager":"Priya Okafor","openedOn":"2026-10-05","description":"Six-month contract to build the first operations reporting suite."}
-]

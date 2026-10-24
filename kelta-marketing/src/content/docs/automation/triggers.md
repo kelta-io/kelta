@@ -77,11 +77,16 @@ POST /api/flows/{flowId}/execute
 ```
 
 Note the wrap: the body's `input` object becomes `$.input` — see [the double-wrap rule](/docs/automation/flow-data/#the-double-wrap-rule).
-The response carries the `executionId`. CLI: `kelta flows execute <flowId> --input '{...}'` (the CLI adds the
-outer wrap for you). MCP: `execute_flow`. Page-builder `runFlow` actions call the same endpoint.
+The response is a JSON:API `flow-executions` resource; the execution id is `data.id` (`attributes.status` is
+`RUNNING`). CLI: `kelta flows execute <flowId> --input '{...}'` (the CLI adds the outer wrap for you). MCP:
+`execute_flow`. Page-builder `runFlow` actions call the same endpoint.
 
 Two escape hatches: `body.state` supplies a complete pre-built envelope, and `body.test: true` marks the run as a
 test.
+
+An inactive flow does not start: the call answers **409** with error code `FLOW_INACTIVE`. The one exception is a
+`test: true` run by a caller whose profile holds `MANAGE_WORKFLOWS` — that is how the flow designer's **Test**
+button runs a flow before it is activated. A test run by anyone else gets the same 409.
 
 ## Inbound webhooks
 
@@ -98,8 +103,10 @@ The JSON body becomes `$.input` and the request headers `$.headers`; `trigger.ty
   to the system that should call it; rotate by recreating the flow.
 - There is **no signature verification**. If the source signs its requests, verify the signature inside the flow
   (`INVOKE_SCRIPT` or `CALL_API` to a verifier) before acting on the body.
-- The gateway applies a per-IP rate limit to unauthenticated paths, and the endpoint is exempt from the tenant IP
-  allowlist.
+- The gateway rate-limits the endpoint per client IP: by default 300 requests per minute per IP, shared by **all**
+  flow webhooks called from that IP (the bucket is the `/api/webhooks` prefix plus the IP). Over budget the call
+  gets `429` with a `Retry-After` header. The budget is configurable per deployment via `RATE_LIMIT_IP_PATHS`
+  (see [Configuration](/docs/deploy/configuration/)). The endpoint is exempt from the tenant IP allowlist.
 - A flow that is not `AUTOLAUNCHED` or not active answers `400`.
 
 For webhooks that carry the record events Kelta itself emits, see [Outbound webhooks](/docs/api/webhooks/).

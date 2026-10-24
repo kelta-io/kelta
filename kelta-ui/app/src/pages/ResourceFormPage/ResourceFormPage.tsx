@@ -142,5 +142,3 @@ export function ResourceFormPage({
     />
   )
 }
-
-export default ResourceFormPage

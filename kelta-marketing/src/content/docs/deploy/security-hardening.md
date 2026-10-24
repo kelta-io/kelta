@@ -13,15 +13,25 @@ order: 70
 | `/api/webhooks/{flowId}` | gateway → worker | the flow id is the secret; per-IP limit; no signature check |
 | `/api/modules/webhooks/{tenantId}/{moduleId}` | gateway → worker | the module verifies the signature; per-IP limit |
 | `/api/webhooks/mail/**` | gateway → worker | inbound mail (optional feature); per-IP limit |
+| `/api/webhooks/ses` | gateway → worker | Amazon SNS signature on bounce and complaint notifications |
+| `/api/track/**` | gateway → worker | campaign open, click and unsubscribe links; the HMAC tracking token |
+| `/api/telehealth/visits/**`, `/api/telehealth/webhooks/**` | gateway → worker | visit links: their signed token; LiveKit webhooks: the signed JWT and body digest (optional feature) |
+| `/scim/**` | gateway → worker | the worker checks the SCIM bearer token ([SCIM](/docs/security/scim/)) |
+| `/otel/**` | gateway → collector | browser telemetry export |
 | `/portal/**` | auth | magic-link and signup pages; per-IP limits in the auth server; optional bot challenge |
 | `/oauth2/**`, `/login/**`, `/saml2/**` | auth | standard OAuth/SAML endpoints |
 
-Everything else under `/api/**` requires a credential and `API_ACCESS`.
+Everything else under `/api/**` requires a credential and `API_ACCESS`, except `GET` on the UI bootstrap paths
+(`/api/ui-pages`, `/api/ui-menus`, `/api/ui-translations`, `/api/oidc-providers`, `/api/tenants`), which the sign-in
+and app shell read before there is a session; they are served only for the tenant in the URL. The full list, with
+each endpoint's permission, is the [public endpoint index](/docs/reference/endpoints/).
 
 ## Gateway limits
 
 - `RATE_LIMIT_IP_PATHS` — per-IP budgets on the public prefixes above. Tune per endpoint; each prefix is its own
-  bucket.
+  bucket. Default `/actuator/health=100,/api/modules/webhooks=300,/api/webhooks=300,/api/webhooks/mail=600,/api/webhooks/ses=600`
+  (requests per minute per IP). `/api/webhooks` covers flow webhooks, and all of them called from one IP share
+  that one bucket. Setting the variable replaces the whole list, so keep every entry you still want.
 - The tenant window is the tenant's `apiCallsPerDay`; `RATE_LIMIT_USER_SHARE` caps one member. Tighten the
   share for tenants with many members.
 - `RATE_LIMIT_EXEMPT_CIDRS` bypasses **both** limiters. Never list private ranges in production; keep it to

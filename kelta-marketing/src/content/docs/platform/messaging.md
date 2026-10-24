@@ -19,12 +19,40 @@ ones) receive an invitation automatically.
 
 **Templates** — Setup → Integration → Email templates (`MANAGE_EMAIL_TEMPLATES`). System defaults
 (`user.invite`, `user.password_reset`, `welcome`, …) are addressed by key; a tenant row with the same key
-overrides the default. Templates use `${var}` merge fields.
+overrides the default. Templates use `${var}` merge fields. `GET /api/admin/email-templates` lists each system
+template with the tenant's override, if any; `POST /api/admin/email-templates/{key}/override` copies the system
+default into a tenant-owned row to edit, and `DELETE` on the same path reverts to the default.
 
 **Sending** — flows use `EMAIL_ALERT` ([action handlers](/docs/automation/action-handlers/#email_alert)); the
 app's *Send email* quick action calls `POST /api/email/send` with a stored template only (no free-form body),
 gated on `MANAGE_EMAIL_TEMPLATES` and rate-limited per tenant; reports can be scheduled for delivery. Every send is
-recorded in the email log.
+recorded in the email log; `GET /api/email/logs?collection=…&recordId=…` returns the log of one record (the record
+page's activity timeline), for a caller who can read that record and holds `MANAGE_EMAIL_TEMPLATES`.
+
+**Bounces and complaints** — a tenant whose SMTP override points at Amazon SES can subscribe the identity's bounce
+and complaint SNS topics to `POST /api/webhooks/ses`. The endpoint is unauthenticated and verifies the SNS
+signature; hard bounces and complaints become suppressions, so later sends to that address are blocked.
+
+## Campaigns
+
+Mass-email campaigns are an optional feature area under `/api/admin/campaigns` (`MANAGE_CAMPAIGNS`; sends count
+against the `campaignEmailsPerDay` governor limit). The `campaigns` collection is read-only over the generic API;
+every change goes through these endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET`, `POST /api/admin/campaigns` | List, create a `DRAFT` |
+| `GET`, `PATCH`, `DELETE /api/admin/campaigns/{id}` | Read, edit (only `DRAFT` or `SCHEDULED`), delete |
+| `POST /api/admin/campaigns/{id}/test` | Send one test message to `{ "email" }` |
+| `POST /api/admin/campaigns/{id}/send` | Queue for sending now |
+| `POST /api/admin/campaigns/{id}/schedule` | Queue for `{ "scheduledAt" }` |
+| `POST /api/admin/campaigns/{id}/cancel` | Cancel a `DRAFT`, `SCHEDULED` or `QUEUED` campaign |
+| `GET /api/admin/campaigns/{id}/stats`, `/recipients` | Delivery, open and click counts; the per-recipient list |
+| `GET`, `POST`, `DELETE /api/admin/campaigns/suppressions` | The tenant's suppression list (`DELETE` takes `?email=`) |
+
+Each message carries signed tracking links, served without authentication — the HMAC token
+(`CAMPAIGN_TRACKING_SECRET`) is the only credential: `GET /api/track/open` (the open pixel), `GET /api/track/click`
+(records the click, then redirects) and `GET`/`POST /api/track/unsubscribe` (the unsubscribe page and its form).
 
 ## SMS
 
@@ -53,7 +81,8 @@ subscribers can coexist:
 |---|---|
 | Keys | `KELTA_PUSH_VAPID_PUBLIC_KEY` (base64url uncompressed P-256 point), `KELTA_PUSH_VAPID_PRIVATE_KEY` (raw scalar), `KELTA_PUSH_VAPID_SUBJECT` (`mailto:` or `https:` URI) — `make gen-vapid` writes a dev pair |
 | Discovery | `GET /api/devices/vapid-public-key` (404 when unconfigured) |
-| Registration | `POST /api/devices` with the browser's `PushSubscription` JSON |
+| Registration | `POST /api/devices` with the browser's `PushSubscription` JSON; `GET /api/devices` lists the caller's devices, `DELETE /api/devices/{deviceId}` removes one |
+| Sending | `POST /api/admin/notifications` with `{ title, body, userId?, data? }` pushes to one user or the whole tenant (10 per hour per tenant) |
 | Pruning | a `404`/`410` from the push service deletes the device; other failures keep it |
 | Rotation | changing the VAPID pair invalidates every browser subscription — clients must re-subscribe |
 

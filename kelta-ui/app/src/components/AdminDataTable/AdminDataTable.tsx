@@ -27,12 +27,7 @@ import {
 import { cn } from '@/lib/utils'
 import { ColumnPicker, loadHiddenColumns } from '@/components/ColumnPicker'
 import type { ColumnPickerOption } from '@/components/ColumnPicker'
-import {
-  FilterBuilder,
-  type FieldOption,
-  type FilterClause,
-  type FilterExpression,
-} from '@/components/FilterBuilder'
+import { FilterBuilder, type FieldOption, type FilterExpression } from '@/components/FilterBuilder'
 import { evaluateFilter } from './evaluateFilter'
 
 export interface AdminColumn<T> {
@@ -54,7 +49,7 @@ export interface AdminColumn<T> {
   cellClassName?: string
 }
 
-export interface AdminSortState {
+interface AdminSortState {
   columnId: string
   direction: 'asc' | 'desc'
 }
@@ -333,6 +328,3 @@ function compareValues(a: unknown, b: unknown): number {
   if (typeof a === 'boolean' && typeof b === 'boolean') return a === b ? 0 : a ? 1 : -1
   return String(a).localeCompare(String(b))
 }
-
-// Re-export FilterClause so callers don't need to import from two places.
-export type { FilterClause }

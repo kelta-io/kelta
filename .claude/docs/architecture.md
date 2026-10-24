@@ -22,6 +22,11 @@ Microservices + Event-Driven + Dynamic Configuration Platform. Multi-tenant with
 - Spring Authorization Server for OAuth2. Federated user mapping from external IdPs.
 - Entry: `kelta-auth/src/main/java/io/kelta/auth/AuthApplication.java`
 
+**MCP server** (`kelta-mcp/`):
+- Stateless MCP over HTTP at `/{tenantSlug}/mcp/user` and `/{tenantSlug}/mcp/admin`; PAT auth, every tool call forwarded through the gateway (`GatewayHttpClient`), which authorizes it.
+- Tools are `UserTool` / `AdminTool` beans auto-registered by `McpServerConfig`; each has a `<ClassName>Test` (`ToolTestCoverageGuardTest`).
+- Admin tools include hosted parity with the CLI's package and dashboard commands (KLT-734): `export_metadata` (`POST /api/packages/export`, package JSON returned as text), `diff_metadata` (`POST /api/packages/import/preview`), `apply_metadata` (`POST /api/packages/import`; both send the package as a raw JSON body, not the CLI's multipart upload), `validate_dashboard` and `dashboard_data` (`POST /api/dashboards/{id}/validate|data`, name resolved to id).
+
 **Runtime Libraries** (`kelta-platform/runtime/`):
 - `runtime-core` — Collection model, query engine, storage, validation, flow execution
 - `runtime-events` — Shared event classes (PlatformEvent<T>)
@@ -287,6 +292,18 @@ token owner can see on `GET /api/me/tokens` (`requestCount`). It's what makes a 
 read-only PAT viable as a lightweight public data API: a tenant can hand out a read-only-profile
 PAT (see `docs/authoring/api-access.md`) and the holder can see how much it's actually being
 used, on top of the shared `apiCallsPerDay` governor budget above.
+
+**PAT last-used (`lastUsedAt`).** After the same successful authentication the filter fires
+`POST /internal/tokens/{sha256}/last-used?windowSeconds=<window>` at the worker — subscribed off
+the request chain, 5 s timeout, errors logged at WARN and swallowed, so it never delays or fails
+the request. A bounded Caffeine cache keyed by token hash (`kelta.gateway.pat-last-used.max-tokens`,
+`expireAfterWrite` = `kelta.gateway.pat-last-used.window-seconds`, default 300) lets each replica
+call at most once per token per window. The worker's `InternalPatUsageController` (no tenant
+bound → RLS `admin_bypass`, like `/api/me/tokens/validate/{hash}`) runs one conditional
+`UPDATE user_api_token SET last_used_at = now() WHERE token_hash = ? AND revoked = false AND
+(last_used_at IS NULL OR last_used_at < now() - <window>)` and always answers 204 — the UPDATE,
+not the gateway cache, is what holds the once-per-window guarantee across replicas.
+`GET /api/me/tokens` serves the result as `lastUsedAt`.
 `RateLimitExemptionService` and `TenantIpAllowlistFilter` share one `CidrBlock` matcher
 (`io.kelta.gateway.net`), which parses address **literals** only so a hostname in a forwarded
 header can never trigger a DNS lookup. Caveat: exemption is evaluated against the same resolved
@@ -351,8 +368,8 @@ Every decision cache key (gateway system/object, worker field/record-access) app
 `:geo:<country>` — a decision cached for one origin must never answer for another.
 
 **Per-record capture:** the `captureGeo` collection flag (clone of `trackHistory`; rides the
-existing `kelta.config.collection.changed` broadcast) makes HTTP record writes stamp
-`createdGeo`/`updatedGeo` JSONB system columns (`RecordWritePipeline.stampGeo`; FLS-exempt
+existing `kelta.config.collection.changed` broadcast) makes HTTP record writes (the router and
+`POST /api/operations`) stamp `createdGeo`/`updatedGeo` JSONB system columns (`GeoStamping`; FLS-exempt
 like `createdBy`; excluded from record-version diffs). New user tables get the columns in base
 DDL; flipping the flag on an existing collection triggers an idempotent
 `ADD COLUMN IF NOT EXISTS` in `SchemaMigrationEngine.migrateSchema` on every pod's refresh.
@@ -525,7 +542,9 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   ids 404, a user outside the tenant 404 and an inactive user 409. The plaintext token is
   returned once. Every attempt is audited as `TENANT_BOOTSTRAP_TOKEN_ISSUED`. The token works
   only on the target tenant's URLs, because `PatAuthenticationFilter` rejects a tenant mismatch
-  with 401. The grant this implies is recorded in `concerns.md`.
+  with 401. A successful `admin-invite` on the tenant revokes every live `bootstrap-*` token in it
+  (`PersonalAccessTokenController#revokeBootstrapTokens`, same steps as `DELETE /api/me/tokens/{id}`,
+  audited `TENANT_BOOTSTRAP_TOKEN_REVOKED`). The grant this implies is recorded in `concerns.md`.
   `POST /api/tenants` also accepts a transient **`adminEmail`** attribute — not a `tenants`
   field: `TenantProvisioningHook` strips it in `beforeCreate` and, after provisioning, seeds the
   admin with that email and sends the same invite. Provisioned admins have no usable password
@@ -643,6 +662,24 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `users` **update** of that id touching only those fields (+ the engine's `updatedAt`); every other
   write under it is judged as unbound. Works for INTERNAL and PORTAL callers, JWT or PAT; the UI is
   `ProfileDialog` (user menu → Profile); external portals: `playbooks.md` §9.
+- **In-app notifications** (`notification` table, V214; `GET /api/me/notifications`,
+  `POST /api/me/notifications/{id}/read`, `POST /api/me/notifications/read-all`,
+  `MyNotificationsController` → `NotificationService` → `NotificationRepository`). Rows are written
+  by the `SEND_NOTIFICATION` flow step through the `NotificationStore` SPI (runtime-module-integration;
+  `NotificationService` is the worker implementation, handed to `IntegrationModule` as a module
+  extension in `FlowConfig.moduleRegistry()`; no store wired → the step fails). The recipient must
+  be a `platform_user` of the tenant (id or email). Same `/api/me/**` model as the self-profile: the
+  recipient is `CallerContext.current().userId()` only, every query filters
+  `tenant_id` **and** `recipient_id`, so another user's id → **404** with the row untouched; tenant
+  RLS (`tenant_isolation`/`admin_bypass`) underneath. The list is newest first, JSON:API
+  `page[number]`/`page[size]`, with `meta.unreadCount`; `?unread=true` returns only rows with
+  `read_at IS NULL` (`NotificationRepository.findUnreadByRecipient`, same tenant + recipient
+  predicates; `meta.totalCount` then counts the unread set, `meta.unreadCount` is always the
+  caller's unread total). Read surfaces: the end-user header's `NotificationBell`
+  (`kelta-ui/app/src/shells/EndUserShell/`, polls `?unread=true&page[size]=20` every 60 s; opening
+  one POSTs `/{id}/read` and follows a tenant-relative `link`), the MCP user tools
+  `list_notifications` (`unreadOnly`, `pageSize`, `pageNumber`) and `mark_notification_read`
+  (`id`), and `kelta notifications list [--unread]`.
 - **User preferences** (`/api/user-ui-preferences`, generic route): ownership metadata
   (`ownerField=userId`, `ownerScope=ALL`, `ownerScopeReads=true`) — reads return only the caller's
   rows and writes are owner-only (foreign update/delete 404), unless the caller holds
@@ -1101,8 +1138,10 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   - `UNIQUE_CONSTRAINT`: export lists each exported collection's `uniq_*` indexes. It never carries
     the index name, because that embeds the source table. It leaves out a single-field index that
     backs the field's own `unique` flag, since that travels with the `FIELD`. An existing index
-    over the same field set (any order) is `SKIPPED` under either conflict mode: a field set has
-    nothing to overwrite.
+    over the same field set in the same order is `SKIPPED` under either conflict mode. Since
+    KLT-744 the index is created in the package's `field_names` order (the source index's column
+    order), and an existing index over the same set in another order is re-created in package
+    order under OVERWRITE (new index first, then the old one dropped).
   - `REPORT`: `primaryCollectionId` resolves by `primary_collection_name` (a platform system
     collection such as `users` included). Each plain column `fieldName`, plus `group_by` and
     `sort_by`, must be a field of that collection; dotted names read through `relatedJoins` and are
@@ -1122,6 +1161,24 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     only its seeded admin, so USER/GROUP approvers could never resolve there, and one report naming
     a since-deleted field would mark the whole clone `FAILED`. Unique constraints do ride along,
     since they come with every exported collection.
+- **Import preview classifies changed vs unchanged (2026-10-24, KLT-744):**
+  `PackageService.previewImport` (`POST /api/packages/import/preview`, `kelta metadata diff`, MCP
+  `diff_metadata`) runs the import as a dry run with `ImportOptions.preview()`
+  (`compareExisting=true`). Each per-type importer resolves the item's natural key and references
+  exactly as a real import does; for an item whose key already exists it compares the item —
+  mapped the way the import would write it, references already resolved to target ids — with the
+  target row read back through `QueryEngine.getById`, and returns the differing attributes (package
+  column names) in `ItemResult.changes`. Only attributes the package carries are compared; audit
+  fields and `tenantId` never count. Per type: `COLLECTION` also compares its display field (by
+  name) and ownership; `APPROVAL_PROCESS` compares each step by `step_number`
+  (`steps[<n>].<column>`, or `steps[<n>]` for a step the target lacks); `DASHBOARD` compares the
+  tree keys and widgets by title via `DashboardTreeService.readTree` (`components[<title>]…`);
+  `UNIQUE_CONSTRAINT` reports `field_names` when the column order differs; an existing `RECORD`
+  seed row is always unchanged (insert-only). The response lists `creates`, `updates`
+  (`{type, name, changes}`), `unchanged` and `conflicts` (an item that would fail, with its
+  `error`). Nothing is written. Tenant items the package does not carry (removals) are not
+  reported. `PackageRoundTripTest.everyTypeIsDocumentedAndCompared` fails when a `TYPE_ORDER` type
+  has no row in `docs/authoring/packages.md` or no comparison in the preview.
 
 **Worker-side system-permission check — how (use the existing pattern, don't reinvent):**
 - Enforce a specific system permission **in the controller/service** with a DB lookup against
@@ -1216,6 +1273,13 @@ Before 2026-09-17 only kelta-worker had the binder, so kelta-auth and kelta-ai r
 statement as the platform session and their RLS policies never evaluated — see
 `concerns.md`. Adding a fourth JDBC service means adding this bean and a tenant resolution
 for it, not just a `ScopedValue`.
+
+Direct database logins (per-tenant `superset_<slug>` roles) never go through this binder: they
+are pinned by `session_user` in `tenant_db_role` (V201), which every policy prefers over the
+GUC. That table has no RLS, so tenant roles hold **no privilege on it** — the pin is read
+through `kelta_pinned_tenant()`, SECURITY DEFINER with a fixed `search_path` — and are granted
+SELECT in `public` only on RLS tables with a `tenant_id` column (V214 applied this to roles
+provisioned before the narrowing).
 
 ## Worker Layers
 

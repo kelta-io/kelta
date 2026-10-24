@@ -843,5 +843,3 @@ export function ProfileDetailPage({
     </div>
   )
 }
-
-export default ProfileDetailPage

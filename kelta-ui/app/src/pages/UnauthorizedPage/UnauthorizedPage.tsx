@@ -153,5 +153,3 @@ export function UnauthorizedPage({ title, message }: UnauthorizedPageProps): Rea
     </div>
   )
 }
-
-export default UnauthorizedPage

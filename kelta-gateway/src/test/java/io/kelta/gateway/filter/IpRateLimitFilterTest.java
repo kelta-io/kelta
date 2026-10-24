@@ -12,7 +12,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
@@ -23,11 +25,13 @@ import reactor.test.StepVerifier;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -157,6 +161,87 @@ class IpRateLimitFilterTest {
                     List.of(IpRateLimitFilter.DEFAULT_IP_PATHS.split(",")));
             assertThat(defaults).isNotEmpty();
             assertThat(defaults.keySet()).noneMatch(path -> path.startsWith("/portal"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Default budgets")
+    class DefaultBudgets {
+
+        private IpRateLimitFilter defaultsFilter() {
+            ClientIpResolver resolver = new ClientIpResolver(true);
+            return new IpRateLimitFilter(resolver, new RateLimitExemptionService(resolver, List.of()),
+                    rateLimiter, List.of(IpRateLimitFilter.DEFAULT_IP_PATHS.split(",")));
+        }
+
+        @Test
+        @DisplayName("application.yml fallback should equal DEFAULT_IP_PATHS")
+        void applicationYmlFallbackShouldEqualDefault() {
+            YamlPropertiesFactoryBean factory = new YamlPropertiesFactoryBean();
+            // The shipped file, not the classpath copy: src/test/resources/application.yml
+            // shadows it on the test classpath. Surefire runs with the module directory as cwd.
+            factory.setResources(new FileSystemResource("src/main/resources/application.yml"));
+            factory.afterPropertiesSet();
+            Properties props = factory.getObject();
+            assertThat(props).isNotNull();
+
+            String value = props.getProperty("kelta.gateway.rate-limit.ip-paths");
+            String prefix = "${RATE_LIMIT_IP_PATHS:";
+            assertThat(value).startsWith(prefix).endsWith("}");
+            assertThat(value.substring(prefix.length(), value.length() - 1))
+                    .isEqualTo(IpRateLimitFilter.DEFAULT_IP_PATHS);
+        }
+
+        @Test
+        @DisplayName("defaults should limit flow webhooks while mail and SES keep their own buckets")
+        void defaultsShouldBucketWebhookPrefixesSeparately() {
+            IpRateLimitFilter f = defaultsFilter();
+            Map<String, Integer> defaults = IpRateLimitFilter.parsePathBudgets(
+                    List.of(IpRateLimitFilter.DEFAULT_IP_PATHS.split(",")));
+
+            assertThat(f.matchPath("/api/webhooks/3f2b8c1e-7d4a-4e6b-9a0c-5d1e2f3a4b5c"))
+                    .isEqualTo("/api/webhooks");
+            assertThat(f.matchPath("/api/webhooks/mail/inbound")).isEqualTo("/api/webhooks/mail");
+            assertThat(f.matchPath("/api/webhooks/ses/notifications")).isEqualTo("/api/webhooks/ses");
+            assertThat(defaults)
+                    .containsEntry("/api/webhooks", 300)
+                    .containsEntry("/api/webhooks/mail", 600)
+                    .containsEntry("/api/webhooks/ses", 600);
+        }
+
+        @Test
+        @DisplayName("should 429 one IP over the flow-webhook budget while another IP passes")
+        void shouldLimitFlowWebhookPerIp() {
+            IpRateLimitFilter f = defaultsFilter();
+            String path = "/api/webhooks/3f2b8c1e-7d4a-4e6b-9a0c-5d1e2f3a4b5c";
+            when(rateLimiter.checkWindow(eq("ratelimit:ip:/api/webhooks:198.51.100.1"), eq(300L),
+                    any(Duration.class)))
+                    .thenReturn(Mono.just(RateLimitResult.allowed(0)),
+                            Mono.just(RateLimitResult.notAllowed(Duration.ofSeconds(42))));
+            when(rateLimiter.checkWindow(eq("ratelimit:ip:/api/webhooks:198.51.100.2"), eq(300L),
+                    any(Duration.class)))
+                    .thenReturn(Mono.just(RateLimitResult.allowed(299)));
+
+            MockServerWebExchange lastAllowed = createPost(path, "198.51.100.1");
+            StepVerifier.create(f.filter(lastAllowed, chain)).verifyComplete();
+            verify(chain).filter(lastAllowed);
+
+            MockServerWebExchange overBudget = createPost(path, "198.51.100.1");
+            StepVerifier.create(f.filter(overBudget, chain)).verifyComplete();
+            assertThat(overBudget.getResponse().getStatusCode())
+                    .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+            assertThat(overBudget.getResponse().getHeaders().getFirst("Retry-After")).isEqualTo("42");
+            StepVerifier.create(overBudget.getResponse().getBodyAsString())
+                    .assertNext(body -> assertThat(body).startsWith(
+                            "{\"error\":{\"status\":429,\"code\":\"TOO_MANY_REQUESTS\","))
+                    .verifyComplete();
+            verify(chain, never()).filter(overBudget);
+
+            MockServerWebExchange otherIp = createPost(path, "198.51.100.2");
+            StepVerifier.create(f.filter(otherIp, chain)).verifyComplete();
+            verify(chain).filter(otherIp);
+            assertThat(otherIp.getResponse().getStatusCode())
+                    .isNotEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         }
     }
 
@@ -383,6 +468,14 @@ class IpRateLimitFilterTest {
                 .get(path)
                 .header("X-Forwarded-For", clientIp)
                 .build();
+        return MockServerWebExchange.from(request);
+    }
+
+    private MockServerWebExchange createPost(String path, String clientIp) {
+        MockServerHttpRequest request = MockServerHttpRequest
+                .post(path)
+                .header("X-Forwarded-For", clientIp)
+                .body("{}");
         return MockServerWebExchange.from(request);
     }
 

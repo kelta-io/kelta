@@ -11,18 +11,7 @@
 
 import React from 'react'
 import { Link } from 'react-router-dom'
-import {
-  Mail,
-  Phone,
-  ExternalLink,
-  MapPin,
-  Lock,
-  Hash,
-  Calculator,
-  Check,
-  X,
-  Copy,
-} from 'lucide-react'
+import { Mail, Phone, ExternalLink, MapPin, Lock, Hash, Calculator, Check, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { EmptyValue } from '@/components/kelta'
@@ -516,6 +505,3 @@ export function FieldRenderer({
     }
   }
 }
-
-// Re-export for convenience
-export { Copy }

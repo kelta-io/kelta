@@ -15,6 +15,7 @@ import { manifestCommands } from '../commands/manifest.js';
 import { mcpCommands } from '../commands/mcp.js';
 import { menuCommands } from '../commands/menus.js';
 import { metadataCommands } from '../commands/metadata.js';
+import { notificationCommands } from '../commands/notifications.js';
 import { pageCommands } from '../commands/pages.js';
 import { picklistCommands } from '../commands/picklists.js';
 import { profileCommands } from '../commands/profile.js';
@@ -48,6 +49,7 @@ export const allCommands: RegisteredCommand[] = [
   ...limitCommands,
   ...auditCommands,
   ...recordCommands,
+  ...notificationCommands,
   ...metadataCommands,
   ...environmentCommands,
   ...sdkCommands,

@@ -53,7 +53,8 @@ io.kelta.mcp/
   resource/        ← MCP Resources for browsable schema/openapi
     docs/          ← DocResource (kelta://docs/<topic>): classpath copies of docs/authoring/*.md,
                      pinned against the repo-root source by DocResourceTest. Topics: jsonapi,
-                     page-layouts, list-views, dashboards, ui-pages, ui-menus, flows
+                     page-layouts, list-views, dashboards, ui-pages, ui-menus, flows,
+                     packages
   client/          ← GatewayHttpClient (in-cluster: http://emf-gateway:80)
   error/           ← McpErrorMapper (gateway 4xx/5xx → MCP error result, redacts klt_)
 ```

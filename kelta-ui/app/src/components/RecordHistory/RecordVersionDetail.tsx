@@ -108,5 +108,3 @@ export function RecordVersionDetail({
     </div>
   )
 }
-
-export default RecordVersionDetail

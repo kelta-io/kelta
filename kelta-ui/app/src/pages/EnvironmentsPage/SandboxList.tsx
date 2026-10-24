@@ -27,11 +27,7 @@ import type { ConnectionTestResult, Environment, EnvironmentStatus, EnvironmentT
 /**
  * Environment status badge — pill with leading dot per DESIGN.md §6.
  */
-export function EnvironmentStatusBadge({
-  status,
-}: {
-  status: EnvironmentStatus
-}): React.ReactElement {
+function EnvironmentStatusBadge({ status }: { status: EnvironmentStatus }): React.ReactElement {
   const { t } = useI18n()
   const statusLabels: Record<EnvironmentStatus, string> = {
     CREATING: t('environments.statuses.creating'),
@@ -364,5 +360,3 @@ export function SandboxList(): React.ReactElement {
     </div>
   )
 }
-
-export default SandboxList

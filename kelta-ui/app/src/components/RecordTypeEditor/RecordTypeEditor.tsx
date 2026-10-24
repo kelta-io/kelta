@@ -205,5 +205,3 @@ export function RecordTypeEditor({
     </form>
   )
 }
-
-export default RecordTypeEditor

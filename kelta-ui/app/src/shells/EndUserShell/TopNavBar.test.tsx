@@ -20,6 +20,20 @@ vi.mock('react-router-dom', () => ({
   ),
 }))
 
+vi.mock('./NotificationBell', () => ({
+  NotificationBell: ({
+    inboxCount,
+    onInboxOpen,
+  }: {
+    inboxCount?: number
+    onInboxOpen?: () => void
+  }) => (
+    <button type="button" data-testid="notification-bell" onClick={onInboxOpen}>
+      {inboxCount}
+    </button>
+  ),
+}))
+
 vi.mock('@/hooks/useSystemPermissions', () => ({
   useSystemPermissions: () => ({ hasPermission: () => false }),
 }))
@@ -178,5 +192,21 @@ describe('submenu groups', () => {
     render(<TopNavBar tabs={GROUPED} />)
     const nav = screen.getByLabelText('Mobile navigation')
     expect(within(nav).getByText('FAQ Translations')).toBeInTheDocument()
+  })
+})
+
+describe('header actions', () => {
+  it('renders the notification bell in the header', () => {
+    render(<TopNavBar tabs={TABS} />)
+    expect(within(screen.getByRole('banner')).getByTestId('notification-bell')).toBeInTheDocument()
+  })
+
+  it('hands the approvals/chat inbox count and handler to the bell', () => {
+    const onInboxOpen = vi.fn()
+    render(<TopNavBar tabs={TABS} inboxCount={3} onInboxOpen={onInboxOpen} />)
+    const bell = screen.getByTestId('notification-bell')
+    expect(bell).toHaveTextContent('3')
+    fireEvent.click(bell)
+    expect(onInboxOpen).toHaveBeenCalled()
   })
 })

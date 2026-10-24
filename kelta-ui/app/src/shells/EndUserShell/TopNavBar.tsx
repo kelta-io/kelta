@@ -3,7 +3,7 @@
  *
  * Horizontal top navigation bar for the end-user runtime.
  * Contains: App launcher, app name, object tabs, search trigger,
- * notifications bell, shared UserMenu.
+ * notifications bell (in-app notifications + approvals/chat inbox), shared UserMenu.
  *
  * Responsive: On mobile (<768px), collection tabs collapse into a
  * hamburger menu that opens a Sheet drawer.
@@ -15,7 +15,6 @@ import React, { useState, useCallback } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Search,
-  Bell,
   Settings,
   LayoutGrid,
   Menu,
@@ -28,7 +27,6 @@ import {
   icons,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import {
   DropdownMenu,
@@ -41,6 +39,7 @@ import { useSystemPermissions } from '@/hooks/useSystemPermissions'
 import { UserMenu } from '@/components/UserMenu'
 import type { User } from '@/types/auth'
 import { recordRoutes } from '@/utils/recordRoutes'
+import { NotificationBell } from './NotificationBell'
 
 /**
  * Navigation tab definition — represents a collection list or a custom page in the top nav.
@@ -68,7 +67,7 @@ export interface NavTab {
 }
 
 /** One entry in the app switcher (apps/nav v2) — an active ui-menu. */
-export interface AppSwitcherEntry {
+interface AppSwitcherEntry {
   id: string
   name: string
   /** Lucide icon name; unknown names fall back to a grid icon. */
@@ -92,10 +91,10 @@ interface TopNavBarProps {
   onLogout?: () => void
   /** Callback when search is triggered */
   onSearchOpen?: () => void
-  /** Notification count */
-  notificationCount?: number
-  /** Callback when notifications bell is clicked */
-  onNotificationsOpen?: () => void
+  /** Pending approvals + unread chats, shown as an inbox entry in the notifications bell */
+  inboxCount?: number
+  /** Callback when that inbox entry is clicked */
+  onInboxOpen?: () => void
   /** Current user roles for role-gated UI */
   userRoles?: string[]
 }
@@ -121,8 +120,8 @@ export function TopNavBar({
   user,
   onLogout,
   onSearchOpen,
-  notificationCount = 0,
-  onNotificationsOpen,
+  inboxCount = 0,
+  onInboxOpen,
 }: TopNavBarProps): React.ReactElement {
   const { tenantSlug } = useParams<{ tenantSlug: string }>()
   const navigate = useNavigate()
@@ -424,24 +423,8 @@ export function TopNavBar({
           <Search className="h-4 w-4" />
         </Button>
 
-        {/* Notifications bell */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative h-8 w-8"
-          aria-label={`Notifications${notificationCount > 0 ? ` (${notificationCount} unread)` : ''}`}
-          onClick={onNotificationsOpen}
-        >
-          <Bell className="h-4 w-4" />
-          {notificationCount > 0 && (
-            <Badge
-              variant="destructive"
-              className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center px-1 text-[10px]"
-            >
-              {notificationCount > 99 ? '99+' : notificationCount}
-            </Badge>
-          )}
-        </Button>
+        {/* In-app notifications (SEND_NOTIFICATION) + the approvals/chat inbox */}
+        <NotificationBell inboxCount={inboxCount} onInboxOpen={onInboxOpen} />
 
         {/* Shared User Menu with avatar, language, theme, and context navigation */}
         {user && onLogout && <UserMenu user={user} onLogout={onLogout} variant="app" />}

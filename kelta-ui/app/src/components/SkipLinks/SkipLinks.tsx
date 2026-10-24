@@ -115,5 +115,3 @@ export function SkipLinks({ targets = DEFAULT_TARGETS }: SkipLinksProps): React.
     </nav>
   )
 }
-
-export default SkipLinks

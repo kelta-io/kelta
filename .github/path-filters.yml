@@ -6,8 +6,11 @@
 # flattens one level of nested YAML anchors, so we anchor list patterns and
 # splice them via `*alias` references below.
 
+# docs/authoring/system-collections.md is generated and checked by runtime-core's
+# SystemCollectionsReferenceTest, so a hand edit to it re-runs the runtime tests.
 runtime: &runtime
   - 'kelta-platform/**'
+  - 'docs/authoring/system-collections.md'
 
 gateway:
   - *runtime
@@ -52,6 +55,21 @@ marketing:
   - 'kelta-web/packages/cli/COMMANDS.md'
   - 'kelta-web/packages/cli/AGENTS.md'
   - 'README.md'
+
+# SDK doc pages — the "test-frontend" job type-checks their ```ts / ```tsx blocks
+# against kelta-web/packages/*/src (npm run check:doc-snippets).
+sdk_docs:
+  - 'kelta-marketing/src/content/docs/sdk/**'
+  - 'docs/**/sdk/**'
+
+# Docs that quote `kelta …` invocations — the "test-frontend" job checks each one against the
+# CLI command registry (kelta-web/packages/cli/src/docsgen/docLines.test.ts).
+cli_docs:
+  - 'kelta-marketing/src/content/docs/**'
+  - 'docs/**'
+  - 'examples/**'
+  - 'README.md'
+  - '**/README.md'
 
 # Any Java service change triggers integration tests.
 any_java:
@@ -156,9 +174,26 @@ workflows:
 # CI scripts — the "test-ci-scripts" job runs every ci/*.test.ts and ci/*.test.sh and
 # syntax-checks + shellchecks ci/*.sh and scripts/ci/*.sh (#1675 changed a ci/ script
 # whose tests only ran when a workflow changed, and the change broke it).
+# It also checks the public endpoint index (ci/endpoint-index.test.ts), so every input of
+# ci/endpoint-index.ts is listed: the controller mappings, the gateway route table and path lists,
+# the system-collection names, kelta-auth's permitAll list, the permission names, and the docs pages
+# the index is published as and links to. A new mapping cannot land without a regenerated index.
 ci_scripts:
   - 'ci/**'
   - 'scripts/ci/**'
+  - 'kelta-*/src/main/java/**/controller/**'
+  - 'kelta-*/src/main/java/**/*Controller.java'
+  - 'kelta-platform/runtime/runtime-core/src/main/java/io/kelta/runtime/router/**'
+  - 'kelta-platform/runtime/runtime-core/src/main/java/io/kelta/runtime/model/system/**'
+  - 'kelta-gateway/src/main/java/io/kelta/gateway/service/RouteConfigService.java'
+  - 'kelta-gateway/src/main/java/io/kelta/gateway/config/RouteInitializer.java'
+  - 'kelta-gateway/src/main/java/io/kelta/gateway/authz/RouteAuthorizationFilter.java'
+  - 'kelta-gateway/src/main/resources/application.yml'
+  - 'kelta-auth/src/main/java/io/kelta/auth/config/**'
+  - 'kelta-worker/src/main/java/io/kelta/worker/listener/TenantProvisioningHook.java'
+  - 'docs/authoring/**'
+  - 'kelta-marketing/src/content/docs/**'
+  - 'kelta-marketing/src/docs/externalMeta.ts'
 
 # DORA collector (node --test, no build).
 dora:

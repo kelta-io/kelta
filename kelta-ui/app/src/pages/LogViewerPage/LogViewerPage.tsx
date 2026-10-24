@@ -315,5 +315,3 @@ export function LogViewerPage({ className }: LogViewerPageProps) {
     </div>
   )
 }
-
-export default LogViewerPage

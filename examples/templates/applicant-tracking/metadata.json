@@ -3193,6 +3193,865 @@
         "step_logging": "FULL",
         "retention_days": null
       }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "candidates",
+        "name": "All candidates",
+        "visibility": "PUBLIC",
+        "is_default": true,
+        "view_type": "TABLE",
+        "columns": [
+          "fullName",
+          "email",
+          "currentTitle",
+          "location",
+          "source"
+        ],
+        "filters": [],
+        "sort_field": "fullName",
+        "sort_direction": "ASC",
+        "row_limit": 25
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "interviews",
+        "name": "Upcoming interviews",
+        "visibility": "PUBLIC",
+        "is_default": true,
+        "view_type": "TABLE",
+        "columns": [
+          "title",
+          "application",
+          "interviewType",
+          "scheduledAt",
+          "interviewer"
+        ],
+        "filters": [
+          {
+            "field": "outcome",
+            "operator": "eq",
+            "value": "PENDING"
+          }
+        ],
+        "sort_field": "scheduledAt",
+        "sort_direction": "ASC",
+        "row_limit": 25
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "interviews",
+        "name": "All interviews",
+        "visibility": "PUBLIC",
+        "is_default": false,
+        "view_type": "TABLE",
+        "columns": [
+          "title",
+          "application",
+          "interviewType",
+          "scheduledAt",
+          "interviewer",
+          "outcome"
+        ],
+        "filters": [],
+        "sort_field": "scheduledAt",
+        "sort_direction": "DESC",
+        "row_limit": 50
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "job-applications",
+        "name": "Active applications",
+        "visibility": "PUBLIC",
+        "is_default": true,
+        "view_type": "TABLE",
+        "columns": [
+          "name",
+          "candidate",
+          "job",
+          "stage",
+          "appliedOn",
+          "stageChangedAt"
+        ],
+        "filters": [
+          {
+            "field": "stage",
+            "operator": "neq",
+            "value": "HIRED"
+          },
+          {
+            "field": "stage",
+            "operator": "neq",
+            "value": "REJECTED"
+          }
+        ],
+        "sort_field": "stage",
+        "sort_direction": "ASC",
+        "row_limit": 25
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "job-applications",
+        "name": "Hiring pipeline",
+        "visibility": "PUBLIC",
+        "is_default": false,
+        "view_type": "KANBAN",
+        "columns": [
+          "name",
+          "candidate",
+          "job",
+          "stage",
+          "rating"
+        ],
+        "filters": [],
+        "row_limit": 100,
+        "type_config": {
+          "kanban": {
+            "laneField": "stage",
+            "cardFields": [
+              "name",
+              "job",
+              "rating"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "job-applications",
+        "name": "Hires",
+        "visibility": "PUBLIC",
+        "is_default": false,
+        "view_type": "TABLE",
+        "columns": [
+          "name",
+          "candidate",
+          "job",
+          "hiredAt"
+        ],
+        "filters": [
+          {
+            "field": "stage",
+            "operator": "eq",
+            "value": "HIRED"
+          }
+        ],
+        "sort_field": "hiredAt",
+        "sort_direction": "DESC",
+        "row_limit": 25
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "job-openings",
+        "name": "Open roles",
+        "visibility": "PUBLIC",
+        "is_default": true,
+        "view_type": "TABLE",
+        "columns": [
+          "title",
+          "department",
+          "location",
+          "employmentType",
+          "headcount",
+          "hiringManager"
+        ],
+        "filters": [
+          {
+            "field": "status",
+            "operator": "eq",
+            "value": "OPEN"
+          }
+        ],
+        "sort_field": "title",
+        "sort_direction": "ASC",
+        "row_limit": 25
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "job-openings",
+        "name": "All job openings",
+        "visibility": "PUBLIC",
+        "is_default": false,
+        "view_type": "TABLE",
+        "columns": [
+          "title",
+          "department",
+          "status",
+          "location",
+          "openedOn"
+        ],
+        "filters": [],
+        "sort_field": "openedOn",
+        "sort_direction": "DESC",
+        "row_limit": 25
+      }
+    },
+    {
+      "type": "DASHBOARD",
+      "data": {
+        "name": "Hiring overview",
+        "description": "Open roles, the application pipeline by stage and upcoming interviews",
+        "accessLevel": "PUBLIC",
+        "columnCount": 3,
+        "components": [
+          {
+            "title": "Open roles",
+            "componentType": "metric",
+            "columnPosition": 1,
+            "rowPosition": 1,
+            "config": {
+              "collectionName": "job-openings",
+              "aggregateFunction": "COUNT",
+              "ignoreTimeRange": true,
+              "filters": [
+                {
+                  "field": "status",
+                  "operator": "eq",
+                  "value": "OPEN"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Active applications",
+            "componentType": "metric",
+            "columnPosition": 2,
+            "rowPosition": 1,
+            "config": {
+              "collectionName": "job-applications",
+              "aggregateFunction": "COUNT",
+              "ignoreTimeRange": true,
+              "filters": [
+                {
+                  "field": "stage",
+                  "operator": "neq",
+                  "value": "HIRED"
+                },
+                {
+                  "field": "stage",
+                  "operator": "neq",
+                  "value": "REJECTED"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Hires",
+            "componentType": "metric",
+            "columnPosition": 3,
+            "rowPosition": 1,
+            "config": {
+              "collectionName": "job-applications",
+              "aggregateFunction": "COUNT",
+              "ignoreTimeRange": true,
+              "filters": [
+                {
+                  "field": "stage",
+                  "operator": "eq",
+                  "value": "HIRED"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Applications by stage",
+            "componentType": "chart",
+            "columnPosition": 1,
+            "rowPosition": 2,
+            "columnSpan": 2,
+            "config": {
+              "collectionName": "job-applications",
+              "groupByField": "stage",
+              "chartStyle": "bar",
+              "ignoreTimeRange": true
+            }
+          },
+          {
+            "title": "Candidates by source",
+            "componentType": "chart",
+            "columnPosition": 3,
+            "rowPosition": 2,
+            "config": {
+              "collectionName": "candidates",
+              "groupByField": "source",
+              "chartStyle": "pie",
+              "ignoreTimeRange": true
+            }
+          },
+          {
+            "title": "Applications by job opening",
+            "componentType": "chart",
+            "columnPosition": 1,
+            "rowPosition": 3,
+            "columnSpan": 3,
+            "config": {
+              "collectionName": "job-applications",
+              "groupByField": "job",
+              "chartStyle": "bar",
+              "ignoreTimeRange": true
+            }
+          },
+          {
+            "title": "Upcoming interviews",
+            "componentType": "table",
+            "columnPosition": 1,
+            "rowPosition": 4,
+            "columnSpan": 3,
+            "config": {
+              "collectionName": "interviews",
+              "fields": [
+                "title",
+                "application",
+                "interviewType",
+                "scheduledAt",
+                "interviewer"
+              ],
+              "sortBy": "scheduledAt",
+              "ignoreTimeRange": true,
+              "filters": [
+                {
+                  "field": "outcome",
+                  "operator": "eq",
+                  "value": "PENDING"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "records": [
+    {
+      "collection": "job-openings",
+      "key": [
+        "title"
+      ],
+      "rows": [
+        {
+          "title": "Backend Engineer",
+          "department": "ENGINEERING",
+          "location": "Remote",
+          "employmentType": "FULL_TIME",
+          "status": "OPEN",
+          "headcount": 2,
+          "hiringManager": "Priya Okafor",
+          "openedOn": "2026-08-18",
+          "description": "Build and run the services behind the product: APIs, data pipelines and the jobs that keep them healthy."
+        },
+        {
+          "title": "Product Designer",
+          "department": "DESIGN",
+          "location": "Lisbon",
+          "employmentType": "FULL_TIME",
+          "status": "OPEN",
+          "headcount": 1,
+          "hiringManager": "Tomas Reyes",
+          "openedOn": "2026-09-01",
+          "description": "Own the end-to-end design of new workflows, from research through high-fidelity prototypes."
+        },
+        {
+          "title": "Account Executive",
+          "department": "SALES",
+          "location": "Chicago",
+          "employmentType": "FULL_TIME",
+          "status": "OPEN",
+          "headcount": 2,
+          "hiringManager": "Dana Whitfield",
+          "openedOn": "2026-09-08",
+          "description": "Run the full sales cycle for mid-market customers."
+        },
+        {
+          "title": "Product Manager",
+          "department": "PRODUCT",
+          "location": "Remote",
+          "employmentType": "FULL_TIME",
+          "status": "ON_HOLD",
+          "headcount": 1,
+          "hiringManager": "Marcus Lindqvist",
+          "openedOn": "2026-07-21",
+          "description": "Lead discovery and delivery for the reporting area."
+        },
+        {
+          "title": "People Operations Coordinator",
+          "department": "PEOPLE",
+          "location": "Chicago",
+          "employmentType": "PART_TIME",
+          "status": "FILLED",
+          "headcount": 1,
+          "hiringManager": "Grace Nakamura",
+          "openedOn": "2026-06-30",
+          "description": "Coordinate onboarding, benefits enrolment and team events."
+        },
+        {
+          "title": "Data Analyst (contract)",
+          "department": "OPERATIONS",
+          "location": "Remote",
+          "employmentType": "CONTRACT",
+          "status": "OPEN",
+          "headcount": 1,
+          "hiringManager": "Priya Okafor",
+          "openedOn": "2026-10-05",
+          "description": "Six-month contract to build the first operations reporting suite."
+        }
+      ]
+    },
+    {
+      "collection": "candidates",
+      "key": [
+        "email"
+      ],
+      "rows": [
+        {
+          "fullName": "Ada Brightwater",
+          "email": "ada.brightwater@example.com",
+          "phone": "+1-555-0110",
+          "currentTitle": "Software engineer",
+          "location": "Austin",
+          "source": "REFERRAL",
+          "profileUrl": "https://example.org/profiles/ada-brightwater"
+        },
+        {
+          "fullName": "Felix Marchetti",
+          "email": "felix.marchetti@example.com",
+          "phone": "+1-555-0111",
+          "currentTitle": "Senior developer",
+          "location": "Remote",
+          "source": "JOB_BOARD",
+          "profileUrl": "https://example.org/profiles/felix-marchetti"
+        },
+        {
+          "fullName": "Noor Haddad",
+          "email": "noor.haddad@example.com",
+          "phone": "+1-555-0112",
+          "currentTitle": "Platform engineer",
+          "location": "Toronto",
+          "source": "CAREERS_SITE",
+          "profileUrl": "https://example.org/profiles/noor-haddad"
+        },
+        {
+          "fullName": "Owen Castellanos",
+          "email": "owen.castellanos@example.com",
+          "phone": "+1-555-0113",
+          "currentTitle": "Junior developer",
+          "location": "Denver",
+          "source": "EVENT",
+          "profileUrl": "https://example.org/profiles/owen-castellanos"
+        },
+        {
+          "fullName": "Lena Vasquez-Hart",
+          "email": "lena.vasquez.hart@example.com",
+          "phone": "+1-555-0114",
+          "currentTitle": "UX designer",
+          "location": "Lisbon",
+          "source": "CAREERS_SITE",
+          "profileUrl": "https://example.org/profiles/lena-vasquez-hart"
+        },
+        {
+          "fullName": "Kofi Mensah-Lowe",
+          "email": "kofi.mensah.lowe@example.com",
+          "phone": "+1-555-0115",
+          "currentTitle": "Visual designer",
+          "location": "Porto",
+          "source": "AGENCY",
+          "profileUrl": "https://example.org/profiles/kofi-mensah-lowe"
+        },
+        {
+          "fullName": "Ingrid Solberg",
+          "email": "ingrid.solberg@example.com",
+          "phone": "+1-555-0116",
+          "currentTitle": "Sales development rep",
+          "location": "Chicago",
+          "source": "JOB_BOARD",
+          "profileUrl": "https://example.org/profiles/ingrid-solberg"
+        },
+        {
+          "fullName": "Rafael Duarte",
+          "email": "rafael.duarte@example.com",
+          "phone": "+1-555-0117",
+          "currentTitle": "Account manager",
+          "location": "Milwaukee",
+          "source": "REFERRAL",
+          "profileUrl": "https://example.org/profiles/rafael-duarte"
+        },
+        {
+          "fullName": "Mei-Ling Arden",
+          "email": "mei.ling.arden@example.com",
+          "phone": "+1-555-0118",
+          "currentTitle": "Regional sales lead",
+          "location": "Chicago",
+          "source": "AGENCY",
+          "profileUrl": "https://example.org/profiles/mei-ling-arden"
+        },
+        {
+          "fullName": "Hugo Pemberton",
+          "email": "hugo.pemberton@example.com",
+          "phone": "+1-555-0119",
+          "currentTitle": "HR assistant",
+          "location": "Chicago",
+          "source": "CAREERS_SITE",
+          "profileUrl": "https://example.org/profiles/hugo-pemberton"
+        },
+        {
+          "fullName": "Sasha Kowalczyk",
+          "email": "sasha.kowalczyk@example.com",
+          "phone": "+1-555-0120",
+          "currentTitle": "Business analyst",
+          "location": "Remote",
+          "source": "JOB_BOARD",
+          "profileUrl": "https://example.org/profiles/sasha-kowalczyk"
+        },
+        {
+          "fullName": "Theo Ashgrove",
+          "email": "theo.ashgrove@example.com",
+          "phone": "+1-555-0121",
+          "currentTitle": "Product owner",
+          "location": "Remote",
+          "source": "REFERRAL",
+          "profileUrl": "https://example.org/profiles/theo-ashgrove"
+        },
+        {
+          "fullName": "Yara Quillfeather",
+          "email": "yara.quillfeather@example.com",
+          "phone": "+1-555-0122",
+          "currentTitle": "Data analyst",
+          "location": "Remote",
+          "source": "EVENT",
+          "profileUrl": "https://example.org/profiles/yara-quillfeather"
+        },
+        {
+          "fullName": "Elliot Fenwick",
+          "email": "elliot.fenwick@example.com",
+          "phone": "+1-555-0123",
+          "currentTitle": "Backend developer",
+          "location": "Boise",
+          "source": "CAREERS_SITE",
+          "profileUrl": "https://example.org/profiles/elliot-fenwick"
+        }
+      ]
+    },
+    {
+      "collection": "job-applications",
+      "key": [
+        "name"
+      ],
+      "references": {
+        "candidate": {
+          "collection": "candidates",
+          "field": "email"
+        },
+        "job": {
+          "collection": "job-openings",
+          "field": "title"
+        }
+      },
+      "rows": [
+        {
+          "name": "Ada Brightwater - Backend Engineer",
+          "candidate": "ada.brightwater@example.com",
+          "job": "Backend Engineer",
+          "stage": "OFFER",
+          "appliedOn": "2026-09-02",
+          "rating": 5,
+          "expectedSalary": 145000,
+          "stageChangedAt": "2026-10-15T16:00:00Z"
+        },
+        {
+          "name": "Felix Marchetti - Backend Engineer",
+          "candidate": "felix.marchetti@example.com",
+          "job": "Backend Engineer",
+          "stage": "INTERVIEW",
+          "appliedOn": "2026-09-10",
+          "rating": 4,
+          "expectedSalary": 150000,
+          "stageChangedAt": "2026-10-08T14:30:00Z"
+        },
+        {
+          "name": "Noor Haddad - Backend Engineer",
+          "candidate": "noor.haddad@example.com",
+          "job": "Backend Engineer",
+          "stage": "HIRED",
+          "appliedOn": "2026-08-25",
+          "rating": 5,
+          "expectedSalary": 140000,
+          "stageChangedAt": "2026-10-01T17:00:00Z",
+          "hiredAt": "2026-10-01T17:00:00Z"
+        },
+        {
+          "name": "Owen Castellanos - Backend Engineer",
+          "candidate": "owen.castellanos@example.com",
+          "job": "Backend Engineer",
+          "stage": "REJECTED",
+          "appliedOn": "2026-09-12",
+          "rating": 2,
+          "expectedSalary": 110000,
+          "stageChangedAt": "2026-09-26T15:00:00Z"
+        },
+        {
+          "name": "Elliot Fenwick - Backend Engineer",
+          "candidate": "elliot.fenwick@example.com",
+          "job": "Backend Engineer",
+          "stage": "SCREENING",
+          "appliedOn": "2026-10-12",
+          "rating": 3,
+          "expectedSalary": 135000,
+          "stageChangedAt": "2026-10-14T13:00:00Z"
+        },
+        {
+          "name": "Lena Vasquez-Hart - Product Designer",
+          "candidate": "lena.vasquez.hart@example.com",
+          "job": "Product Designer",
+          "stage": "INTERVIEW",
+          "appliedOn": "2026-09-09",
+          "rating": 4,
+          "expectedSalary": 98000,
+          "stageChangedAt": "2026-10-06T10:00:00Z"
+        },
+        {
+          "name": "Kofi Mensah-Lowe - Product Designer",
+          "candidate": "kofi.mensah.lowe@example.com",
+          "job": "Product Designer",
+          "stage": "APPLIED",
+          "appliedOn": "2026-10-16",
+          "expectedSalary": 92000,
+          "stageChangedAt": "2026-10-16T09:00:00Z"
+        },
+        {
+          "name": "Ingrid Solberg - Account Executive",
+          "candidate": "ingrid.solberg@example.com",
+          "job": "Account Executive",
+          "stage": "SCREENING",
+          "appliedOn": "2026-10-01",
+          "rating": 3,
+          "expectedSalary": 85000,
+          "stageChangedAt": "2026-10-09T15:30:00Z"
+        },
+        {
+          "name": "Rafael Duarte - Account Executive",
+          "candidate": "rafael.duarte@example.com",
+          "job": "Account Executive",
+          "stage": "INTERVIEW",
+          "appliedOn": "2026-09-22",
+          "rating": 4,
+          "expectedSalary": 90000,
+          "stageChangedAt": "2026-10-12T16:00:00Z"
+        },
+        {
+          "name": "Mei-Ling Arden - Account Executive",
+          "candidate": "mei.ling.arden@example.com",
+          "job": "Account Executive",
+          "stage": "OFFER",
+          "appliedOn": "2026-09-15",
+          "rating": 5,
+          "expectedSalary": 95000,
+          "stageChangedAt": "2026-10-16T18:00:00Z"
+        },
+        {
+          "name": "Theo Ashgrove - Product Manager",
+          "candidate": "theo.ashgrove@example.com",
+          "job": "Product Manager",
+          "stage": "SCREENING",
+          "appliedOn": "2026-08-04",
+          "rating": 3,
+          "expectedSalary": 130000,
+          "stageChangedAt": "2026-08-20T14:00:00Z"
+        },
+        {
+          "name": "Hugo Pemberton - People Operations Coordinator",
+          "candidate": "hugo.pemberton@example.com",
+          "job": "People Operations Coordinator",
+          "stage": "HIRED",
+          "appliedOn": "2026-07-08",
+          "rating": 4,
+          "expectedSalary": 48000,
+          "stageChangedAt": "2026-08-11T16:00:00Z",
+          "hiredAt": "2026-08-11T16:00:00Z"
+        },
+        {
+          "name": "Sasha Kowalczyk - People Operations Coordinator",
+          "candidate": "sasha.kowalczyk@example.com",
+          "job": "People Operations Coordinator",
+          "stage": "REJECTED",
+          "appliedOn": "2026-07-10",
+          "rating": 2,
+          "expectedSalary": 52000,
+          "stageChangedAt": "2026-07-29T12:00:00Z"
+        },
+        {
+          "name": "Sasha Kowalczyk - Data Analyst (contract)",
+          "candidate": "sasha.kowalczyk@example.com",
+          "job": "Data Analyst (contract)",
+          "stage": "INTERVIEW",
+          "appliedOn": "2026-10-06",
+          "rating": 4,
+          "expectedSalary": 70000,
+          "stageChangedAt": "2026-10-13T11:00:00Z"
+        },
+        {
+          "name": "Yara Quillfeather - Data Analyst (contract)",
+          "candidate": "yara.quillfeather@example.com",
+          "job": "Data Analyst (contract)",
+          "stage": "APPLIED",
+          "appliedOn": "2026-10-15",
+          "expectedSalary": 72000,
+          "stageChangedAt": "2026-10-15T08:30:00Z"
+        },
+        {
+          "name": "Theo Ashgrove - Product Designer",
+          "candidate": "theo.ashgrove@example.com",
+          "job": "Product Designer",
+          "stage": "REJECTED",
+          "appliedOn": "2026-09-11",
+          "rating": 2,
+          "expectedSalary": 105000,
+          "stageChangedAt": "2026-09-24T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "collection": "interviews",
+      "key": [
+        "title"
+      ],
+      "references": {
+        "application": {
+          "collection": "job-applications",
+          "field": "name"
+        }
+      },
+      "rows": [
+        {
+          "title": "Phone screen: Ada Brightwater (Backend Engineer)",
+          "application": "Ada Brightwater - Backend Engineer",
+          "interviewType": "PHONE_SCREEN",
+          "scheduledAt": "2026-09-08T15:00:00Z",
+          "durationMinutes": 30,
+          "interviewer": "Priya Okafor",
+          "outcome": "STRONG_YES",
+          "feedback": "Clear communicator; strong on API design."
+        },
+        {
+          "title": "Technical interview: Ada Brightwater (Backend Engineer)",
+          "application": "Ada Brightwater - Backend Engineer",
+          "interviewType": "TECHNICAL",
+          "scheduledAt": "2026-09-22T16:00:00Z",
+          "durationMinutes": 90,
+          "interviewer": "Jonah Ellery",
+          "outcome": "YES",
+          "feedback": "Solid systems answers; asked good questions about on-call."
+        },
+        {
+          "title": "Final interview: Ada Brightwater (Backend Engineer)",
+          "application": "Ada Brightwater - Backend Engineer",
+          "interviewType": "FINAL",
+          "scheduledAt": "2026-10-09T17:00:00Z",
+          "durationMinutes": 60,
+          "interviewer": "Priya Okafor",
+          "outcome": "STRONG_YES",
+          "feedback": "Team is aligned on an offer."
+        },
+        {
+          "title": "Technical interview: Felix Marchetti (Backend Engineer)",
+          "application": "Felix Marchetti - Backend Engineer",
+          "interviewType": "TECHNICAL",
+          "scheduledAt": "2026-10-22T15:00:00Z",
+          "durationMinutes": 90,
+          "interviewer": "Jonah Ellery",
+          "outcome": "PENDING"
+        },
+        {
+          "title": "Onsite: Noor Haddad (Backend Engineer)",
+          "application": "Noor Haddad - Backend Engineer",
+          "interviewType": "ONSITE",
+          "scheduledAt": "2026-09-18T14:00:00Z",
+          "durationMinutes": 180,
+          "interviewer": "Priya Okafor",
+          "outcome": "STRONG_YES",
+          "feedback": "Excellent across the loop."
+        },
+        {
+          "title": "Phone screen: Owen Castellanos (Backend Engineer)",
+          "application": "Owen Castellanos - Backend Engineer",
+          "interviewType": "PHONE_SCREEN",
+          "scheduledAt": "2026-09-19T16:00:00Z",
+          "durationMinutes": 30,
+          "interviewer": "Jonah Ellery",
+          "outcome": "NO",
+          "feedback": "Not enough backend experience yet for this level."
+        },
+        {
+          "title": "Phone screen: Lena Vasquez-Hart (Product Designer)",
+          "application": "Lena Vasquez-Hart - Product Designer",
+          "interviewType": "PHONE_SCREEN",
+          "scheduledAt": "2026-09-24T09:30:00Z",
+          "durationMinutes": 30,
+          "interviewer": "Tomas Reyes",
+          "outcome": "YES",
+          "feedback": "Portfolio shows strong research practice."
+        },
+        {
+          "title": "Onsite: Lena Vasquez-Hart (Product Designer)",
+          "application": "Lena Vasquez-Hart - Product Designer",
+          "interviewType": "ONSITE",
+          "scheduledAt": "2026-10-21T10:00:00Z",
+          "durationMinutes": 180,
+          "interviewer": "Tomas Reyes",
+          "outcome": "PENDING"
+        },
+        {
+          "title": "Phone screen: Rafael Duarte (Account Executive)",
+          "application": "Rafael Duarte - Account Executive",
+          "interviewType": "PHONE_SCREEN",
+          "scheduledAt": "2026-10-02T15:00:00Z",
+          "durationMinutes": 30,
+          "interviewer": "Dana Whitfield",
+          "outcome": "YES",
+          "feedback": "Good discovery questions in the role play."
+        },
+        {
+          "title": "Final interview: Rafael Duarte (Account Executive)",
+          "application": "Rafael Duarte - Account Executive",
+          "interviewType": "FINAL",
+          "scheduledAt": "2026-10-23T16:30:00Z",
+          "durationMinutes": 60,
+          "interviewer": "Dana Whitfield",
+          "outcome": "PENDING"
+        },
+        {
+          "title": "Final interview: Mei-Ling Arden (Account Executive)",
+          "application": "Mei-Ling Arden - Account Executive",
+          "interviewType": "FINAL",
+          "scheduledAt": "2026-10-13T17:00:00Z",
+          "durationMinutes": 60,
+          "interviewer": "Dana Whitfield",
+          "outcome": "STRONG_YES",
+          "feedback": "Ready to move to offer."
+        },
+        {
+          "title": "Technical interview: Sasha Kowalczyk (Data Analyst (contract))",
+          "application": "Sasha Kowalczyk - Data Analyst (contract)",
+          "interviewType": "TECHNICAL",
+          "scheduledAt": "2026-10-27T13:00:00Z",
+          "durationMinutes": 60,
+          "interviewer": "Priya Okafor",
+          "outcome": "PENDING"
+        }
+      ]
     }
   ]
 }

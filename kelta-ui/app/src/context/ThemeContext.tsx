@@ -25,13 +25,13 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 /**
  * Resolved theme (actual applied theme)
  */
-export type ResolvedTheme = 'light' | 'dark'
+type ResolvedTheme = 'light' | 'dark'
 
 /**
  * Theme colors interface
  * Contains all color values for the current theme
  */
-export interface ThemeColors {
+interface ThemeColors {
   // Primary colors
   primary: string
   primaryHover: string
@@ -517,9 +517,6 @@ export function useTheme(): ThemeContextValue {
   }
   return context
 }
-
-// Export the context for testing purposes
-export { ThemeContext }
 
 // eslint-disable-next-line react-refresh/only-export-components
 export { getSystemTheme, getStoredTheme, storeTheme, resolveTheme, getThemeColors }

@@ -11,7 +11,7 @@ import { Image, FileText, Video, Music, Code, Table, Archive, File } from 'lucid
 /**
  * Category of a file based on its MIME type.
  */
-export type FileCategory =
+type FileCategory =
   | 'image'
   | 'pdf'
   | 'video'

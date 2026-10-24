@@ -59,6 +59,19 @@ code `reference` and `meta.field`, `meta.targetCollection` and `meta.value`.
   resolves `invoice-lines` through the already-included `invoices`. (Dot syntax is not used.)
 - Included resources respect field-level security like primary data.
 
+## Child-resource paths
+
+A child collection's records can also be addressed through their parent:
+
+| Endpoint | Does |
+|---|---|
+| `GET /api/<parent>/<parentId>/<child>` | Lists the children whose reference points at that parent (pagination, sort and filters as usual) |
+| `POST /api/<parent>/<parentId>/<child>` | Creates a child with its parent reference set to `parentId` |
+| `GET`, `PUT`, `PATCH`, `DELETE /api/<parent>/<parentId>/<child>/<childId>` | Reads or changes one child of that parent |
+
+The gateway requires `read` on the parent and the usual permission on the child for the method; a child that does
+not belong to the parent is a `404`.
+
 ## Many-to-many
 
 There is no native many-to-many type. Model it with a junction collection carrying two master-detail (or lookup)

@@ -1,2 +1,2 @@
-export { ColumnPicker, type ColumnPickerOption, type ColumnPickerProps } from './ColumnPicker'
-export { loadHiddenColumns, persistHiddenColumns } from './storage'
+export { ColumnPicker, type ColumnPickerOption } from './ColumnPicker'
+export { loadHiddenColumns } from './storage'

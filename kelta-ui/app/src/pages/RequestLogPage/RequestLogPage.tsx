@@ -352,5 +352,3 @@ export function RequestLogPage({ className }: RequestLogPageProps) {
     </div>
   )
 }
-
-export default RequestLogPage

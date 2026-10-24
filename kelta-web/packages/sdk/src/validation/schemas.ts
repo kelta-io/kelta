@@ -54,7 +54,7 @@ export const AuthzConfigSchema = z.object({
   create: z.array(z.string()).optional(),
   update: z.array(z.string()).optional(),
   delete: z.array(z.string()).optional(),
-  fieldLevel: z.record(z.array(z.string())).optional(),
+  fieldLevel: z.record(z.string(), z.array(z.string())).optional(),
 });
 
 /**
@@ -94,7 +94,7 @@ export const ErrorResponseSchema = z.object({
   error: z.string().optional(),
   message: z.string(),
   details: z.unknown().optional(),
-  fieldErrors: z.record(z.array(z.string())).optional(),
+  fieldErrors: z.record(z.string(), z.array(z.string())).optional(),
 });
 
 /**

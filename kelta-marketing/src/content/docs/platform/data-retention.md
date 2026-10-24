@@ -21,7 +21,9 @@ tombstone for sync clients and, when versioning is on, their last snapshot.
 ## Exports
 
 - **Data** — `POST /api/data-exports` (`{ "exportScope": "FULL" | "SELECTIVE", "collectionIds": […], "format": "CSV" | "JSON" }`)
-  runs as a job and returns a presigned download; Setup → Platform → Bulk jobs tracks it. Scheduled exports are scheduled jobs of
+  runs as a job and returns a presigned download; Setup → Platform → Bulk jobs tracks it. `GET /api/data-exports`
+  lists exports, `GET /api/data-exports/{id}` reports one, `POST /api/data-exports/{id}/cancel` stops a pending one and
+  `GET /api/data-exports/{id}/download` fetches the result (all `VIEW_ALL_DATA`). Scheduled exports are scheduled jobs of
   type `DATA_EXPORT`. Exports are masked for the requester ([data masking](/docs/security/field-security-and-masking/)).
 - **Reports** — CSV/PDF export and scheduled delivery ([Dashboards and reports](/docs/console/dashboards-and-reports/)).
 - **Metadata** — packages via `kelta metadata export` ([Sandboxes and promotion](/docs/platform/environments-and-promotion/)).

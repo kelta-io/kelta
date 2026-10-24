@@ -211,5 +211,3 @@ export function useEscapeKey(handler: () => void, enabled: boolean = true): void
     { enabled }
   )
 }
-
-export default useKeyboardShortcuts

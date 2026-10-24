@@ -276,5 +276,3 @@ export function SystemPermissionChecklist({
     </div>
   )
 }
-
-export default SystemPermissionChecklist

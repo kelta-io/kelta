@@ -56,7 +56,7 @@ import { FormFieldRow } from './FormFieldRow'
 import { useRecordFormModel } from './useRecordFormModel'
 import { useRecordFormState } from './useRecordFormState'
 
-export type RecordFormVariant = 'enduser' | 'admin'
+type RecordFormVariant = 'enduser' | 'admin'
 
 /** Where the form navigates: after save, on cancel, and from the permission gate. */
 export interface RecordFormRoutes {
@@ -82,7 +82,7 @@ function renderSlot(slot: ChromeSlot | undefined, ctx: RecordFormChromeContext):
 }
 
 /** Called after an embedded form saves, with the saved record as the API returned it. */
-export type RecordFormSavedHandler = (
+type RecordFormSavedHandler = (
   record: CollectionRecord | undefined,
   context: { isNew: boolean }
 ) => void
@@ -615,5 +615,3 @@ export function RecordForm(props: RecordFormProps): React.ReactElement {
     </RecordStackProvider>
   )
 }
-
-export default RecordForm

@@ -410,6 +410,56 @@ class PackageImportServiceTest {
         }
 
         @Test
+        @DisplayName("a second import SKIPS the existing collection and field without re-patching display field or ownership")
+        void secondImportSkipsWithoutPatching() {
+            seedCollections(Map.of("orders", "tgt-orders"));
+            when(jdbcTemplate.queryForList(contains("FROM field f"), eq(TENANT)))
+                    .thenReturn(List.of(Map.of("id", "tgt-field", "name", "name", "coll", "orders")));
+
+            Map<String, Object> collection = collectionData("orders");
+            collection.put("display_field_id", "src-field-1");
+            collection.put("display_field_name", "name");
+            collection.put("owner_field", "member");
+            collection.put("owner_scope", "PORTAL");
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("id", "src-field-1");
+            field.put("collection_name", "orders");
+            field.put("name", "name");
+            field.put("type", "STRING");
+
+            var report = service.importPackage(TENANT,
+                    pkg(item("COLLECTION", collection), item("FIELD", field)),
+                    PackageImportService.ImportOptions.defaults());
+
+            assertThat(report.items()).extracting(PackageImportService.ItemResult::action)
+                    .containsExactly("SKIPPED", "SKIPPED");
+            assertThat(report.created()).isZero();
+            assertThat(report.updated()).isZero();
+            verify(queryEngine, never()).create(any(), anyMap());
+            verify(queryEngine, never()).update(any(), anyString(), anyMap());
+        }
+
+        @Test
+        @DisplayName("OVERWRITE of an existing collection still patches its display field")
+        void overwritePatchesDisplayField() {
+            seedCollections(Map.of("orders", "tgt-orders"));
+            when(jdbcTemplate.queryForList(contains("FROM field f"), eq(TENANT)))
+                    .thenReturn(List.of(Map.of("id", "tgt-field", "name", "name", "coll", "orders")));
+            when(queryEngine.update(any(), anyString(), anyMap()))
+                    .thenReturn(Optional.of(Map.of("id", "tgt-orders")));
+
+            Map<String, Object> collection = collectionData("orders");
+            collection.put("display_field_name", "name");
+
+            var report = service.importPackage(TENANT, pkg(item("COLLECTION", collection)),
+                    new PackageImportService.ImportOptions(
+                            PackageImportService.ConflictMode.OVERWRITE, false, null, null, null));
+
+            assertThat(report.updated()).isEqualTo(1);
+            verify(queryEngine).update(any(), eq("tgt-orders"), eq(Map.of("displayFieldId", "tgt-field")));
+        }
+
+        @Test
         @DisplayName("skips the patch for a dry run — nothing was actually written")
         void dryRunSkipsPatch() {
             Map<String, Object> collection = collectionData("orders");
@@ -1458,25 +1508,25 @@ class PackageImportServiceTest {
         }
 
         @Test
-        @DisplayName("a unique constraint is created through the service on the target collection by field names")
+        @DisplayName("a unique constraint is created through the service on the target collection, in the package's field order")
         void createsUniqueConstraint() {
             when(uniqueConstraintService.create(eq(orders), anyList()))
-                    .thenReturn(new ConstraintInfo("uniq_orders_code_region", List.of("code", "region"),
-                            List.of("code", "region")));
+                    .thenReturn(new ConstraintInfo("uniq_orders_region_code", List.of("region", "code"),
+                            List.of("region", "code")));
 
             var report = service.importPackage(TENANT, pkg(item("UNIQUE_CONSTRAINT", constraintData("region", "code"))),
                     PackageImportService.ImportOptions.defaults());
 
             assertThat(report.created()).as("%s", report.items()).isEqualTo(1);
-            assertThat(report.items().get(0).resourceId()).isEqualTo("uniq_orders_code_region");
-            verify(uniqueConstraintService).create(orders, List.of("code", "region"));
+            assertThat(report.items().get(0).resourceId()).isEqualTo("uniq_orders_region_code");
+            verify(uniqueConstraintService).create(orders, List.of("region", "code"));
         }
 
         @Test
-        @DisplayName("a unique constraint whose field set already exists (in any order) is SKIPPED, even under OVERWRITE")
+        @DisplayName("a unique constraint whose field set already exists in the same order is SKIPPED, even under OVERWRITE")
         void existingUniqueConstraintSkipped() {
             when(uniqueConstraintService.list(orders)).thenReturn(List.of(new ConstraintInfo(
-                    "uniq_orders_region_code", List.of("region", "code"), List.of("region", "code"))));
+                    "uniq_orders_code_region", List.of("code", "region"), List.of("code", "region"))));
 
             var report = service.importPackage(TENANT, pkg(item("UNIQUE_CONSTRAINT", constraintData("code", "region"))),
                     new PackageImportService.ImportOptions(
@@ -1484,6 +1534,111 @@ class PackageImportServiceTest {
 
             assertThat(report.skipped()).isEqualTo(1);
             verify(uniqueConstraintService, never()).create(any(), anyList());
+        }
+
+        @Test
+        @DisplayName("an existing field set in another order is SKIPPED under SKIP and re-created in package order under OVERWRITE")
+        void reorderedUniqueConstraintRecreatedUnderOverwrite() {
+            when(uniqueConstraintService.list(orders)).thenReturn(List.of(new ConstraintInfo(
+                    "uniq_orders_code_region", List.of("code", "region"), List.of("code", "region"))));
+            when(uniqueConstraintService.create(orders, List.of("region", "code"))).thenReturn(new ConstraintInfo(
+                    "uniq_orders_region_code", List.of("region", "code"), List.of("region", "code")));
+            var pkg = pkg(item("UNIQUE_CONSTRAINT", constraintData("region", "code")));
+
+            var skipped = service.importPackage(TENANT, pkg, PackageImportService.ImportOptions.defaults());
+            assertThat(skipped.skipped()).isEqualTo(1);
+            verify(uniqueConstraintService, never()).create(any(), anyList());
+
+            var overwritten = service.importPackage(TENANT, pkg, new PackageImportService.ImportOptions(
+                    PackageImportService.ConflictMode.OVERWRITE, false, null, null, null));
+
+            assertThat(overwritten.updated()).as("%s", overwritten.items()).isEqualTo(1);
+            assertThat(overwritten.items().get(0).resourceId()).isEqualTo("uniq_orders_region_code");
+            InOrder order = inOrder(uniqueConstraintService);
+            order.verify(uniqueConstraintService).create(orders, List.of("region", "code"));
+            order.verify(uniqueConstraintService).drop(orders, "uniq_orders_code_region");
+        }
+
+        @Test
+        @DisplayName("preview: a reordered unique constraint, a changed report and an approval process whose step "
+                + "changed are listed under updates with their changed attributes; nothing is written")
+        void previewListsChangedItemsUnderUpdates() {
+            when(uniqueConstraintService.list(orders)).thenReturn(List.of(new ConstraintInfo(
+                    "uniq_orders_code_region", List.of("code", "region"), List.of("code", "region"))));
+            when(jdbcTemplate.queryForList(contains("FROM report WHERE"), eq(TENANT))).thenReturn(List.of(
+                    mapOf("id", "tgt-open", "name", "Open orders"),
+                    mapOf("id", "tgt-closed", "name", "Closed orders")));
+            when(queryEngine.getById(argThat(d -> d != null && d.name().equals("reports")), eq("tgt-open")))
+                    .thenReturn(Optional.of(mapOf("name", "Open orders", "reportType", "TABULAR",
+                            "primaryCollectionId", "tgt-orders", "columns", List.of(Map.of("fieldName", "code")),
+                            "groupBy", "owner")));
+            when(queryEngine.getById(argThat(d -> d != null && d.name().equals("reports")), eq("tgt-closed")))
+                    .thenReturn(Optional.of(mapOf("name", "Closed orders", "reportType", "TABULAR",
+                            "primaryCollectionId", "tgt-orders", "columns", List.of(Map.of("fieldName", "code")),
+                            "groupBy", "region")));
+            when(jdbcTemplate.queryForList(contains("FROM approval_process ap"), eq(TENANT))).thenReturn(List.of(
+                    mapOf("id", "tgt-ap", "name", "Discount", "coll", "orders")));
+            when(jdbcTemplate.queryForList(contains("FROM approval_step WHERE"), eq("tgt-ap"))).thenReturn(List.of(
+                    mapOf("id", "tgt-step-1", "step_number", 1), mapOf("id", "tgt-step-2", "step_number", 2)));
+            when(queryEngine.getById(argThat(d -> d != null && d.name().equals("approval-processes")), eq("tgt-ap")))
+                    .thenReturn(Optional.of(mapOf("collectionId", "tgt-orders", "name", "Discount", "active", true,
+                            "initialSubmitterField", "owner")));
+            when(queryEngine.getById(argThat(d -> d != null && d.name().equals("approval-steps")), eq("tgt-step-1")))
+                    .thenReturn(Optional.of(mapOf("approvalProcessId", "tgt-ap", "stepNumber", 1, "name", "Step 1",
+                            "approverType", "USER", "approverId", "tgt-ann")));
+            when(queryEngine.getById(argThat(d -> d != null && d.name().equals("approval-steps")), eq("tgt-step-2")))
+                    .thenReturn(Optional.of(mapOf("approvalProcessId", "tgt-ap", "stepNumber", 2, "name", "Step 2",
+                            "approverType", "GROUP", "approverId", "tgt-legal")));
+            Map<String, Object> closed = reportData("orders", "code");
+            closed.put("name", "Closed orders");
+
+            Map<String, Object> preview = new PackageService(repository, new ObjectMapper(), service,
+                    collectionRegistry, uniqueConstraintService).previewImport(TENANT, pkg(
+                    item("UNIQUE_CONSTRAINT", constraintData("region", "code")),
+                    item("REPORT", reportData("orders", "code")),
+                    item("REPORT", closed),
+                    item("APPROVAL_PROCESS", approvalData(List.of(
+                            step(1, "approver_type", "USER", "approver_email", "ann@acme.io"),
+                            step(2, "approver_type", "GROUP", "approver_group_name", "Finance"))))));
+
+            assertThat(preview.get("updates")).isEqualTo(List.of(
+                    mapOf("type", "UNIQUE_CONSTRAINT", "name", "orders:code,region", "changes", List.of("field_names")),
+                    mapOf("type", "REPORT", "name", "Open orders", "changes", List.of("group_by")),
+                    mapOf("type", "APPROVAL_PROCESS", "name", "orders:Discount",
+                            "changes", List.of("steps[2].approver_id"))));
+            assertThat(preview.get("unchanged")).isEqualTo(List.of(mapOf("type", "REPORT", "name", "Closed orders")));
+            assertThat(preview.get("creates")).isEqualTo(List.of());
+            assertThat(preview.get("conflicts")).isEqualTo(List.of());
+            verify(queryEngine, never()).create(any(), anyMap());
+            verify(queryEngine, never()).update(any(), anyString(), anyMap());
+            verify(uniqueConstraintService, never()).create(any(), anyList());
+            verify(uniqueConstraintService, never()).drop(any(), anyString());
+        }
+
+        @Test
+        @DisplayName("preview: a step the target lacks is a change; an unresolved approver is a conflict, not an update")
+        void previewReportsNewStepsAndUnresolvedReferences() {
+            when(jdbcTemplate.queryForList(contains("FROM approval_process ap"), eq(TENANT))).thenReturn(List.of(
+                    mapOf("id", "tgt-ap", "name", "Discount", "coll", "orders")));
+            when(queryEngine.getById(argThat(d -> d != null && d.name().equals("approval-processes")), eq("tgt-ap")))
+                    .thenReturn(Optional.of(mapOf("collectionId", "tgt-orders", "name", "Discount", "active", true,
+                            "initialSubmitterField", "owner")));
+            Map<String, Object> ghost = approvalData(List.of(
+                    step(1, "approver_type", "USER", "approver_email", "ghost@acme.io")));
+            ghost.put("name", "Other");
+
+            Map<String, Object> preview = new PackageService(repository, new ObjectMapper(), service,
+                    collectionRegistry, uniqueConstraintService).previewImport(TENANT, pkg(
+                    item("APPROVAL_PROCESS", approvalData(List.of(
+                            step(1, "approver_type", "USER", "approver_email", "ann@acme.io")))),
+                    item("APPROVAL_PROCESS", ghost)));
+
+            assertThat(preview.get("updates")).isEqualTo(List.of(mapOf("type", "APPROVAL_PROCESS",
+                    "name", "orders:Discount", "changes", List.of("steps[1]"))));
+            @SuppressWarnings("unchecked")
+            var conflicts = (List<Map<String, Object>>) preview.get("conflicts");
+            assertThat(conflicts).singleElement().satisfies(c -> assertThat(String.valueOf(c.get("error")))
+                    .contains("'ghost@acme.io' not found"));
         }
 
         @Test
