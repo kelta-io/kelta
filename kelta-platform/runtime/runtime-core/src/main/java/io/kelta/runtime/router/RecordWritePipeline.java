@@ -1,7 +1,6 @@
 package io.kelta.runtime.router;
 
 import io.kelta.runtime.context.GeoHeaders;
-import io.kelta.runtime.context.GeoStamp;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.router.jsonapi.JsonApiRecordSerializer;
@@ -109,7 +108,7 @@ final class RecordWritePipeline {
             data.put("createdBy", userId);
             data.put("updatedBy", userId);
         }
-        stampGeo(data, definition, request, true);
+        GeoStamping.stamp(data, definition, GeoHeaders.parse(request), true);
 
         // Inject tenant ID for tenant-scoped system collections
         RecordTenantScope.injectTenantId(data, definition, request.getHeader("X-Tenant-ID"));
@@ -141,7 +140,7 @@ final class RecordWritePipeline {
         if (userId != null) {
             data.put("updatedBy", userId);
         }
-        stampGeo(data, definition, request, false);
+        GeoStamping.stamp(data, definition, GeoHeaders.parse(request), false);
 
         // Optimistic locking: reject a stale If-Match before mutating (slice 5).
         enforceIfMatch(definition, id, request);
@@ -249,25 +248,6 @@ final class RecordWritePipeline {
             }
         }
         return userId;
-    }
-
-    /**
-     * Stamps the request-origin geolocation (gateway {@code X-Geo-*} headers) into
-     * {@code createdGeo}/{@code updatedGeo} for collections with {@code captureGeo}
-     * enabled. Stamps null when the origin has no geolocation — on update this
-     * intentionally clears a previous stamp, so the value always describes the
-     * origin of the LAST write, never a stale one.
-     */
-    private static void stampGeo(Map<String, Object> data, CollectionDefinition definition,
-                                 HttpServletRequest request, boolean isCreate) {
-        if (!definition.captureGeo() || definition.systemCollection()) {
-            return;
-        }
-        Map<String, Object> geo = GeoHeaders.parse(request).map(GeoStamp::toMap).orElse(null);
-        if (isCreate) {
-            data.put("createdGeo", geo);
-        }
-        data.put("updatedGeo", geo);
     }
 
     /**

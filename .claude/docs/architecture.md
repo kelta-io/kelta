@@ -368,8 +368,8 @@ Every decision cache key (gateway system/object, worker field/record-access) app
 `:geo:<country>` — a decision cached for one origin must never answer for another.
 
 **Per-record capture:** the `captureGeo` collection flag (clone of `trackHistory`; rides the
-existing `kelta.config.collection.changed` broadcast) makes HTTP record writes stamp
-`createdGeo`/`updatedGeo` JSONB system columns (`RecordWritePipeline.stampGeo`; FLS-exempt
+existing `kelta.config.collection.changed` broadcast) makes HTTP record writes (the router and
+`POST /api/operations`) stamp `createdGeo`/`updatedGeo` JSONB system columns (`GeoStamping`; FLS-exempt
 like `createdBy`; excluded from record-version diffs). New user tables get the columns in base
 DDL; flipping the flag on an existing collection triggers an idempotent
 `ADD COLUMN IF NOT EXISTS` in `SchemaMigrationEngine.migrateSchema` on every pod's refresh.

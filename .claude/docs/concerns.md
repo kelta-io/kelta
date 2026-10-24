@@ -176,9 +176,11 @@ mailbox to a high-volume public address.
   `CerbosAuthorizationService.checkCollectionAccess`, keyed on the collection **UUID**
   (`getCollectionIdByName`) — keep it UUID-keyed; any denial fails the whole batch; missing
   identity or Cerbos error denies. Each add/update op then gets the field write rules
-  (`FieldWriteGuard`, shared with `CerbosFieldWriteSecurityAdvice`). It stamps `createdBy`/`updatedBy` (KLT-500, CRM build-log #12) but, unlike the
-  router, never stamps `createdGeo`/`updatedGeo` and doesn't inject `tenantId` for tenant-scoped
-  system collections when the client omits it.
+  (`FieldWriteGuard`, shared with `CerbosFieldWriteSecurityAdvice`). Like the router, it stamps
+  `createdBy`/`updatedBy` (KLT-500), `tenantId` on tenant-scoped system collections (PLT-710) and
+  `createdGeo`/`updatedGeo` on `captureGeo` collections from the request's `X-Geo-*` headers
+  (KLT-740; the rule is `GeoStamping`, shared with `RecordWritePipeline`). `PackageImportService`
+  seeds through the two-argument `execute`, so seeded rows get null geo stamps.
 - **Delegated administration (V157):** `DelegatedAdminScopeValidationHook` rejection of
   privileged profiles; `DelegatedAdminService.effectiveScope` **request-time re-filter** (don't
   cache it away); `DelegatedUserAdminController` field whitelist (email/managerId/mfa immutable,
@@ -559,11 +561,6 @@ sub-resource routes consult — see `architecture.md` → Worker Layers.
   envelope, `LinkedHashMap` documents, a `code` on errors), and the router's output was kept
   rather than bent to fit. Only `PaginationLinks` is shared. Converging means extending the library
   to this shape, then deleting the router copy.
-- **Known divergences pinned as-is** (each fix is a deliberate golden update): the read-only `403`
-  body has no `code` or `meta.requestId` (`conventions.md` requires `code` on every 4xx); a cached
-  system-collection get-by-id omits the `ETag` header the uncached path sends; the sub-resource
-  update/delete routes do not apply `If-Match`, and `GET /{parent}/{parentId}/{child}/{childId}`
-  sends no `ETag`.
 
 ### `DynamicCollectionRouter` shadows any `/**` mapping under `/api` (every method but POST)
 
@@ -973,6 +970,7 @@ One line each; full write-ups are in git history.
 - Older: Superset SQL injection hardening; gateway actuator requires JWT except health/info; `/internal/**` JWT auth (flag-gated); schema-name sanitization in `SchemaLifecycleModule`.
 
 **Bugs**
+- KLT-700 / KLT-740 (2026-10-24) — the router divergences `DynamicCollectionRouterGoldenTest` had pinned as-is are fixed (KLT-700): the read-only `403` carries `code` + `meta.requestId`, a cached system-collection get-by-id and the child get-by-id send `ETag`, and child update/delete enforce `If-Match`. `POST /api/operations` now geo-stamps `captureGeo` collections like the router (KLT-740, shared `GeoStamping`), its last behavioural divergence. `AtomicOperationExecutorTest`, `AtomicOperationsControllerTest`.
 - KLT-739 (2026-10-24) — adding a VECTOR field to an existing collection failed with `type "vector" does not exist`: only table creation enabled pgvector. `SchemaMigrationEngine.ensureVectorExtension` is now shared by `CollectionTableDdl` and the `migrateSchema`/destructive add-or-retype paths (same actionable error when `CREATE EXTENSION` is refused). `SchemaMigrationEngineVectorIntegrationTest`.
 - KLT-739 (2026-10-24) — owner-scoped reads filter on `ownerField`, but its column was never indexed; `CollectionTableDdl` and `migrateSchema` (when `ownerField` is set or changed) now emit `CREATE INDEX IF NOT EXISTS idx_owner_<table>_<column>`. `OwnerColumnIndexIntegrationTest`.
 - KLT-500 (2026-10-10) — records written through atomic operations (`POST /api/operations`: `kelta records bulk`, the MCP `seed_records` tool) carried `createdBy`/`updatedBy` = `null` while single-record writes carried the user id (CRM template `BUILD-LOG.md` error #12); `AtomicOperationsController` now stamps both. Moved here from the `docs/authoring/mcp-admin-coverage.md` follow-ups (KLT-734).

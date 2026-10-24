@@ -2,6 +2,8 @@ package io.kelta.runtime.router;
 
 import io.kelta.jsonapi.AtomicOperation;
 import io.kelta.jsonapi.AtomicResult;
+import io.kelta.runtime.context.GeoHeaders;
+import io.kelta.runtime.context.GeoStamp;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.CollectionDefinitionBuilder;
@@ -13,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.*;
 
@@ -398,6 +401,121 @@ class AtomicOperationExecutorTest {
             executor.execute(List.of(add("list-views", Map.of("name", "Mine"))));
 
             assertThat(capturedCreate(def)).doesNotContainKey("tenantId");
+        }
+    }
+
+    @Nested
+    @DisplayName("Geo Stamping")
+    @SuppressWarnings("unchecked")
+    class GeoStampingOnOperations {
+        private CollectionDefinition register(String name, boolean captureGeo) {
+            CollectionDefinition def = new CollectionDefinitionBuilder()
+                    .name(name).displayName(name)
+                    .addField(FieldDefinition.string("name"))
+                    .captureGeo(captureGeo)
+                    .build();
+            when(collectionRegistry.get(name)).thenReturn(def);
+            return def;
+        }
+
+        private static Optional<GeoStamp> parsedGeo() {
+            MockHttpServletRequest request = new MockHttpServletRequest();
+            request.addHeader("X-Geo-Country", "pt");
+            request.addHeader("X-Geo-City", "Lisboa");
+            request.addHeader("X-Geo-Lat", "38.72");
+            request.addHeader("X-Geo-Lon", "-9.14");
+            return GeoHeaders.parse(request);
+        }
+
+        private static AtomicOperation add(String type) {
+            return new AtomicOperation("add", null,
+                    new AtomicOperation.ResourceData(type, null, null, Map.of("name", "N"), null));
+        }
+
+        private static AtomicOperation update(String type, String id) {
+            return new AtomicOperation("update", new AtomicOperation.ResourceRef(type, id, null),
+                    new AtomicOperation.ResourceData(type, null, null, Map.of("name", "U"), null));
+        }
+
+        private Map<String, Object> capturedCreate(CollectionDefinition def) {
+            ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(eq(def), captor.capture());
+            return captor.getValue();
+        }
+
+        private Map<String, Object> capturedUpdate(CollectionDefinition def, String id) {
+            ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).update(eq(def), eq(id), captor.capture());
+            return captor.getValue();
+        }
+
+        @Test
+        void addOnCaptureGeoCollectionStampsCreatedAndUpdatedGeo() {
+            CollectionDefinition def = register("visits", true);
+            when(queryEngine.create(eq(def), anyMap())).thenReturn(Map.of("id", "v-1"));
+            Optional<GeoStamp> geo = parsedGeo();
+            Map<String, Object> expected = Map.of("country", "PT", "city", "Lisboa", "lat", 38.72, "lon", -9.14);
+            assertThat(geo.map(GeoStamp::toMap)).contains(expected);
+
+            executor.execute(List.of(add("visits")), "u-1", geo);
+
+            assertThat(capturedCreate(def))
+                    .containsEntry("createdGeo", expected)
+                    .containsEntry("updatedGeo", expected);
+        }
+
+        @Test
+        void updateOnCaptureGeoCollectionStampsOnlyUpdatedGeo() {
+            CollectionDefinition def = register("visits", true);
+            when(queryEngine.update(eq(def), eq("v-1"), anyMap())).thenReturn(Optional.of(Map.of("id", "v-1")));
+
+            executor.execute(List.of(update("visits", "v-1")), "u-1", parsedGeo());
+
+            assertThat(capturedUpdate(def, "v-1"))
+                    .containsEntry("updatedGeo", parsedGeo().orElseThrow().toMap())
+                    .doesNotContainKey("createdGeo");
+        }
+
+        @Test
+        void noGeoStampsNullAsTheRouterDoes() {
+            CollectionDefinition def = register("visits", true);
+            when(queryEngine.create(eq(def), anyMap())).thenReturn(Map.of("id", "v-1"));
+            when(queryEngine.update(eq(def), eq("v-1"), anyMap())).thenReturn(Optional.of(Map.of("id", "v-1")));
+            Optional<GeoStamp> noHeaders = GeoHeaders.parse(new MockHttpServletRequest());
+
+            executor.execute(List.of(add("visits"), update("visits", "v-1")), "u-1", noHeaders);
+
+            Map<String, Object> created = capturedCreate(def);
+            assertThat(created).containsKey("createdGeo").containsKey("updatedGeo");
+            assertThat(created.get("createdGeo")).isNull();
+            assertThat(created.get("updatedGeo")).isNull();
+            Map<String, Object> updated = capturedUpdate(def, "v-1");
+            assertThat(updated).containsKey("updatedGeo").doesNotContainKey("createdGeo");
+            assertThat(updated.get("updatedGeo")).isNull();
+        }
+
+        @Test
+        void twoArgumentExecuteStampsNull() {
+            CollectionDefinition def = register("visits", true);
+            when(queryEngine.create(eq(def), anyMap())).thenReturn(Map.of("id", "v-1"));
+
+            executor.execute(List.of(add("visits")), null);
+
+            Map<String, Object> created = capturedCreate(def);
+            assertThat(created).containsKey("createdGeo").containsKey("updatedGeo");
+            assertThat(created.get("createdGeo")).isNull();
+        }
+
+        @Test
+        void nonCaptureGeoCollectionGetsNeitherKey() {
+            CollectionDefinition def = register("projects", false);
+            when(queryEngine.create(eq(def), anyMap())).thenReturn(Map.of("id", "p-1"));
+            when(queryEngine.update(eq(def), eq("p-1"), anyMap())).thenReturn(Optional.of(Map.of("id", "p-1")));
+
+            executor.execute(List.of(add("projects"), update("projects", "p-1")), "u-1", parsedGeo());
+
+            assertThat(capturedCreate(def)).doesNotContainKeys("createdGeo", "updatedGeo");
+            assertThat(capturedUpdate(def, "p-1")).doesNotContainKeys("createdGeo", "updatedGeo");
         }
     }
 }
