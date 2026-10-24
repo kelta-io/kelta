@@ -18,7 +18,7 @@ import java.util.Map;
  *
  * <p>Handles:
  * <ul>
- *   <li>Collection changed events: Updates route registry when collections are created/updated/deleted</li>
+ *   <li>Collection changed events: Updates route registry when collections are created/updated/deactivated/deleted</li>
  *   <li>Worker assignment changed events: Updates routes when collections are assigned to workers</li>
  * </ul>
  *
@@ -70,11 +70,14 @@ public class ConfigEventListener {
                 routeRegistry.removeRoute(payload.getId());
                 logger.info("Removed route for deleted collection: id={}, name={}",
                            payload.getId(), payload.getName());
+            } else if (payload.getChangeType() == ChangeType.UPDATED
+                    && Boolean.FALSE.equals(payload.getActive())) {
+                // Only an explicit false deactivates: hooks that reuse this payload for
+                // field/rule changes leave `active` unset (null), which keeps the route.
+                routeRegistry.removeRoute(payload.getId());
+                logger.info("Removed route for deactivated collection: id={}, name={}",
+                           payload.getId(), payload.getName());
             } else {
-                // Note: an UPDATED event does not reliably carry `active` — several publishers
-                // (field, validation-rule and approval hooks) send UPDATED with the primitive
-                // default of false — so a collection that turns inactive keeps its route until
-                // the next bootstrap. Do not treat active=false as a removal here.
                 RouteDefinition route = buildRouteFromCollection(payload, tenantId);
 
                 if (route != null) {

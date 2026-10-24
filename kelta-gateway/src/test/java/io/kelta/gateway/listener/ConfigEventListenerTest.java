@@ -138,19 +138,84 @@ class ConfigEventListenerTest {
         }
 
         @Test
-        @DisplayName("An UPDATED event without `active` (field/rule hooks send none) keeps the route")
-        void shouldKeepRouteWhenUpdatedEventCarriesNoActiveFlag() throws Exception {
+        @DisplayName("An UPDATED event without an `active` key (field/rule hooks send none) keeps the route")
+        void shouldKeepRouteWhenUpdatedEventCarriesNoActiveKey() {
+            String json = "{\"tenantId\":\"tenant-1\",\"payload\":"
+                    + "{\"id\":\"collection-1\",\"name\":\"customers\",\"changeType\":\"UPDATED\"}}";
+
+            listener.handleCollectionChanged(json);
+
+            verify(routeRegistry).updateRoute(any(RouteDefinition.class));
+            verify(routeRegistry, never()).removeRoute(any());
+            verify(routeRefresher).refresh();
+        }
+
+        @Test
+        @DisplayName("An UPDATED event without an `active` key leaves a registered route in the registry")
+        void routeStaysRegisteredWhenUpdatedEventCarriesNoActiveKey() {
+            RouteRegistry realRegistry = new RouteRegistry();
+            realRegistry.addRoute(new RouteDefinition("collection-1", "/api/customers/**",
+                    WORKER_SERVICE_URL, "customers", null, 0, "tenant-1"));
+            ConfigEventListener realListener =
+                    new ConfigEventListener(realRegistry, objectMapper, routeRefresher, WORKER_SERVICE_URL);
+
+            realListener.handleCollectionChanged("{\"tenantId\":\"tenant-1\",\"payload\":"
+                    + "{\"id\":\"collection-1\",\"name\":\"customers\",\"changeType\":\"UPDATED\"}}");
+
+            assertEquals(1, realRegistry.size());
+            assertEquals("collection-1",
+                    realRegistry.findByPath("/api/customers/abc", "tenant-1").orElseThrow().getId());
+        }
+
+        @Test
+        @DisplayName("An UPDATED event with active:false removes the collection's route")
+        void shouldRemoveRouteWhenCollectionDeactivated() {
             CollectionChangedPayload payload = new CollectionChangedPayload();
             payload.setId("collection-1");
             payload.setName("customers");
-            payload.setChangeType(ChangeType.UPDATED);   // active left at its primitive default
-            PlatformEvent<CollectionChangedPayload> event = new PlatformEvent<>(
+            payload.setActive(false);
+            payload.setChangeType(ChangeType.UPDATED);
+
+            listener.handleCollectionChanged(toJson(new PlatformEvent<>(
                 UUID.randomUUID().toString(), "config.collection.changed", "tenant-1",
-                UUID.randomUUID().toString(), null, Instant.now(), payload);
+                UUID.randomUUID().toString(), null, Instant.now(), payload)));
 
-            listener.handleCollectionChanged(toJson(event));
+            InOrder inOrder = inOrder(routeRegistry, routeRefresher);
+            inOrder.verify(routeRegistry).removeRoute("collection-1");
+            inOrder.verify(routeRefresher).refresh();
+            verify(routeRegistry, never()).updateRoute(any());
+        }
 
-            verify(routeRegistry).updateRoute(any());
+        @Test
+        @DisplayName("A deactivation removes the route from a real registry")
+        void deactivationRemovesRouteFromRegistry() {
+            RouteRegistry realRegistry = new RouteRegistry();
+            realRegistry.addRoute(new RouteDefinition("collection-1", "/api/customers/**",
+                    WORKER_SERVICE_URL, "customers", null, 0, "tenant-1"));
+            ConfigEventListener realListener =
+                    new ConfigEventListener(realRegistry, objectMapper, routeRefresher, WORKER_SERVICE_URL);
+
+            realListener.handleCollectionChanged("{\"tenantId\":\"tenant-1\",\"payload\":"
+                    + "{\"id\":\"collection-1\",\"name\":\"customers\",\"active\":false,"
+                    + "\"changeType\":\"UPDATED\"}}");
+
+            assertTrue(realRegistry.isEmpty());
+        }
+
+        @Test
+        @DisplayName("A CREATED event with active:true registers the route")
+        void shouldAddRouteWhenCreatedActive() {
+            CollectionChangedPayload payload = new CollectionChangedPayload();
+            payload.setId("collection-1");
+            payload.setName("customers");
+            payload.setActive(true);
+            payload.setChangeType(ChangeType.CREATED);
+
+            listener.handleCollectionChanged(toJson(new PlatformEvent<>(
+                UUID.randomUUID().toString(), "config.collection.changed", "tenant-1",
+                UUID.randomUUID().toString(), null, Instant.now(), payload)));
+
+            verify(routeRegistry).updateRoute(any(RouteDefinition.class));
             verify(routeRegistry, never()).removeRoute(any());
         }
 
@@ -179,6 +244,7 @@ class ConfigEventListenerTest {
 
             // Assert
             verify(routeRegistry).updateRoute(any(RouteDefinition.class));
+            verify(routeRegistry, never()).removeRoute(any());
         }
 
         @Test
