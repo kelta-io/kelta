@@ -10,7 +10,7 @@ import { useState, useCallback, useEffect } from 'react'
 /**
  * A favorite item entry
  */
-export interface FavoriteItem {
+interface FavoriteItem {
   id: string
   type: 'record' | 'collection'
   collectionName?: string

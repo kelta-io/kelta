@@ -567,9 +567,47 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * The {@code 404} a handler answers itself for a collection it cannot resolve, in this
+     * advice's error shape ({@code code} plus {@code meta.requestId} and {@code meta.path}).
+     */
+    static <T> ResponseEntity<T> collectionNotFound(String collectionName, HttpServletRequest request) {
+        return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND",
+                "Collection '" + collectionName + "' not found", request);
+    }
+
+    /**
+     * The {@code 404} a handler answers itself for a record that is absent, or that the caller's
+     * tenant or the URL's parent may not see — all of which read the same.
+     */
+    static <T> ResponseEntity<T> recordNotFound(String collectionName, String id, HttpServletRequest request) {
+        return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND",
+                "Record '" + id + "' not found in collection '" + collectionName + "'", request);
+    }
+
+    /** The {@code 403} for a write to a read-only collection. */
+    static <T> ResponseEntity<T> readOnlyCollection(String collectionName, HttpServletRequest request) {
+        return errorResponse(HttpStatus.FORBIDDEN, "READ_ONLY_COLLECTION",
+                "Collection '" + collectionName + "' is read-only", request);
+    }
+
+    /**
+     * Builds an error response in this advice's shape for a handler that returns its 4xx rather
+     * than throwing, so direct callers still see a plain {@code ResponseEntity} status. Typed to
+     * the handler's declared body so the {@code ResponseEntity<Void>} delete handlers can carry
+     * the error document too.
+     */
+    @SuppressWarnings("unchecked")
+    private static <T> ResponseEntity<T> errorResponse(HttpStatus status, String code, String detail,
+                                                       HttpServletRequest request) {
+        JsonApiError error = new JsonApiError(String.valueOf(status.value()), code, status.getReasonPhrase(), detail);
+        error.setMeta(Map.of("requestId", generateRequestId(), "path", request.getRequestURI()));
+        return (ResponseEntity<T>) (ResponseEntity<?>) ResponseEntity.status(status).body(errorBody(error));
+    }
+
+    /**
      * Generates a unique request ID for tracing.
      */
-    private String generateRequestId() {
+    private static String generateRequestId() {
         return UUID.randomUUID().toString().substring(0, 8);
     }
 

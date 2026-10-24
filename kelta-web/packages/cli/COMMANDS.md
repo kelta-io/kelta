@@ -22,21 +22,42 @@ Log in via the browser and store a PAT for a profile (--token for headless)
 - `--expires-in <days>` — PAT lifetime in days (browser login) (default: "90")
 - `--no-browser` — Print the login URL instead of opening a browser
 
+```bash
+# Log in through the browser and save a 90-day PAT
+kelta auth login --url https://api.kelta.io --tenant acme
+# Headless login with an existing PAT
+kelta auth login --url https://api.kelta.io --tenant acme --profile staging --token "$KELTA_TOKEN"
+```
+
 ### `kelta auth logout`
 
 Remove the stored credential for the active profile (--revoke also revokes it)
 
 - `--revoke` — Revoke the PAT server-side before removing it locally
 
+```bash
+kelta auth logout
+# Revoke the PAT server-side, then forget it locally
+kelta auth logout --revoke --profile staging
+```
+
 ### `kelta auth status`
 
 Show the resolved connection settings for the active profile
+
+```bash
+kelta auth status --profile staging --output json
+```
 
 ## token
 
 ### `kelta token list`
 
 List your active personal access tokens
+
+```bash
+kelta token list
+```
 
 ### `kelta token create`
 
@@ -45,9 +66,18 @@ Create a personal access token (the full token is shown exactly once)
 - `--name <name>` — Token name
 - `--expires-in <days>` — Lifetime in days (1-365) (default: "90")
 
+```bash
+# Create a 30-day token for CI
+kelta token create --name ci-deploy --expires-in 30
+```
+
 ### `kelta token revoke <tokenId>`
 
 Revoke a personal access token by id **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta token revoke 3f6c1a52-8d2e-4b7a-9c1e-5a0d2f7b9e14 --yes
+```
 
 ## profile
 
@@ -55,21 +85,41 @@ Revoke a personal access token by id **(destructive — needs --yes off-TTY)**
 
 List configured profiles
 
+```bash
+kelta profile list
+```
+
 ### `kelta profile use <name>`
 
 Set the default profile
+
+```bash
+kelta profile use staging
+```
 
 ### `kelta profile show [name]`
 
 Show the resolved settings of a profile (default: active profile)
 
+```bash
+kelta profile show staging --output json
+```
+
 ### `kelta profile remove <name>`
 
 Remove a profile and its stored credential
 
+```bash
+kelta profile remove staging
+```
+
 ### `kelta profile rename <oldName> <newName>`
 
 Rename a profile (credential moves with it)
+
+```bash
+kelta profile rename default production
+```
 
 ## collections
 
@@ -77,9 +127,17 @@ Rename a profile (credential moves with it)
 
 List all collections
 
+```bash
+kelta collections list
+```
+
 ### `kelta collections describe <name>`
 
 Show collection details and fields
+
+```bash
+kelta collections describe customers
+```
 
 ### `kelta collections create`
 
@@ -90,6 +148,12 @@ Create a collection
 - `--description <text>` — Description
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta collections create --name invoices --display-name Invoices --description 'Customer invoices'
+# Create from a JSON attributes file
+kelta collections create --name orders --data @orders-collection.json
+```
+
 ### `kelta collections update <collection>`
 
 Update a collection (name or id)
@@ -98,17 +162,31 @@ Update a collection (name or id)
 - `--description <text>` — Description
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta collections update invoices --display-name 'Sales Invoices'
+```
+
 ### `kelta collections delete <collection>`
 
 Delete a collection and its data **(destructive — needs --yes off-TTY)**
 
 - `--force` — Confirm deletion of a collection that still has dependent data (attachments, layouts, reports, validation rules, field history, record versions, …); the server blocks the delete without this.
 
+```bash
+kelta collections delete invoices --yes
+# Delete even though layouts and other dependent data exist
+kelta collections delete invoices --force --yes
+```
+
 ## fields
 
 ### `kelta fields list <collection>`
 
 List the fields of a collection
+
+```bash
+kelta fields list customers
+```
 
 ### `kelta fields add <collection>`
 
@@ -131,6 +209,13 @@ Add a field to a collection (friendly type aliases: text, number, picklist, refe
 - `--dimension <n>` — Vector dimension (vector type)
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+# Add a required currency field
+kelta fields add invoices --name amount --type currency --required
+# Picklist field with field-scoped values
+kelta fields add orders --name status --type picklist --values draft,submitted,shipped --default draft
+```
+
 ### `kelta fields update <fieldId>`
 
 Update a field by id
@@ -141,9 +226,17 @@ Update a field by id
 - `--description <text>` — Description
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta fields update fld_123 --display-name 'Due Date' --required true
+```
+
 ### `kelta fields remove <fieldId>`
 
 Remove a field and its data **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta fields remove fld_123 --yes
+```
 
 ## picklists
 
@@ -153,9 +246,19 @@ List global picklists
 
 - `--name <name>` — Filter by exact name
 
+```bash
+kelta picklists list
+# Look up one picklist by exact name
+kelta picklists list --name order_status
+```
+
 ### `kelta picklists get <picklist>`
 
 Show a global picklist with its values
+
+```bash
+kelta picklists get order_status
+```
 
 ### `kelta picklists create`
 
@@ -165,9 +268,18 @@ Create a global picklist (optionally with initial values)
 - `--description <text>` — Description
 - `--values <list>` — Initial values, comma-separated (value used as label)
 
+```bash
+# Create a picklist with four initial values
+kelta picklists create --name order_status --description 'Order lifecycle' --values draft,submitted,shipped,cancelled
+```
+
 ### `kelta picklists delete <picklist>`
 
 Delete a global picklist **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta picklists delete order_status --yes
+```
 
 ### `kelta picklists value-add <picklist>`
 
@@ -177,6 +289,10 @@ Add a value to a global picklist
 - `--label <label>` — Display label (default: the value)
 - `--sort <n>` — Sort order (default: "0")
 - `--default` — Mark as the default value
+
+```bash
+kelta picklists value-add order_status --value returned --label Returned --sort 4
+```
 
 ### `kelta picklists value-update <valueId>`
 
@@ -188,15 +304,27 @@ Update a picklist value by id
 - `--active <bool>` — true|false
 - `--default <bool>` — true|false
 
+```bash
+kelta picklists value-update val_123 --label 'On hold' --sort 2
+```
+
 ### `kelta picklists value-deactivate <valueId>`
 
 Deactivate a picklist value (records keep it; new picks cannot use it)
+
+```bash
+kelta picklists value-deactivate val_123
+```
 
 ## validation-rules
 
 ### `kelta validation-rules list <collection>`
 
 List validation rules of a collection
+
+```bash
+kelta validation-rules list invoices
+```
 
 ### `kelta validation-rules create <collection>`
 
@@ -210,6 +338,13 @@ Create a validation rule (record is REJECTED when --formula evaluates TRUE)
 - `--error-field <field>` — Field to attach the error to
 - `--inactive` — Create the rule inactive
 
+```bash
+# Reject invoices whose amount is zero or negative
+kelta validation-rules create invoices --name positive_amount --formula 'amount <= 0' --message 'Amount must be positive' --error-field amount
+# Warn on update when the due date is blank
+kelta validation-rules create orders --name due_date_set --formula 'ISBLANK(due_date)' --message 'Set a due date' --evaluate-on UPDATE --severity WARNING
+```
+
 ### `kelta validation-rules update <ruleId>`
 
 Update a validation rule by id
@@ -217,9 +352,19 @@ Update a validation rule by id
 - `--active <bool>` — true|false
 - `--data <json>` — Attributes as JSON, @file, or - (merged last)
 
+```bash
+# Deactivate a rule
+kelta validation-rules update rule_123 --active false
+kelta validation-rules update rule_123 --data '{"errorMessage": "Amount must be greater than zero"}'
+```
+
 ### `kelta validation-rules delete <ruleId>`
 
 Delete a validation rule **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta validation-rules delete rule_123 --yes
+```
 
 ## constraints
 
@@ -227,21 +372,38 @@ Delete a validation rule **(destructive — needs --yes off-TTY)**
 
 List composite unique constraints of a collection
 
+```bash
+kelta constraints list orders
+```
+
 ### `kelta constraints create <collection>`
 
 Create a composite unique constraint (Postgres unique index; duplicates → 409)
 
 - `--fields <list>` — Field names, comma-separated (required)
 
+```bash
+# Make each order number unique per customer
+kelta constraints create orders --fields customer,order_number
+```
+
 ### `kelta constraints delete <collection> <indexName>`
 
 Drop a composite unique constraint by index name **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta constraints delete orders uq_orders_customer_order_number --yes
+```
 
 ## layouts
 
 ### `kelta layouts list <collection>`
 
 List page layouts of a collection
+
+```bash
+kelta layouts list customers
+```
 
 ### `kelta layouts create <collection>`
 
@@ -251,11 +413,21 @@ Create a page layout (sections/fields via the UI or kelta api)
 - `--default` — Mark as the default layout
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta layouts create customers --name 'Customer detail' --default
+```
+
 ### `kelta layouts get <layoutId>`
 
 Get a page layout by id
 
 - `--tree` — Fetch the whole layout as a tree (sections, field placements, related lists) — the document `layouts apply --file` accepts.
+
+```bash
+kelta layouts get lay_123
+# Fetch the full tree, the shape layouts apply accepts
+kelta layouts get lay_123 --tree --output json
+```
 
 ### `kelta layouts apply <collection>`
 
@@ -263,6 +435,12 @@ Apply a layout tree file (sections, fields, related lists) to a collection
 
 - `--file <path>` — Layout tree JSON file — see `layouts get <id> --tree` for the shape. Also accepts an `apply_layout` (MCP) argument file as-is: `collectionName`/`layoutId` are stripped before forwarding, and a `layoutId` addresses the layout by id.
 - `--name <name>` — Layout name (overrides the file's own "name"; addresses the layout within the collection, creating it if it does not exist yet)
+
+```bash
+kelta layouts apply customers --file customer-layout.json
+# Override the layout name from the file
+kelta layouts apply customers --file customer-layout.json --name 'Customer detail'
+```
 
 ### `kelta layouts update <layoutId>`
 
@@ -272,15 +450,27 @@ Update a page layout by id
 - `--default <bool>` — true|false
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta layouts update lay_123 --name 'Customer summary' --default true
+```
+
 ### `kelta layouts delete <layoutId>`
 
 Delete a page layout **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta layouts delete lay_123 --yes
+```
 
 ## list-views
 
 ### `kelta list-views list <collection>`
 
 List saved list views of a collection
+
+```bash
+kelta list-views list orders
+```
 
 ### `kelta list-views create <collection>`
 
@@ -296,6 +486,13 @@ Create a saved list view
 - `--lane-field <field>` — Kanban lane field (a picklist field)
 - `--card-fields <list>` — Kanban card fields, comma-separated
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
+
+```bash
+# Table view of open orders, newest first
+kelta list-views create orders --name 'Open orders' --columns order_number,customer,amount,status --filter status=open --sort -createdAt
+# Kanban board laned by status
+kelta list-views create orders --name 'Order board' --columns order_number,amount --view-type KANBAN --lane-field status --card-fields customer,amount
+```
 
 ### `kelta list-views apply <collection>`
 
@@ -313,6 +510,11 @@ Create-or-update a saved list view, keyed on (collection, name)
 - `--card-fields <list>` — Kanban card fields, comma-separated
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+# Create or update the shared Overdue view
+kelta list-views apply invoices --name Overdue --columns invoice_number,customer,amount,due_date --filter status=unpaid --filter due_date.lt=2026-11-01 --sort due_date --visibility PUBLIC
+```
+
 ### `kelta list-views update <listViewId>`
 
 Update a saved list view by id
@@ -328,13 +530,25 @@ Update a saved list view by id
 - `--card-fields <list>` — Kanban card fields, comma-separated
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta list-views update lv_123 --columns order_number,customer,status --sort -amount
+```
+
 ### `kelta list-views get <listViewId>`
 
 Get a saved list view by id
 
+```bash
+kelta list-views get lv_123
+```
+
 ### `kelta list-views delete <listViewId>`
 
 Delete a saved list view **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta list-views delete lv_123 --yes
+```
 
 ## pages
 
@@ -342,9 +556,17 @@ Delete a saved list view **(destructive — needs --yes off-TTY)**
 
 List UI pages (screen builder)
 
+```bash
+kelta pages list
+```
+
 ### `kelta pages get <pageId>`
 
 Get a UI page by id
+
+```bash
+kelta pages get page_123 --output json
+```
 
 ### `kelta pages create`
 
@@ -357,11 +579,23 @@ Create a UI page (draft — unpublished until `pages publish`)
 - `--active <bool>` — true|false (default true)
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+# Create a draft page at /home
+kelta pages create --name Home --path /home --title 'Welcome' --config @home-config.json
+```
+
 ### `kelta pages apply <file>`
 
 Validate then create-or-update a UI page from a JSON file, keyed on path. Returns {action, id, path, changed, published} like apply_page — pass --raw for the full ui-pages record instead. **(destructive — needs --yes off-TTY)**
 
 - `--dry-run` — Validate config only; write nothing
+
+```bash
+# Validate the page config without writing
+kelta pages apply home-page.json --dry-run
+# Create or update the page keyed on its path
+kelta pages apply home-page.json --yes
+```
 
 ### `kelta pages update <pageId>`
 
@@ -375,13 +609,25 @@ Update a UI page by id
 - `--published <bool>` — true|false
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta pages update page_123 --title 'Customer home' --published true
+```
+
 ### `kelta pages delete <pageId>`
 
 Delete a UI page **(destructive — needs --yes off-TTY)**
 
+```bash
+kelta pages delete page_123 --yes
+```
+
 ### `kelta pages publish <path>`
 
 Publish the UI page served at a route path (sets published=true). Returns {action: "published"|"unchanged", id, path}.
+
+```bash
+kelta pages publish /home
+```
 
 ## menus
 
@@ -389,11 +635,20 @@ Publish the UI page served at a route path (sets published=true). Returns {actio
 
 List UI menus (apps/nav v2)
 
+```bash
+kelta menus list
+```
+
 ### `kelta menus get <menu>`
 
 Get a UI menu by name or id (--tree nests items by parentId)
 
 - `--tree` — Include menu items nested by parentId under attribute "items"
+
+```bash
+# Show the Sales menu with nested items
+kelta menus get Sales --tree
+```
 
 ### `kelta menus create`
 
@@ -406,12 +661,23 @@ Create a UI menu
 - `--default` — Mark as the default menu
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta menus create --name Sales --icon briefcase --display-order 2
+```
+
 ### `kelta menus apply`
 
 Apply a menu tree file (items/groups) in one call, creating the menu if needed
 
 - `--file <path>` — Menu tree JSON file — see `menus get <name> --tree` for the shape
 - `--name <name>` — Menu name (overrides the file's own "name"; creates the menu if it does not exist yet)
+
+```bash
+# Apply the tree using the file's own name
+kelta menus apply --file sales-menu.json
+# Apply the tree to the Sales menu, creating it if needed
+kelta menus apply --file sales-menu.json --name Sales
+```
 
 ### `kelta menus update <menuId>`
 
@@ -425,9 +691,17 @@ Update a UI menu by id
 - `--active <bool>` — true|false
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta menus update menu_123 --default true --display-order 1
+```
+
 ### `kelta menus delete <menuId>`
 
 Delete a UI menu **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta menus delete menu_123 --yes
+```
 
 ## dashboards
 
@@ -435,11 +709,20 @@ Delete a UI menu **(destructive — needs --yes off-TTY)**
 
 List dashboards
 
+```bash
+kelta dashboards list
+```
+
 ### `kelta dashboards get <dashboardId>`
 
 Get a dashboard by id (--components includes widgets sorted by row/column)
 
 - `--components` — Include dashboard components, sorted by rowPosition then columnPosition
+
+```bash
+# Include widgets in grid order
+kelta dashboards get dash_123 --components
+```
 
 ### `kelta dashboards create`
 
@@ -453,12 +736,21 @@ Create a dashboard (add widgets via `kelta api` — dashboard-components)
 - `--running-user-id <id>` — User a dynamic dashboard executes widgets as
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta dashboards create --name 'Sales overview' --access-level PUBLIC --column-count 12
+```
+
 ### `kelta dashboards apply`
 
 Apply a dashboard tree file (widgets) in one call, creating the dashboard if needed
 
 - `--file <path>` — Dashboard tree JSON file — see `dashboards get <id> --components` for the shape
 - `--name <name>` — Dashboard name (overrides the file's own "name"; creates the dashboard if it does not exist yet)
+
+```bash
+# Apply widgets, creating the dashboard if needed
+kelta dashboards apply --file sales-dashboard.json --name 'Sales overview'
+```
 
 ### `kelta dashboards update <dashboardId>`
 
@@ -472,9 +764,17 @@ Update a dashboard by id
 - `--running-user-id <id>` — User a dynamic dashboard executes widgets as
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+kelta dashboards update dash_123 --access-level PRIVATE --description 'Weekly sales KPIs'
+```
+
 ### `kelta dashboards delete <dashboardId>`
 
 Delete a dashboard **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta dashboards delete dash_123 --yes
+```
 
 ### `kelta dashboards validate <dashboard>`
 
@@ -482,11 +782,20 @@ Validate a dashboard's widget configs (read-only; prints the API response as-is)
 
 - `--data <json>` — Body as JSON, @file, or - — e.g. {"components":[...]} to validate unsaved widgets
 
+```bash
+kelta dashboards validate 'Sales overview'
+```
+
 ### `kelta dashboards data <dashboard>`
 
 Execute a dashboard's widgets and print their data (read-only; API response as-is)
 
 - `--data <json>` — Runtime parameters as JSON, @file, or - (e.g. {"timeRange":"LAST_30_DAYS"})
+
+```bash
+# Widget data for the last 30 days
+kelta dashboards data 'Sales overview' --data '{"timeRange": "LAST_30_DAYS"}'
+```
 
 ## reports
 
@@ -494,9 +803,17 @@ Execute a dashboard's widgets and print their data (read-only; API response as-i
 
 List saved reports
 
+```bash
+kelta reports list
+```
+
 ### `kelta reports get <reportId>`
 
 Get a report definition by id
+
+```bash
+kelta reports get rep_123 --output json
+```
 
 ## flows
 
@@ -504,9 +821,17 @@ Get a report definition by id
 
 List flow definitions
 
+```bash
+kelta flows list --output json
+```
+
 ### `kelta flows describe <flowId>`
 
 Show a flow definition
+
+```bash
+kelta flows describe flow_123
+```
 
 ### `kelta flows create`
 
@@ -521,6 +846,13 @@ Create a flow (definition JSON is the state machine)
 - `--step-logging <level>` — FULL (every step with snapshots) | ERRORS_ONLY (snapshots only for a failed step) | NONE (only a failed step) (default: FULL)
 - `--retention-days <days>` — Days a finished run and its step logs are kept, 1-3650 (default: the platform-wide window)
 
+```bash
+# Active flow that runs whenever an order is created
+kelta flows create --name 'Notify on new order' --type RECORD_TRIGGERED --definition @order-flow.json --trigger-config '{"collection": "orders", "events": ["CREATE"]}' --active
+# Scheduled flow that keeps runs for 30 days
+kelta flows create --name 'Nightly cleanup' --type SCHEDULED --definition @cleanup.json --step-logging ERRORS_ONLY --retention-days 30
+```
+
 ### `kelta flows update <flowId>`
 
 Update a flow by id
@@ -531,9 +863,20 @@ Update a flow by id
 - `--retention-days <days>` — Days a finished run and its step logs are kept, 1-3650 (default: the platform-wide window); "default" clears the override
 - `--data <json>` — Extra attributes as JSON, @file, or - (merged last)
 
+```bash
+# Deactivate a flow
+kelta flows update flow_123 --active false
+# Replace the definition and reset retention to the platform default
+kelta flows update flow_123 --definition @order-flow.json --retention-days default
+```
+
 ### `kelta flows delete <flowId>`
 
 Delete a flow (the server refuses flows that have runs) **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta flows delete flow_123 --yes
+```
 
 ### `kelta flows execute <flowId>`
 
@@ -543,11 +886,22 @@ Start a flow run (flows read input as $.input.<key>)
 - `--test` — Mark the run as a test execution
 - `--wait` — Poll until COMPLETED/FAILED/CANCELLED (~5 min budget)
 
+```bash
+# Run with input read as $.input.orderId and wait for the result
+kelta flows execute flow_123 --input '{"orderId": "rec_123"}' --wait
+# Start a test run from a file
+kelta flows execute flow_123 --input @input.json --test
+```
+
 ### `kelta flows runs <flowId>`
 
 List recent executions of a flow
 
 - `--limit <n>` — Max runs (default: "50")
+
+```bash
+kelta flows runs flow_123 --limit 10
+```
 
 ### `kelta flows run <executionId>`
 
@@ -555,9 +909,18 @@ Show one execution (--steps for per-step detail)
 
 - `--steps` — Include per-step detail
 
+```bash
+# Show an execution with per-step detail
+kelta flows run exec_123 --steps
+```
+
 ### `kelta flows cancel <executionId>`
 
 Cancel a running execution **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta flows cancel exec_123 --yes
+```
 
 ### `kelta flows retry <executionId>`
 
@@ -565,19 +928,36 @@ Retry an execution (new run)
 
 - `--mode <mode>` — full|from-failure (default: "full")
 
+```bash
+# Resume from the failed step
+kelta flows retry exec_123 --mode from-failure
+```
+
 ### `kelta flows publish <flowId>`
 
 Publish the current flow definition as a new version
 
 - `--summary <text>` — Change summary
 
+```bash
+kelta flows publish flow_123 --summary 'Add approval step'
+```
+
 ### `kelta flows versions <flowId>`
 
 List published versions of a flow
 
+```bash
+kelta flows versions flow_123
+```
+
 ### `kelta flows webhook-url <flowId>`
 
 Show the inbound webhook URL of an AUTOLAUNCHED flow
+
+```bash
+kelta flows webhook-url flow_123
+```
 
 ## users
 
@@ -590,13 +970,25 @@ List platform users
 - `--page <n>` — Page number (default: "1")
 - `--size <n>` — Page size (default: "20")
 
+```bash
+kelta users list --search jane --status ACTIVE --size 50
+```
+
 ### `kelta users get <userId>`
 
 Show one user
 
+```bash
+kelta users get usr_123
+```
+
 ### `kelta users invite <userId>`
 
 Send (or resend) the invite email to an existing user
+
+```bash
+kelta users invite usr_123
+```
 
 ### `kelta users portal-invite`
 
@@ -605,9 +997,19 @@ Invite a portal (external) user
 - `--email <email>` — Email address
 - `--data <json>` — Full request body as JSON, @file, or - (wins on collision)
 
+```bash
+kelta users portal-invite --email jane@acme.example
+# Send the full request body from a file
+kelta users portal-invite --data @portal-user.json
+```
+
 ### `kelta users reset-password <userId>`
 
 Trigger a password reset for a user **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta users reset-password usr_123 --yes
+```
 
 ### `kelta users token-create <userId>`
 
@@ -616,11 +1018,20 @@ Mint a personal access token on a user's behalf (requires MANAGE_USERS) **(destr
 - `--name <name>` — Token name
 - `--expires-in <days>` — Lifetime in days (1-365) (default: "90")
 
+```bash
+# 30-day token for a user
+kelta users token-create usr_123 --name 'CI deploy' --expires-in 30 --yes
+```
+
 ### `kelta users logins <userId>`
 
 Show a user's login history
 
 - `--size <n>` — Page size (default: "20")
+
+```bash
+kelta users logins usr_123 --size 10
+```
 
 ## tenants
 
@@ -631,21 +1042,39 @@ Mint a short-lived PAT as a tenant's admin (requires MANAGE_TENANTS; prints the 
 - `--expires-in <duration>` — Lifetime: 30m, 2h or ISO-8601 (PT2H); max 24h (default: "1h")
 - `--user-id <id>` — A user of that tenant (default: the tenant's seeded System Administrator)
 
+```bash
+# Short-lived admin token for the acme tenant
+kelta tenants bootstrap-token acme --expires-in 30m
+```
+
 ## limits
 
 ### `kelta limits get`
 
 Show tenant governor-limit status
 
+```bash
+kelta limits get
+```
+
 ### `kelta limits set-tier <tier>`
 
 Set the tenant governor tier **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta limits set-tier PROFESSIONAL --yes
+```
 
 ### `kelta limits set`
 
 Override individual governor limits (raw limits map, persisted per tenant) **(destructive — needs --yes off-TTY)**
 
 - `--data <json>` — Limits map as JSON, @file, or - (required)
+
+```bash
+# Override the daily API call limit
+kelta limits set --data '{"apiCallsPerDay": 50000}' --yes
+```
 
 ## audit
 
@@ -656,6 +1085,12 @@ Recent setup (metadata) audit entries
 - `--since <iso>` — Only entries at/after this ISO timestamp
 - `--size <n>` — Page size (max 200) (default: "50")
 
+```bash
+kelta audit setup --size 20
+# Entries since 1 October 2026 as JSON
+kelta audit setup --since 2026-10-01T00:00:00Z --output json
+```
+
 ### `kelta audit security`
 
 Recent security audit log entries
@@ -663,12 +1098,24 @@ Recent security audit log entries
 - `--since <iso>` — Only entries at/after this ISO timestamp
 - `--size <n>` — Page size (max 200) (default: "50")
 
+```bash
+kelta audit security --size 20
+# Entries since 1 October 2026 as JSON
+kelta audit security --since 2026-10-01T00:00:00Z --output json
+```
+
 ### `kelta audit logins`
 
 Recent login history
 
 - `--since <iso>` — Only entries at/after this ISO timestamp
 - `--size <n>` — Page size (max 200) (default: "50")
+
+```bash
+kelta audit logins --size 20
+# Entries since 1 October 2026 as JSON
+kelta audit logins --since 2026-10-01T00:00:00Z --output json
+```
 
 ## records
 
@@ -684,6 +1131,13 @@ List records in a collection
 - `--size <number>` — Page size (max 200) (default: "25")
 - `--all` — Auto-paginate through every page (client cap 10k records)
 
+```bash
+# Newest 50 active customers
+kelta records list customers --filter status=active --sort -createdAt --size 50
+# Every order of 100 or more, three fields each
+kelta records list orders --filter amount.gte=100 --fields id,amount,status --all
+```
+
 ### `kelta records get <collection> <id>`
 
 Get a single record
@@ -691,11 +1145,21 @@ Get a single record
 - `--include <rels>` — Related resources to include
 - `--fields <fields>` — Sparse fieldset, comma-separated
 
+```bash
+kelta records get orders rec_123 --include customer
+```
+
 ### `kelta records create <collection>`
 
 Create a record
 
 - `--data <json>` — Attributes as JSON, @file, or - for stdin
+
+```bash
+kelta records create customers --data '{"name": "Acme Ltd", "status": "active"}'
+# Attributes from a file
+kelta records create orders --data @order.json
+```
 
 ### `kelta records update <collection> <id>`
 
@@ -703,9 +1167,17 @@ Update a record (partial)
 
 - `--data <json>` — Attributes as JSON, @file, or - for stdin
 
+```bash
+kelta records update orders rec_123 --data '{"status": "shipped"}'
+```
+
 ### `kelta records delete <collection> <id>`
 
 Delete a record **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta records delete customers rec_123 --yes
+```
 
 ### `kelta records bulk`
 
@@ -713,17 +1185,46 @@ Apply a batch of atomic operations (all-or-nothing, max 100 ops) **(destructive 
 
 - `--data <json>` — Body as JSON, @file, or - : {"atomic:operations":[{op,data|ref},…]} (required)
 
+```bash
+# Apply a JSON:API atomic:operations document, all-or-nothing
+kelta records bulk --data @ops.json --yes
+```
+
 ### `kelta records search <query>`
 
 Full-text search across collections (query min 3 chars)
 
 - `--limit <n>` — Max results (max 100) (default: "20")
 
+```bash
+kelta records search acme --limit 5
+```
+
 ### `kelta records semantic-search <collection> <query>`
 
 Vector similarity search within one collection (needs a VECTOR field)
 
 - `--limit <n>` — Max results (default: "10")
+
+```bash
+kelta records semantic-search orders 'late delivery complaints' --limit 3
+```
+
+## notifications
+
+### `kelta notifications list`
+
+List your own in-app notifications, newest first
+
+- `--unread` — Only unread notifications
+- `--page <n>` — Page number (default: "1")
+- `--size <n>` — Page size (max 200) (default: "20")
+
+```bash
+kelta notifications list
+# Only what is still unread
+kelta notifications list --unread --size 50
+```
 
 ## metadata
 
@@ -737,9 +1238,20 @@ Export this tenant's metadata as a package file
 - `--exclude <types>` — Item types to leave out, comma-separated: list-view, dashboard, flow, page-layout, validation-rule, ui-page, ui-menu (list views and dashboards are exported by default; seed records never are)
 - `-o, --out <file>` — Output file (default: the name the server returns)
 
+```bash
+# Export the whole tenant
+kelta metadata export --out metadata.json
+# Export two collections without their list views and dashboards
+kelta metadata export --collections customers,orders --exclude list-view,dashboard --name sales -v 1.2.0
+```
+
 ### `kelta metadata diff <file>`
 
-Preview the changes a package file would make (no writes)
+Preview a package file against this tenant (dry run, no writes): creates, updates with their changed attributes, unchanged counts, conflicts
+
+```bash
+kelta metadata diff metadata.json
+```
 
 ### `kelta metadata apply <file>`
 
@@ -747,6 +1259,13 @@ Apply a package file to this tenant (metadata items, then its seed records secti
 
 - `--dry-run` — Validate without writing
 - `--conflict <mode>` — On an item that already exists: skip (default) or overwrite (seed records are always skipped) (default: "skip")
+
+```bash
+# Validate without writing
+kelta metadata apply metadata.json --dry-run
+# Apply, overwriting items that already exist
+kelta metadata apply metadata.json --conflict overwrite --yes
+```
 
 ## sandbox
 
@@ -760,9 +1279,19 @@ Create a sandbox environment (prints one-time admin credentials)
 - `-d, --description <description>` — Environment description
 - `--empty` — Create the sandbox without cloning the parent's metadata: system collections, default profiles and the admin only (it cannot be refreshed)
 
+```bash
+kelta sandbox create --name staging --description 'Pre-release testing'
+# Create a sandbox without cloning the parent's metadata
+kelta sandbox create --name uat --empty
+```
+
 ### `kelta sandbox list`
 
 List environments
+
+```bash
+kelta sandbox list --output json
+```
 
 ### `kelta sandbox status <envId>`
 
@@ -770,13 +1299,26 @@ Show environment status (with --wait, poll until ACTIVE or FAILED)
 
 - `--wait` — Poll until the environment reaches ACTIVE or FAILED
 
+```bash
+# Wait until the sandbox is ready
+kelta sandbox status env_123 --wait
+```
+
 ### `kelta sandbox refresh <envId>`
 
 Refresh a sandbox environment from its source (an --empty sandbox is refused with 409) **(destructive — needs --yes off-TTY)**
 
+```bash
+kelta sandbox refresh env_123 --yes
+```
+
 ### `kelta sandbox delete <envId>`
 
 Delete a sandbox environment (archives it; decommissions the backing tenant) **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta sandbox delete env_123 --yes
+```
 
 ## promote
 
@@ -790,15 +1332,30 @@ Create a promotion from a source to a target environment
 - `--conflict <mode>` — Conflict mode: skip or overwrite (default: "skip")
 - `--item <spec>` — Item to promote as TYPE:name (repeatable, for SELECTIVE promotions) (repeatable)
 
+```bash
+# Full promotion
+kelta promote create --source env_123 --target env_456
+# Promote two collections, overwriting existing ones
+kelta promote create --source env_123 --target env_456 --type SELECTIVE --item collection:orders --item collection:invoices --conflict overwrite
+```
+
 ### `kelta promote preview`
 
 Preview the changes a promotion from a source environment would make
 
 - `-s, --source <envId>` — Source environment id
 
+```bash
+kelta promote preview --source env_123
+```
+
 ### `kelta promote approve <id>`
 
 Approve a promotion (a promotion cannot be approved by its creator)
+
+```bash
+kelta promote approve prm_123
+```
 
 ### `kelta promote execute <id>`
 
@@ -806,13 +1363,26 @@ Execute a promotion (with --wait, poll until COMPLETED or FAILED) **(destructive
 
 - `--wait` — Poll until the promotion reaches COMPLETED or FAILED
 
+```bash
+# Execute and wait for COMPLETED or FAILED
+kelta promote execute prm_123 --wait --yes
+```
+
 ### `kelta promote status <id>`
 
 Show a promotion and its item counts
 
+```bash
+kelta promote status prm_123
+```
+
 ### `kelta promote rollback <id>`
 
 Roll back an executed promotion **(destructive — needs --yes off-TTY)**
+
+```bash
+kelta promote rollback prm_123 --yes
+```
 
 ## sdk
 
@@ -822,6 +1392,10 @@ Generate TypeScript types from this tenant's live OpenAPI document
 
 - `-o, --out <file>` — Output file (default: kelta-types.ts)
 
+```bash
+kelta sdk types --out src/kelta-types.ts
+```
+
 ## (top level)
 
 ### `kelta manifest`
@@ -830,15 +1404,32 @@ Print the machine-readable command catalog (JSON Schema per command)
 
 - `--group <group>` — Only commands of one group
 
+```bash
+# Every command with its JSON Schema
+kelta manifest
+# Only the records commands
+kelta manifest --group records
+```
+
 ### `kelta version`
 
 Show detailed build information
+
+```bash
+kelta version --output json
+```
 
 ### `kelta update`
 
 Self-update from the cluster downloads service (--check only reports)
 
 - `--check` — Report whether an update exists without installing
+
+```bash
+# Report whether a newer version exists
+kelta update --check
+kelta update
+```
 
 ### `kelta api <method> <path>`
 
@@ -847,9 +1438,20 @@ Raw API escape hatch: profile auth + tenant prefix applied, response verbatim **
 - `--data <json>` — Request body as JSON, @file, or - (any JSON value)
 - `--header <h>` — Extra header as Name:value (repeatable) (repeatable)
 
+```bash
+kelta api GET '/api/customers?page[size]=5'
+# Update a record with a raw JSON:API body
+kelta api PATCH /api/customers/rec_123 --data '{"data":{"type":"customers","id":"rec_123","attributes":{"status":"active"}}}' --yes
+```
+
 ### `kelta docs <topic>`
 
 Print a reference doc: the agent guide, or a metadata-authoring topic
+
+```bash
+# Print the agent guide
+kelta docs agent
+```
 
 ## mcp
 
@@ -859,10 +1461,17 @@ Run a stdio MCP server: hosted kelta-mcp tools bridged + cli_ local tools
 
 - `--toolset <set>` — user|admin|all (default: "all")
 - `--source <source>` — auto|remote|local (default: "auto")
-- `--mcp-url <url>` — Hosted MCP base URL (default: api.→mcp. derivation)
+- `--mcp-url <url>` — Hosted MCP base URL (default: the profile's API origin)
 - `--tenant <slug>` — Serve this tenant (e.g. a sandbox) instead of the profile's; needs its token
 - `--token-env <var>` — Env var holding the --tenant token (keeps it out of argv and client config)
 - `--enable-api-tool` — Expose the raw cli_api escape hatch (off by default)
+
+```bash
+# Serve all toolsets for the current profile
+kelta mcp serve
+# Serve the user toolset for a sandbox tenant
+kelta mcp serve --toolset user --tenant acme-staging --token-env KELTA_STAGING_TOKEN
+```
 
 ### `kelta mcp install <client>`
 
@@ -872,3 +1481,9 @@ Print MCP client configuration for this profile (stdio bridge by default)
 - `--direct` — Hosted HTTP config instead of the stdio bridge
 - `--tenant <slug>` — Bridge this tenant (e.g. a sandbox) instead of the profile's
 - `--token-env <var>` — Env var the launched server reads the --tenant token from (required with --tenant)
+
+```bash
+kelta mcp install claude-code
+# Bridge a sandbox tenant with the admin toolset
+kelta mcp install cursor --toolset admin --tenant acme-staging --token-env KELTA_STAGING_TOKEN
+```

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["index.html"],
+  "project": ["src/**/*.{ts,tsx}"],
+  "ignore": [
+    "src/test/**",
+    // shadcn/ui primitives vendored by `npx shadcn add`; kept whole so a re-add diffs cleanly, unused sub-parts included.
+    "src/components/ui/**",
+  ],
+  "ignoreDependencies": [
+    // Loaded from CSS (`@import 'tailwindcss'` in src/index.css), which knip does not parse.
+    "tailwindcss",
+    // Loaded from CSS (`@plugin "@tailwindcss/typography"` in src/index.css), which knip does not parse.
+    "@tailwindcss/typography",
+    // Imported by MergeTagNode.ts but must stay the copy @tiptap/react pulls in: a second copy breaks Node extension identity.
+    "@tiptap/core",
+    // Imported by telemetry/index.ts but must stay the version the pinned @opentelemetry/sdk-trace-web pulls in.
+    "@opentelemetry/core",
+    // Imported by telemetry/index.ts but must stay the version the pinned @opentelemetry/instrumentation-fetch pulls in.
+    "@opentelemetry/instrumentation",
+  ],
+  "ignoreBinaries": [
+    // Capacitor CLI for the cap:* mobile scripts; deliberately not a web dependency (see src/push/deviceRegistration.ts).
+    "cap",
+  ],
+  "vite": {
+    "config": ["vite.config.ts"],
+  },
+  "vitest": {
+    "config": ["vitest.config.ts", "vite.config.ts"],
+  },
+}

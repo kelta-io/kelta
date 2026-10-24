@@ -120,8 +120,7 @@ export interface CollectionFormProps {
  * - Lowercase alphanumeric and underscores only
  * - Must start with a letter
  */
-// eslint-disable-next-line react-refresh/only-export-components
-export const collectionFormSchema = z
+const collectionFormSchema = z
   .object({
     name: z
       .string()
@@ -149,7 +148,7 @@ export const collectionFormSchema = z
 /**
  * Type inferred from the Zod schema
  */
-export type CollectionFormSchema = z.infer<typeof collectionFormSchema>
+type CollectionFormSchema = z.infer<typeof collectionFormSchema>
 
 /**
  * CollectionForm Component
@@ -670,5 +669,3 @@ export function CollectionForm({
     </form>
   )
 }
-
-export default CollectionForm

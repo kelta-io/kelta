@@ -14,6 +14,7 @@
 #   1. signs in as the platform admin (POST /auth/direct-login), creates a fresh tenant (a
 #      `tenants` record) and mints a PAT for its seeded admin (POST
 #      /api/tenants/{id}/bootstrap-token) — skipped when KELTA_TOKEN is already set;
+#   (before that, the fixture is refused if any call names a local-only cli_* tool);
 #   2. starts `kelta mcp serve --source remote --mcp-url $MCP_URL --toolset all` and speaks
 #      JSON-RPC to it over stdio: initialize, one tools/list (fails unless it lists every tool
 #      the fixture calls), then each fixture call as a tools/call;
@@ -22,7 +23,8 @@
 #      MCP_REPLAY_RETRIES times unless the fixture marks it expectError (the build hit that error
 #      too); one that still errors fails the replay;
 #   4. checks the tenant over plain HTTP (not MCP, so not counted): every collection of the
-#      template's metadata.json exists and holds as many records as seeds/<collection>.json.
+#      template's metadata.json exists and holds as many records as the rows of its `records`
+#      sections for that collection.
 # It makes no `kelta api` call and drives no CLI authoring command; the only kelta command it
 # runs is the bridge. Fixture format and the {{var}} substitution: see the generator,
 # examples/templates/applicant-tracking/mcp-replay/generate.mjs.
@@ -72,6 +74,12 @@ if [ "${1:-}" = "--in-container" ]; then
 
   [ -f "$FIXTURE" ] || fail "no fixture at $FIXTURE"
   jq -e '.calls | type == "array" and length > 0' "$FIXTURE" >/dev/null || fail "$FIXTURE has no calls"
+  # cli_* tools are local to the kelta CLI: `kelta mcp serve --source remote` never serves them, so
+  # a fixture naming one can only fail at tools/list. Name each offending call and its step.
+  local_calls=$(jq -r '.calls | length as $n | to_entries[] | select((.value.tool // "") | startswith("cli_"))
+    | "call \(.key + 1)/\($n) \(.value.tool) (\(.value.step // "-"))"' "$FIXTURE" | paste -sd ';' | sed 's/;/; /g')
+  [ -z "$local_calls" ] \
+    || fail "$local_calls: cli_ tools are local CLI tools that --source remote does not serve; call the hosted kelta-mcp tool instead"
   mkdir -p "$(dirname "$COUNT_FILE")"
   COUNT=0
   echo "$COUNT" >"$COUNT_FILE"
@@ -241,14 +249,15 @@ if [ "${1:-}" = "--in-container" ]; then
   [ -n "$collections" ] || fail "$TEMPLATE_DIR/metadata.json declares no collections"
   for collection in $collections; do
     actual=$(record_count "$collection") || fail "collection $collection does not exist in $KELTA_TENANT (or its records could not be read)"
-    seed="$TEMPLATE_DIR/seeds/$collection.json"
-    if [ -f "$seed" ]; then
-      expected=$(jq length "$seed")
+    expected=$(jq --arg c "$collection" \
+      '[.records // [] | .[] | select(.collection == $c) | .rows | length] | if length > 0 then add else empty end' \
+      "$TEMPLATE_DIR/metadata.json")
+    if [ -n "$expected" ]; then
       [ "$actual" -eq "$expected" ] \
-        || fail "$collection holds $actual records, seeds/$collection.json has $expected"
-      log "$collection: exists, $actual records (seeds/$collection.json: $expected)"
+        || fail "$collection holds $actual records, the metadata.json records sections have $expected"
+      log "$collection: exists, $actual records (metadata.json records: $expected)"
     else
-      log "$collection: exists ($actual records, no seed file)"
+      log "$collection: exists ($actual records, no records section)"
     fi
   done
   echo "MCP replay passed: $COUNT tools/call requests through kelta mcp serve --source remote --mcp-url $MCP_URL"

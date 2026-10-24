@@ -1132,5 +1132,3 @@ export function PackagesPage({ testId }: PackagesPageProps): React.ReactElement 
     </div>
   )
 }
-
-export default PackagesPage

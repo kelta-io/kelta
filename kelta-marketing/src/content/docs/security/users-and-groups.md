@@ -71,6 +71,7 @@ Full administrators can let selected users manage *some* users without granting 
 1. Create a **delegated-admin scope** (Setup → Administration → Delegated admins, requires
    `MANAGE_DELEGATED_ADMINS`): the delegates (`delegatedUserIds`), the profiles they may assign
    (`manageableProfileIds`), and the switches `canCreateUsers`, `canDeactivateUsers`, `canResetPasswords`.
+   API: `GET`/`POST /api/admin/delegated-admin-scopes`, `GET`/`PATCH`/`DELETE /api/admin/delegated-admin-scopes/{id}`.
 2. Delegates use the scoped endpoints under `/api/admin/delegated/*` (`GET /me` for their effective scope,
    `GET|POST /users`, `PATCH /users/{id}`, invite, reset password). The console shows them a filtered Users page.
 

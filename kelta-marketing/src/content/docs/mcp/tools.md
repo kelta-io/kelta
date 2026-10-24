@@ -42,6 +42,8 @@ User experience:
 | `apply_page` | validate-then-upsert a page-builder page, keyed on path |
 | `apply_menu` | whole app/menu tree, keyed on menu name and item labels |
 | `apply_dashboard` | dashboard and its components, keyed on name and component titles |
+| `validate_dashboard` | check a dashboard's widget configs without writing (`POST /api/dashboards/{id}/validate`; name or id) |
+| `dashboard_data` | run a dashboard's widgets and return their data (`POST /api/dashboards/{id}/data`; name or id) |
 
 Automation and integration:
 
@@ -50,6 +52,14 @@ Automation and integration:
 | `list_flows`, `create_flow`, `update_flow`, `delete_flow` | flow definitions (JSON state machines, `runAsUserId`) |
 | `import_api_spec` | import an OpenAPI 3 document into the API spec library |
 | `materialize_api_collection` | turn a GET operation into an external collection |
+
+Metadata packages:
+
+| Tool | Purpose |
+|---|---|
+| `export_metadata` | export the tenant's metadata (optionally only the named `collections` and what hangs off them) and return the package JSON in the result (`POST /api/packages/export`) |
+| `diff_metadata` | preview what a package would change, no writes (`POST /api/packages/import/preview`) |
+| `apply_metadata` | install a package: metadata, then seed records; `dryRun`, `conflictMode` `skip`/`overwrite` (`POST /api/packages/import`) |
 
 Data:
 
@@ -74,6 +84,8 @@ Plus `ping`.
 | `execute_flow` | start a flow (input is double-wrapped) |
 | `get_flow_run` | status of an execution, optionally with steps |
 | `submit_for_approval`, `list_approvals` | approvals |
+| `list_notifications` | your own in-app notifications, newest first; `unreadOnly`, `pageSize`, `pageNumber`; `meta.unreadCount` is your unread total (`GET /api/me/notifications`) |
+| `mark_notification_read` | mark one of your notifications read by `id` (`POST /api/me/notifications/{id}/read`) |
 | `ping` | |
 
 ## Conventions

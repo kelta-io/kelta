@@ -471,5 +471,3 @@ function formatJson(value?: string): string {
     return value
   }
 }
-
-export default RequestLogDetailPage

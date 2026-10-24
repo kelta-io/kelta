@@ -18,7 +18,7 @@ export const ReleaseManifestSchema = z.object({
   version: z.string().regex(/^\d+\.\d+\.\d+$/),
   gitSha: z.string().min(1),
   builtAt: z.string().min(1),
-  targets: z.record(TargetSchema),
+  targets: z.record(z.string(), TargetSchema),
 });
 
 export type ReleaseManifest = z.infer<typeof ReleaseManifestSchema>;

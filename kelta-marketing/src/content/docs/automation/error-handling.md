@@ -8,10 +8,12 @@ order: 50
 ## Retry
 
 ```json
-"Retry": [
-  { "ErrorEquals": ["Api.Timeout", "Api.HttpServerError"], "IntervalSeconds": 2, "MaxAttempts": 5, "BackoffRate": 2.0 },
-  { "ErrorEquals": ["States.ALL"], "MaxAttempts": 1 }
-]
+{
+  "Retry": [
+    { "ErrorEquals": ["Api.Timeout", "Api.HttpServerError"], "IntervalSeconds": 2, "MaxAttempts": 5, "BackoffRate": 2.0 },
+    { "ErrorEquals": ["States.ALL"], "MaxAttempts": 1 }
+  ]
+}
 ```
 
 Policies are tried in order; the first whose `ErrorEquals` matches the error code applies. Defaults:
@@ -21,10 +23,12 @@ Policies are tried in order; the first whose `ErrorEquals` matches the error cod
 ## Catch
 
 ```json
-"Catch": [
-  { "ErrorEquals": ["Api.HttpClientError"], "ResultPath": "$.error", "Next": "RecordFailure" },
-  { "ErrorEquals": ["States.ALL"], "Next": "NotifyOps" }
-]
+{
+  "Catch": [
+    { "ErrorEquals": ["Api.HttpClientError"], "ResultPath": "$.error", "Next": "RecordFailure" },
+    { "ErrorEquals": ["States.ALL"], "Next": "NotifyOps" }
+  ]
+}
 ```
 
 When retries are exhausted (or none apply), the first matching `Catch` moves execution to `Next` with
@@ -52,8 +56,10 @@ records per-item outcomes and the flow continues.
 ## Wait states and durable resume
 
 ```json
-"Cool-off": { "Type": "Wait", "Seconds": 3600, "Next": "Check" }
-"Until":    { "Type": "Wait", "TimestampPath": "$.record.data.due_date", "Next": "Remind" }
+{
+  "Cool-off": { "Type": "Wait", "Seconds": 3600, "Next": "Check" },
+  "Until":    { "Type": "Wait", "TimestampPath": "$.record.data.due_date", "Next": "Remind" }
+}
 ```
 
 - `Seconds` ≤ 10 sleeps in-process.

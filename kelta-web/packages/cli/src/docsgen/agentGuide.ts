@@ -14,7 +14,8 @@ discoverable command catalog.
 - \`kelta manifest\` — full machine-readable catalog: every command with a JSON
   Schema of its input, dangerous/auth flags, positionals, options. Start here.
 - \`kelta manifest --group records\` — one group only.
-- \`kelta <group> --help\` / \`kelta <group> <command> --help\` — human help.
+- \`kelta <group> --help\` / \`kelta <group> <command> --help\` — human help,
+  ending with that command's examples (also in the manifest as \`examples\`).
 
 ## Auth & profiles
 
@@ -47,6 +48,10 @@ discoverable command catalog.
   reference errors additionally carry \`meta.targetCollection\`.
 - Exit codes: 0 ok · 1 API error · 2 usage/confirmation · 3 auth · 4 not found ·
   5 conflict/rate-limit.
+- Argument errors — a missing required argument, an unknown option or an
+  unknown command — are \`INVALID_ARGUMENTS\`, exit 2, in the same envelope:
+  \`{"error":{"code":"INVALID_ARGUMENTS","detail":"unknown option '--colour'"}}\`.
+  \`--help\` and \`--version\` exit 0.
 
 ## Destructive commands
 

@@ -77,11 +77,16 @@ POST /api/flows/{flowId}/execute
 ```
 
 Note the wrap: the body's `input` object becomes `$.input` — see [the double-wrap rule](/docs/automation/flow-data/#the-double-wrap-rule).
-The response carries the `executionId`. CLI: `kelta flows execute <flowId> --input '{...}'` (the CLI adds the
-outer wrap for you). MCP: `execute_flow`. Page-builder `runFlow` actions call the same endpoint.
+The response is a JSON:API `flow-executions` resource; the execution id is `data.id` (`attributes.status` is
+`RUNNING`). CLI: `kelta flows execute <flowId> --input '{...}'` (the CLI adds the outer wrap for you). MCP:
+`execute_flow`. Page-builder `runFlow` actions call the same endpoint.
 
 Two escape hatches: `body.state` supplies a complete pre-built envelope, and `body.test: true` marks the run as a
 test.
+
+An inactive flow does not start: the call answers **409** with error code `FLOW_INACTIVE`. The one exception is a
+`test: true` run by a caller whose profile holds `MANAGE_WORKFLOWS` — that is how the flow designer's **Test**
+button runs a flow before it is activated. A test run by anyone else gets the same 409.
 
 ## Inbound webhooks
 

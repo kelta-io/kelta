@@ -40,6 +40,13 @@ import java.util.stream.Collectors;
  * collection, as a direct read of each would; a denied single record brings no included
  * resources (see {@link #restrictIncluded}).
  *
+ * <p>Platform metadata paths ({@link #isMetadataPath}) are not record-filtered. On the ones in
+ * {@link #INCLUDE_FILTERED_METADATA_PREFIXES} ({@code /api/profiles}) the primary {@code data} is
+ * still served as is, but {@code included[]} gets the same per-type read decision: an include the
+ * caller could not read directly is dropped from the response, never turned into a 403 for the
+ * whole request. Without it {@code GET /api/profiles/{id}?include=profile-system-permissions,…}
+ * returned every grant row to any {@code API_ACCESS} caller (PLT-657).
+ *
  * <p>Global search ({@code /api/_search}) returns hits of many collections: each hit gets the
  * read decision of its own collection and record, never of a {@code _search} collection (see
  * {@link #readableSearchHits}).
@@ -131,7 +138,11 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
         // appointment list, because portal profiles have no record grants
         // (found 2026-07-12 building the headless portal).
         if (!path.startsWith("/api/") || path.startsWith("/api/admin/") || path.startsWith("/api/me/")
-                || path.startsWith("/api/telehealth/") || isMetadataPath(path)) {
+                || path.startsWith("/api/telehealth/")) {
+            return body;
+        }
+        boolean metadataPath = isMetadataPath(path);
+        if (metadataPath && !isIncludeFilteredMetadataPath(path)) {
             return body;
         }
 
@@ -159,6 +170,15 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
         // The collection the handler served — the child on a child-resource route.
         String collectionId = ApiPaths.collectionName(httpRequest);
         String action = mapMethodToAction(httpRequest.getMethod());
+
+        if (metadataPath) {
+            if (!(responseBody.get("included") instanceof List<?> included) || included.isEmpty()) {
+                return body;
+            }
+            Map<String, Object> result = new LinkedHashMap<>(responseBody);
+            restrictIncluded(result, email, profileId, tenantId);
+            return result;
+        }
 
         if (SEARCH_COLLECTION.equals(collectionId) && data instanceof List<?> hits) {
             return restrictSearchHits(responseBody, hits, httpRequest, email, profileId, tenantId);
@@ -593,6 +613,22 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
                 || path.startsWith("/api/api-operations")
                 || path.startsWith("/api/credentials")
                 || path.startsWith("/api/devices");
+    }
+
+    /**
+     * Metadata paths whose primary {@code data} stays unfiltered but whose {@code included[]} is
+     * filtered by {@link #restrictIncluded}: an include there reaches a record-filtered collection
+     * ({@code profile-*-permissions}) whose direct read this advice already checks (PLT-657).
+     */
+    private static final List<String> INCLUDE_FILTERED_METADATA_PREFIXES = List.of("/api/profiles");
+
+    private static boolean isIncludeFilteredMetadataPath(String path) {
+        for (String prefix : INCLUDE_FILTERED_METADATA_PREFIXES) {
+            if (path.equals(prefix) || path.startsWith(prefix + "/")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

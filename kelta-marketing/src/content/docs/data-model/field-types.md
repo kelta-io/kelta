@@ -65,7 +65,7 @@ formula rollup_summary`. `TEXT`, `INTEGER`, `LONG`, `ARRAY` and `VECTOR` are cre
 | `uniqueConstraint` | Single-column unique constraint; violations answer `409`. Composite constraints: [Validation rules and unique constraints](/docs/data-model/validation-rules/). |
 | `indexed` | Maintain a B-tree index on the column. |
 | `defaultValue` | Applied when the write supplies no value. |
-| `constraints` | JSON field-level checks: `min`, `max`, `pattern`, `email`, `url` depending on type. |
+| `constraints` | JSON field-level checks, enforced on every write: `min`/`max` (value on numbers, `CURRENCY`, `PERCENT`; length on text types), `minLength`, `maxLength`, `minValue`, `maxValue`, `pattern`. `email`, `url`, and `min`/`max` on `DATE`/`DATETIME` are accepted but **not enforced**. See [Field constraints](/docs/data-model/validation-rules/#field-constraints). |
 | `searchable` | Include the value in the collection's full-text index. See [Search and attachments](/docs/data-model/search-and-attachments/). |
 | `trackHistory` | Record old/new values in `field-history`. See [Record history](/docs/data-model/record-history/). |
 | `fieldOrder` | Ordinal position in the collection. |

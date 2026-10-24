@@ -249,7 +249,7 @@ export function ResourceForm({
   }, [schema, hasFieldAccess]);
 
   // Build Zod validation schema from field definitions
-  const validationSchema = useMemo(() => {
+  const validationSchema = useMemo((): z.ZodObject<Record<string, z.ZodTypeAny>> => {
     if (accessibleFields.length === 0) return z.object({});
     return buildZodSchema(accessibleFields);
   }, [accessibleFields]);

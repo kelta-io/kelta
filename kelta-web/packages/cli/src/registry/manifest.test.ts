@@ -8,7 +8,7 @@ const ManifestSchema = z.object({
   manifestVersion: z.literal(MANIFEST_VERSION),
   cliVersion: z.string().min(1),
   outputFormats: z.array(z.string()).min(1),
-  exitCodes: z.record(z.number()),
+  exitCodes: z.record(z.string(), z.number()),
   errorEnvelope: z.string(),
   commands: z
     .array(
@@ -30,6 +30,11 @@ const ManifestSchema = z.object({
             repeatable: z.boolean().optional(),
           })
         ),
+        examples: z
+          .array(
+            z.object({ cmd: z.string().startsWith('kelta '), description: z.string().optional() })
+          )
+          .min(1),
         inputSchema: z.unknown(),
       })
     )
@@ -102,6 +107,47 @@ describe('kelta manifest', () => {
         'all',
       ])
     );
+  });
+
+  // Pins the full input JSON Schema (PLT-730): defaulted keys stay optional,
+  // the object stays closed, and nothing is emitted as a $ref.
+  it('pins the input JSON Schema of records list', () => {
+    const recordsList = manifest.commands.find((c) => c.command === 'kelta records list');
+    expect(recordsList?.inputSchema).toEqual({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      properties: {
+        collection: { type: 'string', minLength: 1 },
+        filter: { type: 'array', items: { type: 'string' }, default: [] },
+        sort: { type: 'string' },
+        fields: { type: 'string' },
+        include: { type: 'string' },
+        page: {
+          type: 'integer',
+          exclusiveMinimum: 0,
+          maximum: Number.MAX_SAFE_INTEGER,
+          default: 1,
+        },
+        size: { type: 'integer', exclusiveMinimum: 0, maximum: 200, default: 25 },
+        all: { type: 'boolean', default: false },
+      },
+      required: ['collection'],
+      additionalProperties: false,
+    });
+  });
+
+  it('emits no $ref in any command input schema', () => {
+    for (const command of manifest.commands) {
+      expect(JSON.stringify(command.inputSchema), command.command).not.toContain('$ref');
+    }
+  });
+
+  it("carries each command's examples from its one `examples` field", () => {
+    for (const [i, command] of manifest.commands.entries()) {
+      expect(command.examples, command.command).toEqual(allCommands[i].examples);
+    }
+    const recordsList = manifest.commands.find((c) => c.command === 'kelta records list');
+    expect(recordsList?.examples[0]?.cmd).toMatch(/^kelta records list customers /);
   });
 
   it('marks destructive and auth-free commands correctly', () => {

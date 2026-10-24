@@ -176,5 +176,3 @@ export function useGlobalShortcuts() {
 
   return { helpOpen, setHelpOpen }
 }
-
-export default useGlobalShortcuts

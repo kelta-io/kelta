@@ -281,5 +281,3 @@ export function TenantDashboardPage({
     </div>
   )
 }
-
-export default TenantDashboardPage

@@ -467,5 +467,3 @@ export function CustomPolicyEditor({
     </div>
   )
 }
-
-export default CustomPolicyEditor

@@ -12,6 +12,7 @@ const list = defineCommand({
     { flag: '--page <n>', description: 'Page number', default: '1' },
     { flag: '--size <n>', description: 'Page size', default: '20' },
   ],
+  examples: [{ cmd: 'kelta users list --search jane --status ACTIVE --size 50' }],
   input: z.object({
     search: z.string().optional(),
     status: z.string().optional(),
@@ -45,6 +46,7 @@ const get = defineCommand({
   name: 'get',
   summary: 'Show one user',
   positionals: [{ name: 'userId', description: 'User id', required: true }],
+  examples: [{ cmd: 'kelta users get usr_123' }],
   input: z.object({ userId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client.getAxiosInstance().get<unknown>(`/api/users/${input.userId}`);
@@ -57,6 +59,7 @@ const invite = defineCommand({
   name: 'invite',
   summary: 'Send (or resend) the invite email to an existing user',
   positionals: [{ name: 'userId', description: 'User id', required: true }],
+  examples: [{ cmd: 'kelta users invite usr_123' }],
   input: z.object({ userId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client
@@ -75,6 +78,13 @@ const portalInvite = defineCommand({
     {
       flag: '--data <json>',
       description: 'Full request body as JSON, @file, or - (wins on collision)',
+    },
+  ],
+  examples: [
+    { cmd: 'kelta users portal-invite --email jane@acme.example' },
+    {
+      cmd: 'kelta users portal-invite --data @portal-user.json',
+      description: 'Send the full request body from a file',
     },
   ],
   input: z
@@ -100,6 +110,7 @@ const resetPassword = defineCommand({
   summary: 'Trigger a password reset for a user',
   dangerous: true,
   positionals: [{ name: 'userId', description: 'User id', required: true }],
+  examples: [{ cmd: 'kelta users reset-password usr_123 --yes' }],
   input: z.object({ userId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client
@@ -118,6 +129,12 @@ const tokenCreate = defineCommand({
   options: [
     { flag: '--name <name>', description: 'Token name' },
     { flag: '--expires-in <days>', description: 'Lifetime in days (1-365)', default: '90' },
+  ],
+  examples: [
+    {
+      cmd: "kelta users token-create usr_123 --name 'CI deploy' --expires-in 30 --yes",
+      description: '30-day token for a user',
+    },
   ],
   input: z.object({
     userId: z.string().min(1),
@@ -144,6 +161,7 @@ const logins = defineCommand({
   summary: "Show a user's login history",
   positionals: [{ name: 'userId', description: 'User id', required: true }],
   options: [{ flag: '--size <n>', description: 'Page size', default: '20' }],
+  examples: [{ cmd: 'kelta users logins usr_123 --size 10' }],
   input: z.object({
     userId: z.string().min(1),
     size: z.coerce.number().int().positive().max(200).default(20),

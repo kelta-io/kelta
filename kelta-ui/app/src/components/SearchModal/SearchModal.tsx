@@ -477,5 +477,3 @@ export function SearchModal({ open, onClose }: SearchModalProps): React.ReactEle
     </Dialog>
   )
 }
-
-export default SearchModal

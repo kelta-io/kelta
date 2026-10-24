@@ -5,10 +5,6 @@
  * Utilities include: formatting, validation helpers, storage helpers, etc.
  */
 
-// JSON:API response utilities
-export { flattenResource, unwrapResource, unwrapCollection } from './jsonapi'
-export type { JsonApiResource, JsonApiResponse, JsonApiCollectionResponse } from './jsonapi'
-
 // CIDR validation for the tenant IP allowlist editor
 export { isValidCidr } from './cidr'
 

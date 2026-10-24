@@ -79,5 +79,3 @@ export function RecordDetailBody({
   }
   return <>{fallback ?? null}</>
 }
-
-export default RecordDetailBody

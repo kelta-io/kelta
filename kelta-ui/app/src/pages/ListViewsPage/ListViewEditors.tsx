@@ -7,8 +7,6 @@
  *
  * All three are controlled (value + onChange) and pure-presentational; the parent owns persistence.
  */
-/* eslint-disable react-refresh/only-export-components -- shared editor module: exports the operator
-   list + types alongside the editor components (not an HMR component file). */
 import React from 'react'
 import { ArrowUp, ArrowDown, X, Plus } from 'lucide-react'
 
@@ -30,7 +28,7 @@ export interface SortRow {
 }
 
 /** Filter operators. `value` is the stored op code; `valueless` ops (is empty / not empty) hide the input. */
-export const FILTER_OPERATORS: Array<{ value: string; label: string; valueless?: boolean }> = [
+const FILTER_OPERATORS: Array<{ value: string; label: string; valueless?: boolean }> = [
   { value: 'eq', label: 'equals' },
   { value: 'neq', label: 'not equals' },
   { value: 'contains', label: 'contains' },

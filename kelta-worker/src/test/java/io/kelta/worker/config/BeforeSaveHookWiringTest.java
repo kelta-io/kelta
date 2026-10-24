@@ -132,6 +132,7 @@ class BeforeSaveHookWiringTest {
         m.put("mailbox-templates", List.of("MailboxTemplateGuardHook"));
         m.put("oidc-providers", List.of("OidcProviderSecretHook", "OidcDiscoveryHook"));
         m.put("page-layouts", List.of("PageLayoutConfigEventPublisher"));
+        m.put("picklist-values", List.of("PicklistValueRefreshHook"));
         m.put("profile-field-permissions", List.of("FieldPermissionSyncHook"));
         m.put("profile-object-permissions", List.of("ProfilePermissionSyncHook"));
         m.put("profile-system-permissions", List.of("ProfilePermissionSyncHook"));

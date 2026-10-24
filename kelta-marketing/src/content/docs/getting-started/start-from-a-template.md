@@ -8,8 +8,8 @@ order: 25
 The repository ships application templates under
 [`examples/templates/`](https://github.com/kelta-io/kelta/tree/main/examples/templates). Each one is a complete
 small app — collections, picklists, page layouts, a validation rule, a flow, list views, a dashboard and seed
-records — that an `install.sh` script applies to a tenant through the `kelta` CLI. Install one to see a working
-app in a few seconds, then change it in the console like anything you built yourself.
+records — in one package file, `metadata.json`, that a single `kelta metadata apply` installs. Install one to see
+a working app in a few seconds, then change it in the console like anything you built yourself.
 
 ## Before you start
 
@@ -19,7 +19,6 @@ You need:
   any Kelta tenant you can sign in to.
 - The `kelta` CLI with a signed-in profile for that tenant ([Install the CLI](/docs/getting-started/install-cli/)),
   as a user who can create collections, flows, list views and dashboards.
-- `jq` on your `PATH`.
 - A clone of the repository, which holds the templates:
 
 ```bash
@@ -28,35 +27,35 @@ cd kelta
 ```
 
 Install into a tenant that does not already have collections with the template's names. `kelta metadata apply`
-skips an item that already exists, so a same-named collection is left as it is and the seed step then fails
+skips an item that already exists, so a same-named collection is left as it is and its seed records then fail
 against it.
 
 ## Install a template
 
-Each `install.sh` takes no arguments and installs into the active `kelta` profile. Select the profile, then run
-the script from the repository root:
+A template installs into the active `kelta` profile with one command, run from the template's directory (its
+`install.sh` runs the same command):
 
 ```bash
 kelta profile use <profile>     # or export KELTA_PROFILE / KELTA_URL + KELTA_TENANT + KELTA_TOKEN
-./examples/templates/crm/install.sh
+cd examples/templates/crm
+kelta metadata apply metadata.json --yes
 ```
 
 ```bash
 kelta profile use <profile>
-./examples/templates/inspections/install.sh
+cd examples/templates/inspections
+kelta metadata apply metadata.json --yes
 ```
 
-The script runs four steps and stops at the first command that fails:
+The package carries every piece: collections, fields, picklists, layouts, the validation rule, the flow, the list
+views (`LIST_VIEW` items), the dashboard (a `DASHBOARD` item) and the seed data. The seed data is the package's
+`records` sections, one per collection, parents before children; each section names the `key` fields that identify
+a row and the `references` whose values name a parent by its natural key, which the import resolves to the
+parent's record id.
 
-1. `kelta metadata apply metadata.json` — collections, fields, picklists, layouts, the validation rule and the flow.
-2. `kelta list-views apply` — every view in `list-views/<collection>.json`.
-3. `kelta dashboards apply` — every dashboard in `dashboards/*.json`.
-4. `kelta records bulk` — every `seeds/<collection>.json`, parents before children, with each reference resolved
-   from the parent's natural key to its record id.
-
-On success it ends with one `seeded <collection>: <count>` line per collection. Running it again is safe up to the
-seed step: the package, list views and dashboard report skipped or unchanged, and the seed step then fails on a
-unique name without writing duplicates.
+The command prints the created, updated, skipped and failed totals with a count per item type. Running it again
+is safe: every item that already exists is skipped, and so is every seed row whose key fields match an existing
+record, so the second run creates nothing.
 
 ## CRM
 
@@ -105,7 +104,7 @@ limits of this design.
 ## How the templates were built
 
 Each template was authored by an agent in throwaway sandboxes with the `kelta` CLI, exported with
-`kelta metadata export`, and verified with a clean `install.sh` run that exited 0. No MCP tool
+`kelta metadata export`, and verified with a clean install run that exited 0. No MCP tool
 did any of the authoring: the CRM log records no MCP tool calls, the inspections log one `ping`.
 The build logs record every command, every error hit on the way and the platform gaps each template had to route
 around:

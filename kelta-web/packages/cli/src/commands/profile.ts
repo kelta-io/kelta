@@ -18,6 +18,7 @@ const list = defineCommand({
   name: 'list',
   summary: 'List configured profiles',
   requiresAuth: false,
+  examples: [{ cmd: 'kelta profile list' }],
   input: z.object({}),
   handler: () => {
     const config = loadConfig();
@@ -50,6 +51,7 @@ const use = defineCommand({
   summary: 'Set the default profile',
   requiresAuth: false,
   positionals: [{ name: 'name', description: 'Profile name', required: true }],
+  examples: [{ cmd: 'kelta profile use staging' }],
   input: z.object({ name: z.string().min(1) }),
   handler: (_ctx, input) => {
     assertProfileExists(input.name);
@@ -66,6 +68,7 @@ const show = defineCommand({
   summary: 'Show the resolved settings of a profile (default: active profile)',
   requiresAuth: false,
   positionals: [{ name: 'name', description: 'Profile name', required: false }],
+  examples: [{ cmd: 'kelta profile show staging --output json' }],
   input: z.object({ name: z.string().min(1).optional() }),
   handler: (ctx, input) => {
     const profile = resolveProfile(input.name ?? ctx.global.profile);
@@ -88,6 +91,7 @@ const remove = defineCommand({
   summary: 'Remove a profile and its stored credential',
   requiresAuth: false,
   positionals: [{ name: 'name', description: 'Profile name', required: true }],
+  examples: [{ cmd: 'kelta profile remove staging' }],
   input: z.object({ name: z.string().min(1) }),
   handler: (_ctx, input) => {
     assertProfileExists(input.name);
@@ -109,6 +113,7 @@ const rename = defineCommand({
     { name: 'oldName', description: 'Current profile name', required: true },
     { name: 'newName', description: 'New profile name', required: true },
   ],
+  examples: [{ cmd: 'kelta profile rename default production' }],
   input: z.object({ oldName: z.string().min(1), newName: z.string().min(1) }),
   handler: (_ctx, input) => {
     assertProfileExists(input.oldName);

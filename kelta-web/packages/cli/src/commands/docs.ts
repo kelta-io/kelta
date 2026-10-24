@@ -22,6 +22,7 @@ const docs = defineCommand({
       required: true,
     },
   ],
+  examples: [{ cmd: 'kelta docs agent', description: 'Print the agent guide' }],
   input: z.object({ topic: z.string() }),
   handler: (_ctx, input) => {
     const text = DOCS[input.topic];

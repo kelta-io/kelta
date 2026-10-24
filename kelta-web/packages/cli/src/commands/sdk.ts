@@ -44,6 +44,7 @@ const types = defineCommand({
   name: 'types',
   summary: "Generate TypeScript types from this tenant's live OpenAPI document",
   options: [{ flag: '-o, --out <file>', description: 'Output file (default: kelta-types.ts)' }],
+  examples: [{ cmd: 'kelta sdk types --out src/kelta-types.ts' }],
   input: z.object({ out: z.string().optional() }),
   handler: async (ctx, input) => {
     const { file, typesGenerated } = await runGenerateTypes(ctx.client.getAxiosInstance(), {

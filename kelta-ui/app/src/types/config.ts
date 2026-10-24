@@ -24,7 +24,7 @@ export interface BootstrapConfig {
 /**
  * Page configuration for dynamic routing
  */
-export interface PageConfig {
+interface PageConfig {
   id: string
   path: string
   title: string

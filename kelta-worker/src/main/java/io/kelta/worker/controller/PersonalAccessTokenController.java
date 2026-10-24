@@ -24,6 +24,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -272,35 +273,74 @@ public class PersonalAccessTokenController {
         }
         String userId = resolveUserId(userIdentifier, tenantId);
 
-        // Verify token belongs to current user
-        var tokens = jdbcTemplate.queryForList(
-                "SELECT id, token_hash FROM user_api_token WHERE id = ? AND user_id = ? AND revoked = false",
-                tokenId, userId);
-        if (tokens.isEmpty()) {
+        List<String> revoked = revokeTokens(tenantId, "id = ? AND user_id = ?", List.of(tokenId, userId),
+                userId, SecurityAuditLogger.EventType.PAT_REVOKED, null);
+        if (revoked.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
-
-        String tokenHash = (String) tokens.get(0).get("token_hash");
-
-        // Revoke in database
-        jdbcTemplate.update(
-                "UPDATE user_api_token SET revoked = true, revoked_at = ?, updated_at = ? WHERE id = ?",
-                Timestamp.from(Instant.now()), Timestamp.from(Instant.now()), tokenId);
-
-        // Remove from Redis cache and add to revocation set
-        try {
-            redisTemplate.delete(PAT_KEY_PREFIX + tokenHash);
-            redisTemplate.opsForValue().set(
-                    REVOCATION_KEY_PREFIX + tokenHash, "revoked", Duration.ofDays(366));
-        } catch (Exception e) {
-            log.warn("Failed to update PAT in Redis: {}", e.getMessage());
-        }
-
-        SecurityAuditLogger.log(SecurityAuditLogger.EventType.PAT_REVOKED,
-                userId, tokenId, tenantId, "success", null);
         log.info("PAT revoked for user {} in tenant {}: tokenId={}", userId, tenantId, tokenId);
 
         return ResponseEntity.ok(Map.of("status", "revoked", "tokenId", tokenId));
+    }
+
+    /**
+     * Revokes every live bootstrap token ({@code bootstrap-*}, minted by
+     * {@link TenantBootstrapTokenController}) in {@code tenantId}, whichever user holds it. Called
+     * when the tenant is claimed, so a bootstrap token handed out before the owner took over stops
+     * working. Must run with {@code tenantId} bound.
+     *
+     * @return the ids of the tokens revoked
+     */
+    public List<String> revokeBootstrapTokens(String tenantId, String actorId) {
+        return revokeTokens(tenantId, "name LIKE 'bootstrap-%'", List.of(), actorId,
+                SecurityAuditLogger.EventType.TENANT_BOOTSTRAP_TOKEN_REVOKED, "tenant claimed via admin-invite");
+    }
+
+    /**
+     * Revokes the live tokens of {@code tenantId} matching {@code condition}: marks each row revoked,
+     * drops its {@code pat:<hash>} cache entry, writes {@code pat:revoked:<hash>} so the gateway
+     * rejects it before the cache would expire, and audits it under {@code eventType} with
+     * {@code actorId}. A Redis failure is logged and never undoes or blocks the database revoke.
+     *
+     * @param condition SQL predicate on {@code user_api_token}, ANDed with the tenant filter
+     * @return the ids of the tokens revoked
+     */
+    private List<String> revokeTokens(String tenantId, String condition, List<Object> args, String actorId,
+                                      SecurityAuditLogger.EventType eventType, String auditDetail) {
+        List<Object> params = new ArrayList<>();
+        params.add(tenantId);
+        params.addAll(args);
+        List<Map<String, Object>> tokens = jdbcTemplate.queryForList(
+                "SELECT id, token_hash FROM user_api_token WHERE tenant_id = ? AND revoked = false AND ("
+                        + condition + ")",
+                params.toArray());
+
+        List<String> revoked = new ArrayList<>();
+        for (Map<String, Object> token : tokens) {
+            String tokenId = String.valueOf(token.get("id"));
+            String tokenHash = (String) token.get("token_hash");
+            Timestamp now = Timestamp.from(Instant.now());
+            int updated = jdbcTemplate.update(
+                    "UPDATE user_api_token SET revoked = true, revoked_at = ?, updated_at = ? "
+                            + "WHERE id = ? AND tenant_id = ? AND revoked = false",
+                    now, now, token.get("id"), tenantId);
+            if (updated == 0) {
+                continue;
+            }
+
+            // Remove from Redis cache and add to revocation set
+            try {
+                redisTemplate.delete(PAT_KEY_PREFIX + tokenHash);
+                redisTemplate.opsForValue().set(
+                        REVOCATION_KEY_PREFIX + tokenHash, "revoked", Duration.ofDays(366));
+            } catch (Exception e) {
+                log.warn("Failed to update revoked PAT {} in Redis: {}", tokenId, e.getMessage());
+            }
+
+            SecurityAuditLogger.log(eventType, actorId, tokenId, tenantId, "success", auditDetail);
+            revoked.add(tokenId);
+        }
+        return revoked;
     }
 
     /**

@@ -10,8 +10,8 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.springframework.stereotype.Component;
+import org.springframework.web.util.UriUtils;
 
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,11 +52,10 @@ public class UpdateCollectionTool implements AdminTool {
                 .callHandler((context, request) -> {
                     Map<String, Object> args = request.arguments();
                     if (args == null) args = Map.of();
-                    Object idArg = args.get("id");
-                    if (idArg == null || idArg.toString().isBlank()) {
-                        return error("Argument \"id\" is required.");
+                    if (!(args.get("id") instanceof String idArg) || idArg.isBlank()) {
+                        return error("Argument \"id\" is required and must be a string.");
                     }
-                    String id = idArg.toString();
+                    String id = idArg;
                     if (!FieldBodyBuilder.UUID_PATTERN.matcher(id).matches()) {
                         String resolved = lookups.collectionIdByName(id);
                         if (resolved == null) {
@@ -86,7 +85,7 @@ public class UpdateCollectionTool implements AdminTool {
                             "type", "collections",
                             "id", id,
                             "attributes", attrs));
-                    String path = "/api/collections/" + URLEncoder.encode(id, StandardCharsets.UTF_8);
+                    String path = "/api/collections/" + UriUtils.encodePathSegment(id, StandardCharsets.UTF_8);
                     try {
                         return McpErrorMapper.toResult(gateway.patch(path, body));
                     } catch (RuntimeException e) {

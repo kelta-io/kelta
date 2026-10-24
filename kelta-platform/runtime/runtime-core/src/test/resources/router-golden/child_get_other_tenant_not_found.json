@@ -1,7 +1,20 @@
 {
   "status" : 404,
-  "headers" : { },
-  "body" : null,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "NOT_FOUND",
+      "detail" : "Record 'f-b' not found in collection 'fields'",
+      "meta" : {
+        "path" : "/api/collections/col-b/fields/f-b",
+        "requestId" : "<requestId>"
+      },
+      "status" : "404",
+      "title" : "Not Found"
+    } ]
+  },
   "calls" : [ {
     "collection" : "fields",
     "id" : "f-b",

@@ -232,5 +232,3 @@ export function LoginPage({ title }: LoginPageProps): React.ReactElement {
     </div>
   )
 }
-
-export default LoginPage

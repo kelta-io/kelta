@@ -215,6 +215,26 @@ phantom ~100 req/s "Requests per Tenant" reading from three `kelta-worker` repli
 replica — and still resolves outside it (container/host id), so the default needs no
 deployment-specific override.
 
+**Flow metrics** (`kelta-worker`; all but the step-log counters come from `FlowMetricsConfig`,
+the `FlowEngine`'s `FlowExecutionListener`). Test executions are not counted in the execution meters.
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `kelta_flow_execution_total` | counter | `flow_id`, `flow_name`, `status` (`COMPLETED`/`FAILED`/`CANCELLED`) |
+| `kelta_flow_execution_duration_seconds` | timer | `flow_id`, `flow_name` |
+| `kelta_flow_step_total` | counter | `flow_id`, `state_type`, `resource` (Task resource key, `none` otherwise), `status` |
+| `kelta_flow_step_duration_seconds` | timer | `flow_id`, `state_type`, `resource` |
+| `kelta_flow_error_total` | counter | `flow_id`, `error_code` (`unknown` when absent) |
+| `kelta_flow_execution_active` | gauge | none |
+| `kelta_flow_step_log_bytes` | counter (bytes) | none — step-log snapshot JSON written, after the cap (`JdbcFlowStore`) |
+| `kelta_flow_step_log_snapshots_truncated` | counter | none — snapshots replaced by a marker over the cap (`JdbcFlowStore`) |
+
+The engine reports only a flow's id; `flow_name` (the flow's display name) is resolved through a
+Caffeine cache (10k entries, 10-minute expiry) over `FlowRepository.findFlowNameById`, under the
+execution's tenant. A missing flow or a failed lookup is tagged `unknown` and is not cached.
+Two tenants may share a flow name, so group by `flow_id` to keep their series apart. No label
+carries an execution, record or user id.
+
 ## Local Development (docker-compose.yml)
 
 | Service | Port | Profile |

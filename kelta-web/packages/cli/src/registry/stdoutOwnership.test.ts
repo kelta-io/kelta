@@ -43,6 +43,7 @@ const serveLike = defineCommand({
   summary: 'owns stdout',
   requiresAuth: false,
   ownsStdout: true,
+  examples: [{ cmd: 'kelta mcp serve' }],
   input: z.object({}),
   // mirrors the real handler: returns an empty result after the transport closes
   handler: () => Promise.resolve({}),
@@ -53,6 +54,7 @@ const normal = defineCommand({
   name: 'noop',
   summary: 'ordinary command',
   requiresAuth: false,
+  examples: [{ cmd: 'kelta things noop' }],
   input: z.object({}),
   handler: () => Promise.resolve({}),
 });

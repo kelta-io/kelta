@@ -176,5 +176,3 @@ export function SearchSettingsPage({
     </div>
   )
 }
-
-export default SearchSettingsPage

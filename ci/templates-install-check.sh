@@ -15,15 +15,24 @@
 #   1. signs in as the platform admin (POST /auth/direct-login) and exports the token as
 #      KELTA_TOKEN with KELTA_URL/KELTA_TENANT, so the CLI never opens a browser login;
 #   2. runs `timeout 300 bash install.sh` with stdin from /dev/null, so no prompt can wait;
-#   3. reads each collection's record count (meta.totalCount of a page[size]=1 list) and
-#      compares it with the length of seeds/<collection>.json.
+#   3. reads the record count (meta.totalCount of a page[size]=1 list) of each collection that
+#      metadata.json's `records` sections seed, and compares it with the number of rows those
+#      sections hold for it;
+#   4. applies the template's metadata.json a second time (`kelta metadata apply metadata.json
+#      --yes --output json`, the command install.sh runs) to the same tenant: a re-apply must
+#      change nothing, so the command has to exit 0 and report created 0 and failed 0 (KLT-666).
+#      Seed rows are keyed, so they are SKIPPED like every other existing item.
 # Then it installs the first template once more, into an empty sandbox (KLT-626): it creates a
 # sandbox of the tenant with cloneMetadata=false (what `kelta sandbox create --empty` sends),
 # checks the response says clone_mode EMPTY and status ACTIVE, signs in as the sandbox's
 # one-time admin, checks none of the template's collections exist there yet (the parent now
 # holds them all, so a clone would have carried them over), runs install.sh against the
 # sandbox with no deletions beforehand, and compares the seed counts there.
-# It exits non-zero at the first failed install, timeout or count mismatch.
+# The sandbox install gets the same second apply. It exits non-zero at the first failed
+# install, timeout or count mismatch; a second apply that changed something is reported as it
+# happens, naming the template and every item that was not SKIPPED, and fails the run once every
+# install is done, so one run shows every template's re-apply.
+# ci/templates-roundtrip-check.sh runs next, in the same image, against the tenant this leaves.
 set -euo pipefail
 
 if [ "${1:-}" = "--in-container" ]; then
@@ -67,10 +76,19 @@ if [ "${1:-}" = "--in-container" ]; then
       "$GATEWAY_URL/$1" || true
   }
 
+  # seed_counts <dir> — prints "<collection> <rows>" for every collection the `records`
+  # sections of the template's metadata.json seed, summed over its sections, in section order.
+  seed_counts() {
+    jq -r 'reduce (.records // [])[] as $s ({}; .[$s.collection] += ($s.rows | length))
+      | to_entries[] | "\(.key) \(.value)"' "$1/metadata.json" \
+      || fail "could not read the records sections of $1/metadata.json"
+  }
+
   # install_template <dir> <tenant-slug> <label> — runs install.sh with the CLI env already
-  # exported (KELTA_TOKEN), then checks every seed file's record count in that tenant.
+  # exported (KELTA_TOKEN), then checks the record count of every seeded collection in that
+  # tenant against metadata.json's records sections.
   install_template() {
-    local template="$1" tenant="$2" label="$3" start status elapsed seed collection expected actual
+    local template="$1" tenant="$2" label="$3" start status elapsed counts collection expected actual
     export KELTA_URL="$GATEWAY_URL" KELTA_TENANT="$tenant"
     start=$(date +%s)
     set +e
@@ -85,15 +103,39 @@ if [ "${1:-}" = "--in-container" ]; then
     fi
     echo "$label: install.sh exited 0 in ${elapsed}s"
 
-    for seed in "$template"/seeds/*.json; do
-      collection="$(basename "$seed" .json)"
-      expected="$(jq length "$seed")"
+    counts="$(seed_counts "$template")"
+    while read -r collection expected; do
+      [ -n "$collection" ] || continue
       actual="$(record_count "$collection" "$tenant")" \
         || fail "$label: could not read the record count of $collection"
       echo "$label/$collection: expected $expected, found $actual"
       [ "$actual" -eq "$expected" ] \
-        || fail "$label: $collection holds $actual records, seeds/$collection.json has $expected"
-    done
+        || fail "$label: $collection holds $actual records, the metadata.json records sections have $expected"
+    done <<<"$counts"
+
+    reapply "$template" "$label"
+  }
+
+  # reapply <dir> <label> — applies metadata.json again; anything but exit 0 with created 0
+  # and failed 0 is recorded in REAPPLY_FAILURES (the items that were not SKIPPED are printed).
+  REAPPLY_FAILURES=()
+  reapply() {
+    local template="$1" label="$2" report status
+    [ -f "$template/metadata.json" ] || fail "$label: no metadata.json"
+    set +e
+    report="$(cd "$template" && kelta metadata apply metadata.json --yes --output json </dev/null)"
+    status=$?
+    set -e
+    if [ "$status" -eq 0 ] && jq -e '.created == 0 and .failed == 0' <<<"$report" >/dev/null 2>&1; then
+      echo "$label: second apply of metadata.json changed nothing: $(jq -c '{created, updated, skipped, failed}' <<<"$report")"
+      return 0
+    fi
+    echo "::error::$label: the second apply of metadata.json was not a no-op (exit $status): $(jq -c '{created, updated, skipped, failed}' <<<"$report" 2>/dev/null || echo "unparseable report")" >&2
+    echo "$label: items the second apply did not skip:" >&2
+    jq -r '.items // [] | .[] | select(.action != "SKIPPED")
+      | "  \(.type) \(.naturalKey): \(.action)\(if .error then " — \(.error)" else "" end)"' \
+      <<<"$report" >&2 2>/dev/null || printf '%s\n' "$report" >&2
+    REAPPLY_FAILURES+=("$label")
   }
 
   shopt -s nullglob
@@ -148,17 +190,21 @@ if [ "${1:-}" = "--in-container" ]; then
   [ "$ready" = "200" ] \
     || fail "sandbox $sandbox_slug: GET /api/collections answered $ready, not 200, with its admin's token"
 
-  for seed in "$template"/seeds/*.json; do
-    collection="$(basename "$seed" .json)"
+  sandbox_counts="$(seed_counts "$template")"
+  while read -r collection _; do
+    [ -n "$collection" ] || continue
     status="$(http_status "$sandbox_slug/api/$collection?page%5Bsize%5D=1")"
     [ "$status" != "200" ] \
       || fail "sandbox $sandbox_slug already holds $collection before the install — it was not created empty"
-  done
+  done <<<"$sandbox_counts"
   echo "sandbox $sandbox_slug holds none of $name's collections"
 
   install_template "$template" "$sandbox_slug" "$name@$sandbox_slug"
   echo "::endgroup::"
   echo "$name installed into the empty sandbox $sandbox_slug with no deletions"
+  [ "${#REAPPLY_FAILURES[@]}" -eq 0 ] \
+    || fail "a second apply of metadata.json changed or failed items in: ${REAPPLY_FAILURES[*]} (see the item lists above)"
+  echo "Every second apply of metadata.json changed nothing"
   exit 0
 fi
 
@@ -169,6 +215,7 @@ IMAGE="kelta-templates-runner:${COMPOSE_PROJECT_NAME}"
 CONTAINER="${COMPOSE_PROJECT_NAME}_templates"
 [ -f kelta-web/packages/cli/dist/index.js ] || { echo "kelta CLI not built (kelta-web/packages/cli/dist)" >&2; exit 1; }
 
+# ci/templates-roundtrip-check.sh, the job's next step, runs in this same image (by tag).
 # --load: the job selects the persistent docker-container builder (BUILDX_BUILDER=kelta-ci),
 # which keeps a build result in its own cache unless told to load it into the daemon; a
 # per-run tag that was never loaded makes `docker run` fail with exit 125.
@@ -179,7 +226,9 @@ COPY kelta-web /kelta-web
 RUN printf '#!/bin/sh\nexec node /kelta-web/packages/cli/dist/index.js "$@"\n' > /usr/local/bin/kelta \
  && chmod +x /usr/local/bin/kelta
 COPY examples/templates /templates
-COPY ci/templates-install-check.sh ci/templates-install-check.test.ts /ci/
+COPY ci/templates-install-check.sh ci/templates-install-check.test.ts \
+     ci/templates-roundtrip-check.sh ci/templates-roundtrip-check.test.ts \
+     ci/templates-roundtrip-normalise.jq ci/templates-roundtrip-exclusions.txt /ci/
 DOCKERFILE
 
 docker run --rm --memory 1g --pids-limit 512 "$IMAGE" node --test /ci/templates-install-check.test.ts </dev/null

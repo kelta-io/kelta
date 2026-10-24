@@ -331,5 +331,3 @@ export function GovernorLimitsPage({ className }: GovernorLimitsPageProps): Reac
     </div>
   )
 }
-
-export default GovernorLimitsPage

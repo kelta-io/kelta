@@ -670,5 +670,3 @@ function CreateEndpointDialog({
     </Dialog>
   )
 }
-
-export default WebhooksPage

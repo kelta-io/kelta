@@ -213,5 +213,3 @@ export function ResourceBrowserPage({
     </div>
   )
 }
-
-export default ResourceBrowserPage

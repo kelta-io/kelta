@@ -6,7 +6,7 @@ import type { ObjectPermissions } from './useCollectionPermissions'
 /**
  * System-level permission flags for the current user.
  */
-export type SystemPermissions = Record<string, boolean>
+type SystemPermissions = Record<string, boolean>
 
 /**
  * Full permissions response from /api/me/permissions.

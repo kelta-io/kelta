@@ -1470,5 +1470,3 @@ export function PageBuilderPage({
     </div>
   )
 }
-
-export default PageBuilderPage

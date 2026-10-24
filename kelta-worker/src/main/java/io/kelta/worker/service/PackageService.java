@@ -332,40 +332,48 @@ public class PackageService {
     }
 
     /**
-     * Read-only preview: classifies every package item as create/update/conflict
-     * via the import engine's dry-run pass (same natural-key resolution as a real
-     * import) and echoes the package's provenance for the caller to display.
+     * Read-only preview through the import engine's dry-run pass (same natural-key resolution
+     * as a real import), comparing every item that already exists in the tenant with the
+     * package's copy: {@code creates} (new natural key), {@code updates} (exists, with the
+     * changed attribute names in {@code changes}), {@code unchanged} (exists, identical) and
+     * {@code conflicts} (the item would fail — an error or an unresolved reference). Echoes the
+     * package's provenance for the caller to display. Tenant items the package does not carry
+     * are not reported.
      */
     public Map<String, Object> previewImport(String tenantId, Map<String, Object> pkg) {
         var report = importService.importPackage(tenantId, pkg,
-                new PackageImportService.ImportOptions(
-                        PackageImportService.ConflictMode.SKIP, true, null, null, null));
+                PackageImportService.ImportOptions.preview());
 
         List<Map<String, Object>> creates = new ArrayList<>();
         List<Map<String, Object>> updates = new ArrayList<>();
+        List<Map<String, Object>> unchanged = new ArrayList<>();
         List<Map<String, Object>> conflicts = new ArrayList<>();
         for (var item : report.items()) {
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("type", item.type());
             entry.put("name", item.naturalKey());
-            switch (item.action()) {
-                case "CREATED" -> creates.add(entry);
-                case "UPDATED" -> updates.add(entry);
-                default -> {
-                    Map<String, Object> conflict = new LinkedHashMap<>();
-                    conflict.put("item", entry);
-                    conflict.put("existingItem", entry);
-                    if (item.error() != null) {
-                        conflict.put("error", item.error());
-                    }
-                    conflicts.add(conflict);
+            if ("CREATED".equals(item.action())) {
+                creates.add(entry);
+            } else if (item.changes() != null && !item.changes().isEmpty()) {
+                entry.put("changes", item.changes());
+                updates.add(entry);
+            } else if (item.changes() != null) {
+                unchanged.add(entry);
+            } else {
+                Map<String, Object> conflict = new LinkedHashMap<>();
+                conflict.put("item", entry);
+                conflict.put("existingItem", entry);
+                if (item.error() != null) {
+                    conflict.put("error", item.error());
                 }
+                conflicts.add(conflict);
             }
         }
 
         Map<String, Object> preview = new LinkedHashMap<>();
         preview.put("creates", creates);
         preview.put("updates", updates);
+        preview.put("unchanged", unchanged);
         preview.put("conflicts", conflicts);
         preview.put("items", toItemMaps(report));
         if (pkg.get("source") != null) {
@@ -442,6 +450,9 @@ public class PackageService {
                     m.put("action", item.action());
                     if (item.error() != null) {
                         m.put("error", item.error());
+                    }
+                    if (item.changes() != null) {
+                        m.put("changes", item.changes());
                     }
                     return m;
                 })

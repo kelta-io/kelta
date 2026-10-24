@@ -227,5 +227,3 @@ export function FileViewer({ attachment, onClose, onDownload }: FileViewerProps)
     </Dialog>
   )
 }
-
-export default FileViewer

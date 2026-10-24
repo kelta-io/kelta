@@ -6,21 +6,39 @@ order: 50
 ---
 
 Every write — console, API, CLI, MCP, flow — goes through the same validation pipeline: required and type checks,
-field constraints, validation rules, immutability, uniqueness and referential integrity. A failure answers
-`400 VALIDATION_FAILED` with one entry per problem.
+field constraints, validation rules, immutability, uniqueness and referential integrity. A field-level failure
+answers `400` with one entry per problem: `title` is `Validation Error`, `source.pointer` names the field
+(`/data/attributes/<field>`), and `code` is the constraint that failed (`nullable`, `type`, `minLength`,
+`maxLength`, `minValue`, `maxValue`, `pattern`, `enum`, `picklist`, `immutable`, `unique`, `reference`).
 
 ## Field constraints
 
-The `constraints` JSON on a field declares simple checks by type:
+The `constraints` JSON on a field declares simple checks. These keys are enforced on every create and on every
+update that writes the field:
 
-| Type | Constraints |
-|---|---|
-| `STRING`, `RICH_TEXT` | `min`, `max` (length), `pattern`, `email`, `url` |
-| numbers, `CURRENCY`, `PERCENT` | `min`, `max` |
-| `DATE`, `DATETIME` | `min`, `max` |
-| `PHONE`, `EMAIL`, `URL`, `EXTERNAL_ID` | `pattern` |
+| Key | Applies to | Check |
+|---|---|---|
+| `min`, `max` | numbers, `CURRENCY`, `PERCENT` | value bounds (same as `minValue`, `maxValue`) |
+| `min`, `max` | `STRING`, `TEXT`, `RICH_TEXT`, `EMAIL`, `URL`, `PHONE`, `EXTERNAL_ID` | length bounds (same as `minLength`, `maxLength`) |
+| `minValue`, `maxValue` | numeric values | value bounds |
+| `minLength`, `maxLength` | text values | length bounds |
+| `pattern` | text values | the whole value must match the regular expression |
 
-`required` and picklist membership are checked here too.
+An explicit `minLength`/`maxLength`/`minValue`/`maxValue` wins over `min`/`max`.
+
+**Not enforced:** `email` and `url` (the console's checkboxes for a text field — use the `EMAIL` or `URL` field type,
+whose format is checked, or a `pattern`), and `min`/`max` on `DATE`/`DATETIME`. The worker ignores these keys and
+logs a warning when it loads the field.
+
+**Picklist membership:** a `PICKLIST` value must be one of the field's **active** picklist values (its own, or
+those of the global picklist it is bound to); each element of a `MULTI_PICKLIST` value likewise. Deactivating a
+value stops new writes from using it. A picklist field with no values accepts any text.
+
+`required` is checked here too.
+
+**Updates only check what they write.** A `PATCH` validates the fields in its body, so a record that already
+holds a value the constraints now reject (written before they were enforced, or before a value was deactivated)
+can still be updated as long as the update leaves that field alone.
 
 ## Validation rules
 

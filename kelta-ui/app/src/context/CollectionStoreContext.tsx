@@ -23,7 +23,7 @@ import type { CollectionSchema, FieldDefinition } from '../hooks/useCollectionSc
 import { normalizeFieldType } from '../utils/normalizeFieldType'
 
 /** Extended field definition with parent collection reference */
-export interface StoredField extends FieldDefinition {
+interface StoredField extends FieldDefinition {
   collectionId: string
   collectionName: string
 }

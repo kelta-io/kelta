@@ -1122,6 +1122,147 @@ class CerbosRecordAuthorizationAdviceTest {
     }
 
     @Nested
+    @DisplayName("profile includes (PLT-657)")
+    class ProfileIncludes {
+
+        /** The admin profile editor's request (ProfileDetailPage). */
+        private static final String EDITOR_INCLUDE =
+                "include=profile-system-permissions,profile-object-permissions,profile-field-permissions";
+
+        private ServletServerHttpRequest editorRequest() {
+            var request = createRequest("/api/profiles/pr1");
+            ((MockHttpServletRequest) request.getServletRequest()).setQueryString(EDITOR_INCLUDE);
+            return request;
+        }
+
+        private Map<String, Object> grant(String type, String id) {
+            Map<String, Object> resource = new LinkedHashMap<>();
+            resource.put("type", type);
+            resource.put("id", id);
+            resource.put("attributes", Map.of("profileId", "pr1"));
+            return resource;
+        }
+
+        private Map<String, Object> profileWithGrants() {
+            Map<String, Object> profile = new LinkedHashMap<>();
+            profile.put("type", "profiles");
+            profile.put("id", "pr1");
+            profile.put("attributes", Map.of("name", "System Administrator"));
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("data", profile);
+            body.put("included", List.of(
+                    grant("profile-system-permissions", "sp1"),
+                    grant("profile-system-permissions", "sp2"),
+                    grant("profile-object-permissions", "op1"),
+                    grant("profile-field-permissions", "fp1")));
+            return body;
+        }
+
+        private void readable(String collection, boolean allowed) {
+            when(authzService.checkCollectionWideRecordAccess(any(), any(), any(), eq(collection), eq("read")))
+                    .thenReturn(allowed);
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<Map<String, Object>> included(Object result) {
+            return (List<Map<String, Object>>) ((Map<String, Object>) result).get("included");
+        }
+
+        @Test
+        @DisplayName("an API_ACCESS caller without read on the grant collections gets the profile and no grant rows")
+        void grantRowsDroppedWithoutRead() {
+            var request = editorRequest();
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            readable("profile-system-permissions", false);
+            readable("profile-object-permissions", false);
+            readable("profile-field-permissions", false);
+            Map<String, Object> body = profileWithGrants();
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(((Map<?, ?>) result).get("data")).isEqualTo(body.get("data"));
+            assertThat(((Map<?, ?>) result).containsKey("included")).isFalse();
+            // The profile itself is still not record-filtered.
+            verify(authzService, never()).checkCollectionWideRecordAccess(any(), any(), any(), eq("profiles"), any());
+            verify(authzService, never()).checkRecordAccess(any(), any(), any(), eq("profiles"), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("the admin editor's request keeps every included grant row for a caller who may read them")
+        void editorRequestKeepsGrantRowsForAdmin() {
+            var request = editorRequest();
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            // System Administrator: VIEW_ALL_DATA grants read on every collection.
+            readable("profile-system-permissions", true);
+            readable("profile-object-permissions", true);
+            readable("profile-field-permissions", true);
+            Map<String, Object> body = profileWithGrants();
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(((Map<?, ?>) result).get("data")).isEqualTo(body.get("data"));
+            assertThat(included(result)).isEqualTo(body.get("included"));
+        }
+
+        @Test
+        @DisplayName("an object read grant on one grant collection keeps only that collection's rows")
+        void objectReadGrantKeepsItsRows() {
+            var request = editorRequest();
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            readable("profile-system-permissions", false);
+            readable("profile-object-permissions", true);
+            readable("profile-field-permissions", false);
+
+            Object result = advice.beforeBodyWrite(profileWithGrants(), null, MediaType.APPLICATION_JSON, null,
+                    request, null);
+
+            assertThat(included(result)).extracting(r -> r.get("id")).containsExactly("op1");
+        }
+
+        @Test
+        @DisplayName("a profile list's included rows are filtered; its profiles are not")
+        void profileListIncludedFiltered() {
+            var request = createRequest("/api/profiles");
+            when(recordRuleIndex.hasRecordVariantRules(any(), any())).thenReturn(false);
+            readable("profile-system-permissions", false);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("data", List.of(Map.of("type", "profiles", "id", "pr1"), Map.of("type", "profiles", "id", "pr2")));
+            body.put("included", List.of(grant("profile-system-permissions", "sp1")));
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat((List<?>) ((Map<?, ?>) result).get("data")).hasSize(2);
+            assertThat(((Map<?, ?>) result).containsKey("included")).isFalse();
+        }
+
+        @Test
+        @DisplayName("a profile response without included is returned untouched")
+        void noIncludedUntouched() {
+            var request = createRequest("/api/profiles/pr1");
+            Map<String, Object> body = Map.of("data", Map.of("type", "profiles", "id", "pr1"));
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(result).isSameAs(body);
+            verifyNoInteractions(authzService);
+        }
+
+        @Test
+        @DisplayName("other metadata paths still skip included filtering")
+        void otherMetadataPathIncludedUntouched() {
+            var request = createRequest("/api/collections/c1");
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("data", Map.of("type", "collections", "id", "c1"));
+            body.put("included", List.of(grant("fields", "f1")));
+
+            Object result = advice.beforeBodyWrite(body, null, MediaType.APPLICATION_JSON, null, request, null);
+
+            assertThat(result).isSameAs(body);
+            verifyNoInteractions(authzService);
+        }
+    }
+
+    @Nested
     @DisplayName("flows and connected-apps (PLT-656)")
     class FlowsAndConnectedApps {
 

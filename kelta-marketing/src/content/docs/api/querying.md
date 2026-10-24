@@ -87,3 +87,17 @@ rejected with `409` if the record changed in between. The kanban board uses this
 `GET /api/_search?q=…` across collections and `POST /api/<collection>/semantic-search`. Both return only
 records the caller can read — see
 [Search and attachments](/docs/data-model/search-and-attachments/).
+
+## Aggregates and the latest value
+
+Two read-only siblings of the list endpoint answer a question without returning rows. Both take the same
+`filter[…]` parameters and need only `read` on the collection.
+
+- `GET /api/<collection>/aggregate?groupBy=<field>&avg=<numericField>` — one group per distinct value of
+  `groupBy`, with its count and (when `avg` is given) the average:
+  `{ "totalCount": 42, "groups": [{ "key": "open", "count": 30, "avg": 4.5 }, …] }`. Grouping is exact-value and
+  in memory over at most 1,000 matching rows.
+- `GET /api/<collection>/latest?fields=<f1,f2>` — the named fields of the most recently created matching record,
+  plus its `recordedAt`: `{ "record": { "status": "ok", "recordedAt": "…" } }`, or `{ "record": null }`.
+
+Neither response is a JSON:API `data` list: they disclose only counts, averages or the fields asked for.

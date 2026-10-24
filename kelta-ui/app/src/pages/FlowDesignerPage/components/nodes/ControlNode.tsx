@@ -5,7 +5,7 @@ import { Clock, ArrowRight, Columns, Repeat } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { DebugStatusBadge, type DebugStatus } from './DebugStatusBadge'
 
-export type ControlNodeData = {
+type ControlNodeData = {
   label: string
   stateType: 'Wait' | 'Pass' | 'Parallel' | 'Map'
   waitDuration?: string

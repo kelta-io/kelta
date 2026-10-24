@@ -653,5 +653,3 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     </div>
   )
 }
-
-export default ModulesPage

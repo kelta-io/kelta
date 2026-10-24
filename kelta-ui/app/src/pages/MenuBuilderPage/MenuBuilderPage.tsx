@@ -1628,5 +1628,3 @@ export function MenuBuilderPage({
     </div>
   )
 }
-
-export default MenuBuilderPage

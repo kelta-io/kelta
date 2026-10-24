@@ -30,7 +30,7 @@ import React, {
  * - 'polite': Waits for user to finish current task before announcing
  * - 'assertive': Interrupts user immediately (use sparingly)
  */
-export type LiveRegionPoliteness = 'polite' | 'assertive'
+type LiveRegionPoliteness = 'polite' | 'assertive'
 
 /**
  * Props for the LiveRegion component
@@ -272,8 +272,3 @@ export function useAnnounce(): LiveRegionContextValue {
   }
   return context
 }
-
-// Export context for testing
-export { LiveRegionContext }
-
-export default LiveRegion

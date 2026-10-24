@@ -10,21 +10,34 @@ order: 30
 ## Plugin
 
 ```ts
-import { BasePlugin, ComponentRegistry, type PluginContext } from '@kelta/plugin-sdk';
+import type { ReactElement } from 'react';
+import {
+  BasePlugin,
+  ComponentRegistry,
+  type FieldRendererProps,
+  type PageComponentProps,
+  type PluginContext,
+} from '@kelta/plugin-sdk';
+
+declare function ErpStatusBadge(props: FieldRendererProps): ReactElement; // your React components
+declare function ErpOrders(props: PageComponentProps): ReactElement;
 
 export class ErpPlugin extends BasePlugin {
   name = 'erp';
   version = '1.0.0';
   async init(ctx: PluginContext) {
+    await super.init(ctx);
     ComponentRegistry.registerFieldRenderer('erp-status', ErpStatusBadge);
     ComponentRegistry.registerPageComponent('erp-orders', '/erp/orders', ErpOrders);
   }
+  mount() {}
+  unmount() {}
 }
 ```
 
 `PluginContext` gives a plugin the API `client`, the current `user` (or `null`) and a `router`. `Plugin` declares
-`name`, `version`, `init(context)`, `mount(container)` and `unmount()`; `BasePlugin` provides defaults for the
-lifecycle methods.
+`name`, `version`, `init(context)`, `mount(container)` and `unmount()`; `BasePlugin` stores the context in `init`
+(call `super.init` when you override it) and leaves `mount` and `unmount` for you to implement.
 
 ## Component registry
 

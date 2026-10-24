@@ -1,0 +1,39 @@
+{
+  "status" : 200,
+  "headers" : {
+    "ETag" : "\"MjAyNi0wMS0wNVQwMDowMDowMFo\"",
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : {
+      "attributes" : {
+        "account" : "acc-1",
+        "employer" : "co-1",
+        "firstName" : "Ann",
+        "updatedAt" : "2026-01-05T00:00:00Z"
+      },
+      "id" : "con-1",
+      "relationships" : {
+        "account" : {
+          "data" : {
+            "id" : "acc-1",
+            "type" : "accounts"
+          }
+        },
+        "employer" : {
+          "data" : {
+            "id" : "co-1",
+            "type" : "companies"
+          }
+        }
+      },
+      "type" : "contacts"
+    }
+  },
+  "calls" : [ {
+    "collection" : "contacts",
+    "id" : "con-1",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  } ]
+}

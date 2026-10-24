@@ -64,7 +64,7 @@ export interface AvailableField {
   required?: boolean
 }
 
-export interface DragSource {
+interface DragSource {
   type: 'palette-field' | 'canvas-field' | 'section'
   fieldId?: string
   fieldPlacementId?: string
@@ -84,7 +84,7 @@ interface UndoableSnapshot {
   relatedLists: EditorRelatedList[]
 }
 
-export interface LayoutEditorState {
+interface LayoutEditorState {
   collectionId: string | null
   sections: EditorSection[]
   relatedLists: EditorRelatedList[]
@@ -927,6 +927,3 @@ export function useLayoutEditor(): LayoutEditorContextValue {
   }
   return context
 }
-
-// Export the context for testing purposes
-export { LayoutEditorContext }

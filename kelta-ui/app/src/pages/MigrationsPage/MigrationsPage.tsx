@@ -65,7 +65,7 @@ export interface MigrationRun {
 /**
  * Migration step interface for planning
  */
-export interface MigrationStep {
+interface MigrationStep {
   order: number
   operation: 'ADD_FIELD' | 'REMOVE_FIELD' | 'MODIFY_FIELD' | 'ADD_INDEX' | 'REMOVE_INDEX'
   details: Record<string, unknown>
@@ -75,7 +75,7 @@ export interface MigrationStep {
 /**
  * Migration risk interface
  */
-export interface MigrationRisk {
+interface MigrationRisk {
   level: 'low' | 'medium' | 'high'
   description: string
 }
@@ -83,7 +83,7 @@ export interface MigrationRisk {
 /**
  * Migration plan interface
  */
-export interface MigrationPlan {
+interface MigrationPlan {
   id: string
   collectionId: string
   collectionName: string
@@ -98,7 +98,7 @@ export interface MigrationPlan {
 /**
  * Collection summary for selection
  */
-export interface CollectionSummary {
+interface CollectionSummary {
   id: string
   name: string
   displayName: string
@@ -179,11 +179,11 @@ async function createMigrationPlan(
  * Execute a migration plan
  * Requirement 10.5: Migration execution shows real-time progress
  */
-export interface ExecuteMigrationRequest {
+interface ExecuteMigrationRequest {
   planId: string
 }
 
-export interface ExecuteMigrationResponse {
+interface ExecuteMigrationResponse {
   runId: string
   status: MigrationStatus
 }
@@ -1647,5 +1647,3 @@ export function MigrationsPage({ testId }: MigrationsPageProps): React.ReactElem
     </div>
   )
 }
-
-export default MigrationsPage

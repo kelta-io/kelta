@@ -427,5 +427,3 @@ export function BulkJobsPage({ testId = 'bulk-jobs-page' }: BulkJobsPageProps): 
     </AdminCrudPage>
   )
 }
-
-export default BulkJobsPage
