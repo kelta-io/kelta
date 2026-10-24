@@ -63,6 +63,16 @@ const login = defineCommand({
     },
     { flag: '--no-browser', description: 'Print the login URL instead of opening a browser' },
   ],
+  examples: [
+    {
+      cmd: 'kelta auth login --url https://api.kelta.io --tenant acme',
+      description: 'Log in through the browser and save a 90-day PAT',
+    },
+    {
+      cmd: 'kelta auth login --url https://api.kelta.io --tenant acme --profile staging --token klt_abc123def456',
+      description: 'Headless login with an existing PAT',
+    },
+  ],
   input: z.object({
     url: z.string().url().optional(),
     tenant: z.string().min(1).optional(),
@@ -177,6 +187,13 @@ const logout = defineCommand({
   options: [
     { flag: '--revoke', description: 'Revoke the PAT server-side before removing it locally' },
   ],
+  examples: [
+    { cmd: 'kelta auth logout' },
+    {
+      cmd: 'kelta auth logout --revoke --profile staging',
+      description: 'Revoke the PAT server-side, then forget it locally',
+    },
+  ],
   input: z.object({ revoke: z.boolean().default(false) }),
   handler: async (ctx, input) => {
     const name = activeProfileName(ctx);
@@ -223,6 +240,7 @@ const status = defineCommand({
   name: 'status',
   summary: 'Show the resolved connection settings for the active profile',
   requiresAuth: false,
+  examples: [{ cmd: 'kelta auth status --profile staging --output json' }],
   input: z.object({}),
   handler: (ctx) => {
     const profile = resolveProfile(ctx.global.profile);

@@ -30,6 +30,11 @@ const ManifestSchema = z.object({
             repeatable: z.boolean().optional(),
           })
         ),
+        examples: z
+          .array(
+            z.object({ cmd: z.string().startsWith('kelta '), description: z.string().optional() })
+          )
+          .min(1),
         inputSchema: z.unknown(),
       })
     )
@@ -135,6 +140,14 @@ describe('kelta manifest', () => {
     for (const command of manifest.commands) {
       expect(JSON.stringify(command.inputSchema), command.command).not.toContain('$ref');
     }
+  });
+
+  it("carries each command's examples from its one `examples` field", () => {
+    for (const [i, command] of manifest.commands.entries()) {
+      expect(command.examples, command.command).toEqual(allCommands[i].examples);
+    }
+    const recordsList = manifest.commands.find((c) => c.command === 'kelta records list');
+    expect(recordsList?.examples[0]?.cmd).toMatch(/^kelta records list customers /);
   });
 
   it('marks destructive and auth-free commands correctly', () => {

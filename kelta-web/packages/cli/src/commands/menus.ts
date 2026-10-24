@@ -62,6 +62,7 @@ const menuList = defineCommand({
   group: 'menus',
   name: 'list',
   summary: 'List UI menus (apps/nav v2)',
+  examples: [{ cmd: 'kelta menus list' }],
   input: z.object({}),
   handler: async (ctx) => {
     const response = await ctx.client.getAxiosInstance().get<unknown>('/api/ui-menus');
@@ -87,6 +88,9 @@ const menuGet = defineCommand({
       flag: '--tree',
       description: 'Include menu items nested by parentId under attribute "items"',
     },
+  ],
+  examples: [
+    { cmd: 'kelta menus get Sales --tree', description: 'Show the Sales menu with nested items' },
   ],
   input: z.object({ menu: z.string().min(1), tree: z.boolean().default(false) }),
   handler: async (ctx, input) => {
@@ -126,6 +130,7 @@ const menuCreate = defineCommand({
     { flag: '--default', description: 'Mark as the default menu' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [{ cmd: 'kelta menus create --name Sales --icon briefcase --display-order 2' }],
   input: z.object({
     name: z.string().min(1),
     description: z.string().optional(),
@@ -168,6 +173,16 @@ const menuApply = defineCommand({
         'Menu name (overrides the file\'s own "name"; creates the menu if it does not exist yet)',
     },
   ],
+  examples: [
+    {
+      cmd: 'kelta menus apply --file sales-menu.json',
+      description: "Apply the tree using the file's own name",
+    },
+    {
+      cmd: 'kelta menus apply --file sales-menu.json --name Sales',
+      description: 'Apply the tree to the Sales menu, creating it if needed',
+    },
+  ],
   input: z.object({ file: z.string().min(1), name: z.string().optional() }),
   handler: async (ctx, input) => {
     const tree = readDataArgument('@' + input.file);
@@ -208,6 +223,7 @@ const menuUpdate = defineCommand({
     { flag: '--active <bool>', description: 'true|false' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [{ cmd: 'kelta menus update menu_123 --default true --display-order 1' }],
   input: z.object({
     menuId: z.string().min(1),
     name: z.string().optional(),
@@ -248,6 +264,7 @@ const menuDelete = defineCommand({
   summary: 'Delete a UI menu',
   dangerous: true,
   positionals: [{ name: 'menuId', description: 'Menu id', required: true }],
+  examples: [{ cmd: 'kelta menus delete menu_123 --yes' }],
   input: z.object({ menuId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client.getAxiosInstance().delete(`/api/ui-menus/${input.menuId}`);

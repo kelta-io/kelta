@@ -28,10 +28,18 @@ On failure the CLI prints one JSON line on stderr:
 |---|---|
 | `0` | success |
 | `1` | API error (4xx/5xx other than the below) |
-| `2` | usage error, or a destructive command without `--yes` off-TTY (`CONFIRMATION_REQUIRED`) |
+| `2` | usage error (`INVALID_ARGUMENTS`), or a destructive command without `--yes` off-TTY (`CONFIRMATION_REQUIRED`) |
 | `3` | authentication required or failed |
 | `4` | not found |
 | `5` | conflict or rate limit |
+
+Argument errors use the same envelope. A missing required argument, an unknown option, an unknown command or an input that fails validation returns `INVALID_ARGUMENTS` and exit `2`; the `detail` is the parser's message, including any "Did you mean …?" suggestion:
+
+```jsonc
+{"error":{"code":"INVALID_ARGUMENTS","detail":"unknown command 'recrods'\n(Did you mean records?)"}}
+```
+
+On a terminal, the same failure prints as `Error [INVALID_ARGUMENTS]: unknown option '--colour'`. `--help` and `--version` exit `0`.
 
 ## Destructive commands
 

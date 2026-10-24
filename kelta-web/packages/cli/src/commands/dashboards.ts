@@ -39,6 +39,7 @@ const dashboardList = defineCommand({
   group: 'dashboards',
   name: 'list',
   summary: 'List dashboards',
+  examples: [{ cmd: 'kelta dashboards list' }],
   input: z.object({}),
   handler: async (ctx) => {
     const response = await ctx.client.getAxiosInstance().get<unknown>('/api/dashboards');
@@ -62,6 +63,12 @@ const dashboardGet = defineCommand({
     {
       flag: '--components',
       description: 'Include dashboard components, sorted by rowPosition then columnPosition',
+    },
+  ],
+  examples: [
+    {
+      cmd: 'kelta dashboards get dash_123 --components',
+      description: 'Include widgets in grid order',
     },
   ],
   input: z.object({ dashboardId: z.string().min(1), components: z.boolean().default(false) }),
@@ -111,6 +118,11 @@ const dashboardCreate = defineCommand({
     { flag: '--running-user-id <id>', description: 'User a dynamic dashboard executes widgets as' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [
+    {
+      cmd: "kelta dashboards create --name 'Sales overview' --access-level PUBLIC --column-count 12",
+    },
+  ],
   input: z.object({
     name: z.string().min(1),
     description: z.string().optional(),
@@ -156,6 +168,12 @@ const dashboardApply = defineCommand({
         'Dashboard name (overrides the file\'s own "name"; creates the dashboard if it does not exist yet)',
     },
   ],
+  examples: [
+    {
+      cmd: "kelta dashboards apply --file sales-dashboard.json --name 'Sales overview'",
+      description: 'Apply widgets, creating the dashboard if needed',
+    },
+  ],
   input: z.object({ file: z.string().min(1), name: z.string().optional() }),
   handler: async (ctx, input) => {
     const tree = readDataArgument('@' + input.file);
@@ -195,6 +213,11 @@ const dashboardUpdate = defineCommand({
     { flag: '--dynamic <bool>', description: 'true|false' },
     { flag: '--running-user-id <id>', description: 'User a dynamic dashboard executes widgets as' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
+  ],
+  examples: [
+    {
+      cmd: "kelta dashboards update dash_123 --access-level PRIVATE --description 'Weekly sales KPIs'",
+    },
   ],
   input: z.object({
     dashboardId: z.string().min(1),
@@ -236,6 +259,7 @@ const dashboardDelete = defineCommand({
   summary: 'Delete a dashboard',
   dangerous: true,
   positionals: [{ name: 'dashboardId', description: 'Dashboard id', required: true }],
+  examples: [{ cmd: 'kelta dashboards delete dash_123 --yes' }],
   input: z.object({ dashboardId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client.getAxiosInstance().delete(`/api/dashboards/${input.dashboardId}`);
@@ -259,6 +283,7 @@ const dashboardValidate = defineCommand({
         'Body as JSON, @file, or - — e.g. {"components":[...]} to validate unsaved widgets',
     },
   ],
+  examples: [{ cmd: "kelta dashboards validate 'Sales overview'" }],
   input: z.object({ dashboard: z.string().min(1), data: z.string().optional() }),
   handler: async (ctx, input) => {
     const dashboardId = await dashboardIdByName(ctx, input.dashboard);
@@ -279,6 +304,12 @@ const dashboardData = defineCommand({
     {
       flag: '--data <json>',
       description: 'Runtime parameters as JSON, @file, or - (e.g. {"timeRange":"LAST_30_DAYS"})',
+    },
+  ],
+  examples: [
+    {
+      cmd: 'kelta dashboards data \'Sales overview\' --data \'{"timeRange": "LAST_30_DAYS"}\'',
+      description: 'Widget data for the last 30 days',
     },
   ],
   input: z.object({ dashboard: z.string().min(1), data: z.string().optional() }),

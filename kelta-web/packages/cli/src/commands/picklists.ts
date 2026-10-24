@@ -15,6 +15,13 @@ const list = defineCommand({
   name: 'list',
   summary: 'List global picklists',
   options: [{ flag: '--name <name>', description: 'Filter by exact name' }],
+  examples: [
+    { cmd: 'kelta picklists list' },
+    {
+      cmd: 'kelta picklists list --name order_status',
+      description: 'Look up one picklist by exact name',
+    },
+  ],
   input: z.object({ name: z.string().optional() }),
   handler: async (ctx, input) => {
     const filter = input.name ? `&filter[name][EQ]=${encodeURIComponent(input.name)}` : '';
@@ -36,6 +43,7 @@ const get = defineCommand({
   name: 'get',
   summary: 'Show a global picklist with its values',
   positionals: [{ name: 'picklist', description: 'Picklist name or id', required: true }],
+  examples: [{ cmd: 'kelta picklists get order_status' }],
   input: z.object({ picklist: z.string().min(1) }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
@@ -78,6 +86,12 @@ const create = defineCommand({
     {
       flag: '--values <list>',
       description: 'Initial values, comma-separated (value used as label)',
+    },
+  ],
+  examples: [
+    {
+      cmd: "kelta picklists create --name order_status --description 'Order lifecycle' --values draft,submitted,shipped,cancelled",
+      description: 'Create a picklist with four initial values',
     },
   ],
   input: z.object({
@@ -126,6 +140,7 @@ const remove = defineCommand({
   summary: 'Delete a global picklist',
   dangerous: true,
   positionals: [{ name: 'picklist', description: 'Picklist name or id', required: true }],
+  examples: [{ cmd: 'kelta picklists delete order_status --yes' }],
   input: z.object({ picklist: z.string().min(1) }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
@@ -149,6 +164,9 @@ const valueAdd = defineCommand({
     { flag: '--label <label>', description: 'Display label (default: the value)' },
     { flag: '--sort <n>', description: 'Sort order', default: '0' },
     { flag: '--default', description: 'Mark as the default value' },
+  ],
+  examples: [
+    { cmd: 'kelta picklists value-add order_status --value returned --label Returned --sort 4' },
   ],
   input: z.object({
     picklist: z.string().min(1),
@@ -195,6 +213,7 @@ const valueUpdate = defineCommand({
     { flag: '--active <bool>', description: 'true|false' },
     { flag: '--default <bool>', description: 'true|false' },
   ],
+  examples: [{ cmd: "kelta picklists value-update val_123 --label 'On hold' --sort 2" }],
   input: z.object({
     valueId: z.string().min(1),
     value: z.string().optional(),
@@ -224,6 +243,7 @@ const valueDeactivate = defineCommand({
   name: 'value-deactivate',
   summary: 'Deactivate a picklist value (records keep it; new picks cannot use it)',
   positionals: [{ name: 'valueId', description: 'Picklist value id', required: true }],
+  examples: [{ cmd: 'kelta picklists value-deactivate val_123' }],
   input: z.object({ valueId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client

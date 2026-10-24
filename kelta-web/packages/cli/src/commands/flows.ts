@@ -57,6 +57,7 @@ const list = defineCommand({
   group: 'flows',
   name: 'list',
   summary: 'List flow definitions',
+  examples: [{ cmd: 'kelta flows list --output json' }],
   input: z.object({}),
   handler: async (ctx) => {
     const response = await ctx.client.getAxiosInstance().get<unknown>('/api/flows');
@@ -78,6 +79,7 @@ const describe = defineCommand({
   name: 'describe',
   summary: 'Show a flow definition',
   positionals: [{ name: 'flowId', description: 'Flow id', required: true }],
+  examples: [{ cmd: 'kelta flows describe flow_123' }],
   input: z.object({ flowId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client.getAxiosInstance().get<unknown>(`/api/flows/${input.flowId}`);
@@ -101,6 +103,16 @@ const create = defineCommand({
     { flag: '--active', description: 'Create the flow active (default: inactive)' },
     { ...STEP_LOGGING_OPTION, description: `${STEP_LOGGING_OPTION.description} (default: FULL)` },
     RETENTION_DAYS_OPTION,
+  ],
+  examples: [
+    {
+      cmd: 'kelta flows create --name \'Notify on new order\' --type RECORD_TRIGGERED --definition @order-flow.json --trigger-config \'{"collection": "orders", "events": ["CREATE"]}\' --active',
+      description: 'Active flow that runs whenever an order is created',
+    },
+    {
+      cmd: "kelta flows create --name 'Nightly cleanup' --type SCHEDULED --definition @cleanup.json --step-logging ERRORS_ONLY --retention-days 30",
+      description: 'Scheduled flow that keeps runs for 30 days',
+    },
   ],
   input: z.object({
     name: z.string().min(1),
@@ -151,6 +163,13 @@ const update = defineCommand({
     },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [
+    { cmd: 'kelta flows update flow_123 --active false', description: 'Deactivate a flow' },
+    {
+      cmd: 'kelta flows update flow_123 --definition @order-flow.json --retention-days default',
+      description: 'Replace the definition and reset retention to the platform default',
+    },
+  ],
   input: z.object({
     flowId: z.string().min(1),
     active: z.enum(['true', 'false']).optional(),
@@ -184,6 +203,16 @@ const execute = defineCommand({
     { flag: '--input <json>', description: 'Flow input as JSON, @file, or -' },
     { flag: '--test', description: 'Mark the run as a test execution' },
     { flag: '--wait', description: 'Poll until COMPLETED/FAILED/CANCELLED (~5 min budget)' },
+  ],
+  examples: [
+    {
+      cmd: 'kelta flows execute flow_123 --input \'{"orderId": "rec_123"}\' --wait',
+      description: 'Run with input read as $.input.orderId and wait for the result',
+    },
+    {
+      cmd: 'kelta flows execute flow_123 --input @input.json --test',
+      description: 'Start a test run from a file',
+    },
   ],
   input: z.object({
     flowId: z.string().min(1),
@@ -231,6 +260,7 @@ const remove = defineCommand({
   summary: 'Delete a flow (the server refuses flows that have runs)',
   dangerous: true,
   positionals: [{ name: 'flowId', description: 'Flow id', required: true }],
+  examples: [{ cmd: 'kelta flows delete flow_123 --yes' }],
   input: z.object({ flowId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client.getAxiosInstance().delete(`/api/flows/${input.flowId}`);
@@ -248,6 +278,7 @@ const runs = defineCommand({
   summary: 'List recent executions of a flow',
   positionals: [{ name: 'flowId', description: 'Flow id', required: true }],
   options: [{ flag: '--limit <n>', description: 'Max runs', default: '50' }],
+  examples: [{ cmd: 'kelta flows runs flow_123 --limit 10' }],
   input: z.object({
     flowId: z.string().min(1),
     limit: z.coerce.number().int().positive().default(50),
@@ -274,6 +305,12 @@ const run = defineCommand({
   summary: 'Show one execution (--steps for per-step detail)',
   positionals: [{ name: 'executionId', description: 'Execution id', required: true }],
   options: [{ flag: '--steps', description: 'Include per-step detail' }],
+  examples: [
+    {
+      cmd: 'kelta flows run exec_123 --steps',
+      description: 'Show an execution with per-step detail',
+    },
+  ],
   input: z.object({ executionId: z.string().min(1), steps: z.boolean().default(false) }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
@@ -291,6 +328,7 @@ const cancel = defineCommand({
   summary: 'Cancel a running execution',
   dangerous: true,
   positionals: [{ name: 'executionId', description: 'Execution id', required: true }],
+  examples: [{ cmd: 'kelta flows cancel exec_123 --yes' }],
   input: z.object({ executionId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client
@@ -306,6 +344,12 @@ const retry = defineCommand({
   summary: 'Retry an execution (new run)',
   positionals: [{ name: 'executionId', description: 'Execution id', required: true }],
   options: [{ flag: '--mode <mode>', description: 'full|from-failure', default: 'full' }],
+  examples: [
+    {
+      cmd: 'kelta flows retry exec_123 --mode from-failure',
+      description: 'Resume from the failed step',
+    },
+  ],
   input: z.object({
     executionId: z.string().min(1),
     mode: z.enum(['full', 'from-failure']).default('full'),
@@ -324,6 +368,7 @@ const publish = defineCommand({
   summary: 'Publish the current flow definition as a new version',
   positionals: [{ name: 'flowId', description: 'Flow id', required: true }],
   options: [{ flag: '--summary <text>', description: 'Change summary' }],
+  examples: [{ cmd: "kelta flows publish flow_123 --summary 'Add approval step'" }],
   input: z.object({ flowId: z.string().min(1), summary: z.string().optional() }),
   handler: async (ctx, input) => {
     const response = await ctx.client
@@ -341,6 +386,7 @@ const versions = defineCommand({
   name: 'versions',
   summary: 'List published versions of a flow',
   positionals: [{ name: 'flowId', description: 'Flow id', required: true }],
+  examples: [{ cmd: 'kelta flows versions flow_123' }],
   input: z.object({ flowId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client
@@ -355,6 +401,7 @@ const webhookUrl = defineCommand({
   name: 'webhook-url',
   summary: 'Show the inbound webhook URL of an AUTOLAUNCHED flow',
   positionals: [{ name: 'flowId', description: 'Flow id', required: true }],
+  examples: [{ cmd: 'kelta flows webhook-url flow_123' }],
   input: z.object({ flowId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client

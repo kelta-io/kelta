@@ -21,7 +21,7 @@ export function addGlobalOptions(command: Command): Command {
 }
 
 /** Read the harness-level flags (leaf + inherited root values). */
-function globalOptions(command: Command): GlobalOptions {
+export function globalOptions(command: Command): GlobalOptions {
   const opts = command.optsWithGlobals<{
     profile?: string;
     output?: string;
@@ -78,6 +78,27 @@ function formatTableError(mapped: CliError): string {
   );
 }
 
+/**
+ * Write a failure to stderr — `Error [CODE]: …` in table format, else the
+ * one-line JSON envelope — and set the exit code. `output` is the --output
+ * value, when known; parse errors pre-scan argv for it.
+ */
+export function renderError(error: unknown, output?: OutputFormat): void {
+  const mapped = mapError(error);
+  const format = pickFormat(output, process.stderr.isTTY ?? false);
+  process.stderr.write(
+    format === 'table' ? formatTableError(mapped) : toErrorPayload(mapped) + '\n'
+  );
+  process.exitCode = mapped.exitCode;
+}
+
+/** What a bound leaf does with its parsed invocation; `dispatch` in production. */
+export type CommandRunner = (
+  leaf: Command,
+  def: RegisteredCommand,
+  rawInput: Record<string, unknown>
+) => Promise<void>;
+
 /** Execute one command definition with already-merged raw input. */
 export async function dispatch(
   leaf: Command,
@@ -103,17 +124,24 @@ export async function dispatch(
     process.stdout.write(renderResult(result, { format, raw: global.raw, quiet: global.quiet }));
     await maybeNotifyUpdate((message) => process.stderr.write(message + '\n'));
   } catch (error) {
-    const mapped = mapError(error);
-    const format = pickFormat(global.output, process.stderr.isTTY ?? false);
-    process.stderr.write(
-      format === 'table' ? formatTableError(mapped) : toErrorPayload(mapped) + '\n'
-    );
-    process.exitCode = mapped.exitCode;
+    renderError(error, global.output);
   }
 }
 
+function examplesHelp(def: RegisteredCommand): string {
+  const lines = def.examples.flatMap((example) => [
+    `  $ ${example.cmd}`,
+    ...(example.description ? [`    ${example.description}`] : []),
+  ]);
+  return ['', 'Examples:', ...lines].join('\n');
+}
+
 /** Wire every command definition into the commander program. */
-export function bindCommands(program: Command, defs: RegisteredCommand[]): void {
+export function bindCommands(
+  program: Command,
+  defs: RegisteredCommand[],
+  run: CommandRunner = dispatch
+): void {
   const groups = new Map<string, Command>();
 
   for (const def of defs) {
@@ -132,6 +160,7 @@ export function bindCommands(program: Command, defs: RegisteredCommand[]): void 
       ...(def.positionals ?? []).map((p) => (p.required ? `<${p.name}>` : `[${p.name}]`)),
     ].join(' ');
     const sub = addGlobalOptions(parent.command(signature).description(def.summary));
+    sub.addHelpText('after', examplesHelp(def));
     for (const opt of def.options ?? []) {
       if (opt.repeatable) {
         sub.option(
@@ -156,7 +185,7 @@ export function bindCommands(program: Command, defs: RegisteredCommand[]): void 
       for (const [name, value] of positionals) {
         if (value !== undefined) rawInput[name] = value;
       }
-      await dispatch(sub, def, rawInput);
+      await run(sub, def, rawInput);
     });
   }
 }

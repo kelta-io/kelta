@@ -588,6 +588,18 @@ stderr error envelope carrying the platform's stable `code`, exit codes 0/1/2/3/
 Shared contracts. Discovery surface: `kelta manifest` (versioned command catalog with
 JSON Schemas) and `packages/cli/AGENTS.md` (generated — `npm run gen:docs`).
 
+- **Argument errors are part of that contract.** `createProgram` (`src/registry/program.ts`) sets
+  commander's `exitOverride()` and a silent `outputError`, so a missing required argument, an unknown
+  option/command or excess arguments surface as `CliError` `INVALID_ARGUMENTS` (exit 2) through
+  `mapError` and the same `renderError` the dispatcher uses — `Error [INVALID_ARGUMENTS]: …` on a TTY
+  table, else the one-line JSON envelope; `--output` is pre-scanned from argv because commander can fail
+  before reading it. Commander's message (with its "Did you mean …?") is the `detail`. `--help` and
+  `--version` keep commander's exit code (0) and are never rendered as errors.
+- **Every command declares `examples`** (`CommandDef.examples`, `{ cmd, description? }[]`, at least one).
+  That one field feeds `kelta <group> <cmd> --help`, `COMMANDS.md` and the manifest's `examples`;
+  `registry/examples.test.ts` parses each one. Use generic data (`customers`, `orders`, `rec_123`) and
+  `--yes` on destructive commands.
+
 ## Changelog
 
 Every change adds one fragment file under `.claude/changelog.d/` — named after the task key
