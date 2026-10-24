@@ -287,6 +287,18 @@ token owner can see on `GET /api/me/tokens` (`requestCount`). It's what makes a 
 read-only PAT viable as a lightweight public data API: a tenant can hand out a read-only-profile
 PAT (see `docs/authoring/api-access.md`) and the holder can see how much it's actually being
 used, on top of the shared `apiCallsPerDay` governor budget above.
+
+**PAT last-used (`lastUsedAt`).** After the same successful authentication the filter fires
+`POST /internal/tokens/{sha256}/last-used?windowSeconds=<window>` at the worker — subscribed off
+the request chain, 5 s timeout, errors logged at WARN and swallowed, so it never delays or fails
+the request. A bounded Caffeine cache keyed by token hash (`kelta.gateway.pat-last-used.max-tokens`,
+`expireAfterWrite` = `kelta.gateway.pat-last-used.window-seconds`, default 300) lets each replica
+call at most once per token per window. The worker's `InternalPatUsageController` (no tenant
+bound → RLS `admin_bypass`, like `/api/me/tokens/validate/{hash}`) runs one conditional
+`UPDATE user_api_token SET last_used_at = now() WHERE token_hash = ? AND revoked = false AND
+(last_used_at IS NULL OR last_used_at < now() - <window>)` and always answers 204 — the UPDATE,
+not the gateway cache, is what holds the once-per-window guarantee across replicas.
+`GET /api/me/tokens` serves the result as `lastUsedAt`.
 `RateLimitExemptionService` and `TenantIpAllowlistFilter` share one `CidrBlock` matcher
 (`io.kelta.gateway.net`), which parses address **literals** only so a hostname in a forwarded
 header can never trigger a DNS lookup. Caveat: exemption is evaluated against the same resolved
