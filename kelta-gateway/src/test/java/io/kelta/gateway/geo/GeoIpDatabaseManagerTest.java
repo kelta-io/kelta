@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.zip.GZIPOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,6 +18,50 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("GeoIpDatabaseManager Tests")
 class GeoIpDatabaseManagerTest {
+
+    static final long BUILD_EPOCH = 1_784_000_000L;
+
+    /** Manager with downloads disabled (no license key), so refresh() only loads from disk. */
+    static GeoIpDatabaseManager localOnlyManager(Path dbPath) {
+        return new GeoIpDatabaseManager(true, dbPath.toString(), "", "http://unused?suffix=tar.gz", 7, 1000);
+    }
+
+    // ---- loading from disk ----
+
+    @Test
+    @DisplayName("loads an on-disk database into a reader whose metadata decodes on 4.x")
+    void loadsDatabaseFromDisk(@TempDir Path dir) throws Exception {
+        Path db = TestMmdbWriter.write(dir.resolve("GeoLite2-City.mmdb"), "203.0.113.0", 24,
+                TestMmdbWriter.cityRecord(), BUILD_EPOCH);
+        GeoIpDatabaseManager manager = localOnlyManager(db);
+
+        manager.refresh();
+
+        assertThat(manager.getReader()).isNotNull();
+        assertThat(manager.getReader().getMetadata().buildTime()).isEqualTo(Instant.ofEpochSecond(BUILD_EPOCH));
+        assertThat(manager.getReader().getMetadata().databaseType()).isEqualTo("GeoLite2-City");
+    }
+
+    @Test
+    @DisplayName("fails open with no reader when the database file is missing")
+    void failsOpenWhenDatabaseFileMissing(@TempDir Path dir) {
+        GeoIpDatabaseManager manager = localOnlyManager(dir.resolve("absent/GeoLite2-City.mmdb"));
+
+        manager.refresh();
+
+        assertThat(manager.getReader()).isNull();
+    }
+
+    @Test
+    @DisplayName("fails open with no reader when the database file is corrupt")
+    void failsOpenWhenDatabaseFileCorrupt(@TempDir Path dir) throws Exception {
+        Path db = Files.writeString(dir.resolve("GeoLite2-City.mmdb"), "not an mmdb");
+        GeoIpDatabaseManager manager = localOnlyManager(db);
+
+        manager.refresh();
+
+        assertThat(manager.getReader()).isNull();
+    }
 
     // ---- tar.gz extraction ----
 

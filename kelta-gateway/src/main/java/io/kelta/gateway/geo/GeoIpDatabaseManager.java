@@ -124,7 +124,7 @@ public class GeoIpDatabaseManager {
         try {
             swap(new Reader(dbPath.toFile(), Reader.FileMode.MEMORY, new CHMCache()));
             log.info("GeoIP: loaded database from {} (built {})", dbPath,
-                    reader.get().getMetadata().getBuildDate());
+                    reader.get().getMetadata().buildTime());
         } catch (IOException e) {
             log.warn("GeoIP: failed to load existing database at {}: {}", dbPath, e.toString());
         }
@@ -162,7 +162,7 @@ public class GeoIpDatabaseManager {
             Reader candidate = new Reader(mmdbTmp.toFile(), Reader.FileMode.MEMORY, new CHMCache());
             Files.move(mmdbTmp, dbPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             swap(candidate);
-            log.info("GeoIP: database refreshed (built {})", candidate.getMetadata().getBuildDate());
+            log.info("GeoIP: database refreshed (built {})", candidate.getMetadata().buildTime());
         } finally {
             Files.deleteIfExists(tarball);
         }
