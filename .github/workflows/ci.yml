@@ -1050,12 +1050,13 @@ jobs:
   # ===========================================================================
   # Tenant templates — two checks on one HEAD-built stack:
   #
-  # 1. Install (ci/templates-install-check.sh): installs every examples/templates/*/
-  #    (metadata package, list views, dashboards, seed records, via its install.sh and the
-  #    kelta CLI) into one fresh tenant, checks each collection's record count against the
-  #    length of its seeds/<collection>.json, then applies the template's metadata.json a
-  #    second time and fails unless that re-apply exits 0 with created 0 and failed 0 — a
-  #    re-apply must change nothing (KLT-666).
+  # 1. Install (ci/templates-install-check.sh): installs every examples/templates/*/ into
+  #    one fresh tenant through its install.sh, which is the one `kelta metadata apply
+  #    metadata.json --yes` (the package carries the collections, LIST_VIEW and DASHBOARD
+  #    items and the seed rows in its `records` sections), checks each seeded collection's
+  #    record count against the rows of its `records` sections, then applies the template's
+  #    metadata.json a second time and fails unless that re-apply exits 0 with created 0 and
+  #    failed 0 — a re-apply must change nothing, seed rows included (KLT-666).
   # 2. Round trip (ci/templates-roundtrip-check.sh): for each installed template, exports
   #    its collections (`kelta metadata export --collections`), applies the export to a new
   #    empty sandbox, re-exports from the sandbox and fails on any difference between the two

@@ -45,18 +45,21 @@ let stubBin: string;
 
 interface Template {
   install: string;
-  seeds?: Record<string, unknown[]>;
+  /** The package's `records` sections; a collection may span several. */
+  records?: { collection: string; rows: unknown[] }[];
 }
+
+/** One `records` section per collection (writeTemplates keys each on `name`). */
+const sections = (rows: Record<string, unknown[]>) =>
+  Object.entries(rows).map(([collection, r]) => ({ collection, rows: r }));
 
 function writeTemplates(templates: Record<string, Template>): string {
   const dir = mkdtempSync(join(root, 'templates-'));
   for (const [name, t] of Object.entries(templates)) {
-    mkdirSync(join(dir, name, 'seeds'), { recursive: true });
+    mkdirSync(join(dir, name), { recursive: true });
     writeFileSync(join(dir, name, 'install.sh'), `set -euo pipefail\n${t.install}\n`);
-    writeFileSync(join(dir, name, 'metadata.json'), '{"items": []}');
-    for (const [collection, rows] of Object.entries(t.seeds ?? {})) {
-      writeFileSync(join(dir, name, 'seeds', `${collection}.json`), JSON.stringify(rows));
-    }
+    const records = (t.records ?? []).map((section) => ({ key: ['name'], ...section }));
+    writeFileSync(join(dir, name, 'metadata.json'), JSON.stringify({ items: [], ...(t.records ? { records } : {}) }));
   }
   return dir;
 }
@@ -206,10 +209,10 @@ describe('templates-install-check.sh --in-container', () => {
   it('installs every template in name order with the CLI env set and stdin closed', async () => {
     counts = { accounts: 2, sites: 1 };
     const dir = writeTemplates({
-      b: { install: 'echo "b $KELTA_URL $KELTA_TENANT $KELTA_TOKEN" >>"$LOG"; ! read -r _', seeds: { sites: [{}] } },
+      b: { install: 'echo "b $KELTA_URL $KELTA_TENANT $KELTA_TOKEN" >>"$LOG"; ! read -r _', records: sections({ sites: [{}] }) },
       a: {
         install: `echo "a $KELTA_URL $KELTA_TENANT $KELTA_TOKEN" >>"$LOG"; ${MARK_INSTALLED}`,
-        seeds: { accounts: [{}, {}] },
+        records: sections({ accounts: [{}, {}] }),
       },
     });
 
@@ -229,7 +232,7 @@ describe('templates-install-check.sh --in-container', () => {
   it('applies metadata.json a second time after each install.sh and passes when it changes nothing', async () => {
     counts = { accounts: 2 };
     const dir = writeTemplates({
-      a: { install: MARK_INSTALLED, seeds: { accounts: [{}, {}] } },
+      a: { install: MARK_INSTALLED, records: sections({ accounts: [{}, {}] }) },
       b: { install: 'true' },
     });
 
@@ -303,7 +306,7 @@ describe('templates-install-check.sh --in-container', () => {
   it('installs the first template into an empty sandbox created with cloneMetadata: false', async () => {
     counts = { accounts: 2 };
     const dir = writeTemplates({
-      a: { install: MARK_INSTALLED, seeds: { accounts: [{}, {}] } },
+      a: { install: MARK_INSTALLED, records: sections({ accounts: [{}, {}] }) },
     });
 
     const result = await run(dir);
@@ -348,7 +351,7 @@ describe('templates-install-check.sh --in-container', () => {
   it('fails when the sandbox already holds a template collection before the install', async () => {
     counts = { accounts: 1 };
     sandboxInstalled = true;
-    const dir = writeTemplates({ a: { install: 'true', seeds: { accounts: [{}] } } });
+    const dir = writeTemplates({ a: { install: 'true', records: sections({ accounts: [{}] }) } });
 
     const result = await run(dir);
 
@@ -369,14 +372,49 @@ describe('templates-install-check.sh --in-container', () => {
     assert.equal(readFileSync(join(dir, 'log'), 'utf8'), 'a\n');
   });
 
-  it('fails when a collection holds a different number of records than its seed file', async () => {
+  it('fails when a collection holds a different number of records than its records sections', async () => {
     counts = { accounts: 1 };
-    const dir = writeTemplates({ a: { install: 'true', seeds: { accounts: [{}, {}, {}] } } });
+    const dir = writeTemplates({ a: { install: 'true', records: sections({ accounts: [{}, {}, {}] }) } });
 
     const result = await run(dir);
 
     assert.equal(result.code, 1);
-    assert.match(result.out, /::error::a: accounts holds 1 records, seeds\/accounts\.json has 3/);
+    assert.match(
+      result.out,
+      /::error::a: accounts holds 1 records, the metadata\.json records sections have 3/
+    );
+    assert.doesNotMatch(result.out, /second apply/);
+  });
+
+  it('sums the rows of every records section of a collection', async () => {
+    counts = { accounts: 3, contacts: 1 };
+    const dir = writeTemplates({
+      a: {
+        install: MARK_INSTALLED,
+        records: [
+          { collection: 'accounts', rows: [{}, {}] },
+          { collection: 'contacts', rows: [{}] },
+          { collection: 'accounts', rows: [{}] },
+        ],
+      },
+    });
+
+    const result = await run(dir);
+
+    assert.equal(result.code, 0, result.out);
+    assert.match(result.out, /a\/accounts: expected 3, found 3/);
+    assert.match(result.out, /a\/contacts: expected 1, found 1/);
+    assert.equal(result.out.match(/^a\/accounts: /gm)?.length, 1);
+  });
+
+  it('checks no count when metadata.json has no records section', async () => {
+    counts = { accounts: 5 };
+    const dir = writeTemplates({ a: { install: MARK_INSTALLED } });
+
+    const result = await run(dir);
+
+    assert.equal(result.code, 0, result.out);
+    assert.doesNotMatch(result.out, /expected \d+, found/);
   });
 
   it('fails an install that outlives the timeout', async () => {
