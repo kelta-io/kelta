@@ -661,6 +661,33 @@ class SchemaMigrationEngineTest {
         }
         
         @Test
+        @DisplayName("Should skip deprecate but still record it when another pod already dropped the column")
+        void shouldTolerateAlreadyDroppedColumnOnDeprecate() {
+            List<FieldDefinition> oldFields = List.of(
+                new FieldDefinition("name", FieldType.STRING, false, false, false, null, null, null, null, null),
+                new FieldDefinition("old_field", FieldType.STRING, true, false, false, null, null, null, null, null)
+            );
+            setupTestTable("test_data", oldFields);
+
+            // Another pod's destructive migration dropped the column before this pod refreshed
+            jdbcTemplate.execute("ALTER TABLE test_data DROP COLUMN old_field");
+
+            List<FieldDefinition> newFields = List.of(
+                new FieldDefinition("name", FieldType.STRING, false, false, false, null, null, null, null, null),
+                new FieldDefinition("new_field", FieldType.STRING, true, false, false, null, null, null, null, null)
+            );
+            CollectionDefinition oldDef = createCollection("test_data", oldFields);
+            CollectionDefinition newDef = createCollection("test_data", newFields);
+
+            assertDoesNotThrow(() -> migrationEngine.migrateSchema(oldDef, newDef, TableRef.publicSchema("test_data")));
+
+            assertTrue(migrationEngine.getExistingColumns("test_data").contains("new_field"));
+            List<MigrationRecord> history = migrationEngine.getMigrationHistory("test_data");
+            assertEquals(1, history.stream().filter(r -> r.migrationType() == MigrationType.ADD_COLUMN).count());
+            assertEquals(1, history.stream().filter(r -> r.migrationType() == MigrationType.DEPRECATE_COLUMN).count());
+        }
+
+        @Test
         @DisplayName("Should alter column type for compatible changes")
         void shouldAlterColumnTypeForCompatibleChanges() {
             // Create initial table with INTEGER field
