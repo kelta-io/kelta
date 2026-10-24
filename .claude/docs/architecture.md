@@ -78,6 +78,14 @@ resolution is done in the worker by `JsonApiIncludeResolver` (runtime-core `rout
 numbered filter; read-side record authorization and FLS of included resources are enforced in the
 worker (`CerbosRecordAuthorizationAdvice`, `CerbosFieldSecurityAdvice`), not the gateway.
 
+Spring Cloud Gateway's own `HttpHeadersFilter`s run after the chain, when the request is proxied.
+Since 5.0.4 they drop every `X-Forwarded-*` header unless the peer matches
+`spring.cloud.gateway.server.webflux.trusted-proxies`, which would strip the
+`X-Forwarded-User`/`-Groups`/`-Roles` that `HeaderTransformationFilter` sets. `application.yml`
+sets it to `.*` with every `x-forwarded.*-enabled` and `forwarded.enabled` off, so headers pass
+through unchanged and none are added (the pre-5.0.4 behaviour). `ForwardedHeadersPassThroughTest`
+guards this.
+
 **System-collection response cache.** GETs of the hot metadata collections in
 `SystemCollectionResponseCacheFilter.CACHEABLE_COLLECTIONS` (ui-pages/menus, collections, fields,
 tenants, oidc-providers, picklists, layouts, list-views, profiles) are cached in the gateway
