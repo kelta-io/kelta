@@ -779,7 +779,8 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   (reachable from `BootstrapConfig`; a miss once took the whole API down —
   `RouteConfigService.refreshRoutes` now registers static routes independently); **every NATS
   event payload in both worker and gateway** (`EventPayloadReflectConfigTest` checks the worker
-  file only — the gateway's list is unchecked); `io.kelta.jsonapi` atomic-operation records;
+  file; `GatewayReflectConfigDriftTest` checks the gateway's against the payloads its class files
+  reference); `io.kelta.jsonapi` atomic-operation records;
   GeoLite2 models (`io.kelta.gateway.geo.model.*`); GraalJS host classes (`java.util.Locale`,
   `Locale$Category`, `TimeZone` — a `MissingReflectionRegistrationError` message prints the exact
   entry to add).
@@ -895,10 +896,6 @@ its own change with a full compose run.
   one**; a second bean of an injected type needs `@Primary` or qualifiers. Copy
   `PushProviderWiringTest` (`ApplicationContextRunner` over the beans involved). A whole-worker
   context test is still owed.
-- **Rate-limit window semantics are mocked** — `EndToEndRequestFlowIntegrationTest` runs the
-  gateway limiter against real Redis (`GatewayContainers`) but only asserts the remaining budget
-  drops; nothing reaches a 429 or window expiry, or proves two replicas share a counter, and the
-  window guard is still a text assertion on the script source (`RedisRateLimiterTest`).
 - **Harness Cerbos is allow-all** — object/record policy deny paths are verified only by
   `CerbosGeneratedPolicyIT` against generated goldens; geo rules and `/api/operations` denies only
   on a live stack.
@@ -1021,6 +1018,7 @@ One line each; full write-ups are in git history.
 - Older: federated users stuck PENDING_ACTIVATION; password reset sent no email; `EmptyResultDataAccessException` and null `reset_token_expires_at` in `PasswordController`.
 
 **Tech debt / test infrastructure**
+- KLT-741 (2026-10-24) — gateway rate-limit window semantics were mocked (no test reached a 429, window expiry or a shared counter on real Redis); `RateLimitWindowIntegrationTest` drives `RateLimitFilter` over real `RedisRateLimiter`s (`GatewayContainers`): N allowed then a JSON:API 429 with `Retry-After`, reopening after expiry, one budget across two connection factories.
 - #1815 (2026-10-19) — kelta-gateway integration tests never ran (failsafe needed `-Pintegration-tests`, which CI never passed, plus `@Tag("integration")`); ten dead suites targeting a pre-Kelta stack deleted, the five live suites (27 tests) run in `test-java` on `k8s-runner-integration` over `GatewayContainers` (real Redis + NATS).
 - 2026-10-12 — `SystemCollectionDefinitions.java` (~3,400 lines, the biggest merge hotspot) split into 17 per-section `<Area>SystemCollections` classes in `model/system/` plus `SystemCollectionBuilders`; it keeps only `all()` / `byName()` / `SYSTEM_TENANT_ID`.
 - #1222 — `CreateValidationRuleTool` (kelta-mcp) had no test; `CreateValidationRuleToolTest` asserts the wire body with WireMock JSON-path matchers.
