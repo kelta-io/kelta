@@ -38,6 +38,7 @@ public final class SecurityAuditLogger {
         PAT_CREATED,
         PAT_ADMIN_CREATED,
         PAT_REVOKED,
+        PAT_ADMIN_REVOKED,
         DELEGATED_ADMIN_ACTION,
         DELEGATED_SCOPE_CHANGED,
         PORTAL_USER_INVITED,

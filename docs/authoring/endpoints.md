@@ -49,7 +49,7 @@ it before routing.
 `internal` marks an endpoint only the platform's own admin UI or services call; it is reachable, but
 not a supported integration surface and may change without notice.
 
-**397** public endpoints: **305** linked to docs, **29** internal,
+**399** public endpoints: **307** linked to docs, **29** internal,
 **63** not yet documented.
 
 ## Endpoints
@@ -122,7 +122,9 @@ not a supported integration surface and may change without notice.
 | GET | `/api/admin/tenant/portal-auth-settings` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/authentication](/docs/security/authentication/#auth-server-endpoints) |
 | PUT | `/api/admin/tenant/portal-auth-settings` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/authentication](/docs/security/authentication/#auth-server-endpoints) |
 | POST | `/api/admin/users/portal-invite` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/users-and-groups](/docs/security/users-and-groups/#inviting-users) |
+| GET | `/api/admin/users/{id}/tokens` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/personal-access-tokens](/docs/security/personal-access-tokens/#list-and-revoke) |
 | POST | `/api/admin/users/{id}/tokens` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/personal-access-tokens](/docs/security/personal-access-tokens/#create) |
+| DELETE | `/api/admin/users/{id}/tokens/{tokenId}` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/personal-access-tokens](/docs/security/personal-access-tokens/#list-and-revoke) |
 | POST | `/api/admin/users/{userId}/invite` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/users-and-groups](/docs/security/users-and-groups/#inviting-users) |
 | POST | `/api/admin/users/{userId}/reset-password` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#password-policy) |
 | GET | `/api/ai/agents` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#governed-agents) |
