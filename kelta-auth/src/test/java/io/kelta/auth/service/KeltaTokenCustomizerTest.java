@@ -1,5 +1,6 @@
 package io.kelta.auth.service;
 
+import io.kelta.auth.config.AuthProperties;
 import io.kelta.auth.model.KeltaUserDetails;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -7,7 +8,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.User;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -45,9 +49,12 @@ class KeltaTokenCustomizerTest {
     @Mock
     private ConnectedAppTokenRecorder tokenRecorder;
 
+    private AuthProperties authProperties;
+
     @BeforeEach
     void setUp() {
-        customizer = new KeltaTokenCustomizer(jdbcTemplate, tokenRecorder);
+        authProperties = new AuthProperties();
+        customizer = new KeltaTokenCustomizer(jdbcTemplate, tokenRecorder, authProperties);
     }
 
     @Test
@@ -176,25 +183,125 @@ class KeltaTokenCustomizerTest {
     }
 
     @Test
-    void customize_clientCredentialsUnknownClient_doesNotRecord() {
-        RegisteredClient registeredClient = RegisteredClient.withId(UUID.randomUUID().toString())
-                .clientId("ghost-client")
-                .clientSecret("{noop}secret")
-                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
-                .scope("api")
-                .build();
-
-        when(context.getAuthorizationGrantType()).thenReturn(AuthorizationGrantType.CLIENT_CREDENTIALS);
-        when(context.getTokenType()).thenReturn(new OAuth2TokenType("access_token"));
-        when(context.getRegisteredClient()).thenReturn(registeredClient);
+    void customize_clientCredentialsUnknownClient_refusesTenantlessToken() {
+        RegisteredClient registeredClient = clientCredentialsClient("ghost-client", "api");
+        stubClientCredentialsAccessToken(registeredClient);
         when(jdbcTemplate.queryForList(
                 eq("SELECT id, tenant_id, scopes FROM connected_app WHERE client_id = ? AND active = true"),
                 eq("ghost-client")
         )).thenReturn(List.of());
 
+        assertThrows(OAuth2AuthenticationException.class, () -> customizer.customize(context));
+
+        verify(context, never()).getClaims();
+        verify(tokenRecorder, never()).recordIssuedToken(anyString(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void customize_clientCredentialsClientWithInternalScopeButNotConfigured_refusesTenantlessToken() {
+        // Holding the "internal" scope is not enough: only a client InternalClientRegistrar
+        // provisions from kelta.auth.internal-clients is platform-scoped.
+        RegisteredClient registeredClient = clientCredentialsClient("rogue-internal", "internal");
+        stubClientCredentialsAccessToken(registeredClient);
+        when(jdbcTemplate.queryForList(anyString(), eq("rogue-internal"))).thenReturn(List.of());
+
+        assertThrows(OAuth2AuthenticationException.class, () -> customizer.customize(context));
+    }
+
+    @Test
+    void customize_clientCredentialsConnectedAppWithoutTenant_refusesToken() {
+        RegisteredClient registeredClient = clientCredentialsClient("orphan-app", "api");
+        stubClientCredentialsAccessToken(registeredClient);
+        Map<String, Object> appRow = new HashMap<>();
+        appRow.put("id", "connected-app-2");
+        appRow.put("tenant_id", null);
+        appRow.put("scopes", "[\"api\"]");
+        when(jdbcTemplate.queryForList(anyString(), eq("orphan-app"))).thenReturn(List.of(appRow));
+
+        assertThrows(OAuth2AuthenticationException.class, () -> customizer.customize(context));
+
+        verify(tokenRecorder, never()).recordIssuedToken(anyString(), any(), any(), anyString(), any());
+    }
+
+    @Test
+    void customize_internalPlatformClient_keepsPlatformScopedTokenWithoutTenant() {
+        AuthProperties.InternalClient internal = new AuthProperties.InternalClient();
+        internal.setSecret("s3cret");
+        authProperties.getInternalClients().put("gateway-internal", internal);
+
+        RegisteredClient registeredClient = clientCredentialsClient("gateway-internal", "internal");
+        stubClientCredentialsAccessToken(registeredClient);
+        when(jdbcTemplate.queryForList(anyString(), eq("gateway-internal"))).thenReturn(List.of());
+
+        assertDoesNotThrow(() -> customizer.customize(context));
+
+        verify(context, never()).getClaims();
+        verify(tokenRecorder, never()).recordIssuedToken(anyString(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void customize_accessTokenForNonKeltaUserPrincipal_refusesTenantlessToken() {
+        User foreignUser = new User("someone@test.com", "", List.of());
+        when(context.getAuthorizationGrantType()).thenReturn(AuthorizationGrantType.AUTHORIZATION_CODE);
+        when(context.getPrincipal()).thenReturn(
+                UsernamePasswordAuthenticationToken.authenticated(foreignUser, null, List.of()));
+        when(context.getTokenType()).thenReturn(new OAuth2TokenType("access_token"));
+
+        assertThrows(OAuth2AuthenticationException.class, () -> customizer.customize(context));
+
+        verify(context, never()).getClaims();
+    }
+
+    @Test
+    void customize_accessTokenForKeltaUserWithoutTenant_refusesToken() {
+        KeltaUserDetails user = new KeltaUserDetails(
+                "user-1", "admin@test.com", null, "profile-1",
+                "System Administrator", "Test Admin", "$2a$10$hash",
+                true, false, false
+        );
+        when(context.getAuthorizationGrantType()).thenReturn(AuthorizationGrantType.AUTHORIZATION_CODE);
+        when(context.getPrincipal()).thenReturn(authentication);
+        when(authentication.getPrincipal()).thenReturn(user);
+        when(context.getTokenType()).thenReturn(new OAuth2TokenType("access_token"));
+
+        assertThrows(OAuth2AuthenticationException.class, () -> customizer.customize(context));
+    }
+
+    @Test
+    void customize_accessTokenForKeltaUser_carriesTenantId() {
+        KeltaUserDetails user = new KeltaUserDetails(
+                "user-1", "admin@test.com", "tenant-1", "profile-1",
+                "System Administrator", "Test Admin", "$2a$10$hash",
+                true, false, false
+        );
+        when(context.getPrincipal()).thenReturn(authentication);
+        when(authentication.getPrincipal()).thenReturn(user);
+        when(context.getTokenType()).thenReturn(new OAuth2TokenType("access_token"));
+        when(context.getAuthorizationGrantType()).thenReturn(AuthorizationGrantType.REFRESH_TOKEN);
+        JwtClaimsSet.Builder claimsBuilder = JwtClaimsSet.builder()
+                .issuer("http://localhost")
+                .subject("user-1")
+                .issuedAt(Instant.now());
+        when(context.getClaims()).thenReturn(claimsBuilder);
+
         customizer.customize(context);
 
-        verify(tokenRecorder, never()).recordIssuedToken(anyString(), anyString(), anyString(), anyString(), any());
+        assertEquals("tenant-1", claimsBuilder.build().getClaim("tenant_id"));
+    }
+
+    private static RegisteredClient clientCredentialsClient(String clientId, String scope) {
+        return RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(clientId)
+                .clientSecret("{noop}secret")
+                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+                .scope(scope)
+                .build();
+    }
+
+    private void stubClientCredentialsAccessToken(RegisteredClient registeredClient) {
+        when(context.getAuthorizationGrantType()).thenReturn(AuthorizationGrantType.CLIENT_CREDENTIALS);
+        when(context.getTokenType()).thenReturn(new OAuth2TokenType("access_token"));
+        when(context.getRegisteredClient()).thenReturn(registeredClient);
     }
 
     @Test

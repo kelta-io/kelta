@@ -93,8 +93,8 @@ public class SearchIndexService {
             FROM search_index
             WHERE tenant_id = ?
               AND search_vector @@ to_tsquery('simple', ?)
-            ORDER BY rank DESC
-            LIMIT ?
+            ORDER BY rank DESC, collection_name, record_id
+            LIMIT ? OFFSET ?
             """;
 
     /** Fallback display field names when no display field is configured. */
@@ -273,20 +273,24 @@ public class SearchIndexService {
     /**
      * Performs full-text search across all collections for a tenant.
      * Uses PostgreSQL tsquery with prefix matching for partial word support.
+     * Rows are ordered by rank with a stable tiebreak, so consecutive offsets page the index
+     * without gaps or repeats. Rows are not authorized here: the caller filters them per
+     * collection and record.
      *
      * @param tenantId the tenant ID
      * @param query    the search query string
      * @param pageSize maximum number of results to return
+     * @param offset   number of leading results to skip
      * @return list of search result maps
      */
-    public List<Map<String, Object>> search(String tenantId, String query, int pageSize) {
+    public List<Map<String, Object>> search(String tenantId, String query, int pageSize, int offset) {
         String tsQuery = buildTsQuery(query);
         if (tsQuery == null || tsQuery.isBlank()) {
             return List.of();
         }
 
         try {
-            return jdbcTemplate.queryForList(SEARCH_QUERY, tsQuery, tenantId, tsQuery, pageSize);
+            return jdbcTemplate.queryForList(SEARCH_QUERY, tsQuery, tenantId, tsQuery, pageSize, offset);
         } catch (Exception e) {
             log.error("Full-text search failed for tenant {}: {}", tenantId, e.getMessage());
             return List.of();

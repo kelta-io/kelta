@@ -24,12 +24,23 @@ public class TenantAwareDataSourcePostProcessor implements BeanPostProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(TenantAwareDataSourcePostProcessor.class);
 
+    private final boolean failClosedOnTenantRequest;
+
+    public TenantAwareDataSourcePostProcessor() {
+        this(true);
+    }
+
+    /** @see TenantAwareDataSource#TenantAwareDataSource(DataSource, boolean) */
+    public TenantAwareDataSourcePostProcessor(boolean failClosedOnTenantRequest) {
+        this.failClosedOnTenantRequest = failClosedOnTenantRequest;
+    }
+
     @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
         if ("dataSource".equals(beanName) && bean instanceof DataSource ds) {
             log.info("Wrapping DataSource with tenant-aware RLS support "
                     + "(transaction-scoped SET LOCAL for tenant connections)");
-            return new TenantAwareDataSource(ds);
+            return new TenantAwareDataSource(ds, failClosedOnTenantRequest);
         }
         return bean;
     }

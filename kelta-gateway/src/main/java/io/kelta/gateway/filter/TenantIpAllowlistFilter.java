@@ -38,10 +38,10 @@ import java.util.List;
  *   <li>With {@code kelta.security.trusted-proxies} set, only the single resolved client
  *       IP — forwarding headers are honoured only from a trusted proxy peer, so a client
  *       cannot name an allowed address in {@code X-Forwarded-For} / {@code X-Real-IP}.</li>
- *   <li>With it unset (legacy), a match on <em>any</em> IP in the chain — the socket
- *       address plus every {@code X-Forwarded-For} hop and {@code X-Real-IP} when
- *       {@code trust-forwarded-for} is enabled. Topology-resilient but client-spoofable;
- *       {@code trust-forwarded-for=false} matches the socket address only.</li>
+ *   <li>With it unset (the default), the socket peer address only — forwarding headers
+ *       are ignored whatever {@code trust-forwarded-for} says. Behind an ingress the peer
+ *       is the ingress pod, so restricted tenants' non-admins are refused until the
+ *       trusted-proxy list is set.</li>
  * </ul>
  *
  * <p><b>Fail-open by design</b> so a misconfiguration can never lock a tenant out:
