@@ -1,6 +1,7 @@
 {
   "status" : 200,
   "headers" : {
+    "ETag" : "\"MjAyNi0wMS0wMVQwMDowMDowMFo\"",
     "Content-Type" : "application/json"
   },
   "body" : {

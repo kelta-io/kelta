@@ -6,7 +6,8 @@ import java.util.Map;
 
 /**
  * The optimistic-locking version token (unified record experience, slice 5): emitted as
- * {@code ETag} on get-by-id and checked against {@code If-Match} on top-level update/delete by
+ * {@code ETag} on every get-by-id (top-level and sub-resource, cached or not) and checked against
+ * {@code If-Match} on update/delete by
  * {@link RecordWritePipeline}.
  */
 final class RecordETag {
@@ -20,7 +21,7 @@ final class RecordETag {
      * base64-encoded so it is header-safe and collision-free for a single record's timeline; the
      * client treats it as opaque and echoes it back via {@code If-Match}.
      */
-    static String of(Map<String, Object> record) {
+    static String of(Map<String, ?> record) {
         Object updatedAt = record.get("updatedAt");
         if (updatedAt == null) {
             return null;
@@ -28,5 +29,19 @@ final class RecordETag {
         String token = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(String.valueOf(updatedAt).getBytes(StandardCharsets.UTF_8));
         return "\"" + token + "\"";
+    }
+
+    /**
+     * The ETag of the record a single-resource JSON:API document carries, read from
+     * {@code data.attributes} — for a response served from the system-collection cache, which
+     * holds the document rather than the record. Equals {@link #of} of the record it was built from.
+     */
+    @SuppressWarnings("unchecked")
+    static String ofDocument(Map<String, Object> document) {
+        if (document.get("data") instanceof Map<?, ?> data
+                && data.get("attributes") instanceof Map<?, ?> attributes) {
+            return of((Map<String, ?>) attributes);
+        }
+        return null;
     }
 }
