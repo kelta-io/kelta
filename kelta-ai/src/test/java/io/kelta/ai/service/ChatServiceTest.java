@@ -70,7 +70,7 @@ class ChatServiceTest {
                 .model("claude-sonnet-5")
                 .maxTokens(1024)
                 .system("system prompt")
-                .addMessage(MessageParam.builder().role(MessageParam.Role.USER).content("hi").build());
+                .addMessage(MessageParam.ofUser("hi"));
     }
 
     private static Message assistantMessage(String text, long inputTokens, long outputTokens) {
@@ -81,13 +81,17 @@ class ChatServiceTest {
                 .cacheCreationInputTokens(Optional.empty())
                 .cacheReadInputTokens(Optional.empty())
                 .inferenceGeo(Optional.empty())
+                .outputTokensDetails(Optional.empty())
                 .serverToolUse(Optional.empty())
                 .serviceTier(Optional.empty())
+                .speed(Optional.empty())
                 .build();
         return Message.builder()
                 .id("msg_test")
                 .container(Optional.empty())
+                .diagnostics(Optional.empty())
                 .model("claude-sonnet-5")
+                .stopDetails(Optional.empty())
                 .stopReason(Optional.empty())
                 .stopSequence(Optional.empty())
                 .content(List.of(ContentBlock.ofText(

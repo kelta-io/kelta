@@ -145,11 +145,8 @@ public class FlowGenerationService {
                 .model(model)
                 .maxTokens(4096L)
                 .system(systemPrompt)
-                .addMessage(MessageParam.builder()
-                        .role(MessageParam.Role.USER)
-                        .contentOfBlockParams(List.of(ContentBlockParam.ofText(
-                                TextBlockParam.builder().text(description).build())))
-                        .build())
+                .addMessage(MessageParam.ofUserOfContentBlockParams(List.of(ContentBlockParam.ofText(
+                        TextBlockParam.builder().text(description).build()))))
                 .build();
 
         log.info("Generating flow for tenant {} — description: {}", tenantId,

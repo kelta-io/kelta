@@ -49,10 +49,7 @@ class AnthropicServiceTest {
     }
 
     private MessageParam userMessage(String text) {
-        return MessageParam.builder()
-                .role(MessageParam.Role.USER)
-                .content(text)
-                .build();
+        return MessageParam.ofUser(text);
     }
 
     @Nested
@@ -133,7 +130,7 @@ class AnthropicServiceTest {
             when(messageService.create(any(MessageCreateParams.class))).thenReturn(mock(Message.class));
 
             MessageCreateParams params = mock(MessageCreateParams.class);
-            when(params.model()).thenReturn(Model.CLAUDE_SONNET_4_20250514);
+            when(params.model()).thenReturn(Model.of("claude-sonnet-4-20250514"));
 
             service.sendMessage(params);
 
@@ -151,7 +148,7 @@ class AnthropicServiceTest {
             when(client.messages()).thenReturn(messageService);
 
             MessageCreateParams params = mock(MessageCreateParams.class);
-            when(params.model()).thenReturn(Model.CLAUDE_SONNET_4_20250514);
+            when(params.model()).thenReturn(Model.of("claude-sonnet-4-20250514"));
 
             service.streamMessage(params);
 
