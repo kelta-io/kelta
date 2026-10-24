@@ -10,6 +10,7 @@ import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
+import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
@@ -73,23 +74,36 @@ public class DynamicReactiveJwtDecoder implements ReactiveJwtDecoder {
         String issuer;
         try {
             issuer = extractIssuer(token);
-        } catch (Exception e) {
-            return Mono.error(new JwtException("Failed to parse JWT issuer: " + e.getMessage()));
+        } catch (RuntimeException e) {
+            return reject("Failed to parse JWT issuer: " + e.getMessage());
         }
 
-        if (issuer == null) {
-            return Mono.error(new JwtException("JWT missing issuer (iss) claim"));
+        if (issuer == null || issuer.isBlank()) {
+            return reject("JWT missing issuer (iss) claim");
         }
 
         String normalised = stripTrailingSlash(issuer);
         if (!isAcceptedIssuer(normalised)) {
             log.warn("Rejecting JWT: iss={} not platform issuer or verified custom domain", normalised);
-            return Mono.error(new JwtException(
-                    "JWT issuer not accepted: " + normalised + " is not the platform issuer "
-                            + "(" + primaryIssuer + ") or a verified tenant custom domain"));
+            // The issuer is caller-supplied; keep it out of the message, which becomes the
+            // WWW-Authenticate error_description.
+            return Mono.error(new BadJwtException(
+                    "JWT issuer not accepted: not the platform issuer or a verified tenant custom domain"));
         }
 
+        // The Nimbus delegate already raises BadJwtException for signature, expiry and validator
+        // failures, and a plain JwtException for a JWKS fetch failure (5xx, not 401).
         return delegateFor(normalised).decode(token);
+    }
+
+    /**
+     * A token-shape problem is the caller's fault: {@link BadJwtException} is what Spring
+     * Security's {@code JwtReactiveAuthenticationManager} maps to a 401 {@code invalid_token}.
+     * Any other {@link JwtException} becomes an {@code AuthenticationServiceException} (500).
+     */
+    private static Mono<Jwt> reject(String reason) {
+        log.warn("Rejecting JWT: {}", reason);
+        return Mono.error(new BadJwtException(reason));
     }
 
     private boolean isAcceptedIssuer(String issuer) {
@@ -142,6 +156,9 @@ public class DynamicReactiveJwtDecoder implements ReactiveJwtDecoder {
     }
 
     private String extractIssuer(String token) {
+        if (token == null) {
+            throw new IllegalArgumentException("Invalid JWT format");
+        }
         String[] parts = token.split("\\.");
         if (parts.length < 2) {
             throw new IllegalArgumentException("Invalid JWT format");
@@ -150,9 +167,9 @@ public class DynamicReactiveJwtDecoder implements ReactiveJwtDecoder {
         try {
             JsonNode node = objectMapper.readTree(payload);
             JsonNode issNode = node.get("iss");
-            return issNode != null ? issNode.asText() : null;
+            return issNode != null && !issNode.isNull() ? issNode.asText() : null;
         } catch (Exception e) {
-            throw new IllegalArgumentException("Failed to parse JWT payload", e);
+            throw new IllegalArgumentException("Failed to parse JWT payload");
         }
     }
 

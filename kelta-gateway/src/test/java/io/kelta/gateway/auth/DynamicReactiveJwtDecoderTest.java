@@ -10,10 +10,10 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
+import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
 import reactor.test.StepVerifier;
@@ -48,36 +48,83 @@ class DynamicReactiveJwtDecoderTest {
     }
 
     @Test
-    @DisplayName("rejects invalid JWT format")
-    void rejectInvalidJwt() {
-        StepVerifier.create(decoder.decode("not.a.jwt"))
-                .expectError(JwtException.class)
+    @DisplayName("rejects a token that is not three dot-separated parts as a bad JWT")
+    void rejectUnparseableToken() {
+        StepVerifier.create(decoder.decode("abc"))
+                .expectErrorSatisfies(err -> {
+                    assertThat(err).isInstanceOf(BadJwtException.class);
+                    assertThat(err.getMessage()).contains("Invalid JWT format");
+                })
                 .verify();
     }
 
     @Test
-    @DisplayName("rejects token without iss claim")
+    @DisplayName("rejects invalid JWT format as a bad JWT")
+    void rejectInvalidJwt() {
+        StepVerifier.create(decoder.decode("not.a.jwt"))
+                .expectError(BadJwtException.class)
+                .verify();
+    }
+
+    @Test
+    @DisplayName("rejects a payload that is not valid base64url as a bad JWT")
+    void rejectNonBase64Payload() {
+        StepVerifier.create(decoder.decode("eyJhbGciOiJSUzI1NiJ9.!!!not-base64!!!.sig"))
+                .expectErrorSatisfies(err -> {
+                    assertThat(err).isInstanceOf(BadJwtException.class);
+                    assertThat(err.getMessage()).contains("Failed to parse JWT issuer");
+                })
+                .verify();
+    }
+
+    @Test
+    @DisplayName("rejects a payload that is base64 but not JSON as a bad JWT")
+    void rejectNonJsonPayload() {
+        StepVerifier.create(decoder.decode(unsignedToken("this is not json")))
+                .expectErrorSatisfies(err -> {
+                    assertThat(err).isInstanceOf(BadJwtException.class);
+                    assertThat(err.getMessage()).contains("Failed to parse JWT payload");
+                })
+                .verify();
+    }
+
+    @Test
+    @DisplayName("rejects token without iss claim as a bad JWT")
     void rejectTokenWithoutIssuer() {
         String token = unsignedToken("{\"sub\":\"user\"}");
 
         StepVerifier.create(decoder.decode(token))
                 .expectErrorSatisfies(err -> {
-                    assertThat(err).isInstanceOf(JwtException.class);
+                    assertThat(err).isInstanceOf(BadJwtException.class);
                     assertThat(err.getMessage()).contains("missing issuer");
                 })
                 .verify();
     }
 
     @Test
-    @DisplayName("rejects token whose iss is not the platform issuer or a verified custom domain")
+    @DisplayName("treats a blank iss claim as missing")
+    void rejectTokenWithBlankIssuer() {
+        String token = unsignedToken("{\"iss\":\"  \",\"sub\":\"user\"}");
+
+        StepVerifier.create(decoder.decode(token))
+                .expectErrorSatisfies(err -> {
+                    assertThat(err).isInstanceOf(BadJwtException.class);
+                    assertThat(err.getMessage()).contains("missing issuer");
+                })
+                .verify();
+    }
+
+    @Test
+    @DisplayName("rejects token whose iss is not the platform issuer or a verified custom domain as a bad JWT")
     void rejectsForeignIssuer() {
         String token = unsignedToken(
                 "{\"iss\":\"https://idp.rzware.com/realms/rzWare\",\"sub\":\"u\"}");
 
         StepVerifier.create(decoder.decode(token))
                 .expectErrorSatisfies(err -> {
-                    assertThat(err).isInstanceOf(JwtException.class);
-                    assertThat(err.getMessage()).contains("not the platform issuer");
+                    assertThat(err).isInstanceOf(BadJwtException.class);
+                    assertThat(err.getMessage()).contains("not the platform issuer")
+                            .doesNotContain("idp.rzware.com");
                 })
                 .verify();
     }
@@ -138,7 +185,7 @@ class DynamicReactiveJwtDecoderTest {
                     INTERNAL_ISSUER, Duration.ofSeconds(60), cacheManager);
 
             StepVerifier.create(d.decode("not.a.jwt"))
-                    .expectError(JwtException.class)
+                    .expectError(BadJwtException.class)
                     .verify();
         }
     }
@@ -180,7 +227,7 @@ class DynamicReactiveJwtDecoderTest {
 
             StepVerifier.create(delegate.decode(refreshToken))
                     .expectErrorSatisfies(err -> {
-                        assertThat(err).isInstanceOf(JwtException.class);
+                        assertThat(err).isInstanceOf(BadJwtException.class);
                         assertThat(err.getMessage()).contains("refresh token is not a bearer token");
                     })
                     .verify();
@@ -214,8 +261,9 @@ class DynamicReactiveJwtDecoderTest {
                     .expiresAt(past.plus(1, ChronoUnit.HOURS))
                     .build());
 
+            // Nimbus raises JwtValidationException, a BadJwtException, so it is already a 401.
             StepVerifier.create(delegate.decode(expired))
-                    .expectError(JwtException.class)
+                    .expectError(BadJwtException.class)
                     .verify();
         }
 
