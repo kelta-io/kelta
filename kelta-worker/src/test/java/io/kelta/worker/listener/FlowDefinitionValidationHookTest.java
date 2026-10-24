@@ -220,4 +220,37 @@ class FlowDefinitionValidationHookTest {
         assertFalse(result.isSuccess());
         assertTrue(result.getErrors().get(0).message().toLowerCase().contains("json object"));
     }
+
+    private static Map<String, Object> flowWithTask(String resource) {
+        Map<String, Object> def = new LinkedHashMap<>();
+        def.put("StartAt", "Step");
+        def.put("States", Map.of("Step", Map.of("Type", "Task", "Resource", resource, "End", true)));
+        return new HashMap<>(Map.of("name", "retired-flow", "flowType", "AUTOLAUNCHED", "definition", def));
+    }
+
+    @Test
+    @DisplayName("Rejects create and update of a flow with a DELAY Task, naming the Wait state")
+    void rejectsDelayTask() {
+        for (BeforeSaveResult result : List.of(
+                hook.beforeCreate(flowWithTask("DELAY"), "tenant-1"),
+                hook.beforeUpdate("flow-1", flowWithTask("DELAY"), Map.of(), "tenant-1"))) {
+            assertFalse(result.isSuccess());
+            assertEquals("definition", result.getErrors().get(0).field());
+            assertTrue(result.getErrors().get(0).message().contains("Wait state"),
+                    result.getErrors().get(0).message());
+        }
+    }
+
+    @Test
+    @DisplayName("Rejects create and update of a flow with a CREATE_TASK Task, naming CREATE_RECORD")
+    void rejectsCreateTaskTask() {
+        for (BeforeSaveResult result : List.of(
+                hook.beforeCreate(flowWithTask("CREATE_TASK"), "tenant-1"),
+                hook.beforeUpdate("flow-1", flowWithTask("CREATE_TASK"), Map.of(), "tenant-1"))) {
+            assertFalse(result.isSuccess());
+            assertEquals("definition", result.getErrors().get(0).field());
+            assertTrue(result.getErrors().get(0).message().contains("CREATE_RECORD"),
+                    result.getErrors().get(0).message());
+        }
+    }
 }

@@ -4,6 +4,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Validates a flow definition at save time by running the {@link FlowDefinitionParser}
@@ -15,12 +16,22 @@ import java.util.List;
  * <p>The parser already rejects missing top-level {@code StartAt}, missing
  * {@code States}, malformed JSON, unknown state types, and Choice/Parallel state
  * structural problems with a {@link FlowDefinitionException}. This class
+ * also rejects Tasks whose {@code Resource} is a retired action that only ever
+ * faked success ({@link #RETIRED_RESOURCES}), at any nesting level. This class
  * surfaces that as a single-entry error list so the caller can report multiple
  * dangling-target problems in one round-trip instead of one-at-a-time.
  *
  * @since 1.0.0
  */
 public class FlowDefinitionValidator {
+
+    /**
+     * Task resources that are rejected at save, with the replacement each message names.
+     * Their handlers stay registered and fail at run time for flows saved before this check.
+     */
+    static final Map<String, String> RETIRED_RESOURCES = Map.of(
+            "DELAY", "use a Wait state (Seconds, Timestamp or TimestampPath) to pause the flow",
+            "CREATE_TASK", "use a CREATE_RECORD Task that writes to your task collection");
 
     private final FlowDefinitionParser parser;
 
@@ -73,6 +84,11 @@ public class FlowDefinitionValidator {
                                 FlowDefinition parent, String stateScope, List<String> errors) {
         switch (state) {
             case StateDefinition.TaskState task -> {
+                String replacement = task.resource() != null ? RETIRED_RESOURCES.get(task.resource()) : null;
+                if (replacement != null) {
+                    errors.add(prefixed(scopePrefix, "State '" + stateId + "' uses Resource '"
+                            + task.resource() + "', which is no longer supported — " + replacement));
+                }
                 checkTransition(stateId, scopePrefix, task.next(), task.end(), parent, errors);
                 for (CatchPolicy catchPolicy : task.catchPolicies()) {
                     checkTarget(stateId, scopePrefix, "Catch.Next", catchPolicy.next(), parent, errors);

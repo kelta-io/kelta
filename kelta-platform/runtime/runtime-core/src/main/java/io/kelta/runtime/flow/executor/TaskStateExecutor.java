@@ -93,6 +93,7 @@ public class TaskStateExecutor implements StateExecutor {
                     .actionConfigJson(configJson)
                     .data(input)
                     .resolvedData(input)
+                    .triggerDepth(context.triggerDepth())
                     .build();
 
                 actionResult = handler.get().execute(actionContext);

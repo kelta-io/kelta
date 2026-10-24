@@ -1,5 +1,6 @@
 package io.kelta.runtime.module.core;
 
+import io.kelta.runtime.flow.FlowEngine;
 import io.kelta.runtime.module.core.handlers.*;
 import io.kelta.runtime.workflow.ActionHandler;
 import io.kelta.runtime.workflow.module.KeltaModule;
@@ -17,10 +18,11 @@ import java.util.List;
  *   <li><b>CREATE_RECORD</b> — Creates a new record in a target collection</li>
  *   <li><b>UPDATE_RECORD</b> — Updates a record in any collection (cross-collection)</li>
  *   <li><b>DELETE_RECORD</b> — Deletes a record from a collection</li>
- *   <li><b>CREATE_TASK</b> — Creates a task record for follow-up</li>
+ *   <li><b>CREATE_TASK</b> — Retired: fails, pointing at CREATE_RECORD</li>
  *   <li><b>LOG_MESSAGE</b> — Writes a message to the execution log</li>
  *   <li><b>DECISION</b> — Implements conditional branching (if/else)</li>
- *   <li><b>TRIGGER_FLOW</b> — Invokes another flow as a sub-invocation</li>
+ *   <li><b>TRIGGER_FLOW</b> — Starts another saved flow as a new execution (needs the
+ *       {@link FlowEngine} extension)</li>
  * </ul>
  *
  * <p>Handlers requiring runtime services (CollectionRegistry, FormulaEvaluator,
@@ -55,11 +57,11 @@ public class CoreActionsModule implements KeltaModule {
 
         // Simple handlers (ObjectMapper only)
         handlers.add(new FieldUpdateActionHandler(objectMapper));
-        handlers.add(new CreateTaskActionHandler(objectMapper));
+        handlers.add(new CreateTaskActionHandler());
         handlers.add(new LogMessageActionHandler(objectMapper));
 
-        // TriggerFlow handler — triggers another flow as a sub-invocation
-        handlers.add(new TriggerFlowActionHandler(objectMapper));
+        // TriggerFlow handler — starts another saved flow; fails at run time without an engine
+        handlers.add(new TriggerFlowActionHandler(objectMapper, context.getExtension(FlowEngine.class)));
 
         // Handlers needing CollectionRegistry
         handlers.add(new CreateRecordActionHandler(objectMapper, collectionRegistry, queryEngine));

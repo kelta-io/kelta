@@ -351,4 +351,70 @@ class FlowDefinitionValidatorTest {
         assertTrue(errors.get(0).toLowerCase().contains("flow") ||
                    errors.get(0).toLowerCase().contains("parse"));
     }
+
+    @Test
+    @DisplayName("rejects a DELAY Task, naming the Wait state")
+    void rejectsDelayTask() {
+        String json = """
+            {
+                "StartAt": "Pause",
+                "States": {
+                    "Pause": { "Type": "Task", "Resource": "DELAY", "Parameters": { "delayMinutes": 5 }, "Next": "Done" },
+                    "Done": { "Type": "Succeed" }
+                }
+            }
+            """;
+        List<String> errors = validator.validate(json);
+        assertEquals(1, errors.size(), errors.toString());
+        assertTrue(errors.get(0).contains("'Pause'") && errors.get(0).contains("DELAY")
+                && errors.get(0).contains("Wait state"), errors.get(0));
+    }
+
+    @Test
+    @DisplayName("rejects a CREATE_TASK Task, naming CREATE_RECORD")
+    void rejectsCreateTaskTask() {
+        String json = """
+            {
+                "StartAt": "Task1",
+                "States": {
+                    "Task1": { "Type": "Task", "Resource": "CREATE_TASK", "End": true }
+                }
+            }
+            """;
+        List<String> errors = validator.validate(json);
+        assertEquals(1, errors.size(), errors.toString());
+        assertTrue(errors.get(0).contains("CREATE_TASK") && errors.get(0).contains("CREATE_RECORD"),
+                errors.get(0));
+    }
+
+    @Test
+    @DisplayName("rejects retired Tasks nested in Parallel branches and Map iterators")
+    void rejectsNestedRetiredTasks() {
+        String json = """
+            {
+                "StartAt": "Fan",
+                "States": {
+                    "Fan": {
+                        "Type": "Parallel",
+                        "Branches": [
+                            { "StartAt": "B1", "States": { "B1": { "Type": "Task", "Resource": "DELAY", "End": true } } }
+                        ],
+                        "Next": "Each"
+                    },
+                    "Each": {
+                        "Type": "Map",
+                        "ItemsPath": "$.items",
+                        "Iterator": { "StartAt": "I1", "States": { "I1": { "Type": "Task", "Resource": "CREATE_TASK", "End": true } } },
+                        "End": true
+                    }
+                }
+            }
+            """;
+        List<String> errors = validator.validate(json);
+        assertEquals(2, errors.size(), errors.toString());
+        assertTrue(errors.stream().anyMatch(e -> e.startsWith("Fan.Branches[0]:") && e.contains("Wait state")),
+                errors.toString());
+        assertTrue(errors.stream().anyMatch(e -> e.startsWith("Each.Iterator:") && e.contains("CREATE_RECORD")),
+                errors.toString());
+    }
 }

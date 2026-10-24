@@ -301,6 +301,29 @@ video-session lifecycle event onto `kelta.trigger.<tenantId>.video.session` (sam
 NATS_TRIGGERED flow with trigger topic `video.session` reads
 `$.input.payload.{sessionId,appointmentId,conversationId,status,durationSeconds}`.
 
+### Flow-to-flow and outbound events (`TRIGGER_FLOW`, `PUBLISH_EVENT`)
+
+`TRIGGER_FLOW` (`{ flowId, input? }`) starts a saved flow through the `FlowEngine` module
+extension (`FlowEngine.startTriggeredExecution`): a new async execution whose initial state is
+`{ trigger: { type: "TRIGGER_FLOW" }, input, context: { tenantId, userId, flowId } }`, so the
+target reads `$.input.<key>` like every other entry point. Output `{ flowId, executionId }`;
+an unknown `flowId` or a missing engine fails the step. The hop count travels in the started
+execution's **initial input** under `FlowEngine.TRIGGER_DEPTH_KEY` (`_triggerDepth`) — the
+in-memory `invokeDepth` cannot cross an async hop, and the initial input is persisted, so the
+count also survives a Wait/resume. `TaskStateExecutor` passes it to handlers as
+`ActionContext.triggerDepth`; a step at `FlowEngine.MAX_TRIGGER_DEPTH` (= `MAX_INVOKE_DEPTH`, 10)
+fails with `… MAX_TRIGGER_DEPTH=10`.
+
+`PUBLISH_EVENT` publishes to `kelta.event.<tenantId>.<topic>` (stream `KELTA_EVENTS`, 24h) via the
+`EventPublisher` extension the worker builds in `FlowConfig.natsFlowEventPublisher` (synchronous
+JetStream publish; no NATS connection → no extension → the step fails). Subject rules and the
+envelope: `architecture.md` → Flow-published external events, and the public
+`kelta-marketing/src/content/docs/api/external-events.md`.
+
+`DELAY` and `CREATE_TASK` are rejected by `FlowDefinitionValidator` (hence
+`FlowDefinitionValidationHook`, 400) at any nesting depth; their handlers stay registered and fail
+naming the replacement (`Wait` state / `CREATE_RECORD`) for flows saved earlier.
+
 ### Wait states — persistence and resume
 
 A Wait with `Seconds` ≤ 10 sleeps in-process. Longer, timestamp-based

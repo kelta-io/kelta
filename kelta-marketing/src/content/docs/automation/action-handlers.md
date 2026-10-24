@@ -1,6 +1,6 @@
 ---
 title: Action handler reference
-description: Every action a Task state can run — parameters, outputs and error codes — grouped by data, communication, integration and control, with the not-yet-functional ones called out.
+description: Every action a Task state can run — parameters, outputs and error codes — grouped by data, communication, integration and control, with the retired and not-yet-functional ones called out.
 section: automation
 order: 20
 ---
@@ -138,6 +138,19 @@ refused unless the operator allow-lists that range (`KELTA_OUTBOUND_ALLOWED_PRIV
 `GET` redirects are followed up to three hops, each checked the same way. The call times out
 after 60 seconds, reads at most 1 MB, and a 4xx/5xx response fails the step.
 
+### `PUBLISH_EVENT`
+
+```json
+{ "topic": "order.approved", "eventType": "order.approved",
+  "dataPayload": { "orderId": "${$.input.orderId}", "total": "${$.input.total}" } }
+```
+
+Publishes a JSON event to `kelta.event.<tenantId>.<topic>` on the platform's NATS JetStream (stream `KELTA_EVENTS`)
+for systems outside Kelta. The tenant id in the subject is inserted by the platform; `topic` is dot-separated
+tokens of letters, digits, `-` and `_` — wildcards and empty tokens fail the step. Returns
+`{ "topic", "subject", "eventType", "messageKey" }`. The step fails if no NATS publisher is configured or the publish
+is not acknowledged. Subject, envelope fields and consuming: [External events](/docs/api/external-events/).
+
 ### `INVOKE_SCRIPT`
 
 ```json
@@ -170,6 +183,22 @@ usually clearer.
 
 Writes to the run's step log.
 
+### `TRIGGER_FLOW`
+
+```json
+{ "flowId": "<flow id>", "input": { "orderId": "${$.input.orderId}" } }
+```
+
+Starts another saved flow as a **new, asynchronous** execution and returns `{ "flowId", "executionId" }` without
+waiting for it; the run appears under the target flow's runs. The target reads `input` as `$.input.<key>`, and
+`$.trigger.type` is `TRIGGER_FLOW`. An unknown `flowId` fails the step. To wait for another flow's result, use an
+`InvokeFlow` state instead.
+
+Chains are bounded: each `TRIGGER_FLOW` hop counts one level (carried in the started run's initial input as
+`_triggerDepth`, so it also survives a `Wait`), and a step at depth 10 fails with
+`… the trigger chain reached MAX_TRIGGER_DEPTH=10` instead of starting another run. A flow that triggers itself,
+directly or through other flows, therefore stops after ten hops.
+
 ### `SUBMIT_FOR_APPROVAL` *(record-scoped)*
 
 ```json
@@ -178,19 +207,26 @@ Writes to the run's step log.
 
 Submits the triggering record; see [Approval processes](/docs/automation/approvals/).
 
+## Rejected at save
+
+These handlers never did their work. Saving a flow (create or update) with a Task whose `Resource` is one of them —
+at any level, including `Parallel` branches and `Map` iterators — returns `400` naming the replacement. A flow saved
+before this check still runs, but the step fails with the same message instead of reporting success.
+
+| Handler | Use instead |
+|---|---|
+| `DELAY` | a `Wait` state (`Seconds`, `Timestamp`, `TimestampPath`) |
+| `CREATE_TASK` | `CREATE_RECORD` on your tasks collection |
+
 ## Registered but not yet functional
 
-These handlers exist in the catalogue and accept their configuration, but the platform side they depend on is not
-wired in the current release. They return a success result and write to the step log without doing the work.
-Do not build on them yet.
+This handler exists in the catalogue and accepts its configuration, but the platform side it depends on is not
+wired in the current release. It returns a success result and writes to the step log without doing the work.
+Do not build on it yet.
 
 | Handler | Config accepted | Use instead |
 |---|---|---|
-| `TRIGGER_FLOW` | `{ "flowId" }` — returns `{ "status": "QUEUED" }` | an `InvokeFlow` state |
-| `DELAY` | `{ "delayMinutes" \| "delayUntilField" \| "delayUntilTime" }` — returns immediately | a `Wait` state (`Seconds`, `Timestamp`, `TimestampPath`) |
 | `SEND_NOTIFICATION` | `{ "userId", "title", "message", "level" }` — logged only | `EMAIL_ALERT`, or `CREATE_RECORD` on a notifications collection |
-| `PUBLISH_EVENT` | `{ "topic", "eventType", "dataPayload" }` — logged only | `CALL_API` / `OUTBOUND_MESSAGE` to notify an external system |
-| `CREATE_TASK` | `{ "subject", "description", "assignTo", "dueDate", "priority", "status" }` — returns the payload, writes nothing | `CREATE_RECORD` on your tasks collection |
 
 ## Handlers from modules
 

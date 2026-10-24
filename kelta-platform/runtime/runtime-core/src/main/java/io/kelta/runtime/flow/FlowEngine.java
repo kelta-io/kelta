@@ -44,6 +44,18 @@ public class FlowEngine {
      */
     public static final int MAX_INVOKE_DEPTH = 10;
 
+    /**
+     * Maximum chain length of {@code TRIGGER_FLOW} hops. Each hop starts a new,
+     * asynchronous execution, so {@link #MAX_INVOKE_DEPTH} (which lives in one
+     * execution's context) cannot see it; the depth travels in the started
+     * execution's initial input under {@link #TRIGGER_DEPTH_KEY} instead, which is
+     * persisted with the execution row and therefore also survives a Wait/resume.
+     */
+    public static final int MAX_TRIGGER_DEPTH = MAX_INVOKE_DEPTH;
+
+    /** Reserved initial-input key carrying the {@code TRIGGER_FLOW} hop count. */
+    public static final String TRIGGER_DEPTH_KEY = "_triggerDepth";
+
     private final FlowStore flowStore;
     private final FlowDefinitionParser parser;
     private final StateDataResolver dataResolver;
@@ -134,6 +146,27 @@ public class FlowEngine {
         }));
 
         return executionId;
+    }
+
+    /**
+     * Starts the saved flow {@code flowId} asynchronously on behalf of a
+     * {@code TRIGGER_FLOW} step, recording {@code triggerDepth} in its initial input
+     * under {@link #TRIGGER_DEPTH_KEY} so the next hop can be bounded by
+     * {@link #MAX_TRIGGER_DEPTH}.
+     *
+     * @return the new execution's id, or empty when the tenant has no flow {@code flowId}
+     */
+    public Optional<String> startTriggeredExecution(String tenantId, String flowId,
+                                                    Map<String, Object> input, String userId,
+                                                    int triggerDepth) {
+        Optional<String> definitionJson = flowStore.findFlowDefinitionById(tenantId, flowId);
+        if (definitionJson.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<String, Object> initialInput = input != null ? new LinkedHashMap<>(input) : new LinkedHashMap<>();
+        initialInput.put(TRIGGER_DEPTH_KEY, triggerDepth);
+        return Optional.of(startExecution(tenantId, flowId, definitionJson.get(), initialInput,
+            userId, null, false));
     }
 
     /**
@@ -244,6 +277,7 @@ public class FlowEngine {
                     executionId, resumeTenantId, flowId, fresh.startedBy(),
                     definition, fresh.stateData(), 0,
                     flowStore.findStepLogging(resumeTenantId, flowId));
+                context.setTriggerDepth(triggerDepthOf(fresh.initialInput()));
                 context.setCurrentStateId(nextStateId);
                 flowStore.updateExecutionState(executionId, nextStateId, fresh.stateData(),
                     FlowExecutionData.STATUS_RUNNING, fresh.stepCount());
@@ -363,6 +397,7 @@ public class FlowEngine {
             parent.executionId(),
             parent.tenantId(), parent.flowId(), parent.userId(),
             subFlow, input, parent.invokeDepth(), parent.stepLogging());
+        subContext.setTriggerDepth(parent.triggerDepth());
 
         Map<String, Object> finalData = runStateLoop(subContext);
         return buildSubFlowResult(finalData, subContext);
@@ -384,6 +419,7 @@ public class FlowEngine {
             parent.executionId(),
             parent.tenantId(), parent.flowId(), parent.userId(),
             targetFlow, input, parent.invokeDepth() + 1, parent.stepLogging());
+        invokedContext.setTriggerDepth(parent.triggerDepth());
 
         Map<String, Object> finalData = runStateLoop(invokedContext);
         return buildSubFlowResult(finalData, invokedContext);
@@ -439,12 +475,20 @@ public class FlowEngine {
         FlowExecutionContext context = new FlowExecutionContext(
             executionId, tenantId, flowId, userId, definition, initialInput, 0,
             flowStore.findStepLogging(tenantId, flowId));
+        context.setTriggerDepth(triggerDepthOf(initialInput));
 
         log.info("Starting flow execution {} (flow={}, startAt={})",
             executionId, flowId, definition.startAt());
 
         Map<String, Object> finalData = runStateLoop(context);
         return completeIfNeeded(context, finalData);
+    }
+
+    private static int triggerDepthOf(Map<String, Object> initialInput) {
+        if (initialInput != null && initialInput.get(TRIGGER_DEPTH_KEY) instanceof Number n) {
+            return n.intValue();
+        }
+        return 0;
     }
 
     /**

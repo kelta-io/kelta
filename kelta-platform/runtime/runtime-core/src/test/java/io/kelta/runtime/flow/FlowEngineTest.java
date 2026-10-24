@@ -1033,6 +1033,50 @@ class FlowEngineTest {
             assertEquals(FlowExecutionData.STATUS_COMPLETED, resumed.status());
         }
 
+        @Test
+        @DisplayName("TRIGGER_FLOW depth reaches the handler and survives a Wait/resume")
+        void triggerDepthSurvivesResume() throws Exception {
+            List<Integer> seenDepths = Collections.synchronizedList(new ArrayList<>());
+            handlerRegistry.register(new ActionHandler() {
+                @Override
+                public String getActionTypeKey() { return "DEPTH_PROBE"; }
+
+                @Override
+                public ActionResult execute(ActionContext context) {
+                    seenDepths.add(context.triggerDepth());
+                    return ActionResult.success(Map.of());
+                }
+            });
+            String probeFlow = """
+                {
+                    "StartAt": "Before",
+                    "States": {
+                        "Before": { "Type": "Task", "Resource": "DEPTH_PROBE", "ResultPath": null, "Next": "Sleep" },
+                        "Sleep": { "Type": "Wait", "Seconds": 60, "Next": "After" },
+                        "After": { "Type": "Task", "Resource": "DEPTH_PROBE", "OutputPath": "$.nothing", "End": true }
+                    }
+                }
+                """;
+            flowStore.registerFlow("t1", "flow-probe", "Probe", probeFlow);
+
+            String executionId = engine.startTriggeredExecution("t1", "flow-probe", Map.of("k", "v"), "u1", 3)
+                .orElseThrow();
+            awaitStatus(executionId, FlowExecutionData.STATUS_WAITING);
+            engine.resumeExecution(executionId);
+            awaitStatus(executionId, FlowExecutionData.STATUS_COMPLETED);
+
+            assertEquals(List.of(3, 3), seenDepths);
+            assertEquals(3, flowStore.loadExecution(executionId).orElseThrow()
+                .initialInput().get(FlowEngine.TRIGGER_DEPTH_KEY));
+        }
+
+        @Test
+        @DisplayName("startTriggeredExecution returns empty for an unknown flow")
+        void triggeredExecutionOfUnknownFlowIsEmpty() {
+            assertTrue(engine.startTriggeredExecution("t1", "ghost", Map.of(), "u1", 1).isEmpty());
+            assertTrue(flowStore.getAllExecutions().isEmpty());
+        }
+
         private FlowExecutionData awaitStatus(String executionId, String status) throws Exception {
             long deadline = System.currentTimeMillis() + 5000;
             while (System.currentTimeMillis() < deadline) {

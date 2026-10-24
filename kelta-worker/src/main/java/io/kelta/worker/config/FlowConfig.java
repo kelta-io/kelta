@@ -4,7 +4,9 @@ import io.kelta.runtime.flow.*;
 import io.kelta.runtime.formula.FormulaEvaluator;
 import io.kelta.runtime.module.core.CoreActionsModule;
 import io.kelta.runtime.module.integration.IntegrationModule;
+import io.kelta.runtime.messaging.nats.NatsConnectionManager;
 import io.kelta.runtime.module.integration.api.OpenApiSpecParser;
+import io.kelta.runtime.module.integration.handlers.PublishEventActionHandler;
 import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor;
 import io.kelta.runtime.module.integration.spi.graalvm.GraalVmScriptExecutor;
@@ -21,6 +23,8 @@ import io.kelta.worker.flow.JdbcFlowStore;
 import io.kelta.worker.handler.SubmitForApprovalActionHandler;
 import io.kelta.worker.service.ApprovalService;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.nats.client.impl.Headers;
+import io.nats.client.impl.NatsMessage;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -191,7 +195,8 @@ public class FlowConfig {
                                               io.kelta.runtime.module.integration.spi.CredentialResolverPort credentialResolverPort,
                                           @Autowired(required = false)
                                               io.kelta.runtime.module.integration.spi.IdempotencyStore idempotencyStore,
-                                          io.kelta.runtime.outbound.OutboundUrlGuard outboundUrlGuard) {
+                                          io.kelta.runtime.outbound.OutboundUrlGuard outboundUrlGuard,
+                                          ObjectProvider<NatsConnectionManager> natsConnectionManager) {
         ModuleRegistry registry = new ModuleRegistry(actionHandlerRegistry, beforeSaveHookRegistry);
 
         if (discoveredModules != null && !discoveredModules.isEmpty()) {
@@ -204,6 +209,14 @@ public class FlowConfig {
             // Flow HTTP callouts fetch tenant-configured URLs through the same guard (and
             // allow-list) as every other outbound fetch of a tenant-supplied URL.
             extensions.put(io.kelta.runtime.outbound.OutboundUrlGuard.class, outboundUrlGuard);
+
+            NatsConnectionManager nats = natsConnectionManager.getIfAvailable();
+            if (nats != null) {
+                extensions.put(PublishEventActionHandler.EventPublisher.class,
+                    natsFlowEventPublisher(nats, objectMapper));
+            } else {
+                log.warn("No NATS connection — PUBLISH_EVENT flow steps will fail");
+            }
 
             if (emailService != null) {
                 extensions.put(EmailService.class, emailService);
@@ -243,6 +256,34 @@ public class FlowConfig {
         }
 
         return registry;
+    }
+
+    /**
+     * Publishes a PUBLISH_EVENT flow step's envelope as JSON to JetStream (stream
+     * {@code KELTA_EVENTS}, {@code kelta.event.>}). The publish waits for the stream ack, so a
+     * missing stream or a NATS outage fails the step instead of being logged and dropped.
+     */
+    static PublishEventActionHandler.EventPublisher natsFlowEventPublisher(
+            NatsConnectionManager nats, ObjectMapper objectMapper) {
+        return (subject, key, eventData) -> {
+            Headers headers = new Headers();
+            if (eventData.get("eventId") instanceof String eventId) {
+                headers.add("Nats-Msg-Id", eventId);
+            }
+            if (eventData.get("tenantId") instanceof String tenantId) {
+                headers.add(io.kelta.runtime.messaging.nats.NatsEventPublisher.TENANT_ID_HEADER, tenantId);
+            }
+            headers.add("Kelta-Message-Key", key);
+            try {
+                nats.jetStream().publish(NatsMessage.builder()
+                    .subject(subject)
+                    .headers(headers)
+                    .data(objectMapper.writeValueAsBytes(eventData))
+                    .build());
+            } catch (java.io.IOException | io.nats.client.JetStreamApiException e) {
+                throw new IllegalStateException("Publish to " + subject + " failed: " + e.getMessage(), e);
+            }
+        };
     }
 
     // ---------------------------------------------------------------------------

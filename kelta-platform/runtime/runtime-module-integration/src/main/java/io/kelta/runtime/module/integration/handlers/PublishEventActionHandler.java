@@ -11,25 +11,30 @@ import org.slf4j.LoggerFactory;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
- * Action handler that publishes a custom event (e.g., to NATS).
+ * Action handler that publishes a custom event for consumers outside the platform.
  *
  * <p>Config format:
  * <pre>
  * {
- *   "topic": "custom.event.topic",
+ *   "topic": "order.approved",
  *   "eventType": "order.approved",
  *   "dataPayload": {"key1": "value1"}
  * }
  * </pre>
  *
- * <p>Publishes a message containing event data, record information, and a timestamp.
- * The message key is {@code tenantId:collectionId} for consistent per-record ordering.
+ * <p>The event goes to {@code kelta.event.<tenantId>.<topic>}: the handler, not the flow
+ * author, supplies the tenant id, so a flow can only publish into its own tenant's namespace.
+ * {@code topic} is one or more dot-separated tokens of letters, digits, {@code -} and
+ * {@code _}; wildcards ({@code *}, {@code >}), empty tokens and anything else are rejected so
+ * a topic cannot escape that namespace. The message key is {@code tenantId:collectionId}.
+ * The envelope is documented in {@code kelta-marketing/.../docs/api/external-events.md}.
  *
- * <p>This handler uses an {@code EventPublisher} function obtained from ModuleContext
- * extensions. If no publisher is available, the event data is logged and returned
- * in the output without actual publishing.
+ * <p>The {@code EventPublisher} comes from the ModuleContext extensions; without one every
+ * execution fails rather than reporting an event that was never sent.
  *
  * @since 1.0.0
  */
@@ -42,8 +47,14 @@ public class PublishEventActionHandler implements ActionHandler {
      */
     @FunctionalInterface
     public interface EventPublisher {
-        void publish(String topic, String key, Map<String, Object> eventData);
+        void publish(String subject, String key, Map<String, Object> eventData);
     }
+
+    /** Subject prefix of every published event; followed by {@code <tenantId>.<topic>}. */
+    public static final String SUBJECT_PREFIX = "kelta.event.";
+
+    private static final Pattern TOPIC = Pattern.compile("[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*");
+    private static final Pattern TENANT_TOKEN = Pattern.compile("[A-Za-z0-9_-]+");
 
     private final ObjectMapper objectMapper;
     private final EventPublisher eventPublisher;
@@ -68,13 +79,27 @@ public class PublishEventActionHandler implements ActionHandler {
             if (topic == null || topic.isBlank()) {
                 return ActionResult.failure("Event 'topic' is required");
             }
+            if (!TOPIC.matcher(topic).matches()) {
+                return ActionResult.failure("Event 'topic' '" + topic + "' is invalid: use dot-separated "
+                    + "tokens of letters, digits, '-' and '_' (no wildcards or empty tokens)");
+            }
+            String tenantId = context.tenantId();
+            if (tenantId == null || !TENANT_TOKEN.matcher(tenantId).matches()) {
+                return ActionResult.failure("PUBLISH_EVENT needs a tenant to scope the event subject");
+            }
+            if (eventPublisher == null) {
+                return ActionResult.failure("PUBLISH_EVENT: no event publisher is configured — "
+                    + "the event to topic '" + topic + "' was not sent");
+            }
+            String subject = SUBJECT_PREFIX + tenantId + "." + topic;
 
             String eventType = (String) config.getOrDefault("eventType", "workflow.custom.event");
 
             // Build event payload
             Map<String, Object> eventData = new HashMap<>();
+            eventData.put("eventId", UUID.randomUUID().toString());
             eventData.put("eventType", eventType);
-            eventData.put("tenantId", context.tenantId());
+            eventData.put("tenantId", tenantId);
             eventData.put("collectionId", context.collectionId());
             eventData.put("collectionName", context.collectionName());
             eventData.put("recordId", context.recordId());
@@ -89,19 +114,14 @@ public class PublishEventActionHandler implements ActionHandler {
 
             eventData.put("recordData", context.data());
 
-            String messageKey = context.tenantId() + ":" + context.collectionId();
+            String messageKey = tenantId + ":" + context.collectionId();
 
-            if (eventPublisher != null) {
-                eventPublisher.publish(topic, messageKey, eventData);
-                log.info("Custom event published: topic={}, eventType={}, workflowRule={}",
-                    topic, eventType, context.workflowRuleId());
-            } else {
-                log.warn("No EventPublisher configured — event logged but not published: topic={}, eventType={}",
-                    topic, eventType);
-            }
+            eventPublisher.publish(subject, messageKey, eventData);
+            log.info("Custom event published: subject={}, eventType={}", subject, eventType);
 
             return ActionResult.success(Map.of(
                 "topic", topic,
+                "subject", subject,
                 "eventType", eventType,
                 "messageKey", messageKey
             ));
