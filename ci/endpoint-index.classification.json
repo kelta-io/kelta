@@ -41,6 +41,8 @@
     "DELETE /api/me/tokens/{tokenId}": { "docs": "/docs/security/personal-access-tokens/#list-and-revoke" },
     "GET /api/me/tokens/validate/{tokenHash}": { "internal": "Called by the gateway, not by clients: it validates a PAT by its hash when the token is not in the gateway's Redis cache." },
     "POST /api/admin/users/{id}/tokens": { "docs": "/docs/security/personal-access-tokens/#create" },
+    "GET /api/admin/users/{id}/tokens": { "docs": "/docs/security/personal-access-tokens/#list-and-revoke" },
+    "DELETE /api/admin/users/{id}/tokens/{tokenId}": { "docs": "/docs/security/personal-access-tokens/#list-and-revoke" },
     "POST /api/admin/users/{userId}/invite": { "docs": "/docs/security/users-and-groups/#inviting-users" },
     "POST /api/admin/users/portal-invite": { "docs": "/docs/security/users-and-groups/#inviting-users" },
     "POST /api/admin/users/{userId}/reset-password": { "docs": "/docs/security/mfa-and-password-policy/#password-policy" },

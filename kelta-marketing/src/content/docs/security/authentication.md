@@ -99,9 +99,10 @@ A tenant can restrict API access to known networks. Under **Setup → Security �
 - Applies to `/api/**` for every caller whose profile lacks `MANAGE_TENANTS` — administrators always get through,
   so a bad range cannot lock everyone out.
 - With `KELTA_SECURITY_TRUSTED_PROXIES` set, the single resolved client address is checked; forwarded headers
-  count only when they come from a trusted proxy. Without it, the socket address and every `X-Forwarded-For` /
-  `X-Real-IP` hop are checked when forwarded-header trust is on (`IP_ALLOWLIST_TRUST_XFF`), which a client can
-  spoof — see [Security hardening](/docs/deploy/security-hardening/#client-ip-and-trusted-proxies).
+  count only when they come from a trusted proxy. Without it the check is strict: only the socket peer address is
+  checked and `X-Forwarded-For` / `X-Real-IP` are ignored. Behind an ingress that address is the ingress, so the
+  deployment must set `KELTA_SECURITY_TRUSTED_PROXIES` or non-admin users of a restricted tenant are refused — see
+  [Security hardening](/docs/deploy/security-hardening/#client-ip-and-trusted-proxies).
 - Fails open when the configuration is missing or disabled.
 - Inbound webhook endpoints are not subject to it (they authenticate differently — see
   [Triggers](/docs/automation/triggers/)).

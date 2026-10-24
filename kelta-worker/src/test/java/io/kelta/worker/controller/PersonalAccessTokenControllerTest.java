@@ -240,6 +240,41 @@ class PersonalAccessTokenControllerTest {
     }
 
     @Nested
+    @DisplayName("revokeAllUserTokens / revokeDeletedTokens")
+    class RevokeAllUserTokens {
+        @Test
+        void shouldRevokeEveryLiveTokenOfTheUserInTheTenant() {
+            when(jdbcTemplate.queryForList(contains("WHERE tenant_id = ? AND revoked = false AND (user_id = ?)"),
+                    eq("tenant-1"), eq("user-1")))
+                    .thenReturn(List.of(Map.of("id", "tok-1", "token_hash", "h1"),
+                            Map.of("id", "tok-2", "token_hash", "h2")));
+            when(jdbcTemplate.update(contains("revoked = true"), any(), any(), anyString(), eq("tenant-1")))
+                    .thenReturn(1);
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+
+            List<String> revoked = controller.revokeAllUserTokens("tenant-1", "user-1", "system",
+                    SecurityAuditLogger.EventType.PAT_REVOKED, "user status INACTIVE");
+
+            assertThat(revoked).containsExactly("tok-1", "tok-2");
+            verify(valueOps).set("pat:revoked:h1", "revoked", Duration.ofDays(366));
+            verify(valueOps).set("pat:revoked:h2", "revoked", Duration.ofDays(366));
+        }
+
+        @Test
+        void shouldBlockDeletedTokensInRedisWithoutTouchingTheDatabase() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+
+            controller.revokeDeletedTokens("tenant-1",
+                    List.of(new PersonalAccessTokenController.LiveToken("tok-1", "h1")), "system",
+                    SecurityAuditLogger.EventType.PAT_REVOKED, "user deleted");
+
+            verify(redisTemplate).delete("pat:h1");
+            verify(valueOps).set("pat:revoked:h1", "revoked", Duration.ofDays(366));
+            verifyNoInteractions(jdbcTemplate);
+        }
+    }
+
+    @Nested
     @DisplayName("GET /api/me/tokens/validate/{tokenHash}")
     class ValidateToken {
         private Map<String, Object> row(Instant expiresAt) {
