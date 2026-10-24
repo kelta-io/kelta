@@ -32,11 +32,12 @@ concurrency:
 
 env:
   JAVA_VERSION: '25'
-  # 20 to match kelta-ui/Dockerfile (node:20-alpine) — CI was validating against a Node
-  # the shipped image is not built with. It is also the floor for kelta-ui/app's vitest
-  # suite: on 18, jsdom's html-encoding-sniffer require()s an ES module, so all 223 test
-  # files fail to start (ERR_REQUIRE_ESM) before a single test runs.
-  NODE_VERSION: '20'
+  # Must equal the node major of the kelta-ui/Dockerfile and kelta-web/Dockerfile builder
+  # stages (node:24.x-alpine) — CI was once validating against a Node the shipped images
+  # were not built with. Move all three together. Never below 20.19 (kelta-ui/app's
+  # engines): on 18, jsdom's html-encoding-sniffer require()s an ES module, so all 223
+  # test files fail to start (ERR_REQUIRE_ESM) before a single test runs.
+  NODE_VERSION: '24'
   MAVEN_VERSION: '3.9.9'
   # Survive transient Maven Central 429 / 503 / connection resets. Both the
   # legacy wagon HTTP transport and the newer Aether connector retry up to 10
@@ -1786,8 +1787,8 @@ jobs:
           shellcheck "${scripts[@]}"
 
   # ===========================================================================
-  # Marketing site (kelta.io) — Astro static build + route guards. Node 22 to
-  # match kelta-marketing/Dockerfile, which is what actually ships the site.
+  # Marketing site (kelta.io) — Astro static build + route guards. NODE_VERSION
+  # matches kelta-marketing/Dockerfile, which is what actually ships the site.
   # ===========================================================================
   test-marketing:
     name: Test Marketing Site
@@ -1804,7 +1805,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
