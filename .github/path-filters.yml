@@ -59,6 +59,15 @@ sdk_docs:
   - 'kelta-marketing/src/content/docs/sdk/**'
   - 'docs/**/sdk/**'
 
+# Docs that quote `kelta …` invocations — the "test-frontend" job checks each one against the
+# CLI command registry (kelta-web/packages/cli/src/docsgen/docLines.test.ts).
+cli_docs:
+  - 'kelta-marketing/src/content/docs/**'
+  - 'docs/**'
+  - 'examples/**'
+  - 'README.md'
+  - '**/README.md'
+
 # Any Java service change triggers integration tests.
 any_java:
   - *runtime

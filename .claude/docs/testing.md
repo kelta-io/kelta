@@ -422,8 +422,8 @@ change to the script skipped its tests and broke it.
 
 ## Docs checks
 
-The published docs (`kelta-marketing/src/content/docs/**` plus `docs/authoring/*.md`) have two
-static checks; both run without a stack.
+The published docs (`kelta-marketing/src/content/docs/**` plus `docs/authoring/*.md`) have three
+static checks; all run without a stack.
 
 - **SDK snippet type-check** — `cd kelta-web && npm run check:doc-snippets`
   (`scripts/check-doc-snippets.mjs`, run by the `test-frontend` job after "Type check"; the
@@ -440,6 +440,18 @@ static checks; both run without a stack.
   `/docs/...` link must reach a page and every `#fragment` (same-page or cross-page) an id on the
   target. Every ```` ```json ```` block must `JSON.parse`; an annotated example (comments, bare
   `…`, several documents, a fragment) is fenced ```` ```jsonc ````, which the check skips.
+- **`kelta …` lines** — `kelta-web/packages/cli/src/docsgen/docLines.test.ts` (part of the
+  `kelta-web` vitest run, job `test-frontend`; the `cli_docs` path filter triggers it on edits to
+  `kelta-marketing/src/content/docs/**`, `docs/**`, `examples/**` or any `README.md`). Every
+  `kelta …` line in a fenced block (after an optional `$ `, `\` continuations joined) or an inline
+  code span of those files, the `examples/**/*.sh` scripts and `packages/cli/AGENTS.md` is checked
+  against `buildManifest(allCommands)`: command path, declared flags (plus the root program's
+  global options from `addGlobalOptions`) and positional arity. `<placeholder>` is a positional,
+  `…` elides the rest, `[…]` reads as given, `--help` skips arity, and a bare command path in an
+  inline span is a reference. Fix the doc; when the doc is right and the CLI is wrong, add
+  `{file, line, text, reason}` to `docLines.allowlist.json` — an entry that no longer exists or
+  now passes fails the test. A fix to `AGENTS.md` goes in `docsgen/agentGuide.ts`
+  (`npm run gen:docs`); one to `docs/authoring/*.md` is mirrored in `docsgen/authoringDocs.ts`.
 
 ## MCP smoke test (CI)
 

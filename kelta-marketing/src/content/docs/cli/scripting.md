@@ -49,11 +49,12 @@ requires `--yes` otherwise. `kelta manifest` marks these `"dangerous": true`.
 ## Query grammar for list commands
 
 ```bash
+# --filter is field[.op]=value, repeatable, ANDed; --all instead of --page/--size (client cap 10 000 rows)
 kelta records list invoices \
-  --filter status=open --filter amount.gte=100 \   # field[.op]=value, repeatable, ANDed
+  --filter status=open --filter amount.gte=100 \
   --sort -createdAt,number \
   --fields number,amount --include customer \
-  --page 1 --size 200                              # or --all (client cap 10 000 rows)
+  --page 1 --size 200
 ```
 
 Operators: `eq neq gt gte lt lte isnull contains starts ends icontains istarts iends ieq in` (`any` = `in`).
