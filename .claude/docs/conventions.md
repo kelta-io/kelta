@@ -125,6 +125,14 @@ fall back to `VALIDATION_FAILED`. Codes returned today:
   `UiPageConfigHook` (unknown field/column/operator, bad grid position, unknown
   widget type, etc).
 
+### Security on/off flags on a native service
+A security flag on kelta-gateway or kelta-auth (native images) is read at **run time**: declare it
+in `application.yml` as `${ENV_VAR:default}`, bind it to a typed `@ConfigurationProperties` record
+and branch where the beans are built — never `@ConditionalOnProperty`, which the native build
+freezes, so an env-var flip is silently ignored. Reference: `InternalAuthProperties` +
+`InternalServiceAuthConfig` (gateway), `InternalWorkerClientConfig` (auth),
+`InternalEndpointSecurityConfig` (worker, same shape).
+
 ### Javadoc
 - Required for public classes and methods
 - Include `@param`, `@returns`, `@throws`
@@ -578,6 +586,7 @@ MCP admin tools expose camelCase, lowercase-friendly argument names to LLM calle
 
 - **Field types**: accept friendly aliases (`text`, `number`, `picklist`, `lookup`, …) and map to the uppercase `FieldType` enum the worker expects. Centralise the mapping in `FieldBodyBuilder.resolveNativeType` so `add_field` and `create_collection`'s nested field array stay in sync.
 - **Per-type payload**: picklist fields need `attributes.fieldTypeConfig = {picklistSourceType, picklistSourceId}`; reference/lookup fields need `relationships.referenceCollectionId.data.id` + `attributes.relationshipName` (and optional `relationshipType`). Build these in the same helper so the on-the-wire shape can be unit-tested with WireMock JSON path matchers.
+- **Argument types are validated centrally**: `ArgumentTypeValidatingToolDecorator` (wired for every tool in `McpServerConfig`) checks each argument against the top-level `type` in the tool's `inputSchema` and returns a 400 `INVALID_ARGUMENT_TYPE` result (`McpErrorMapper.badRequest`) before the tool runs. Tools must not coerce a wrong-typed argument (e.g. parse a number sent as a string); declare the type in `inputSchema` instead.
 - **ID resolution**: accept either a UUID (`collectionId`, `referenceCollectionId`, `picklistSourceId`) or a friendly name (`collectionName`, `referenceCollection`) and resolve names via `GET /api/collections?filter[name][eq]=…`. UUIDs match `FieldBodyBuilder.UUID_PATTERN`; anything else triggers the lookup.
 
 ### Idempotent create-or-update (`apply_*` tools)

@@ -149,8 +149,13 @@ The tenant a request runs under is decided in this order, and only the gateway d
    PLT-359). An id the slug map does not know is still claimed, with no slug, and left to the
    credential check. The exchange is marked `tenantSource=header`
    (`TenantResolutionFilter.isHeaderSourced`). The claim must be proven by the credential:
-   - **JWT** — the `tenant_id` claim must be present and equal (`tenant_mismatch` → 401). On a
-     URL tenant a token without the claim is still accepted, as before.
+   - **JWT** — the `tenant_id` claim must be present and equal (`tenant_mismatch` → 401). The
+     same holds on a URL tenant: `JwtAuthenticationFilter` rejects a JWT without the claim on
+     every tenant route (`missing_tenant_claim` → 401, PLT-707), and
+     `DynamicReactiveJwtDecoder.bearerTokenValidator` rejects a `token_type=refresh` JWT outright.
+     kelta-auth never mints a tenant-less access token (`KeltaTokenCustomizer`) except the
+     platform-scoped `client_credentials` token of an internal client (`InternalClientRegistrar`),
+     which calls the worker's `/internal/**` directly.
    - **PAT** — the token's `tenantId` must be present and equal (`tenant_mismatch` → 401).
    - **Anonymous / Guest** — never. A non-public path is 401 without consulting the Guest
      profile (`header_tenant_anonymous`); a public / unauthenticated path runs with **no**
@@ -325,9 +330,11 @@ Consumers: `SecurityAuditFilter`, `GeoEnrichmentFilter`, `IpRateLimitFilter`,
   the first untrusted one (left-most if all trusted; a non-literal hop stops the walk at the
   nearest verified hop); no XFF → `X-Real-IP` if a literal, else the peer. The allowlist judges
   only this one address.
-- **Legacy mode** (list empty, the default) — unchanged: left-most XFF hop when
-  `trust-forwarded-for=true`, else the peer; the allowlist matches **any** of peer / XFF hops /
-  `X-Real-IP` (spoofable — `concerns.md`). The resolver logs the active mode at startup.
+- **Legacy mode** (list empty, the default) — `resolve` takes the left-most XFF hop when
+  `trust-forwarded-for=true`, else the peer (spoofable for audit/geo/rate limits — `concerns.md`);
+  the allowlist judges the socket peer **only** (`allowlistCandidates`, PLT-693), so behind an
+  ingress the list must be set or restricted tenants' non-admins are refused. The resolver logs
+  the active mode at startup.
 - **Downstream:** `IdentityHeaderStripFilter` (-400) removes any inbound `X-Kelta-Client-Ip`;
   `ClientIpForwardingFilter` (-390) sets it to the resolved IP. The worker's
   `LoginTrackingFilter` records that header in `login_history.source_ip` and the
@@ -646,8 +653,11 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   - **Realtime:** `RecordChangedPayload.ownerScoped=true` → `RealtimeBridge` publishes
     invalidation-only (no `data`); clients refetch through the scoped JSON:API path.
   - **Not covered:** anything reading the table without `QueryEngine` → the storage adapter —
-    raw-`JdbcTemplate` repositories/controllers and the `search_index` full-text search. Those
-    stay code-scoped (concerns.md → Owner-scoped collections). A new endpoint over an
+    raw-`JdbcTemplate` repositories/controllers. Those stay code-scoped (concerns.md →
+    Owner-scoped collections). `GET /api/_search` reads the tenant-wide `search_index`, then
+    authorizes each hit against its own collection and record
+    (`CerbosRecordAuthorizationAdvice.readableSearchHits`; owner-scoped and record-variant hits
+    are re-loaded through the `QueryEngine`) and pages the index until `limit` readable hits. A new endpoint over an
     owner-scoped collection must go through `QueryEngine` or scope itself.
 - **Member self-profile** (`GET`/`PATCH /api/me/profile`, `MyProfileController`;
   member-data-ownership slice 3, security). Rides the existing `/api/me/**` static route —
@@ -1227,7 +1237,12 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `actorId == userId` and the admin endpoint call it with the caller's identity and a distinct
   event type (`PAT_ADMIN_CREATED` vs `PAT_CREATED`, mirroring the existing
   `PASSWORD_RESET_ADMIN`/`PASSWORD_CHANGED` split) — so the audit trail can tell a self-mint from
-  an admin-mint by event type alone, not just by comparing actor/target columns.
+  an admin-mint by event type alone, not just by comparing actor/target columns. The same
+  controller lists a user's live tokens (`GET /api/admin/users/{id}/tokens`) and revokes one
+  (`DELETE /api/admin/users/{id}/tokens/{tokenId}`, `PAT_ADMIN_REVOKED`) through
+  `PersonalAccessTokenController`'s shared revoke (row revoked, `pat:<hash>` dropped,
+  `pat:revoked:<hash>` written); `UserSessionRevocationHook` uses it to revoke every PAT of a user
+  who leaves `ACTIVE` or is deleted.
 
 ### Tenant context in the worker
 
@@ -2087,6 +2102,13 @@ non-object snapshot ⇒ row dropped). UI: a **History** tab (shared `DetailTabBa
 the **current** page layout read-only with changed-field badges
 (`RecordHistoryTab`/`RecordVersionDetail`); `ActivityTimeline` shows one entry per
 version (author included, click-through via `?tab=__history__&version=N`).
+Retention: `RecordVersionRetentionSweep` (worker, hourly `kelta.record-version.retention.poll-interval-ms`,
+no tenant bound → every tenant) deletes versions older than
+`kelta.record-version.retention.max-age-days` (365) and, when
+`kelta.record-version.retention.max-versions-per-record` > 0 (default 0 = off), all but each
+record's newest N; batched (`batch-size` × `max-batches` per cycle, `FOR UPDATE SKIP LOCKED`).
+**Dry-run by default** (`kelta.record-version.retention.dry-run:true`) — it only logs the count
+until armed; metric `kelta_worker_record_versions_purged`.
 
 **Pagination contract** — every paginated REST endpoint uses JSON:API
 bracket syntax (`page[number]` / `page[size]`). Parsing lives in
