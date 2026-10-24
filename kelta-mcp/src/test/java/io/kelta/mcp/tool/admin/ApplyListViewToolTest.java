@@ -73,6 +73,15 @@ class ApplyListViewToolTest {
     }
 
     @Test
+    void rejectsNonStringNameInsteadOfSendingItsToString() {
+        CallToolResult result = call(Map.of(
+                "collectionName", "projects", "name", 42, "columns", List.of("name")));
+
+        assertThat(result.isError()).isEqualTo(Boolean.TRUE);
+        wm.verify(0, WireMock.anyRequestedFor(WireMock.anyUrl()));
+    }
+
+    @Test
     void rejectsWithoutColumns() {
         CallToolResult result = call(Map.of("collectionName", "projects", "name", "Main"));
         assertThat(result.isError()).isEqualTo(Boolean.TRUE);

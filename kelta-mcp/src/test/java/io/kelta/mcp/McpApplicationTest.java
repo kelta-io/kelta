@@ -347,6 +347,33 @@ class McpApplicationTest {
     }
 
     @Test
+    void userToolCallWithWrongTypedArgumentIsRejectedWith400() throws Exception {
+        MockHttpServletResponse res = rpc(userTransport, "/threadline-clothing/mcp/user",
+                "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\","
+                        + "\"params\":{\"name\":\"search\",\"arguments\":{\"query\":42}}}");
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(res.getContentAsString())
+                .contains("\"isError\":true")
+                .contains("\"status\":400")
+                .contains("INVALID_ARGUMENT_TYPE")
+                .contains("\\\"query\\\" must be string, got number");
+    }
+
+    @Test
+    void adminToolCallWithWrongTypedArgumentIsRejectedWith400() throws Exception {
+        MockHttpServletResponse res = rpc(adminTransport, "/threadline-clothing/mcp/admin",
+                "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\","
+                        + "\"params\":{\"name\":\"update_layout\","
+                        + "\"arguments\":{\"id\":\"L1\",\"isDefault\":\"true\"}}}");
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(res.getContentAsString())
+                .contains("\"isError\":true")
+                .contains("\"status\":400")
+                .contains("INVALID_ARGUMENT_TYPE")
+                .contains("\\\"isDefault\\\" must be boolean, got string");
+    }
+
+    @Test
     void userResourcesListIncludesAuthoringDocs() throws Exception {
         MockHttpServletResponse res = rpc(userTransport, "/threadline-clothing/mcp/user",
                 "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{}}");
