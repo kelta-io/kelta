@@ -48,6 +48,7 @@ Several problems in one request produce several entries (one per field).
 | `NOT_FOUND` | 404 | record not found (or not visible) |
 | `COLLECTION_NOT_FOUND` | 404 | unknown collection |
 | — | 409 | unique-constraint violation, or stale `If-Match` |
+| `FLOW_INACTIVE` | 409 | `POST /api/flows/{id}/execute` on an inactive flow (a `test: true` run by a `MANAGE_WORKFLOWS` holder is exempt) |
 | `RATE_LIMIT_EXCEEDED` | 429 | tenant quota or per-user share used up; carries `Retry-After` and `X-RateLimit-*` headers — body below, details in [Rate limits](/docs/api/rate-limits/#handling-429) |
 | — | 5xx | unexpected; `meta.requestId` is what to report |
 
