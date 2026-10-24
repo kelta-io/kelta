@@ -16,30 +16,32 @@ generated CLI docs, read in place — editing those files republishes the site. 
 
 Start a released Kelta stack, open the UI, and create your first collection. Nothing is
 built: Compose pulls the version pinned by `KELTA_VERSION` in `.env` from `ghcr.io/kelta-io`,
-so you need only Docker Compose v2.24+, `make` and `git` — no JDK, Maven or Node.
+so you need only Docker Compose v2.24+, `make` and `git` — no JDK, Maven or Node. Host ports
+**5173** (UI) and **8080** (gateway) must be free — `lsof -i :5173 -i :8080` should print nothing.
+They cannot be remapped today: the released UI bundle calls `http://localhost:8080` and the OAuth
+redirect is `http://localhost:5173/auth/callback`.
 
 ```bash
 git clone https://github.com/kelta-io/kelta.git
 cd kelta
 make setup                  # first time only: copies .env.example → .env, generates dev signing keys
-docker compose up -d --wait # pulls + starts postgres, redis, nats, cerbos, auth, worker, gateway, ui
+docker compose up -d --wait # pulls + starts postgres, redis, nats, cerbos, mailpit, auth, worker, gateway, ui
 ```
 
 To build this checkout from source instead, run `make up-jvm` — see
 [From source](#from-source-contributors).
 
 1. Open **http://localhost:5173/default/** and sign in as `admin@kelta.local` with the
-   first-boot password kelta-auth prints once in its log
-   (`docker compose logs kelta-auth | grep -o 'Password: *[A-Za-z0-9]*'`), then choose your own.
+   first-boot password kelta-auth prints once in its log, then choose your own:
+   `docker compose logs --no-color kelta-auth | sed -n 's/.*Password: *\([A-Za-z0-9]*\).*/\1/p' | head -n 1`.
    Set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` in `.env` before the first start to pick it instead. The
    `/default/` path is the tenant — the bare `http://localhost:5173` shows a *Tenant Required* page.
 2. Go to **Setup → Data Model → Collections**, click **Create Collection**, fill in
    the wizard (Basics → Fields → Authorization → Review), then click **Create
    Collection** on the Review step.
 
-That's it — a running, runtime-configurable Kelta instance with your first collection.
-See [Local Development](#local-development) below for ports, debugging, and the full
-service list.
+That's it — a running, runtime-configurable Kelta instance with your first collection. See
+[Local Development](#local-development) below for ports, debugging, and the full service list.
 
 ## Architecture
 
@@ -148,7 +150,7 @@ Platform admin (seeded by Flyway; kelta-auth replaces the seeded password on fir
 | NATS | :4222 | |
 | pgAdmin | :8092 | `--profile tools` |
 | Redis Commander | :8091 | `--profile tools` |
-| Mailpit (SMTP UI) | :8025 | `--profile tools` |
+| Mailpit (SMTP UI) | :8025 | Default stack — catches outgoing email |
 
 ### Useful Makefile targets
 
