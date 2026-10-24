@@ -3,7 +3,7 @@ package io.kelta.worker.config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -31,15 +31,19 @@ import org.springframework.security.web.SecurityFilterChain;
  * is still registered, but requests will fail closed with 401. Configure the
  * issuer explicitly to enable internal calls.
  *
- * <p><b>Rollout flag.</b> The JWT chain is <em>off by default</em>. Flip
+ * <p><b>Rollout flag.</b> The JWT requirement is <em>off by default</em>. Flip
  * {@code kelta.worker.internal-auth.enabled=true} (or the env
  * {@code KELTA_WORKER_INTERNAL_AUTH_ENABLED=true}) once every caller — gateway,
  * ai, auth — has been updated to acquire a bearer token and attach it. Until
- * then the chain degrades to permit-all on {@code /internal/**} so the acceptance
- * side can ship ahead of the caller side without breaking production.
+ * then {@code /internal/**} is permit-all so the acceptance side can ship ahead
+ * of the caller side without breaking production. The flag
+ * ({@link InternalAuthProperties}) is read when the {@code /internal/**} chain is
+ * built rather than through {@code @ConditionalOnProperty}, so a native build
+ * (as {@code make up} produces) honours a deploy-time env flip too.
  */
 @Configuration
 @EnableWebSecurity
+@EnableConfigurationProperties(InternalAuthProperties.class)
 public class InternalEndpointSecurityConfig {
 
     private static final Logger log = LoggerFactory.getLogger(InternalEndpointSecurityConfig.class);
@@ -48,15 +52,27 @@ public class InternalEndpointSecurityConfig {
     private static final String INTERNAL_SCOPE = "SCOPE_internal";
 
     /**
-     * JWT-protected security chain for {@code /internal/**} — active only when
-     * the rollout flag is on.
+     * Security chain for {@code /internal/**}: JWT with scope {@code internal}
+     * when the rollout flag is on, permit-all when it is off.
      */
     @Bean
     @Order(1)
-    @ConditionalOnProperty(name = "kelta.worker.internal-auth.enabled", havingValue = "true")
-    public SecurityFilterChain internalEndpointJwtFilterChain(HttpSecurity http,
+    public SecurityFilterChain internalEndpointFilterChain(HttpSecurity http,
+            InternalAuthProperties internalAuth,
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:${kelta.auth.issuer-uri:}}") String issuerUri)
             throws Exception {
+
+        http
+                .securityMatcher(INTERNAL_PATH)
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+
+        if (!internalAuth.enabled()) {
+            log.info("Worker /internal/** is permit-all (kelta.worker.internal-auth.enabled=false). "
+                    + "Flip the flag once every caller acquires a client_credentials JWT.");
+            http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+            return http.build();
+        }
 
         if (issuerUri == null || issuerUri.isBlank()) {
             log.warn("OAuth2 issuer URI is not configured — /internal/** endpoints will reject every request. "
@@ -64,35 +80,10 @@ public class InternalEndpointSecurityConfig {
         } else {
             log.info("Worker /internal/** protected by OAuth2 JWT (issuer={}, required scope=internal)", issuerUri);
         }
-
         http
-                .securityMatcher(INTERNAL_PATH)
-                .csrf(csrf -> csrf.disable())
-                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .anyRequest().hasAuthority(INTERNAL_SCOPE))
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()));
-
-        return http.build();
-    }
-
-    /**
-     * Permit-all chain for {@code /internal/**} that keeps the worker reachable
-     * while the rollout flag is off. Registered at the same order as the JWT
-     * chain but with the opposite flag value, so exactly one of the two is active
-     * at a time.
-     */
-    @Bean
-    @Order(1)
-    @ConditionalOnProperty(name = "kelta.worker.internal-auth.enabled", havingValue = "false", matchIfMissing = true)
-    public SecurityFilterChain internalEndpointPermitAllFilterChain(HttpSecurity http) throws Exception {
-        log.info("Worker /internal/** is permit-all (kelta.worker.internal-auth.enabled=false). "
-                + "Flip the flag once every caller acquires a client_credentials JWT.");
-        http
-                .securityMatcher(INTERNAL_PATH)
-                .csrf(csrf -> csrf.disable())
-                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
         return http.build();
     }
 
