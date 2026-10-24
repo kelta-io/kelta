@@ -7,6 +7,8 @@ import io.kelta.worker.service.SecurityAuditLogger;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -17,7 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.Map;
 
 /**
- * Admin-on-behalf-of personal access token minting for managed users — {@code MANAGE_USERS}
+ * Admin-on-behalf-of personal access token management for managed users — {@code MANAGE_USERS}
  * holders can mint a PAT for another user (e.g. to script an integration on their behalf)
  * without ever seeing that user's password. {@code /api/admin/**} is a static gateway route
  * with only the blanket API_ACCESS check, so the permission is enforced here, following the
@@ -26,7 +28,9 @@ import java.util.Map;
  * <p>Delegates the actual mint (generation, SHA-256 hash, Redis cache) to
  * {@link PersonalAccessTokenController#mintToken}, passing the caller's identity as the audit
  * actor and {@link SecurityAuditLogger.EventType#PAT_ADMIN_CREATED} so admin-minted tokens are
- * distinguishable from self-service ones in the audit trail.
+ * distinguishable from self-service ones in the audit trail. Admins can also list a user's live
+ * tokens and revoke one (audited {@link SecurityAuditLogger.EventType#PAT_ADMIN_REVOKED}); a user
+ * outside the caller's tenant, or a token the user does not hold, answers 404.
  *
  * @since 1.0.0
  */
@@ -63,6 +67,41 @@ public class AdminPersonalAccessTokenController {
         String actorEmail = permissionResolver.getEmail(request);
         return personalAccessTokenController.mintToken(
                 id, tenantId, body, actorEmail, SecurityAuditLogger.EventType.PAT_ADMIN_CREATED);
+    }
+
+    /** List the live tokens of {@code id} (the target user). Never returns the token hash. */
+    @GetMapping("/{id}/tokens")
+    public ResponseEntity<?> listTokens(HttpServletRequest request, @PathVariable("id") String id) {
+        requirePermission(request);
+        String tenantId = TenantContext.get();
+        if (tenantId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
+        }
+        if (!personalAccessTokenController.userExists(tenantId, id)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(Map.of("data", personalAccessTokenController.listUserTokens(tenantId, id)));
+    }
+
+    /** Revoke token {@code tokenId} of {@code id} (the target user), on the caller's behalf. */
+    @DeleteMapping("/{id}/tokens/{tokenId}")
+    public ResponseEntity<?> revokeToken(HttpServletRequest request, @PathVariable("id") String id,
+                                         @PathVariable("tokenId") String tokenId) {
+        requirePermission(request);
+        String tenantId = TenantContext.get();
+        if (tenantId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
+        }
+        if (!personalAccessTokenController.userExists(tenantId, id)) {
+            return ResponseEntity.notFound().build();
+        }
+        String actorEmail = permissionResolver.getEmail(request);
+        boolean revoked = personalAccessTokenController.revokeUserToken(
+                tenantId, id, tokenId, actorEmail, SecurityAuditLogger.EventType.PAT_ADMIN_REVOKED);
+        if (!revoked) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(Map.of("status", "revoked", "tokenId", tokenId));
     }
 
     private void requirePermission(HttpServletRequest request) {

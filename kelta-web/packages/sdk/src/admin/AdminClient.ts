@@ -139,6 +139,7 @@ import type {
   SearchReindexResult,
   PersonalAccessToken,
   PersonalAccessTokenCreated,
+  AdminUserPersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   AiChatRequest,
   AiChatResponse,
@@ -581,6 +582,17 @@ export class AdminClient {
       ): Promise<PersonalAccessTokenCreated> => {
         const response = await this.axios.post(`/api/admin/users/${userId}/tokens`, request);
         return response.data as PersonalAccessTokenCreated;
+      },
+
+      /** Live tokens of `userId` (`MANAGE_USERS`). Never includes the token hash. */
+      list: async (userId: string): Promise<AdminUserPersonalAccessToken[]> => {
+        const response = await this.axios.get(`/api/admin/users/${userId}/tokens`);
+        return (response.data as { data: AdminUserPersonalAccessToken[] }).data;
+      },
+
+      /** Revoke `userId`'s token `tokenId` on the caller's behalf (`MANAGE_USERS`). */
+      revoke: async (userId: string, tokenId: string): Promise<void> => {
+        await this.axios.delete(`/api/admin/users/${userId}/tokens/${tokenId}`);
       },
     },
   };
