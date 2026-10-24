@@ -462,6 +462,25 @@ static checks; all run without a stack.
   (`npm run gen:docs`); one to `docs/authoring/*.md` is mirrored in `docsgen/authoringDocs.ts` and
   `kelta-mcp/src/main/resources/docs/authoring/` (pinned by `DocResourceTest`).
 
+**Runnable blocks (`runnable` fence marker).** A shell block whose fence info string carries the
+word `runnable` — ```` ```bash runnable ```` — is *executed* against a live stack, not just
+checked statically. Today that is `getting-started/first-app.md` (both Part 2 blocks), run by
+`ci/first-app-runnable.sh` in the `templates` job's "Run the first-app tutorial's runnable
+blocks" step: it creates an empty sandbox of `default` (a fresh tenant, so `customers`/`invoices`
+cannot collide with the installed templates), exports `KELTA_URL`/`KELTA_TENANT`/`KELTA_TOKEN` for
+the sandbox admin, and runs every marked block in document order in **one** `bash -euo pipefail`
+shell inside a temp directory (blocks share variables and the files they write), echoing
+`==> block <n>/<total>: <first line>` before each. The first failing command fails the step. It
+then re-runs each `kelta <group> apply …` of those blocks with `--output json` and fails unless
+it created, updated and deleted nothing (`unchanged`), because the page promises that. Unmarked
+blocks (```` ```bash ````, ```` ```json ````, …) stay illustrative; the marker does not affect
+the `kelta …` line check above (its fence regex ignores the info string). Mark a block only if it
+runs against a fresh tenant with nothing but the blocks before it. `bash ci/first-app-runnable.sh
+--extract <page.md>` prints what would run; the script's tests are `ci/first-app-runnable.test.ts`
+(job `test-ci-scripts`, stub `kelta` on `PATH`). The `templates` path filter does not list the
+page yet, so an edit to it alone does not trigger the job (the weekly schedule and any
+`ci.yml`/`templates` change do).
+
 ## MCP smoke test (CI)
 
 The `e2e` job runs kelta-mcp in its compose stack (`docker-compose.ci.yml`, under the `mcp`
