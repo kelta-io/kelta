@@ -542,7 +542,9 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   ids 404, a user outside the tenant 404 and an inactive user 409. The plaintext token is
   returned once. Every attempt is audited as `TENANT_BOOTSTRAP_TOKEN_ISSUED`. The token works
   only on the target tenant's URLs, because `PatAuthenticationFilter` rejects a tenant mismatch
-  with 401. The grant this implies is recorded in `concerns.md`.
+  with 401. A successful `admin-invite` on the tenant revokes every live `bootstrap-*` token in it
+  (`PersonalAccessTokenController#revokeBootstrapTokens`, same steps as `DELETE /api/me/tokens/{id}`,
+  audited `TENANT_BOOTSTRAP_TOKEN_REVOKED`). The grant this implies is recorded in `concerns.md`.
   `POST /api/tenants` also accepts a transient **`adminEmail`** attribute — not a `tenants`
   field: `TenantProvisioningHook` strips it in `beforeCreate` and, after provisioning, seeds the
   admin with that email and sends the same invite. Provisioned admins have no usable password
@@ -1271,6 +1273,13 @@ Before 2026-09-17 only kelta-worker had the binder, so kelta-auth and kelta-ai r
 statement as the platform session and their RLS policies never evaluated — see
 `concerns.md`. Adding a fourth JDBC service means adding this bean and a tenant resolution
 for it, not just a `ScopedValue`.
+
+Direct database logins (per-tenant `superset_<slug>` roles) never go through this binder: they
+are pinned by `session_user` in `tenant_db_role` (V201), which every policy prefers over the
+GUC. That table has no RLS, so tenant roles hold **no privilege on it** — the pin is read
+through `kelta_pinned_tenant()`, SECURITY DEFINER with a fixed `search_path` — and are granted
+SELECT in `public` only on RLS tables with a `tenant_id` column (V215 applied this to roles
+provisioned before the narrowing).
 
 ## Worker Layers
 

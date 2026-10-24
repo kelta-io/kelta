@@ -84,7 +84,8 @@ rejected with `409` if the record changed in between. The kanban board uses this
 
 ## Full-text and semantic search
 
-`GET /api/_search?q=…` across collections and `POST /api/<collection>/semantic-search` — see
+`GET /api/_search?q=…` across collections and `POST /api/<collection>/semantic-search`. Both return only
+records the caller can read — see
 [Search and attachments](/docs/data-model/search-and-attachments/).
 
 ## Aggregates and the latest value

@@ -18,13 +18,17 @@ scoped without knowing it. `aggregate()`, `semanticSearch()` and the `COUNT(*)` 
 read path including `getById` (PLT-330). `DynamicCollectionRouter` keeps its own injection as a
 second layer (`RecordTenantScope`); both read the shared-rows list from `SystemCollectionTenancy`.
 
+By-id statements are scoped in the adapter too (PLT-708): `getById`, the `UPDATE` in `update`
+and the `DELETE` in `delete` AND in `TenantScopePolicy.tenantScope` (reads) /
+`tenantWriteScope` (writes — the same predicate minus the shared system rows, which RLS only
+lets a tenant `SELECT`) for every `tenant_id`-scoped system collection, so with a tenant bound a
+foreign id matches no row even on a connection that runs as `admin_bypass`. The `UPDATE` carries
+its own predicate rather than trusting the `getById` check before it (TOCTOU). No tenant bound
+→ unscoped, as before; tables without a `tenant_id` column (`hasTenantColumn`) get nothing.
+No caller was found that binds one tenant and legitimately writes another's row by id through the
+adapter (cross-tenant copiers — provisioning, promotion — use raw JDBC under each tenant in turn).
+
 **Still open:**
-- **By-id and write paths remain router-only** for `tenant_id`-scoped system collections:
-  `getById`, `update` and `delete` take no tenant predicate, so `RecordTenantScope.visibleToTenant` (`GET /:id` and the sub-resource routes)
-  and `RecordTenantScope.injectTenantId` (creates) are the only application-layer check. A direct caller can load a
-  single foreign system record by guessing its id. Closing it needs a pass over the
-  cross-tenant write paths (provisioning, promotion, the create read-back) that legitimately
-  touch another tenant.
 - **Eleven tenant-data child collections are `.tenantScoped(false)`** (`package-items`,
   `record-type-picklists`, `script-triggers`, `approval-steps`, `approval-step-instances`,
   `connected-app-tokens`, `job-execution-logs`, `bulk-job-results`, `collection-versions`,
@@ -41,6 +45,24 @@ second layer (`RecordTenantScope`); both read the shared-rows list from `SystemC
   self-scoped collection becomes `WHERE FALSE` (PLT-354, `refusesAnonymousRead`); an
   authenticated no-tenant read still runs unscoped.
 - The in-code predicate is the first line of defence; RLS is the backstop.
+
+### `admin_bypass` — the empty GUC opens every tenant
+
+`admin_bypass` (V201, every tenant table) admits all rows when `app.current_tenant_id = ''`,
+and `TenantAwareDataSource` issues `SET app.current_tenant_id = ''` whenever `TenantContext` is
+empty. That is right for Flyway, bootstrap, schedulers and NATS consumers, and catastrophic for a
+request thread that lost its tenant (a hop the `ScopedValue` did not follow, a filter that did not
+bind): RLS then isolates nothing, and only the app-layer predicates above stand. Two guards:
+- **Fail closed on a tenant request with no tenant (PLT-708).** When the thread serves an HTTP
+  request carrying `X-Tenant-ID` (`RequestContextHolder`) yet `TenantContext` is empty, the borrow
+  throws and WARNs with the method and path instead of issuing `''`. Exempt: a request bound
+  `RequestAuthentication.PLATFORM_SCOPED` (`TenantManagementScopeFilter`'s `MANAGE_TENANTS`
+  listing, unbound on purpose), and kelta-auth, which binds from its session, not the header
+  (`TenantAwareDataSourcePostProcessor(false)`). It cannot see a request whose work hopped to a
+  thread with neither the `ScopedValue` nor the request bound — those reach `''` as before.
+- **App-layer predicates** in `TenantScopePolicy` (lists, counts, aggregates, by-id read/update/delete).
+
+Raw `JdbcTemplate` SQL issued with no tenant bound still relies on its own `WHERE` alone.
 
 ### RLS invariants
 
@@ -62,7 +84,11 @@ RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205). Rules
   `field_version`, whose policies key strictly on the parent's `tenant_id`.
 - **Superset logins** are granted table by table on RLS-enforced `tenant_id` tables only
   (`supersetRoleIsGrantedOnlyTenantScopedTables`); pinned roles cannot hop tenants via the GUC
-  (V201).
+  (V201). Tenant roles hold **no privilege on `tenant_db_role`** (it has no RLS — reading it lists
+  every tenant's id and DB role): the pin works through `kelta_pinned_tenant()`, SECURITY
+  DEFINER with a fixed `search_path`. V215 revoked it from every pinned and `superset_%` role and
+  applied the narrowing to roles provisioned before it (blanket public grant until next rotation);
+  an unpinned `superset_%` role keeps no public grant (`v215NarrowsAPreNarrowingSupersetRole`).
 - **Hand-rolled JDBC must write `AND tenant_id = ?` on the table that owns the row** — RLS is
   not a substitute (see `PageLayoutTreeService` in the archive) — and test with a second tenant.
 
@@ -200,9 +226,14 @@ mailbox to a high-volume public address.
   change is a security change): default 1 h / max 24 h (`MAX_LIFETIME`), Redis `pat:<hash>`
   cached for exactly the remaining lifetime; the PAT is rejected on any other tenant's URL; the
   platform tenant → 403, non-UUID ids → 404; user lookup tenant-filtered; every attempt logged as
-  `TENANT_BOOTSTRAP_TOKEN_ISSUED` on `security.audit` (log-only, not a table row). Residual: the
-  token is never auto-revoked when the tenant is claimed; expired tokens no longer count against
-  the 10-live cap.
+  `TENANT_BOOTSTRAP_TOKEN_ISSUED` on `security.audit` (log-only, not a table row). Claiming the
+  tenant (`POST /api/tenants/{id}/admin-invite` → `TenantAdminInviteService.inviteSeededAdmin`)
+  revokes every live `bootstrap-*` token in that tenant, whichever user holds it
+  (`PersonalAccessTokenController#revokeBootstrapTokens`, tenant-filtered: DB `revoked`, Redis
+  `pat:<hash>` dropped + `pat:revoked:<hash>` set, each audited `TENANT_BOOTSTRAP_TOKEN_REVOKED`
+  with the inviting actor; a Redis outage is logged and the DB revoke still stands). Residual: a
+  bootstrap token minted *after* the invite lives until it expires (≤ 24 h); a token renamed
+  away from `bootstrap-` escapes the sweep; expired tokens no longer count against the 10-live cap.
 - **Server-only fields:** secret material on system collections (`credentials.dataEnc`,
   `credential-oauth-tokens.accessTokenEnc`/`refreshTokenEnc`, `oidc-providers.clientSecretEnc`,
   `connected-apps.clientSecretHash`, `connected-app-tokens.tokenHash`) is declared
@@ -234,10 +265,6 @@ mailbox to a high-volume public address.
 - **`/api/oidc-providers` reads skip record filtering**: `CerbosRecordAuthorizationAdvice`'s own
   `isMetadataPath` matches `/api/oidc` as a raw prefix. Writes are gated (PLT-656); the client
   secret is server-only.
-- `GET /api/profiles/{id}?include=profile-system-permissions,…` returns grant rows at
-  `API_ACCESS`; the `profile-*-permissions` routes' own object check does not apply to an include,
-  and #1772's include filtering never runs because `/api/profiles` is in the advice's
-  `isMetadataPath`.
 - **Approval instances/steps are tenant-visible to every user** (accepted 2026-07-08).
   `approval-instances`/`approval-step-instances` (incl. `comments`) have no row-level read
   restriction beyond tenant RLS. Owner scoping doesn't fit (submitter **or** assignee); needs a
@@ -638,10 +665,10 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   `collection(id)` without an `ON DELETE` action.
 - **Destructive schema-migration execute** (`MigrationExecutionService` +
   `SchemaMigrationEngine.migrateSchemaDestructive`) is the only path that `DROP COLUMN`s tenant
-  data. Other pods refresh via NATS and then try to deprecate the already-dropped column with
-  `COMMENT ON COLUMN`; that fails harmlessly after re-registration (one `StorageException` log per
-  removed field). Make deprecate tolerant of a missing column as a follow-up. Security — not
-  auto-merged.
+  data. Other pods refresh via NATS and run the non-destructive `migrateSchema`, whose deprecate
+  checks `information_schema.columns` first: an already-dropped column skips the `COMMENT ON
+  COLUMN` with one INFO line, the `DEPRECATE_COLUMN` history row is still recorded, and the other
+  migrations in the call still run. Security — not auto-merged.
 - **runtime-core's jar-packaged `application.properties` becomes config for worker/ai/mcp/auth.**
   Never put operational settings there (it once forced JDBC DEBUG = 92% of all log volume); it
   still ships datasource/Hikari/Redis/actuator values each service must override.
@@ -876,7 +903,7 @@ Follow-up: alert on `numbackends / max_connections > 0.8`.
 
 `TenantAwareDataSource` (runtime-core, registered by worker, auth and ai) scopes
 `app.current_tenant_id` per transaction with `SET LOCAL`, so it survives PgBouncer
-`pool_mode = transaction`; unbound connections keep the session `''` sentinel (`admin_bypass`).
+`pool_mode = transaction`; unbound connections keep the session `''` sentinel (`admin_bypass`) — except a request carrying `X-Tenant-ID` with no tenant bound, which is refused (see Security Risks → `admin_bypass`).
 Guards: `TenantAwareDataSourceTest`, `RowLevelSecurityIntegrationTest`, `TenantBindingIntegrationTest`.
 
 **Open — compose healthchecks for kelta-worker and kelta-ai can never fail.** Both use
@@ -896,9 +923,11 @@ its own change with a full compose run.
 - **Harness Cerbos is allow-all** — object/record policy deny paths are verified only by
   `CerbosGeneratedPolicyIT` against generated goldens; geo rules and `/api/operations` denies only
   on a live stack.
-- `SchemaMigrationEngine.migrateSchema` (non-destructive deprecate branch) is covered on H2 only
-  (`SchemaMigrationEngineTest`), with no real-Postgres scenario; the destructive path has unit
-  tests + `SchemaMigrationScenarioTest`.
+- `SchemaMigrationEngine.migrateSchema` (non-destructive deprecate branch) is covered on H2
+  (`SchemaMigrationEngineTest`) and on real Postgres only for the dropped-column / schema-qualified
+  deprecate (`SchemaMigrationEngineDeprecateIntegrationTest`, skipped without Docker); ADD and
+  ALTER TYPE have no Postgres scenario. The destructive path has unit tests +
+  `SchemaMigrationScenarioTest`.
 - SQL filter operator mappings (`SqlQueryBuilder`, runtime-core) are tested only through the
   adapter (`PhysicalTableStorageAdapterTest` filter-operator cases on H2; `ISNULL`/`IN` on real
   Postgres for temporal fields only).
@@ -945,6 +974,7 @@ One line each; full write-ups are in git history.
 - PLT-330 (2026-10-04) — any token (and, via the public path, anyone) could list every tenant; gateway narrowing (#1603/#1604) + self-scoped storage predicate.
 - PLT-331 (2026-10-04) — static routes for `users`/`profiles`/`collections` skipped the collection check; `COLLECTION_CHECKED_STATIC_ROUTES` + advice count correction.
 - PLT-656 (2026-10-24) — writes to `page-layouts`, `list-views`, `ui-menus`, `ui-pages`, `global-picklists`, `oidc-providers`, `email-templates`, `scripts`, `connected-apps`, `flows`, `approval-processes`, `reports` and `dashboards` ran at `API_ACCESS` (any user could create a script, flow, OIDC provider or connected app); each is now a writes-only `COLLECTION_CHECKED_STATIC_ROUTES` row with its setup page's permission as override, and generic `flows`/`connected-apps` reads get record filtering. Left out: `webhooks` (no collection behind `/api/webhooks/**` — inbound receivers that authenticate the sender). Exempt end-user actions: flow/script/report execute, dashboard data (flow execute still open, above).
+- PLT-657 (2026-10-24) — `GET /api/profiles/{id}?include=profile-system-permissions,…` returned every grant row at `API_ACCESS`, because `CerbosRecordAuthorizationAdvice` skipped metadata paths before its include filtering; `/api/profiles` responses now get `restrictIncluded` on `included[]` (denied rows dropped, no 403) while the profiles themselves stay unfiltered and `ApiPaths.METADATA_PREFIXES` (FLS/masking) is unchanged. `CerbosRecordAuthorizationAdviceTest` → profile includes.
 - 2026-10-12 (child-route-authz) — child-resource paths `/api/{parent}/{parentId}/{child}[/{childId}]` were authorized against the parent collection only; the gateway now also requires the child's own decision (parent needs `read`), and the record/field-write advices use the child collection.
 - 2026-10-12 (include-record-authz) — `CerbosRecordAuthorizationAdvice` applies each included collection's record read authorization (collection-level read, record-level rules, shares) to `included[]`, per type; a single record that is not readable carries no `included`.
 - 2026-10-12 (child-authz-static-and-create) — the worker authorizes the router's generic child handlers against the child collection under every parent, `static-` ones included (`CerbosSubResourceAuthorizer`); field write rules apply to creates (top-level, child, `/api/operations`) and to to-one relationships, as to updates.

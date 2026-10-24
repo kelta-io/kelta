@@ -1,7 +1,11 @@
 package io.kelta.runtime.context;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import javax.sql.DataSource;
 import java.io.PrintWriter;
@@ -48,6 +52,15 @@ import java.sql.Statement;
  * with no transaction management. The empty value already maps to {@code admin_bypass}, so
  * transaction scoping is irrelevant to their isolation.
  *
+ * <h2>Fail closed on a tenant request that lost its tenant</h2>
+ * <p>{@code ''} opens every tenant, so it is only issued where no tenant can be meant. When the
+ * thread is serving an HTTP request that carries an {@code X-Tenant-ID} header (the gateway
+ * attests it, and the service's {@code TenantContextFilter} binds from it) yet {@link TenantContext} is empty — a filter that did not bind it, a hop onto a
+ * thread the scope did not follow — the borrow throws instead and logs a WARN naming the request.
+ * Such a request was always meant to run as its tenant; reading as the platform would be a leak.
+ * The one request that is unbound on purpose says so with
+ * {@link RequestAuthentication#PLATFORM_SCOPED} and keeps {@code ''}.
+ *
  * <p>See {@code .claude/docs/concerns.md} → "Connection Pooler Compatibility" and
  * {@code .claude/docs/conventions.md} → "Row-level security: scoping tenant data in the
  * database".
@@ -56,10 +69,25 @@ public class TenantAwareDataSource implements DataSource {
 
     private static final Logger log = LoggerFactory.getLogger(TenantAwareDataSource.class);
 
+    /** The gateway-attested tenant header every tenant request reaches a service with. */
+    static final String TENANT_HEADER = "X-Tenant-ID";
+
     private final DataSource delegate;
+    private final boolean failClosedOnTenantRequest;
 
     public TenantAwareDataSource(DataSource delegate) {
+        this(delegate, true);
+    }
+
+    /**
+     * @param failClosedOnTenantRequest whether a request carrying {@code X-Tenant-ID} with no
+     *        {@link TenantContext} bound is refused instead of run as the platform session. On for
+     *        services whose tenant binding comes from that header (worker, ai); kelta-auth binds
+     *        from its session and is reached directly by browsers, so the header proves nothing there.
+     */
+    public TenantAwareDataSource(DataSource delegate, boolean failClosedOnTenantRequest) {
         this.delegate = delegate;
+        this.failClosedOnTenantRequest = failClosedOnTenantRequest;
     }
 
     @Override
@@ -83,6 +111,9 @@ public class TenantAwareDataSource implements DataSource {
         // legacy session SET '' behavior. Empty already maps to admin_bypass, so there is
         // nothing to isolate and no need to manage a transaction.
         if (tenantId == null || tenantId.isBlank()) {
+            if (failClosedOnTenantRequest) {
+                failIfTenantRequest(conn);
+            }
             setTenantSession(conn, "");
             return conn;
         }
@@ -103,6 +134,35 @@ public class TenantAwareDataSource implements DataSource {
         // We started the transaction for an autocommit-style operation: commit it and
         // restore autocommit when the caller releases the connection.
         return wrapWithCommitOnClose(conn);
+    }
+
+    /**
+     * Refuses the platform session for a thread serving a tenant's HTTP request: closes the
+     * borrowed connection and throws. Threads with no bound request (Flyway, schedulers, NATS
+     * consumers, startup), requests without a tenant header, and a request explicitly marked
+     * {@link RequestAuthentication#PLATFORM_SCOPED} (unbound on purpose to read across tenants)
+     * fall through to {@code SET ''}.
+     */
+    private static void failIfTenantRequest(Connection conn) throws SQLException {
+        if (RequestAuthentication.current() == RequestAuthentication.PLATFORM_SCOPED) {
+            // Deliberately unbound (TenantManagementScopeFilter's MANAGE_TENANTS listing).
+            return;
+        }
+        RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
+        if (!(attributes instanceof ServletRequestAttributes servlet)) {
+            return;
+        }
+        HttpServletRequest request = servlet.getRequest();
+        String requestTenant = request.getHeader(TENANT_HEADER);
+        if (requestTenant == null || requestTenant.isBlank()) {
+            return;
+        }
+        log.warn("Refusing a platform (app.current_tenant_id = '') connection for {} {}: the request "
+                        + "carries tenant {} but no TenantContext is bound on thread '{}'",
+                request.getMethod(), request.getRequestURI(), requestTenant, Thread.currentThread().getName());
+        conn.close();
+        throw new SQLException("No tenant bound for a request of tenant " + requestTenant
+                + " — refusing to run it as the platform session");
     }
 
     /** Issues a transaction-local {@code SET LOCAL} for a tenant-scoped connection. */

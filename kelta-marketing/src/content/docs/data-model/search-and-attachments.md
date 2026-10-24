@@ -15,7 +15,11 @@ GET /api/_search?q=acme&limit=20
 ```
 
 - `q` must be at least 3 characters; `limit` is clamped to 1–100 (default 20).
-- Results carry the collection, record id, display value and a snippet, ordered by rank.
+- Results carry the collection, record id, display value and rank, ordered by rank.
+- Search returns only hits the caller can read. Each hit is checked against its own collection and
+  record, the same way as `GET /api/<collection>/<id>`: collection read access, record-level rules and
+  manual shares all apply. Hits the caller cannot read are left out before the limit is applied, and
+  `meta.total` is the number of hits returned.
 - The end-user app exposes it as global search (`Cmd/Ctrl+K`, `/app/search`); the MCP user toolset as `search`.
 - Fields with a masking configuration are never indexed.
 
