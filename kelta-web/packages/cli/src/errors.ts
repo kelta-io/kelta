@@ -30,6 +30,8 @@ export interface CliErrorOptions {
   meta?: Record<string, unknown>;
   /** The full JSON:API `errors[]` array, when the failure came from one. */
   errors?: JsonApiErrorEntry[];
+  /** What the caller can do about it, when the CLI knows. */
+  hint?: string;
 }
 
 /** A fully-mapped CLI failure: stable `code`, exit code, optional HTTP context. */
@@ -41,6 +43,7 @@ export class CliError extends Error {
   readonly source?: Record<string, unknown>;
   readonly meta?: Record<string, unknown>;
   readonly errors?: JsonApiErrorEntry[];
+  readonly hint?: string;
 
   constructor(message: string, options: CliErrorOptions) {
     super(message);
@@ -52,6 +55,7 @@ export class CliError extends Error {
     this.source = options.source;
     this.meta = options.meta;
     this.errors = options.errors;
+    this.hint = options.hint;
     Object.setPrototypeOf(this, CliError.prototype);
   }
 }
@@ -97,26 +101,46 @@ function codeForStatus(status: number): string {
   }
 }
 
+/** `Retry-After` as whole seconds; the HTTP-date form is not used by the gateway. */
+function retryAfterSeconds(headers: unknown): number | undefined {
+  if (typeof headers !== 'object' || headers === null) return undefined;
+  const raw = (headers as Record<string, unknown>)['retry-after'];
+  const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.trim()) : NaN;
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function hintFor(code: string, headers: unknown): string | undefined {
+  if (code !== 'RATE_LIMIT_EXCEEDED') return undefined;
+  const seconds = retryAfterSeconds(headers);
+  const wait =
+    seconds !== undefined
+      ? `Wait ${String(seconds)} second${seconds === 1 ? '' : 's'} (Retry-After) before retrying`
+      : 'Wait before retrying';
+  return `${wait}; check usage with \`kelta limits get\` and batch or slow down requests.`;
+}
+
 /**
  * Map a non-2xx HTTP response to a CliError, keeping the server's own reason:
  * `errors[0].detail` of a JSON:API envelope, else a legacy `error` string.
  * The generic `Request failed with status N` is only for a body with neither.
  */
-export function errorFromResponse(status: number, data: unknown): CliError {
+export function errorFromResponse(status: number, data: unknown, headers?: unknown): CliError {
   const body = (typeof data === 'object' && data !== null ? data : {}) as JsonApiErrorBody;
   const entries = Array.isArray(body.errors) ? body.errors : [];
   const first = entries[0];
   const legacy = typeof body.error === 'string' && body.error !== '' ? body.error : undefined;
+  const code = first?.code ?? codeForStatus(status);
   return new CliError(
     first?.detail ?? first?.title ?? legacy ?? `Request failed with status ${status}`,
     {
-      code: first?.code ?? codeForStatus(status),
+      code,
       exitCode: exitCodeForStatus(status),
       status,
       requestId: first?.meta?.requestId,
       source: first?.source,
       meta: first?.meta,
       errors: entries.length > 0 ? entries : undefined,
+      hint: hintFor(code, headers),
     }
   );
 }
@@ -144,7 +168,7 @@ export function mapError(error: unknown): CliError {
         exitCode: EXIT.API,
       });
     }
-    return errorFromResponse(error.response.status, error.response.data);
+    return errorFromResponse(error.response.status, error.response.data, error.response.headers);
   }
 
   if (isKeltaErrorLike(error)) {
@@ -177,6 +201,7 @@ export function toErrorPayload(error: CliError): string {
       detail: error.message,
       source: error.source,
       meta: error.meta,
+      hint: error.hint,
     },
     ...(error.errors && error.errors.length > 0 ? { errors: error.errors } : {}),
   });

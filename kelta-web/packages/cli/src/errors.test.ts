@@ -3,7 +3,11 @@ import { AxiosError, AxiosHeaders } from 'axios';
 import { z } from 'zod';
 import { CliError, EXIT, mapError, toErrorPayload } from './errors.js';
 
-function axiosError(status: number, body: unknown): AxiosError {
+function axiosError(
+  status: number,
+  body: unknown,
+  responseHeaders: Record<string, string> = {}
+): AxiosError {
   const headers = new AxiosHeaders();
   const config = { headers };
   return new AxiosError(
@@ -14,7 +18,7 @@ function axiosError(status: number, body: unknown): AxiosError {
     {
       status,
       statusText: '',
-      headers: {},
+      headers: responseHeaders,
       config: config as never,
       data: body,
     }
@@ -106,6 +110,41 @@ describe('mapError', () => {
     expect(mapped.exitCode).toBe(exitCode);
     expect(mapped.code).toBe(code);
     expect(mapped.status).toBe(status);
+  });
+
+  it('hints to wait Retry-After seconds on RATE_LIMIT_EXCEEDED', () => {
+    const mapped = mapError(
+      axiosError(
+        429,
+        {
+          errors: [
+            {
+              status: '429',
+              code: 'RATE_LIMIT_EXCEEDED',
+              title: 'RATE_LIMIT_EXCEEDED',
+              detail: 'Rate limit exceeded. Retry after 42 seconds.',
+              meta: { requestId: 'req-429' },
+            },
+          ],
+        },
+        { 'retry-after': '42' }
+      )
+    );
+    expect(mapped.code).toBe('RATE_LIMIT_EXCEEDED');
+    expect(mapped.exitCode).toBe(EXIT.CONFLICT);
+    expect(mapped.requestId).toBe('req-429');
+    expect(mapped.hint).toContain('Wait 42 seconds (Retry-After)');
+    const payload = JSON.parse(toErrorPayload(mapped)) as { error: { hint?: string } };
+    expect(payload.error.hint).toBe(mapped.hint);
+  });
+
+  it('still hints on a 429 without Retry-After', () => {
+    const mapped = mapError(axiosError(429, 'slow down'));
+    expect(mapped.hint).toMatch(/^Wait before retrying/);
+  });
+
+  it('gives no hint for other errors', () => {
+    expect(mapError(axiosError(404, 'missing')).hint).toBeUndefined();
   });
 
   it('maps network errors (no response)', () => {

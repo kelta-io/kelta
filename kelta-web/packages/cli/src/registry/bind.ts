@@ -67,11 +67,14 @@ async function confirmDangerous(def: RegisteredCommand, global: GlobalOptions): 
 /** Human-readable rendering of every error, not just the first. */
 function formatTableError(mapped: CliError): string {
   const entries = mapped.errors && mapped.errors.length > 0 ? mapped.errors : undefined;
-  if (!entries) return `Error [${mapped.code}]: ${mapped.message}\n`;
+  const hint = mapped.hint ? `Hint: ${mapped.hint}\n` : '';
+  if (!entries) return `Error [${mapped.code}]: ${mapped.message}\n` + hint;
   return (
     entries
       .map((e) => `Error [${e.code ?? mapped.code}]: ${e.detail ?? mapped.message}`)
-      .join('\n') + '\n'
+      .join('\n') +
+    '\n' +
+    hint
   );
 }
 

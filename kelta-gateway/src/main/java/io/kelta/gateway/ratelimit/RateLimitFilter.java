@@ -7,6 +7,7 @@ import io.kelta.gateway.error.ResponseHelpers;
 import io.kelta.gateway.filter.TenantResolutionFilter;
 import io.kelta.gateway.metrics.GatewayMetrics;
 import io.kelta.gateway.route.RateLimitConfig;
+import io.kelta.jsonapi.JsonApiError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +21,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.Map;
 
 /**
  * Global filter that enforces per-tenant rate limiting based on governor limits.
@@ -228,7 +230,8 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     }
 
     /**
-     * Returns a 429 Too Many Requests response with rate limit information.
+     * Returns a 429 {@code RATE_LIMIT_EXCEEDED} JSON:API error with rate limit headers,
+     * the same envelope {@code GlobalErrorHandler} renders.
      *
      * @param exchange the server web exchange
      * @param config the rate limit configuration
@@ -237,10 +240,6 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
      */
     private Mono<Void> tooManyRequests(ServerWebExchange exchange, RateLimitConfig config, RateLimitResult result) {
         long retryAfterSeconds = result.getRetryAfter().getSeconds();
-
-        if (!ResponseHelpers.prepareJsonResponse(exchange.getResponse(), HttpStatus.TOO_MANY_REQUESTS)) {
-            return Mono.empty();
-        }
 
         ResponseHelpers.applyHeaderIfWritable(exchange.getResponse(), () -> {
             HttpHeaders headers = exchange.getResponse().getHeaders();
@@ -251,15 +250,15 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
             headers.add("Retry-After", String.valueOf(retryAfterSeconds));
         });
 
-        String errorJson = String.format(
-            "{\"error\":{\"status\":429,\"code\":\"TOO_MANY_REQUESTS\",\"message\":\"Rate limit exceeded. Retry after %d seconds.\",\"path\":\"%s\"}}",
-            retryAfterSeconds,
-            exchange.getRequest().getPath().value()
+        HttpStatus status = HttpStatus.TOO_MANY_REQUESTS;
+        JsonApiError error = new JsonApiError(
+            String.valueOf(status.value()),
+            "RATE_LIMIT_EXCEEDED",
+            "RATE_LIMIT_EXCEEDED",
+            "Rate limit exceeded. Retry after " + retryAfterSeconds + " seconds."
         );
-
-        return exchange.getResponse().writeWith(
-            Mono.just(exchange.getResponse().bufferFactory().wrap(errorJson.getBytes()))
-        );
+        error.setMeta(Map.of("requestId", ResponseHelpers.correlationId(exchange)));
+        return ResponseHelpers.writeJsonApiError(exchange, status, error);
     }
 
     @Override
