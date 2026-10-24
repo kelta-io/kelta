@@ -22,6 +22,18 @@ updates:
       - /kelta-modules/billing
     schedule:
       interval: weekly
+    # Platform upgrades are planned work, not Dependabot batches: a Spring Boot bump (even
+    # the 4.0.5 -> 4.0.9 patch line) broke tenant creation in E2E (PLT-767), and the GraalVM
+    # polyglot/js runtime must stay on the GraalVM JDK line the native builds use (25.0.x);
+    # Dependabot proposed 25.0.2 -> 25.4.4.1.1. Spring Boot / Spring Cloud move only through a
+    # task; org.graalvm.* gets patch bumps only.
+    ignore:
+      - dependency-name: "org.springframework.boot:*"
+      - dependency-name: "org.springframework.cloud:*"
+      - dependency-name: "org.graalvm.*:*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
     open-pull-requests-limit: 5
     labels:
       - dependencies
