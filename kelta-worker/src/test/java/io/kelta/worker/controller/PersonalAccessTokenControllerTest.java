@@ -2,10 +2,12 @@ package io.kelta.worker.controller;
 
 import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
+import io.kelta.worker.service.SecurityAuditLogger;
 import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -13,6 +15,8 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.sql.Timestamp;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -181,24 +185,32 @@ class PersonalAccessTokenControllerTest {
     class RevokeToken {
         @Test
         void shouldRevokeTokenSuccessfully() {
-            when(jdbcTemplate.queryForList(contains("user_api_token WHERE id"), eq("tok-1"), eq("user-1")))
+            when(jdbcTemplate.queryForList(contains("UPDATE user_api_token SET revoked = true"),
+                    any(Timestamp.class), any(Timestamp.class), eq("user-1"), eq("tenant-1"), eq("tok-1")))
                     .thenReturn(List.of(Map.of("id", "tok-1", "token_hash", "abc123")));
             when(redisTemplate.opsForValue()).thenReturn(valueOps);
 
             var response = controller.revokeToken("tok-1", "user-1");
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-            verify(jdbcTemplate).update(contains("revoked = true"), any(), any(), eq("tok-1"));
+            verify(jdbcTemplate).queryForList(
+                    argThat((String sql) -> sql.contains("revoked_at = ?") && sql.contains("AND tenant_id = ?")
+                            && sql.contains("AND id = ?")),
+                    any(Timestamp.class), any(Timestamp.class), eq("user-1"), eq("tenant-1"), eq("tok-1"));
+            verify(redisTemplate).delete("pat:abc123");
+            verify(valueOps).set(eq("pat:revoked:abc123"), eq("revoked"), eq(Duration.ofDays(366)));
         }
 
         @Test
         void shouldReturn404ForNonExistentToken() {
-            when(jdbcTemplate.queryForList(contains("user_api_token WHERE id"), eq("tok-1"), eq("user-1")))
+            when(jdbcTemplate.queryForList(contains("UPDATE user_api_token"),
+                    any(Timestamp.class), any(Timestamp.class), eq("user-1"), eq("tenant-1"), eq("tok-1")))
                     .thenReturn(List.of());
 
             var response = controller.revokeToken("tok-1", "user-1");
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            verifyNoInteractions(redisTemplate);
         }
 
         @Test
@@ -206,6 +218,45 @@ class PersonalAccessTokenControllerTest {
             var response = controller.revokeToken("tok-1", null);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    @Nested
+    @DisplayName("revokeTokens / revokeCached (shared revoke helper)")
+    class RevokeHelper {
+        @Test
+        void revokesEveryLiveTokenOfTheUserInTheTenantWhenNoTokenIdIsGiven() {
+            when(jdbcTemplate.queryForList(contains("UPDATE user_api_token"),
+                    any(Timestamp.class), any(Timestamp.class), eq("user-1"), eq("tenant-1")))
+                    .thenReturn(List.of(Map.of("id", "tok-1", "token_hash", "h1"),
+                            Map.of("id", "tok-2", "token_hash", "h2")));
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+
+            var revoked = controller.revokeTokens("user-1", "tenant-1", null, "system",
+                    SecurityAuditLogger.EventType.PAT_REVOKED, "reason=test");
+
+            assertThat(revoked).extracting(PersonalAccessTokenController.TokenRef::id).containsExactly("tok-1", "tok-2");
+            verify(jdbcTemplate).queryForList(
+                    argThat((String sql) -> sql.contains("WHERE user_id = ? AND tenant_id = ? AND revoked = false")
+                            && !sql.contains("AND id = ?")),
+                    any(Timestamp.class), any(Timestamp.class), eq("user-1"), eq("tenant-1"));
+            verify(redisTemplate).delete("pat:h1");
+            verify(redisTemplate).delete("pat:h2");
+            verify(valueOps).set("pat:revoked:h1", "revoked", Duration.ofDays(366));
+            verify(valueOps).set("pat:revoked:h2", "revoked", Duration.ofDays(366));
+        }
+
+        @Test
+        void aRedisFailureIsSwallowedAndStillAudited() {
+            when(redisTemplate.delete(anyString())).thenThrow(new IllegalStateException("redis down"));
+
+            try (MockedStatic<SecurityAuditLogger> audit = mockStatic(SecurityAuditLogger.class)) {
+                controller.revokeCached(List.of(new PersonalAccessTokenController.TokenRef("tok-1", "h1")),
+                        "user-1", "tenant-1", "system", SecurityAuditLogger.EventType.PAT_REVOKED, null);
+
+                audit.verify(() -> SecurityAuditLogger.log(SecurityAuditLogger.EventType.PAT_REVOKED,
+                        "system", "tok-1", "tenant-1", "success", null));
+            }
         }
     }
 

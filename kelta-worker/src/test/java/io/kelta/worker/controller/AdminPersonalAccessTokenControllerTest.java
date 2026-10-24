@@ -17,6 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
 
@@ -45,7 +46,13 @@ class AdminPersonalAccessTokenControllerTest {
         PersonalAccessTokenController personalAccessTokenController =
                 new PersonalAccessTokenController(jdbcTemplate, redisTemplate, userIdResolver);
         controller = new AdminPersonalAccessTokenController(
-                permissionResolver, bootstrapRepository, personalAccessTokenController);
+                permissionResolver, bootstrapRepository, personalAccessTokenController, jdbcTemplate);
+    }
+
+    private void denyManageUsers() {
+        when(permissionResolver.getProfileId(request)).thenReturn("caller-profile");
+        when(bootstrapRepository.findProfileSystemPermissions("caller-profile")).thenReturn(List.of(
+                Map.of("permission_name", "MANAGE_USERS", "granted", false)));
     }
 
     private void grantManageUsers() {
@@ -154,6 +161,141 @@ class AdminPersonalAccessTokenControllerTest {
                         SecurityAuditLogger.EventType.PAT_ADMIN_CREATED,
                         "admin@test.com", "target-user", "tenant-1", "success", "name=Audited token"));
             }
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /{id}/tokens")
+    class ListTokens {
+
+        @Test
+        @DisplayName("403 when the caller's profile lacks MANAGE_USERS")
+        void shouldRejectWithoutManageUsers() {
+            denyManageUsers();
+
+            assertThatThrownBy(() -> controller.listTokens(request, "target-user"))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasFieldOrPropertyWithValue("statusCode", HttpStatus.FORBIDDEN);
+            verifyNoInteractions(jdbcTemplate);
+        }
+
+        @Test
+        @DisplayName("lists the target user's live tokens in the current tenant, never the hash")
+        void shouldListTargetUsersTokens() {
+            grantManageUsers();
+            when(jdbcTemplate.queryForList(contains("FROM platform_user"), eq("target-user"), eq("tenant-1")))
+                    .thenReturn(List.of(Map.of("id", "target-user")));
+            when(jdbcTemplate.queryForList(contains("FROM user_api_token"), eq("target-user"), eq("tenant-1")))
+                    .thenReturn(List.of(Map.of(
+                            "id", "tok-1", "name", "CI bot", "token_prefix", "klt_ABCD",
+                            "scopes", "[\"api\"]", "token_hash", "secret-hash",
+                            "created_at", "2026-10-01T00:00:00Z", "expires_at", "2026-12-30T00:00:00Z")));
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+
+            var response = controller.listTokens(request, "target-user");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tokens =
+                    (List<Map<String, Object>>) ((Map<String, Object>) response.getBody()).get("data");
+            assertThat(tokens).hasSize(1);
+            assertThat(tokens.get(0))
+                    .containsEntry("id", "tok-1")
+                    .containsEntry("name", "CI bot")
+                    .containsEntry("tokenPrefix", "klt_ABCD")
+                    .containsEntry("scopes", "[\"api\"]")
+                    .containsEntry("createdAt", "2026-10-01T00:00:00Z")
+                    .containsEntry("expiresAt", "2026-12-30T00:00:00Z")
+                    .doesNotContainKeys("tokenHash", "token_hash", "token");
+            assertThat(tokens.get(0).values()).doesNotContain("secret-hash");
+        }
+
+        @Test
+        @DisplayName("404 for a user id from another tenant (no row under the current tenant)")
+        void shouldReturn404ForUserOfAnotherTenant() {
+            grantManageUsers();
+            when(jdbcTemplate.queryForList(contains("FROM platform_user"), eq("other-tenant-user"), eq("tenant-1")))
+                    .thenReturn(List.of());
+
+            var response = controller.listTokens(request, "other-tenant-user");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            verify(jdbcTemplate, never()).queryForList(contains("FROM user_api_token"), any(Object[].class));
+        }
+    }
+
+    @Nested
+    @DisplayName("DELETE /{id}/tokens/{tokenId}")
+    class RevokeToken {
+
+        @Test
+        @DisplayName("403 when the caller's profile lacks MANAGE_USERS")
+        void shouldRejectWithoutManageUsers() {
+            denyManageUsers();
+
+            assertThatThrownBy(() -> controller.revokeToken(request, "target-user", "tok-1"))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasFieldOrPropertyWithValue("statusCode", HttpStatus.FORBIDDEN);
+            verifyNoInteractions(jdbcTemplate, redisTemplate);
+        }
+
+        @Test
+        @DisplayName("revokes the token in the DB and Redis, audited PAT_ADMIN_REVOKED with the caller as actor")
+        void shouldRevokeAndAudit() {
+            grantManageUsers();
+            when(permissionResolver.getEmail(request)).thenReturn("admin@test.com");
+            when(jdbcTemplate.queryForList(contains("UPDATE user_api_token SET revoked = true"),
+                    any(Timestamp.class), any(Timestamp.class), eq("target-user"), eq("tenant-1"), eq("tok-1")))
+                    .thenReturn(List.of(Map.of("id", "tok-1", "token_hash", "hash-1")));
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+
+            try (MockedStatic<SecurityAuditLogger> audit = mockStatic(SecurityAuditLogger.class)) {
+                var response = controller.revokeToken(request, "target-user", "tok-1");
+
+                assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+                audit.verify(() -> SecurityAuditLogger.log(
+                        SecurityAuditLogger.EventType.PAT_ADMIN_REVOKED,
+                        "admin@test.com", "tok-1", "tenant-1", "success", "userId=target-user"));
+            }
+            verify(redisTemplate).delete("pat:hash-1");
+            verify(valueOps).set(eq("pat:revoked:hash-1"), eq("revoked"), any());
+        }
+
+        @Test
+        @DisplayName("404 for a token of another user — nothing revoked, nothing evicted")
+        void shouldReturn404ForTokenOfAnotherUser() {
+            grantManageUsers();
+            // The UPDATE carries user_id = ? AND tenant_id = ? AND id = ?, so another user's token matches no row.
+            when(jdbcTemplate.queryForList(contains("UPDATE user_api_token"),
+                    any(Timestamp.class), any(Timestamp.class), eq("target-user"), eq("tenant-1"), eq("someone-elses-token")))
+                    .thenReturn(List.of());
+
+            try (MockedStatic<SecurityAuditLogger> audit = mockStatic(SecurityAuditLogger.class)) {
+                var response = controller.revokeToken(request, "target-user", "someone-elses-token");
+
+                assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+                audit.verifyNoInteractions();
+            }
+            verifyNoInteractions(redisTemplate);
+            verify(jdbcTemplate).queryForList(
+                    argThat((String sql) -> sql.contains("WHERE user_id = ? AND tenant_id = ? AND revoked = false AND id = ?")),
+                    any(Timestamp.class), any(Timestamp.class), eq("target-user"), eq("tenant-1"), eq("someone-elses-token"));
+        }
+
+        @Test
+        @DisplayName("404 for a user id from another tenant — the query is bound to TenantContext's tenant")
+        @WithTenant("tenant-2")
+        void shouldReturn404ForUserOfAnotherTenant() {
+            grantManageUsers();
+            when(jdbcTemplate.queryForList(contains("UPDATE user_api_token"),
+                    any(Timestamp.class), any(Timestamp.class), eq("tenant-1-user"), eq("tenant-2"), eq("tok-1")))
+                    .thenReturn(List.of());
+
+            var response = controller.revokeToken(request, "tenant-1-user", "tok-1");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            verifyNoInteractions(redisTemplate);
+            verify(jdbcTemplate, never()).queryForList(anyString(), any(), any(Timestamp.class), any(Timestamp.class), eq("tenant-1"), any());
         }
     }
 }

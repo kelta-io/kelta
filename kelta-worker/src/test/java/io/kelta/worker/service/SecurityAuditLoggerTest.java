@@ -16,7 +16,7 @@ class SecurityAuditLoggerTest {
 
         @Test
         void shouldHaveAllExpectedEventTypes() {
-            assertEquals(36, SecurityAuditLogger.EventType.values().length);
+            assertEquals(37, SecurityAuditLogger.EventType.values().length);
             assertNotNull(SecurityAuditLogger.EventType.valueOf("RECORDING_CONSENT_CAPTURED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("ARCHIVE_CREATED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("ARCHIVE_ACCESSED"));
@@ -53,6 +53,7 @@ class SecurityAuditLoggerTest {
             assertNotNull(SecurityAuditLogger.EventType.valueOf("PAT_CREATED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("PAT_ADMIN_CREATED"));
             assertNotNull(SecurityAuditLogger.EventType.valueOf("PAT_REVOKED"));
+            assertNotNull(SecurityAuditLogger.EventType.valueOf("PAT_ADMIN_REVOKED"));
         }
     }
 

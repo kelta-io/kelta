@@ -7,6 +7,9 @@ import io.kelta.worker.service.SecurityAuditLogger;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -14,19 +17,23 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Map;
 
 /**
- * Admin-on-behalf-of personal access token minting for managed users — {@code MANAGE_USERS}
+ * Admin-on-behalf-of personal access token management for managed users — {@code MANAGE_USERS}
  * holders can mint a PAT for another user (e.g. to script an integration on their behalf)
- * without ever seeing that user's password. {@code /api/admin/**} is a static gateway route
+ * without ever seeing that user's password, list that user's live tokens, and revoke one. {@code /api/admin/**} is a static gateway route
  * with only the blanket API_ACCESS check, so the permission is enforced here, following the
  * same manual-check pattern as {@link PasswordResetAdminController}.
  *
  * <p>Delegates the actual mint (generation, SHA-256 hash, Redis cache) to
  * {@link PersonalAccessTokenController#mintToken}, passing the caller's identity as the audit
  * actor and {@link SecurityAuditLogger.EventType#PAT_ADMIN_CREATED} so admin-minted tokens are
- * distinguishable from self-service ones in the audit trail.
+ * distinguishable from self-service ones in the audit trail. Revocation goes through
+ * {@link PersonalAccessTokenController#revokeTokens} the same way, audited
+ * {@link SecurityAuditLogger.EventType#PAT_ADMIN_REVOKED}. A user or token outside the caller's
+ * tenant, or a token of another user, is a 404.
  *
  * @since 1.0.0
  */
@@ -39,13 +46,53 @@ public class AdminPersonalAccessTokenController {
     private final CerbosPermissionResolver permissionResolver;
     private final BootstrapRepository bootstrapRepository;
     private final PersonalAccessTokenController personalAccessTokenController;
+    private final JdbcTemplate jdbcTemplate;
 
     public AdminPersonalAccessTokenController(CerbosPermissionResolver permissionResolver,
                                               BootstrapRepository bootstrapRepository,
-                                              PersonalAccessTokenController personalAccessTokenController) {
+                                              PersonalAccessTokenController personalAccessTokenController,
+                                              JdbcTemplate jdbcTemplate) {
         this.permissionResolver = permissionResolver;
         this.bootstrapRepository = bootstrapRepository;
         this.personalAccessTokenController = personalAccessTokenController;
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    /** List {@code id}'s live (non-revoked) tokens. Never returns a token or its hash. */
+    @GetMapping("/{id}/tokens")
+    public ResponseEntity<?> listTokens(HttpServletRequest request, @PathVariable("id") String id) {
+        requirePermission(request);
+        String tenantId = TenantContext.get();
+        if (tenantId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
+        }
+        if (!userExists(id, tenantId)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(Map.of("data", personalAccessTokenController.listLiveTokens(id, tenantId)));
+    }
+
+    /** Revoke {@code id}'s live token {@code tokenId}, on the caller's behalf. */
+    @DeleteMapping("/{id}/tokens/{tokenId}")
+    public ResponseEntity<?> revokeToken(HttpServletRequest request, @PathVariable("id") String id,
+                                         @PathVariable("tokenId") String tokenId) {
+        requirePermission(request);
+        String tenantId = TenantContext.get();
+        if (tenantId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
+        }
+        String actorEmail = permissionResolver.getEmail(request);
+        List<PersonalAccessTokenController.TokenRef> revoked = personalAccessTokenController.revokeTokens(
+                id, tenantId, tokenId, actorEmail, SecurityAuditLogger.EventType.PAT_ADMIN_REVOKED, "userId=" + id);
+        if (revoked.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(Map.of("status", "revoked", "tokenId", tokenId));
+    }
+
+    private boolean userExists(String userId, String tenantId) {
+        return !jdbcTemplate.queryForList(
+                "SELECT id FROM platform_user WHERE id = ? AND tenant_id = ?", userId, tenantId).isEmpty();
     }
 
     /**

@@ -115,15 +115,17 @@ public class PersonalAccessTokenController {
             return ResponseEntity.badRequest().body(Map.of("error", "Missing tenant or user context"));
         }
         String userId = resolveUserId(userIdentifier, tenantId);
+        return ResponseEntity.ok(Map.of("data", listLiveTokens(userId, tenantId)));
+    }
 
+    /** {@code userId}'s non-revoked tokens in {@code tenantId}, newest first, without their hashes. */
+    List<Map<String, Object>> listLiveTokens(String userId, String tenantId) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                 "SELECT id, name, token_prefix, scopes, expires_at, last_used_at, created_at, token_hash " +
                         "FROM user_api_token WHERE user_id = ? AND tenant_id = ? AND revoked = false " +
                         "ORDER BY created_at DESC",
                 userId, tenantId);
-
-        List<Map<String, Object>> tokens = rows.stream().map(this::toCamelCaseToken).toList();
-        return ResponseEntity.ok(Map.of("data", tokens));
+        return rows.stream().map(this::toCamelCaseToken).toList();
     }
 
     /**
@@ -272,35 +274,70 @@ public class PersonalAccessTokenController {
         }
         String userId = resolveUserId(userIdentifier, tenantId);
 
-        // Verify token belongs to current user
-        var tokens = jdbcTemplate.queryForList(
-                "SELECT id, token_hash FROM user_api_token WHERE id = ? AND user_id = ? AND revoked = false",
-                tokenId, userId);
-        if (tokens.isEmpty()) {
+        if (revokeTokens(userId, tenantId, tokenId, userId, SecurityAuditLogger.EventType.PAT_REVOKED, null).isEmpty()) {
             return ResponseEntity.notFound().build();
         }
-
-        String tokenHash = (String) tokens.get(0).get("token_hash");
-
-        // Revoke in database
-        jdbcTemplate.update(
-                "UPDATE user_api_token SET revoked = true, revoked_at = ?, updated_at = ? WHERE id = ?",
-                Timestamp.from(Instant.now()), Timestamp.from(Instant.now()), tokenId);
-
-        // Remove from Redis cache and add to revocation set
-        try {
-            redisTemplate.delete(PAT_KEY_PREFIX + tokenHash);
-            redisTemplate.opsForValue().set(
-                    REVOCATION_KEY_PREFIX + tokenHash, "revoked", Duration.ofDays(366));
-        } catch (Exception e) {
-            log.warn("Failed to update PAT in Redis: {}", e.getMessage());
-        }
-
-        SecurityAuditLogger.log(SecurityAuditLogger.EventType.PAT_REVOKED,
-                userId, tokenId, tenantId, "success", null);
-        log.info("PAT revoked for user {} in tenant {}: tokenId={}", userId, tenantId, tokenId);
-
         return ResponseEntity.ok(Map.of("status", "revoked", "tokenId", tokenId));
+    }
+
+    /** A token chosen for revocation. The hash never leaves the worker. */
+    public record TokenRef(String id, String tokenHash) {}
+
+    /** {@code userId}'s non-revoked tokens in {@code tenantId}. */
+    public List<TokenRef> findLiveTokens(String userId, String tenantId) {
+        return jdbcTemplate.queryForList(
+                        "SELECT id, token_hash FROM user_api_token " +
+                                "WHERE user_id = ? AND tenant_id = ? AND revoked = false",
+                        userId, tenantId)
+                .stream().map(PersonalAccessTokenController::toTokenRef).toList();
+    }
+
+    /**
+     * Revokes {@code userId}'s live token {@code tokenId} in {@code tenantId} — or every live token
+     * of that user when {@code tokenId} is {@code null} — then evicts each from the gateway's Redis
+     * cache and audits it ({@link #revokeCached}). A token of another user or another tenant matches
+     * nothing. Must run with {@code tenantId} bound (RLS on {@code user_api_token}).
+     *
+     * @return the tokens revoked; empty when none matched
+     */
+    public List<TokenRef> revokeTokens(String userId, String tenantId, String tokenId, String actorId,
+                                       SecurityAuditLogger.EventType eventType, String auditDetail) {
+        Timestamp now = Timestamp.from(Instant.now());
+        String sql = "UPDATE user_api_token SET revoked = true, revoked_at = ?, updated_at = ? " +
+                "WHERE user_id = ? AND tenant_id = ? AND revoked = false";
+        List<Map<String, Object>> rows = tokenId == null
+                ? jdbcTemplate.queryForList(sql + " RETURNING id, token_hash", now, now, userId, tenantId)
+                : jdbcTemplate.queryForList(sql + " AND id = ? RETURNING id, token_hash",
+                        now, now, userId, tenantId, tokenId);
+        List<TokenRef> revoked = rows.stream().map(PersonalAccessTokenController::toTokenRef).toList();
+        revokeCached(revoked, userId, tenantId, actorId, eventType, auditDetail);
+        return revoked;
+    }
+
+    /**
+     * Removes each token's {@code pat:<hash>} cache entry, writes its {@code pat:revoked:<hash>} key
+     * (which the gateway checks before anything else) and audits it. Redis is best effort: a failure
+     * is logged, never thrown. Used on its own for tokens whose rows are already gone (a deleted
+     * user's tokens go with the user, {@code ON DELETE CASCADE}).
+     */
+    public void revokeCached(List<TokenRef> tokens, String userId, String tenantId, String actorId,
+                             SecurityAuditLogger.EventType eventType, String auditDetail) {
+        for (TokenRef token : tokens) {
+            try {
+                redisTemplate.delete(PAT_KEY_PREFIX + token.tokenHash());
+                redisTemplate.opsForValue().set(
+                        REVOCATION_KEY_PREFIX + token.tokenHash(), "revoked", Duration.ofDays(366));
+            } catch (Exception e) {
+                log.warn("Failed to update PAT in Redis: {}", e.getMessage());
+            }
+            SecurityAuditLogger.log(eventType, actorId, token.id(), tenantId, "success", auditDetail);
+            log.info("PAT revoked for user {} in tenant {} (actor {}): tokenId={}",
+                    userId, tenantId, actorId, token.id());
+        }
+    }
+
+    private static TokenRef toTokenRef(Map<String, Object> row) {
+        return new TokenRef(String.valueOf(row.get("id")), (String) row.get("token_hash"));
     }
 
     /**

@@ -582,6 +582,17 @@ export class AdminClient {
         const response = await this.axios.post(`/api/admin/users/${userId}/tokens`, request);
         return response.data as PersonalAccessTokenCreated;
       },
+
+      /** `userId`'s live (non-revoked) tokens (`MANAGE_USERS`). Never includes a token or its hash. */
+      list: async (userId: string): Promise<PersonalAccessToken[]> => {
+        const response = await this.axios.get(`/api/admin/users/${userId}/tokens`);
+        return (response.data as { data: PersonalAccessToken[] }).data;
+      },
+
+      /** Revoke `userId`'s token `tokenId` on the caller's behalf (`MANAGE_USERS`). */
+      revoke: async (userId: string, tokenId: string): Promise<void> => {
+        await this.axios.delete(`/api/admin/users/${userId}/tokens/${tokenId}`);
+      },
     },
   };
 
