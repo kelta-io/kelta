@@ -154,7 +154,7 @@ export function mapError(error: unknown): CliError {
   if (error instanceof CliError) return error;
 
   if (error instanceof ZodError) {
-    const detail = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
+    const detail = error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
     return new CliError(`Invalid arguments — ${detail}`, {
       code: 'INVALID_ARGUMENTS',
       exitCode: EXIT.USAGE,

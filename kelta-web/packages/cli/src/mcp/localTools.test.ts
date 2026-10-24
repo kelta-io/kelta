@@ -76,6 +76,27 @@ describe('selectLocalCommands', () => {
     expect(tool.annotations.destructiveHint).toBe(true);
     expect((tool.inputSchema as { properties?: object }).properties).toHaveProperty('id');
   });
+
+  // Pins the exact MCP inputSchema of one command so a zod (or z.toJSONSchema)
+  // upgrade that changes the shape clients receive fails here (PLT-730).
+  it('pins the JSON Schema of metadata apply (required, types, enum, defaults, no $ref)', () => {
+    const metadataApply = allCommands.find(
+      (command) => command.group === 'metadata' && command.name === 'apply'
+    );
+    const tool = toMcpTool(metadataApply!);
+    expect(tool.inputSchema).toEqual({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      properties: {
+        file: { type: 'string', minLength: 1 },
+        dryRun: { type: 'boolean', default: false },
+        conflict: { type: 'string', enum: ['skip', 'overwrite'], default: 'skip' },
+      },
+      required: ['file'],
+      additionalProperties: false,
+    });
+    expect(JSON.stringify(tool.inputSchema)).not.toContain('$ref');
+  });
 });
 
 describe('runLocalCommand', () => {
