@@ -120,5 +120,3 @@ export function ListShell({
     </RecordStackProvider>
   )
 }
-
-export default ListShell

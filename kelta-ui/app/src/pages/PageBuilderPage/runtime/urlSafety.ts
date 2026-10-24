@@ -12,7 +12,7 @@
  */
 
 /** Schemes a navigate/openUrl target may carry. A relative path has no scheme and is allowed implicitly. */
-export const ALLOWED_SCHEMES = ['http', 'https', 'mailto', 'tel'] as const
+const ALLOWED_SCHEMES = ['http', 'https', 'mailto', 'tel'] as const
 
 /** Thrown when a resolved URL carries a disallowed scheme (e.g. `javascript:`/`data:`). */
 export class UnsafeUrlError extends Error {

@@ -272,5 +272,3 @@ export function PasswordPolicyPanel(): React.ReactElement {
     </div>
   )
 }
-
-export default PasswordPolicyPanel

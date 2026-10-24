@@ -282,5 +282,3 @@ export function ProviderAvailabilityPage(): React.ReactElement {
     </div>
   )
 }
-
-export default ProviderAvailabilityPage

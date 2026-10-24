@@ -38,7 +38,7 @@ import { buildSortParam } from './listUrlState'
 import { isSharedViewId } from './listViewMapping'
 import type { UseListParamsReturn } from './useListParams'
 
-export type ListTypeConfig = SavedView['typeConfig'] | null
+type ListTypeConfig = SavedView['typeConfig'] | null
 
 export interface UseListViewStateOptions {
   collectionName: string

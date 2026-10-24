@@ -228,5 +228,3 @@ interface ActivityEntry {
   status: string
   traceId?: string
 }
-
-export default UserActivityPage

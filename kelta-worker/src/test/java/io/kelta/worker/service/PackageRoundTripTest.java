@@ -4,7 +4,9 @@ import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.CollectionDefinitionBuilder;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.query.Pagination;
 import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.query.QueryResult;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.storage.CompositeUniqueConstraintService;
 import io.kelta.runtime.storage.CompositeUniqueConstraintService.ConstraintInfo;
@@ -17,6 +19,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -305,7 +311,8 @@ class PackageRoundTripTest {
         assertThat(report.failed()).as("%s", report.items()).isZero();
 
         assertThat(targetConstraints).extracting(ConstraintInfo::fieldNames)
-                .containsExactly(List.of("stage", "status"));
+                .as("created in the source index's column order")
+                .containsExactly(List.of("status", "stage"));
         assertThat(written("reports"))
                 .containsEntry("name", "Orders by stage")
                 .containsEntry("primaryCollectionId", idOf("collections", "orders"))
@@ -404,6 +411,114 @@ class PackageRoundTripTest {
         assertThat(report.failed()).as("%s", report.items()).isZero();
         assertThat(report.created()).isZero();
         assertThat(report.skipped()).isEqualTo(items.size());
+    }
+
+    @Test
+    @DisplayName("previewing the package against the tenant it built lists no creates and no updates for any type")
+    @SuppressWarnings("unchecked")
+    void previewOfIdenticalTenantIsAllUnchanged() {
+        Map<String, Object> preview = previewAgainstFirstApply();
+
+        assertThat(preview.get("creates")).as("creates").isEqualTo(List.of());
+        assertThat(preview.get("updates")).as("updates").isEqualTo(List.of());
+        assertThat(preview.get("conflicts")).as("conflicts").isEqualTo(List.of());
+        assertThat(((List<Map<String, Object>>) preview.get("unchanged")).stream().map(e -> e.get("type")))
+                .containsAll(PackageImportService.supportedTypes());
+        verify(queryEngine, never()).update(any(), anyString(), anyMap());
+    }
+
+    /**
+     * Ratchet over {@code TYPE_ORDER}: a type the importer learns must also be documented in
+     * {@code docs/authoring/packages.md} and compared (changed vs unchanged) by the preview.
+     */
+    @Test
+    @DisplayName("ratchet: every TYPE_ORDER type has a row in docs/authoring/packages.md and a changed/unchanged comparison in the preview")
+    @SuppressWarnings("unchecked")
+    void everyTypeIsDocumentedAndCompared() throws IOException {
+        Map<String, String> documented = packagesDocKeyCells();
+        Map<String, Object> preview = previewAgainstFirstApply();
+        Set<Object> compared = new HashSet<>();
+        for (String bucket : List.of("unchanged", "updates")) {
+            ((List<Map<String, Object>>) preview.get(bucket)).forEach(e -> compared.add(e.get("type")));
+        }
+
+        List<String> gaps = new ArrayList<>();
+        for (String type : PackageImportService.supportedTypes()) {
+            if (!documented.containsKey(type)) {
+                gaps.add(type + " has no row in docs/authoring/packages.md");
+            }
+            if (!compared.contains(type)) {
+                gaps.add(type + " has no changed/unchanged comparison in PackageService.previewImport "
+                        + "(an existing item of the type is not listed under unchanged or updates)");
+            }
+        }
+        assertThat(gaps).as("TYPE_ORDER types missing docs or a preview comparison").isEmpty();
+    }
+
+    @Test
+    @DisplayName("docs/authoring/packages.md gives each natural key exactly as naturalKeyFor builds it")
+    void documentedNaturalKeysMatchNaturalKeyFor() throws IOException {
+        java.util.regex.Pattern codeSpan = java.util.regex.Pattern.compile("`([^`]+)`");
+        java.util.regex.Pattern placeholder = java.util.regex.Pattern.compile("<([a-z_]+)>");
+        for (var row : packagesDocKeyCells().entrySet()) {
+            if ("RECORD".equals(row.getKey())) {
+                continue; // a records-section row's key is built from its section, not naturalKeyFor
+            }
+            List<String> forms = codeSpan.matcher(row.getValue()).results().map(m -> m.group(1)).toList();
+            Map<String, Object> data = new HashMap<>();
+            for (String form : forms) {
+                placeholder.matcher(form).results()
+                        .forEach(m -> data.put(m.group(1), "<" + m.group(1) + ">"));
+            }
+            data.computeIfPresent("field_names", (k, v) -> List.of(v));
+            assertThat(forms).as("documented key of %s", row.getKey())
+                    .contains(PackageImportService.naturalKeyFor(row.getKey(), data));
+        }
+    }
+
+    /** Type → natural-key cell of each {@code | `TYPE` | key | ... |} row of the packages doc. */
+    private static Map<String, String> packagesDocKeyCells() throws IOException {
+        Map<String, String> cells = new LinkedHashMap<>();
+        java.util.regex.Pattern row = java.util.regex.Pattern.compile("^\\| `([A-Z_]+)` \\| (.+?) \\|");
+        for (String line : Files.readAllLines(Path.of("../docs/authoring/packages.md"), StandardCharsets.UTF_8)) {
+            var m = row.matcher(line);
+            if (m.find()) {
+                cells.put(m.group(1), m.group(2));
+            }
+        }
+        return cells;
+    }
+
+    /**
+     * Applies the export to the empty target, then previews the same package — plus a seed row
+     * the target already holds — against the state that apply left behind.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> previewAgainstFirstApply() {
+        var items = exportItems();
+        var first = importService.importPackage(TARGET, Map.of("items", items),
+                PackageImportService.ImportOptions.defaults());
+        assertThat(first.failed()).as("%s", first.items()).isZero();
+        seedTargetFromFirstApply();
+        when(queryEngine.getById(any(), anyString())).thenAnswer(inv -> creates.stream()
+                .filter(c -> c.getKey().equals(inv.<CollectionDefinition>getArgument(0).name())
+                        && inv.getArgument(1).equals(createdIds.get(c.getValue())))
+                .map(c -> (Map<String, Object>) new LinkedHashMap<>(c.getValue()))
+                .findFirst());
+        when(dashboardTreeService.readTree(anyString())).thenAnswer(inv ->
+                mockingDetails(dashboardTreeService).getInvocations().stream()
+                        .filter(i -> i.getMethod().getName().equals("applyTree")
+                                && i.getArgument(0).equals(inv.getArgument(0)))
+                        .map(i -> i.<Map<String, Object>>getArgument(1))
+                        .findFirst().orElseThrow());
+        when(queryEngine.executeQuery(argThat(d -> d != null && "orders".equals(d.name())), any()))
+                .thenReturn(QueryResult.of(List.of(Map.of("id", "tgt-order-1")), 1, new Pagination(1, 1)));
+
+        Map<String, Object> pkg = Map.of("items", items, "records", List.of(Map.of(
+                "collection", "orders", "key", List.of("status"), "rows", List.of(Map.of("status", "draft")))));
+        return new PackageService(mock(PackageRepository.class), new ObjectMapper(), importService,
+                mock(CollectionRegistry.class), mock(CompositeUniqueConstraintService.class))
+                .previewImport(TARGET, pkg);
     }
 
     @Test

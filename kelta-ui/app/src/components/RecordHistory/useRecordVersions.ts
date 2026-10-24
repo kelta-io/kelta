@@ -11,7 +11,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useApi } from '@/context/ApiContext'
 import type { CollectionRecord } from '@/hooks/useCollectionRecords'
 
-export type RecordVersionChangeType = 'CREATED' | 'UPDATED' | 'DELETED'
+type RecordVersionChangeType = 'CREATED' | 'UPDATED' | 'DELETED'
 
 export interface RecordVersion {
   id: string

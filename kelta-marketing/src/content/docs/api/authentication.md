@@ -45,6 +45,10 @@ GET /api/me/permissions   # effective system permissions
 
 `userId` is the canonical UUID to use in bodies that reference the current user.
 
+`GET /api/me/profile` returns the caller's own user record, and `PATCH /api/me/profile` changes the fields a user
+may edit about themselves — `firstName`, `lastName`, `locale`, `timezone` — without `MANAGE_USERS`. Any other
+attribute is rejected with `FIELD_NOT_EDITABLE`.
+
 ## Realtime and MCP
 
 - The WebSocket endpoint takes the JWT as a query parameter on the upgrade — see [Realtime](/docs/api/realtime/).

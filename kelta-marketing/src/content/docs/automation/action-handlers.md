@@ -1,6 +1,6 @@
 ---
 title: Action handler reference
-description: Every action a Task state can run — parameters, outputs and error codes — grouped by data, communication, integration and control, with the retired and not-yet-functional ones called out.
+description: Every action a Task state can run — parameters, outputs and error codes — grouped by data, communication, integration and control, with the retired ones called out.
 section: automation
 order: 20
 ---
@@ -94,6 +94,24 @@ refused unless the operator allow-lists that range (`KELTA_OUTBOUND_ALLOWED_PRIV
 `GET` redirects are followed up to three hops, each checked the same way; other methods do not
 follow redirects. The call times out after 60 seconds, and a 4xx/5xx response fails the step.
 
+### `SEND_NOTIFICATION`
+
+```json
+{ "userId": "${$.record.data.ownerId}", "title": "Order approved",
+  "message": "Order ${$.record.data.number} was approved.", "link": "/app/orders/${$.record.id}", "level": "INFO" }
+```
+
+Writes an in-app notification for one user of the tenant. `title` (up to 255 characters) and `message` are
+required. `userId` takes a user id or email and defaults to the user who triggered the flow; a recipient who is not a
+user of the tenant fails the step. `link` is optional (up to 2048 characters). `level` is `INFO` (default),
+`WARNING` or `ERROR`; anything else fails the step.
+
+Output: `{ "notificationId", "userId", "title", "message", "link", "level" }` (`link` only when set).
+
+The recipient reads their own notifications at `GET /api/me/notifications` (newest first, `page[number]` /
+`page[size]`, with `meta.unreadCount`) and marks them read with `POST /api/me/notifications/{id}/read` or
+`POST /api/me/notifications/read-all`. Nobody else can list or mark them, admins included.
+
 ## Integration
 
 ### `CALL_API`
@@ -161,6 +179,11 @@ or inline `"scriptSource": "record.total > input.threshold"`. Scripts run in a s
 `record`, `previousRecord`, `input` and `context` bindings and return the last expression. Scripts are managed
 under Setup → Integration → Scripts.
 
+An active script of type `API_ENDPOINT` or `EVENT_HANDLER` can also be run over HTTP — the app's *run script* quick
+action does this: `POST /api/scripts/{id}/execute` with `{ "input": { … }, "context"?: { … } }` runs it
+synchronously and returns its result. When the script sets `requiredPermission`, the caller's profile must hold
+that system permission (`403` otherwise); without it any API user may run the script.
+
 ## Control and utility
 
 ### `DECISION`
@@ -201,7 +224,7 @@ directly or through other flows, therefore stops after ten hops.
 
 ### `SUBMIT_FOR_APPROVAL` *(record-scoped)*
 
-```json
+```jsonc
 { "processId": "<approval process id>" }   // optional — auto-detects the collection's process
 ```
 
@@ -217,16 +240,6 @@ before this check still runs, but the step fails with the same message instead o
 |---|---|
 | `DELAY` | a `Wait` state (`Seconds`, `Timestamp`, `TimestampPath`) |
 | `CREATE_TASK` | `CREATE_RECORD` on your tasks collection |
-
-## Registered but not yet functional
-
-This handler exists in the catalogue and accepts its configuration, but the platform side it depends on is not
-wired in the current release. It returns a success result and writes to the step log without doing the work.
-Do not build on it yet.
-
-| Handler | Config accepted | Use instead |
-|---|---|---|
-| `SEND_NOTIFICATION` | `{ "userId", "title", "message", "level" }` — logged only | `EMAIL_ALERT`, or `CREATE_RECORD` on a notifications collection |
 
 ## Handlers from modules
 

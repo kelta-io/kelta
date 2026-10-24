@@ -1,7 +1,20 @@
 {
   "status" : 404,
-  "headers" : { },
-  "body" : null,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "NOT_FOUND",
+      "detail" : "Record 'col-plat' not found in collection 'collections'",
+      "meta" : {
+        "path" : "/api/collections/col-plat",
+        "requestId" : "<requestId>"
+      },
+      "status" : "404",
+      "title" : "Not Found"
+    } ]
+  },
   "calls" : [ {
     "collection" : "collections",
     "hit" : false,

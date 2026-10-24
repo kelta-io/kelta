@@ -156,7 +156,7 @@ services:
       kelta-worker:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q UP || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health/readiness >/dev/null || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -218,7 +218,7 @@ services:
       mailpit:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness >/dev/null || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -280,7 +280,7 @@ services:
       # requests (RouteInitializer is an ApplicationRunner). /actuator/health
       # reports UP during that window while every /api/** request still 404s.
       #
-      # Checked by exit code rather than `grep -q UP`: with `show-details: always`
+      # Checked by exit code rather than by grepping the body for UP: with `show-details: always`
       # the body lists every component, so grepping for UP matches a healthy
       # sub-component even when the overall status is DOWN — that check can never
       # fail. Spring maps DOWN to HTTP 503 and wget exits non-zero on 503.
@@ -341,7 +341,7 @@ services:
       kelta-worker:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness >/dev/null || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10

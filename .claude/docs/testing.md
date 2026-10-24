@@ -150,7 +150,7 @@ class GatewayMetricsTest {
 - Immutable test data: `List.of(...)` for constants
 - Focus on behavior over state
 - `Mockito.inOrder(mockA, mockB)` when the bug is about *ordering* of side-effects across collaborators (e.g. "reconcile schema must run before FK constraint statements"). Plain `verify()` checks only that calls happened, not the sequence — `InOrder` is what catches re-ordering regressions. See `PhysicalTableStorageAdapterSystemCollectionTest.initializeCollection_reconcilesSchema_beforeForeignKeyStatements` for an example.
-- `doThrow(new DuplicateKeyException(...)).when(mockJdbc).execute(argThat(sql -> sql.contains("CREATE TABLE")))` to simulate PostgreSQL-only failure modes (e.g. the `pg_type_typname_nsp_index` race in concurrent `CREATE TABLE IF NOT EXISTS`) without spinning up Testcontainers. H2 won't reproduce these, so a mocked `JdbcTemplate` that throws the translated Spring exception on a matching statement is the cheapest regression guard. See `PhysicalTableStorageAdapterSystemCollectionTest.initializeCollection_swallowsDuplicateKey_fromConcurrentCreateRace`. **But a mock only covers the shapes you thought of**: that race also surfaces as `type "…" already exists` and FK `constraint "…" already exists` (both 42710), which the 23505-only guard missed in production. `PhysicalTableStorageAdapterConcurrentDdlIntegrationTest` races `initializeCollection` from six threads against real Postgres (Testcontainers) and asserts every "pod" succeeds — it fails on the pre-fix code in round 0. Classification lives in `PhysicalTableStorageAdapter.isConcurrentDdlDuplicate` (42P07, 42710, and 23505 only on the `pg_type`/`pg_class` name indexes — a 23505 from `CREATE UNIQUE INDEX` over duplicate rows is real and still fails).
+- `doThrow(new DuplicateKeyException(...)).when(mockJdbc).execute(argThat(sql -> sql.contains("CREATE TABLE")))` to simulate PostgreSQL-only failure modes (e.g. the `pg_type_typname_nsp_index` race in concurrent `CREATE TABLE IF NOT EXISTS`) without spinning up Testcontainers. H2 won't reproduce these, so a mocked `JdbcTemplate` that throws the translated Spring exception on a matching statement is the cheapest regression guard. See `PhysicalTableStorageAdapterSystemCollectionTest.initializeCollection_swallowsDuplicateKey_fromConcurrentCreateRace`. **But a mock only covers the shapes you thought of**: that race also surfaces as `type "…" already exists` and FK `constraint "…" already exists` (both 42710), which the 23505-only guard missed in production. `PhysicalTableStorageAdapterConcurrentDdlIntegrationTest` races `initializeCollection` from six threads against real Postgres (Testcontainers) and asserts every "pod" succeeds — it fails on the pre-fix code in round 0. Classification lives in `PhysicalTableStorageAdapter.isConcurrentDdlDuplicate` (42P07, 42710, and 23505 only on the `pg_type`/`pg_class` name indexes — a 23505 from `CREATE UNIQUE INDEX` over duplicate rows is real and still fails). `SchemaMigrationEngineDeprecateIntegrationTest` is the same kind of guard for the multi-pod deprecate race: a column dropped out of band (another pod's destructive migration) must not fail `migrateSchema`'s `COMMENT ON COLUMN`, on a public and a schema-qualified `TableRef`; `SchemaMigrationEngineTest` covers the public case on H2.
 
 ### Real-DB guard for constraint-bearing writes
 
@@ -189,6 +189,18 @@ database contract.
   fails on any regression. Raise a value when coverage improves; never lower one. The keys must sit
   directly under `thresholds` — vitest 1.x silently ignores a nested `global` block (that is how an
   advertised 80% gate once enforced nothing).
+
+### CLI command examples (`@kelta/cli`)
+Every `CommandDef` declares `examples` (required by the type). `packages/cli/src/registry/examples.test.ts`
+word-splits each example's `cmd` (quotes and backslashes only — no pipes, redirects or `$`), builds the real
+program with `createProgram([def], runner)` and parses it: the runner stands in for `dispatch`, so the
+command's own commander binding, `--output` check and zod `input` run, but no handler, prompt or HTTP call.
+Excess positionals are rejected there, and the example must invoke its own command. A failure names the
+command and the example; fixture commands with an unknown option, a missing positional, a zod-rejected value
+and zero examples prove the check fails. Parse-only `CommandRunner`s are the pattern for any test that needs
+a parse result without running a handler. Argument errors (`program.test.ts`) are tested through
+`runCli(createProgram(allCommands), args)` with `process.stderr.isTTY` set, for both the table and the
+`--output json` rendering.
 
 ### Structure
 ```typescript
@@ -387,14 +399,35 @@ the script.
 The script's own tests are `ci/update-snapshots.test.ts` (`node --test`, Node ≥ 24). They run
 in the `test-ci-scripts` job, against a local bare repo and a fake `docker`.
 
+## Generated reference: system collections
+
+`SystemCollectionsReferenceTest` (runtime-core, `model/system/`) renders
+`docs/authoring/system-collections.md` from `SystemCollectionDefinitions.all()` and fails when the
+committed page differs or its table row count is not `all().size()`. **Adding, renaming or
+re-describing a system collection means regenerating the page in the same PR:**
+
+```bash
+mvn -f kelta-platform/pom.xml -pl runtime/runtime-core test -Dtest=SystemCollectionsReferenceTest -Dkelta.docs.write=true
+```
+
+It runs in the `test-runtime` job; the `runtime` path filter lists the page, so a hand edit is checked too.
+
 ## CI script tests
 
 **A `ci/` script's tests live next to it as `ci/<name>.test.ts` or `ci/<name>.test.sh`.** The
-`test-ci-scripts` job in `ci.yml` (job detail: `ci-cd.md`) runs whenever `ci/**`, `scripts/ci/**`
-or the workflows change, and picks tests up by glob — `node --test ci/*.test.ts` and `bash` on
+`test-ci-scripts` job in `ci.yml` (job detail: `ci-cd.md`) runs whenever `ci/**`, `scripts/ci/**`,
+the endpoint index's inputs (below) or the workflows change, and picks tests up by glob — `node --test ci/*.test.ts` and `bash` on
 each `ci/*.test.sh` — so a new test needs no workflow edit. It also runs `bash -n` and
 `shellcheck` 0.10.0 (pinned; default severity) over every `ci/*.sh` and `scripts/ci/*.sh` — use
 the same release locally, since older distro builds report findings the job does not. Locally:
+
+`ci/endpoint-index.test.ts` is the one test here that guards platform source rather than a
+script: it re-renders the public endpoint index and fails when `docs/authoring/endpoints.md` is
+stale (run `node ci/endpoint-index.ts --write`), when an `internal` classification has no reason,
+when a docs link names a page or heading the site does not publish, or when the unclassified count
+moves off `ci/endpoint-index.baseline.json`. The `ci_scripts` filter therefore also lists every
+generator input (controllers, the gateway route table and `application.yml`, kelta-auth's security
+config, the system-collection definitions, `docs/authoring/**` and the docs pages it links to).
 
 ```bash
 node --test ci/*.test.ts          # Node >= 24 (native type stripping)
@@ -407,6 +440,65 @@ in `templates`, `ci/upgrade-verify.test.sh` in `upgrade`), but never *only* ther
 this job cannot run must be named in a comment in the job with the reason and the job that runs
 it. Before this job, `ci/update-snapshots.test.ts` ran only when a workflow changed, so #1675's
 change to the script skipped its tests and broke it.
+
+## Docs checks
+
+The published docs (`kelta-marketing/src/content/docs/**` plus `docs/authoring/*.md`) have three
+static checks; all run without a stack.
+
+- **SDK snippet type-check** — `cd kelta-web && npm run check:doc-snippets`
+  (`scripts/check-doc-snippets.mjs`, run by the `test-frontend` job after "Type check"; the
+  `sdk_docs` path filter triggers that job on SDK doc edits). Every ```` ```ts ```` / ```` ```tsx ````
+  block in `kelta-marketing/src/content/docs/sdk/*.md` (and any `docs/**/sdk/*.md`) is written as
+  its own module into a temp project whose tsconfig extends `kelta-web/tsconfig.json`, so
+  `@kelta/*` resolve to `packages/*/src`, and checked with `tsc --noEmit` under `strict`
+  (unused locals/parameters allowed). Errors are reported as `<md file>:<line>:<col>`. A snippet
+  must be self-contained: declare the types and values it uses. To skip one, put
+  `<!-- not-compiled: <reason> -->` on the line directly above its fence; an empty reason fails.
+- **Links, anchors and JSON** — `kelta-marketing/test/docs-engine.test.ts` (`npm test`, job
+  `test-marketing`). Each local page and authoring page is rendered with Astro's own markdown
+  pipeline (`astro.config.mjs` → `markdown`), so heading ids are the slugs the site serves; every
+  `/docs/...` link must reach a page and every `#fragment` (same-page or cross-page) an id on the
+  target. Every ```` ```json ```` block must `JSON.parse`; an annotated example (comments, bare
+  `…`, several documents, a fragment) is fenced ```` ```jsonc ````, which the check skips.
+- **`kelta …` lines** — `kelta-web/packages/cli/src/docsgen/docLines.test.ts` (part of the
+  `kelta-web` vitest run, job `test-frontend`; the `cli_docs` path filter triggers it on edits to
+  `kelta-marketing/src/content/docs/**`, `docs/**`, `examples/**` or any `README.md`). Every
+  `kelta …` line in a fenced block (after an optional `$ `, `\` continuations joined) or an inline
+  code span of those files, the `examples/**/*.sh` scripts and `packages/cli/AGENTS.md` is checked
+  against `buildManifest(allCommands)`: command path, declared flags (plus the root program's
+  global options from `addGlobalOptions`) and positional arity. `<placeholder>` is a positional,
+  `…` elides the rest, `[…]` reads as given, `--help` skips arity, and a bare command path in an
+  inline span is a reference. Fix the doc; when the doc is right and the CLI is wrong, add
+  `{file, line, text, reason}` to `docLines.allowlist.json` — an entry that no longer exists or
+  now passes fails the test. A fix to `AGENTS.md` goes in `docsgen/agentGuide.ts`
+  (`npm run gen:docs`); one to `docs/authoring/*.md` is mirrored in `docsgen/authoringDocs.ts` and
+  `kelta-mcp/src/main/resources/docs/authoring/` (pinned by `DocResourceTest`).
+- **Flow Task resource lists** — `kelta-worker/.../flow/FlowResourceListsTest` (worker surefire,
+  `/verify`). Starts `CoreActionsModule` + `IntegrationModule`, takes their `getActionHandlers()`
+  keys minus `FlowDefinitionValidator.retiredResources()`, and asserts the kelta-ai
+  `FlowGenerationService` prompt's "Available resources:" block and `docs/authoring/flows.md` →
+  "All accepted resources" list exactly that set (the failure names missing/extra keys). A new
+  handler key or a newly retired one needs both lists updated.
+
+**Runnable blocks (`runnable` fence marker).** A shell block whose fence info string carries the
+word `runnable` — ```` ```bash runnable ```` — is *executed* against a live stack, not just
+checked statically. Today that is `getting-started/first-app.md` (both Part 2 blocks), run by
+`ci/first-app-runnable.sh` in the `templates` job's "Run the first-app tutorial's runnable
+blocks" step: it creates an empty sandbox of `default` (a fresh tenant, so `customers`/`invoices`
+cannot collide with the installed templates), exports `KELTA_URL`/`KELTA_TENANT`/`KELTA_TOKEN` for
+the sandbox admin, and runs every marked block in document order in **one** `bash -euo pipefail`
+shell inside a temp directory (blocks share variables and the files they write), echoing
+`==> block <n>/<total>: <first line>` before each. The first failing command fails the step. It
+then re-runs each `kelta <group> apply …` of those blocks with `--output json` and fails unless
+it created, updated and deleted nothing (`unchanged`), because the page promises that. Unmarked
+blocks (```` ```bash ````, ```` ```json ````, …) stay illustrative; the marker does not affect
+the `kelta …` line check above (its fence regex ignores the info string). Mark a block only if it
+runs against a fresh tenant with nothing but the blocks before it. `bash ci/first-app-runnable.sh
+--extract <page.md>` prints what would run; the script's tests are `ci/first-app-runnable.test.ts`
+(job `test-ci-scripts`, stub `kelta` on `PATH`). The `templates` path filter does not list the
+page yet, so an edit to it alone does not trigger the job (the weekly schedule and any
+`ci.yml`/`templates` change do).
 
 ## MCP smoke test (CI)
 
@@ -446,7 +538,7 @@ they fail on the unique constraints whatever gets fixed. On the stack from the `
 http://kelta-mcp:8080 --toolset all` over stdio JSON-RPC, counts every `tools/call` (an unexpected
 error is retried up to `MCP_REPLAY_RETRIES`, 2, and each retry counts), fails on an error the
 fixture does not expect, then checks over plain HTTP that every collection of the template's
-`metadata.json` exists with `jq length seeds/<c>.json` records. `ci/mcp-replay-compare.sh` fails
+`metadata.json` exists with as many records as the rows of its `records` sections for it. `ci/mcp-replay-compare.sh` fails
 when `count * 5 > baseline * 6` (baseline 100: 120 passes, 121 fails), and the job writes count,
 baseline and threshold to the step summary. `ci/mcp-replay.test.sh` drives the runner against a
 fake `kelta` and a fake `curl` (substitution, retries counted, expected and unexpected errors,

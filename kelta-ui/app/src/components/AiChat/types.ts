@@ -19,7 +19,7 @@ export interface ChatMessage {
   createdAt: string
 }
 
-export type AiProposalType =
+type AiProposalType =
   | 'collection'
   | 'layout'
   | 'add_fields'
@@ -52,11 +52,6 @@ export interface AiChatState {
   streamingText: string
   proposals: AiProposal[]
   tokenUsage: { used: number; limit: number } | null
-}
-
-export interface SseEvent {
-  event: string
-  data: string
 }
 
 export interface ProposedField {

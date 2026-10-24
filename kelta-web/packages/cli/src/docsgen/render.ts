@@ -61,6 +61,12 @@ export function renderCommandsMd(manifest: Manifest): string {
         }
         lines.push('');
       }
+      lines.push('```bash');
+      for (const example of command.examples) {
+        if (example.description) lines.push(`# ${example.description}`);
+        lines.push(example.cmd);
+      }
+      lines.push('```', '');
     }
   }
   return lines.join('\n');

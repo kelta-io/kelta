@@ -343,5 +343,3 @@ export function PicklistDependencyEditor({
     </div>
   )
 }
-
-export default PicklistDependencyEditor

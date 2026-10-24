@@ -15,7 +15,7 @@ import { useCallback } from 'react'
 import { usePreferenceValue } from './usePreferenceStore'
 import type { SavedView, SavedViewType } from './useSavedViews'
 
-export interface ViewTypeOverride {
+interface ViewTypeOverride {
   viewType: SavedViewType
   typeConfig?: SavedView['typeConfig']
 }

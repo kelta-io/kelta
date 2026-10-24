@@ -84,6 +84,22 @@ public final class McpErrorMapper {
         return List.of();
     }
 
+    /**
+     * A client-side 400 raised before any gateway call (e.g. a wrong-typed
+     * argument), in the same {@code {status, errors:[...]}} envelope as a
+     * gateway error so callers branch on it the same way.
+     */
+    public static CallToolResult badRequest(String message, List<Map<String, Object>> errors) {
+        Map<String, Object> structured = new LinkedHashMap<>();
+        structured.put("status", 400);
+        structured.put("errors", errors);
+        return CallToolResult.builder()
+                .isError(true)
+                .content(List.of(new TextContent(redact(message))))
+                .structuredContent(structured)
+                .build();
+    }
+
     public static CallToolResult fromException(Throwable t) {
         String message = redact(t.getClass().getSimpleName() + ": " + t.getMessage());
         return CallToolResult.builder()

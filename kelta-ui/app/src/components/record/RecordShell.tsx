@@ -22,7 +22,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { cn } from '@/lib/utils'
 import { RecordStackProvider } from '@/context/RecordStackContext'
 
-export type RecordShellVariant = 'enduser' | 'admin'
+type RecordShellVariant = 'enduser' | 'admin'
 
 export interface RecordShellProps {
   /** Which stack renders this shell. Drives no layout itself — the slots do — but it
@@ -128,5 +128,3 @@ export function RecordShell({
     </RecordStackProvider>
   )
 }
-
-export default RecordShell

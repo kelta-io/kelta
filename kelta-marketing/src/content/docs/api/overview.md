@@ -83,6 +83,27 @@ on these pages, not in the spec.
 cap to 500), with local ids (`lid`) so later operations can reference records created earlier in the same batch.
 Shape and rules: [JSON:API conventions → atomic operations](/docs/reference/jsonapi/). CLI: `kelta records bulk`.
 
+## Bulk jobs, imports and duplicates
+
+For more records than a batch holds, a **bulk job** runs in the background (`MANAGE_DATA`):
+
+| Endpoint | Does |
+|---|---|
+| `POST /api/bulk-jobs` | Queue `{ collectionId, operation, records, externalIdField?, batchSize? }`; `operation` is `INSERT`, `UPDATE`, `UPSERT` (needs `externalIdField`) or `DELETE` |
+| `POST /api/bulk-jobs/upload` | The same from a multipart CSV or JSON `file`, with the other values as form fields |
+| `GET /api/bulk-jobs`, `GET /api/bulk-jobs/{id}` | List jobs; one job's status and progress |
+| `GET /api/bulk-jobs/{id}/results`, `/results/download` | Per-record results, as JSON:API or as a CSV file |
+| `POST /api/bulk-jobs/{id}/abort` | Stop a queued or running job |
+
+`POST /api/collections/{name}/import/csv` (multipart `file`) creates one record per CSV row, header names matching
+field names. It needs `create` on the collection, skips columns the caller may not write, and reports failed rows
+individually while committing the rest.
+
+Duplicates (`MANAGE_DATA`): `POST /api/collections/{name}/duplicates` with `{ "matchFields": [...], "limit"? }`
+returns groups of records sharing those values; `POST /api/collections/{name}/merge` with
+`{ "masterId", "duplicateIds": [...], "fieldOverrides"? }` keeps the master, re-points references to the duplicates
+at it and deletes them, in one transaction.
+
 ## Clients
 
 - **CLI** — `kelta records list|get|create|update|delete <collection>` and the raw `kelta api <METHOD> <path>`;

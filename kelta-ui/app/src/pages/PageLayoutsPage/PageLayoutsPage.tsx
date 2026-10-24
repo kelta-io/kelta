@@ -1132,5 +1132,3 @@ export function PageLayoutsPage({
     </AdminCrudPage>
   )
 }
-
-export default PageLayoutsPage

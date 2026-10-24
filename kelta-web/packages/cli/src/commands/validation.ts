@@ -8,6 +8,7 @@ const list = defineCommand({
   name: 'list',
   summary: 'List validation rules of a collection',
   positionals: [{ name: 'collection', description: 'Collection name or id', required: true }],
+  examples: [{ cmd: 'kelta validation-rules list invoices' }],
   input: z.object({ collection: z.string().min(1) }),
   handler: async (ctx, input) => {
     const axios = ctx.client.getAxiosInstance();
@@ -48,6 +49,16 @@ const create = defineCommand({
     { flag: '--severity <level>', description: 'ERROR|WARNING', default: 'ERROR' },
     { flag: '--error-field <field>', description: 'Field to attach the error to' },
     { flag: '--inactive', description: 'Create the rule inactive' },
+  ],
+  examples: [
+    {
+      cmd: "kelta validation-rules create invoices --name positive_amount --formula 'amount <= 0' --message 'Amount must be positive' --error-field amount",
+      description: 'Reject invoices whose amount is zero or negative',
+    },
+    {
+      cmd: "kelta validation-rules create orders --name due_date_set --formula 'ISBLANK(due_date)' --message 'Set a due date' --evaluate-on UPDATE --severity WARNING",
+      description: 'Warn on update when the due date is blank',
+    },
   ],
   input: z.object({
     collection: z.string().min(1),
@@ -92,6 +103,15 @@ const update = defineCommand({
     { flag: '--active <bool>', description: 'true|false' },
     { flag: '--data <json>', description: 'Attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [
+    {
+      cmd: 'kelta validation-rules update rule_123 --active false',
+      description: 'Deactivate a rule',
+    },
+    {
+      cmd: 'kelta validation-rules update rule_123 --data \'{"errorMessage": "Amount must be greater than zero"}\'',
+    },
+  ],
   input: z.object({
     ruleId: z.string().min(1),
     active: z.enum(['true', 'false']).optional(),
@@ -116,6 +136,7 @@ const remove = defineCommand({
   summary: 'Delete a validation rule',
   dangerous: true,
   positionals: [{ name: 'ruleId', description: 'Rule id', required: true }],
+  examples: [{ cmd: 'kelta validation-rules delete rule_123 --yes' }],
   input: z.object({ ruleId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client.getAxiosInstance().delete(`/api/validation-rules/${input.ruleId}`);

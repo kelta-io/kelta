@@ -23,8 +23,6 @@ import type { ApiClient } from '../../services/apiClient'
 import type { Note } from '../../hooks/useRecordContext'
 import { formatRelativeTime } from '../../utils/formatRelativeTime'
 
-export type { Note }
-
 /**
  * Props for the NotesSection component
  */
@@ -323,5 +321,3 @@ export function NotesSection({
     </section>
   )
 }
-
-export default NotesSection

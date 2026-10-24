@@ -60,4 +60,10 @@ public class DocResourcesConfig {
         return new DocResource("flows",
                 "Authoring flows: trigger config, state envelope, ${...} substitution, ResultPath, task Parameters.");
     }
+
+    @Bean
+    public DocResource packagesDocResource() {
+        return new DocResource("packages",
+                "Metadata packages: item types and natural keys, reference resolution, metadata diff and apply.");
+    }
 }

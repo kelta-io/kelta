@@ -55,6 +55,8 @@ The grid model and every row attribute are in the [authoring reference](/docs/re
 - **CLI** — `kelta reports list|get`, `kelta dashboards list|get --components|apply`.
 - **MCP** — `apply_dashboard` upserts a dashboard and its components in one call, keyed on the dashboard name and
   each component's title.
+- **API** — `kelta dashboards apply` goes through `PUT /api/dashboards/{name}/tree` (`GET` reads it), which applies the whole
+  dashboard (its components) in one call (`CUSTOMIZE_APPLICATION`).
 
 ## Embedded BI
 

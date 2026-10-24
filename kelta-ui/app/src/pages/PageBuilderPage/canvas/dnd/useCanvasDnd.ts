@@ -30,7 +30,7 @@ function generateNodeId(): string {
 }
 
 /** Build a fresh node for `widgetType`, seeded with the descriptor's default props. */
-export function makeNode(widgetType: string): PageComponent {
+function makeNode(widgetType: string): PageComponent {
   const descriptor = widgetRegistry.get(widgetType)
   return {
     id: generateNodeId(),
@@ -39,7 +39,7 @@ export function makeNode(widgetType: string): PageComponent {
   }
 }
 
-export interface ActiveDrag {
+interface ActiveDrag {
   /** A palette widget type, or an existing node id (for the `DragOverlay` preview). */
   source: 'palette' | 'node'
   widgetType?: string

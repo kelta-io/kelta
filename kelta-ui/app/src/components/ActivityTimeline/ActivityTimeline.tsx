@@ -769,5 +769,3 @@ export function ActivityTimeline({
     </section>
   )
 }
-
-export default ActivityTimeline

@@ -4,23 +4,37 @@
 ARG MAVEN_VERSION=3.9.9
 ARG GRAALVM_IMAGE=ghcr.io/graalvm/native-image-community:25-ol9
 
+# Base-image registry and Maven mirror are build args. The DEFAULTS are the homelab
+# pull-through caches that CI and production builds use (LAN speed, and no Docker Hub /
+# Maven Central rate limits when several images build in parallel) — builds that pass no
+# args behave exactly as before. Outside the homelab pass the public sources:
+#   --build-arg BASE_REGISTRY=docker.io/library \
+#   --build-arg MAVEN_MIRROR=central \
+#   --build-arg MAVEN_DIST_URL=https://repo.maven.apache.org/maven2
+ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
+ARG MAVEN_DIST_URL=https://nexus.rzware.com/repository/maven-public
+
 # =============================================================================
 # Stage 1: Build runtime-platform dependencies
 # =============================================================================
 FROM ${GRAALVM_IMAGE} AS runtime-builder
 
 ARG MAVEN_VERSION
+ARG MAVEN_DIST_URL
 
 WORKDIR /kelta-platform
 
 RUN microdnf install -y findutils && \
     curl -fsSL --retry 8 --retry-delay 5 --retry-connrefused --retry-all-errors \
-      "https://nexus.rzware.com/repository/maven-public/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" | \
+      "${MAVEN_DIST_URL}/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" | \
     tar xzf - -C /opt && \
     ln -sf /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
 # Route Maven Central through Google's GCS mirror to dodge 429 rate limits.
-COPY ci/maven-settings.xml /root/.m2/settings.xml
+ARG MAVEN_MIRROR=nexus
+COPY ci/maven-settings.xml /tmp/maven-settings.xml
+RUN mkdir -p /root/.m2 && \
+    if [ "$MAVEN_MIRROR" = "nexus" ]; then cp /tmp/maven-settings.xml /root/.m2/settings.xml; fi
 
 # Belt-and-braces: retry on transient 429 / 503 / connection resets in case the
 # mirror is unreachable and Maven falls back to central.
@@ -59,17 +73,21 @@ RUN mvn clean install -DskipTests -B \
 FROM ${GRAALVM_IMAGE} AS builder
 
 ARG MAVEN_VERSION
+ARG MAVEN_DIST_URL
 
 WORKDIR /build
 
 RUN microdnf install -y findutils && \
     curl -fsSL --retry 8 --retry-delay 5 --retry-connrefused --retry-all-errors \
-      "https://nexus.rzware.com/repository/maven-public/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" | \
+      "${MAVEN_DIST_URL}/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" | \
     tar xzf - -C /opt && \
     ln -sf /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
 # Route Maven Central through Google's GCS mirror to dodge 429 rate limits.
-COPY ci/maven-settings.xml /root/.m2/settings.xml
+ARG MAVEN_MIRROR=nexus
+COPY ci/maven-settings.xml /tmp/maven-settings.xml
+RUN mkdir -p /root/.m2 && \
+    if [ "$MAVEN_MIRROR" = "nexus" ]; then cp /tmp/maven-settings.xml /root/.m2/settings.xml; fi
 
 # Retry fallback if mirror is unreachable.
 ENV MAVEN_OPTS="-Dmaven.wagon.http.retryHandler.count=10 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true -Daether.connector.http.retryHandler.count=10"
@@ -90,7 +108,7 @@ RUN mvn -Pnative native:compile -DskipTests -B \
 # =============================================================================
 # Stage 3: Minimal runtime (no JRE — binary is self-contained)
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/debian:12-slim
+FROM ${BASE_REGISTRY}/debian:12-slim
 
 WORKDIR /app
 

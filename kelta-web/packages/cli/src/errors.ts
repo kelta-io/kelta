@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { CommanderError } from 'commander';
 import { ZodError } from 'zod';
 
 /** Stable exit codes — part of the CLI's machine contract (see specs/kelta-cli). */
@@ -30,6 +31,8 @@ export interface CliErrorOptions {
   meta?: Record<string, unknown>;
   /** The full JSON:API `errors[]` array, when the failure came from one. */
   errors?: JsonApiErrorEntry[];
+  /** What the caller can do about it, when the CLI knows. */
+  hint?: string;
 }
 
 /** A fully-mapped CLI failure: stable `code`, exit code, optional HTTP context. */
@@ -41,6 +44,7 @@ export class CliError extends Error {
   readonly source?: Record<string, unknown>;
   readonly meta?: Record<string, unknown>;
   readonly errors?: JsonApiErrorEntry[];
+  readonly hint?: string;
 
   constructor(message: string, options: CliErrorOptions) {
     super(message);
@@ -52,6 +56,7 @@ export class CliError extends Error {
     this.source = options.source;
     this.meta = options.meta;
     this.errors = options.errors;
+    this.hint = options.hint;
     Object.setPrototypeOf(this, CliError.prototype);
   }
 }
@@ -97,26 +102,61 @@ function codeForStatus(status: number): string {
   }
 }
 
+/** `Retry-After` as whole seconds; the HTTP-date form is not used by the gateway. */
+function retryAfterSeconds(headers: unknown): number | undefined {
+  if (typeof headers !== 'object' || headers === null) return undefined;
+  const raw = (headers as Record<string, unknown>)['retry-after'];
+  const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.trim()) : NaN;
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/** What to do next for the statuses every command can hit; keyed on HTTP status, not the server's code. */
+const STATUS_HINTS: Record<number, string> = {
+  401: 'Run `kelta auth login` to sign in again, or check that KELTA_TOKEN holds a valid token.',
+  403: "The token's user lacks permission for this on the tenant; check the profile and tenant with `kelta auth status`.",
+  404: 'Check the id or name, and that the tenant slug is right (`kelta auth status`).',
+};
+
+/** Hint for a failure that never reached the server. */
+const NETWORK_HINT =
+  "Check the profile's API URL with `kelta profile show` and that it is reachable from here.";
+
+function statusHint(status: number | undefined): string | undefined {
+  return status !== undefined ? STATUS_HINTS[status] : undefined;
+}
+
+function hintFor(code: string, status: number, headers: unknown): string | undefined {
+  if (code !== 'RATE_LIMIT_EXCEEDED') return statusHint(status);
+  const seconds = retryAfterSeconds(headers);
+  const wait =
+    seconds !== undefined
+      ? `Wait ${String(seconds)} second${seconds === 1 ? '' : 's'} (Retry-After) before retrying`
+      : 'Wait before retrying';
+  return `${wait}; check usage with \`kelta limits get\` and batch or slow down requests.`;
+}
+
 /**
  * Map a non-2xx HTTP response to a CliError, keeping the server's own reason:
  * `errors[0].detail` of a JSON:API envelope, else a legacy `error` string.
  * The generic `Request failed with status N` is only for a body with neither.
  */
-export function errorFromResponse(status: number, data: unknown): CliError {
+export function errorFromResponse(status: number, data: unknown, headers?: unknown): CliError {
   const body = (typeof data === 'object' && data !== null ? data : {}) as JsonApiErrorBody;
   const entries = Array.isArray(body.errors) ? body.errors : [];
   const first = entries[0];
   const legacy = typeof body.error === 'string' && body.error !== '' ? body.error : undefined;
+  const code = first?.code ?? codeForStatus(status);
   return new CliError(
     first?.detail ?? first?.title ?? legacy ?? `Request failed with status ${status}`,
     {
-      code: first?.code ?? codeForStatus(status),
+      code,
       exitCode: exitCodeForStatus(status),
       status,
       requestId: first?.meta?.requestId,
       source: first?.source,
       meta: first?.meta,
       errors: entries.length > 0 ? entries : undefined,
+      hint: hintFor(code, status, headers),
     }
   );
 }
@@ -129,8 +169,17 @@ export function errorFromResponse(status: number, data: unknown): CliError {
 export function mapError(error: unknown): CliError {
   if (error instanceof CliError) return error;
 
+  // missing argument, unknown option/command, excess arguments: commander's
+  // message (with its "Did you mean …?" suggestion) becomes the detail
+  if (error instanceof CommanderError) {
+    return new CliError(error.message.replace(/^error: /, ''), {
+      code: 'INVALID_ARGUMENTS',
+      exitCode: EXIT.USAGE,
+    });
+  }
+
   if (error instanceof ZodError) {
-    const detail = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
+    const detail = error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
     return new CliError(`Invalid arguments — ${detail}`, {
       code: 'INVALID_ARGUMENTS',
       exitCode: EXIT.USAGE,
@@ -142,9 +191,10 @@ export function mapError(error: unknown): CliError {
       return new CliError(error.message || 'Network error', {
         code: 'NETWORK_ERROR',
         exitCode: EXIT.API,
+        hint: NETWORK_HINT,
       });
     }
-    return errorFromResponse(error.response.status, error.response.data);
+    return errorFromResponse(error.response.status, error.response.data, error.response.headers);
   }
 
   if (isKeltaErrorLike(error)) {
@@ -153,6 +203,7 @@ export function mapError(error: unknown): CliError {
       code: status !== undefined ? codeForStatus(status) : 'API_ERROR',
       exitCode: status !== undefined ? exitCodeForStatus(status) : EXIT.API,
       status,
+      hint: statusHint(status),
     });
   }
 
@@ -177,6 +228,7 @@ export function toErrorPayload(error: CliError): string {
       detail: error.message,
       source: error.source,
       meta: error.meta,
+      hint: error.hint,
     },
     ...(error.errors && error.errors.length > 0 ? { errors: error.errors } : {}),
   });

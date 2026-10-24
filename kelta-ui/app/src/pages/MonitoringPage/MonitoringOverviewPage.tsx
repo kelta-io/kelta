@@ -612,5 +612,3 @@ function ChartPanel({
     </div>
   )
 }
-
-export default MonitoringOverviewPage

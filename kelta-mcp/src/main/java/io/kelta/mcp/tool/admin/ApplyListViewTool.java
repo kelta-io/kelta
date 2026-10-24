@@ -124,18 +124,16 @@ public class ApplyListViewTool implements AdminTool {
     }
 
     CallToolResult apply(Map<String, Object> args) {
-        Object cn = args.get("collectionName");
-        Object nameArg = args.get("name");
-        if (cn == null || cn.toString().isBlank() || nameArg == null || nameArg.toString().isBlank()) {
-            return error("Arguments \"collectionName\" and \"name\" are required.");
+        if (!(args.get("collectionName") instanceof String cn) || cn.isBlank()
+                || !(args.get("name") instanceof String name) || name.isBlank()) {
+            return error("Arguments \"collectionName\" and \"name\" are required strings.");
         }
         if (!(args.get("columns") instanceof List<?> columns) || columns.isEmpty()) {
             return error("Argument \"columns\" must be a non-empty array.");
         }
-        String name = nameArg.toString();
 
         try {
-            String collectionId = lookups.collectionIdByName(cn.toString());
+            String collectionId = lookups.collectionIdByName(cn);
             if (collectionId == null) {
                 return error("Collection \"" + cn + "\" not found.");
             }

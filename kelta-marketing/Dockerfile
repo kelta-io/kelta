@@ -1,7 +1,15 @@
 # Build context is the REPOSITORY ROOT (like every other image): the docs engine
 # reads docs/authoring/*.md, the generated CLI docs and README.md from outside this module.
 # Dockerfile.dockerignore next to this file keeps the context to those paths.
-FROM harbor.rzware.com/dockerhub-cache/library/node:22-alpine AS build
+
+# Base-image registry is a build arg. The DEFAULT is the homelab pull-through cache
+# that CI and production builds use (LAN speed, and no Docker Hub rate limits when
+# several images build in parallel) — builds that pass no args behave exactly as
+# before. Outside the homelab pass the public source:
+#   --build-arg BASE_REGISTRY=docker.io/library
+ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
+
+FROM ${BASE_REGISTRY}/node:22-alpine AS build
 WORKDIR /app/kelta-marketing
 COPY kelta-marketing/package.json kelta-marketing/package-lock.json ./
 RUN npm ci
@@ -20,7 +28,7 @@ ENV PUBLIC_WAITLIST_ENDPOINT=$PUBLIC_WAITLIST_ENDPOINT
 RUN npm run build
 
 # Production stage — serve static files with nginx
-FROM harbor.rzware.com/dockerhub-cache/library/nginx:1.27-alpine
+FROM ${BASE_REGISTRY}/nginx:1.27-alpine
 COPY --from=build /app/kelta-marketing/dist /usr/share/nginx/html
 COPY kelta-marketing/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

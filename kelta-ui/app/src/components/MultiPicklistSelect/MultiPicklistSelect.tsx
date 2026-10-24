@@ -251,5 +251,3 @@ export function MultiPicklistSelect({
     </div>
   )
 }
-
-export default MultiPicklistSelect

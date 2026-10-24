@@ -1,0 +1,25 @@
+{
+  "status" : 200,
+  "headers" : {
+    "ETag" : "\"MjAyNi0wMS0wMVQwMDowMDowMFo\"",
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "data" : {
+      "attributes" : {
+        "name" : "Admin",
+        "tenantId" : "tenant-a",
+        "updatedAt" : "2026-01-01T00:00:00Z"
+      },
+      "id" : "menu-2",
+      "type" : "ui-menus"
+    }
+  },
+  "calls" : [ {
+    "collection" : "ui-menus",
+    "hit" : true,
+    "id" : "menu-2",
+    "op" : "cache.getByIdResponse",
+    "tenant" : "tenant-a"
+  } ]
+}

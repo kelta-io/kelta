@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
-export interface VariableNode {
+interface VariableNode {
   /** JSONPath-style path users will see, e.g. "$.record.data.name" */
   path: string
   /** Human-readable label shown next to the path */

@@ -1,5 +1,0 @@
-[
-  { "name": "Active applications", "columns": ["name", "candidate", "job", "stage", "appliedOn", "stageChangedAt"], "filters": ["stage.neq=HIRED", "stage.neq=REJECTED"], "sort": "stage", "default": true, "rowLimit": 25 },
-  { "name": "Hiring pipeline", "columns": ["name", "candidate", "job", "stage", "rating"], "viewType": "KANBAN", "laneField": "stage", "cardFields": ["name", "job", "rating"], "rowLimit": 100 },
-  { "name": "Hires", "columns": ["name", "candidate", "job", "hiredAt"], "filters": ["stage=HIRED"], "sort": "-hiredAt", "rowLimit": 25 }
-]

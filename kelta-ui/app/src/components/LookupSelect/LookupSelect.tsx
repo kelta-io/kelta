@@ -308,5 +308,3 @@ export function LookupSelect({
     </div>
   )
 }
-
-export default LookupSelect

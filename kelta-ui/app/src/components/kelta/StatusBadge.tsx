@@ -2,7 +2,7 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
-export type StatusVariant = 'active' | 'pending' | 'inactive' | 'failed' | 'paid'
+type StatusVariant = 'active' | 'pending' | 'inactive' | 'failed' | 'paid'
 
 const variantClass: Record<StatusVariant, string> = {
   active: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/55',

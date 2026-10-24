@@ -93,7 +93,7 @@ negative amount and read the validation error.
 Install and log in first ([Install the CLI](/docs/getting-started/install-cli/)). Every command prints JSON when
 piped, so the same script works for a person and for CI.
 
-```bash
+```bash runnable
 kelta collections create --name customers --display-name Customers
 kelta fields add customers --name name --type text --required
 
@@ -114,7 +114,7 @@ kelta validation-rules create invoices \
 
 Layouts and menus are applied as trees from a file — one idempotent call per object:
 
-```bash
+```bash runnable
 cat > invoices-layout.json <<'JSON'
 {
   "name": "Main",

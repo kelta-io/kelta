@@ -6,6 +6,7 @@ const get = defineCommand({
   group: 'limits',
   name: 'get',
   summary: 'Show tenant governor-limit status',
+  examples: [{ cmd: 'kelta limits get' }],
   input: z.object({}),
   handler: async (ctx) => {
     const response = await ctx.client.getAxiosInstance().get<unknown>('/api/governor-limits');
@@ -21,6 +22,7 @@ const setTier = defineCommand({
   positionals: [
     { name: 'tier', description: 'FREE|PROFESSIONAL|ENTERPRISE|UNLIMITED', required: true },
   ],
+  examples: [{ cmd: 'kelta limits set-tier PROFESSIONAL --yes' }],
   input: z.object({
     tier: z.enum(['FREE', 'PROFESSIONAL', 'ENTERPRISE', 'UNLIMITED']),
   }),
@@ -38,6 +40,12 @@ const set = defineCommand({
   summary: 'Override individual governor limits (raw limits map, persisted per tenant)',
   dangerous: true,
   options: [{ flag: '--data <json>', description: 'Limits map as JSON, @file, or - (required)' }],
+  examples: [
+    {
+      cmd: 'kelta limits set --data \'{"apiCallsPerDay": 50000}\' --yes',
+      description: 'Override the daily API call limit',
+    },
+  ],
   input: z.object({ data: z.string().min(1) }),
   handler: async (ctx, input) => {
     const body = readDataArgument(input.data);

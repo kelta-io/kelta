@@ -19,6 +19,7 @@ const list = defineCommand({
   group: 'collections',
   name: 'list',
   summary: 'List all collections',
+  examples: [{ cmd: 'kelta collections list' }],
   input: z.object({}),
   handler: async (ctx) => {
     const body = (await ctx.client.resource('collections').list({ size: 200 })) as {
@@ -65,6 +66,7 @@ const describe = defineCommand({
   name: 'describe',
   summary: 'Show collection details and fields',
   positionals: [{ name: 'name', description: 'Collection name', required: true }],
+  examples: [{ cmd: 'kelta collections describe customers' }],
   input: z.object({ name: z.string().min(1) }),
   handler: async (ctx, input) => {
     const body = (await ctx.client.resource('collections').get(input.name)) as {
@@ -97,6 +99,15 @@ const create = defineCommand({
     { flag: '--display-name <label>', description: 'Display name' },
     { flag: '--description <text>', description: 'Description' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
+  ],
+  examples: [
+    {
+      cmd: "kelta collections create --name invoices --display-name Invoices --description 'Customer invoices'",
+    },
+    {
+      cmd: 'kelta collections create --name orders --data @orders-collection.json',
+      description: 'Create from a JSON attributes file',
+    },
   ],
   input: z.object({
     name: z.string().min(1),
@@ -132,6 +143,7 @@ const update = defineCommand({
     { flag: '--description <text>', description: 'Description' },
     { flag: '--data <json>', description: 'Extra attributes as JSON, @file, or - (merged last)' },
   ],
+  examples: [{ cmd: "kelta collections update invoices --display-name 'Sales Invoices'" }],
   input: z.object({
     collection: z.string().min(1),
     displayName: z.string().optional(),
@@ -165,6 +177,13 @@ const remove = defineCommand({
         'Confirm deletion of a collection that still has dependent data (attachments, ' +
         'layouts, reports, validation rules, field history, record versions, …); the ' +
         'server blocks the delete without this.',
+    },
+  ],
+  examples: [
+    { cmd: 'kelta collections delete invoices --yes' },
+    {
+      cmd: 'kelta collections delete invoices --force --yes',
+      description: 'Delete even though layouts and other dependent data exist',
     },
   ],
   input: z.object({ collection: z.string().min(1), force: z.boolean().default(false) }),

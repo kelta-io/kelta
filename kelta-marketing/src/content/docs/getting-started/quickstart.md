@@ -18,6 +18,9 @@ Check the [prerequisites](#prerequisites) below first, then run the steps in thi
 
 - Docker and Docker Compose v2.24+ (Docker Desktop or the Docker Engine plugin).
 - `make` and `git`.
+- **Free host ports 5173 and 8080** (UI and gateway) — `lsof -i :5173 -i :8080` should print nothing. They cannot
+  be remapped today: the released UI bundle calls `http://localhost:8080` and the OAuth redirect is
+  `http://localhost:5173/auth/callback`.
 - **Memory.** A default Docker Desktop allocation is enough — the commands above pull prebuilt JVM images.
   Building the GraalVM native images production runs needs roughly **24 GB allocated to Docker**; see
   [Native images](#native-images) if you want them.
@@ -74,11 +77,11 @@ Kelta does not ship a default administrator password. On its first boot, kelta-a
 prints the new password **once** in a warning banner headed `Kelta platform admin initial password`:
 
 ```bash
-docker compose logs kelta-auth | grep -o 'Password: *[A-Za-z0-9]*'
+docker compose logs --no-color kelta-auth | sed -n 's/.*Password: *\([A-Za-z0-9]*\).*/\1/p' | head -n 1
 ```
 
-(The services log JSON, so the banner arrives as one line; drop the `grep -o` to see all of it.) The banner is
-printed only once — on later restarts the account is already changed and nothing is logged.
+(The services log JSON, so the banner arrives as one line; run `docker compose logs kelta-auth` to see all of
+it.) The banner is printed only once — on later restarts the account is already changed and nothing is logged.
 
 To choose the initial password yourself instead, set `KELTA_BOOTSTRAP_ADMIN_PASSWORD` in `.env` (or your shell)
 **before the first start**. It is applied once, never logged, and you are still asked to change it at first

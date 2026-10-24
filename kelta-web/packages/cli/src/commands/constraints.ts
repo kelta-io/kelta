@@ -9,6 +9,7 @@ const list = defineCommand({
   name: 'list',
   summary: 'List composite unique constraints of a collection',
   positionals: [{ name: 'collection', description: 'Collection name', required: true }],
+  examples: [{ cmd: 'kelta constraints list orders' }],
   input: z.object({ collection: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client
@@ -24,6 +25,12 @@ const create = defineCommand({
   summary: 'Create a composite unique constraint (Postgres unique index; duplicates → 409)',
   positionals: [{ name: 'collection', description: 'Collection name', required: true }],
   options: [{ flag: '--fields <list>', description: 'Field names, comma-separated (required)' }],
+  examples: [
+    {
+      cmd: 'kelta constraints create orders --fields customer,order_number',
+      description: 'Make each order number unique per customer',
+    },
+  ],
   input: z.object({
     collection: z.string().min(1),
     fields: z.string().min(1),
@@ -51,6 +58,7 @@ const remove = defineCommand({
     { name: 'collection', description: 'Collection name', required: true },
     { name: 'indexName', description: 'Index name (see: kelta constraints list)', required: true },
   ],
+  examples: [{ cmd: 'kelta constraints delete orders uq_orders_customer_order_number --yes' }],
   input: z.object({ collection: z.string().min(1), indexName: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client

@@ -51,6 +51,9 @@ kelta menus apply --file finance.json --name Finance
   { "label": "Reports", "children": [ { "label": "Aging", "path": "/reports/<id>" } ] } ] }
 ```
 
+**API** — `kelta menus apply` uses `PUT /api/ui-menus/{name}/tree` (`GET` reads it; `CUSTOMIZE_APPLICATION`), which applies the
+whole tree in one call.
+
 **MCP** — `apply_menu` upserts the whole tree keyed on the menu name and (menu, parent, label) per item,
 validates every path against the grammar before writing, and reports each item as `created`, `updated`,
 `unchanged` or `stale` (`prune: true` deletes stale items).

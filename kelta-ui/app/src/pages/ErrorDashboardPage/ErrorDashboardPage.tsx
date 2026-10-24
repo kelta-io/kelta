@@ -139,5 +139,3 @@ export function ErrorDashboardPage({ className }: ErrorDashboardPageProps) {
     </div>
   )
 }
-
-export default ErrorDashboardPage

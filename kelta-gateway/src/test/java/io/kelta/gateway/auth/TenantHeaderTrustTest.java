@@ -90,8 +90,8 @@ class TenantHeaderTrustTest {
 
         tenantFilter = new TenantResolutionFilter(metrics, cacheManager);
         jwtFilter = new JwtAuthenticationFilter(jwtDecoder, principalExtractor, publicPathMatcher, metrics, cacheManager);
-        patFilter = new PatAuthenticationFilter(redis, WebClient.builder(), "http://localhost:1", 300,
-                metrics, rateLimiter);
+        patFilter = new PatAuthenticationFilter(redis, WebClient.builder(), "http://localhost:1", 300, 10_000,
+                metrics, rateLimiter, 300, 10000);
     }
 
     private void jwtWithTenantClaim(String tenantId) {

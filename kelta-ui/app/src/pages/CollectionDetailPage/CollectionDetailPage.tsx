@@ -2181,5 +2181,3 @@ export function CollectionDetailPage({
     </div>
   )
 }
-
-export default CollectionDetailPage

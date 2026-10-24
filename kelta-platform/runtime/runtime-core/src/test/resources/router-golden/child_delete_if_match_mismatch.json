@@ -1,0 +1,29 @@
+{
+  "status" : 409,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "STALE_WRITE",
+      "detail" : "This record was modified since you opened it. Reload the latest version and try again.",
+      "meta" : {
+        "path" : "/api/accounts/acc-1/contacts/con-1",
+        "requestId" : "<requestId>"
+      },
+      "status" : "409",
+      "title" : "Conflict"
+    } ]
+  },
+  "calls" : [ {
+    "collection" : "contacts",
+    "id" : "con-1",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  }, {
+    "collection" : "contacts",
+    "id" : "con-1",
+    "op" : "getById",
+    "tenant" : "tenant-a"
+  } ]
+}

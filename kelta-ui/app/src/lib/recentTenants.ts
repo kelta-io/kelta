@@ -13,7 +13,7 @@
  * merely asks for a slug.
  */
 
-export interface RecentUser {
+interface RecentUser {
   email: string
   name?: string
   lastUsedAt: string

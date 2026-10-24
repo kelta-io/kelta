@@ -18,6 +18,7 @@ const list = defineCommand({
   group: 'token',
   name: 'list',
   summary: 'List your active personal access tokens',
+  examples: [{ cmd: 'kelta token list' }],
   input: z.object({}),
   handler: async (ctx) => {
     const tokens = (await ctx.client.admin.personalTokens.list()) as PatSummary[];
@@ -42,6 +43,12 @@ const create = defineCommand({
   options: [
     { flag: '--name <name>', description: 'Token name' },
     { flag: '--expires-in <days>', description: 'Lifetime in days (1-365)', default: '90' },
+  ],
+  examples: [
+    {
+      cmd: 'kelta token create --name ci-deploy --expires-in 30',
+      description: 'Create a 30-day token for CI',
+    },
   ],
   input: z.object({
     name: z.string().min(1).max(200),
@@ -69,6 +76,7 @@ const revoke = defineCommand({
   positionals: [
     { name: 'tokenId', description: 'Token id (see: kelta token list)', required: true },
   ],
+  examples: [{ cmd: 'kelta token revoke 3f6c1a52-8d2e-4b7a-9c1e-5a0d2f7b9e14 --yes' }],
   input: z.object({ tokenId: z.string().min(1) }),
   handler: async (ctx, input) => {
     await ctx.client.admin.personalTokens.revoke(input.tokenId);

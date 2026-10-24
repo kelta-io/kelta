@@ -27,7 +27,7 @@ import type React from 'react'
 /**
  * Props passed to a custom field renderer component.
  */
-export interface FieldRendererComponentProps {
+interface FieldRendererComponentProps {
   /** The field value */
   value: unknown
   /** Field name */
@@ -47,7 +47,7 @@ export interface FieldRendererComponentProps {
 /**
  * Props passed to a custom page component.
  */
-export interface PageComponentProps {
+interface PageComponentProps {
   /** Page configuration props from the page definition */
   config?: Record<string, unknown>
   /** Tenant slug for navigation */
@@ -77,7 +77,7 @@ export interface QuickActionComponentProps {
 /**
  * Props passed to a custom column renderer.
  */
-export interface ColumnRendererComponentProps {
+interface ColumnRendererComponentProps {
   /** The cell value */
   value: unknown
   /** Column field name */

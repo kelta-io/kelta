@@ -23,7 +23,7 @@ export interface JsonApiResource {
 /**
  * JSON:API single-resource response envelope
  */
-export interface JsonApiResponse {
+interface JsonApiResponse {
   data: JsonApiResource
   included?: JsonApiResource[]
 }
@@ -31,7 +31,7 @@ export interface JsonApiResponse {
 /**
  * JSON:API collection response envelope
  */
-export interface JsonApiCollectionResponse {
+interface JsonApiCollectionResponse {
   data: JsonApiResource[]
   included?: JsonApiResource[]
   total?: number

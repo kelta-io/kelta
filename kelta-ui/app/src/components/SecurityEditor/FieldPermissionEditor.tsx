@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/select'
 
 /** Visibility options */
-export type FieldVisibility = 'VISIBLE' | 'READ_ONLY' | 'HIDDEN' | 'MASKED'
+type FieldVisibility = 'VISIBLE' | 'READ_ONLY' | 'HIDDEN' | 'MASKED'
 
 /** Collection reference */
 export interface CollectionRef {
@@ -332,5 +332,3 @@ export function FieldPermissionEditor({
     </div>
   )
 }
-
-export default FieldPermissionEditor

@@ -105,8 +105,8 @@ export function EndUserShell(): React.ReactElement {
         user={user}
         onLogout={handleLogout}
         onSearchOpen={() => setSearchOpen(true)}
-        notificationCount={pendingApprovals + unreadChats}
-        onNotificationsOpen={() =>
+        inboxCount={pendingApprovals + unreadChats}
+        onInboxOpen={() =>
           navigate(
             // Approvals stay the primary feed; when only chat is unread, land there.
             pendingApprovals === 0 && unreadChats > 0

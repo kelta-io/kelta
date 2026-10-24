@@ -1,5 +1,13 @@
 # Multi-stage build for Kelta MCP Server
 
+# Base-image registry and Maven mirror are build args. The DEFAULTS are the homelab
+# pull-through caches that CI and production builds use (LAN speed, and no Docker Hub /
+# Maven Central rate limits when several images build in parallel) — builds that pass no
+# args behave exactly as before. Outside the homelab pass the public sources:
+#   --build-arg BASE_REGISTRY=docker.io/library \
+#   --build-arg MAVEN_MIRROR=central
+ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
+
 # =============================================================================
 # Stage 1: Build runtime-platform dependencies
 #
@@ -8,7 +16,7 @@
 # AtomicResult), so all three must be built. We mirror kelta-ai's module
 # list for cache-key compatibility — Maven's -am handles the dep graph.
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/maven:3.9-eclipse-temurin-25 AS runtime-builder
+FROM ${BASE_REGISTRY}/maven:3.9-eclipse-temurin-25 AS runtime-builder
 
 # Survive transient Maven Central 429 / 503 / connection resets — both the
 # legacy wagon HTTP transport and the newer Aether connector retry up to 10
@@ -18,7 +26,10 @@ ENV MAVEN_OPTS="-Dmaven.wagon.http.retryHandler.count=10 -Dmaven.wagon.http.retr
 WORKDIR /kelta-platform
 
 # Route Maven Central through Google's GCS mirror to dodge 429 rate limits.
-COPY ci/maven-settings.xml /root/.m2/settings.xml
+ARG MAVEN_MIRROR=nexus
+COPY ci/maven-settings.xml /tmp/maven-settings.xml
+RUN mkdir -p /root/.m2 && \
+    if [ "$MAVEN_MIRROR" = "nexus" ]; then cp /tmp/maven-settings.xml /root/.m2/settings.xml; fi
 
 # Copy only POMs first for dependency layer caching
 COPY kelta-platform/pom.xml ./
@@ -48,14 +59,17 @@ RUN mvn clean install -DskipTests -B \
 # =============================================================================
 # Stage 2: Build the application
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/maven:3.9-eclipse-temurin-25 AS builder
+FROM ${BASE_REGISTRY}/maven:3.9-eclipse-temurin-25 AS builder
 
 ENV MAVEN_OPTS="-Dmaven.wagon.http.retryHandler.count=10 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true -Daether.connector.http.retryHandler.count=10"
 
 WORKDIR /build
 
 # Route Maven Central through Google's GCS mirror to dodge 429 rate limits.
-COPY ci/maven-settings.xml /root/.m2/settings.xml
+ARG MAVEN_MIRROR=nexus
+COPY ci/maven-settings.xml /tmp/maven-settings.xml
+RUN mkdir -p /root/.m2 && \
+    if [ "$MAVEN_MIRROR" = "nexus" ]; then cp /tmp/maven-settings.xml /root/.m2/settings.xml; fi
 
 # Copy runtime artifacts from previous stage
 COPY --from=runtime-builder /root/.m2/repository/io/kelta /root/.m2/repository/io/kelta
@@ -81,7 +95,7 @@ RUN curl -fL -o opentelemetry-javaagent.jar \
 # =============================================================================
 # Stage 3: Runtime image
 # =============================================================================
-FROM harbor.rzware.com/dockerhub-cache/library/eclipse-temurin:25-jre
+FROM ${BASE_REGISTRY}/eclipse-temurin:25-jre
 
 WORKDIR /app
 

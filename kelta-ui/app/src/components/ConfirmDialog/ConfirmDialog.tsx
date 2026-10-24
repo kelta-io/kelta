@@ -37,7 +37,7 @@ import { cn } from '@/lib/utils'
 /**
  * ConfirmDialog variant type
  */
-export type ConfirmDialogVariant = 'default' | 'danger'
+type ConfirmDialogVariant = 'default' | 'danger'
 
 /**
  * Props for the ConfirmDialog component
@@ -157,5 +157,3 @@ export function ConfirmDialog({
     </AlertDialog>
   )
 }
-
-export default ConfirmDialog

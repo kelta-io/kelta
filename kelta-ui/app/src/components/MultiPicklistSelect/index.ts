@@ -1,2 +1,2 @@
-export { MultiPicklistSelect, type MultiPicklistSelectProps } from './MultiPicklistSelect'
+export { MultiPicklistSelect } from './MultiPicklistSelect'
 export { normalizeMultiPicklistValue } from './utils'

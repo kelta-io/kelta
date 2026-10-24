@@ -763,5 +763,12 @@
     "breadcrumbNew": "جديد",
     "breadcrumbEdit": "تعديل",
     "breadcrumbClone": "استنساخ"
+  },
+  "notificationBell": {
+    "label": "الإشعارات",
+    "labelUnread": "الإشعارات ({{count}} غير مقروءة)",
+    "title": "الإشعارات",
+    "empty": "لا توجد إشعارات غير مقروءة",
+    "inbox": "الموافقات والدردشة"
   }
 }

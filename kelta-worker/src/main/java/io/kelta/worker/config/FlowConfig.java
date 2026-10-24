@@ -195,6 +195,8 @@ public class FlowConfig {
                                               io.kelta.runtime.module.integration.spi.CredentialResolverPort credentialResolverPort,
                                           @Autowired(required = false)
                                               io.kelta.runtime.module.integration.spi.IdempotencyStore idempotencyStore,
+                                          @Autowired(required = false)
+                                              io.kelta.runtime.module.integration.spi.NotificationStore notificationStore,
                                           io.kelta.runtime.outbound.OutboundUrlGuard outboundUrlGuard,
                                           ObjectProvider<NatsConnectionManager> natsConnectionManager) {
         ModuleRegistry registry = new ModuleRegistry(actionHandlerRegistry, beforeSaveHookRegistry);
@@ -243,6 +245,12 @@ public class FlowConfig {
                 extensions.put(io.kelta.runtime.module.integration.spi.IdempotencyStore.class,
                     idempotencyStore);
                 log.info("IdempotencyStore wired into module context — CALL_API will dedupe non-idempotent calls");
+            }
+            if (notificationStore != null) {
+                extensions.put(io.kelta.runtime.module.integration.spi.NotificationStore.class,
+                    notificationStore);
+            } else {
+                log.warn("No NotificationStore — SEND_NOTIFICATION flow steps will fail");
             }
 
             ModuleContext context = new ModuleContext(

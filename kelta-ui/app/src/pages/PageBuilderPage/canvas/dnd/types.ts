@@ -18,8 +18,6 @@ export interface NodeDragData {
   parentId: string | null
 }
 
-export type DragData = PaletteDragData | NodeDragData
-
 /** Attached to each droppable container + each sortable slot, read on drag-over/end. */
 export interface DropData {
   /** The container node id this droppable belongs to (`null` = root canvas). */

@@ -185,6 +185,31 @@ kelta:
     # 0 disables the cap. Metrics: kelta_flow_step_log_bytes, kelta_flow_step_log_snapshots_truncated.
     step-log:
       max-snapshot-bytes: ${FLOW_STEP_LOG_MAX_SNAPSHOT_BYTES:65536}
+  record-version:
+    # Retention for record_version (full-record snapshots written for collections with
+    # track_history on). Nothing else deletes these rows, so without this they grow without bound.
+    # DESTRUCTIVE — dry-run is the DEFAULT: the sweep only logs what it WOULD delete until an
+    # operator explicitly sets dry-run=false. Recommended arming: leave dry-run on for a cycle,
+    # read the "WOULD delete" count, then arm per environment.
+    # Runs with no tenant bound, so one cycle covers every tenant.
+    # Metric: kelta_worker_record_versions_purged.
+    retention:
+      enabled: ${RECORD_VERSION_RETENTION_ENABLED:true}
+      dry-run: ${RECORD_VERSION_RETENTION_DRY_RUN:true}
+      # A version older than this is deleted. Conservative default (one year) because versions
+      # are the user-visible record history and restore source. NOTE: this can remove EVERY
+      # version of a record unchanged for longer than the window — intended; the record itself
+      # is untouched.
+      max-age-days: ${RECORD_VERSION_RETENTION_MAX_AGE_DAYS:365}
+      # Keep at most this many newest versions (by version_number) per record; older ones are
+      # deleted even inside the window. The newest version is never removed by the cap.
+      # 0 = no cap (default): a cap discards history regardless of age, so it is opt-in.
+      max-versions-per-record: ${RECORD_VERSION_RETENTION_MAX_VERSIONS_PER_RECORD:0}
+      batch-size: ${RECORD_VERSION_RETENTION_BATCH_SIZE:1000}
+      # Caps work per cycle (batch-size x max-batches rows), so a first arming against a large
+      # backlog drains over several cycles rather than in one enormous delete.
+      max-batches: ${RECORD_VERSION_RETENTION_MAX_BATCHES:20}
+      poll-interval-ms: ${RECORD_VERSION_RETENTION_POLL_INTERVAL_MS:3600000}
   email:
     from-address: ${EMAIL_FROM_ADDRESS:noreply@kelta.io}
     from-name: ${EMAIL_FROM_NAME:Kelta Platform}

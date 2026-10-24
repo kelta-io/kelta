@@ -1,4 +1,4 @@
-import type { ZodType, ZodTypeDef } from 'zod';
+import type { ZodType } from 'zod';
 import type { KeltaClient } from '@kelta/sdk';
 import type { ResolvedProfile } from '../config/resolve.js';
 import type { HandlerResult, OutputFormat } from '../render/render.js';
@@ -37,6 +37,13 @@ export interface OptionSpec {
   repeatable?: boolean;
 }
 
+/** One runnable invocation, shown in `--help`, COMMANDS.md and the manifest. */
+export interface CommandExample {
+  /** Full invocation starting with `kelta`; parsed by registry/examples.test.ts. */
+  cmd: string;
+  description?: string;
+}
+
 /**
  * One CLI command as data — the single source of truth the parser, the
  * manifest, and (later) local MCP tools are derived from. Handlers return
@@ -49,8 +56,10 @@ export interface CommandDef<I = unknown> {
   summary: string;
   positionals?: PositionalSpec[];
   options?: OptionSpec[];
+  /** At least one realistic invocation; each must parse (examples.test.ts). */
+  examples: CommandExample[];
   /** Validates the merged positionals+options object; failures exit 2. */
-  input: ZodType<I, ZodTypeDef, unknown>;
+  input: ZodType<I, unknown>;
   /**
    * Destructive: confirm on a TTY, require --yes otherwise. A predicate makes
    * the gate input-dependent (e.g. `metadata apply --dry-run` is safe).
@@ -82,6 +91,7 @@ export interface RegisteredCommand {
   summary: string;
   positionals?: PositionalSpec[];
   options?: OptionSpec[];
+  examples: CommandExample[];
   input: { parse(raw: unknown): unknown };
   dangerous?: boolean | ((input: never) => boolean);
   requiresAuth?: boolean;

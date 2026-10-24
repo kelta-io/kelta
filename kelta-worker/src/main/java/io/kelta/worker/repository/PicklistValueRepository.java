@@ -35,7 +35,7 @@ public class PicklistValueRepository {
      * ({@code FIELD} source, keyed by field id) or is bound to a global picklist through
      * {@code fieldTypeConfig.globalPicklistId} ({@code GLOBAL} source).
      */
-    static final String SELECT_ACTIVE_VALUES_BY_COLLECTION = """
+    public static final String SELECT_ACTIVE_VALUES_BY_COLLECTION = """
             SELECT f.name AS field_name, pv.value, pv.label, pv.is_default, pv.sort_order
             FROM collection c
             JOIN field f ON f.collection_id = c.id

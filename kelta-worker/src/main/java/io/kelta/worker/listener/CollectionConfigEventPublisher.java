@@ -115,11 +115,8 @@ public class CollectionConfigEventPublisher implements BeforeSaveHook {
             return;
         }
 
-        Object active = record.get("active");
-        if (active instanceof Boolean b) {
-            payload.setActive(b);
-        } else {
-            payload.setActive(true);
+        if (record.get("active") instanceof Boolean active) {
+            payload.setActive(active);
         }
 
         Object version = record.get("currentVersion");

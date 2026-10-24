@@ -16,16 +16,29 @@ front end on the same primitives. Peer dependency: `@kelta/sdk` (and React 19).
 > The example below still works; copy any of these into your app if you depend on them.
 
 ```tsx
-import { KeltaProvider, useResourceList, DataTable } from '@kelta/components';
+import { KeltaClient } from '@kelta/sdk';
+import { KeltaProvider, useResourceList, DataTable, type ColumnDefinition } from '@kelta/components';
 
-<KeltaProvider client={client}>
-  <Invoices />
-</KeltaProvider>
+interface Invoice { id: string; number: string; amount: number; status: string }
+
+const client = new KeltaClient({ baseUrl: 'https://api.example.com', tenantSlug: 'acme' });
+const columns: ColumnDefinition<Invoice>[] = [
+  { field: 'number', header: 'Number' },
+  { field: 'amount', header: 'Amount' },
+];
+
+export function App() {
+  return (
+    <KeltaProvider client={client}>
+      <Invoices />
+    </KeltaProvider>
+  );
+}
 
 function Invoices() {
   const { data, isLoading } = useResourceList<Invoice>('invoices', { size: 50 });
   // or let the table fetch for itself:
-  return <DataTable<Invoice> resourceName="invoices" columns={columns} pageSize={50} onRowClick={open} />;
+  return <DataTable<Invoice> resourceName="invoices" columns={columns} pageSize={50} onRowClick={(row) => console.log(row.id)} />;
 }
 ```
 

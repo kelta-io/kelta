@@ -50,6 +50,74 @@ export async function runDiff(client: AxiosInstance, file: string): Promise<unkn
   return res.data as unknown;
 }
 
+interface DiffEntry {
+  type?: string;
+  name?: string;
+  changes?: string[];
+}
+
+interface DiffConflict {
+  item?: DiffEntry;
+  error?: string;
+}
+
+function entries<T>(value: unknown): T[] {
+  return (Array.isArray(value) ? value : []) as T[];
+}
+
+/**
+ * Human rendering of an import preview: every create, every update with its changed
+ * attributes, unchanged counts per type, and every conflict with its error, e.g.
+ *
+ * ```
+ * creates (1):
+ *   + LIST_VIEW orders:Open
+ * updates (1):
+ *   ~ REPORT Open orders: group_by
+ * unchanged (3): COLLECTION 2, FIELD 1
+ * conflicts (0)
+ * ```
+ */
+export function renderDiff(preview: unknown): string {
+  const body = (preview ?? {}) as Record<string, unknown>;
+  const label = (e: DiffEntry | undefined) => `${e?.type ?? '?'} ${e?.name ?? '?'}`;
+  const creates = entries<DiffEntry>(body.creates);
+  const updates = entries<DiffEntry>(body.updates);
+  const unchanged = entries<DiffEntry>(body.unchanged);
+  const conflicts = entries<DiffConflict>(body.conflicts);
+
+  const lines: string[] = [];
+  const section = (title: string, rows: string[]) => {
+    lines.push(rows.length > 0 ? `${title} (${String(rows.length)}):` : `${title} (0)`);
+    lines.push(...rows.map((row) => `  ${row}`));
+  };
+  section(
+    'creates',
+    creates.map((e) => `+ ${label(e)}`)
+  );
+  section(
+    'updates',
+    updates.map((e) => `~ ${label(e)}: ${(e.changes ?? []).join(', ')}`)
+  );
+  const perType = new Map<string, number>();
+  for (const e of unchanged) {
+    const type = e.type ?? '?';
+    perType.set(type, (perType.get(type) ?? 0) + 1);
+  }
+  lines.push(
+    `unchanged (${String(unchanged.length)})` +
+      (perType.size > 0
+        ? ': ' +
+          [...perType.entries()].map(([type, count]) => `${type} ${String(count)}`).join(', ')
+        : '')
+  );
+  section(
+    'conflicts',
+    conflicts.map((c) => `! ${label(c.item)}${c.error ? `: ${c.error}` : ''}`)
+  );
+  return lines.join('\n') + '\n';
+}
+
 /** Apply a package file — POST /api/packages/import (with optional dryRun + conflict mode). */
 export async function runApply(
   client: AxiosInstance,
@@ -143,6 +211,13 @@ const exportCommand = defineCommand({
     },
     { flag: '-o, --out <file>', description: 'Output file (default: the name the server returns)' },
   ],
+  examples: [
+    { cmd: 'kelta metadata export --out metadata.json', description: 'Export the whole tenant' },
+    {
+      cmd: 'kelta metadata export --collections customers,orders --exclude list-view,dashboard --name sales -v 1.2.0',
+      description: 'Export two collections without their list views and dashboards',
+    },
+  ],
   input: z.object({
     name: z.string().min(1).optional(),
     version: z.string().min(1).optional(),
@@ -165,12 +240,15 @@ const exportCommand = defineCommand({
 const diff = defineCommand({
   group: 'metadata',
   name: 'diff',
-  summary: 'Preview the changes a package file would make (no writes)',
+  summary:
+    'Preview a package file against this tenant (dry run, no writes): creates, updates with ' +
+    'their changed attributes, unchanged counts, conflicts',
   positionals: [{ name: 'file', description: 'Package file', required: true }],
+  examples: [{ cmd: 'kelta metadata diff metadata.json' }],
   input: z.object({ file: z.string().min(1) }),
   handler: async (ctx, input) => {
     const result = await runDiff(ctx.client.getAxiosInstance(), input.file);
-    return { data: result };
+    return { data: result, human: renderDiff(result) };
   },
 });
 
@@ -187,6 +265,16 @@ const apply = defineCommand({
       description:
         'On an item that already exists: skip (default) or overwrite (seed records are always skipped)',
       default: 'skip',
+    },
+  ],
+  examples: [
+    {
+      cmd: 'kelta metadata apply metadata.json --dry-run',
+      description: 'Validate without writing',
+    },
+    {
+      cmd: 'kelta metadata apply metadata.json --conflict overwrite --yes',
+      description: 'Apply, overwriting items that already exist',
     },
   ],
   input: z.object({

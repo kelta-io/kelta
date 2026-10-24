@@ -1,0 +1,57 @@
+# CodeQL code scanning (free for public repositories). Documented in
+# .claude/docs/ci-cd.md → codeql.yml. Results land in the Security tab → Code scanning.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 06:17 UTC: picks up new CodeQL queries even when main is quiet.
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # build-mode none for Java: CodeQL extracts the sources without compiling them.
+          # There is no root pom.xml and the services depend on the kelta-platform runtime
+          # snapshots, so an autobuild would have to build the runtime and then every
+          # service in order; none skips that and still analyses every .java file. The
+          # repo has no Kotlin, which is the one JVM language none cannot cover.
+          - language: java-kotlin
+            build-mode: none
+          # build-mode none for JS/TS: interpreted languages are always extracted from
+          # source; none is the only mode CodeQL supports for them.
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
