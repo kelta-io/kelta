@@ -5,6 +5,7 @@ const reportList = defineCommand({
   group: 'reports',
   name: 'list',
   summary: 'List saved reports',
+  examples: [{ cmd: 'kelta reports list' }],
   input: z.object({}),
   handler: async (ctx) => {
     const response = await ctx.client.getAxiosInstance().get<unknown>('/api/reports');
@@ -25,6 +26,7 @@ const reportGet = defineCommand({
   name: 'get',
   summary: 'Get a report definition by id',
   positionals: [{ name: 'reportId', description: 'Report id', required: true }],
+  examples: [{ cmd: 'kelta reports get rep_123 --output json' }],
   input: z.object({ reportId: z.string().min(1) }),
   handler: async (ctx, input) => {
     const response = await ctx.client

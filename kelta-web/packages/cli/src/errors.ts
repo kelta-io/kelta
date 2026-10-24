@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { CommanderError } from 'commander';
 import { ZodError } from 'zod';
 
 /** Stable exit codes — part of the CLI's machine contract (see specs/kelta-cli). */
@@ -152,6 +153,15 @@ export function errorFromResponse(status: number, data: unknown, headers?: unkno
  */
 export function mapError(error: unknown): CliError {
   if (error instanceof CliError) return error;
+
+  // missing argument, unknown option/command, excess arguments: commander's
+  // message (with its "Did you mean …?" suggestion) becomes the detail
+  if (error instanceof CommanderError) {
+    return new CliError(error.message.replace(/^error: /, ''), {
+      code: 'INVALID_ARGUMENTS',
+      exitCode: EXIT.USAGE,
+    });
+  }
 
   if (error instanceof ZodError) {
     const detail = error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');

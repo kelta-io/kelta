@@ -21,6 +21,8 @@ export interface ManifestCommand {
   requiresAuth: boolean;
   positionals: { name: string; description: string; required: boolean }[];
   options: { flag: string; description: string; default?: unknown; repeatable?: boolean }[];
+  /** Runnable invocations, each parse-checked against this command (examples.test.ts). */
+  examples: { cmd: string; description?: string }[];
   /** JSON Schema of the validated handler input (positionals + option keys merged). */
   inputSchema: unknown;
 }
@@ -54,6 +56,7 @@ export function buildManifest(commands: RegisteredCommand[], group?: string): Ma
       requiresAuth: command.requiresAuth !== false,
       positionals: (command.positionals ?? []).map((positional) => ({ ...positional })),
       options: (command.options ?? []).map((option) => ({ ...option })),
+      examples: command.examples.map((example) => ({ ...example })),
       inputSchema: commandInputJsonSchema(command),
     })),
   };

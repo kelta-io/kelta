@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AxiosError, AxiosHeaders } from 'axios';
+import { CommanderError } from 'commander';
 import { z } from 'zod';
 import { CliError, EXIT, mapError, toErrorPayload } from './errors.js';
 
@@ -164,6 +165,25 @@ describe('mapError', () => {
       expect(mapped.message).toContain('name');
     }
   });
+
+  it.each([
+    ['commander.missingArgument', "error: missing required argument 'id'"],
+    ['commander.optionMissingArgument', "error: option '--data <json>' argument missing"],
+    ['commander.unknownOption', "error: unknown option '--colour'"],
+    ['commander.unknownCommand', "error: unknown command 'recrods'\n(Did you mean records?)"],
+    [
+      'commander.excessArguments',
+      "error: too many arguments for 'get'. Expected 2 arguments but got 3.",
+    ],
+  ])(
+    'maps a %s parse error to INVALID_ARGUMENTS (exit 2), keeping the message',
+    (code, message) => {
+      const mapped = mapError(new CommanderError(1, code, message));
+      expect(mapped.code).toBe('INVALID_ARGUMENTS');
+      expect(mapped.exitCode).toBe(EXIT.USAGE);
+      expect(mapped.message).toBe(message.replace(/^error: /, ''));
+    }
+  );
 
   it('maps SDK KeltaError-like errors by statusCode', () => {
     const sdkError = Object.assign(new Error('denied'), { statusCode: 401 });

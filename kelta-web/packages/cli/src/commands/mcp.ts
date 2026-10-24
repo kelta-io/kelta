@@ -116,6 +116,13 @@ const serve = defineCommand({
       description: 'Expose the raw cli_api escape hatch (off by default)',
     },
   ],
+  examples: [
+    { cmd: 'kelta mcp serve', description: 'Serve all toolsets for the current profile' },
+    {
+      cmd: 'kelta mcp serve --toolset user --tenant acme-staging --token-env KELTA_STAGING_TOKEN',
+      description: 'Serve the user toolset for a sandbox tenant',
+    },
+  ],
   input: z.object({
     toolset: z.enum(['user', 'admin', 'all']).default('all'),
     source: z.enum(['auto', 'remote', 'local']).default('auto'),
@@ -172,6 +179,13 @@ const install = defineCommand({
       flag: '--token-env <var>',
       description:
         'Env var the launched server reads the --tenant token from (required with --tenant)',
+    },
+  ],
+  examples: [
+    { cmd: 'kelta mcp install claude-code' },
+    {
+      cmd: 'kelta mcp install cursor --toolset admin --tenant acme-staging --token-env KELTA_STAGING_TOKEN',
+      description: 'Bridge a sandbox tenant with the admin toolset',
     },
   ],
   input: z.object({

@@ -37,6 +37,12 @@ const bootstrapToken = defineCommand({
       description: "A user of that tenant (default: the tenant's seeded System Administrator)",
     },
   ],
+  examples: [
+    {
+      cmd: 'kelta tenants bootstrap-token acme --expires-in 30m',
+      description: 'Short-lived admin token for the acme tenant',
+    },
+  ],
   input: z.object({
     slug: z.string().min(1),
     expiresIn: z.string().min(1).default('1h'),

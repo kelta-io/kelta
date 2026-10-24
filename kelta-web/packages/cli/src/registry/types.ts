@@ -37,6 +37,13 @@ export interface OptionSpec {
   repeatable?: boolean;
 }
 
+/** One runnable invocation, shown in `--help`, COMMANDS.md and the manifest. */
+export interface CommandExample {
+  /** Full invocation starting with `kelta`; parsed by registry/examples.test.ts. */
+  cmd: string;
+  description?: string;
+}
+
 /**
  * One CLI command as data — the single source of truth the parser, the
  * manifest, and (later) local MCP tools are derived from. Handlers return
@@ -49,6 +56,8 @@ export interface CommandDef<I = unknown> {
   summary: string;
   positionals?: PositionalSpec[];
   options?: OptionSpec[];
+  /** At least one realistic invocation; each must parse (examples.test.ts). */
+  examples: CommandExample[];
   /** Validates the merged positionals+options object; failures exit 2. */
   input: ZodType<I, unknown>;
   /**
@@ -82,6 +91,7 @@ export interface RegisteredCommand {
   summary: string;
   positionals?: PositionalSpec[];
   options?: OptionSpec[];
+  examples: CommandExample[];
   input: { parse(raw: unknown): unknown };
   dangerous?: boolean | ((input: never) => boolean);
   requiresAuth?: boolean;

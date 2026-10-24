@@ -9,6 +9,7 @@ const version = defineCommand({
   name: 'version',
   summary: 'Show detailed build information',
   requiresAuth: false,
+  examples: [{ cmd: 'kelta version --output json' }],
   input: z.object({}),
   handler: () => {
     const data = { version: VERSION, gitSha: GIT_SHA, target: BUILD_TARGET };
@@ -25,6 +26,10 @@ const update = defineCommand({
   summary: 'Self-update from the cluster downloads service (--check only reports)',
   requiresAuth: false,
   options: [{ flag: '--check', description: 'Report whether an update exists without installing' }],
+  examples: [
+    { cmd: 'kelta update --check', description: 'Report whether a newer version exists' },
+    { cmd: 'kelta update' },
+  ],
   input: z.object({ check: z.boolean().default(false) }),
   handler: async (ctx, input) => {
     const baseUrl = updateBaseUrl();

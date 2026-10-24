@@ -190,6 +190,18 @@ database contract.
   directly under `thresholds` — vitest 1.x silently ignores a nested `global` block (that is how an
   advertised 80% gate once enforced nothing).
 
+### CLI command examples (`@kelta/cli`)
+Every `CommandDef` declares `examples` (required by the type). `packages/cli/src/registry/examples.test.ts`
+word-splits each example's `cmd` (quotes and backslashes only — no pipes, redirects or `$`), builds the real
+program with `createProgram([def], runner)` and parses it: the runner stands in for `dispatch`, so the
+command's own commander binding, `--output` check and zod `input` run, but no handler, prompt or HTTP call.
+Excess positionals are rejected there, and the example must invoke its own command. A failure names the
+command and the example; fixture commands with an unknown option, a missing positional, a zod-rejected value
+and zero examples prove the check fails. Parse-only `CommandRunner`s are the pattern for any test that needs
+a parse result without running a handler. Argument errors (`program.test.ts`) are tested through
+`runCli(createProgram(allCommands), args)` with `process.stderr.isTTY` set, for both the table and the
+`--output json` rendering.
+
 ### Structure
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
