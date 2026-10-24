@@ -23,7 +23,7 @@
         <spring-cloud.version>2025.1.1</spring-cloud.version>
         <protobuf.version>4.32.0</protobuf.version>
         <!-- Same pin as the other modules (1.21.4 = Docker Engine 29 support); see testing.md. -->
-        <testcontainers.version>1.21.4</testcontainers.version>
+        <testcontainers.version>2.0.5</testcontainers.version>
         <graalvm-sdk.version>25.0.2</graalvm-sdk.version>
         <junit-quickcheck.version>1.0</junit-quickcheck.version>
         <skipITs>true</skipITs>
