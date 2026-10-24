@@ -64,9 +64,9 @@ RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205). Rules
   (`supersetRoleIsGrantedOnlyTenantScopedTables`); pinned roles cannot hop tenants via the GUC
   (V201). Tenant roles hold **no privilege on `tenant_db_role`** (it has no RLS — reading it lists
   every tenant's id and DB role): the pin works through `kelta_pinned_tenant()`, SECURITY
-  DEFINER with a fixed `search_path`. V214 revoked it from every pinned and `superset_%` role and
+  DEFINER with a fixed `search_path`. V215 revoked it from every pinned and `superset_%` role and
   applied the narrowing to roles provisioned before it (blanket public grant until next rotation);
-  an unpinned `superset_%` role keeps no public grant (`v214NarrowsAPreNarrowingSupersetRole`).
+  an unpinned `superset_%` role keeps no public grant (`v215NarrowsAPreNarrowingSupersetRole`).
 - **Hand-rolled JDBC must write `AND tenant_id = ?` on the table that owns the row** — RLS is
   not a substitute (see `PageLayoutTreeService` in the archive) — and test with a second tenant.
 

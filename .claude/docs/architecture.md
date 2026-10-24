@@ -1278,7 +1278,7 @@ Direct database logins (per-tenant `superset_<slug>` roles) never go through thi
 are pinned by `session_user` in `tenant_db_role` (V201), which every policy prefers over the
 GUC. That table has no RLS, so tenant roles hold **no privilege on it** — the pin is read
 through `kelta_pinned_tenant()`, SECURITY DEFINER with a fixed `search_path` — and are granted
-SELECT in `public` only on RLS tables with a `tenant_id` column (V214 applied this to roles
+SELECT in `public` only on RLS tables with a `tenant_id` column (V215 applied this to roles
 provisioned before the narrowing).
 
 ## Worker Layers
