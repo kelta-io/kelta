@@ -133,7 +133,7 @@ evaluated against it:
 - `$.input.<key>` — inputs for API, CLI, MCP, scheduled, NATS and
   webhook starts. Never `$.<key>`. `POST /api/flows/{id}/execute` reads
   `body.input`, so the HTTP and MCP callers double-wrap
-  (`{"input": {"customerId": "…"}}`); `kelta flows execute --input`
+  (`{"input": {"customerId": "…"}}`); `kelta flows execute <flowId> --input`
   adds the outer wrap for you.
 - `$.context.*` — always present.
 
