@@ -17,10 +17,6 @@ export type { ErrorBoundaryProps, ErrorBoundaryState, ErrorFallbackProps } from 
 export { PluginErrorBoundary } from './PluginErrorBoundary'
 export type { PluginErrorBoundaryProps } from './PluginErrorBoundary'
 
-// Legacy toast API (deprecated adapter over `sonner` — new code calls `toast` from 'sonner')
-export { ToastProvider, useToast } from './Toast'
-export type { ToastType, ToastContextValue, ToastProviderProps } from './Toast'
-
 // ConfirmDialog component
 export { ConfirmDialog } from './ConfirmDialog'
 export type { ConfirmDialogProps, ConfirmDialogVariant } from './ConfirmDialog'

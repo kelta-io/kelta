@@ -42,7 +42,3 @@ export type {
 // Plugin context
 export { PluginProvider, usePlugins, PluginContext } from './PluginContext'
 export type { PluginContextValue, PluginProviderProps } from './PluginContext'
-
-// Export context providers as they are implemented
-// Example exports:
-// export { ToastProvider, ToastContext } from './ToastContext';
