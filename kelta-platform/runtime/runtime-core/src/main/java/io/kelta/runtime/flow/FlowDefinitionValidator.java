@@ -5,6 +5,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Validates a flow definition at save time by running the {@link FlowDefinitionParser}
@@ -34,6 +35,11 @@ public class FlowDefinitionValidator {
             "CREATE_TASK", "use a CREATE_RECORD Task that writes to your task collection");
 
     private final FlowDefinitionParser parser;
+
+    /** The {@code Resource} keys rejected at save; unmodifiable. */
+    public static Set<String> retiredResources() {
+        return RETIRED_RESOURCES.keySet();
+    }
 
     public FlowDefinitionValidator(ObjectMapper objectMapper) {
         this.parser = new FlowDefinitionParser(objectMapper);

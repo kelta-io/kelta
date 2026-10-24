@@ -461,6 +461,12 @@ static checks; all run without a stack.
   now passes fails the test. A fix to `AGENTS.md` goes in `docsgen/agentGuide.ts`
   (`npm run gen:docs`); one to `docs/authoring/*.md` is mirrored in `docsgen/authoringDocs.ts` and
   `kelta-mcp/src/main/resources/docs/authoring/` (pinned by `DocResourceTest`).
+- **Flow Task resource lists** — `kelta-worker/.../flow/FlowResourceListsTest` (worker surefire,
+  `/verify`). Starts `CoreActionsModule` + `IntegrationModule`, takes their `getActionHandlers()`
+  keys minus `FlowDefinitionValidator.retiredResources()`, and asserts the kelta-ai
+  `FlowGenerationService` prompt's "Available resources:" block and `docs/authoring/flows.md` →
+  "All accepted resources" list exactly that set (the failure names missing/extra keys). A new
+  handler key or a newly retired one needs both lists updated.
 
 **Runnable blocks (`runnable` fence marker).** A shell block whose fence info string carries the
 word `runnable` — ```` ```bash runnable ```` — is *executed* against a live stack, not just

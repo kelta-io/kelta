@@ -154,6 +154,32 @@ whose successors still need the record or inputs.
 
 `Resource` names the handler; `Parameters` is its config.
 
+### All accepted resources
+
+Every `Resource` a Task may name:
+
+- `CREATE_RECORD`
+- `UPDATE_RECORD`
+- `DELETE_RECORD`
+- `QUERY_RECORDS`
+- `FIELD_UPDATE`
+- `SQL_QUERY`
+- `EMAIL_ALERT`
+- `SEND_NOTIFICATION`
+- `OUTBOUND_MESSAGE`
+- `CALL_API`
+- `HTTP_CALLOUT`
+- `PUBLISH_EVENT`
+- `INVOKE_SCRIPT`
+- `LOG_MESSAGE`
+- `TRIGGER_FLOW`
+- `DECISION` (prefer a `Choice` state for branching)
+
+Two retired resources are rejected at save with a `400`: `DELAY` (use a
+`Wait` state with `Seconds`, `Timestamp` or `TimestampPath`) and
+`CREATE_TASK` (use a `CREATE_RECORD` Task that writes to your task
+collection).
+
 ### `CREATE_RECORD`
 
 ```json
