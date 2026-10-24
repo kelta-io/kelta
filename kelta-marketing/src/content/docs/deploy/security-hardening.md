@@ -40,12 +40,14 @@ the worker in a header it sets itself.
 Your ingress must preserve the client address (for example `externalTrafficPolicy: Local`, or PROXY protocol
 from the load balancer), or every request will look like it came from the node.
 
-Left empty (the default), Kelta keeps its earlier behaviour so upgrades don't change anything: with
-`IP_ALLOWLIST_TRUST_XFF=true` the left-most `X-Forwarded-For` hop is treated as the client and a tenant
-allowlist admits a request if **any** forwarded hop matches. Both are client-controlled, so a caller can name an
-allowed address in `X-Forwarded-For` to get past an allowlist, and can put any address they like in the audit
-trail. `IP_ALLOWLIST_TRUST_XFF=true` without trusted proxies stays spoofable; setting it to `false` closes that but
-makes every client look like the ingress.
+Left empty (the default), tenant IP allowlists are strict: they judge only the address of the connection the
+gateway received (the socket peer) and ignore `X-Forwarded-For` / `X-Real-IP`. Behind an ingress that address is
+the ingress pod, so a restricted tenant's non-admin users are refused until you set
+`KELTA_SECURITY_TRUSTED_PROXIES` (users with `MANAGE_TENANTS` still get through). Audit logs, geolocation and rate
+limits keep the earlier behaviour: with `IP_ALLOWLIST_TRUST_XFF=true` the left-most `X-Forwarded-For` hop is treated
+as the client. That hop is client-controlled, so a caller can put any address they like in the audit trail and
+get a fresh rate-limit bucket per request; setting `IP_ALLOWLIST_TRUST_XFF=false` closes that but makes every client
+look like the ingress. Setting trusted proxies fixes both.
 
 ## Auth server
 
@@ -64,9 +66,12 @@ makes every client look like the ingress.
 
 ## Tenant IP allowlists
 
-Offer tenants the IP allowlist ([Authentication](/docs/security/authentication/#tenant-ip-allowlist)) only once
-`KELTA_SECURITY_TRUSTED_PROXIES` is set; then the allowlist judges the one resolved client address and forwarded
-headers from anyone else are ignored.
+Without `KELTA_SECURITY_TRUSTED_PROXIES`, the IP allowlist
+([Authentication](/docs/security/authentication/#tenant-ip-allowlist)) checks only the socket peer address. That
+is correct when clients connect to the gateway directly, but behind an ingress every request appears to come from
+the ingress, so a restricted tenant's non-admin users are refused. A deployment behind an ingress or load balancer
+must set `KELTA_SECURITY_TRUSTED_PROXIES` before tenants use the allowlist; then the allowlist judges the one
+resolved client address, and forwarded headers from anyone else are ignored.
 
 ## Secrets
 
