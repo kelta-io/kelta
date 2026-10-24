@@ -7,6 +7,7 @@ import io.kelta.mcp.client.GatewayHttpClient;
 import io.kelta.mcp.config.McpProperties;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -83,7 +84,8 @@ class ListNotificationsToolTest {
 
     @Test
     void declaresItsInputs() {
-        assertThat(tool.toSpecification().tool().inputSchema().properties())
+        assertThat(tool.toSpecification().tool().inputSchema()).extractingByKey("properties")
+                .asInstanceOf(InstanceOfAssertFactories.MAP)
                 .containsOnlyKeys("unreadOnly", "pageSize", "pageNumber");
         assertThat(tool.toSpecification().tool().annotations().readOnlyHint()).isTrue();
     }

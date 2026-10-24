@@ -235,6 +235,9 @@ public class McpServerConfig {
             ArgumentTypeValidatingToolDecorator argumentValidator) {
         McpStatelessSyncServer server = McpServer.sync(transport)
                 .serverInfo(SERVER_NAME + "-user", SERVER_VERSION)
+                // ArgumentTypeValidatingToolDecorator owns argument checks so a mismatch
+                // keeps the INVALID_ARGUMENT_TYPE 400 shape; SDK 2.x validation would answer first.
+                .validateToolInputs(false)
                 .instructions(USER_INSTRUCTIONS)
                 .capabilities(ServerCapabilities.builder()
                         .tools(true)
@@ -273,6 +276,7 @@ public class McpServerConfig {
             ArgumentTypeValidatingToolDecorator argumentValidator) {
         McpStatelessSyncServer server = McpServer.sync(transport)
                 .serverInfo(SERVER_NAME + "-admin", SERVER_VERSION)
+                .validateToolInputs(false)
                 .instructions(ADMIN_INSTRUCTIONS)
                 .capabilities(ServerCapabilities.builder()
                         .tools(true)

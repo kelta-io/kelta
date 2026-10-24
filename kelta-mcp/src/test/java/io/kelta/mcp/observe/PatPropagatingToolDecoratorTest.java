@@ -3,11 +3,11 @@ package io.kelta.mcp.observe;
 import io.kelta.mcp.auth.KeltaTransportContextExtractor;
 import io.kelta.mcp.auth.RequestPatHolder;
 import io.kelta.mcp.auth.RequestSlugHolder;
+import io.kelta.mcp.tool.Schemas;
 import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
-import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.junit.jupiter.api.Test;
@@ -27,7 +27,7 @@ class PatPropagatingToolDecoratorTest {
         Tool tool = Tool.builder()
                 .name("stub")
                 .description("test")
-                .inputSchema(new JsonSchema("object", Map.of(), List.of(), false, null, null))
+                .inputSchema(Schemas.empty())
                 .build();
         return SyncToolSpecification.builder()
                 .tool(tool)

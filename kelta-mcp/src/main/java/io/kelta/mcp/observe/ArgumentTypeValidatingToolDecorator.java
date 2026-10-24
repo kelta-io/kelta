@@ -2,7 +2,6 @@ package io.kelta.mcp.observe;
 
 import io.kelta.mcp.error.McpErrorMapper;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
-import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -68,11 +67,12 @@ public class ArgumentTypeValidatingToolDecorator {
                 .build();
     }
 
-    private static Map<String, Object> declaredProperties(JsonSchema schema) {
-        if (schema == null || schema.properties() == null) {
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> declaredProperties(Map<String, Object> schema) {
+        if (schema == null || !(schema.get("properties") instanceof Map<?, ?> properties)) {
             return Map.of();
         }
-        return schema.properties();
+        return (Map<String, Object>) properties;
     }
 
     private static List<String> declaredTypes(Object property) {
