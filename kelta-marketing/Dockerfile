@@ -9,7 +9,7 @@
 #   --build-arg BASE_REGISTRY=docker.io/library
 ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
 
-FROM ${BASE_REGISTRY}/node:22-alpine AS build
+FROM ${BASE_REGISTRY}/node:24.22-alpine3.24 AS build
 WORKDIR /app/kelta-marketing
 COPY kelta-marketing/package.json kelta-marketing/package-lock.json ./
 RUN npm ci

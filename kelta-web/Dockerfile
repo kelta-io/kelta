@@ -11,7 +11,7 @@ ARG BASE_REGISTRY=harbor.rzware.com/dockerhub-cache/library
 # =============================================================================
 # Stage 1: Install dependencies and build
 # =============================================================================
-FROM ${BASE_REGISTRY}/node:18-alpine AS builder
+FROM ${BASE_REGISTRY}/node:24.22-alpine3.24 AS builder
 
 WORKDIR /app
 
