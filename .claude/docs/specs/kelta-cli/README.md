@@ -126,10 +126,10 @@ drifting.
 
 ### D4 — Auth: loopback PKCE → mint PAT; PAT is the only stored credential
 
-`kelta login` runs authorization_code+PKCE against kelta-auth with a new `kelta-cli` public
+`kelta auth login` runs authorization_code+PKCE against kelta-auth with a new `kelta-cli` public
 client (RFC 8252 loopback redirect, any port on `127.0.0.1`), then immediately calls
 `POST /api/me/tokens` with the short-lived JWT to mint a named PAT, stores the PAT, and
-discards the JWT. No refresh tokens on disk. Manual `kelta login --token klt_…` remains for
+discards the JWT. No refresh tokens on disk. Manual `kelta auth login --token klt_…` remains for
 headless boxes. Device grant is a deliberate non-goal for v1 (see slice 2 open questions).
 
 ### D5 — Distribution from the cluster, GitOps like everything else

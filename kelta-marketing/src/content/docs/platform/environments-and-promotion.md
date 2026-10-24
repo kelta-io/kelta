@@ -14,7 +14,7 @@ secret, and then clones the parent's **metadata** — not its records — by exp
 and importing it into the sandbox.
 
 ```bash
-kelta sandbox create --name dev --wait   # returns the sandbox tenant + one-time admin credential
+kelta sandbox create --name dev          # returns the sandbox tenant + one-time admin credential
 kelta sandbox list
 kelta sandbox status <envId>
 kelta sandbox refresh <envId>            # re-clone metadata from the parent
@@ -55,7 +55,7 @@ Promotion wraps export → import in a governed pipeline from a sandbox to its p
 
 ```bash
 kelta promote create --source <sandboxEnvId> --target <prodEnvId> [--type SELECTIVE --item COLLECTION:invoices]
-kelta promote preview <id>      # the diff against production
+kelta promote preview --source <sandboxEnvId>   # the diff against production
 kelta promote approve <id>      # must be a different user from the creator
 kelta promote execute <id>      # snapshots production first, then imports
 kelta promote status <id>
