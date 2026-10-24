@@ -1,6 +1,6 @@
 ---
 title: Action handler reference
-description: Every action a Task state can run — parameters, outputs and error codes — grouped by data, communication, integration and control, with the retired and not-yet-functional ones called out.
+description: Every action a Task state can run — parameters, outputs and error codes — grouped by data, communication, integration and control, with the retired ones called out.
 section: automation
 order: 20
 ---
@@ -93,6 +93,24 @@ The URL must be public: a host that resolves to a loopback, private or link-loca
 refused unless the operator allow-lists that range (`KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS`).
 `GET` redirects are followed up to three hops, each checked the same way; other methods do not
 follow redirects. The call times out after 60 seconds, and a 4xx/5xx response fails the step.
+
+### `SEND_NOTIFICATION`
+
+```json
+{ "userId": "${$.record.data.ownerId}", "title": "Order approved",
+  "message": "Order ${$.record.data.number} was approved.", "link": "/app/orders/${$.record.id}", "level": "INFO" }
+```
+
+Writes an in-app notification for one user of the tenant. `title` (up to 255 characters) and `message` are
+required. `userId` takes a user id or email and defaults to the user who triggered the flow; a recipient who is not a
+user of the tenant fails the step. `link` is optional (up to 2048 characters). `level` is `INFO` (default),
+`WARNING` or `ERROR`; anything else fails the step.
+
+Output: `{ "notificationId", "userId", "title", "message", "link", "level" }` (`link` only when set).
+
+The recipient reads their own notifications at `GET /api/me/notifications` (newest first, `page[number]` /
+`page[size]`, with `meta.unreadCount`) and marks them read with `POST /api/me/notifications/{id}/read` or
+`POST /api/me/notifications/read-all`. Nobody else can list or mark them, admins included.
 
 ## Integration
 
@@ -217,16 +235,6 @@ before this check still runs, but the step fails with the same message instead o
 |---|---|
 | `DELAY` | a `Wait` state (`Seconds`, `Timestamp`, `TimestampPath`) |
 | `CREATE_TASK` | `CREATE_RECORD` on your tasks collection |
-
-## Registered but not yet functional
-
-This handler exists in the catalogue and accepts its configuration, but the platform side it depends on is not
-wired in the current release. It returns a success result and writes to the step log without doing the work.
-Do not build on it yet.
-
-| Handler | Config accepted | Use instead |
-|---|---|---|
-| `SEND_NOTIFICATION` | `{ "userId", "title", "message", "level" }` — logged only | `EMAIL_ALERT`, or `CREATE_RECORD` on a notifications collection |
 
 ## Handlers from modules
 
