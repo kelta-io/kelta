@@ -21,13 +21,15 @@ import org.springframework.context.annotation.Configuration;
  * exactly those: no tenant bound, no change.
  *
  * <p>The mechanics live in {@link TenantAwareDataSource} (runtime-core), shared with
- * kelta-worker and kelta-ai.
+ * kelta-worker and kelta-ai. Unlike those two, kelta-auth does not bind from {@code X-Tenant-ID}
+ * (browsers reach it directly, and the SDK sends that header on every call), so the
+ * fail-closed check on a header-carrying request with no tenant bound is off here.
  */
 @Configuration
 public class TenantAwareDataSourceConfig {
 
     @Bean
     public static BeanPostProcessor tenantAwareDataSourcePostProcessor() {
-        return new TenantAwareDataSourcePostProcessor();
+        return new TenantAwareDataSourcePostProcessor(false);
     }
 }

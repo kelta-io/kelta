@@ -17,7 +17,6 @@ import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.model.FieldType;
-import io.kelta.runtime.model.system.SystemCollectionTenancy;
 import io.kelta.runtime.query.AggregationSpec;
 import io.kelta.runtime.query.FilterCondition;
 import io.kelta.runtime.query.Pagination;
@@ -356,15 +355,13 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         String sql = "SELECT * FROM " + tableRef.toSql() + " WHERE id = ?";
         List<Object> params = new ArrayList<>();
         params.add(id);
-        // Only self-scoped collections are narrowed here: for tenant_id-scoped ones get-by-id
-        // stays router-side (the router's RecordTenantScope.visibleToTenant), but nothing downstream
-        // could narrow a tenants row and a foreign id must read as absent.
-        if (SystemCollectionTenancy.isSelfScoped(definition)) {
-            TenantScope scope = tenantScopePolicy.tenantScope(definition, tableRef);
-            if (scope != null) {
-                sql += " AND " + scope.sql();
-                params.addAll(scope.params());
-            }
+        // A foreign id reads as absent in SQL, not only through RLS: a connection that lost its
+        // tenant runs as admin_bypass and would otherwise return any tenant's row. The router's
+        // RecordTenantScope.visibleToTenant still filters shared system rows on top of this.
+        TenantScope scope = tenantScopePolicy.tenantScope(definition, tableRef);
+        if (scope != null) {
+            sql += " AND " + scope.sql();
+            params.addAll(scope.params());
         }
         // Owner-scoped callers never see a row they do not own: a foreign id reads as absent (404).
         TenantScope owner = tenantScopePolicy.ownerScope(definition);
@@ -589,6 +586,12 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
 
         String sql = String.format("UPDATE %s SET %s WHERE id = ?",
             tableRef.toSql(), String.join(", ", setClauses));
+        // The getById above is only a check; the UPDATE carries the tenant predicate itself (TOCTOU).
+        TenantScope scope = tenantScopePolicy.tenantWriteScope(definition, tableRef);
+        if (scope != null) {
+            sql += " AND " + scope.sql();
+            values.addAll(scope.params());
+        }
 
         try {
             int rowsAffected = jdbcTemplate.update(sql, values.toArray());
@@ -622,9 +625,16 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
         }
 
         String sql = "DELETE FROM " + tableRef.toSql() + " WHERE id = ?";
+        List<Object> params = new ArrayList<>();
+        params.add(id);
+        TenantScope scope = tenantScopePolicy.tenantWriteScope(definition, tableRef);
+        if (scope != null) {
+            sql += " AND " + scope.sql();
+            params.addAll(scope.params());
+        }
 
         try {
-            int rowsAffected = jdbcTemplate.update(sql, id);
+            int rowsAffected = jdbcTemplate.update(sql, params.toArray());
             if (rowsAffected > 0) {
                 log.debug("Deleted record with ID '{}' from collection '{}'", id, definition.name());
             }

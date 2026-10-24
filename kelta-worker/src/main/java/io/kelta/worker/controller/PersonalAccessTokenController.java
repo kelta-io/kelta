@@ -296,6 +296,76 @@ public class PersonalAccessTokenController {
                 SecurityAuditLogger.EventType.TENANT_BOOTSTRAP_TOKEN_REVOKED, "tenant claimed via admin-invite");
     }
 
+    /** A live token's id and hash, read before its row can go away with its user. */
+    public record LiveToken(String id, String tokenHash) {}
+
+    /**
+     * Lists {@code userId}'s live tokens in {@code tenantId}. Never returns the token hash.
+     * Must run with {@code tenantId} bound.
+     */
+    public List<Map<String, Object>> listUserTokens(String tenantId, String userId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, name, token_prefix, scopes, expires_at, created_at " +
+                        "FROM user_api_token WHERE user_id = ? AND tenant_id = ? AND revoked = false " +
+                        "ORDER BY created_at DESC",
+                userId, tenantId);
+        return rows.stream().map(row -> {
+            Map<String, Object> token = new java.util.LinkedHashMap<>();
+            token.put("id", row.get("id"));
+            token.put("name", row.get("name"));
+            token.put("tokenPrefix", row.get("token_prefix"));
+            token.put("scopes", row.get("scopes"));
+            token.put("createdAt", row.get("created_at") != null ? row.get("created_at").toString() : null);
+            token.put("expiresAt", row.get("expires_at") != null ? row.get("expires_at").toString() : null);
+            return token;
+        }).toList();
+    }
+
+    /** Whether {@code userId} is a user of {@code tenantId}. */
+    public boolean userExists(String tenantId, String userId) {
+        return !jdbcTemplate.queryForList(
+                "SELECT id FROM platform_user WHERE id = ? AND tenant_id = ?", userId, tenantId).isEmpty();
+    }
+
+    /** Reads the id and hash of every live token {@code userId} holds in {@code tenantId}. */
+    public List<LiveToken> findLiveTokens(String tenantId, String userId) {
+        return selectLiveTokens(tenantId, "user_id = ?", List.of(userId));
+    }
+
+    /**
+     * Revokes token {@code tokenId} when {@code userId} holds it in {@code tenantId}.
+     *
+     * @return {@code false} when there is no such live token
+     */
+    public boolean revokeUserToken(String tenantId, String userId, String tokenId, String actorId,
+                                   SecurityAuditLogger.EventType eventType) {
+        return !revokeTokens(tenantId, "id = ? AND user_id = ?", List.of(tokenId, userId),
+                actorId, eventType, "userId=" + userId).isEmpty();
+    }
+
+    /**
+     * Revokes every live token {@code userId} holds in {@code tenantId} — called when the user
+     * stops being active. Must run with {@code tenantId} bound.
+     *
+     * @return the ids of the tokens revoked
+     */
+    public List<String> revokeAllUserTokens(String tenantId, String userId, String actorId,
+                                            SecurityAuditLogger.EventType eventType, String auditDetail) {
+        return revokeTokens(tenantId, "user_id = ?", List.of(userId), actorId, eventType, auditDetail);
+    }
+
+    /**
+     * Blocks tokens whose rows were deleted with their user ({@code ON DELETE CASCADE}): there is
+     * no row left to mark, so only the gateway-facing Redis state is revoked and each is audited.
+     */
+    public void revokeDeletedTokens(String tenantId, List<LiveToken> tokens, String actorId,
+                                    SecurityAuditLogger.EventType eventType, String auditDetail) {
+        for (LiveToken token : tokens) {
+            revokeInCache(token);
+            SecurityAuditLogger.log(eventType, actorId, token.id(), tenantId, "success", auditDetail);
+        }
+    }
+
     /**
      * Revokes the live tokens of {@code tenantId} matching {@code condition}: marks each row revoked,
      * drops its {@code pat:<hash>} cache entry, writes {@code pat:revoked:<hash>} so the gateway
@@ -307,40 +377,44 @@ public class PersonalAccessTokenController {
      */
     private List<String> revokeTokens(String tenantId, String condition, List<Object> args, String actorId,
                                       SecurityAuditLogger.EventType eventType, String auditDetail) {
-        List<Object> params = new ArrayList<>();
-        params.add(tenantId);
-        params.addAll(args);
-        List<Map<String, Object>> tokens = jdbcTemplate.queryForList(
-                "SELECT id, token_hash FROM user_api_token WHERE tenant_id = ? AND revoked = false AND ("
-                        + condition + ")",
-                params.toArray());
-
         List<String> revoked = new ArrayList<>();
-        for (Map<String, Object> token : tokens) {
-            String tokenId = String.valueOf(token.get("id"));
-            String tokenHash = (String) token.get("token_hash");
+        for (LiveToken token : selectLiveTokens(tenantId, condition, args)) {
             Timestamp now = Timestamp.from(Instant.now());
             int updated = jdbcTemplate.update(
                     "UPDATE user_api_token SET revoked = true, revoked_at = ?, updated_at = ? "
                             + "WHERE id = ? AND tenant_id = ? AND revoked = false",
-                    now, now, token.get("id"), tenantId);
+                    now, now, token.id(), tenantId);
             if (updated == 0) {
                 continue;
             }
-
-            // Remove from Redis cache and add to revocation set
-            try {
-                redisTemplate.delete(PAT_KEY_PREFIX + tokenHash);
-                redisTemplate.opsForValue().set(
-                        REVOCATION_KEY_PREFIX + tokenHash, "revoked", Duration.ofDays(366));
-            } catch (Exception e) {
-                log.warn("Failed to update revoked PAT {} in Redis: {}", tokenId, e.getMessage());
-            }
-
-            SecurityAuditLogger.log(eventType, actorId, tokenId, tenantId, "success", auditDetail);
-            revoked.add(tokenId);
+            revokeInCache(token);
+            SecurityAuditLogger.log(eventType, actorId, token.id(), tenantId, "success", auditDetail);
+            revoked.add(token.id());
         }
         return revoked;
+    }
+
+    private List<LiveToken> selectLiveTokens(String tenantId, String condition, List<Object> args) {
+        List<Object> params = new ArrayList<>();
+        params.add(tenantId);
+        params.addAll(args);
+        return jdbcTemplate.queryForList(
+                "SELECT id, token_hash FROM user_api_token WHERE tenant_id = ? AND revoked = false AND ("
+                        + condition + ")",
+                params.toArray()).stream()
+                .map(row -> new LiveToken(String.valueOf(row.get("id")), (String) row.get("token_hash")))
+                .toList();
+    }
+
+    /** Removes the token from the Redis cache and adds it to the revocation set. Never throws. */
+    private void revokeInCache(LiveToken token) {
+        try {
+            redisTemplate.delete(PAT_KEY_PREFIX + token.tokenHash());
+            redisTemplate.opsForValue().set(
+                    REVOCATION_KEY_PREFIX + token.tokenHash(), "revoked", Duration.ofDays(366));
+        } catch (Exception e) {
+            log.warn("Failed to update revoked PAT {} in Redis: {}", token.id(), e.getMessage());
+        }
     }
 
     /**

@@ -68,9 +68,10 @@ kelta:
     # Comma-separated CIDRs or bare IPs, e.g. "10.42.0.0/16,192.0.2.7"; set it to the
     # ingress (traefik) pod CIDR. When set, X-Forwarded-For / X-Real-IP are honoured only
     # from a trusted peer and the client is the right-most untrusted X-Forwarded-For hop.
-    # Empty (the default) keeps the legacy behaviour below: with
-    # ip-allowlist.trust-forwarded-for=true the left-most hop is used and the allowlist
-    # matches any hop — both client-spoofable.
+    # Empty (the default): the tenant IP allowlist judges the socket peer only (strict),
+    # and audit/geo/rate limits keep the legacy behaviour below (with
+    # ip-allowlist.trust-forwarded-for=true the left-most hop — client-spoofable).
+    # Behind an ingress this MUST be set if any tenant uses an IP allowlist.
     trusted-proxies: ${KELTA_SECURITY_TRUSTED_PROXIES:}
   gateway:
     # Tenant slug URL prefix configuration
@@ -149,11 +150,14 @@ kelta:
     # MANAGE_TENANTS holders bypass. Config is fetched at bootstrap and refreshed via NATS.
     ip-allowlist:
       enabled: ${IP_ALLOWLIST_ENABLED:true}   # Global kill-switch for the filter
-      # Legacy mode only (kelta.security.trusted-proxies empty): when true, ANY
-      # X-Forwarded-For / X-Real-IP hop matching an allowed CIDR admits the request
-      # (resilient to proxy topology but client-spoofable). Set false to match only the
-      # socket source address. Ignored once trusted-proxies is set — then only the single
-      # resolved client IP is judged.
+      # The allowlist itself never trusts this flag: with kelta.security.trusted-proxies
+      # empty it judges the socket peer address only (strict); once trusted-proxies is set
+      # it judges the single resolved client IP. A gateway behind an ingress therefore
+      # MUST set KELTA_SECURITY_TRUSTED_PROXIES, or the peer is the ingress pod and
+      # restricted tenants' non-admins are refused (MANAGE_TENANTS holders still bypass).
+      # Legacy mode only (trusted-proxies empty): when true, the left-most X-Forwarded-For
+      # hop is the client IP for audit, geo, rate limits and X-Kelta-Client-Ip
+      # (client-spoofable); false uses the socket peer. Ignored once trusted-proxies is set.
       trust-forwarded-for: ${IP_ALLOWLIST_TRUST_XFF:true}
 
     # IP geolocation enrichment (GeoLite2-City, self-hosted MMDB).
