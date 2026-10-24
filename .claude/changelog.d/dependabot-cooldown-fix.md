@@ -1,0 +1,1 @@
+- 2026-10-24 fix(ci): drop Dependabot cooldown from docker and github-actions (semver-major-days unsupported there; the whole config was rejected)
