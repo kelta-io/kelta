@@ -1,5 +1,6 @@
 package io.kelta.worker.interceptor;
 
+import io.kelta.runtime.router.DynamicCollectionRouter;
 import io.kelta.worker.service.CerbosAuthorizationService;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import io.kelta.worker.service.RecordRuleIndex;
@@ -107,6 +108,10 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
         // (found 2026-07-12 building the headless portal).
         if (!path.startsWith("/api/") || path.startsWith("/api/admin/") || path.startsWith("/api/me/")
                 || path.startsWith("/api/telehealth/") || isMetadataPath(path)) {
+            return body;
+        }
+
+        if (isRouterFilteredOnlyPath(path) && !isCollectionRouter(returnType)) {
             return body;
         }
 
@@ -407,12 +412,36 @@ public class CerbosRecordAuthorizationAdvice implements ResponseBodyAdvice<Objec
                 || path.startsWith("/api/oidc")
                 || path.startsWith("/api/tenants")
                 || path.startsWith("/api/metrics")
-                || path.startsWith("/api/flows")
                 || path.startsWith("/api/api-specs")
                 || path.startsWith("/api/api-operations")
                 || path.startsWith("/api/credentials")
-                || path.startsWith("/api/connected-apps")
                 || path.startsWith("/api/devices");
+    }
+
+    /**
+     * System collections whose records the generic collection router serves (and this advice
+     * filters, like any other system collection) under a prefix that also hosts dedicated
+     * controllers whose bodies are not records of the collection: {@code FlowExecutionController}
+     * (executions, versions), {@code FlowScheduleStatusController}, {@code FlowWebhookController}
+     * and {@code ConnectedAppTokenController}. Checking those bodies as {@code flows} /
+     * {@code connected-apps} records would null a page action's flow-execution id for a caller
+     * without {@code create} on {@code flows}. Field-level security and masking keep their own
+     * {@link ApiPaths#isMetadataPath} decision for these paths (PLT-656).
+     */
+    private static final List<String> ROUTER_FILTERED_ONLY_PREFIXES = List.of("/api/flows", "/api/connected-apps");
+
+    private static boolean isRouterFilteredOnlyPath(String path) {
+        for (String prefix : ROUTER_FILTERED_ONLY_PREFIXES) {
+            if (path.equals(prefix) || path.startsWith(prefix + "/")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isCollectionRouter(MethodParameter returnType) {
+        return returnType != null
+                && DynamicCollectionRouter.class.isAssignableFrom(returnType.getContainingClass());
     }
 
     private String mapMethodToAction(String method) {

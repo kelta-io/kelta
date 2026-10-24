@@ -48,10 +48,11 @@ class GatewayStaticRoutesSyncTest {
     @DisplayName("the collection-checked static routes and their override permissions")
     void collectionChecks() throws IOException {
         String source = read("service/RouteConfigService.java");
-        int start = source.indexOf("COLLECTION_CHECKED_STATIC_ROUTES = Map.of(");
+        int start = source.indexOf("COLLECTION_CHECKED_STATIC_ROUTES = Map.ofEntries(");
         assertThat(start).isPositive();
-        String table = source.substring(start, source.indexOf(");", start));
-        Matcher m = Pattern.compile("\"([a-z-]+)\",\\s*new StaticCollectionCheck\\((true|false),\\s*\"([A-Z_]+)\"")
+        String table = source.substring(start, source.indexOf(";", start));
+        Matcher m = Pattern.compile(
+                        "Map\\.entry\\(\"([a-z-]+)\",\\s*new StaticCollectionCheck\\((true|false),\\s*\"([A-Z_]+)\"")
                 .matcher(table);
         Map<String, GatewayStaticRoutes.CollectionCheck> gateway = new TreeMap<>();
         while (m.find()) {
@@ -59,8 +60,18 @@ class GatewayStaticRoutesSyncTest {
         }
 
         assertThat(new TreeMap<>(GatewayStaticRoutes.COLLECTION_CHECKS)).isEqualTo(gateway);
-        // The only exempt sub-paths are three segments below /api/collections — never a direct path.
-        assertThat(table).contains("^/api/collections/[^/]+/(import|duplicates|merge)(/.*)?$");
+        // Exempt sub-paths are at least two segments below the route — never a direct path to
+        // a record, which is all a child-resource request is mirrored as.
+        Matcher exempt = Pattern.compile("Pattern\\.compile\\(\"(\\^/api/([a-z-]+)/[^\"]+)\"\\)").matcher(table);
+        Set<String> exemptRoutes = new TreeSet<>();
+        while (exempt.find()) {
+            Pattern exemptPaths = Pattern.compile(exempt.group(1).replace("\\\\", "\\"));
+            String route = exempt.group(2);
+            exemptRoutes.add(route);
+            assertThat(exemptPaths.matcher("/api/" + route).matches()).as(exempt.group(1)).isFalse();
+            assertThat(exemptPaths.matcher("/api/" + route + "/r-1").matches()).as(exempt.group(1)).isFalse();
+        }
+        assertThat(exemptRoutes).containsExactly("collections", "dashboards", "flows", "reports", "scripts");
     }
 
     @Test

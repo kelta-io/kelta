@@ -58,15 +58,29 @@ public final class GatewayStaticRoutes {
     record CollectionCheck(boolean includeReads, String writeOverridePermission) {}
 
     /**
-     * {@code COLLECTION_CHECKED_STATIC_ROUTES}. The {@code collections} route's exempt sub-paths
-     * ({@code /{name}/import|duplicates|merge}) are deeper than any direct request to a child
+     * {@code COLLECTION_CHECKED_STATIC_ROUTES}. Its exempt sub-paths ({@code /collections/{name}/
+     * import|duplicates|merge}, {@code /flows|scripts|reports/{id}/execute},
+     * {@code /dashboards/{id}/data}, ...) are deeper than any direct request to a child
      * collection, so they never apply here.
      */
-    static final Map<String, CollectionCheck> COLLECTION_CHECKS = Map.of(
-            "users", new CollectionCheck(true, "MANAGE_USERS"),
-            "profiles", new CollectionCheck(false, "MANAGE_USERS"),
-            "collections", new CollectionCheck(false, "CUSTOMIZE_APPLICATION"),
-            "scheduled-jobs", new CollectionCheck(false, "MANAGE_WORKFLOWS"));
+    static final Map<String, CollectionCheck> COLLECTION_CHECKS = Map.ofEntries(
+            Map.entry("users", new CollectionCheck(true, "MANAGE_USERS")),
+            Map.entry("profiles", new CollectionCheck(false, "MANAGE_USERS")),
+            Map.entry("collections", new CollectionCheck(false, "CUSTOMIZE_APPLICATION")),
+            Map.entry("scheduled-jobs", new CollectionCheck(false, "MANAGE_WORKFLOWS")),
+            Map.entry("page-layouts", new CollectionCheck(false, "CUSTOMIZE_APPLICATION")),
+            Map.entry("list-views", new CollectionCheck(false, "MANAGE_LISTVIEWS")),
+            Map.entry("ui-menus", new CollectionCheck(false, "CUSTOMIZE_APPLICATION")),
+            Map.entry("ui-pages", new CollectionCheck(false, "CUSTOMIZE_APPLICATION")),
+            Map.entry("global-picklists", new CollectionCheck(false, "CUSTOMIZE_APPLICATION")),
+            Map.entry("oidc-providers", new CollectionCheck(false, "MANAGE_CONNECTED_APPS")),
+            Map.entry("email-templates", new CollectionCheck(false, "MANAGE_EMAIL_TEMPLATES")),
+            Map.entry("scripts", new CollectionCheck(false, "MANAGE_CONNECTED_APPS")),
+            Map.entry("connected-apps", new CollectionCheck(false, "MANAGE_CONNECTED_APPS")),
+            Map.entry("flows", new CollectionCheck(false, "MANAGE_WORKFLOWS")),
+            Map.entry("approval-processes", new CollectionCheck(false, "MANAGE_APPROVALS")),
+            Map.entry("reports", new CollectionCheck(false, "MANAGE_REPORTS")),
+            Map.entry("dashboards", new CollectionCheck(false, "MANAGE_REPORTS")));
 
     /** {@code static-tenants}: writes need this; reads need it or address the caller's own tenant. */
     static final String TENANTS = "tenants";

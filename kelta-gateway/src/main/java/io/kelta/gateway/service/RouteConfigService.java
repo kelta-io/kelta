@@ -300,13 +300,68 @@ public class RouteConfigService {
      *       {@code /{id}/pause|resume|execute} and {@code /validate-cron} POSTs, none of which check
      *       a permission themselves. Reads stay API_ACCESS-only.</li>
      * </ul>
+     *
+     * <p>The setup-metadata collections below (PLT-656) are writes only: reads stay API_ACCESS-only
+     * because the app shell reads layouts, list views, menus, pages and picklists for every user,
+     * and the worker's record advice filters reads of the rest. Each override is the system
+     * permission the collection's setup page is gated on in the UI. A dedicated-controller POST
+     * that is not a write to the collection is covered too (it is a POST under the route) unless
+     * listed as exempt here:
+     * <ul>
+     *   <li>{@code page-layouts}, {@code ui-menus}, {@code ui-pages}, {@code global-picklists} —
+     *       {@code CUSTOMIZE_APPLICATION}. Includes {@code PageLayoutTreeController}'s and
+     *       {@code MenuTreeController}'s {@code PUT /{id}/tree} (which also require it in the
+     *       worker), {@code UiPageValidateController}'s builder-only {@code POST /validate} and
+     *       {@code GlobalPicklistController}'s delete.</li>
+     *   <li>{@code list-views} — {@code MANAGE_LISTVIEWS}. These are the admin-published shared
+     *       views; a user's personal views are not stored here.</li>
+     *   <li>{@code oidc-providers}, {@code scripts}, {@code connected-apps} —
+     *       {@code MANAGE_CONNECTED_APPS}. Includes {@code ConnectedAppTokenController}'s token
+     *       writes. {@code POST /api/scripts/{id}/execute} is exempt: record quick actions run
+     *       scripts for end users, and {@code ScriptExecutionController} enforces the script's own
+     *       {@code requiredPermission}.</li>
+     *   <li>{@code email-templates} — {@code MANAGE_EMAIL_TEMPLATES}.</li>
+     *   <li>{@code flows} — {@code MANAGE_WORKFLOWS}. Includes {@code FlowExecutionController}'s
+     *       {@code /{id}/publish} and {@code /executions/{id}/cancel|retry}.
+     *       {@code POST /api/flows/{id}/execute} is exempt: page actions ({@code runFlow}) start
+     *       flows for end users, and the flow runs as its resolved actor.</li>
+     *   <li>{@code approval-processes} — {@code MANAGE_APPROVALS}. Submitting and deciding
+     *       approvals is {@code /api/approvals/**}, a separate route.</li>
+     *   <li>{@code reports}, {@code dashboards} — {@code MANAGE_REPORTS}. Running a report
+     *       ({@code POST /api/reports/{id}/execute}) and loading dashboard data
+     *       ({@code POST /api/dashboards/{id}/data}, {@code /{id}/components/{componentId}/data})
+     *       are reads by viewers holding {@code VIEW_ANALYTICS}, so they are exempt; their
+     *       controllers check that permission and the source record's read access.</li>
+     * </ul>
+     *
+     * <p>{@code webhooks} is not listed: {@code /api/webhooks/**} fronts no collection — it carries
+     * the inbound webhook receivers ({@code FlowWebhookController}, {@code SesNotificationController},
+     * {@code MailboxWebhookController}), which authenticate the sender themselves — so a check here
+     * would find no collection behind the route and fail closed.
      */
-    static final Map<String, StaticCollectionCheck> COLLECTION_CHECKED_STATIC_ROUTES = Map.of(
-            "users", new StaticCollectionCheck(true, "MANAGE_USERS"),
-            "profiles", new StaticCollectionCheck(false, "MANAGE_USERS"),
-            "collections", new StaticCollectionCheck(false, "CUSTOMIZE_APPLICATION",
-                    Pattern.compile("^/api/collections/[^/]+/(import|duplicates|merge)(/.*)?$")),
-            "scheduled-jobs", new StaticCollectionCheck(false, "MANAGE_WORKFLOWS"));
+    public static final Map<String, StaticCollectionCheck> COLLECTION_CHECKED_STATIC_ROUTES = Map.ofEntries(
+            Map.entry("users", new StaticCollectionCheck(true, "MANAGE_USERS")),
+            Map.entry("profiles", new StaticCollectionCheck(false, "MANAGE_USERS")),
+            Map.entry("collections", new StaticCollectionCheck(false, "CUSTOMIZE_APPLICATION",
+                    Pattern.compile("^/api/collections/[^/]+/(import|duplicates|merge)(/.*)?$"))),
+            Map.entry("scheduled-jobs", new StaticCollectionCheck(false, "MANAGE_WORKFLOWS")),
+            Map.entry("page-layouts", new StaticCollectionCheck(false, "CUSTOMIZE_APPLICATION")),
+            Map.entry("list-views", new StaticCollectionCheck(false, "MANAGE_LISTVIEWS")),
+            Map.entry("ui-menus", new StaticCollectionCheck(false, "CUSTOMIZE_APPLICATION")),
+            Map.entry("ui-pages", new StaticCollectionCheck(false, "CUSTOMIZE_APPLICATION")),
+            Map.entry("global-picklists", new StaticCollectionCheck(false, "CUSTOMIZE_APPLICATION")),
+            Map.entry("oidc-providers", new StaticCollectionCheck(false, "MANAGE_CONNECTED_APPS")),
+            Map.entry("email-templates", new StaticCollectionCheck(false, "MANAGE_EMAIL_TEMPLATES")),
+            Map.entry("scripts", new StaticCollectionCheck(false, "MANAGE_CONNECTED_APPS",
+                    Pattern.compile("^/api/scripts/[^/]+/execute$"))),
+            Map.entry("connected-apps", new StaticCollectionCheck(false, "MANAGE_CONNECTED_APPS")),
+            Map.entry("flows", new StaticCollectionCheck(false, "MANAGE_WORKFLOWS",
+                    Pattern.compile("^/api/flows/[^/]+/execute$"))),
+            Map.entry("approval-processes", new StaticCollectionCheck(false, "MANAGE_APPROVALS")),
+            Map.entry("reports", new StaticCollectionCheck(false, "MANAGE_REPORTS",
+                    Pattern.compile("^/api/reports/[^/]+/execute$"))),
+            Map.entry("dashboards", new StaticCollectionCheck(false, "MANAGE_REPORTS",
+                    Pattern.compile("^/api/dashboards/[^/]+/(data|components/[^/]+/data)$"))));
 
     /** Registers every {@link #STATIC_ROUTES} entry against the worker service URL. */
     private void registerStaticRoutes() {
