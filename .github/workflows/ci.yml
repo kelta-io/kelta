@@ -215,7 +215,7 @@ jobs:
         # hosted runner — don't let that mask a green test run.
         continue-on-error: true
         if: always() && (matrix.changed == 'true' || needs.changes.outputs.workflows == 'true')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-test-results-${{ matrix.service }}
           path: |
@@ -227,7 +227,7 @@ jobs:
       - name: Upload coverage report
         continue-on-error: true
         if: always() && (matrix.changed == 'true' || needs.changes.outputs.workflows == 'true')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-coverage-${{ matrix.service }}
           path: kelta-${{ matrix.service }}/target/site/jacoco/
@@ -295,7 +295,7 @@ jobs:
         # hosted runner — don't let that mask a green test run.
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-test-results-runtime
           path: kelta-platform/runtime/*/target/surefire-reports/
@@ -373,7 +373,7 @@ jobs:
         # hosted runner — don't let that mask a green test run.
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-test-results-runtime-modules
           path: kelta-modules/*/target/surefire-reports/
@@ -490,7 +490,7 @@ jobs:
       - name: Upload coverage report
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-coverage
           path: kelta-web/coverage/
@@ -608,7 +608,7 @@ jobs:
       - name: Upload harness reports
         continue-on-error: true
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: harness-failsafe-reports
           path: kelta-test-harness/target/failsafe-reports/
@@ -866,7 +866,7 @@ jobs:
       - name: Upload e2e artifacts
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-report
           path: |
@@ -1025,7 +1025,7 @@ jobs:
       - name: Upload logs
         continue-on-error: true
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: quickstart-logs
           path: _logs/
@@ -1182,7 +1182,7 @@ jobs:
       - name: Upload logs
         continue-on-error: true
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: templates-logs
           path: _logs/
@@ -1336,7 +1336,7 @@ jobs:
       - name: Upload logs
         continue-on-error: true
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mcp-replay-logs
           path: _logs/
@@ -1549,7 +1549,7 @@ jobs:
       - name: Upload logs and seed data
         continue-on-error: true
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: upgrade-test-logs
           path: |

@@ -274,7 +274,7 @@ jobs:
       - name: Upload test results
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-test-results-runtime
           path: kelta-platform/runtime/*/target/surefire-reports/
@@ -1221,7 +1221,7 @@ jobs:
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-test-results
           path: |
@@ -1231,7 +1231,7 @@ jobs:
 
       - name: Upload trace files
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-traces
           path: e2e-tests/test-results/**/*.zip
@@ -1251,7 +1251,7 @@ jobs:
       # a bug task into the tracker tenant from the run URL and these uploaded logs.
       - name: Upload failing pod logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bug-context
           path: _bug-context/*.log
