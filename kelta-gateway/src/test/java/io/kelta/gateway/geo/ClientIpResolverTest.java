@@ -151,14 +151,33 @@ class ClientIpResolverTest {
     }
 
     @Test
-    @DisplayName("allowlist candidates: one resolved IP in trusted-proxy mode, every hop in legacy mode")
-    void allowlistCandidates() {
+    @DisplayName("allowlist candidates in trusted-proxy mode: exactly the right-most untrusted hop")
+    void allowlistCandidatesTrustedProxyMode() {
         MockServerWebExchange exchange = request("10.1.0.9", "198.51.100.1, 203.0.113.7", "192.0.2.5");
 
         assertThat(trusting("10.1.0.0/16").allowlistCandidates(exchange)).containsExactly("203.0.113.7");
-        assertThat(new ClientIpResolver(true).allowlistCandidates(exchange))
-                .containsExactly("10.1.0.9", "198.51.100.1", "203.0.113.7", "192.0.2.5");
+    }
+
+    @Test
+    @DisplayName("allowlist candidates in legacy mode: the socket peer only, whatever trust-forwarded-for says")
+    void allowlistCandidatesLegacyModeIsPeerOnly() {
+        MockServerWebExchange exchange = request("10.1.0.9", "198.51.100.1, 203.0.113.7", "192.0.2.5");
+
+        assertThat(new ClientIpResolver(true).allowlistCandidates(exchange)).containsExactly("10.1.0.9");
         assertThat(new ClientIpResolver(false).allowlistCandidates(exchange)).containsExactly("10.1.0.9");
+        assertThat(new ClientIpResolver(true, List.of()).allowlistCandidates(exchange)).containsExactly("10.1.0.9");
+        assertThat(new ClientIpResolver(true).allowlistCandidates(request("10.1.0.9", null, "192.0.2.5")))
+                .containsExactly("10.1.0.9");
+    }
+
+    @Test
+    @DisplayName("legacy mode: resolve still takes the left-most hop while the allowlist sees the peer")
+    void legacyResolveUnchangedWhileAllowlistIsStrict() {
+        ClientIpResolver resolver = new ClientIpResolver(true);
+        MockServerWebExchange exchange = request("10.1.0.9", "198.51.100.1, 203.0.113.7", null);
+
+        assertThat(resolver.resolve(exchange)).isEqualTo("198.51.100.1");
+        assertThat(resolver.allowlistCandidates(exchange)).containsExactly("10.1.0.9");
     }
 
     @Test

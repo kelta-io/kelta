@@ -3,6 +3,10 @@ package io.kelta.worker.config;
 import com.zaxxer.hikari.HikariDataSource;
 import io.kelta.runtime.context.TenantAwareDataSource;
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.model.system.CoreSystemCollections;
+import io.kelta.runtime.storage.PhysicalTableStorageAdapter;
+import io.kelta.runtime.storage.SchemaMigrationEngine;
 import io.kelta.worker.service.SupersetDatabaseUserService;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -20,7 +24,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import javax.sql.DataSource;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -528,8 +535,8 @@ class RowLevelSecurityIntegrationTest {
     }
 
     @Test
-    @DisplayName("V214 narrows a superset role provisioned before the grant narrowing: own rows only, no tenant_db_role")
-    void v214NarrowsAPreNarrowingSupersetRole() throws Exception {
+    @DisplayName("V215 narrows a superset role provisioned before the grant narrowing: own rows only, no tenant_db_role")
+    void v215NarrowsAPreNarrowingSupersetRole() throws Exception {
         String legacy = "superset_legacy_" + UUID.randomUUID().toString().substring(0, 8);
         String orphan = "superset_orphan_" + UUID.randomUUID().toString().substring(0, 8);
         String missing = "superset_missing_" + UUID.randomUUID().toString().substring(0, 8);
@@ -549,13 +556,13 @@ class RowLevelSecurityIntegrationTest {
             assertThat(granted(legacy, "tenant_db_role")).as("precondition: the blanket grant covers the pin").isTrue();
             assertThat(granted(legacy, "user_credential")).as("precondition").isTrue();
 
-            // Migrations already ran in @BeforeAll, before these roles existed; run V214 again as
+            // Migrations already ran in @BeforeAll, before these roles existed; run V215 again as
             // the migrating role, twice, to prove it acts on them and is idempotent.
-            String v214 = new String(getClass().getResourceAsStream(
-                    "/db/migration/V214__revoke_tenant_db_role_from_tenant_roles.sql").readAllBytes(),
+            String v215 = new String(getClass().getResourceAsStream(
+                    "/db/migration/V215__revoke_tenant_db_role_from_tenant_roles.sql").readAllBytes(),
                     java.nio.charset.StandardCharsets.UTF_8);
-            migrator.execute(v214);
-            migrator.execute(v214);
+            migrator.execute(v215);
+            migrator.execute(v215);
 
             assertThat(granted(legacy, "tenant_db_role")).isFalse();
             assertThat(granted(legacy, "user_credential")).as("password hashes").isFalse();
@@ -626,5 +633,41 @@ class RowLevelSecurityIntegrationTest {
                 .containsExactly(LAYOUT_A, LAYOUT_B);
         assertThat(asTenant(TENANT_A, () -> ids("SELECT id FROM page_layout WHERE id IN (?, ?)", LAYOUT_A, LAYOUT_B)))
                 .containsExactly(LAYOUT_A);
+    }
+
+    // ------------------------------------------------------------------ app-layer predicate (PLT-708)
+
+    @Test
+    @DisplayName("with the GUC forced to '' and tenant A bound, the adapter's by-id GET/PATCH/DELETE cannot reach tenant B's row")
+    void adapterByIdStatementsHoldWhenTheGucIsBlank() {
+        PhysicalTableStorageAdapter adapter = new PhysicalTableStorageAdapter(
+                app, new SchemaMigrationEngine(app), new tools.jackson.databind.ObjectMapper());
+        CollectionDefinition users = CoreSystemCollections.users();
+        TransactionTemplate tx = new TransactionTemplate(new DataSourceTransactionManager(appDataSource));
+
+        // The transaction borrows its connection before any tenant is bound, so it carries the
+        // platform session ('' → admin_bypass) for its whole life; tenant A is bound only inside.
+        // That is the shape of a connection that lost its tenant: RLS opens every row.
+        tx.executeWithoutResult(status -> TenantContext.runWithTenant(TENANT_A, "tenant-a", () -> {
+            assertThat(app.queryForObject("SELECT current_setting('app.current_tenant_id', true)", String.class))
+                    .isEmpty();
+            assertThat(ids("SELECT id FROM platform_user WHERE id = ?", USER_B))
+                    .as("precondition: RLS alone lets this connection see tenant B")
+                    .containsExactly(USER_B);
+
+            Optional<Map<String, Object>> read = adapter.getById(users, USER_B);
+            Map<String, Object> patch = new HashMap<>(Map.of("email", "hacked@tenant-a.example"));
+            Optional<Map<String, Object>> updated = adapter.update(users, USER_B, patch);
+            boolean deleted = adapter.delete(users, USER_B);
+
+            assertThat(read).isEmpty();
+            assertThat(updated).isEmpty();
+            assertThat(deleted).isFalse();
+            // The adapter still works for tenant A's own row on the same connection.
+            assertThat(adapter.getById(users, USER_A)).isPresent();
+        }));
+
+        assertThat(admin.queryForObject("SELECT email FROM platform_user WHERE id = ?", String.class, USER_B))
+                .isEqualTo("bob@tenant-b.example");
     }
 }

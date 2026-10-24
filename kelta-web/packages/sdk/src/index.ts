@@ -156,6 +156,7 @@ export type {
   SearchReindexResult,
   PersonalAccessToken,
   PersonalAccessTokenCreated,
+  AdminUserPersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CredentialRecord,
   CredentialTypeDescriptor,
