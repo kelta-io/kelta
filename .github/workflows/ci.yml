@@ -181,7 +181,7 @@ jobs:
 
       - name: Cache Maven dependencies
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
@@ -272,7 +272,7 @@ jobs:
           cp ci/maven-settings.xml ~/.m2/settings.xml
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
@@ -340,7 +340,7 @@ jobs:
           cp ci/maven-settings.xml ~/.m2/settings.xml
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
@@ -402,7 +402,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Cache npm dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('kelta-web/package-lock.json') }}
@@ -531,7 +531,7 @@ jobs:
           cp ci/maven-settings.xml ~/.m2/settings.xml
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
