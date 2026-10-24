@@ -67,7 +67,8 @@ public class InternalServiceAuthConfig {
     public ReactiveClientRegistrationRepository internalClientRegistrations(
             @Value("${kelta.gateway.internal-auth.client-id:gateway-internal}") String clientId,
             @Value("${kelta.gateway.internal-auth.client-secret:}") String clientSecret,
-            @Value("${kelta.auth.issuer-uri:${spring.security.oauth2.resourceserver.jwt.issuer-uri:}}") String issuerUri) {
+            @Value("${kelta.auth.issuer-uri:${spring.security.oauth2.resourceserver.jwt.issuer-uri:}}") String issuerUri,
+            @Value("${kelta.gateway.auth-service-url:}") String authServiceUrl) {
 
         if (clientSecret == null || clientSecret.isBlank()) {
             throw new IllegalStateException(
@@ -81,7 +82,10 @@ public class InternalServiceAuthConfig {
                             + "(kelta.auth.issuer-uri or spring.security.oauth2.resourceserver.jwt.issuer-uri).");
         }
 
-        String tokenUri = issuerUri.endsWith("/") ? issuerUri + "oauth2/token" : issuerUri + "/oauth2/token";
+        // kelta-auth's token endpoint, reached at the auth-service URL when one is set (the same
+        // network path the JWT decoder fetches keys over), else at the issuer.
+        String authBase = authServiceUrl == null || authServiceUrl.isBlank() ? issuerUri : authServiceUrl.trim();
+        String tokenUri = authBase.endsWith("/") ? authBase + "oauth2/token" : authBase + "/oauth2/token";
         ClientRegistration registration = ClientRegistration.withRegistrationId(CLIENT_REGISTRATION_ID)
                 .clientId(clientId)
                 .clientSecret(clientSecret)

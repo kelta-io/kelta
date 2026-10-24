@@ -35,6 +35,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * </ul>
  *
  * <p>External IdPs federate through kelta-auth — they never sign tokens directly.
+ *
+ * <p>Which issuers are accepted and where their signing keys are fetched from are separate.
+ * A custom domain's keys come from {@code <issuer>/oauth2/jwks}. The platform issuer's come
+ * from {@code <authServiceUrl>/oauth2/jwks} when an auth-service URL is configured, else from
+ * the issuer itself. The {@code iss} a token must carry is unchanged by it: the auth-service
+ * URL is only the network path from the gateway to kelta-auth, for when the public issuer URL
+ * is not one — e.g. the compose stack's {@code http://auth.localhost:8081}, which an RFC 6761
+ * resolver (Netty's since 4.2.14) answers with the gateway's own loopback address.
  */
 public class DynamicReactiveJwtDecoder implements ReactiveJwtDecoder {
 
@@ -42,22 +50,37 @@ public class DynamicReactiveJwtDecoder implements ReactiveJwtDecoder {
 
     private static final String TOKEN_TYPE_CLAIM = "token_type";
     private static final String REFRESH_TOKEN_TYPE = "refresh";
+    private static final String JWKS_PATH = "/oauth2/jwks";
 
     private final String primaryIssuer;
+    private final String primaryJwkSetUri;
     private final Duration clockSkew;
     private final GatewayCacheManager cacheManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ConcurrentHashMap<String, NimbusReactiveJwtDecoder> delegates = new ConcurrentHashMap<>();
 
     public DynamicReactiveJwtDecoder(String primaryIssuer, Duration clockSkew, GatewayCacheManager cacheManager) {
+        this(primaryIssuer, null, clockSkew, cacheManager);
+    }
+
+    /**
+     * @param authServiceUrl base URL the gateway reaches kelta-auth at to fetch the platform
+     *                       issuer's keys; {@code null} or blank fetches them from the issuer
+     */
+    public DynamicReactiveJwtDecoder(String primaryIssuer, String authServiceUrl, Duration clockSkew,
+                                     GatewayCacheManager cacheManager) {
         if (primaryIssuer == null || primaryIssuer.isBlank()) {
             throw new IllegalArgumentException("primaryIssuer must be set to the internal kelta-auth issuer");
         }
         this.primaryIssuer = stripTrailingSlash(primaryIssuer);
+        String keysBase = authServiceUrl == null || authServiceUrl.isBlank()
+                ? this.primaryIssuer
+                : stripTrailingSlash(authServiceUrl.trim());
+        this.primaryJwkSetUri = keysBase + JWKS_PATH;
         this.clockSkew = clockSkew != null ? clockSkew : Duration.ZERO;
         this.cacheManager = cacheManager;
-        log.info("DynamicReactiveJwtDecoder initialized: primaryIssuer={}, clockSkew={}s",
-                this.primaryIssuer, this.clockSkew.getSeconds());
+        log.info("DynamicReactiveJwtDecoder initialized: primaryIssuer={}, primaryJwkSetUri={}, clockSkew={}s",
+                this.primaryIssuer, this.primaryJwkSetUri, this.clockSkew.getSeconds());
     }
 
     @Override
@@ -117,12 +140,17 @@ public class DynamicReactiveJwtDecoder implements ReactiveJwtDecoder {
 
     private NimbusReactiveJwtDecoder delegateFor(String issuer) {
         return delegates.computeIfAbsent(issuer, iss -> {
-            String jwksUri = iss + "/oauth2/jwks";
+            String jwksUri = jwkSetUriFor(iss);
             NimbusReactiveJwtDecoder nimbus = NimbusReactiveJwtDecoder.withJwkSetUri(jwksUri).build();
             nimbus.setJwtValidator(bearerTokenValidator(clockSkew));
             log.debug("Initialized JWKS decoder for {}", jwksUri);
             return nimbus;
         });
+    }
+
+    /** Where the keys for an accepted {@code issuer} (trailing slash stripped) are fetched from. */
+    String jwkSetUriFor(String issuer) {
+        return primaryIssuer.equals(issuer) ? primaryJwkSetUri : issuer + JWKS_PATH;
     }
 
     /**

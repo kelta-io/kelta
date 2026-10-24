@@ -93,6 +93,14 @@ kelta:
     # Worker service URL (used for routing AND internal API calls)
     worker-service-url: ${WORKER_SERVICE_URL:http://emf-worker:80}
 
+    # kelta-auth URL for the gateway's own calls to it: the JWKS that verifies the platform
+    # issuer's tokens (<url>/oauth2/jwks) and, with internal-auth on, the client-credentials
+    # token endpoint. Empty (the default): the issuer URI. Tokens must still carry the issuer
+    # as `iss`; this is only the network path. Set it when the issuer is not reachable from the
+    # gateway under its public name — docker-compose.yml's http://auth.localhost:8081 is loopback
+    # to any RFC 6761 resolver, Netty's included (4.2.14+), so compose sets kelta-auth's service name.
+    auth-service-url: ${AUTH_SERVICE_URL:}
+
     # PAT grace cache (PatAuthenticationFilter): the last accepted PAT data per token hash,
     # served only when Redis misses AND the worker validation call fails (non-404), so
     # valid tokens ride out worker restarts. Entries are written only after a token is
