@@ -1093,7 +1093,8 @@ export interface TransformLayoutRule extends BaseLayoutRule {
   kind: 'transform';
   target: string;
   transform:
-    { type: 'upper' | 'lower' | 'trim' | 'titleCase' } | { type: 'formula'; formula: string };
+    | { type: 'upper' | 'lower' | 'trim' | 'titleCase' }
+    | { type: 'formula'; formula: string };
 }
 
 /**
@@ -1467,7 +1468,13 @@ export interface CreateEmailTemplateRequest {
 // --- Email Campaigns ---
 
 export type CampaignStatus =
-  'DRAFT' | 'SCHEDULED' | 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED' | 'CANCELLED';
+  | 'DRAFT'
+  | 'SCHEDULED'
+  | 'QUEUED'
+  | 'SENDING'
+  | 'SENT'
+  | 'FAILED'
+  | 'CANCELLED';
 
 /** A single filter condition applied to the target collection. */
 export interface CampaignFilterCondition {
