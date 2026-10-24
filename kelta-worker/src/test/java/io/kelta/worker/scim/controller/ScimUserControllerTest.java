@@ -23,7 +23,7 @@ class ScimUserControllerTest {
     @BeforeEach
     void setUp() {
         userService = mock(ScimUserService.class);
-        controller = new ScimUserController(userService);
+        controller = new ScimUserController(userService, null);
         request = new MockHttpServletRequest();
         request.setScheme("https");
         request.setServerName("example.com");
@@ -96,5 +96,56 @@ class ScimUserControllerTest {
         controller.listUsers("t1", null, 1, 5000, request);
 
         verify(userService).listUsers(anyString(), any(), anyInt(), eq(1000), anyString());
+    }
+
+    @Test
+    @DisplayName("meta.location is built on kelta.scim.public-url, not the request's own address")
+    void metaLocationUsesConfiguredPublicUrl() {
+        controller = new ScimUserController(userService, "https://api.kelta.example/");
+        stubGetUserEchoingBaseUrl();
+
+        var response = controller.getUser("t1", "user-1", request);
+
+        assertThat(response.getBody().getMeta().getLocation())
+                .isEqualTo("https://api.kelta.example/scim/v2/Users/user-1");
+    }
+
+    @Test
+    @DisplayName("X-Forwarded-Host / -Proto cannot change meta.location")
+    void forwardedHeadersAreIgnored() {
+        controller = new ScimUserController(userService, "https://api.kelta.example");
+        request.addHeader("X-Forwarded-Host", "evil.example");
+        request.addHeader("X-Forwarded-Proto", "http");
+        stubGetUserEchoingBaseUrl();
+
+        var response = controller.getUser("t1", "user-1", request);
+
+        assertThat(response.getBody().getMeta().getLocation())
+                .startsWith("https://api.kelta.example/")
+                .doesNotContain("evil.example");
+    }
+
+    @Test
+    @DisplayName("blank public-url falls back to the request's scheme, host and port, still ignoring forwarded headers")
+    void blankPublicUrlFallsBackToRequest() {
+        controller = new ScimUserController(userService, "  ");
+        request.addHeader("X-Forwarded-Host", "evil.example");
+        stubGetUserEchoingBaseUrl();
+
+        var response = controller.getUser("t1", "user-1", request);
+
+        assertThat(response.getBody().getMeta().getLocation())
+                .isEqualTo("https://example.com:443/scim/v2/Users/user-1");
+    }
+
+    /** Mirrors the service: meta.location is the base URL the controller hands it plus the path. */
+    private void stubGetUserEchoingBaseUrl() {
+        when(userService.getUser(eq("t1"), eq("user-1"), anyString())).thenAnswer(inv -> {
+            ScimUser user = new ScimUser();
+            user.setId("user-1");
+            user.setMeta(new ScimMeta("User", null, null,
+                    inv.getArgument(2) + "/scim/v2/Users/user-1"));
+            return user;
+        });
     }
 }

@@ -23,7 +23,7 @@ class ScimGroupControllerTest {
     @BeforeEach
     void setUp() {
         groupService = mock(ScimGroupService.class);
-        controller = new ScimGroupController(groupService);
+        controller = new ScimGroupController(groupService, null);
         request = new MockHttpServletRequest();
         request.setScheme("https");
         request.setServerName("example.com");
@@ -70,5 +70,56 @@ class ScimGroupControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
         verify(groupService).deleteGroup("t1", "group-1");
+    }
+
+    @Test
+    @DisplayName("meta.location is built on kelta.scim.public-url, not the request's own address")
+    void metaLocationUsesConfiguredPublicUrl() {
+        controller = new ScimGroupController(groupService, "https://api.kelta.example/");
+        stubGetGroupEchoingBaseUrl();
+
+        var response = controller.getGroup("t1", "group-1", request);
+
+        assertThat(response.getBody().getMeta().getLocation())
+                .isEqualTo("https://api.kelta.example/scim/v2/Groups/group-1");
+    }
+
+    @Test
+    @DisplayName("X-Forwarded-Host / -Proto cannot change meta.location")
+    void forwardedHeadersAreIgnored() {
+        controller = new ScimGroupController(groupService, "https://api.kelta.example");
+        request.addHeader("X-Forwarded-Host", "evil.example");
+        request.addHeader("X-Forwarded-Proto", "http");
+        stubGetGroupEchoingBaseUrl();
+
+        var response = controller.getGroup("t1", "group-1", request);
+
+        assertThat(response.getBody().getMeta().getLocation())
+                .startsWith("https://api.kelta.example/")
+                .doesNotContain("evil.example");
+    }
+
+    @Test
+    @DisplayName("blank public-url falls back to the request's scheme, host and port, still ignoring forwarded headers")
+    void blankPublicUrlFallsBackToRequest() {
+        controller = new ScimGroupController(groupService, "  ");
+        request.addHeader("X-Forwarded-Host", "evil.example");
+        stubGetGroupEchoingBaseUrl();
+
+        var response = controller.getGroup("t1", "group-1", request);
+
+        assertThat(response.getBody().getMeta().getLocation())
+                .isEqualTo("https://example.com:443/scim/v2/Groups/group-1");
+    }
+
+    /** Mirrors the service: meta.location is the base URL the controller hands it plus the path. */
+    private void stubGetGroupEchoingBaseUrl() {
+        when(groupService.getGroup(eq("t1"), eq("group-1"), anyString())).thenAnswer(inv -> {
+            ScimGroup group = new ScimGroup();
+            group.setId("group-1");
+            group.setMeta(new ScimMeta("Group", null, null,
+                    inv.getArgument(2) + "/scim/v2/Groups/group-1"));
+            return group;
+        });
     }
 }
