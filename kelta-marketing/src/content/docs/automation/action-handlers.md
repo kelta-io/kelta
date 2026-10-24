@@ -179,6 +179,11 @@ or inline `"scriptSource": "record.total > input.threshold"`. Scripts run in a s
 `record`, `previousRecord`, `input` and `context` bindings and return the last expression. Scripts are managed
 under Setup → Integration → Scripts.
 
+An active script of type `API_ENDPOINT` or `EVENT_HANDLER` can also be run over HTTP — the app's *run script* quick
+action does this: `POST /api/scripts/{id}/execute` with `{ "input": { … }, "context"?: { … } }` runs it
+synchronously and returns its result. When the script sets `requiredPermission`, the caller's profile must hold
+that system permission (`403` otherwise); without it any API user may run the script.
+
 ## Control and utility
 
 ### `DECISION`

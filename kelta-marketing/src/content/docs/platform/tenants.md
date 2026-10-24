@@ -30,6 +30,10 @@ Creating a tenant runs the provisioning chain: schema, seeded profiles, an admin
 any configured integrations. Suspending a tenant (`status: SUSPENDED`) rejects its logins and API calls without
 deleting anything.
 
+The seeded administrator has no usable password. `POST /api/tenants/{id}/admin-invite` with `{ "email" }` sets that
+administrator's email and sends the invitation (`MANAGE_TENANTS`); passing `adminEmail` when creating the tenant
+does the same.
+
 ### Bootstrap token
 
 A new tenant's administrator has no usable password until someone claims the account through the invite, and a

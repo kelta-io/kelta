@@ -82,4 +82,7 @@ local snapshot, so rollback answers `409` — restore on the remote side. The ma
 
 Changing a field's type on a collection with data is a separate, planned operation: Setup → Platform →
 Migrations snapshots the schema, computes an `ADD/REMOVE/MODIFY` plan with risk and row counts, executes the
-`ALTER TABLE`s as a restore-pointed run, and can roll back to the snapshot.
+`ALTER TABLE`s as a restore-pointed run, and can roll back to the snapshot. The endpoints, all
+`CUSTOMIZE_APPLICATION`: `POST /api/migrations/snapshot`, `GET /api/migrations/versions`, `POST /api/migrations/plan`
+(read-only), `POST /api/migrations/execute` and `POST /api/migrations/{runId}/rollback`; runs are records of
+`migration-runs`.

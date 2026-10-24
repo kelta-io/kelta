@@ -44,7 +44,7 @@ codes; the user re-enrols at next login.
 
 ## Password policy
 
-One policy per tenant, edited under Setup → Security → Password policy:
+One policy per tenant, edited under Setup → Security → Password policy, or `GET`/`PUT /api/admin/password-policy`:
 
 | Setting | Default |
 |---|---|
@@ -57,6 +57,7 @@ One policy per tenant, edited under Setup → Security → Password policy:
 | Lockout duration | 30 minutes |
 | Maximum age (days; forces rotation) | unset |
 
-Locked accounts show `status: LOCKED` and unlock automatically after the lockout duration or when an
-administrator resets the password. Administrator-initiated resets and new invitations force a password change at
+Locked accounts show `status: LOCKED` and unlock automatically after the lockout duration, when an administrator
+resets the password, or on `POST /api/admin/password-policy/users/{userId}/unlock`. Administrator-initiated resets
+(`POST /api/admin/users/{userId}/reset-password`, `MANAGE_USERS`) and new invitations force a password change at
 next login.
