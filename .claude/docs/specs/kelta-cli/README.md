@@ -119,7 +119,7 @@ are ported onto the registry, keeping flag compatibility where cheap.
 
 Every command is a data record: `{ group, name, summary, input: zod schema, dangerous?,
 handler(ctx, input) => Result }`. From it we derive: commander wiring + `--help`,
-`kelta manifest` (JSON catalog with JSON-Schema per command via zod-to-json-schema), local
+`kelta manifest` (JSON catalog with JSON-Schema per command via zod 4 `z.toJSONSchema`), local
 MCP tool specs (slice 5), and docs. Handlers return structured data; a separate renderer
 serializes per `--output`. This is the mechanism that keeps CLI, MCP, and agent docs from
 drifting.
