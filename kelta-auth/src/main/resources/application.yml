@@ -84,6 +84,14 @@ kelta:
     # Set explicitly to pin a single issuer URL.
     issuer-uri: ${KELTA_AUTH_ISSUER_URI:}
     worker-url: ${WORKER_SERVICE_URL:http://localhost:8081}
+    # Service-to-service OAuth2 for calls into the worker's /internal/** (rollout flag, off by
+    # default). Bound by InternalAuthProperties and read at run time, not by a @Conditional:
+    # the native image freezes conditions at build time, so an env flip would be ignored.
+    # client-secret must match kelta.auth.internal-clients.<client-id>.secret.
+    internal-auth:
+      enabled: ${KELTA_AUTH_INTERNAL_AUTH_ENABLED:false}
+      client-id: ${KELTA_AUTH_INTERNAL_AUTH_CLIENT_ID:auth-internal}
+      client-secret: ${KELTA_AUTH_INTERNAL_AUTH_CLIENT_SECRET:}
     # cookie-domain is no longer read directly — CookieDomainResolver derives
     # the cookie Domain attribute from each request's host. The property is
     # retained as a no-op for migration; remove once all deployments have rolled.
