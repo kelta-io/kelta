@@ -84,6 +84,8 @@ Plus `ping`.
 | `execute_flow` | start a flow (input is double-wrapped) |
 | `get_flow_run` | status of an execution, optionally with steps |
 | `submit_for_approval`, `list_approvals` | approvals |
+| `list_notifications` | your own in-app notifications, newest first; `unreadOnly`, `pageSize`, `pageNumber`; `meta.unreadCount` is your unread total (`GET /api/me/notifications`) |
+| `mark_notification_read` | mark one of your notifications read by `id` (`POST /api/me/notifications/{id}/read`) |
 | `ping` | |
 
 ## Conventions

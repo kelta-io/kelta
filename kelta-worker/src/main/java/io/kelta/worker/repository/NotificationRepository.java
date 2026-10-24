@@ -71,6 +71,14 @@ public class NotificationRepository {
                 MAPPER, tenantId, recipientId, limit, offset);
     }
 
+    /** The recipient's unread notifications, newest first. */
+    public List<Notification> findUnreadByRecipient(String tenantId, String recipientId, int limit, int offset) {
+        return jdbcTemplate.query(
+                "SELECT " + COLUMNS + " FROM notification WHERE tenant_id = ? AND recipient_id = ? "
+                        + "AND read_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                MAPPER, tenantId, recipientId, limit, offset);
+    }
+
     public Optional<Notification> findByIdForRecipient(String tenantId, String recipientId, String id) {
         return jdbcTemplate.query(
                 "SELECT " + COLUMNS + " FROM notification WHERE tenant_id = ? AND recipient_id = ? AND id = ?",

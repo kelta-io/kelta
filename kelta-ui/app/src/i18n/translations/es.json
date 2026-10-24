@@ -1074,5 +1074,12 @@
     "breadcrumbNew": "Nuevo",
     "breadcrumbEdit": "Editar",
     "breadcrumbClone": "Clonar"
+  },
+  "notificationBell": {
+    "label": "Notificaciones",
+    "labelUnread": "Notificaciones ({{count}} sin leer)",
+    "title": "Notificaciones",
+    "empty": "No hay notificaciones sin leer",
+    "inbox": "Aprobaciones y chat"
   }
 }

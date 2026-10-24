@@ -27,7 +27,7 @@ import java.util.Map;
  *
  * <ul>
  *   <li>{@code GET /api/me/notifications} — newest first, {@code page[number]}/{@code page[size]},
- *       with {@code meta.unreadCount}</li>
+ *       with {@code meta.unreadCount}; {@code ?unread=true} returns only unread ones</li>
  *   <li>{@code POST /api/me/notifications/{id}/read} — marks one read</li>
  *   <li>{@code POST /api/me/notifications/read-all} — marks all of the caller's unread ones read</li>
  * </ul>
@@ -60,7 +60,9 @@ public class MyNotificationsController {
         String callerId = requireCallerId();
         Pagination pagination = Pagination.fromParams(params == null ? Map.of() : params);
 
-        NotificationService.Page page = notificationService.list(tenantId, callerId, pagination);
+        boolean unreadOnly = params != null && "true".equalsIgnoreCase(params.get("unread"));
+
+        NotificationService.Page page = notificationService.list(tenantId, callerId, pagination, unreadOnly);
         int totalPages = (int) Math.ceil((double) page.totalCount() / pagination.pageSize());
 
         Map<String, Object> meta = new LinkedHashMap<>();

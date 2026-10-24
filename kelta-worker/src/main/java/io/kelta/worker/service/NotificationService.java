@@ -56,10 +56,26 @@ public class NotificationService implements NotificationStore {
     }
 
     public Page list(String tenantId, String recipientId, Pagination pagination) {
+        return list(tenantId, recipientId, pagination, false);
+    }
+
+    /**
+     * One page of the recipient's notifications; with {@code unreadOnly} only the unread ones, and
+     * {@code totalCount} counts that filtered set. {@code unreadCount} is always the recipient's
+     * unread total.
+     */
+    public Page list(String tenantId, String recipientId, Pagination pagination, boolean unreadOnly) {
+        long unreadCount = repository.countUnread(tenantId, recipientId);
+        if (unreadOnly) {
+            return new Page(
+                    repository.findUnreadByRecipient(tenantId, recipientId, pagination.pageSize(), pagination.offset()),
+                    unreadCount,
+                    unreadCount);
+        }
         return new Page(
                 repository.findByRecipient(tenantId, recipientId, pagination.pageSize(), pagination.offset()),
                 repository.countByRecipient(tenantId, recipientId),
-                repository.countUnread(tenantId, recipientId));
+                unreadCount);
     }
 
     /** Marks the recipient's notification read; empty when the recipient owns no such notification. */

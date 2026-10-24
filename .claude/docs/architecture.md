@@ -670,7 +670,14 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   recipient is `CallerContext.current().userId()` only, every query filters
   `tenant_id` **and** `recipient_id`, so another user's id → **404** with the row untouched; tenant
   RLS (`tenant_isolation`/`admin_bypass`) underneath. The list is newest first, JSON:API
-  `page[number]`/`page[size]`, with `meta.unreadCount`.
+  `page[number]`/`page[size]`, with `meta.unreadCount`; `?unread=true` returns only rows with
+  `read_at IS NULL` (`NotificationRepository.findUnreadByRecipient`, same tenant + recipient
+  predicates; `meta.totalCount` then counts the unread set, `meta.unreadCount` is always the
+  caller's unread total). Read surfaces: the end-user header's `NotificationBell`
+  (`kelta-ui/app/src/shells/EndUserShell/`, polls `?unread=true&page[size]=20` every 60 s; opening
+  one POSTs `/{id}/read` and follows a tenant-relative `link`), the MCP user tools
+  `list_notifications` (`unreadOnly`, `pageSize`, `pageNumber`) and `mark_notification_read`
+  (`id`), and `kelta notifications list [--unread]`.
 - **User preferences** (`/api/user-ui-preferences`, generic route): ownership metadata
   (`ownerField=userId`, `ownerScope=ALL`, `ownerScopeReads=true`) — reads return only the caller's
   rows and writes are owner-only (foreign update/delete 404), unless the caller holds
