@@ -9,6 +9,7 @@ import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecifi
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,7 +49,8 @@ class ListCollectionsToolTest {
     void toolHasExpectedNameAndRequiresNoArgs() {
         SyncToolSpecification spec = tool.toSpecification();
         assertThat(spec.tool().name()).isEqualTo("list_collections");
-        assertThat(spec.tool().inputSchema().required()).isEmpty();
+        assertThat(spec.tool().inputSchema()).extractingByKey("required")
+                .asInstanceOf(InstanceOfAssertFactories.LIST).isEmpty();
     }
 
     @Test

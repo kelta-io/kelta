@@ -1,29 +1,31 @@
 package io.kelta.mcp.tool;
 
-import io.modelcontextprotocol.spec.McpSchema;
-
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Tiny helpers for building {@link io.modelcontextprotocol.spec.McpSchema.JsonSchema}
- * input descriptors. The MCP SDK's {@code JsonSchema} record takes positional
- * args; these helpers keep tool authors away from null-laden constructors and
- * give consistent shapes.
+ * Tiny helpers for building tool {@code inputSchema} descriptors. The MCP SDK
+ * takes the schema as a raw JSON Schema {@code Map}; these helpers keep tool
+ * authors away from hand-built maps and give consistent shapes.
  */
 public final class Schemas {
 
     private Schemas() {}
 
     /** Empty no-args schema. */
-    public static McpSchema.JsonSchema empty() {
-        return new McpSchema.JsonSchema("object", Map.of(), List.of(), false, null, null);
+    public static Map<String, Object> empty() {
+        return object(Map.of(), List.of());
     }
 
     /** Object schema with the given properties and required field names. */
-    public static McpSchema.JsonSchema object(Map<String, Object> properties, List<String> required) {
-        return new McpSchema.JsonSchema("object", properties, required, false, null, null);
+    public static Map<String, Object> object(Map<String, Object> properties, List<String> required) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("type", "object");
+        m.put("properties", properties);
+        m.put("required", required);
+        m.put("additionalProperties", false);
+        return m;
     }
 
     /** Convenience for a string property descriptor. */

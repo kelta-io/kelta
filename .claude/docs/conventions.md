@@ -619,7 +619,7 @@ not "leave alone" — same as `apply_layout`'s existing whole-tree-replace contr
 
 A non-2xx gateway response maps to `CallToolResult.isError = true` with **both** the
 existing human-readable `TextContent` **and** `structuredContent = {status, errors:[...]}`
-(MCP SDK 1.1.2 `CallToolResult.builder().structuredContent(...)`) — `errors` is the
+(MCP SDK 2.1.0 `CallToolResult.builder().structuredContent(...)`) — `errors` is the
 gateway's own JSON:API error array (see "JSON:API error response shape" above), parsed and
 re-emitted verbatim so a calling agent can branch on `errors[0].code` /
 `errors[0].source.pointer` instead of parsing the prose message. A body that isn't a

@@ -179,6 +179,40 @@ class ArgumentTypeValidatingToolDecoratorTest {
         assertThat(text(array)).contains("must be string or number or boolean or null");
     }
 
+    private CallToolResult callWithRawSchema(Map<String, Object> inputSchema, Map<String, Object> args) {
+        Tool tool = Tool.builder("raw_tool", inputSchema).build();
+        SyncToolSpecification spec = SyncToolSpecification.builder()
+                .tool(tool)
+                .callHandler((ctx, req) -> {
+                    calls.incrementAndGet();
+                    return CallToolResult.builder().content(List.of(new TextContent("ok"))).build();
+                })
+                .build();
+        return decorator.decorate(spec).callHandler().apply(
+                McpTransportContext.EMPTY, new CallToolRequest("raw_tool", args, null));
+    }
+
+    @Test
+    void rawMapInputSchemaIsValidated() {
+        Map<String, Object> schema = Map.of(
+                "type", "object",
+                "properties", Map.of("name", Map.of("type", "string")));
+
+        CallToolResult wrong = callWithRawSchema(schema, Map.of("name", 42));
+        assertRejected(wrong, "name", "string", "number");
+        assertThat(firstError(wrong)).containsEntry("code", ArgumentTypeValidatingToolDecorator.CODE);
+
+        callWithRawSchema(schema, Map.of("name", "a", "extra", 1));
+        assertThat(calls).hasValue(1);
+    }
+
+    @Test
+    void inputSchemaWithoutPropertiesPassesThrough() {
+        callWithRawSchema(Map.of("type", "object"), Map.of("name", 42));
+
+        assertThat(calls).hasValue(1);
+    }
+
     /** Real tools behind the decorator: a wrong-typed argument never reaches the gateway. */
     @Nested
     class RealTools {

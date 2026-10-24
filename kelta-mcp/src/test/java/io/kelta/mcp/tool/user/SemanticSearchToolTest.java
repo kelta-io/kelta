@@ -7,6 +7,7 @@ import io.kelta.mcp.client.GatewayHttpClient;
 import io.kelta.mcp.config.McpProperties;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,7 @@ class SemanticSearchToolTest {
     void declaresAReadOnlyTool() {
         var tool = this.tool.toSpecification().tool();
         assertThat(tool.name()).isEqualTo("semantic_search");
-        assertThat(tool.inputSchema().required()).contains("collection", "query");
+        assertThat(tool.inputSchema()).extractingByKey("required")
+                .asInstanceOf(InstanceOfAssertFactories.LIST).contains("collection", "query");
     }
 }
