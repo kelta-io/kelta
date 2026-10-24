@@ -71,7 +71,15 @@ cli_docs:
   - 'README.md'
   - '**/README.md'
 
-# Any Java service change triggers integration tests.
+# ci/maven-settings.xml routes every runner-side `mvn` call through the Nexus mirror, so a
+# change to it re-runs each Maven job in ci.yml (test-java, test-runtime, test-runtime-modules,
+# integration-tests). Not spliced into *runtime: build-and-publish-containers.yml reads
+# runtime/any_java to decide which images to publish.
+maven_settings: &maven_settings
+  - 'ci/maven-settings.xml'
+
+# Any Java service change. build-and-publish-containers.yml publishes images on it, so the
+# test harness is deliberately not here — see `integration` below.
 any_java:
   - *runtime
   - 'kelta-gateway/**'
@@ -79,6 +87,20 @@ any_java:
   - 'kelta-auth/**'
   - 'kelta-ai/**'
   - 'kelta-mcp/**'
+
+# Cross-service integration tests (kelta-test-harness) and the test-java job they need: any
+# Java service change, the harness itself, or the Maven settings it builds with. kelta#1928
+# bumped Testcontainers in kelta-test-harness/pom.xml alone, skipped Integration Tests, and
+# broke them on main. ci.yml only — the image builds do not read it.
+integration:
+  - *runtime
+  - 'kelta-gateway/**'
+  - 'kelta-worker/**'
+  - 'kelta-auth/**'
+  - 'kelta-ai/**'
+  - 'kelta-mcp/**'
+  - 'kelta-test-harness/**'
+  - *maven_settings
 
 # E2E tests — run on any backend, frontend, or e2e suite change.
 e2e:
@@ -105,6 +127,7 @@ e2e:
 runtime_modules:
   - *runtime
   - 'kelta-modules/**'
+  - *maven_settings
 
 # Quickstart smoke test — anything that could break "clone → docker compose up →
 # create first collection" for a first-time user.
@@ -178,8 +201,10 @@ workflows:
 # ci/endpoint-index.ts is listed: the controller mappings, the gateway route table and path lists,
 # the system-collection names, kelta-auth's permitAll list, the permission names, and the docs pages
 # the index is published as and links to. A new mapping cannot land without a regenerated index.
+# ci/path-filters.test.ts checks this file (`workflows` covers it too; listed to be explicit).
 ci_scripts:
   - 'ci/**'
+  - '.github/path-filters.yml'
   - 'scripts/ci/**'
   - 'kelta-*/src/main/java/**/controller/**'
   - 'kelta-*/src/main/java/**/*Controller.java'
