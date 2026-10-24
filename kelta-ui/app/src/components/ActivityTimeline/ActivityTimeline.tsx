@@ -274,8 +274,7 @@ function formatFieldValue(value: unknown): string {
  */
 export function ActivityTimeline({
   collectionId,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  collectionName: _collectionName,
+  collectionName,
   recordId,
   recordCreatedAt,
   recordUpdatedAt,
@@ -373,20 +372,22 @@ export function ActivityTimeline({
     enabled: !!recordId,
   })
 
-  // Fetch email logs sourced from this record
+  // Fetch email logs sourced from this record. The collection lets the backend check that the
+  // caller can read the record before it reveals who was emailed about it.
   const { data: emailLogs } = useQuery({
-    queryKey: ['activity-email-logs', recordId],
+    queryKey: ['activity-email-logs', collectionName, recordId],
     queryFn: async () => {
       try {
         const result = await apiClient.getList<ActivityEmailLog>(
-          `/api/email/logs?recordId=${recordId}&limit=20`
+          `/api/email/logs?collection=${encodeURIComponent(collectionName)}` +
+            `&recordId=${encodeURIComponent(recordId)}&limit=20`
         )
         return result || []
       } catch {
         return []
       }
     },
-    enabled: !!recordId,
+    enabled: !!collectionName && !!recordId,
   })
 
   // Fetch record versions (collection-level tracking). Snapshots arrive already

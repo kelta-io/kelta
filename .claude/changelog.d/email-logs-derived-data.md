@@ -1,0 +1,1 @@
+- 2026-10-22 fix(worker): the record email log takes the record's collection and needs read access to that record, so template managers without VIEW_ALL_DATA see email entries on the timeline (email-logs-derived-data)

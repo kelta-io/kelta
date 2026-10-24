@@ -1,6 +1,5 @@
 package io.kelta.worker.controller;
 
-import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.EmailRepository;
@@ -18,8 +17,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -92,41 +89,6 @@ public class EmailSendController {
                            Map<String, Object> mergeContext) {
             this(templateId, templateKey, to, mergeContext, null);
         }
-    }
-
-    /**
-     * Lists email log entries whose {@code source_id} is the given record —
-     * consumed by the record activity timeline. RLS scopes rows to the tenant.
-     *
-     * <p>Gated on {@code MANAGE_EMAIL_TEMPLATES} like {@code /send}: {@code /api/email/**} is a
-     * static gateway route with only the blanket {@code API_ACCESS} check, and the log names
-     * recipients and subjects for any record id the caller supplies, whether or not they can
-     * read that record. The timeline treats a refusal as "no email entries".
-     */
-    @GetMapping("/logs")
-    public ResponseEntity<Map<String, Object>> listLogsByRecord(
-            @RequestParam String recordId,
-            @RequestParam(defaultValue = "20") int limit,
-            HttpServletRequest httpRequest) {
-        requireSendPermission(httpRequest);
-
-        int effectiveLimit = Math.min(Math.max(limit, 1), 100);
-        List<Map<String, Object>> logs = emailRepository.findLogsBySourceId(recordId, effectiveLimit);
-
-        List<Map<String, Object>> records = logs.stream()
-                .map(row -> {
-                    Map<String, Object> record = new LinkedHashMap<String, Object>();
-                    record.put("id", row.get("id"));
-                    record.put("recipientEmail", row.get("recipient_email"));
-                    record.put("subject", row.get("subject"));
-                    record.put("status", row.get("status"));
-                    record.put("sentAt", row.get("sent_at") != null ? row.get("sent_at").toString() : null);
-                    record.put("createdAt", row.get("created_at") != null ? row.get("created_at").toString() : null);
-                    return record;
-                })
-                .toList();
-
-        return ResponseEntity.ok(JsonApiResponseBuilder.collection("email-logs", records));
     }
 
     @PostMapping("/send")

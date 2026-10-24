@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.worker.interceptor.PermissionGatedController;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.MailboxAccessRepository;
 import io.kelta.worker.repository.MailboxAutoReplyDecisionRepository;
@@ -50,7 +51,7 @@ import java.util.regex.Pattern;
 // is order-sensitive during component scan and can drop the bean even when the dependency is
 // later registered — see TenantEmailSettingsController for the same reasoning.
 @ConditionalOnProperty(name = "kelta.encryption.key")
-public class MailboxAdminController {
+public class MailboxAdminController implements PermissionGatedController {
 
     private static final Logger log = LoggerFactory.getLogger(MailboxAdminController.class);
 

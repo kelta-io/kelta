@@ -142,8 +142,9 @@ describe('ActivityTimeline', () => {
     renderTimeline({ getList: getList as unknown as ApiClient['getList'] })
 
     await waitFor(() => expect(screen.getByText('activity.emailSent')).toBeInTheDocument())
+    // The collection lets the backend check the caller can read the record first.
     expect(getList).toHaveBeenCalledWith(
-      expect.stringContaining('/api/email/logs?recordId=rec-1&limit=20')
+      expect.stringContaining('/api/email/logs?collection=orders&recordId=rec-1&limit=20')
     )
   })
 

@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import tools.jackson.databind.ObjectMapper;
 import io.kelta.jsonapi.JsonApiResponseBuilder;
+import io.kelta.worker.interceptor.PermissionGatedController;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.BulkJobRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -31,7 +32,7 @@ import java.util.*;
  */
 @RestController
 @RequestMapping("/api/bulk-jobs")
-public class BulkOperationsController {
+public class BulkOperationsController implements PermissionGatedController {
 
     private static final Logger log = LoggerFactory.getLogger(BulkOperationsController.class);
     private static final Logger securityLog = LoggerFactory.getLogger("security.audit");

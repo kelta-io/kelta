@@ -5,6 +5,7 @@ import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.event.RecordChangedPayload;
 import io.kelta.runtime.events.RecordEventPublisher;
 import io.kelta.worker.cache.WorkerCacheManager;
+import io.kelta.worker.interceptor.PermissionGatedControllers;
 import io.kelta.worker.listener.SystemFeatureEventPublisher;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.GovernorLimitsRepository;
@@ -72,13 +73,37 @@ class GovernorLimitsControllerTest {
         request = mock(HttpServletRequest.class);
         controller = new GovernorLimitsController(repository, objectMapper, redisTemplate, recordEventPublisher,
                 cacheManager, featureEventPublisher, permissionResolver, bootstrapRepository);
-        grantPermission("MANAGE_TENANTS", true);
+        // The setup page's reader: VIEW_SETUP for the status read, MANAGE_TENANTS for writes.
+        when(permissionResolver.getProfileId(request)).thenReturn("profile-1");
+        when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
+                Map.of("permission_name", "VIEW_SETUP", "granted", true),
+                Map.of("permission_name", "MANAGE_TENANTS", "granted", true)));
     }
 
     private void grantPermission(String permissionName, boolean granted) {
         when(permissionResolver.getProfileId(request)).thenReturn("profile-1");
         when(bootstrapRepository.findProfileSystemPermissions("profile-1")).thenReturn(List.of(
                 Map.of("permission_name", permissionName, "granted", granted)));
+    }
+
+    @Test
+    @DisplayName("gates the read on VIEW_SETUP and writes on MANAGE_TENANTS (PermissionGatedController promise)")
+    void everyHandlerIsPermissionGated() {
+        grantPermission("API_ACCESS", true);
+
+        PermissionGatedControllers.assertEveryHandlerForbidden(controller, request);
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    @DisplayName("the status read needs VIEW_SETUP — MANAGE_TENANTS alone does not admit it")
+    void statusReadNeedsViewSetup() {
+        grantPermission("MANAGE_TENANTS", true);
+
+        assertThatThrownBy(() -> controller.getStatus("tenant-1", request))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("VIEW_SETUP");
+        verifyNoInteractions(repository);
     }
 
     /** Extracts the attributes map from a JSON:API single-resource response body. */
@@ -106,7 +131,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(0);
             when(repository.countActiveCollections("tenant-1")).thenReturn(0);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             Map<String, Object> body = response.getBody();
             assertThat(body).containsKey("data");
@@ -123,7 +148,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(5);
             when(repository.countActiveCollections("tenant-1")).thenReturn(12);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
             Map<String, Object> attrs = getAttributes(response.getBody());
@@ -154,7 +179,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(25);
             when(repository.countActiveCollections("tenant-1")).thenReturn(8);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             Map<String, Object> attrs = getAttributes(response.getBody());
 
@@ -179,7 +204,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(0);
             when(repository.countActiveCollections("tenant-1")).thenReturn(0);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             @SuppressWarnings("unchecked")
             Map<String, Object> limits = (Map<String, Object>) getAttributes(response.getBody()).get("limits");
@@ -196,7 +221,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("nonexistent")).thenReturn(0);
             when(repository.countActiveCollections("nonexistent")).thenReturn(0);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("nonexistent");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("nonexistent", request);
 
             assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
             @SuppressWarnings("unchecked")
@@ -211,7 +236,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(3);
             when(repository.countActiveCollections("tenant-1")).thenReturn(5);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
             @SuppressWarnings("unchecked")
@@ -231,7 +256,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(10);
             when(repository.countActiveCollections("tenant-1")).thenReturn(20);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             @SuppressWarnings("unchecked")
             Map<String, Object> limits = (Map<String, Object>) getAttributes(response.getBody()).get("limits");
@@ -256,7 +281,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(10);
             when(repository.countActiveCollections("tenant-1")).thenReturn(5);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             @SuppressWarnings("unchecked")
             Map<String, Object> limits = (Map<String, Object>) getAttributes(response.getBody()).get("limits");
@@ -275,7 +300,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(2);
             when(repository.countActiveCollections("tenant-1")).thenReturn(3);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             Map<String, Object> attrs = getAttributes(response.getBody());
             assertThat(attrs.get("tier")).isEqualTo("FREE");
@@ -295,7 +320,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(0);
             when(repository.countActiveCollections("tenant-1")).thenReturn(0);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             Map<String, Object> attrs = getAttributes(response.getBody());
             assertThat(attrs.get("tier")).isEqualTo("ENTERPRISE");
@@ -315,7 +340,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(0);
             when(repository.countActiveCollections("tenant-1")).thenReturn(0);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             Map<String, Object> attrs = getAttributes(response.getBody());
             @SuppressWarnings("unchecked")
@@ -333,7 +358,7 @@ class GovernorLimitsControllerTest {
             when(repository.countActiveUsers("tenant-1")).thenReturn(0);
             when(repository.countActiveCollections("tenant-1")).thenReturn(0);
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             assertThat(getAttributes(response.getBody()).get("apiCallsUsed")).isEqualTo(0);
         }
@@ -348,7 +373,7 @@ class GovernorLimitsControllerTest {
             String today = LocalDate.now(ZoneOffset.UTC).toString();
             when(valueOps.get("api-calls-daily:tenant-1:" + today)).thenReturn("4523");
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             assertThat(getAttributes(response.getBody()).get("apiCallsUsed")).isEqualTo(4523);
         }
@@ -362,7 +387,7 @@ class GovernorLimitsControllerTest {
 
             when(redisTemplate.opsForValue()).thenThrow(new RuntimeException("Redis unavailable"));
 
-            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1");
+            ResponseEntity<Map<String, Object>> response = controller.getStatus("tenant-1", request);
 
             assertThat(getAttributes(response.getBody()).get("apiCallsUsed")).isEqualTo(0);
         }
@@ -448,6 +473,21 @@ class GovernorLimitsControllerTest {
 
             assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
             verify(repository).updateTenantEdition("tenant-1", "ENTERPRISE");
+        }
+
+        @Test
+        @DisplayName("a MANAGE_TENANTS writer without VIEW_SETUP still gets the updated status back")
+        void writerWithoutViewSetupGetsStatus() {
+            grantPermission("MANAGE_TENANTS", true);
+            when(repository.updateTenantEdition("tenant-1", "ENTERPRISE")).thenReturn(1);
+            when(repository.findEditionAndLimits("tenant-1")).thenReturn(
+                    Optional.of(new GovernorLimitsRepository.EditionAndLimits("ENTERPRISE", "{}")));
+
+            ResponseEntity<Map<String, Object>> response = controller.updateTier(
+                    "tenant-1", Map.of("tier", "ENTERPRISE"), request);
+
+            assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+            assertThat(response.getBody()).containsKey("data");
         }
 
         @Test

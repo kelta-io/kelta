@@ -3,13 +3,19 @@ package io.kelta.worker.controller;
 import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.module.ModuleSigningKey;
 import io.kelta.runtime.module.ModuleSigningKeyStore;
+import io.kelta.worker.interceptor.PermissionGatedController;
 import io.kelta.worker.module.ModuleSignatureVerifier;
+import io.kelta.worker.repository.BootstrapRepository;
+import io.kelta.worker.service.CerbosPermissionResolver;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,27 +36,52 @@ import java.util.UUID;
  *
  * <p>Only public keys pass through here, so responses may safely include the PEM. Adding a key is
  * nonetheless a grant of code-execution authority over the tenant, which is why writes on this
- * path require {@code MANAGE_CREDENTIALS} at the gateway rather than the blanket
- * {@code API_ACCESS} the rest of {@code /api/modules/**} carries.
+ * path require {@code MANAGE_CREDENTIALS} — at the gateway and again here — rather than the
+ * blanket {@code API_ACCESS} the rest of {@code /api/modules/**} carries. The key list stays at
+ * {@code API_ACCESS}: the keys are public, and {@code dependentModules} is what makes a rotation
+ * safe to plan.
  *
  * @since 1.0.0
  */
 @RestController
 @RequestMapping("/api/modules/signing-keys")
 @ConditionalOnBean(ModuleSigningKeyStore.class)
-public class ModuleSigningKeyController {
+public class ModuleSigningKeyController implements PermissionGatedController {
 
     private static final Logger log = LoggerFactory.getLogger(ModuleSigningKeyController.class);
 
     private static final int MAX_LABEL_LENGTH = 100;
 
+    /** The gateway's rule for writes under {@code /api/modules/signing-keys}, repeated here. */
+    static final String WRITE_PERMISSION = "MANAGE_CREDENTIALS";
+
     private final ModuleSigningKeyStore keyStore;
     private final ModuleSignatureVerifier signatureVerifier;
+    private final CerbosPermissionResolver permissionResolver;
+    private final BootstrapRepository bootstrapRepository;
 
     public ModuleSigningKeyController(ModuleSigningKeyStore keyStore,
-                                       ModuleSignatureVerifier signatureVerifier) {
+                                       ModuleSignatureVerifier signatureVerifier,
+                                       CerbosPermissionResolver permissionResolver,
+                                       BootstrapRepository bootstrapRepository) {
         this.keyStore = keyStore;
         this.signatureVerifier = signatureVerifier;
+        this.permissionResolver = permissionResolver;
+        this.bootstrapRepository = bootstrapRepository;
+    }
+
+    /** Gates key writes on {@value #WRITE_PERMISSION}. Fail-closed: no resolvable profile is a 403. */
+    private void requireWritePermission(HttpServletRequest request) {
+        String profileId = permissionResolver.getProfileId(request);
+        if (profileId == null || profileId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No identity");
+        }
+        boolean granted = bootstrapRepository.findProfileSystemPermissions(profileId).stream()
+                .anyMatch(p -> WRITE_PERMISSION.equals(p.get("permission_name"))
+                        && Boolean.TRUE.equals(p.get("granted")));
+        if (!granted) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, WRITE_PERMISSION + " permission required");
+        }
     }
 
     /**
@@ -92,9 +123,11 @@ public class ModuleSigningKeyController {
      */
     @PostMapping
     public ResponseEntity<Map<String, Object>> addKey(
+            HttpServletRequest request,
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestBody Map<String, Object> body) {
+        requireWritePermission(request);
 
         String label = string(body.get("label"));
         String publicKeyPem = string(body.get("publicKeyPem"));
@@ -148,9 +181,11 @@ public class ModuleSigningKeyController {
      */
     @PostMapping("/{id}/retire")
     public ResponseEntity<Map<String, Object>> retireKey(
+            HttpServletRequest request,
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @PathVariable String id) {
+        requireWritePermission(request);
         return setActive(tenantId, userId, id, false);
     }
 
@@ -159,9 +194,11 @@ public class ModuleSigningKeyController {
      */
     @PostMapping("/{id}/activate")
     public ResponseEntity<Map<String, Object>> activateKey(
+            HttpServletRequest request,
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @PathVariable String id) {
+        requireWritePermission(request);
         return setActive(tenantId, userId, id, true);
     }
 
@@ -175,8 +212,10 @@ public class ModuleSigningKeyController {
      */
     @DeleteMapping("/{id}")
     public ResponseEntity<Map<String, Object>> deleteKey(
+            HttpServletRequest request,
             @RequestHeader("X-Tenant-ID") String tenantId,
             @PathVariable String id) {
+        requireWritePermission(request);
         ModuleSigningKey key = keyStore.findById(tenantId, id).orElse(null);
         if (key == null) {
             return notFound();

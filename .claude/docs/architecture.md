@@ -1089,11 +1089,15 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `CerbosRecordAuthorizationAdvice` reads any `data` object/list under `/api/<segment>` as records
   of collection `<segment>`, so a caller holding the controller's permission but no grant on
   `<segment>` (nor VIEW_ALL_DATA / MODIFY_ALL_DATA) gets `data: null` or an emptied list with a
-  200 — after any write already ran. A controller whose every handler is gated on a system
-  permission and returns no tenant data records implements **`PermissionGatedController`** and
-  calls `PermissionGatedControllers.assertEveryHandlerForbidden` in its test (references:
-  `PromotionController`, `EnvironmentController`, `PackageController`); one whose access follows a
-  source record implements `DerivedDataController` instead.
+  200 — after any write already ran. A controller whose handlers are gated on a system
+  permission and return no tenant data records implements **`PermissionGatedController`** and
+  calls `PermissionGatedControllers.assertEveryHandlerForbidden` in its test, naming any GET it
+  deliberately leaves at `API_ACCESS` (references: `PromotionController`, `PackageController`;
+  with open reads `ModuleController`, `ModuleSigningKeyController`). One whose access follows the
+  caller — own rows or a membership, such as chat participants or support-mailbox agents —
+  implements `SelfScopedController` (`ChatController`, `MailboxController`); one whose access
+  follows a source record implements `DerivedDataController` and loads that record through the
+  `QueryEngine` before `isRecordReadable` (`DashboardDataController`, `EmailLogController`).
 - Identity: inject **`CerbosPermissionResolver`** and read `getProfileId(request)`,
   `getEmail(request)`, `getProfileName(request)`, `getTenantId(request)`, `hasIdentity(request)`.
   The gateway's `RouteAuthorizationFilter.forwardWithHeaders` sets `X-User-Profile-Id`,
