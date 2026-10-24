@@ -3,8 +3,8 @@
 // step"), in build order, on the hosted kelta-mcp tools that now do each step in fewest calls
 // (apply_collection, apply_listview, validate_dashboard, dashboard_data, export_metadata), with
 // every argument spelled out. The build's error calls are not reproduced. The arguments are read
-// from the template's own files (metadata.json, list-views/, dashboards/, seeds/), so the replay
-// builds exactly what install.sh installs.
+// from the template's metadata.json (its items, LIST_VIEW and DASHBOARD included, and its seed
+// `records` sections), so the replay builds exactly what install.sh installs.
 //
 //   node examples/templates/applicant-tracking/mcp-replay/generate.mjs           rewrite calls.json
 //   node examples/templates/applicant-tracking/mcp-replay/generate.mjs --check   exit 1 if stale
@@ -17,7 +17,7 @@
 //   "{{var}}" / "{{var:key}}"  an argument string that is exactly this is replaced by the saved
 //                        value (or by its member "key"), so ids minted earlier in the run are
 //                        never written into the fixture
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,18 +29,13 @@ const readJson = (path) => JSON.parse(readFileSync(join(TEMPLATE, path), 'utf8')
 const metadata = readJson('metadata.json');
 const items = (type) => metadata.items.filter((item) => item.type === type).map((item) => item.data);
 
-// Parents before children, as the build created them (and as install.sh seeds them).
+// Parents before children, as the build created them (and as the package's records sections seed them).
 const COLLECTION_ORDER = ['job-openings', 'candidates', 'job-applications', 'interviews'];
-// The natural key each seed file's references use (install.sh REFS).
-const SEED_KEYS = {
-  'job-openings': 'title',
-  candidates: 'email',
-  'job-applications': 'name',
-};
-const SEED_REFS = {
-  'job-applications': { candidate: 'candidates', job: 'job-openings' },
-  interviews: { application: 'job-applications' },
-};
+const seedSections = metadata.records;
+// The parent field each reference names (the sections' `references`), keyed by parent collection.
+const SEED_KEYS = Object.fromEntries(
+  seedSections.flatMap((s) => Object.values(s.references ?? {}).map((ref) => [ref.collection, ref.field]))
+);
 
 const camel = (name) => name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 const seedVar = (collection) => `${camel(collection)}Ids`;
@@ -161,50 +156,41 @@ step('Flow', {
 });
 
 // --- List views ----------------------------------------------------------------------------
-// install.sh's filter strings: "field=value" or "field.op=value".
-const parseFilter = (text) => {
-  const [lhs, value] = text.split('=');
-  const [field, operator = 'eq'] = lhs.split('.');
-  return { field, operator, value };
-};
-const listViewFiles = readdirSync(join(TEMPLATE, 'list-views')).filter((f) => f.endsWith('.json')).sort();
-for (const file of listViewFiles) {
-  const collectionName = file.replace(/\.json$/, '');
-  for (const view of readJson(`list-views/${file}`)) {
-    const args = {
-      collectionName,
-      name: view.name,
-      columns: view.columns,
-      filters: (view.filters ?? []).map(parseFilter),
-      visibility: view.visibility ?? 'PUBLIC',
-      isDefault: view.default ?? false,
-    };
-    if (view.sort) args.sort = view.sort;
-    if (view.rowLimit) args.rowLimit = view.rowLimit;
-    if (view.viewType) {
-      args.viewType = view.viewType;
-      args.typeConfig = { kanban: { laneField: view.laneField, cardFields: view.cardFields } };
-    }
-    step('List views', { tool: 'apply_listview', arguments: args });
+for (const view of items('LIST_VIEW')) {
+  const args = {
+    collectionName: view.collection_name,
+    name: view.name,
+    columns: view.columns,
+    filters: view.filters,
+    visibility: view.visibility,
+    isDefault: view.is_default,
+  };
+  if (view.sort_field) args.sort = `${view.sort_direction === 'DESC' ? '-' : ''}${view.sort_field}`;
+  if (view.row_limit) args.rowLimit = view.row_limit;
+  if (view.view_type !== 'TABLE') {
+    args.viewType = view.view_type;
+    args.typeConfig = view.type_config;
   }
+  step('List views', { tool: 'apply_listview', arguments: args });
 }
 
 // --- Dashboard -----------------------------------------------------------------------------
-for (const file of readdirSync(join(TEMPLATE, 'dashboards')).filter((f) => f.endsWith('.json')).sort()) {
-  step('Dashboard', { tool: 'apply_dashboard', arguments: readJson(`dashboards/${file}`) });
+for (const dashboard of items('DASHBOARD')) {
+  step('Dashboard', { tool: 'apply_dashboard', arguments: dashboard });
 }
 
 // --- Seed records --------------------------------------------------------------------------
 // One bulk_apply per collection; a reference holds "{{<parent>Ids:<natural key>}}", resolved
 // from the parent's bulk_apply result.
-for (const collection of COLLECTION_ORDER) {
-  const refs = SEED_REFS[collection] ?? {};
-  const operations = readJson(`seeds/${collection}.json`).map((row) => ({
+for (const { collection, references = {}, rows } of seedSections) {
+  const operations = rows.map((row) => ({
     op: 'add',
     type: collection,
     attributes: Object.fromEntries(
       Object.entries(row).map(([key, value]) =>
-        refs[key] && value !== null ? [key, `{{${seedVar(refs[key])}:${value}}}`] : [key, value]
+        references[key] && value !== null
+          ? [key, `{{${seedVar(references[key].collection)}:${value}}}`]
+          : [key, value]
       )
     ),
   }));

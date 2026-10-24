@@ -14,9 +14,9 @@ one command.
 | One page layout per collection, with related lists (a site shows its inspections, a template its checklist items and inspections, an inspection its findings, a checklist item its findings) | `metadata.json` | `kelta metadata apply` |
 | Validation rule **No pass with open high-severity findings** on `inspections` | `metadata.json` | `kelta metadata apply` |
 | Flow **Count open high-severity findings**: on every created, updated or deleted finding it recounts the open `HIGH` findings of that finding's inspection and stores the count in `inspections.openHighFindings`; a passed inspection that gains one is moved back to In progress | `metadata.json` | `kelta metadata apply` |
-| List views: 1 for sites, 2 for inspection templates, 1 for checklist items, 3 for inspections (including a Kanban board by status), 3 for findings | `list-views/<collection>.json` | `kelta list-views apply` |
-| Dashboard **Inspections overview**: open findings, open high-severity findings, site count, open findings by severity, inspections by status, the high-severity findings still open | `dashboards/inspections-overview.json` | `kelta dashboards apply` |
-| Seed data: 6 sites, 3 inspection templates, 15 checklist items, 10 inspections, 12 findings (fictional sites and people) | `seeds/<collection>.json` | `kelta records bulk` |
+| List views: 1 for sites, 2 for inspection templates, 1 for checklist items, 3 for inspections (including a Kanban board by status), 3 for findings | `metadata.json` (`LIST_VIEW` items) | `kelta metadata apply` |
+| Dashboard **Inspections overview**: open findings, open high-severity findings, site count, open findings by severity, inspections by status, the high-severity findings still open | `metadata.json` (a `DASHBOARD` item) | `kelta metadata apply` |
+| Seed data: 6 sites, 3 inspection templates, 15 checklist items, 10 inspections, 12 findings (fictional sites and people) | `metadata.json` (`records` sections) | `kelta metadata apply` |
 
 Inspection statuses are Scheduled, In progress, Passed, Failed and Cancelled. Finding severities
 are Low, Medium and High; a finding is open until its `resolved` flag is set.
@@ -47,52 +47,57 @@ Limits that follow from this design (see `BUILD-LOG.md`):
 
 ## Install
 
-You need the `kelta` CLI, `jq`, and a profile that is signed in to the tenant you want to install
-into as a user who can create collections, flows, list views and dashboards.
+You need the `kelta` CLI and a profile that is signed in to the tenant you want to install into
+as a user who can create collections, flows, list views and dashboards. From the template
+directory, one command installs everything:
 
 ```bash
 kelta profile use <profile>     # or export KELTA_PROFILE / KELTA_URL + KELTA_TENANT + KELTA_TOKEN
-./examples/templates/inspections/install.sh
+cd examples/templates/inspections
+kelta metadata apply metadata.json --yes
 ```
 
-The script takes no arguments and stops at the first command that fails. On success it ends with
-one line per seeded collection:
-
-```
-seeded sites: 6
-seeded inspection-templates: 3
-seeded checklist-items: 15
-seeded inspections: 10
-seeded findings: 12
-```
+`./install.sh` runs exactly that command from its own directory. The command prints one line of
+totals with a count per item type; the `RECORD` count is the 46 seed rows. An item that fails
+is reported as `failed` with its error, and the other items are still applied.
 
 Install into a tenant that does not already have `sites`, `inspection-templates`,
 `checklist-items`, `inspections` or `findings` collections. `kelta metadata apply` skips an item
-that already exists, so a same-named collection from something else is left as it is and the
-seed step then fails against it.
+that already exists, so a same-named collection from something else is left as it is and its seed
+rows then fail against it.
 
-Running the script again is safe up to the seed step: the package, list views and dashboard are
-applied idempotently (reported as skipped or unchanged). The seed step then fails on the unique
-site name, and because each `records bulk` call is all-or-nothing, no duplicate records are
-written.
+Running the command again is safe: every item that already exists is reported as skipped, and
+so is every seed row whose key fields (below) match an existing record, so a second run reports
+`created=0`.
 
-## Seed files
+## Seed records
 
-Each `seeds/<collection>.json` is a JSON array of attribute objects; its length is the number of
-records the script creates. A reference field holds the parent's natural key instead of an id,
-and `install.sh` resolves it after loading the parent:
+The package's top-level `records` array holds one section per collection, applied in order
+(parents before children) after every metadata item. A section names its `collection`, the
+`key` fields that identify a row, and its `rows`, each a plain attribute object:
 
-| Field | Holds |
-|-------|-------|
-| `checklist-items.template`, `inspections.template` | the inspection template `name` |
-| `inspections.site` | the site `name` |
-| `findings.inspection` | the inspection `name` |
-| `findings.checklistItem` | the checklist item `code` |
+| Collection | Key | Rows |
+|------------|-----|------|
+| `sites` | `name` | 6 |
+| `inspection-templates` | `name` | 3 |
+| `checklist-items` | `code` | 15 |
+| `inspections` | `name` | 10 |
+| `findings` | `title` | 12 |
 
-`inspections.openHighFindings` is not seeded: the flow sets it while the findings load. To add a
-record, append an object to the right file. A key that matches no parent stops the install with
-a message naming the field and the value. Keep a seeded inspection with an open high-severity
-finding out of `PASSED`: the flow moves such an inspection to In progress while the findings load.
+A reference field holds the parent's natural key instead of an id; the section's `references`
+names the parent collection and field, and the importer resolves the value to the parent's id:
+
+| Field | Parent collection | Parent field |
+|-------|-------------------|--------------|
+| `checklist-items.template` | `inspection-templates` | `name` |
+| `inspections.site` | `sites` | `name` |
+| `inspections.template` | `inspection-templates` | `name` |
+| `findings.inspection` | `inspections` | `name` |
+| `findings.checklistItem` | `checklist-items` | `code` |
+
+To add a record, append an object to the right section's `rows`. A reference value that matches
+no parent fails that row with a message naming the field and the value, and its whole section is
+not written: a section writes all of its new rows or none.
 
 ## How it was built
 

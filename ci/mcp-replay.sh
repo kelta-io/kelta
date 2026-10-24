@@ -23,7 +23,8 @@
 #      MCP_REPLAY_RETRIES times unless the fixture marks it expectError (the build hit that error
 #      too); one that still errors fails the replay;
 #   4. checks the tenant over plain HTTP (not MCP, so not counted): every collection of the
-#      template's metadata.json exists and holds as many records as seeds/<collection>.json.
+#      template's metadata.json exists and holds as many records as the rows of its `records`
+#      sections for that collection.
 # It makes no `kelta api` call and drives no CLI authoring command; the only kelta command it
 # runs is the bridge. Fixture format and the {{var}} substitution: see the generator,
 # examples/templates/applicant-tracking/mcp-replay/generate.mjs.
@@ -248,14 +249,15 @@ if [ "${1:-}" = "--in-container" ]; then
   [ -n "$collections" ] || fail "$TEMPLATE_DIR/metadata.json declares no collections"
   for collection in $collections; do
     actual=$(record_count "$collection") || fail "collection $collection does not exist in $KELTA_TENANT (or its records could not be read)"
-    seed="$TEMPLATE_DIR/seeds/$collection.json"
-    if [ -f "$seed" ]; then
-      expected=$(jq length "$seed")
+    expected=$(jq --arg c "$collection" \
+      '[.records // [] | .[] | select(.collection == $c) | .rows | length] | if length > 0 then add else empty end' \
+      "$TEMPLATE_DIR/metadata.json")
+    if [ -n "$expected" ]; then
       [ "$actual" -eq "$expected" ] \
-        || fail "$collection holds $actual records, seeds/$collection.json has $expected"
-      log "$collection: exists, $actual records (seeds/$collection.json: $expected)"
+        || fail "$collection holds $actual records, the metadata.json records sections have $expected"
+      log "$collection: exists, $actual records (metadata.json records: $expected)"
     else
-      log "$collection: exists ($actual records, no seed file)"
+      log "$collection: exists ($actual records, no records section)"
     fi
   done
   echo "MCP replay passed: $COUNT tools/call requests through kelta mcp serve --source remote --mcp-url $MCP_URL"

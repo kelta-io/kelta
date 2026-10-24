@@ -2437,6 +2437,791 @@
         "published_version": null,
         "run_as_user_id": null
       }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "checklist-items",
+        "name": "All checklist items",
+        "visibility": "PUBLIC",
+        "is_default": true,
+        "view_type": "TABLE",
+        "columns": [
+          "code",
+          "question",
+          "template",
+          "sortOrder"
+        ],
+        "filters": [],
+        "sort_field": "code",
+        "sort_direction": "ASC",
+        "row_limit": 100
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "findings",
+        "name": "Open findings",
+        "visibility": "PUBLIC",
+        "is_default": true,
+        "view_type": "TABLE",
+        "columns": [
+          "title",
+          "inspection",
+          "severity",
+          "dueDate"
+        ],
+        "filters": [
+          {
+            "field": "resolved",
+            "operator": "eq",
+            "value": "false"
+          }
+        ],
+        "sort_field": "dueDate",
+        "sort_direction": "ASC",
+        "row_limit": 25
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "findings",
+        "name": "Open high-severity findings",
+        "visibility": "PUBLIC",
+        "is_default": false,
+        "view_type": "TABLE",
+        "columns": [
+          "title",
+          "inspection",
+          "checklistItem",
+          "dueDate"
+        ],
+        "filters": [
+          {
+            "field": "resolved",
+            "operator": "eq",
+            "value": "false"
+          },
+          {
+            "field": "severity",
+            "operator": "eq",
+            "value": "HIGH"
+          }
+        ],
+        "sort_field": "dueDate",
+        "sort_direction": "ASC",
+        "row_limit": 25
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "findings",
+        "name": "All findings",
+        "visibility": "PUBLIC",
+        "is_default": false,
+        "view_type": "TABLE",
+        "columns": [
+          "title",
+          "inspection",
+          "severity",
+          "resolved",
+          "dueDate"
+        ],
+        "filters": [],
+        "sort_field": "createdAt",
+        "sort_direction": "DESC",
+        "row_limit": 50
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "inspection-templates",
+        "name": "Active templates",
+        "visibility": "PUBLIC",
+        "is_default": true,
+        "view_type": "TABLE",
+        "columns": [
+          "name",
+          "frequency",
+          "active"
+        ],
+        "filters": [
+          {
+            "field": "active",
+            "operator": "eq",
+            "value": "true"
+          }
+        ],
+        "sort_field": "name",
+        "sort_direction": "ASC",
+        "row_limit": 50
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "inspection-templates",
+        "name": "All templates",
+        "visibility": "PUBLIC",
+        "is_default": false,
+        "view_type": "TABLE",
+        "columns": [
+          "name",
+          "frequency",
+          "active"
+        ],
+        "filters": [],
+        "sort_field": "name",
+        "sort_direction": "ASC",
+        "row_limit": 50
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "inspections",
+        "name": "Upcoming and in progress",
+        "visibility": "PUBLIC",
+        "is_default": true,
+        "view_type": "TABLE",
+        "columns": [
+          "name",
+          "site",
+          "template",
+          "status",
+          "scheduledDate",
+          "openHighFindings"
+        ],
+        "filters": [
+          {
+            "field": "status",
+            "operator": "in",
+            "value": "SCHEDULED,IN_PROGRESS"
+          }
+        ],
+        "sort_field": "scheduledDate",
+        "sort_direction": "ASC",
+        "row_limit": 25
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "inspections",
+        "name": "Inspection board",
+        "visibility": "PUBLIC",
+        "is_default": false,
+        "view_type": "KANBAN",
+        "columns": [
+          "name",
+          "site",
+          "status",
+          "scheduledDate"
+        ],
+        "filters": [],
+        "row_limit": 100,
+        "type_config": {
+          "kanban": {
+            "laneField": "status",
+            "cardFields": [
+              "name",
+              "site",
+              "scheduledDate"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "inspections",
+        "name": "Failed inspections",
+        "visibility": "PUBLIC",
+        "is_default": false,
+        "view_type": "TABLE",
+        "columns": [
+          "name",
+          "site",
+          "template",
+          "completedDate",
+          "openHighFindings"
+        ],
+        "filters": [
+          {
+            "field": "status",
+            "operator": "eq",
+            "value": "FAILED"
+          }
+        ],
+        "sort_field": "completedDate",
+        "sort_direction": "DESC",
+        "row_limit": 25
+      }
+    },
+    {
+      "type": "LIST_VIEW",
+      "data": {
+        "collection_name": "sites",
+        "name": "All sites",
+        "visibility": "PUBLIC",
+        "is_default": true,
+        "view_type": "TABLE",
+        "columns": [
+          "name",
+          "city",
+          "country",
+          "siteManager",
+          "phone"
+        ],
+        "filters": [],
+        "sort_field": "name",
+        "sort_direction": "ASC",
+        "row_limit": 50
+      }
+    },
+    {
+      "type": "DASHBOARD",
+      "data": {
+        "name": "Inspections overview",
+        "description": "Open findings by severity, inspections by status and the high-severity findings still open",
+        "accessLevel": "PUBLIC",
+        "columnCount": 3,
+        "components": [
+          {
+            "title": "Open findings",
+            "componentType": "metric",
+            "columnPosition": 1,
+            "rowPosition": 1,
+            "config": {
+              "collectionName": "findings",
+              "aggregateFunction": "COUNT",
+              "filters": [
+                {
+                  "field": "resolved",
+                  "operator": "eq",
+                  "value": false
+                }
+              ]
+            }
+          },
+          {
+            "title": "Open high-severity findings",
+            "componentType": "metric",
+            "columnPosition": 2,
+            "rowPosition": 1,
+            "config": {
+              "collectionName": "findings",
+              "aggregateFunction": "COUNT",
+              "filters": [
+                {
+                  "field": "resolved",
+                  "operator": "eq",
+                  "value": false
+                },
+                {
+                  "field": "severity",
+                  "operator": "eq",
+                  "value": "HIGH"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Sites",
+            "componentType": "metric",
+            "columnPosition": 3,
+            "rowPosition": 1,
+            "config": {
+              "collectionName": "sites",
+              "aggregateFunction": "COUNT"
+            }
+          },
+          {
+            "title": "Open findings by severity",
+            "componentType": "chart",
+            "columnPosition": 1,
+            "rowPosition": 2,
+            "columnSpan": 2,
+            "config": {
+              "collectionName": "findings",
+              "groupByField": "severity",
+              "aggregateFunction": "COUNT",
+              "chartStyle": "bar",
+              "filters": [
+                {
+                  "field": "resolved",
+                  "operator": "eq",
+                  "value": false
+                }
+              ]
+            }
+          },
+          {
+            "title": "Inspections by status",
+            "componentType": "chart",
+            "columnPosition": 3,
+            "rowPosition": 2,
+            "config": {
+              "collectionName": "inspections",
+              "groupByField": "status",
+              "chartStyle": "pie"
+            }
+          },
+          {
+            "title": "High-severity findings still open",
+            "componentType": "table",
+            "columnPosition": 1,
+            "rowPosition": 3,
+            "columnSpan": 3,
+            "config": {
+              "collectionName": "findings",
+              "fields": [
+                "title",
+                "inspection",
+                "checklistItem",
+                "dueDate"
+              ],
+              "filters": [
+                {
+                  "field": "resolved",
+                  "operator": "eq",
+                  "value": false
+                },
+                {
+                  "field": "severity",
+                  "operator": "eq",
+                  "value": "HIGH"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "records": [
+    {
+      "collection": "sites",
+      "key": [
+        "name"
+      ],
+      "rows": [
+        {
+          "name": "Riverside Distribution Center",
+          "address": "1200 Riverside Way",
+          "city": "Portland",
+          "country": "United States",
+          "siteManager": "Dana Whitfield",
+          "phone": "+1 503 555 0141"
+        },
+        {
+          "name": "Harbor Street Bakery",
+          "address": "48 Harbor Street",
+          "city": "Halifax",
+          "country": "Canada",
+          "siteManager": "Omar Haddad",
+          "phone": "+1 902 555 0177"
+        },
+        {
+          "name": "Northgate Office Tower",
+          "address": "300 Northgate Avenue, floors 4-9",
+          "city": "Manchester",
+          "country": "United Kingdom",
+          "siteManager": "Fiona Marsh",
+          "phone": "+44 161 555 0102"
+        },
+        {
+          "name": "Lakeshore Assembly Plant",
+          "address": "77 Industrial Parkway",
+          "city": "Cleveland",
+          "country": "United States",
+          "siteManager": "Marcus Bell",
+          "phone": "+1 216 555 0190"
+        },
+        {
+          "name": "Hillcrest Community Kitchen",
+          "address": "9 Hillcrest Road",
+          "city": "Dublin",
+          "country": "Ireland",
+          "siteManager": "Aoife Byrne",
+          "phone": "+353 1 555 0133"
+        },
+        {
+          "name": "Southpoint Retail Store",
+          "address": "Unit 14, Southpoint Mall",
+          "city": "Melbourne",
+          "country": "Australia",
+          "siteManager": "Liam Nguyen",
+          "phone": "+61 3 5550 0164"
+        }
+      ]
+    },
+    {
+      "collection": "inspection-templates",
+      "key": [
+        "name"
+      ],
+      "rows": [
+        {
+          "name": "Fire safety",
+          "description": "Exits, alarms, extinguishers and sprinklers. Based on a typical monthly fire warden walk-through.",
+          "frequency": "Monthly",
+          "active": true
+        },
+        {
+          "name": "Food hygiene",
+          "description": "Storage temperatures, cleaning, pest control and staff hygiene in food preparation areas.",
+          "frequency": "Weekly",
+          "active": true
+        },
+        {
+          "name": "Workplace safety walk",
+          "description": "General hazards: walkways, ladders, electrical equipment, first aid and machine guarding.",
+          "frequency": "Quarterly",
+          "active": true
+        }
+      ]
+    },
+    {
+      "collection": "checklist-items",
+      "key": [
+        "code"
+      ],
+      "references": {
+        "template": {
+          "collection": "inspection-templates",
+          "field": "name"
+        }
+      },
+      "rows": [
+        {
+          "code": "FS-01",
+          "template": "Fire safety",
+          "question": "Are all fire exits clear and unlocked?",
+          "guidance": "Walk every exit route. Nothing stored in corridors or in front of exit doors.",
+          "sortOrder": 1
+        },
+        {
+          "code": "FS-02",
+          "template": "Fire safety",
+          "question": "Are exit signs and emergency lights working?",
+          "guidance": "Press the test button on each emergency light.",
+          "sortOrder": 2
+        },
+        {
+          "code": "FS-03",
+          "template": "Fire safety",
+          "question": "Are extinguishers in place, charged and inspected within the last 12 months?",
+          "guidance": "Check the gauge and the inspection tag.",
+          "sortOrder": 3
+        },
+        {
+          "code": "FS-04",
+          "template": "Fire safety",
+          "question": "Was the fire alarm tested this month?",
+          "guidance": "Look for the entry in the alarm test log.",
+          "sortOrder": 4
+        },
+        {
+          "code": "FS-05",
+          "template": "Fire safety",
+          "question": "Is there 45 cm of clearance below sprinkler heads?",
+          "sortOrder": 5
+        },
+        {
+          "code": "FH-01",
+          "template": "Food hygiene",
+          "question": "Are fridges at or below 5 °C and freezers at or below -18 °C?",
+          "guidance": "Read the thermometer in each unit, not the display.",
+          "sortOrder": 1
+        },
+        {
+          "code": "FH-02",
+          "template": "Food hygiene",
+          "question": "Is all stored food covered, labelled and in date?",
+          "sortOrder": 2
+        },
+        {
+          "code": "FH-03",
+          "template": "Food hygiene",
+          "question": "Are hand-wash stations stocked with soap and paper towels?",
+          "sortOrder": 3
+        },
+        {
+          "code": "FH-04",
+          "template": "Food hygiene",
+          "question": "Is there no sign of pests?",
+          "guidance": "Check corners, under shelving and the pest control log.",
+          "sortOrder": 4
+        },
+        {
+          "code": "FH-05",
+          "template": "Food hygiene",
+          "question": "Is the cleaning schedule signed off for the last seven days?",
+          "sortOrder": 5
+        },
+        {
+          "code": "WS-01",
+          "template": "Workplace safety walk",
+          "question": "Are walkways free of trip hazards and spills?",
+          "sortOrder": 1
+        },
+        {
+          "code": "WS-02",
+          "template": "Workplace safety walk",
+          "question": "Are ladders and step stools in good condition?",
+          "sortOrder": 2
+        },
+        {
+          "code": "WS-03",
+          "template": "Workplace safety walk",
+          "question": "Are electrical cords and sockets undamaged and not overloaded?",
+          "sortOrder": 3
+        },
+        {
+          "code": "WS-04",
+          "template": "Workplace safety walk",
+          "question": "Is the first aid kit complete?",
+          "sortOrder": 4
+        },
+        {
+          "code": "WS-05",
+          "template": "Workplace safety walk",
+          "question": "Are machine guards fitted and in use?",
+          "sortOrder": 5
+        }
+      ]
+    },
+    {
+      "collection": "inspections",
+      "key": [
+        "name"
+      ],
+      "references": {
+        "site": {
+          "collection": "sites",
+          "field": "name"
+        },
+        "template": {
+          "collection": "inspection-templates",
+          "field": "name"
+        }
+      },
+      "rows": [
+        {
+          "name": "Riverside Distribution Center - Fire safety - Aug 2026",
+          "site": "Riverside Distribution Center",
+          "template": "Fire safety",
+          "inspector": "Sam Ortega",
+          "scheduledDate": "2026-08-12",
+          "completedDate": "2026-08-12",
+          "status": "PASSED",
+          "notes": "No issues."
+        },
+        {
+          "name": "Riverside Distribution Center - Fire safety - Sep 2026",
+          "site": "Riverside Distribution Center",
+          "template": "Fire safety",
+          "inspector": "Sam Ortega",
+          "scheduledDate": "2026-09-14",
+          "status": "IN_PROGRESS",
+          "notes": "Pallets in front of the east exit; waiting for the warehouse team."
+        },
+        {
+          "name": "Riverside Distribution Center - Workplace safety walk - Q3 2026",
+          "site": "Riverside Distribution Center",
+          "template": "Workplace safety walk",
+          "inspector": "Priya Raman",
+          "scheduledDate": "2026-09-02",
+          "completedDate": "2026-09-02",
+          "status": "FAILED"
+        },
+        {
+          "name": "Harbor Street Bakery - Food hygiene - week 38",
+          "site": "Harbor Street Bakery",
+          "template": "Food hygiene",
+          "inspector": "Elena Rossi",
+          "scheduledDate": "2026-09-16",
+          "completedDate": "2026-09-16",
+          "status": "PASSED",
+          "notes": "Hand-wash station restocked during the visit."
+        },
+        {
+          "name": "Harbor Street Bakery - Food hygiene - week 39",
+          "site": "Harbor Street Bakery",
+          "template": "Food hygiene",
+          "inspector": "Elena Rossi",
+          "scheduledDate": "2026-09-23",
+          "status": "IN_PROGRESS"
+        },
+        {
+          "name": "Northgate Office Tower - Fire safety - Sep 2026",
+          "site": "Northgate Office Tower",
+          "template": "Fire safety",
+          "inspector": "Tom Becker",
+          "scheduledDate": "2026-09-09",
+          "completedDate": "2026-09-09",
+          "status": "PASSED"
+        },
+        {
+          "name": "Lakeshore Assembly Plant - Workplace safety walk - Q3 2026",
+          "site": "Lakeshore Assembly Plant",
+          "template": "Workplace safety walk",
+          "inspector": "Priya Raman",
+          "scheduledDate": "2026-09-18",
+          "completedDate": "2026-09-18",
+          "status": "FAILED",
+          "notes": "Re-inspect once the press guard is refitted."
+        },
+        {
+          "name": "Hillcrest Community Kitchen - Food hygiene - week 39",
+          "site": "Hillcrest Community Kitchen",
+          "template": "Food hygiene",
+          "inspector": "Elena Rossi",
+          "scheduledDate": "2026-09-24",
+          "completedDate": "2026-09-24",
+          "status": "PASSED"
+        },
+        {
+          "name": "Southpoint Retail Store - Fire safety - Oct 2026",
+          "site": "Southpoint Retail Store",
+          "template": "Fire safety",
+          "inspector": "Tom Becker",
+          "scheduledDate": "2026-10-20",
+          "status": "SCHEDULED"
+        },
+        {
+          "name": "Lakeshore Assembly Plant - Fire safety - Oct 2026",
+          "site": "Lakeshore Assembly Plant",
+          "template": "Fire safety",
+          "inspector": "Sam Ortega",
+          "scheduledDate": "2026-10-27",
+          "status": "SCHEDULED"
+        }
+      ]
+    },
+    {
+      "collection": "findings",
+      "key": [
+        "title"
+      ],
+      "references": {
+        "inspection": {
+          "collection": "inspections",
+          "field": "name"
+        },
+        "checklistItem": {
+          "collection": "checklist-items",
+          "field": "code"
+        }
+      },
+      "rows": [
+        {
+          "title": "East fire exit blocked by pallets",
+          "inspection": "Riverside Distribution Center - Fire safety - Sep 2026",
+          "checklistItem": "FS-01",
+          "severity": "HIGH",
+          "resolved": false,
+          "dueDate": "2026-09-15",
+          "description": "Two pallets of stock stored against the east exit door."
+        },
+        {
+          "title": "Emergency light over loading bay 3 not working",
+          "inspection": "Riverside Distribution Center - Fire safety - Sep 2026",
+          "checklistItem": "FS-02",
+          "severity": "MEDIUM",
+          "resolved": false,
+          "dueDate": "2026-09-30"
+        },
+        {
+          "title": "Damaged extension cord at packing station",
+          "inspection": "Riverside Distribution Center - Workplace safety walk - Q3 2026",
+          "checklistItem": "WS-03",
+          "severity": "HIGH",
+          "resolved": false,
+          "dueDate": "2026-09-05",
+          "description": "Insulation split near the plug; cord taken out of use but not replaced."
+        },
+        {
+          "title": "First aid kit missing burn dressings",
+          "inspection": "Riverside Distribution Center - Workplace safety walk - Q3 2026",
+          "checklistItem": "WS-04",
+          "severity": "LOW",
+          "resolved": true,
+          "dueDate": "2026-09-09"
+        },
+        {
+          "title": "Hand-wash station out of paper towels",
+          "inspection": "Harbor Street Bakery - Food hygiene - week 38",
+          "checklistItem": "FH-03",
+          "severity": "LOW",
+          "resolved": true,
+          "dueDate": "2026-09-16"
+        },
+        {
+          "title": "Walk-in fridge reading 8 °C",
+          "inspection": "Harbor Street Bakery - Food hygiene - week 39",
+          "checklistItem": "FH-01",
+          "severity": "HIGH",
+          "resolved": false,
+          "dueDate": "2026-09-24",
+          "description": "Door seal worn. Stock moved to the reach-in fridge."
+        },
+        {
+          "title": "Unlabelled containers on dry store shelf",
+          "inspection": "Harbor Street Bakery - Food hygiene - week 39",
+          "checklistItem": "FH-02",
+          "severity": "MEDIUM",
+          "resolved": false,
+          "dueDate": "2026-09-26"
+        },
+        {
+          "title": "Extinguisher tag on floor 6 out of date",
+          "inspection": "Northgate Office Tower - Fire safety - Sep 2026",
+          "checklistItem": "FS-03",
+          "severity": "MEDIUM",
+          "resolved": true,
+          "dueDate": "2026-09-20"
+        },
+        {
+          "title": "Guard removed from press 4",
+          "inspection": "Lakeshore Assembly Plant - Workplace safety walk - Q3 2026",
+          "checklistItem": "WS-05",
+          "severity": "HIGH",
+          "resolved": false,
+          "dueDate": "2026-09-19",
+          "description": "Press locked out until the guard is refitted."
+        },
+        {
+          "title": "Oil spill near line 2",
+          "inspection": "Lakeshore Assembly Plant - Workplace safety walk - Q3 2026",
+          "checklistItem": "WS-01",
+          "severity": "MEDIUM",
+          "resolved": true,
+          "dueDate": "2026-09-18"
+        },
+        {
+          "title": "Step stool with cracked tread",
+          "inspection": "Lakeshore Assembly Plant - Workplace safety walk - Q3 2026",
+          "checklistItem": "WS-02",
+          "severity": "LOW",
+          "resolved": false,
+          "dueDate": "2026-10-02"
+        },
+        {
+          "title": "Cleaning schedule missing two sign-offs",
+          "inspection": "Hillcrest Community Kitchen - Food hygiene - week 39",
+          "checklistItem": "FH-05",
+          "severity": "LOW",
+          "resolved": true,
+          "dueDate": "2026-09-27"
+        }
+      ]
     }
   ]
 }

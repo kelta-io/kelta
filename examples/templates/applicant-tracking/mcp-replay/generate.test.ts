@@ -1,7 +1,7 @@
 // Invariants of the generated MCP replay fixture. Run: node --test examples/templates/applicant-tracking/mcp-replay/generate.test.ts
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -60,31 +60,46 @@ test('each collection is one apply_collection with its fields, picklist values a
 test('every list view goes through apply_listview, kanban boards with viewType and typeConfig', () => {
   assert.deepEqual(callsOf('create_listview'), []);
   const applied = callsOf('apply_listview');
-  for (const file of readdirSync(join(TEMPLATE, 'list-views')).filter((f) => f.endsWith('.json'))) {
-    const collectionName = file.replace(/\.json$/, '');
-    for (const view of readJson(`list-views/${file}`)) {
-      const call = applied.find((c) => c.arguments.collectionName === collectionName && c.arguments.name === view.name);
-      assert.ok(call, `no apply_listview for ${collectionName} / ${view.name}`);
-      if (view.viewType === 'KANBAN') {
-        assert.equal(call.arguments.viewType, 'KANBAN');
-        assert.deepEqual(call.arguments.typeConfig, {
-          kanban: { laneField: view.laneField, cardFields: view.cardFields },
-        });
-      }
+  const views = items('LIST_VIEW');
+  assert.equal(applied.length, views.length);
+  assert.ok(views.some((v: any) => v.view_type === 'KANBAN'), 'the package carries no kanban view');
+  for (const view of views) {
+    const call = applied.find(
+      (c) => c.arguments.collectionName === view.collection_name && c.arguments.name === view.name
+    );
+    assert.ok(call, `no apply_listview for ${view.collection_name} / ${view.name}`);
+    assert.deepEqual(call.arguments.columns, view.columns);
+    assert.deepEqual(call.arguments.filters, view.filters);
+    if (view.view_type === 'KANBAN') {
+      assert.equal(call.arguments.viewType, 'KANBAN');
+      assert.deepEqual(call.arguments.typeConfig, view.type_config);
     }
   }
 });
 
-test('one bulk_apply per seed file writes all its records', () => {
-  const seeds = readdirSync(join(TEMPLATE, 'seeds')).filter((f) => f.endsWith('.json'));
+test('every dashboard item is one apply_dashboard of its data', () => {
+  assert.deepEqual(
+    callsOf('apply_dashboard').map((c) => c.arguments),
+    items('DASHBOARD')
+  );
+});
+
+test('one bulk_apply per records section writes all its rows, in section order', () => {
+  const sections = metadata.records;
   const seedCalls = calls.filter((c) => c.step === 'Seed records');
-  assert.equal(seedCalls.length, seeds.length);
-  for (const file of seeds) {
-    const collection = file.replace(/\.json$/, '');
-    const call = seedCalls.find((c) => c.arguments.operations[0].type === collection);
-    assert.ok(call, `no seed call for ${collection}`);
+  assert.deepEqual(
+    seedCalls.map((c) => c.arguments.operations[0].type),
+    sections.map((s: any) => s.collection)
+  );
+  for (const section of sections) {
+    const call = seedCalls.find((c) => c.arguments.operations[0].type === section.collection)!;
     assert.equal(call.tool, 'bulk_apply');
-    assert.equal(call.arguments.operations.length, readJson(`seeds/${file}`).length);
+    assert.equal(call.arguments.operations.length, section.rows.length);
+    for (const [field, ref] of Object.entries<any>(section.references ?? {})) {
+      const parent = seedCalls.find((c) => c.arguments.operations[0].type === ref.collection)!;
+      assert.ok(parent.save, `${ref.collection} saves no ids for ${section.collection}.${field}`);
+      assert.match(Object.values(parent.save)[0], new RegExp(`\\.attributes\\.${ref.field} `));
+    }
   }
 });
 

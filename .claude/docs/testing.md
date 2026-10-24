@@ -492,7 +492,7 @@ they fail on the unique constraints whatever gets fixed. On the stack from the `
 http://kelta-mcp:8080 --toolset all` over stdio JSON-RPC, counts every `tools/call` (an unexpected
 error is retried up to `MCP_REPLAY_RETRIES`, 2, and each retry counts), fails on an error the
 fixture does not expect, then checks over plain HTTP that every collection of the template's
-`metadata.json` exists with `jq length seeds/<c>.json` records. `ci/mcp-replay-compare.sh` fails
+`metadata.json` exists with as many records as the rows of its `records` sections for it. `ci/mcp-replay-compare.sh` fails
 when `count * 5 > baseline * 6` (baseline 100: 120 passes, 121 fails), and the job writes count,
 baseline and threshold to the step summary. `ci/mcp-replay.test.sh` drives the runner against a
 fake `kelta` and a fake `curl` (substitution, retries counted, expected and unexpected errors,
