@@ -100,6 +100,15 @@ kelta:
       initial-delay-ms: 2000
       max-delay-ms: 30000
 
+    # PAT last-used tracking. After a successful PAT authentication the gateway asks the
+    # worker (POST /internal/tokens/{hash}/last-used?windowSeconds=<window-seconds>) to stamp
+    # user_api_token.last_used_at, fire-and-forget. Each replica calls at most once per token
+    # per window (Caffeine cache, max-tokens entries, expireAfterWrite = window); the worker's
+    # UPDATE only writes when last_used_at is older than the same window it is sent.
+    pat-last-used:
+      window-seconds: ${KELTA_GATEWAY_PAT_LAST_USED_WINDOW_SECONDS:300}
+      max-tokens: ${KELTA_GATEWAY_PAT_LAST_USED_MAX_TOKENS:10000}
+
     # AI service URL (used for routing /api/ai/** requests)
     ai-service-url: ${AI_SERVICE_URL:http://emf-ai:80}
     

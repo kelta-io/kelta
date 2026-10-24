@@ -1,5 +1,7 @@
 package io.kelta.gateway.auth;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import io.kelta.gateway.error.ResponseHelpers;
@@ -48,6 +50,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * Revocation is always checked first — a revoked token is rejected even when
  * the grace cache holds its data.
  *
+ * <p>Last-used tracking: after a successful authentication the filter tells the worker
+ * ({@code POST /internal/tokens/{hash}/last-used}) to stamp {@code user_api_token.last_used_at},
+ * fire-and-forget, at most once per token per window on this replica (a bounded Caffeine cache
+ * keyed by token hash). The worker's UPDATE is itself conditional on the window, so replicas
+ * cannot stamp the same token twice in one window either.
+ *
  * @since 1.0.0
  */
 @Component
@@ -62,12 +70,15 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
     private static final String PAT_KEY_PREFIX = "pat:";
     private static final String REVOCATION_KEY_PREFIX = "pat:revoked:";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final Duration LAST_USED_TIMEOUT = Duration.ofSeconds(5);
 
     private final ReactiveStringRedisTemplate redisTemplate;
     private final WebClient workerClient;
     private final GatewayMetrics metrics;
     private final Duration graceTtl;
     private final RedisRateLimiter redisRateLimiter;
+    private final long lastUsedWindowSeconds;
+    private final Cache<String, Boolean> lastUsedThrottle;
 
     // Short-TTL in-memory fallback keyed by token hash. Populated on every
     // successful PAT resolution (Redis hit or worker call) so requests can
@@ -88,12 +99,19 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
             @Value("${kelta.gateway.worker-service-url:http://kelta-worker:80}") String workerServiceUrl,
             @Value("${kelta.gateway.pat-grace-ttl-seconds:300}") int graceTtlSeconds,
             GatewayMetrics metrics,
-            RedisRateLimiter redisRateLimiter) {
+            RedisRateLimiter redisRateLimiter,
+            @Value("${kelta.gateway.pat-last-used.window-seconds:300}") long lastUsedWindowSeconds,
+            @Value("${kelta.gateway.pat-last-used.max-tokens:10000}") long lastUsedMaxTokens) {
         this.redisTemplate = redisTemplate;
         this.workerClient = webClientBuilder.baseUrl(workerServiceUrl).build();
         this.graceTtl = Duration.ofSeconds(graceTtlSeconds);
         this.metrics = metrics;
         this.redisRateLimiter = redisRateLimiter;
+        this.lastUsedWindowSeconds = lastUsedWindowSeconds;
+        this.lastUsedThrottle = Caffeine.newBuilder()
+                .maximumSize(lastUsedMaxTokens)
+                .expireAfterWrite(Duration.ofSeconds(lastUsedWindowSeconds))
+                .build();
     }
 
     @Override
@@ -247,12 +265,33 @@ public class PatAuthenticationFilter implements GlobalFilter, Ordered {
             // Fire-and-forget, mirroring RateLimitFilter's incrementDailyCounter — must
             // not delay or fail the request if Redis is briefly unavailable.
             redisRateLimiter.incrementPatUsageCounter(tokenHash).subscribe();
+            recordLastUsed(tokenHash);
             return chain.filter(mutatedExchange);
         } catch (JacksonException e) {
             log.error("Failed to parse PAT data", e);
             metrics.recordAuthFailure(tenantSlug, "pat_parse_error");
             return unauthorized(exchange, "Authentication failed");
         }
+    }
+
+    /**
+     * Fire-and-forget: subscribed off the request chain, so a slow or failing worker never
+     * delays or fails the request. A failed call is not retried until the window expires.
+     */
+    private void recordLastUsed(String tokenHash) {
+        if (lastUsedThrottle.asMap().putIfAbsent(tokenHash, Boolean.TRUE) != null) {
+            return;
+        }
+        workerClient.post()
+                .uri(uri -> uri.path("/internal/tokens/{hash}/last-used")
+                        .queryParam("windowSeconds", lastUsedWindowSeconds)
+                        .build(tokenHash))
+                .retrieve()
+                .toBodilessEntity()
+                .timeout(LAST_USED_TIMEOUT)
+                .subscribe(
+                        response -> { },
+                        e -> log.warn("Failed to record PAT last-used time: {}", e.toString()));
     }
 
     private Mono<Void> unauthorized(ServerWebExchange exchange, String message) {
