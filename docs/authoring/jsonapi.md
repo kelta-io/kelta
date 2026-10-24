@@ -101,6 +101,34 @@ metadata apply` restores it; a package without the key applies the field
 with the flag `false`. To maintain the value, write it from a flow step
 (e.g. an update-record action), not from the API client.
 
+### Picklist values in the schema
+
+In the same response, every `PICKLIST` and `MULTI_PICKLIST` field of a
+tenant collection carries `picklistValues`: its active values, in
+`sortOrder`, whether the field owns them or is bound to a global picklist
+(`fieldTypeConfig.globalPicklistId`). Inactive values are left out. A
+picklist field with no active values has `picklistValues: []`; other
+fields have no `picklistValues` key. System collections keep listing their
+allowed values under `enum`.
+
+```json
+{
+  "name": "priority",
+  "type": "PICKLIST",
+  "required": false,
+  "isRelationship": false,
+  "description": null,
+  "systemMaintained": false,
+  "picklistValues": [
+    { "value": "LOW",  "label": "Low",  "isDefault": true,  "sortOrder": 1 },
+    { "value": "HIGH", "label": "High", "isDefault": false, "sortOrder": 2 }
+  ]
+}
+```
+
+Write a field's `value` (not its `label`) in a create or update; for a
+`MULTI_PICKLIST`, write an array of values.
+
 ## `--yes` on every non-GET
 
 Every CLI/API mutation is treated as requiring explicit confirmation:

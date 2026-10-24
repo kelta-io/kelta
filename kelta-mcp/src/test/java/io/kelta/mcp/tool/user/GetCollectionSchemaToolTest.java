@@ -124,6 +124,37 @@ class GetCollectionSchemaToolTest {
     }
 
     @Test
+    void passesPicklistValuesThroughFromTheSchemaResponse() {
+        wm.stubFor(get(urlEqualTo("/api/collections/tickets/schema"))
+                .willReturn(aResponse().withStatus(200).withBody("""
+                        {"name":"tickets","displayName":"Tickets","systemCollection":false,\
+                        "fields":[{"name":"priority","type":"PICKLIST","required":false,"isRelationship":false,\
+                        "picklistValues":[\
+                        {"value":"LOW","label":"Low","isDefault":true,"sortOrder":1},\
+                        {"value":"HIGH","label":"High","isDefault":false,"sortOrder":2}]}]}""")));
+
+        CallToolResult result = tool.toSpecification().callHandler().apply(null,
+                new CallToolRequest("get_collection_schema",
+                        Map.of("collection", "tickets", "includeRules", false), null));
+
+        assertThat(result.isError()).isNotEqualTo(Boolean.TRUE);
+        JsonNode values = new ObjectMapper()
+                .readTree(((TextContent) result.content().get(0)).text())
+                .get("fields").get(0).get("picklistValues");
+        assertThat(values).hasSize(2);
+        assertThat(values.get(0).get("value").asString()).isEqualTo("LOW");
+        assertThat(values.get(0).get("label").asString()).isEqualTo("Low");
+        assertThat(values.get(0).get("isDefault").asBoolean()).isTrue();
+        assertThat(values.get(0).get("sortOrder").asInt()).isEqualTo(1);
+        assertThat(values.get(1).get("value").asString()).isEqualTo("HIGH");
+    }
+
+    @Test
+    void describesPicklistValues() {
+        assertThat(tool.toSpecification().tool().description()).contains("picklistValues");
+    }
+
+    @Test
     void skipsValidationRulesFetchWhenIncludeRulesIsFalse() {
         wm.stubFor(get(urlEqualTo("/api/collections/customers/schema"))
                 .willReturn(aResponse().withStatus(200).withBody(SCHEMA_BODY)));

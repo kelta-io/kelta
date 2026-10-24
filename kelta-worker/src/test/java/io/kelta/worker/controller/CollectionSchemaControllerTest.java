@@ -4,24 +4,36 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.model.FieldType;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
 import io.kelta.runtime.registry.CollectionOnDemandLoader;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.worker.repository.PicklistValueRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -188,5 +200,139 @@ class CollectionSchemaControllerTest {
                 .andExpect(jsonPath("$.fields[?(@.name=='reference')].required").value(true))
                 .andExpect(jsonPath("$.fields[?(@.name=='reference')].description")
                         .value("Customer-facing order reference."));
+    }
+
+    // --- picklist values -------------------------------------------------------------------
+
+    private static FieldDefinition picklist(String name, FieldType type, Map<String, Object> fieldTypeConfig) {
+        return new FieldDefinition(name, type, true, false, false, null, null, null, null,
+                fieldTypeConfig, null, false, null, false, false);
+    }
+
+    /** A {@code picklist_value} row joined to its field, as the tenant database holds it. */
+    private static Map<String, Object> value(String field, String value, String label,
+                                             boolean isDefault, boolean isActive, int sortOrder) {
+        Map<String, Object> row = new HashMap<>();
+        row.put("field_name", field);
+        row.put("value", value);
+        row.put("label", label);
+        row.put("is_default", isDefault);
+        row.put("is_active", isActive);
+        row.put("sort_order", sortOrder);
+        return row;
+    }
+
+    /**
+     * Wires a real {@link PicklistValueRepository} over a JdbcTemplate holding {@code rows} for
+     * tenant {@code t-1}. The stub applies the query's own active filter and ordering only when
+     * the SQL carries them, so dropping either from the repository fails these cases.
+     */
+    private JdbcTemplate wirePicklistRows(String collection, List<Map<String, Object>> rows) {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForList(anyString(), eq("t-1"), eq(collection))).thenAnswer(inv -> {
+            String sql = inv.getArgument(0);
+            var stream = rows.stream();
+            if (sql.contains("pv.is_active = true")) {
+                stream = stream.filter(r -> Boolean.TRUE.equals(r.get("is_active")));
+            }
+            if (sql.contains("pv.sort_order")) {
+                stream = stream.sorted(Comparator.comparing(r -> (Integer) r.get("sort_order")));
+            }
+            return stream.toList();
+        });
+        controller.setPicklistValueRepository(new PicklistValueRepository(jdbc));
+        return jdbc;
+    }
+
+    @Test
+    @DisplayName("A field-scoped PICKLIST lists only its active values, in sortOrder")
+    void fieldScopedPicklistValues() throws Exception {
+        when(registry.get("tickets")).thenReturn(CollectionDefinition.builder()
+                .name("tickets").displayName("Tickets")
+                .addField(picklist("priority", FieldType.PICKLIST, null))
+                .build());
+        wirePicklistRows("tickets", List.of(
+                value("priority", "HIGH", "High", false, true, 2),
+                value("priority", "RETIRED", "Retired", false, false, 0),
+                value("priority", "LOW", "Low", true, true, 1)));
+
+        String body = mvc.perform(get("/api/collections/tickets/schema").header("X-Tenant-ID", "t-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fields[0].picklistValues[*].value", contains("LOW", "HIGH")))
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode values = new ObjectMapper().readTree(body).get("fields").get(0).get("picklistValues");
+        assertThat(values).hasSize(2);
+        assertThat(values.get(0).get("value").asText()).isEqualTo("LOW");
+        assertThat(values.get(0).get("label").asText()).isEqualTo("Low");
+        assertThat(values.get(0).get("isDefault").asBoolean()).isTrue();
+        assertThat(values.get(0).get("sortOrder").asInt()).isEqualTo(1);
+        assertThat(values.get(1).get("value").asText()).isEqualTo("HIGH");
+        assertThat(values.get(1).get("isDefault").asBoolean()).isFalse();
+        assertThat(values.get(1).get("sortOrder").asInt()).isEqualTo(2);
+        assertThat(values.get(0).size()).as("keys of a picklist value").isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("A field bound to a global picklist lists that picklist's active values in the same shape")
+    void globalPicklistValues() throws Exception {
+        when(registry.get("tickets")).thenReturn(CollectionDefinition.builder()
+                .name("tickets").displayName("Tickets")
+                .addField(picklist("region", FieldType.PICKLIST, Map.of("globalPicklistId", "gp-1")))
+                .build());
+        JdbcTemplate jdbc = wirePicklistRows("tickets", List.of(
+                value("region", "EU", "Europe", false, true, 1),
+                value("region", "US", "United States", true, true, 0)));
+
+        mvc.perform(get("/api/collections/tickets/schema").header("X-Tenant-ID", "t-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fields[0].picklistValues[*].value", contains("US", "EU")))
+                .andExpect(jsonPath("$.fields[0].picklistValues[0].label").value("United States"))
+                .andExpect(jsonPath("$.fields[0].picklistValues[0].isDefault").value(true))
+                .andExpect(jsonPath("$.fields[0].picklistValues[0].sortOrder").value(0));
+
+        verify(jdbc).queryForList(
+                org.mockito.ArgumentMatchers.contains("pv.picklist_source_type = 'GLOBAL'"),
+                eq("t-1"), eq("tickets"));
+    }
+
+    @Test
+    @DisplayName("MULTI_PICKLIST gets picklistValues; other fields carry no picklistValues key")
+    void multiPicklistAndNonPicklistFields() throws Exception {
+        when(registry.get("tickets")).thenReturn(CollectionDefinition.builder()
+                .name("tickets").displayName("Tickets")
+                .addField(FieldDefinition.requiredString("subject"))
+                .addField(picklist("tags", FieldType.MULTI_PICKLIST, null))
+                .addField(picklist("status", FieldType.PICKLIST, null))
+                .build());
+        wirePicklistRows("tickets", List.of(
+                value("tags", "BUG", "Bug", false, true, 0),
+                value("tags", "UX", "UX", false, true, 1)));
+
+        String body = mvc.perform(get("/api/collections/tickets/schema").header("X-Tenant-ID", "t-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fields[?(@.name=='tags')].picklistValues[*].value", contains("BUG", "UX")))
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode fields = new ObjectMapper().readTree(body).get("fields");
+        assertThat(fields.get(0).has("picklistValues")).as("subject").isFalse();
+        assertThat(fields.get(2).get("picklistValues")).as("status with no values").isEmpty();
+    }
+
+    @Test
+    @DisplayName("System collections keep their enum output and never query picklist values")
+    void systemCollectionEnumUnchanged() throws Exception {
+        register("page-layouts");
+        JdbcTemplate jdbc = wirePicklistRows("page-layouts", List.of());
+
+        String body = mvc.perform(get("/api/collections/page-layouts/schema").header("X-Tenant-ID", "t-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fields[?(@.name=='layoutType')].enum[*]", hasItem("DETAIL")))
+                .andReturn().getResponse().getContentAsString();
+
+        for (JsonNode field : new ObjectMapper().readTree(body).get("fields")) {
+            assertThat(field.has("picklistValues")).as(field.path("name").asText()).isFalse();
+        }
+        verifyNoInteractions(jdbc);
     }
 }

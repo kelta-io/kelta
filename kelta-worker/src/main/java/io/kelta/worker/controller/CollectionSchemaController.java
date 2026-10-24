@@ -3,9 +3,12 @@ package io.kelta.worker.controller;
 import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
+import io.kelta.runtime.model.FieldType;
 import io.kelta.runtime.model.ReferenceConfig;
 import io.kelta.runtime.registry.CollectionOnDemandLoader;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.worker.repository.PicklistValueRepository;
+import io.kelta.worker.repository.PicklistValueRepository.PicklistOption;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -55,6 +58,12 @@ public class CollectionSchemaController {
      */
     private CollectionOnDemandLoader onDemandLoader;
 
+    /**
+     * Optional picklist value source: tenant fields are loaded with no {@code enumValues}, so
+     * their selectable values come from {@code picklist_value} instead.
+     */
+    private PicklistValueRepository picklistValues;
+
     public CollectionSchemaController(CollectionRegistry registry) {
         this.registry = registry;
     }
@@ -64,12 +73,19 @@ public class CollectionSchemaController {
         this.onDemandLoader = onDemandLoader;
     }
 
+    @Autowired(required = false)
+    public void setPicklistValueRepository(PicklistValueRepository picklistValues) {
+        this.picklistValues = picklistValues;
+    }
+
     /**
      * Returns the schema of one collection.
      *
      * @param name     the collection name, as it appears in {@code /api/{name}}
-     * @param tenantId tenant from the gateway-attached header, used only for on-demand loading
-     * @return {@code {name, displayName, systemCollection, fields:[...]}}, or 404 if unknown
+     * @param tenantId tenant from the gateway-attached header, used for on-demand loading and
+     *                 picklist value lookup
+     * @return {@code {name, displayName, systemCollection, fields:[...]}}, or 404 if unknown;
+     *         PICKLIST / MULTI_PICKLIST fields of tenant collections carry {@code picklistValues}
      */
     @GetMapping("/{name}/schema")
     public ResponseEntity<Map<String, Object>> schema(
@@ -88,12 +104,17 @@ public class CollectionSchemaController {
         body.put("displayName", definition.displayName());
         body.put("systemCollection", definition.systemCollection());
 
+        Map<String, List<PicklistOption>> options = picklistOptions(definition, tenantId);
         List<Map<String, Object>> fields = new ArrayList<>();
         for (FieldDefinition field : definition.fields()) {
             if (field.serverOnly()) {
                 continue; // never read or written through the API, so not part of its shape
             }
-            fields.add(describe(field));
+            Map<String, Object> described = describe(field);
+            if (options != null && isPicklist(field)) {
+                described.put("picklistValues", options.getOrDefault(field.name(), List.of()));
+            }
+            fields.add(described);
         }
         body.put("fields", fields);
 
@@ -111,6 +132,19 @@ public class CollectionSchemaController {
             logger.warn("On-demand load failed for collection '{}': {}", name, e.getMessage());
             return null;
         }
+    }
+
+    /** Active values per picklist field of a tenant collection; null when there is nothing to look up. */
+    private Map<String, List<PicklistOption>> picklistOptions(CollectionDefinition definition, String tenantId) {
+        if (picklistValues == null || definition.systemCollection() || tenantId == null || tenantId.isBlank()
+                || definition.fields().stream().noneMatch(CollectionSchemaController::isPicklist)) {
+            return null;
+        }
+        return picklistValues.findActiveValuesByCollection(tenantId, definition.name());
+    }
+
+    private static boolean isPicklist(FieldDefinition field) {
+        return field.type() == FieldType.PICKLIST || field.type() == FieldType.MULTI_PICKLIST;
     }
 
     private Map<String, Object> describe(FieldDefinition field) {
