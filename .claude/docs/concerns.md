@@ -650,10 +650,7 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   `KELTA_ENCRYPTION_KEY` fail startup when unset. A `log.warn` is not a control.
 - **Exporters that read rows with `queryForList` must convert `PGobject`** before the value leaves
   the service (KLT-479); **any id stored inside a JSON config column** is a source-tenant id —
-  export a natural key beside it and remap on import (KLT-480). Open gap:
-  `MetadataPromotionService.parentKeys` doesn't list `GLOBAL_PICKLIST:<name>` as a parent of a
-  bound FIELD, so a selective promotion of that field without its picklist fails loudly instead of
-  pulling it in.
+  export a natural key beside it and remap on import (KLT-480).
 
 - **Field constraints and picklist values are enforced on user collections since PLT-711.**
   `CollectionLifecycleManager` used to build tenant `FieldDefinition`s with no `ValidationRules`
@@ -1008,6 +1005,7 @@ One line each; full write-ups are in git history.
 - 2026-10-07 — gateway served only static routes after starting before the worker; bootstrap retry; error bodies serialized empty (PLT-456).
 - KLT-479 — metadata export wrote JSON columns as `PGobject` beans.
 - KLT-480 — metadata apply kept the source tenant's global picklist id.
+- KLT-746 — selective promotion of a picklist-bound FIELD failed the field because `MetadataPromotionService.parentKeys` didn't list its `GLOBAL_PICKLIST`; it now pulls the picklist and its values, and `filterPackage` emits items in the importer's type order. `MetadataPromotionServiceTest.parentKeysListsBoundGlobalPicklist`, `PicklistBoundField.pullsPicklistAndValues`, `PicklistBoundField.matchesExistingTargetPicklistByName`.
 - PLT-266 / PLT-521 — `FieldEditor`/`CollectionForm` async-submit test races (sync zod resolver, test-owned deferred).
 - homelab-argo #312 (2026-09-21, PLT-307/309) — kelta.io apex/www/downloads SERVFAIL'd from inside the cluster (CoreDNS `hosts … fallthrough` with no `forward`).
 - PLT-278 / PLT-282 / PLT-477 — marketing manifest named nonexistent namespace/class/issuer; smoke deadlines shared; rollout dropped requests to a terminating pod.

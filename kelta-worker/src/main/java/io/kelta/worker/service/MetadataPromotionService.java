@@ -397,7 +397,10 @@ public class MetadataPromotionService {
         }
     }
 
-    /** Removes security types and, when a selection is given, unselected items. */
+    /**
+     * Removes security types and, when a selection is given, unselected items, and
+     * orders what is left by the importer's type order (stable within a type).
+     */
     @SuppressWarnings("unchecked")
     Map<String, Object> filterPackage(Map<String, Object> pkg, Set<String> selectedKeys) {
         List<Map<String, Object>> items =
@@ -417,6 +420,12 @@ public class MetadataPromotionService {
             }
             kept.add(item);
         }
+        // Export writes FIELD before GLOBAL_PICKLIST; hand the target dependency order instead.
+        List<String> typeOrder = PackageImportService.supportedTypes();
+        kept.sort(Comparator.comparingInt(item -> {
+            int index = typeOrder.indexOf((String) item.get("type"));
+            return index < 0 ? typeOrder.size() : index;
+        }));
         Map<String, Object> filtered = new LinkedHashMap<>(pkg);
         filtered.put("items", kept);
         return filtered;
@@ -425,7 +434,8 @@ public class MetadataPromotionService {
     /**
      * Expands a SELECTIVE selection to include hard dependencies present in the
      * package (a selected field pulls its collection, a layout field pulls its
-     * section/layout/field, …) via fixpoint iteration over parent keys.
+     * section/layout/field, …) via fixpoint iteration over parent keys. A
+     * pulled-in GLOBAL_PICKLIST also brings its PICKLIST_VALUE children.
      */
     @SuppressWarnings("unchecked")
     Set<String> expandSelection(Map<String, Object> pkg, List<Map<String, Object>> itemRows) {
@@ -455,19 +465,35 @@ public class MetadataPromotionService {
                         changed = true;
                     }
                 }
+                if (key.startsWith("GLOBAL_PICKLIST:")) {
+                    // A picklist without its values rejects every write to a bound field.
+                    String picklistName = key.substring("GLOBAL_PICKLIST:".length());
+                    for (var entry : packageByKey.entrySet()) {
+                        Map<String, Object> data = (Map<String, Object>) entry.getValue().get("data");
+                        if ("PICKLIST_VALUE".equals(entry.getValue().get("type"))
+                                && "GLOBAL".equals(data.get("picklist_source_type"))
+                                && picklistName.equals(data.get("picklist_name"))
+                                && selected.add(entry.getKey())) {
+                            changed = true;
+                        }
+                    }
+                }
             }
         }
         return selected;
     }
 
     /** Natural keys of the items this item cannot import without. */
-    private List<String> parentKeys(String type, Map<String, Object> data) {
+    List<String> parentKeys(String type, Map<String, Object> data) {
         return switch (type) {
             case "FIELD" -> {
                 List<String> parents = new ArrayList<>();
                 parents.add("COLLECTION:" + data.get("collection_name"));
                 if (data.get("reference_collection_name") != null) {
                     parents.add("COLLECTION:" + data.get("reference_collection_name"));
+                }
+                if (data.get("global_picklist_name") != null) {
+                    parents.add("GLOBAL_PICKLIST:" + data.get("global_picklist_name"));
                 }
                 yield parents;
             }

@@ -1,10 +1,16 @@
 package io.kelta.worker.service;
 
 import io.kelta.runtime.event.PlatformEventPublisher;
+import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.storage.CompositeUniqueConstraintService;
 import io.kelta.worker.repository.EnvironmentPromotionRepository;
 import io.kelta.worker.repository.EnvironmentRepository;
 import io.kelta.worker.repository.PackageRepository;
 import org.junit.jupiter.api.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.*;
@@ -370,6 +376,128 @@ class MetadataPromotionServiceTest {
                 "PAGE_LAYOUT:orders:Default",
                 "FIELD:orders.customer",
                 "COLLECTION:orders");
+    }
+
+    @Test
+    @DisplayName("parentKeys lists GLOBAL_PICKLIST:<name> only for a picklist-bound FIELD")
+    void parentKeysListsBoundGlobalPicklist() {
+        assertThat(service.parentKeys("FIELD", invoiceStatusField()))
+                .containsExactly("COLLECTION:invoices", "GLOBAL_PICKLIST:invoice-status");
+        assertThat(service.parentKeys("FIELD", Map.of("collection_name", "invoices", "name", "amount")))
+                .containsExactly("COLLECTION:invoices");
+    }
+
+    @Nested
+    @DisplayName("selective promotion of a picklist-bound FIELD")
+    class PicklistBoundField {
+
+        private final List<Map<String, Object>> selection =
+                List.of(Map.of("item_type", "FIELD", "item_name", "invoices.status"));
+
+        @Test
+        @DisplayName("pulls in the GLOBAL_PICKLIST and its values, ordered before the FIELD")
+        @SuppressWarnings("unchecked")
+        void pullsPicklistAndValues() {
+            Map<String, Object> pkg = invoicePackage();
+
+            var selected = service.expandSelection(pkg, selection);
+
+            assertThat(selected).containsExactlyInAnyOrder(
+                    "FIELD:invoices.status", "COLLECTION:invoices", "GLOBAL_PICKLIST:invoice-status",
+                    "PICKLIST_VALUE:invoice-status:open", "PICKLIST_VALUE:invoice-status:paid");
+
+            var kept = (List<Map<String, Object>>) service.filterPackage(pkg, selected).get("items");
+            List<String> keys = kept.stream()
+                    .map(i -> i.get("type") + ":" + PackageImportService.naturalKeyFor(
+                            (String) i.get("type"), (Map<String, Object>) i.get("data")))
+                    .toList();
+            assertThat(keys).containsExactly(
+                    "COLLECTION:invoices",
+                    "GLOBAL_PICKLIST:invoice-status",
+                    "FIELD:invoices.status",
+                    "PICKLIST_VALUE:invoice-status:open",
+                    "PICKLIST_VALUE:invoice-status:paid");
+        }
+
+        @Test
+        @DisplayName("matches a picklist the target already has by name — never a second CREATED picklist")
+        void matchesExistingTargetPicklistByName() {
+            QueryEngine queryEngine = mock(QueryEngine.class);
+            CollectionRegistry collectionRegistry = mock(CollectionRegistry.class);
+            PackageRepository targetRepository = mock(PackageRepository.class);
+            JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+            when(targetRepository.getJdbcTemplate()).thenReturn(jdbcTemplate);
+            when(collectionRegistry.get(anyString())).thenAnswer(inv ->
+                    SystemCollectionDefinitions.byName().get(inv.<String>getArgument(0)));
+            when(jdbcTemplate.queryForList(anyString(), any(Object.class))).thenReturn(List.of());
+            when(jdbcTemplate.queryForList(contains("FROM collection WHERE tenant_id"), eq(TENANT)))
+                    .thenReturn(List.of(Map.of("id", "tgt-invoices", "name", "invoices")));
+            when(jdbcTemplate.queryForList(contains("FROM global_picklist"), eq(TENANT)))
+                    .thenReturn(List.of(Map.of("id", "tgt-gp-invoice-status", "name", "invoice-status")));
+            when(queryEngine.create(any(), anyMap())).thenReturn(Map.of("id", "tgt-new"));
+            var importer = new PackageImportService(queryEngine, collectionRegistry, targetRepository,
+                    new ObjectMapper(), new JdbcUserIdResolver(jdbcTemplate), mock(DashboardTreeService.class),
+                    new DashboardComponentValidator(collectionRegistry, mock(CollectionLifecycleManager.class),
+                            queryEngine),
+                    mock(PlatformTransactionManager.class), mock(CompositeUniqueConstraintService.class));
+
+            Map<String, Object> pkg = invoicePackage();
+            Set<String> selected = service.expandSelection(pkg, selection);
+            for (var mode : PackageImportService.ConflictMode.values()) {
+                var report = importer.importPackage(TENANT, service.filterPackage(pkg, selected),
+                        new PackageImportService.ImportOptions(mode, false, null, selected, "u1"));
+
+                assertThat(report.items())
+                        .filteredOn(i -> "GLOBAL_PICKLIST".equals(i.type()))
+                        .as("%s: %s", mode, report.items())
+                        .singleElement()
+                        .satisfies(i -> {
+                            assertThat(i.naturalKey()).isEqualTo("invoice-status");
+                            assertThat(i.action()).isIn("SKIPPED", "UPDATED");
+                            assertThat(i.resourceId()).isEqualTo("tgt-gp-invoice-status");
+                        });
+                assertThat(report.failed()).as("%s: %s", mode, report.items()).isZero();
+            }
+            verify(queryEngine, never()).create(
+                    argThat(d -> d != null && "global-picklists".equals(d.name())), anyMap());
+        }
+    }
+
+    private static Map<String, Object> invoiceStatusField() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", "src-invoices-status");
+        data.put("collection_name", "invoices");
+        data.put("name", "status");
+        data.put("type", "PICKLIST");
+        data.put("field_type_config", Map.of("globalPicklistId", "src-gp-invoice-status"));
+        data.put("global_picklist_name", "invoice-status");
+        return data;
+    }
+
+    private static Map<String, Object> globalPicklistValue(String picklist, String value) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", "src-pv-" + picklist + "-" + value);
+        data.put("picklist_source_type", "GLOBAL");
+        data.put("picklist_source_id", "src-gp-" + picklist);
+        data.put("picklist_name", picklist);
+        data.put("value", value);
+        data.put("label", value);
+        return data;
+    }
+
+    /** Items in the order {@code PackageService.exportPackage} writes them: fields before picklists. */
+    private static Map<String, Object> invoicePackage() {
+        Map<String, Object> pkg = new LinkedHashMap<>();
+        pkg.put("items", List.of(
+                item("COLLECTION", Map.of("id", "src-invoices", "name", "invoices")),
+                item("FIELD", invoiceStatusField()),
+                item("FIELD", Map.of("collection_name", "invoices", "name", "amount", "type", "NUMBER")),
+                item("GLOBAL_PICKLIST", Map.of("id", "src-gp-invoice-status", "name", "invoice-status")),
+                item("GLOBAL_PICKLIST", Map.of("id", "src-gp-priority", "name", "priority")),
+                item("PICKLIST_VALUE", globalPicklistValue("invoice-status", "open")),
+                item("PICKLIST_VALUE", globalPicklistValue("invoice-status", "paid")),
+                item("PICKLIST_VALUE", globalPicklistValue("priority", "high"))));
+        return pkg;
     }
 
     // ------------------------------------------------------------------
