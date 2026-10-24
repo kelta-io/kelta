@@ -14,6 +14,7 @@
 #   1. signs in as the platform admin (POST /auth/direct-login), creates a fresh tenant (a
 #      `tenants` record) and mints a PAT for its seeded admin (POST
 #      /api/tenants/{id}/bootstrap-token) — skipped when KELTA_TOKEN is already set;
+#   (before that, the fixture is refused if any call names a local-only cli_* tool);
 #   2. starts `kelta mcp serve --source remote --mcp-url $MCP_URL --toolset all` and speaks
 #      JSON-RPC to it over stdio: initialize, one tools/list (fails unless it lists every tool
 #      the fixture calls), then each fixture call as a tools/call;
@@ -72,6 +73,12 @@ if [ "${1:-}" = "--in-container" ]; then
 
   [ -f "$FIXTURE" ] || fail "no fixture at $FIXTURE"
   jq -e '.calls | type == "array" and length > 0' "$FIXTURE" >/dev/null || fail "$FIXTURE has no calls"
+  # cli_* tools are local to the kelta CLI: `kelta mcp serve --source remote` never serves them, so
+  # a fixture naming one can only fail at tools/list. Name each offending call and its step.
+  local_calls=$(jq -r '.calls | length as $n | to_entries[] | select((.value.tool // "") | startswith("cli_"))
+    | "call \(.key + 1)/\($n) \(.value.tool) (\(.value.step // "-"))"' "$FIXTURE" | paste -sd ';' | sed 's/;/; /g')
+  [ -z "$local_calls" ] \
+    || fail "$local_calls: cli_ tools are local CLI tools that --source remote does not serve; call the hosted kelta-mcp tool instead"
   mkdir -p "$(dirname "$COUNT_FILE")"
   COUNT=0
   echo "$COUNT" >"$COUNT_FILE"

@@ -159,6 +159,13 @@ public class McpServerConfig {
             deleted. A component's report is a saved report name (optional — a component can \
             target config.collectionName directly instead).
 
+            Metadata packages: export_metadata returns this tenant's metadata (optionally \
+            only the named collections and what hangs off them) as package JSON text; \
+            diff_metadata previews what that package would change in a tenant without \
+            writing; apply_metadata installs it (dryRun, conflictMode skip|overwrite). \
+            validate_dashboard checks a dashboard's widget configs and dashboard_data runs \
+            its widgets, both read-only and taking a dashboard name or id.
+
             Pages: apply_page takes a custom UI page (screen builder), keyed on path — falling \
             back to slug when path itself doesn't match an existing row, e.g. a route rename. \
             config is dry-run through the worker's page config validator (unknown widget type, \
