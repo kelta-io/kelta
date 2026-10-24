@@ -40,6 +40,18 @@ test's response. After adding routes to `RouteRegistry` directly, call `RouteRef
 `BaselineAdminPasswordIntegrationTest` migrates its database from kelta-worker's real migration
 directory via a `filesystem:` Flyway location, so it needs the whole repo checked out.)
 
+**Whole-worker context test.** `WorkerApplicationContextIntegrationTest` (kelta-worker) boots the
+full `WorkerApplication` context (`@SpringBootTest`, random port, profile `context-it` →
+`src/test/resources/application-context-it.yml`) on Postgres, Redis and NATS containers, with
+Flyway running the real migrations, and asserts the context loaded and that
+`GET /api/profiles?filter[name][eq]=System Administrator` answers 200 with the seeded profile.
+Cerbos (gRPC client + admin sync service) is `@MockitoBean`; Svix, Superset, S3, SMTP and the
+pollers are off in the profile. It also keeps the component scan off `target/test-classes`, because
+other tests nest router stand-in `@RestController`s that would collide with
+`DynamicCollectionRouter`. Run it with
+`mvn -f kelta-worker/pom.xml verify -Dtest=WorkerApplicationContextIntegrationTest` (skipped without
+Docker). A wiring change that breaks pod start breaks this test.
+
 **kelta-auth HTTP sessions in tests.** A flow test that needs real session behaviour (cookie,
 session id, `sid`, the OIDC `SessionRegistry`) puts Spring Session's `SessionRepositoryFilter` in
 front of Spring Security and drives a cookie jar, over `InMemoryIndexedSessionRepository` — a
