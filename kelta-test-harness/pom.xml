@@ -31,11 +31,12 @@
 
     <properties>
         <java.version>25</java.version>
-        <!-- 1.21.4 is required for Docker Engine 29 (min API 1.44): earlier versions ping
-             /v1.32, get a 400, and report "Could not find a valid Docker environment". The fix
-             is Testcontainers' API-version negotiation (testcontainers-java #11346, first in
-             1.21.4). Pinned below Spring Boot's managed 2.0.x on purpose — see testing.md. -->
-        <testcontainers.version>1.21.4</testcontainers.version>
+        <!-- Testcontainers 2.x (2.0.5, the same in every module and in line with Spring Boot 4's
+             managed 2.0.x). Docker Engine 29 (min API 1.44) needs Testcontainers' API-version
+             negotiation (testcontainers-java #11346): releases without it ping /v1.32, get a 400 and
+             report "Could not find a valid Docker environment". On 2.x it ships from 2.0.3 (1.x
+             had it only in 1.21.4), so keep this at 2.0.3 or later — see testing.md. -->
+        <testcontainers.version>2.0.5</testcontainers.version>
         <skipITs>true</skipITs>
         <!-- Maven resource filtering injects these into harness.properties -->
         <harness.basedir>${project.basedir}</harness.basedir>
@@ -77,12 +78,12 @@
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>postgresql</artifactId>
+            <artifactId>testcontainers-postgresql</artifactId>
             <scope>test</scope>
         </dependency>
         <!-- Direct JDBC access for scenarios that assert DB state the API doesn't

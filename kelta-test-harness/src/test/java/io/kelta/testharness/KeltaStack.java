@@ -5,9 +5,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
-import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.ImageFromDockerfile;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
@@ -124,9 +124,9 @@ public final class KeltaStack {
      * {@code CI_DB_JDBC_URL} — see {@link HarnessDbConfig#resolve}.
      */
     @SuppressWarnings("resource")
-    public static final PostgreSQLContainer<?> POSTGRES = DB_CONFIG.external()
+    public static final PostgreSQLContainer POSTGRES = DB_CONFIG.external()
             ? null
-            : new PostgreSQLContainer<>(DockerImageName.parse("pgvector/pgvector:pg15")
+            : new PostgreSQLContainer(DockerImageName.parse("pgvector/pgvector:pg15")
                     .asCompatibleSubstituteFor("postgres"))
                     .withNetworkAliases("postgres")
                     .withNetwork(NETWORK)

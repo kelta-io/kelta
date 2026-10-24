@@ -13,9 +13,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Instant;
@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SqlQueryBuilderFilterOperatorIntegrationTest {
 
     @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:15");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:15");
 
     private record Case(FilterCondition filter, List<String> expectedIds) {}
 
