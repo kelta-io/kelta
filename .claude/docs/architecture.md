@@ -520,7 +520,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   | `/api/oidc-providers/**`, `/api/connected-apps/**` | writes, incl. `ConnectedAppTokenController`'s token writes | `MANAGE_CONNECTED_APPS` | `API_ACCESS` at the gateway; generic `connected-apps` reads are record-filtered in the worker |
   | `/api/scripts/**` | writes, except `POST /{id}/execute` | `MANAGE_CONNECTED_APPS` | `API_ACCESS`; record-filtered. Execute is exempt: record quick actions run scripts for end users and `ScriptExecutionController` enforces the script's `requiredPermission` |
   | `/api/email-templates/**` | writes | `MANAGE_EMAIL_TEMPLATES` | `API_ACCESS`; record-filtered |
-  | `/api/flows/**` | writes, incl. `/{id}/publish` and `/executions/{id}/cancel\|retry`, except `POST /{id}/execute` | `MANAGE_WORKFLOWS` | `API_ACCESS`; generic reads record-filtered. Execute is exempt: page actions (`runFlow`) start flows for end users (open gap — `concerns.md`) |
+  | `/api/flows/**` | writes, incl. `/{id}/publish` and `/executions/{id}/cancel\|retry`, except `POST /{id}/execute` | `MANAGE_WORKFLOWS` | `API_ACCESS`; generic reads record-filtered. Execute is exempt: page actions (`runFlow`) start flows for end users; `FlowExecutionController` admits a caller without `MANAGE_WORKFLOWS` only to a member-launchable flow (→ Flow execute authorization) |
   | `/api/approval-processes/**` | writes | `MANAGE_APPROVALS` | `API_ACCESS`; record-filtered. Submitting/deciding is `/api/approvals/**`, a separate route |
   | `/api/reports/**`, `/api/dashboards/**` | writes, incl. `PUT /api/dashboards/{name}/tree` and `POST /{id}/validate`, except `POST /api/reports/{id}/execute` and `POST /api/dashboards/{id}/data`, `/{id}/components/{cid}/data` | `MANAGE_REPORTS` | `API_ACCESS`; record-filtered. The exempt POSTs are reads by `VIEW_ANALYTICS` viewers, gated in their controllers |
 
@@ -2492,6 +2492,47 @@ that user-facing config to the `scheduled_job` table (which the
   mean the executor will never pick it up. `/runs` returns recent
   `job_execution_log` rows (status, startedAt, completedAt, durationMs,
   errorMessage) joined via `scheduled_job` so the result is tenant-scoped.
+
+### Flow execute authorization (KLT-793)
+
+`POST /api/flows/{id}/execute` is exempt from the gateway's `flows` write check (page `runFlow`
+actions start flows for portal members, whose seeded profile holds only `API_ACCESS`), so
+`FlowExecutionController.executeFlow` authorizes it. It reads the caller's profile from
+`X-User-Profile-Id` and checks `MANAGE_WORKFLOWS` (`holdsManageWorkflows`). In order:
+
+1. Unknown flow → 404; no `definition` → 400; inactive → 409 `FLOW_INACTIVE` (a `test: true` run by a
+   `MANAGE_WORKFLOWS` caller is the only way past an inactive flow).
+2. Caller without `MANAGE_WORKFLOWS` → 403 `FLOW_NOT_LAUNCHABLE` unless the flow is
+   `flow_type = SCREEN` or its `trigger_config` jsonb has `memberLaunchable: true` (boolean `true`
+   only; a string `"true"` does not count). An author opts an `AUTOLAUNCHED` flow in with
+   `triggerConfig: {"memberLaunchable": true}`; no migration — `trigger_config` already exists.
+3. Caller without `MANAGE_WORKFLOWS` sending `state` → 403 `FLOW_STATE_OVERRIDE_FORBIDDEN`. Only
+   `body.input` is read for them, and `InitialStateBuilder.buildFromApiInvocation` builds `context`
+   (`tenantId`/`userId` from `X-Tenant-ID`/`X-User-ID`), `trigger` and no `record`; other top-level
+   body keys are ignored. A `MANAGE_WORKFLOWS` caller may still pass a pre-built `state` (replay,
+   tests); its `context` is used as sent.
+
+Pinned by `FlowExecutionControllerTest`. The read endpoints under `/api/flows/executions/**` are
+not covered by this check (`concerns.md` → Authorization gaps still open).
+
+### SQL_QUERY binds state values (KLT-793)
+
+`SQL_QUERY` never splices state into its statement. `ActionHandler.unresolvedParameterKeys()`
+(default empty) names the top-level Task `Parameters` keys `TaskStateExecutor` leaves unresolved;
+`SqlQueryActionHandler` declares `sql`, and the executor passes the whole state envelope (before
+`InputPath`) as `ActionContext.stateData`. The handler parses the template: each `${path}` becomes a
+JDBC `?` bound to `StateDataResolver.readPath(stateData, path)` as a `SqlParameterValue(Types.OTHER,
+text)` — untyped, so Postgres infers the type from the position, as it does for a literal (maps and
+lists bind as JSON text). The documented form `'${$.id}'` (a placeholder that is the whole quoted
+literal) has its quotes stripped and binds a missing value as `''`, as the old splice produced; a bare
+`${...}` with no value binds `NULL`. A literal `?` outside strings and comments is escaped as `??`
+when anything is bound; placeholders inside comments are left as text. Rejected at run time with a clear message
+(the step fails; `validate()` applies the same rules, but flow save does not call handler `validate`): a placeholder inside a larger literal
+(`'%${$.q}%'` — write `'%' || ${$.q} || '%'`), in an identifier position (after `FROM`/`JOIN`/`INTO`/
+`UPDATE`/`TABLE`/`BY`, next to a `.`, or inside double quotes), or making up the whole statement.
+Other handlers are unaffected: their parameters resolve through `resolveDeep` as before. Scope is
+still only `SET LOCAL search_path` on the application role (`concerns.md` → SQL_QUERY cross-tenant
+reach). Pinned by `SqlQueryActionHandlerTest` and `TaskStateExecutorUnresolvedParametersTest`.
 
 ### Flow step logging level (PLT-602)
 

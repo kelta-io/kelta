@@ -324,7 +324,12 @@ public class RouteConfigService {
      *   <li>{@code flows} — {@code MANAGE_WORKFLOWS}. Includes {@code FlowExecutionController}'s
      *       {@code /{id}/publish} and {@code /executions/{id}/cancel|retry}.
      *       {@code POST /api/flows/{id}/execute} is exempt: page actions ({@code runFlow}) start
-     *       flows for end users, and the flow runs as its resolved actor.</li>
+     *       flows for end users, and the flow runs as its resolved actor. The worker gates it
+     *       instead: {@code FlowExecutionController.executeFlow} answers 403
+     *       {@code FLOW_NOT_LAUNCHABLE} to a caller without {@code MANAGE_WORKFLOWS} unless the
+     *       flow's {@code flow_type} is {@code SCREEN} or its {@code trigger_config} sets
+     *       {@code memberLaunchable: true}, and 403 {@code FLOW_STATE_OVERRIDE_FORBIDDEN} when such
+     *       a caller sends {@code state} (its context is always built from the request headers).</li>
      *   <li>{@code approval-processes} — {@code MANAGE_APPROVALS}. Submitting and deciding
      *       approvals is {@code /api/approvals/**}, a separate route.</li>
      *   <li>{@code reports}, {@code dashboards} — {@code MANAGE_REPORTS}. Running a report

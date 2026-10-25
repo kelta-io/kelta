@@ -13,6 +13,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.*;
 
@@ -31,8 +32,14 @@ public class FlowExecutionController {
 
     private static final Logger log = LoggerFactory.getLogger(FlowExecutionController.class);
 
-    /** Lets a test run start an inactive flow; the gateway exempts {@code /execute} from it. */
+    /**
+     * Lets a test run start an inactive flow, start any flow, and pass a pre-built {@code state}.
+     * The gateway exempts {@code /execute} from it, so a caller without it may start only a
+     * member-launchable flow, with server-built context.
+     */
     static final String MANAGE_WORKFLOWS = "MANAGE_WORKFLOWS";
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final FlowEngine flowEngine;
     private final FlowActorResolver flowActorResolver;
@@ -61,6 +68,11 @@ public class FlowExecutionController {
     /**
      * Executes a flow with optional input payload.
      * Used for AUTOLAUNCHED flows and manual trigger from UI.
+     * <p>
+     * A caller without MANAGE_WORKFLOWS (a portal member running a page {@code runFlow} action)
+     * may start only a {@code SCREEN} flow or one whose {@code trigger_config} has
+     * {@code memberLaunchable: true}, and may not send {@code state}: its context always comes
+     * from the request headers.
      */
     @PostMapping("/{flowId}/execute")
     @SuppressWarnings("unchecked")
@@ -87,10 +99,26 @@ public class FlowExecutionController {
         }
 
         boolean isTest = body != null && Boolean.TRUE.equals(body.get("test"));
-        if (!Boolean.TRUE.equals(flow.get("active")) && !(isTest && holdsManageWorkflows(request))) {
+        boolean manager = holdsManageWorkflows(request);
+        if (!Boolean.TRUE.equals(flow.get("active")) && !(isTest && manager)) {
             log.warn("Execute rejected for inactive flow: flowId={}", flowId);
             return ResponseEntity.status(HttpStatus.CONFLICT).body(
                     JsonApiResponseBuilder.error("409", "FLOW_INACTIVE", "Conflict", "Flow is not active"));
+        }
+
+        if (!manager && !isMemberLaunchable(flow)) {
+            log.warn("Execute rejected for flow not launchable by members: flowId={}, userId={}", flowId, userId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+                    JsonApiResponseBuilder.error("403", "FLOW_NOT_LAUNCHABLE", "Forbidden",
+                            "Starting this flow requires the MANAGE_WORKFLOWS permission"));
+        }
+
+        if (!manager && body != null && body.containsKey("state")) {
+            log.warn("Execute rejected for state override without MANAGE_WORKFLOWS: flowId={}, userId={}",
+                    flowId, userId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+                    JsonApiResponseBuilder.error("403", "FLOW_STATE_OVERRIDE_FORBIDDEN", "Forbidden",
+                            "Passing 'state' requires the MANAGE_WORKFLOWS permission; send 'input' instead"));
         }
 
         // If no tenantId from header, use the flow's tenant
@@ -454,6 +482,30 @@ public class FlowExecutionController {
         return bootstrapRepository.findProfileSystemPermissions(profileId).stream()
                 .anyMatch(p -> MANAGE_WORKFLOWS.equals(p.get("permission_name"))
                         && Boolean.TRUE.equals(p.get("granted")));
+    }
+
+    /** A {@code SCREEN} flow, or one whose {@code trigger_config} sets {@code memberLaunchable: true}. */
+    static boolean isMemberLaunchable(Map<String, Object> flow) {
+        if ("SCREEN".equals(flow.get("flow_type"))) {
+            return true;
+        }
+        if (!(flow.get("trigger_config") instanceof String json) || json.isBlank()) {
+            return false;
+        }
+        try {
+            Object config = MAPPER.readValue(json, Object.class);
+            if (config instanceof String inner) {
+                config = MAPPER.readValue(inner, Object.class);
+            }
+            if (config instanceof Map<?, ?> map && "jsonb".equals(map.get("type"))
+                    && map.get("value") instanceof String inner) {
+                config = MAPPER.readValue(inner, Object.class);
+            }
+            return config instanceof Map<?, ?> map && Boolean.TRUE.equals(map.get("memberLaunchable"));
+        } catch (Exception e) {
+            log.warn("Unreadable trigger_config on flow {}: {}", flow.get("id"), e.getMessage());
+            return false;
+        }
     }
 
     private Map<String, Object> executionToMap(FlowExecutionData exec) {
