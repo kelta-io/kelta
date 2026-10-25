@@ -98,6 +98,10 @@ well under a minute.
 
 ## Sinks
 
+Each sink is attempted independently — a failed Loki push still runs the OTLP push and
+the Kelta upsert — and the job still exits 1 with one `ERROR <sink>: <message> (<cause>)`
+line per failed sink.
+
 - **Loki** `{job="dora", event=deploy|rollback|incident|snapshot}` — lines carry the
   event's own timestamp (only the last `--push-days`, default 6, inside Loki's 7-day
   old-sample window) and are serialized with sorted keys, so a re-push is
