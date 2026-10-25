@@ -29,7 +29,8 @@ test.use({
   // Playwright's default headless browser (chromium-headless-shell) ignores
   // --unsafely-treat-insecure-origin-as-secure, so on an http container origin (CI) the SPA
   // has no crypto.subtle and its PKCE step throws. Full Chromium in new-headless mode honours
-  // the flag — verified in mcr.microsoft.com/playwright:v1.58.2-noble. Only this spec switches.
+  // the flag — verified in the CI runner image (mcr.microsoft.com/playwright, tag derived from
+  // e2e-tests/package-lock.json), first on 1.58.2. Only this spec switches.
   ...(process.env.E2E_BROWSER_SECURE_ORIGINS ? { channel: "chromium" } : {}),
 });
 

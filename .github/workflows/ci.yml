@@ -753,13 +753,21 @@ jobs:
         # `../../kelta-web/packages/cli/dist/index.js` from /work/tests, the same
         # relative path cli-smoke.spec.ts already uses.
         run: |
-          # Image tag must match the @playwright/test version in package-lock.json
-          # (resolved from ^1.50.0 → currently 1.58.2). Update both together.
+          # The image tag is derived from @playwright/test in e2e-tests/package-lock.json, so the
+          # browsers always match the installed package (kelta#1984 failed on a package-only bump).
+          PLAYWRIGHT_VERSION=$(jq -r '.packages["node_modules/@playwright/test"].version' e2e-tests/package-lock.json)
+          if [ -z "$PLAYWRIGHT_VERSION" ] || [ "$PLAYWRIGHT_VERSION" = "null" ]; then
+            echo "::error::no @playwright/test version in e2e-tests/package-lock.json"
+            exit 1
+          fi
+          echo "Playwright runner base image: mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
           # --load: BUILDX_BUILDER selects the docker-container kelta-ci builder, which keeps
           # an unloaded result in its cache only, so `docker run` silently used whatever stale
           # kelta-e2e-runner:local the node already had (old specs; PLT-522).
-          docker buildx build --load -t kelta-e2e-runner:local -f - . <<'DOCKERFILE'
-          FROM mcr.microsoft.com/playwright:v1.58.2-noble
+          docker buildx build --load -t kelta-e2e-runner:local \
+            --build-arg PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" -f - . <<'DOCKERFILE'
+          ARG PLAYWRIGHT_VERSION
+          FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
           WORKDIR /work
           COPY e2e-tests/package.json e2e-tests/package-lock.json ./
           RUN npm ci
