@@ -4,6 +4,7 @@ import io.kelta.worker.repository.PasswordPolicyRepository;
 import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,8 @@ import static org.mockito.Mockito.*;
 @WithTenant("t1")
 class PasswordPolicyControllerTest {
 
+    private final MockHttpServletRequest adminRequest = AdminPermissionGuardFixture.request();
+
     private PasswordPolicyRepository repository;
     private JdbcTemplate jdbcTemplate;
     private PasswordPolicyController controller;
@@ -24,7 +27,8 @@ class PasswordPolicyControllerTest {
     void setUp() {
         repository = mock(PasswordPolicyRepository.class);
         jdbcTemplate = mock(JdbcTemplate.class);
-        controller = new PasswordPolicyController(repository, jdbcTemplate);
+        controller = new PasswordPolicyController(repository, jdbcTemplate,
+                AdminPermissionGuardFixture.granting("MANAGE_USERS"));
     }
 
     @Nested
@@ -36,7 +40,7 @@ class PasswordPolicyControllerTest {
         void shouldReturnDefaults() {
             when(repository.findByTenantId("t1")).thenReturn(Optional.empty());
 
-            var response = controller.getPolicy();
+            var response = controller.getPolicy(adminRequest);
             assertThat(response.getStatusCode().value()).isEqualTo(200);
         }
 
@@ -58,7 +62,7 @@ class PasswordPolicyControllerTest {
                     Map.entry("max_age_days", 90)
             )));
 
-            var response = controller.getPolicy();
+            var response = controller.getPolicy(adminRequest);
             assertThat(response.getStatusCode().value()).isEqualTo(200);
         }
     }
@@ -70,7 +74,7 @@ class PasswordPolicyControllerTest {
         @Test
         @DisplayName("Should reject minLength below 8")
         void shouldRejectMinLengthBelow8() {
-            var response = controller.updatePolicy(Map.of("minLength", 4));
+            var response = controller.updatePolicy(adminRequest, Map.of("minLength", 4));
             assertThat(response.getStatusCode().value()).isEqualTo(400);
         }
 
@@ -86,7 +90,7 @@ class PasswordPolicyControllerTest {
             policyMap.put("historyCount", 5); policyMap.put("dictionaryCheck", true);
             policyMap.put("personalDataCheck", true); policyMap.put("lockoutThreshold", 5);
             policyMap.put("lockoutDurationMinutes", 30); policyMap.put("maxAgeDays", 90);
-            var response = controller.updatePolicy(policyMap);
+            var response = controller.updatePolicy(adminRequest, policyMap);
 
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             verify(repository).upsert(eq("t1"), any());
@@ -103,7 +107,7 @@ class PasswordPolicyControllerTest {
             when(jdbcTemplate.queryForList(startsWith("SELECT id FROM platform_user"), any(Object[].class)))
                     .thenReturn(List.of(Map.of("id", "user-1")));
 
-            var response = controller.unlockAccount("user-1");
+            var response = controller.unlockAccount(adminRequest, "user-1");
             assertThat(response.getStatusCode().value()).isEqualTo(200);
         }
 
@@ -113,8 +117,28 @@ class PasswordPolicyControllerTest {
             when(jdbcTemplate.queryForList(startsWith("SELECT id FROM platform_user"), any(Object[].class)))
                     .thenReturn(List.of());
 
-            var response = controller.unlockAccount("user-other");
+            var response = controller.unlockAccount(adminRequest, "user-other");
             assertThat(response.getStatusCode().value()).isEqualTo(404);
         }
+    }
+
+    @Test
+    @DisplayName("A profile without MANAGE_USERS (API_ACCESS only, like Portal User) gets 403 on every handler")
+    void deniedWithoutManageUsers() {
+        controller = new PasswordPolicyController(repository, jdbcTemplate, AdminPermissionGuardFixture.apiAccessOnly());
+
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.getPolicy(adminRequest), "MANAGE_USERS");
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.updatePolicy(adminRequest, Map.of("minLength", 12)),
+                "MANAGE_USERS");
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.unlockAccount(adminRequest, "user-1"), "MANAGE_USERS");
+        verifyNoInteractions(repository, jdbcTemplate);
+    }
+
+    @Test
+    @DisplayName("A profile holding MANAGE_USERS can read the policy")
+    void allowedWithManageUsers() {
+        when(repository.findByTenantId("t1")).thenReturn(Optional.empty());
+
+        assertThat(controller.getPolicy(adminRequest).getStatusCode().value()).isEqualTo(200);
     }
 }

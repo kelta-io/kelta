@@ -1,6 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.TenantContext;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -31,16 +32,21 @@ import java.util.UUID;
 @RequestMapping("/api/admin/email-templates")
 public class EmailTemplatesController {
 
+    private static final String PERMISSION = "MANAGE_EMAIL_TEMPLATES";
+
     private static final Logger log = LoggerFactory.getLogger(EmailTemplatesController.class);
 
     private final JdbcTemplate jdbcTemplate;
+    private final AdminPermissionGuard permissionGuard;
 
-    public EmailTemplatesController(JdbcTemplate jdbcTemplate) {
+    public EmailTemplatesController(JdbcTemplate jdbcTemplate, AdminPermissionGuard permissionGuard) {
         this.jdbcTemplate = jdbcTemplate;
+        this.permissionGuard = permissionGuard;
     }
 
     @GetMapping
-    public ResponseEntity<?> list() {
+    public ResponseEntity<?> list(HttpServletRequest request) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 
@@ -69,7 +75,8 @@ public class EmailTemplatesController {
     }
 
     @PostMapping("/{templateKey}/override")
-    public ResponseEntity<?> override(@PathVariable String templateKey, @RequestBody(required = false) Map<String, Object> body) {
+    public ResponseEntity<?> override(HttpServletRequest request, @PathVariable String templateKey, @RequestBody(required = false) Map<String, Object> body) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 
@@ -101,7 +108,8 @@ public class EmailTemplatesController {
     }
 
     @DeleteMapping("/{templateKey}/override")
-    public ResponseEntity<?> revert(@PathVariable String templateKey) {
+    public ResponseEntity<?> revert(HttpServletRequest request, @PathVariable String templateKey) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 

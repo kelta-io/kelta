@@ -1,6 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.jsonapi.JsonApiResponseBuilder;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -20,12 +21,16 @@ import java.util.*;
 @RequestMapping("/api/admin/observability-settings")
 public class ObservabilitySettingsController {
 
+    private static final String PERMISSION = "CUSTOMIZE_APPLICATION";
+
     private static final Logger log = LoggerFactory.getLogger(ObservabilitySettingsController.class);
 
     private final JdbcTemplate jdbcTemplate;
+    private final AdminPermissionGuard permissionGuard;
 
-    public ObservabilitySettingsController(JdbcTemplate jdbcTemplate) {
+    public ObservabilitySettingsController(JdbcTemplate jdbcTemplate, AdminPermissionGuard permissionGuard) {
         this.jdbcTemplate = jdbcTemplate;
+        this.permissionGuard = permissionGuard;
     }
 
     /**
@@ -33,7 +38,9 @@ public class ObservabilitySettingsController {
      */
     @GetMapping
     public ResponseEntity<Map<String, Object>> getSettings(
+            HttpServletRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId) {
+        permissionGuard.require(request, PERMISSION);
         try {
             if (tenantId == null || tenantId.isBlank()) {
                 return ResponseEntity.badRequest().body(
@@ -69,8 +76,10 @@ public class ObservabilitySettingsController {
      */
     @PutMapping
     public ResponseEntity<Map<String, Object>> updateSettings(
+            HttpServletRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestBody Map<String, Object> body) {
+        permissionGuard.require(request, PERMISSION);
         try {
             if (tenantId == null || tenantId.isBlank()) {
                 return ResponseEntity.badRequest().body(
@@ -106,7 +115,7 @@ public class ObservabilitySettingsController {
             log.info("Updated observability settings for tenant {}: {} settings", tenantId, settings.size());
 
             // Return updated settings
-            return getSettings(tenantId);
+            return getSettings(request, tenantId);
         } catch (Exception e) {
             log.error("Failed to update observability settings: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(

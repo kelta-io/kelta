@@ -209,7 +209,7 @@ Each maps to a real mistake an agent has made here. Violating one usually compil
 - ❌ Update an in-memory registry without the NATS broadcast → ✅ BeforeSaveHook + publish (Rule 1).
 - ❌ Block in a gateway filter → ✅ reactive `Mono`/`Flux` only.
 - ❌ Call `runWithTenant` on a worker request path → ✅ context is pre-bound by `TenantContextFilter`; just read `TenantContext`.
-- ❌ Assume `/api/admin/**` is Cerbos-protected per-resource → it gets only `API_ACCESS`; enforce specific permissions in-controller (`architecture.md` → Authorizing a new endpoint).
+- ❌ Assume `/api/admin/**` is Cerbos-protected per-resource → it gets only `API_ACCESS` (plus a gateway deny for portal users); enforce the specific permission in-controller with `AdminPermissionGuard` (`architecture.md` → Authorizing a new endpoint).
 - ❌ Register a flow `ActionHandler` as `@Component` → ✅ wire it in the module's `onStartup()` (`playbooks.md`). The `@Component` Javadoc is wrong.
 - ❌ Hand-write MCP `server.addTool(...)` → ✅ implement the `AdminTool`/`UserTool` marker; `McpServerConfig` auto-registers.
 - ❌ Wire a platform `BeforeSaveHook` as a `@Bean` + `hookRegistry.register(hook)` → ✅ annotate it `@Component` with a

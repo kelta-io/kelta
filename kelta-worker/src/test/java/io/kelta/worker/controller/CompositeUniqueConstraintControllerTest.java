@@ -15,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.time.Instant;
 import java.util.List;
@@ -31,6 +32,8 @@ import static org.mockito.Mockito.when;
 @DisplayName("CompositeUniqueConstraintController Tests")
 class CompositeUniqueConstraintControllerTest {
 
+    private final MockHttpServletRequest adminRequest = AdminPermissionGuardFixture.request();
+
     @Mock private CollectionRegistry collectionRegistry;
     @Mock private CompositeUniqueConstraintService constraintService;
     private CompositeUniqueConstraintController controller;
@@ -38,7 +41,8 @@ class CompositeUniqueConstraintControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new CompositeUniqueConstraintController(collectionRegistry, constraintService);
+        controller = new CompositeUniqueConstraintController(collectionRegistry, constraintService,
+                AdminPermissionGuardFixture.granting("CUSTOMIZE_APPLICATION"));
         availability = new CollectionDefinition(
                 "availability",
                 "Availability",
@@ -53,7 +57,7 @@ class CompositeUniqueConstraintControllerTest {
     void createReturns404WhenCollectionUnknown() {
         when(collectionRegistry.get("nope")).thenReturn(null);
 
-        ResponseEntity<?> response = controller.create("nope", Map.of("fieldNames", List.of("a", "b")));
+        ResponseEntity<?> response = controller.create(adminRequest, "nope", Map.of("fieldNames", List.of("a", "b")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         verifyNoInteractions(constraintService);
@@ -63,7 +67,7 @@ class CompositeUniqueConstraintControllerTest {
     void createReturns400WhenFieldNamesMissing() {
         when(collectionRegistry.get("availability")).thenReturn(availability);
 
-        ResponseEntity<?> response = controller.create("availability", Map.of());
+        ResponseEntity<?> response = controller.create(adminRequest, "availability", Map.of());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         verifyNoInteractions(constraintService);
@@ -73,7 +77,7 @@ class CompositeUniqueConstraintControllerTest {
     void createReturns400WhenFieldNamesContainsBlank() {
         when(collectionRegistry.get("availability")).thenReturn(availability);
 
-        ResponseEntity<?> response = controller.create("availability",
+        ResponseEntity<?> response = controller.create(adminRequest, "availability",
                 Map.of("fieldNames", java.util.Arrays.asList("title", "")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
@@ -89,7 +93,7 @@ class CompositeUniqueConstraintControllerTest {
                         List.of("title", "provider", "region"),
                         List.of("title", "provider", "region")));
 
-        ResponseEntity<?> response = controller.create("availability",
+        ResponseEntity<?> response = controller.create(adminRequest, "availability",
                 Map.of("fieldNames", List.of("title", "provider", "region")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
@@ -108,7 +112,7 @@ class CompositeUniqueConstraintControllerTest {
         when(constraintService.create(any(), any()))
                 .thenThrow(new IllegalArgumentException("Unknown field 'foo'"));
 
-        ResponseEntity<?> response = controller.create("availability",
+        ResponseEntity<?> response = controller.create(adminRequest, "availability",
                 Map.of("fieldNames", List.of("foo")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
@@ -121,7 +125,7 @@ class CompositeUniqueConstraintControllerTest {
                 .thenThrow(new UniqueConstraintViolationException(
                         "availability", "title,provider", null));
 
-        ResponseEntity<?> response = controller.create("availability",
+        ResponseEntity<?> response = controller.create(adminRequest, "availability",
                 Map.of("fieldNames", List.of("title", "provider")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
@@ -136,7 +140,7 @@ class CompositeUniqueConstraintControllerTest {
                         List.of("title", "provider"),
                         List.of("title", "provider"))));
 
-        ResponseEntity<?> response = controller.list("availability");
+        ResponseEntity<?> response = controller.list(adminRequest, "availability");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         @SuppressWarnings("unchecked")
@@ -151,7 +155,7 @@ class CompositeUniqueConstraintControllerTest {
     @Test
     void listReturns404WhenCollectionUnknown() {
         when(collectionRegistry.get("nope")).thenReturn(null);
-        ResponseEntity<?> response = controller.list("nope");
+        ResponseEntity<?> response = controller.list(adminRequest, "nope");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
@@ -160,7 +164,7 @@ class CompositeUniqueConstraintControllerTest {
         when(collectionRegistry.get("availability")).thenReturn(availability);
         when(constraintService.drop(availability, "uniq_availability_title_provider")).thenReturn(true);
 
-        ResponseEntity<?> response = controller.drop("availability", "uniq_availability_title_provider");
+        ResponseEntity<?> response = controller.drop(adminRequest, "availability", "uniq_availability_title_provider");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(constraintService).drop(availability, "uniq_availability_title_provider");
@@ -171,8 +175,33 @@ class CompositeUniqueConstraintControllerTest {
         when(collectionRegistry.get("availability")).thenReturn(availability);
         when(constraintService.drop(availability, "uniq_missing")).thenReturn(false);
 
-        ResponseEntity<?> response = controller.drop("availability", "uniq_missing");
+        ResponseEntity<?> response = controller.drop(adminRequest, "availability", "uniq_missing");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("A profile without CUSTOMIZE_APPLICATION (API_ACCESS only, like Portal User) gets 403 on every handler")
+    void deniedWithoutCustomizeApplication() {
+        controller = new CompositeUniqueConstraintController(collectionRegistry, constraintService,
+                AdminPermissionGuardFixture.apiAccessOnly());
+
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.create(adminRequest, "availability",
+                Map.of("fieldNames", List.of("a", "b"))), "CUSTOMIZE_APPLICATION");
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.list(adminRequest, "availability"),
+                "CUSTOMIZE_APPLICATION");
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.drop(adminRequest, "availability", "idx"),
+                "CUSTOMIZE_APPLICATION");
+        verifyNoInteractions(collectionRegistry, constraintService);
+    }
+
+    @Test
+    @DisplayName("A profile holding CUSTOMIZE_APPLICATION reaches the handler")
+    void allowedWithCustomizeApplication() {
+        when(collectionRegistry.get("availability")).thenReturn(availability);
+
+        ResponseEntity<?> response = controller.list(adminRequest, "availability");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 }

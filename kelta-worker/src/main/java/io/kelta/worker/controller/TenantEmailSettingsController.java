@@ -5,6 +5,7 @@ import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.worker.repository.EmailRepository;
 import io.kelta.worker.repository.EmailRepository.TenantEmailConfigRow;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -44,6 +45,8 @@ import java.util.UUID;
 @ConditionalOnProperty(name = "kelta.encryption.key")
 public class TenantEmailSettingsController {
 
+    private static final String PERMISSION = "MANAGE_TENANTS";
+
     private static final Logger log = LoggerFactory.getLogger(TenantEmailSettingsController.class);
     private static final String CREDENTIAL_NAME = "tenant-smtp";
 
@@ -52,21 +55,25 @@ public class TenantEmailSettingsController {
     private final EmailService emailService;
     private final EncryptionService encryptionService;
     private final ObjectMapper objectMapper;
+    private final AdminPermissionGuard permissionGuard;
 
     public TenantEmailSettingsController(JdbcTemplate jdbcTemplate,
                                           EmailRepository emailRepository,
                                           EmailService emailService,
                                           EncryptionService encryptionService,
-                                          ObjectMapper objectMapper) {
+                                          ObjectMapper objectMapper,
+                                          AdminPermissionGuard permissionGuard) {
         this.jdbcTemplate = jdbcTemplate;
         this.emailRepository = emailRepository;
         this.emailService = emailService;
         this.encryptionService = encryptionService;
         this.objectMapper = objectMapper;
+        this.permissionGuard = permissionGuard;
     }
 
     @GetMapping
-    public ResponseEntity<?> get() {
+    public ResponseEntity<?> get(HttpServletRequest request) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 
@@ -103,7 +110,8 @@ public class TenantEmailSettingsController {
     ) {}
 
     @PutMapping
-    public ResponseEntity<?> update(@RequestBody EmailSettingsUpdate req) {
+    public ResponseEntity<?> update(HttpServletRequest request, @RequestBody EmailSettingsUpdate req) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 
@@ -164,7 +172,8 @@ public class TenantEmailSettingsController {
     public record TestSendRequest(String to) {}
 
     @PostMapping("/test")
-    public ResponseEntity<?> testSend(@RequestBody TestSendRequest req) {
+    public ResponseEntity<?> testSend(HttpServletRequest request, @RequestBody TestSendRequest req) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
         if (req.to() == null || req.to().isBlank()) {

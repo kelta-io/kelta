@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.worker.service.SearchIndexService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -20,12 +21,16 @@ import java.util.Map;
 @RequestMapping("/api/admin/search-reindex")
 public class SearchReindexController {
 
+    private static final String PERMISSION = "CUSTOMIZE_APPLICATION";
+
     private static final Logger log = LoggerFactory.getLogger(SearchReindexController.class);
 
     private final SearchIndexService searchIndexService;
+    private final AdminPermissionGuard permissionGuard;
 
-    public SearchReindexController(SearchIndexService searchIndexService) {
+    public SearchReindexController(SearchIndexService searchIndexService, AdminPermissionGuard permissionGuard) {
         this.searchIndexService = searchIndexService;
+        this.permissionGuard = permissionGuard;
     }
 
     /**
@@ -33,7 +38,9 @@ public class SearchReindexController {
      */
     @GetMapping
     public ResponseEntity<Map<String, Object>> getStats(
+            HttpServletRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId) {
+        permissionGuard.require(request, PERMISSION);
         try {
             if (tenantId == null || tenantId.isBlank()) {
                 return ResponseEntity.badRequest().body(
@@ -57,9 +64,11 @@ public class SearchReindexController {
      */
     @PostMapping
     public ResponseEntity<Map<String, Object>> triggerReindex(
+            HttpServletRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Tenant-Slug", required = false) String tenantSlug,
             @RequestBody(required = false) Map<String, Object> body) {
+        permissionGuard.require(request, PERMISSION);
         try {
             if (tenantId == null || tenantId.isBlank()) {
                 return ResponseEntity.badRequest().body(

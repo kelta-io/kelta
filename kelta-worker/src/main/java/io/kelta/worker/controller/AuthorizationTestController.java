@@ -1,6 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.worker.service.CerbosAuthorizationService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -19,12 +20,16 @@ import java.util.Map;
 @RequestMapping("/api/admin/authorization")
 public class AuthorizationTestController {
 
+    private static final String PERMISSION = "MANAGE_USERS";
+
     private static final Logger log = LoggerFactory.getLogger(AuthorizationTestController.class);
 
     private final CerbosAuthorizationService authzService;
+    private final AdminPermissionGuard permissionGuard;
 
-    public AuthorizationTestController(CerbosAuthorizationService authzService) {
+    public AuthorizationTestController(CerbosAuthorizationService authzService, AdminPermissionGuard permissionGuard) {
         this.authzService = authzService;
+        this.permissionGuard = permissionGuard;
     }
 
     /**
@@ -36,7 +41,8 @@ public class AuthorizationTestController {
      */
     @PostMapping("/test")
     @SuppressWarnings("unchecked")
-    public ResponseEntity<Map<String, Object>> testAuthorization(@RequestBody Map<String, Object> body) {
+    public ResponseEntity<Map<String, Object>> testAuthorization(HttpServletRequest request, @RequestBody Map<String, Object> body) {
+        permissionGuard.require(request, PERMISSION);
         String email = (String) body.get("email");
         String profileId = (String) body.get("profileId");
         String tenantId = (String) body.get("tenantId");

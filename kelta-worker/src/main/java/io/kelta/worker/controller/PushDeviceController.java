@@ -5,6 +5,7 @@ import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.worker.service.push.DefaultPushService;
 import io.kelta.worker.service.push.WebPushProvider;
 import io.kelta.worker.interceptor.SelfScopedController;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -27,6 +28,8 @@ import java.util.Map;
 @RestController
 public class PushDeviceController implements SelfScopedController {
 
+    private static final String PERMISSION = "CUSTOMIZE_APPLICATION";
+
     private static final Logger log = LoggerFactory.getLogger(PushDeviceController.class);
     private static final int ADMIN_NOTIFICATION_RATE_LIMIT = 10; // per hour
 
@@ -34,15 +37,18 @@ public class PushDeviceController implements SelfScopedController {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectProvider<WebPushProvider> webPushProvider;
     private final UserIdResolver userIdResolver;
+    private final AdminPermissionGuard permissionGuard;
 
     public PushDeviceController(DefaultPushService pushService, JdbcTemplate jdbcTemplate,
                                 ObjectProvider<WebPushProvider> webPushProvider,
-                                UserIdResolver userIdResolver) {
+                                UserIdResolver userIdResolver,
+                                AdminPermissionGuard permissionGuard) {
         this.pushService = pushService;
         this.jdbcTemplate = jdbcTemplate;
         // Absent unless VAPID keys are configured.
         this.webPushProvider = webPushProvider;
         this.userIdResolver = userIdResolver;
+        this.permissionGuard = permissionGuard;
     }
 
     /**
@@ -125,7 +131,8 @@ public class PushDeviceController implements SelfScopedController {
     }
 
     @PostMapping("/api/admin/notifications")
-    public ResponseEntity<?> sendNotification(@RequestBody Map<String, Object> body) {
+    public ResponseEntity<?> sendNotification(HttpServletRequest request, @RequestBody Map<String, Object> body) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 
