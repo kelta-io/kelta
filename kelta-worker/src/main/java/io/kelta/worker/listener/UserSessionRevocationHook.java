@@ -6,6 +6,7 @@ import io.kelta.worker.controller.PersonalAccessTokenController;
 import io.kelta.worker.controller.PersonalAccessTokenController.LiveToken;
 import io.kelta.worker.service.AuthSessionRevocationClient;
 import io.kelta.worker.service.SecurityAuditLogger;
+import io.kelta.worker.service.UserAccessRevocationMarker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -29,6 +30,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code pat:<hash>} cache entries dropped and {@code pat:revoked:<hash>} written, so automation
  * holding a cached token stops working. Also best effort: a failure is logged, never thrown.
  *
+ * <p>The access tokens kelta-auth has already issued are self-contained JWTs, so
+ * {@link UserAccessRevocationMarker} writes {@code user:revoked:<tenantId>:<userId>} after the
+ * write commits and the gateway rejects every one of them issued before it. Best effort as well.
+ *
  * <p>A deleted user's row is gone when kelta-auth handles the call, so the login names kelta-auth
  * needs to find the user's tokens are read in {@link #beforeDelete} and handed over in
  * {@link #afterDelete}. The same goes for the PATs, whose rows the delete cascades away.
@@ -46,14 +51,17 @@ public class UserSessionRevocationHook implements BeforeSaveHook {
     private final AuthSessionRevocationClient authClient;
     private final JdbcTemplate jdbcTemplate;
     private final PersonalAccessTokenController tokens;
+    private final UserAccessRevocationMarker accessRevocation;
     private final Map<String, List<String>> pendingDeletes = new ConcurrentHashMap<>();
     private final Map<String, List<LiveToken>> pendingTokenDeletes = new ConcurrentHashMap<>();
 
     public UserSessionRevocationHook(AuthSessionRevocationClient authClient, JdbcTemplate jdbcTemplate,
-                                     PersonalAccessTokenController tokens) {
+                                     PersonalAccessTokenController tokens,
+                                     UserAccessRevocationMarker accessRevocation) {
         this.authClient = authClient;
         this.jdbcTemplate = jdbcTemplate;
         this.tokens = tokens;
+        this.accessRevocation = accessRevocation;
     }
 
     @Override
@@ -73,6 +81,7 @@ public class UserSessionRevocationHook implements BeforeSaveHook {
         Object before = previous == null ? null : previous.get("status");
         if (status != null && !ACTIVE.equals(status) && !Objects.equals(status, before)) {
             authClient.revokeAfterCommit(tenantId, id);
+            accessRevocation.markAfterCommit(tenantId, id);
             try {
                 tokens.revokeAllUserTokens(tenantId, id, AUDIT_ACTOR,
                         SecurityAuditLogger.EventType.PAT_REVOKED, "user status " + status);
@@ -122,6 +131,7 @@ public class UserSessionRevocationHook implements BeforeSaveHook {
     public void afterDelete(String id, String tenantId) {
         List<String> names = pendingDeletes.remove(key(tenantId, id));
         authClient.revokeAfterCommit(tenantId, id, names == null ? List.of() : names);
+        accessRevocation.markAfterCommit(tenantId, id);
         List<LiveToken> live = pendingTokenDeletes.remove(key(tenantId, id));
         if (live != null) {
             try {
