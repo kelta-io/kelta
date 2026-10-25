@@ -62,6 +62,23 @@ the JAR and every cast to a platform type would fail.
 3. Create `billing_plans` rows. `kind` is `SUBSCRIPTION`, `ONE_TIME`, or `DEFAULT` (the free
    baseline — not purchasable). `stripePriceId` must match the Stripe price.
 
+## Per-member quotas
+
+A `billing_entitlement_rules` row (`collectionName`, `limitKey`, `appliesTo`, optional
+`countFilter`, optional `message`) caps creates in `collectionName` by the member's resolved value
+for `limitKey`. That value — base plan plus live passes, merged by `EntitlementResolver` — is read
+as one of three kinds:
+
+| Value of `limitKey` | Effect on a create |
+|---|---|
+| Boolean — a feature gate | `false` rejects with the rule's `message`; `true` allows. No count query. Passes OR-merge, so a pass granting `true` lifts a DEFAULT `false`. |
+| Non-negative number — a count cap | The member's existing rows (`createdBy` = member, plus `countFilter`) are counted; at or over the limit rejects. `0` rejects without counting. A numeric string is parsed as an integer. |
+| Negative number (e.g. `-1`) — unlimited | Allows, no count query. |
+
+A member with no value for `limitKey` is uncapped — put the key on the DEFAULT plan for a hard
+baseline. Any other value (an unparseable string, an object) is logged and allowed, like every other
+quota fault.
+
 ## Security notes
 
 - **The webhook route is unauthenticated and the platform verifies nothing.** This module is the
