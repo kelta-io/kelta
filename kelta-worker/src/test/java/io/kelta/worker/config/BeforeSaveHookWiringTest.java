@@ -224,7 +224,8 @@ class BeforeSaveHookWiringTest {
             UiPageConfigValidator.class, UserInviteService.class, VectorMaintenanceService.class,
             EncryptionService.class, CredentialTypeRegistry.class, OutboundUrlGuard.class,
             io.kelta.worker.service.AuthSessionRevocationClient.class,
-            io.kelta.worker.controller.PersonalAccessTokenController.class);
+            io.kelta.worker.controller.PersonalAccessTokenController.class,
+            io.kelta.worker.service.UserAccessRevocationMarker.class);
 
     /** Collection key → the hooks registered directly on it (wildcard hooks excluded), in order. */
     private static Map<String, List<String>> registeredHooks(BeforeSaveHookRegistry registry) {

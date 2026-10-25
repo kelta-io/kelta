@@ -4,9 +4,12 @@ import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.worker.controller.PersonalAccessTokenController;
 import io.kelta.worker.service.AuthSessionRevocationClient;
 import io.kelta.worker.service.SecurityAuditLogger;
+import io.kelta.worker.service.UserAccessRevocationMarker;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.http.HttpStatus;
@@ -27,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
@@ -44,10 +48,18 @@ class UserSessionRevocationHookTest {
     private final StringRedisTemplate redis = mock(StringRedisTemplate.class);
     private final PersonalAccessTokenController tokens =
             new PersonalAccessTokenController(jdbc, redis, mock(UserIdResolver.class));
-    private final UserSessionRevocationHook hook = new UserSessionRevocationHook(client, jdbc, tokens);
+    private final UserAccessRevocationMarker marker = new UserAccessRevocationMarker(redis, Duration.ofHours(2));
+    private final UserSessionRevocationHook hook = new UserSessionRevocationHook(client, jdbc, tokens, marker);
 
     private static final String LIVE_TOKENS = "SELECT id, token_hash FROM user_api_token WHERE tenant_id = ?";
     private static final String REVOKE = "SET revoked = true";
+
+    /** Asserts {@code user:revoked:t-1:u-1} was written with a revocation time in [from, now] and a 2 h TTL. */
+    private void assertMarkerWrittenSince(long from) {
+        ArgumentCaptor<String> value = ArgumentCaptor.forClass(String.class);
+        verify(valueOps).set(eq("user:revoked:t-1:u-1"), value.capture(), eq(Duration.ofHours(2)));
+        assertThat(Long.parseLong(value.getValue())).isBetween(from, Instant.now().getEpochSecond());
+    }
 
     @SafeVarargs
     private void userHoldsTokens(Map<String, Object>... rows) {
@@ -206,6 +218,53 @@ class UserSessionRevocationHookTest {
 
         hook.beforeDelete("u-1", "t-1");
         assertThatCode(() -> hook.afterDelete("u-1", "t-1")).doesNotThrowAnyException();
+        verify(client).revokeAfterCommit("t-1", "u-1", List.of());
+    }
+
+    @Test
+    @DisplayName("a user leaving ACTIVE gets a user:revoked marker (epoch seconds, 2 h TTL) so the gateway rejects their access tokens")
+    void deactivationWritesAccessRevocationMarker() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        long before = Instant.now().getEpochSecond();
+
+        hook.afterUpdate("u-1", Map.of("status", "INACTIVE"), Map.of("status", "ACTIVE"), "t-1");
+
+        assertMarkerWrittenSince(before);
+    }
+
+    @Test
+    @DisplayName("a deleted user gets the same user:revoked marker")
+    void deleteWritesAccessRevocationMarker() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        long before = Instant.now().getEpochSecond();
+
+        hook.beforeDelete("u-1", "t-1");
+        hook.afterDelete("u-1", "t-1");
+
+        assertMarkerWrittenSince(before);
+    }
+
+    @Test
+    @DisplayName("updates that do not leave ACTIVE write no marker")
+    void otherUpdatesWriteNoMarker() {
+        hook.afterUpdate("u-1", Map.of("status", "ACTIVE"), Map.of("status", "INACTIVE"), "t-1");
+
+        verify(valueOps, never()).set(anyString(), anyString(), any(Duration.class));
+    }
+
+    @Test
+    @DisplayName("a Redis failure while writing the marker never fails the user write")
+    void markerFailureDoesNotFailTheWrite() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        doThrow(new RedisConnectionFailureException("redis down"))
+                .when(valueOps).set(anyString(), anyString(), any(Duration.class));
+
+        assertThatCode(() -> hook.afterUpdate("u-1", Map.of("status", "INACTIVE"), Map.of("status", "ACTIVE"), "t-1"))
+                .doesNotThrowAnyException();
+        hook.beforeDelete("u-1", "t-1");
+        assertThatCode(() -> hook.afterDelete("u-1", "t-1")).doesNotThrowAnyException();
+
+        verify(client).revokeAfterCommit("t-1", "u-1");
         verify(client).revokeAfterCommit("t-1", "u-1", List.of());
     }
 }

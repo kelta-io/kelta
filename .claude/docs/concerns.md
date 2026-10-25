@@ -351,6 +351,14 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
   database revoke, so the gateway can keep accepting a still-cached `pat:<hash>` until it expires —
   remove `API_ACCESS` from the profile if that log line appears. Reactivating a user does not
   restore revoked tokens.
+- **Deactivated users' access tokens — Redis-dependent, bounded** (KLT-801). Access tokens are
+  JWTs checked by signature, so they used to outlive a deactivation or delete until they expired (up
+  to 1 h). `UserSessionRevocationHook` now writes `user:revoked:<tenantId>:<userId>`
+  (`UserAccessRevocationMarker`) and the gateway's `RevokedUserFilter` rejects older tokens. Residual:
+  a Redis failure on the worker write (ERROR log) or the gateway read (WARN, fail-open,
+  `reason=user_revocation_unchecked`) leaves the token valid until it expires; SCIM deactivate/delete
+  (`ScimUserService`) bypasses the hook and writes no marker; the marker TTL
+  (`kelta.security.user-revocation-ttl`, `PT2H`) must stay above the longest access-token TTL.
 - **PAT grace cache** (`PatAuthenticationFilter`, PLT-694) serves the last accepted PAT JSON when
   Redis misses and the worker validation call fails. Bounded Caffeine cache
   (`kelta.gateway.pat-grace-max-entries`, default 10,000; `expireAfterWrite`
