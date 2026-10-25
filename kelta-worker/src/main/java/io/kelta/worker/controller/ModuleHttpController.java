@@ -1,5 +1,6 @@
 package io.kelta.worker.controller;
 
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.workflow.ActionResult;
 import io.kelta.worker.module.RuntimeModuleManager;
 import jakarta.servlet.http.HttpServletRequest;
@@ -78,7 +79,6 @@ public class ModuleHttpController {
             method = {RequestMethod.GET, RequestMethod.POST,
             RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE})
     public ResponseEntity<?> dispatch(@RequestHeader("X-Tenant-ID") String tenantId,
-                                      @RequestHeader(value = "X-User-Id", required = false) String userId,
                                       @PathVariable String moduleId,
                                       @RequestBody(required = false) String rawBody,
                                       HttpServletRequest request) {
@@ -93,6 +93,11 @@ public class ModuleHttpController {
         if (manager == null) {
             return ResponseEntity.notFound().build();
         }
+
+        // The platform user UUID CallerContextFilter resolved, never the raw X-User-Id header: the
+        // gateway sends the caller's email there, and a module that keys rows by it (billing's
+        // Stripe client_reference_id) writes rows nothing else in the platform can find.
+        String userId = CallerContext.current().map(CallerContext::userId).orElse(null);
 
         Optional<ActionResult> result;
         try {
