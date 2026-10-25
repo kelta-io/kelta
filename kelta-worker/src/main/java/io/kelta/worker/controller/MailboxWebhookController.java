@@ -20,8 +20,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.InetAddress;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,6 +63,9 @@ public class MailboxWebhookController {
 
     /** Hard cap before any parsing. SES tops out at 40 MB; this is headroom, not a limit. */
     private static final int MAX_BODY_BYTES = 45 * 1024 * 1024;
+
+    /** Set by the gateway from its trusted-proxy rules; mirrors {@code LoginTrackingFilter}. */
+    static final String CLIENT_IP_HEADER = "X-Kelta-Client-Ip";
 
     private final MailboxRepository mailboxRepository;
     private final MailboxInboundEventRepository eventRepository;
@@ -126,6 +131,12 @@ public class MailboxWebhookController {
         InboundMailAdapter.InboundRequest inbound =
                 new InboundMailAdapter.InboundRequest(body, headersOf(request), clientIp(request));
         InboundMailAdapter.MailboxRef ref = refOf(mailbox);
+
+        if (!sourceAllowed(ref.allowedCidrs(), inbound.remoteIp())) {
+            log.warn("Discarding inbound delivery for mailbox {}: source {} is outside inbound_allowed_cidrs",
+                    ref.id(), inbound.remoteIp());
+            return ResponseEntity.ok().build();
+        }
 
         return TenantContext.callWithTenant(tenantId, () ->
                 handle(adapter, inbound, ref, mailbox, tenantId, provider, body));
@@ -237,18 +248,86 @@ public class MailboxWebhookController {
     }
 
     /**
-     * Best-effort client IP.
+     * The client IP, as resolved by the gateway.
      *
-     * <p>Read from the rightmost {@code X-Forwarded-For} entry, not the leftmost: the left end is
-     * client-supplied and anyone can prepend whatever address they like. Used only for logging
-     * and the optional CIDR allowlist, never as an authentication factor.
+     * <p>{@value #CLIENT_IP_HEADER} is stamped by the gateway's {@code ClientIpForwardingFilter}
+     * from its trusted-proxy rules, after {@code IdentityHeaderStripFilter} has removed any
+     * client-sent copy, so it cannot be forged through the gateway. {@code X-Forwarded-For} is
+     * never read: the gateway strips it, and anything that reaches the worker directly controls
+     * it. Same precedence as {@code LoginTrackingFilter.extractClientIp}.
      */
-    private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            String[] parts = forwarded.split(",");
-            return parts[parts.length - 1].trim();
+    static String clientIp(HttpServletRequest request) {
+        String gatewayResolved = request.getHeader(CLIENT_IP_HEADER);
+        if (gatewayResolved != null && !gatewayResolved.isBlank()) {
+            return gatewayResolved.trim();
         }
         return request.getRemoteAddr();
+    }
+
+    /**
+     * Applies the mailbox's optional {@code inbound_allowed_cidrs}. No list means no restriction;
+     * a list means the source must fall inside one of its ranges. Fails closed: an unparseable
+     * source address, or a list in which no entry parses, rejects the delivery.
+     *
+     * <p>The column has been written both as comma-separated text and as a JSON array of strings
+     * (the admin API binds it as jsonb), so both shapes are accepted.
+     */
+    static boolean sourceAllowed(String allowedCidrs, String sourceIp) {
+        if (allowedCidrs == null) {
+            return true;
+        }
+        List<String> cidrs = Arrays.stream(allowedCidrs.replaceAll("[\\[\\]\"]", "").split("[,\\s]+"))
+                .filter(c -> !c.isBlank())
+                .toList();
+        if (cidrs.isEmpty()) {
+            return true;
+        }
+        byte[] source = literalAddress(sourceIp);
+        if (source == null) {
+            return false;
+        }
+        for (String cidr : cidrs) {
+            if (inCidr(source, cidr)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean inCidr(byte[] source, String cidr) {
+        int slash = cidr.indexOf('/');
+        byte[] network = literalAddress(slash < 0 ? cidr : cidr.substring(0, slash));
+        if (network == null || network.length != source.length) {
+            return false;
+        }
+        int prefix;
+        try {
+            prefix = slash < 0 ? network.length * 8 : Integer.parseInt(cidr.substring(slash + 1));
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        if (prefix < 0 || prefix > network.length * 8) {
+            return false;
+        }
+        for (int i = 0; i < network.length; i++) {
+            int bits = Math.min(8, Math.max(0, prefix - i * 8));
+            int mask = bits == 0 ? 0 : (0xFF << (8 - bits)) & 0xFF;
+            if ((source[i] & mask) != (network[i] & mask)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Parses an IP literal only — {@code InetAddress.ofLiteral} never does a DNS lookup. */
+    private static byte[] literalAddress(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return InetAddress.ofLiteral(value.trim()).getAddress();
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 }
