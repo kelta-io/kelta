@@ -9,6 +9,7 @@ import io.kelta.worker.cache.WorkerCacheManager;
 import io.kelta.worker.listener.CustomDomainEventPublisher;
 import io.kelta.worker.service.CustomDomainProvisioner;
 import io.kelta.worker.service.DomainOwnershipVerifier;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -38,6 +39,8 @@ import java.util.regex.Pattern;
 @RestController
 public class TenantDomainController {
 
+    private static final String PERMISSION = "CUSTOMIZE_APPLICATION";
+
     private static final Logger log = LoggerFactory.getLogger(TenantDomainController.class);
     private static final Pattern DOMAIN_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9.-]{0,253}[a-zA-Z0-9]$");
 
@@ -56,22 +59,26 @@ public class TenantDomainController {
     private final CustomDomainProvisioner provisioner;
     private final DomainOwnershipVerifier ownershipVerifier;
     private final SecureRandom random = new SecureRandom();
+    private final AdminPermissionGuard permissionGuard;
 
     public TenantDomainController(JdbcTemplate jdbcTemplate, WorkerCacheManager cacheManager,
                                    RecordEventPublisher recordEventPublisher,
                                    CustomDomainEventPublisher domainEventPublisher,
                                    CustomDomainProvisioner provisioner,
-                                   DomainOwnershipVerifier ownershipVerifier) {
+                                   DomainOwnershipVerifier ownershipVerifier,
+                                   AdminPermissionGuard permissionGuard) {
         this.jdbcTemplate = jdbcTemplate;
         this.cacheManager = cacheManager;
         this.recordEventPublisher = recordEventPublisher;
         this.domainEventPublisher = domainEventPublisher;
         this.provisioner = provisioner;
         this.ownershipVerifier = ownershipVerifier;
+        this.permissionGuard = permissionGuard;
     }
 
     @GetMapping("/api/admin/domains")
-    public ResponseEntity<?> listDomains() {
+    public ResponseEntity<?> listDomains(HttpServletRequest request) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 
@@ -82,7 +89,8 @@ public class TenantDomainController {
     }
 
     @PostMapping("/api/admin/domains")
-    public ResponseEntity<?> registerDomain(@RequestBody Map<String, String> body) {
+    public ResponseEntity<?> registerDomain(HttpServletRequest request, @RequestBody Map<String, String> body) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 
@@ -133,7 +141,8 @@ public class TenantDomainController {
     }
 
     @PostMapping("/api/admin/domains/{domainId}/verify")
-    public ResponseEntity<?> verifyDomain(@PathVariable String domainId) {
+    public ResponseEntity<?> verifyDomain(HttpServletRequest request, @PathVariable String domainId) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 
@@ -182,7 +191,8 @@ public class TenantDomainController {
     }
 
     @DeleteMapping("/api/admin/domains/{domainId}")
-    public ResponseEntity<?> removeDomain(@PathVariable String domainId) {
+    public ResponseEntity<?> removeDomain(HttpServletRequest request, @PathVariable String domainId) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
 

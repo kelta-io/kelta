@@ -3,6 +3,7 @@ package io.kelta.worker.controller;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.PasswordPolicyRepository;
 import io.kelta.worker.service.SecurityAuditLogger;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -22,10 +23,13 @@ import java.util.Map;
 @RequestMapping("/api/admin/password-policy")
 public class PasswordPolicyController {
 
+    private static final String PERMISSION = "MANAGE_USERS";
+
     private static final Logger log = LoggerFactory.getLogger(PasswordPolicyController.class);
 
     private final PasswordPolicyRepository repository;
     private final JdbcTemplate jdbcTemplate;
+    private final AdminPermissionGuard permissionGuard;
 
     // Default policy values (NIST SP 800-63B aligned)
     private static final Map<String, Object> DEFAULTS;
@@ -46,13 +50,15 @@ public class PasswordPolicyController {
         DEFAULTS = java.util.Collections.unmodifiableMap(map);
     }
 
-    public PasswordPolicyController(PasswordPolicyRepository repository, JdbcTemplate jdbcTemplate) {
+    public PasswordPolicyController(PasswordPolicyRepository repository, JdbcTemplate jdbcTemplate, AdminPermissionGuard permissionGuard) {
         this.repository = repository;
         this.jdbcTemplate = jdbcTemplate;
+        this.permissionGuard = permissionGuard;
     }
 
     @GetMapping
-    public ResponseEntity<?> getPolicy() {
+    public ResponseEntity<?> getPolicy(HttpServletRequest request) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
@@ -66,7 +72,8 @@ public class PasswordPolicyController {
     }
 
     @PutMapping
-    public ResponseEntity<?> updatePolicy(@RequestBody Map<String, Object> policy) {
+    public ResponseEntity<?> updatePolicy(HttpServletRequest request, @RequestBody Map<String, Object> policy) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
@@ -91,7 +98,8 @@ public class PasswordPolicyController {
     }
 
     @PostMapping("/users/{userId}/unlock")
-    public ResponseEntity<?> unlockAccount(@PathVariable String userId) {
+    public ResponseEntity<?> unlockAccount(HttpServletRequest request, @PathVariable String userId) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));

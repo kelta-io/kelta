@@ -4,6 +4,7 @@ import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.worker.service.AuditQueryService;
 import io.kelta.worker.service.ObservabilityQueryService;
 import io.kelta.worker.service.ObservabilityQueryService.SearchResult;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -20,19 +21,25 @@ import java.util.*;
 @RequestMapping("/api/admin/observability")
 public class ObservabilityController {
 
+    private static final String PERMISSION = "VIEW_SETUP";
+
     private static final Logger log = LoggerFactory.getLogger(ObservabilityController.class);
 
     private final ObservabilityQueryService queryService;
     private final AuditQueryService auditQueryService;
+    private final AdminPermissionGuard permissionGuard;
 
     public ObservabilityController(ObservabilityQueryService queryService,
-                                   AuditQueryService auditQueryService) {
+                                   AuditQueryService auditQueryService,
+                                   AdminPermissionGuard permissionGuard) {
         this.queryService = queryService;
         this.auditQueryService = auditQueryService;
+        this.permissionGuard = permissionGuard;
     }
 
     @GetMapping("/request-logs")
     public ResponseEntity<Map<String, Object>> searchRequestLogs(
+            HttpServletRequest request,
             @RequestHeader(value = "X-Tenant-Slug", required = false) String tenantSlug,
             @RequestParam(required = false) String method,
             @RequestParam(required = false) String status,
@@ -43,6 +50,7 @@ public class ObservabilityController {
             @RequestParam(required = false) String end,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
+        permissionGuard.require(request, PERMISSION);
         try {
             Instant endInstant = end != null ? Instant.parse(end) : Instant.now();
             Instant startInstant = start != null ? Instant.parse(start) : endInstant.minusSeconds(3600);
@@ -74,7 +82,9 @@ public class ObservabilityController {
 
     @GetMapping("/request-logs/{traceId}")
     public ResponseEntity<Map<String, Object>> getRequestLog(
+            HttpServletRequest request,
             @PathVariable String traceId) {
+        permissionGuard.require(request, PERMISSION);
         try {
             List<Map<String, Object>> spans = queryService.getTraceDetail(traceId);
 
@@ -93,6 +103,7 @@ public class ObservabilityController {
 
     @GetMapping("/logs")
     public ResponseEntity<Map<String, Object>> searchLogs(
+            HttpServletRequest request,
             @RequestParam(required = false) String query,
             @RequestParam(required = false) String level,
             @RequestParam(required = false) String service,
@@ -101,6 +112,7 @@ public class ObservabilityController {
             @RequestParam(required = false) String end,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
+        permissionGuard.require(request, PERMISSION);
         try {
             Map<String, String> filters = new HashMap<>();
             if (query != null) filters.put("query", query);
@@ -129,6 +141,7 @@ public class ObservabilityController {
 
     @GetMapping("/audit")
     public ResponseEntity<Map<String, Object>> searchAudit(
+            HttpServletRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestParam(required = false) String auditType,
             @RequestParam(required = false) String action,
@@ -137,6 +150,7 @@ public class ObservabilityController {
             @RequestParam(required = false) String end,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
+        permissionGuard.require(request, PERMISSION);
         try {
             Instant startInstant = start != null ? Instant.parse(start) : null;
             Instant endInstant = end != null ? Instant.parse(end) : null;

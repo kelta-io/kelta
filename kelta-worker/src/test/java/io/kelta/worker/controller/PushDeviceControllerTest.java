@@ -13,6 +13,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.Map;
 
@@ -23,6 +24,8 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 @DisplayName("PushDeviceController Tests")
 class PushDeviceControllerTest {
+
+    private final MockHttpServletRequest adminRequest = AdminPermissionGuardFixture.request();
 
     private static final String VAPID_PUBLIC =
             "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
@@ -42,7 +45,8 @@ class PushDeviceControllerTest {
         // the email→id case is covered by its own test below.
         lenient().when(userIdResolver.resolve(any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0));
-        return new PushDeviceController(pushService, jdbcTemplate, objectProvider, userIdResolver);
+        return new PushDeviceController(pushService, jdbcTemplate, objectProvider, userIdResolver,
+                AdminPermissionGuardFixture.granting("CUSTOMIZE_APPLICATION"));
     }
 
     @Test
@@ -173,5 +177,30 @@ class PushDeviceControllerTest {
             assertThat(controller(webPushProvider).vapidPublicKey().getStatusCode())
                     .isEqualTo(HttpStatus.NOT_FOUND);
         }
+    }
+
+    @Test
+    @DisplayName("POST /api/admin/notifications without CUSTOMIZE_APPLICATION (API_ACCESS only, like Portal User) is 403")
+    void adminNotificationDeniedWithoutCustomizeApplication() {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<WebPushProvider> objectProvider = mock(ObjectProvider.class);
+        PushDeviceController c = new PushDeviceController(pushService, jdbcTemplate, objectProvider, userIdResolver,
+                AdminPermissionGuardFixture.apiAccessOnly());
+
+        AdminPermissionGuardFixture.assertForbidden(() -> withTenant(() -> c.sendNotification(adminRequest,
+                Map.of("title", "Hi", "body", "All hands"))), "CUSTOMIZE_APPLICATION");
+        verifyNoInteractions(pushService);
+    }
+
+    @Test
+    @DisplayName("POST /api/admin/notifications with CUSTOMIZE_APPLICATION sends to the tenant")
+    void adminNotificationAllowedWithCustomizeApplication() {
+        PushDeviceController c = controller(null);
+        when(pushService.sendToTenant("t1", "Hi", "All hands", null)).thenReturn(3);
+
+        var response = withTenant(() -> c.sendNotification(adminRequest, Map.of("title", "Hi", "body", "All hands")));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(pushService).sendToTenant("t1", "Hi", "All hands", null);
     }
 }

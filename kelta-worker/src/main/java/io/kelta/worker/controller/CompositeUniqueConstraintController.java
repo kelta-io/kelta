@@ -4,6 +4,7 @@ import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.storage.CompositeUniqueConstraintService;
 import io.kelta.runtime.storage.UniqueConstraintViolationException;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -41,20 +42,26 @@ import java.util.Map;
 @RequestMapping("/api/admin/collections/{name}/unique-constraints")
 public class CompositeUniqueConstraintController {
 
+    private static final String PERMISSION = "CUSTOMIZE_APPLICATION";
+
     private static final Logger log = LoggerFactory.getLogger(CompositeUniqueConstraintController.class);
 
     private final CollectionRegistry collectionRegistry;
     private final CompositeUniqueConstraintService constraintService;
+    private final AdminPermissionGuard permissionGuard;
 
     public CompositeUniqueConstraintController(CollectionRegistry collectionRegistry,
-                                                CompositeUniqueConstraintService constraintService) {
+                                                CompositeUniqueConstraintService constraintService,
+                                                AdminPermissionGuard permissionGuard) {
         this.collectionRegistry = collectionRegistry;
         this.constraintService = constraintService;
+        this.permissionGuard = permissionGuard;
     }
 
     @PostMapping
-    public ResponseEntity<?> create(@PathVariable("name") String collectionName,
+    public ResponseEntity<?> create(HttpServletRequest request, @PathVariable("name") String collectionName,
                                      @RequestBody Map<String, Object> body) {
+        permissionGuard.require(request, PERMISSION);
         CollectionDefinition definition = collectionRegistry.get(collectionName);
         if (definition == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -83,7 +90,8 @@ public class CompositeUniqueConstraintController {
     }
 
     @GetMapping
-    public ResponseEntity<?> list(@PathVariable("name") String collectionName) {
+    public ResponseEntity<?> list(HttpServletRequest request, @PathVariable("name") String collectionName) {
+        permissionGuard.require(request, PERMISSION);
         CollectionDefinition definition = collectionRegistry.get(collectionName);
         if (definition == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -100,8 +108,9 @@ public class CompositeUniqueConstraintController {
     }
 
     @DeleteMapping("/{indexName}")
-    public ResponseEntity<?> drop(@PathVariable("name") String collectionName,
+    public ResponseEntity<?> drop(HttpServletRequest request, @PathVariable("name") String collectionName,
                                    @PathVariable("indexName") String indexName) {
+        permissionGuard.require(request, PERMISSION);
         CollectionDefinition definition = collectionRegistry.get(collectionName);
         if (definition == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)

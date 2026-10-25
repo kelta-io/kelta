@@ -22,22 +22,28 @@ import java.util.*;
 @RequestMapping("/api/admin/profiles/{profileId}/custom-rules")
 public class CustomRuleController {
 
+    private static final String PERMISSION = "MANAGE_USERS";
+
     private static final Logger log = LoggerFactory.getLogger(CustomRuleController.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final CerbosPolicySyncService syncService;
     private final ObjectMapper objectMapper;
+    private final AdminPermissionGuard permissionGuard;
 
     public CustomRuleController(JdbcTemplate jdbcTemplate,
                                  CerbosPolicySyncService syncService,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper,
+                                 AdminPermissionGuard permissionGuard) {
         this.jdbcTemplate = jdbcTemplate;
         this.syncService = syncService;
         this.objectMapper = objectMapper;
+        this.permissionGuard = permissionGuard;
     }
 
     @GetMapping
-    public ResponseEntity<List<Map<String, Object>>> listRules(@PathVariable String profileId) {
+    public ResponseEntity<List<Map<String, Object>>> listRules(HttpServletRequest request, @PathVariable String profileId) {
+        permissionGuard.require(request, PERMISSION);
         List<Map<String, Object>> rules = jdbcTemplate.queryForList(
                 "SELECT * FROM profile_custom_rules WHERE profile_id = ? ORDER BY created_at",
                 profileId);
@@ -49,6 +55,7 @@ public class CustomRuleController {
             @PathVariable String profileId,
             @RequestBody Map<String, Object> body,
             HttpServletRequest request) {
+        permissionGuard.require(request, PERMISSION);
         String id = UUID.randomUUID().toString();
         String tenantId = body.get("tenantId") != null
                 ? (String) body.get("tenantId")
@@ -93,9 +100,11 @@ public class CustomRuleController {
 
     @PutMapping("/{ruleId}")
     public ResponseEntity<Map<String, Object>> updateRule(
+            HttpServletRequest request,
             @PathVariable String profileId,
             @PathVariable String ruleId,
             @RequestBody Map<String, Object> body) {
+        permissionGuard.require(request, PERMISSION);
         String action = (String) body.get("action");
         String effect = (String) body.get("effect");
         String conditionType = (String) body.get("conditionType");
@@ -134,8 +143,10 @@ public class CustomRuleController {
 
     @DeleteMapping("/{ruleId}")
     public ResponseEntity<Void> deleteRule(
+            HttpServletRequest request,
             @PathVariable String profileId,
             @PathVariable String ruleId) {
+        permissionGuard.require(request, PERMISSION);
         // Look up tenant ID before deleting
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                 "SELECT tenant_id FROM profile_custom_rules WHERE id = ? AND profile_id = ?",

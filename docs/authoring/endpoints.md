@@ -57,7 +57,7 @@ not a supported integration surface and may change without notice.
 | Method | Path | Service | Permission | Docs |
 | --- | --- | --- | --- | --- |
 | GET | `/api/_search` | worker | API_ACCESS | [api/querying](/docs/api/querying/#full-text-and-semantic-search) |
-| POST | `/api/admin/authorization/test` | worker | API_ACCESS | internal — Backs the admin console's authorization tester, which asks Cerbos whether a user/resource/action would be allowed; it changes nothing. |
+| POST | `/api/admin/authorization/test` | worker | API_ACCESS; handler checks MANAGE_USERS | internal — Backs the admin console's authorization tester, which asks Cerbos whether a user/resource/action would be allowed; it changes nothing. |
 | GET | `/api/admin/campaigns` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | POST | `/api/admin/campaigns` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | GET | `/api/admin/campaigns/suppressions` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
@@ -72,9 +72,9 @@ not a supported integration surface and may change without notice.
 | POST | `/api/admin/campaigns/{id}/send` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | GET | `/api/admin/campaigns/{id}/stats` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | POST | `/api/admin/campaigns/{id}/test` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
-| GET | `/api/admin/collections/{name}/unique-constraints` | worker | API_ACCESS | [data-model/validation-rules](/docs/data-model/validation-rules/#unique-constraints) |
-| POST | `/api/admin/collections/{name}/unique-constraints` | worker | API_ACCESS | [data-model/validation-rules](/docs/data-model/validation-rules/#unique-constraints) |
-| DELETE | `/api/admin/collections/{name}/unique-constraints/{indexName}` | worker | API_ACCESS | [data-model/validation-rules](/docs/data-model/validation-rules/#unique-constraints) |
+| GET | `/api/admin/collections/{name}/unique-constraints` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [data-model/validation-rules](/docs/data-model/validation-rules/#unique-constraints) |
+| POST | `/api/admin/collections/{name}/unique-constraints` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [data-model/validation-rules](/docs/data-model/validation-rules/#unique-constraints) |
+| DELETE | `/api/admin/collections/{name}/unique-constraints/{indexName}` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [data-model/validation-rules](/docs/data-model/validation-rules/#unique-constraints) |
 | GET | `/api/admin/delegated-admin-scopes` | worker | API_ACCESS; handler checks MANAGE_DELEGATED_ADMINS | [security/users-and-groups](/docs/security/users-and-groups/#delegated-administration) |
 | POST | `/api/admin/delegated-admin-scopes` | worker | API_ACCESS; handler checks MANAGE_DELEGATED_ADMINS | [security/users-and-groups](/docs/security/users-and-groups/#delegated-administration) |
 | GET | `/api/admin/delegated-admin-scopes/{id}` | worker | API_ACCESS; handler checks MANAGE_DELEGATED_ADMINS | [security/users-and-groups](/docs/security/users-and-groups/#delegated-administration) |
@@ -86,39 +86,39 @@ not a supported integration surface and may change without notice.
 | PATCH | `/api/admin/delegated/users/{id}` | worker | API_ACCESS | [security/users-and-groups](/docs/security/users-and-groups/#delegated-administration) |
 | POST | `/api/admin/delegated/users/{id}/invite` | worker | API_ACCESS | [security/users-and-groups](/docs/security/users-and-groups/#delegated-administration) |
 | POST | `/api/admin/delegated/users/{id}/reset-password` | worker | API_ACCESS | [security/users-and-groups](/docs/security/users-and-groups/#delegated-administration) |
-| GET | `/api/admin/domains` | worker | API_ACCESS | [platform/tenants](/docs/platform/tenants/#custom-domains) |
-| POST | `/api/admin/domains` | worker | API_ACCESS | [platform/tenants](/docs/platform/tenants/#custom-domains) |
-| DELETE | `/api/admin/domains/{domainId}` | worker | API_ACCESS | [platform/tenants](/docs/platform/tenants/#custom-domains) |
-| POST | `/api/admin/domains/{domainId}/verify` | worker | API_ACCESS | [platform/tenants](/docs/platform/tenants/#custom-domains) |
-| GET | `/api/admin/email-templates` | worker | API_ACCESS | [platform/messaging](/docs/platform/messaging/#email) |
-| POST | `/api/admin/email-templates/{templateKey}/override` | worker | API_ACCESS | [platform/messaging](/docs/platform/messaging/#email) |
-| DELETE | `/api/admin/email-templates/{templateKey}/override` | worker | API_ACCESS | [platform/messaging](/docs/platform/messaging/#email) |
-| GET | `/api/admin/mfa/policy` | worker | API_ACCESS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#requiring-mfa-for-a-tenant) |
-| PUT | `/api/admin/mfa/policy` | worker | API_ACCESS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#requiring-mfa-for-a-tenant) |
-| POST | `/api/admin/mfa/users/{userId}/reset` | worker | API_ACCESS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#administrator-actions) |
-| GET | `/api/admin/mfa/users/{userId}/status` | worker | API_ACCESS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#administrator-actions) |
-| POST | `/api/admin/notifications` | worker | API_ACCESS | [platform/messaging](/docs/platform/messaging/#push) |
-| GET | `/api/admin/observability-settings` | worker | API_ACCESS | [platform/audit-and-monitoring](/docs/platform/audit-and-monitoring/#retention) |
-| PUT | `/api/admin/observability-settings` | worker | API_ACCESS | [platform/audit-and-monitoring](/docs/platform/audit-and-monitoring/#retention) |
-| GET | `/api/admin/observability/audit` | worker | API_ACCESS | internal — Backs the Activity view of the admin console's Monitoring pages; the query shape follows that UI and is not a supported API. |
-| GET | `/api/admin/observability/logs` | worker | API_ACCESS | internal — Backs the Logs view of the admin console's Monitoring pages; the query shape follows that UI and is not a supported API. |
+| GET | `/api/admin/domains` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/tenants](/docs/platform/tenants/#custom-domains) |
+| POST | `/api/admin/domains` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/tenants](/docs/platform/tenants/#custom-domains) |
+| DELETE | `/api/admin/domains/{domainId}` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/tenants](/docs/platform/tenants/#custom-domains) |
+| POST | `/api/admin/domains/{domainId}/verify` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/tenants](/docs/platform/tenants/#custom-domains) |
+| GET | `/api/admin/email-templates` | worker | API_ACCESS; handler checks MANAGE_EMAIL_TEMPLATES | [platform/messaging](/docs/platform/messaging/#email) |
+| POST | `/api/admin/email-templates/{templateKey}/override` | worker | API_ACCESS; handler checks MANAGE_EMAIL_TEMPLATES | [platform/messaging](/docs/platform/messaging/#email) |
+| DELETE | `/api/admin/email-templates/{templateKey}/override` | worker | API_ACCESS; handler checks MANAGE_EMAIL_TEMPLATES | [platform/messaging](/docs/platform/messaging/#email) |
+| GET | `/api/admin/mfa/policy` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#requiring-mfa-for-a-tenant) |
+| PUT | `/api/admin/mfa/policy` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#requiring-mfa-for-a-tenant) |
+| POST | `/api/admin/mfa/users/{userId}/reset` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#administrator-actions) |
+| GET | `/api/admin/mfa/users/{userId}/status` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#administrator-actions) |
+| POST | `/api/admin/notifications` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/messaging](/docs/platform/messaging/#push) |
+| GET | `/api/admin/observability-settings` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/audit-and-monitoring](/docs/platform/audit-and-monitoring/#retention) |
+| PUT | `/api/admin/observability-settings` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/audit-and-monitoring](/docs/platform/audit-and-monitoring/#retention) |
+| GET | `/api/admin/observability/audit` | worker | API_ACCESS; handler checks VIEW_SETUP | internal — Backs the Activity view of the admin console's Monitoring pages; the query shape follows that UI and is not a supported API. |
+| GET | `/api/admin/observability/logs` | worker | API_ACCESS; handler checks VIEW_SETUP | internal — Backs the Logs view of the admin console's Monitoring pages; the query shape follows that UI and is not a supported API. |
 | GET | `/api/admin/observability/otlp-target` | worker | API_ACCESS; handler checks VIEW_SETUP | [platform/audit-and-monitoring](/docs/platform/audit-and-monitoring/#per-tenant-otlp-export) |
 | PUT | `/api/admin/observability/otlp-target` | worker | API_ACCESS; handler checks VIEW_SETUP | [platform/audit-and-monitoring](/docs/platform/audit-and-monitoring/#per-tenant-otlp-export) |
 | DELETE | `/api/admin/observability/otlp-target` | worker | API_ACCESS; handler checks VIEW_SETUP | [platform/audit-and-monitoring](/docs/platform/audit-and-monitoring/#per-tenant-otlp-export) |
-| GET | `/api/admin/observability/request-logs` | worker | API_ACCESS | internal — Backs the Requests view (and its request detail) of the admin console's Monitoring pages; not a supported API. |
-| GET | `/api/admin/observability/request-logs/{traceId}` | worker | API_ACCESS | internal — Backs the Requests view (and its request detail) of the admin console's Monitoring pages; not a supported API. |
-| GET | `/api/admin/password-policy` | worker | API_ACCESS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#password-policy) |
-| PUT | `/api/admin/password-policy` | worker | API_ACCESS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#password-policy) |
-| POST | `/api/admin/password-policy/users/{userId}/unlock` | worker | API_ACCESS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#password-policy) |
-| GET | `/api/admin/profiles/{profileId}/custom-rules` | worker | API_ACCESS | internal — Backs the custom ABAC rule editor on the admin console's profile page (CustomPolicyEditor); no client outside the console calls it. |
-| POST | `/api/admin/profiles/{profileId}/custom-rules` | worker | API_ACCESS | internal — Backs the custom ABAC rule editor on the admin console's profile page (CustomPolicyEditor); no client outside the console calls it. |
-| PUT | `/api/admin/profiles/{profileId}/custom-rules/{ruleId}` | worker | API_ACCESS | internal — Backs the custom ABAC rule editor on the admin console's profile page (CustomPolicyEditor); no client outside the console calls it. |
-| DELETE | `/api/admin/profiles/{profileId}/custom-rules/{ruleId}` | worker | API_ACCESS | internal — Backs the custom ABAC rule editor on the admin console's profile page (CustomPolicyEditor); no client outside the console calls it. |
-| GET | `/api/admin/search-reindex` | worker | API_ACCESS | [data-model/search-and-attachments](/docs/data-model/search-and-attachments/#full-text-search) |
-| POST | `/api/admin/search-reindex` | worker | API_ACCESS | [data-model/search-and-attachments](/docs/data-model/search-and-attachments/#full-text-search) |
-| GET | `/api/admin/tenant/email-settings` | worker | API_ACCESS | [platform/messaging](/docs/platform/messaging/#email) |
-| PUT | `/api/admin/tenant/email-settings` | worker | API_ACCESS | [platform/messaging](/docs/platform/messaging/#email) |
-| POST | `/api/admin/tenant/email-settings/test` | worker | API_ACCESS | [platform/messaging](/docs/platform/messaging/#email) |
+| GET | `/api/admin/observability/request-logs` | worker | API_ACCESS; handler checks VIEW_SETUP | internal — Backs the Requests view (and its request detail) of the admin console's Monitoring pages; not a supported API. |
+| GET | `/api/admin/observability/request-logs/{traceId}` | worker | API_ACCESS; handler checks VIEW_SETUP | internal — Backs the Requests view (and its request detail) of the admin console's Monitoring pages; not a supported API. |
+| GET | `/api/admin/password-policy` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#password-policy) |
+| PUT | `/api/admin/password-policy` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#password-policy) |
+| POST | `/api/admin/password-policy/users/{userId}/unlock` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/mfa-and-password-policy](/docs/security/mfa-and-password-policy/#password-policy) |
+| GET | `/api/admin/profiles/{profileId}/custom-rules` | worker | API_ACCESS; handler checks MANAGE_USERS | internal — Backs the custom ABAC rule editor on the admin console's profile page (CustomPolicyEditor); no client outside the console calls it. |
+| POST | `/api/admin/profiles/{profileId}/custom-rules` | worker | API_ACCESS; handler checks MANAGE_USERS | internal — Backs the custom ABAC rule editor on the admin console's profile page (CustomPolicyEditor); no client outside the console calls it. |
+| PUT | `/api/admin/profiles/{profileId}/custom-rules/{ruleId}` | worker | API_ACCESS; handler checks MANAGE_USERS | internal — Backs the custom ABAC rule editor on the admin console's profile page (CustomPolicyEditor); no client outside the console calls it. |
+| DELETE | `/api/admin/profiles/{profileId}/custom-rules/{ruleId}` | worker | API_ACCESS; handler checks MANAGE_USERS | internal — Backs the custom ABAC rule editor on the admin console's profile page (CustomPolicyEditor); no client outside the console calls it. |
+| GET | `/api/admin/search-reindex` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [data-model/search-and-attachments](/docs/data-model/search-and-attachments/#full-text-search) |
+| POST | `/api/admin/search-reindex` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [data-model/search-and-attachments](/docs/data-model/search-and-attachments/#full-text-search) |
+| GET | `/api/admin/tenant/email-settings` | worker | API_ACCESS; handler checks MANAGE_TENANTS | [platform/messaging](/docs/platform/messaging/#email) |
+| PUT | `/api/admin/tenant/email-settings` | worker | API_ACCESS; handler checks MANAGE_TENANTS | [platform/messaging](/docs/platform/messaging/#email) |
+| POST | `/api/admin/tenant/email-settings/test` | worker | API_ACCESS; handler checks MANAGE_TENANTS | [platform/messaging](/docs/platform/messaging/#email) |
 | GET | `/api/admin/tenant/portal-auth-settings` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/authentication](/docs/security/authentication/#auth-server-endpoints) |
 | PUT | `/api/admin/tenant/portal-auth-settings` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/authentication](/docs/security/authentication/#auth-server-endpoints) |
 | POST | `/api/admin/users/portal-invite` | worker | API_ACCESS; handler checks MANAGE_USERS | [security/users-and-groups](/docs/security/users-and-groups/#inviting-users) |

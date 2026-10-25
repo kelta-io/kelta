@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -19,6 +20,8 @@ import static org.mockito.Mockito.*;
 @DisplayName("ObservabilityController Tests")
 class ObservabilityControllerTest {
 
+    private final MockHttpServletRequest adminRequest = AdminPermissionGuardFixture.request();
+
     private ObservabilityQueryService queryService;
     private AuditQueryService auditQueryService;
     private ObservabilityController controller;
@@ -27,7 +30,8 @@ class ObservabilityControllerTest {
     void setUp() {
         queryService = mock(ObservabilityQueryService.class);
         auditQueryService = mock(AuditQueryService.class);
-        controller = new ObservabilityController(queryService, auditQueryService);
+        controller = new ObservabilityController(queryService, auditQueryService,
+                AdminPermissionGuardFixture.granting("VIEW_SETUP"));
     }
 
     @Nested
@@ -39,7 +43,7 @@ class ObservabilityControllerTest {
             when(queryService.searchTraceSpans(any(), any(), any(), any(), anyInt(), anyInt()))
                     .thenReturn(new SearchResult(List.of(), 0));
 
-            var response = controller.searchRequestLogs("slug", null, null, null, null, null, null, null, 0, 50);
+            var response = controller.searchRequestLogs(adminRequest, "slug", null, null, null, null, null, null, null, 0, 50);
             assertEquals(HttpStatus.OK, response.getStatusCode());
         }
 
@@ -48,7 +52,7 @@ class ObservabilityControllerTest {
             when(queryService.searchTraceSpans(any(), any(), any(), any(), anyInt(), anyInt()))
                     .thenThrow(new RuntimeException("Tempo error"));
 
-            var response = controller.searchRequestLogs("slug", null, null, null, null, null, null, null, 0, 50);
+            var response = controller.searchRequestLogs(adminRequest, "slug", null, null, null, null, null, null, null, 0, 50);
             assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
         }
     }
@@ -61,7 +65,7 @@ class ObservabilityControllerTest {
         void shouldReturnTraceDetail() {
             when(queryService.getTraceDetail("trace-123")).thenReturn(List.of(Map.of("span", "data")));
 
-            var response = controller.getRequestLog("trace-123");
+            var response = controller.getRequestLog(adminRequest, "trace-123");
             assertEquals(HttpStatus.OK, response.getStatusCode());
         }
 
@@ -69,7 +73,7 @@ class ObservabilityControllerTest {
         void shouldReturn500OnException() {
             when(queryService.getTraceDetail(any())).thenThrow(new RuntimeException("error"));
 
-            var response = controller.getRequestLog("trace-123");
+            var response = controller.getRequestLog(adminRequest, "trace-123");
             assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
         }
     }
@@ -83,7 +87,7 @@ class ObservabilityControllerTest {
             when(queryService.searchLogs(any(), anyInt(), anyInt()))
                     .thenReturn(new SearchResult(List.of(), 0));
 
-            var response = controller.searchLogs(null, null, null, null, null, null, 0, 50);
+            var response = controller.searchLogs(adminRequest, null, null, null, null, null, null, 0, 50);
             assertEquals(HttpStatus.OK, response.getStatusCode());
         }
     }
@@ -97,7 +101,7 @@ class ObservabilityControllerTest {
             when(auditQueryService.searchAudit(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
                     .thenReturn(new SearchResult(List.of(), 0));
 
-            var response = controller.searchAudit("tenant-1", null, null, null, null, null, 0, 50);
+            var response = controller.searchAudit(adminRequest, "tenant-1", null, null, null, null, null, 0, 50);
             assertEquals(HttpStatus.OK, response.getStatusCode());
         }
 
@@ -106,8 +110,34 @@ class ObservabilityControllerTest {
             when(auditQueryService.searchAudit(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
                     .thenThrow(new RuntimeException("DB error"));
 
-            var response = controller.searchAudit("tenant-1", null, null, null, null, null, 0, 50);
+            var response = controller.searchAudit(adminRequest, "tenant-1", null, null, null, null, null, 0, 50);
             assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
         }
+    }
+
+    @Test
+    @DisplayName("A profile without VIEW_SETUP (API_ACCESS only, like Portal User) gets 403 on every handler")
+    void deniedWithoutViewSetup() {
+        controller = new ObservabilityController(queryService, auditQueryService,
+                AdminPermissionGuardFixture.apiAccessOnly());
+
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.searchRequestLogs(adminRequest, "slug",
+                null, null, null, null, null, null, null, 0, 50), "VIEW_SETUP");
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.getRequestLog(adminRequest, "trace-1"), "VIEW_SETUP");
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.searchLogs(adminRequest,
+                null, null, null, null, null, null, 0, 50), "VIEW_SETUP");
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.searchAudit(adminRequest, "tenant-1",
+                null, null, null, null, null, 0, 50), "VIEW_SETUP");
+        verifyNoInteractions(queryService, auditQueryService);
+    }
+
+    @Test
+    @DisplayName("A profile holding VIEW_SETUP can search request logs")
+    void allowedWithViewSetup() {
+        when(queryService.searchTraceSpans(any(), any(), any(), any(), anyInt(), anyInt()))
+                .thenReturn(new SearchResult(List.of(), 0));
+
+        var response = controller.searchRequestLogs(adminRequest, "slug", null, null, null, null, null, null, null, 0, 50);
+        assertEquals(HttpStatus.OK, response.getStatusCode());
     }
 }
