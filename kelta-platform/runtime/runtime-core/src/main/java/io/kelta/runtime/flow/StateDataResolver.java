@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 /**
  * Resolves JSONPath-based data flow between states.
@@ -29,6 +30,7 @@ import java.util.Map;
 public class StateDataResolver {
 
     private static final String ROOT_PATH = "$";
+    private static final String RAW_PREFIX = "raw:";
     private final Configuration jsonPathConfig;
     private final ObjectMapper objectMapper;
 
@@ -144,6 +146,24 @@ public class StateDataResolver {
      * @return the resolved string with all expressions replaced
      */
     public String resolveTemplate(String template, Map<String, Object> stateData) {
+        return resolveTemplate(template, stateData, null);
+    }
+
+    /**
+     * Resolves {@code ${$.path}} expressions like {@link #resolveTemplate(String, Map)},
+     * passing each interpolated value through {@code valueEncoder} (e.g. an HTML escaper).
+     * With an encoder, a {@code ${raw:$.path}} expression inserts its value unencoded.
+     * The template is scanned once: a {@code ${...}} inside an interpolated value is
+     * copied as text, never expanded.
+     *
+     * @param template     the template string containing ${$.path} expressions
+     * @param stateData    the state data to resolve paths against
+     * @param valueEncoder applied to each interpolated value; {@code null} inserts values
+     *                     as-is and gives {@code raw:} no special meaning
+     * @return the resolved string with all expressions replaced
+     */
+    public String resolveTemplate(String template, Map<String, Object> stateData,
+                                  UnaryOperator<String> valueEncoder) {
         if (template == null || stateData == null || !template.contains("${")) {
             return template;
         }
@@ -155,8 +175,10 @@ public class StateDataResolver {
                 int end = template.indexOf('}', i + 2);
                 if (end > 0) {
                     String path = template.substring(i + 2, end);
-                    Object value = readPath(stateData, path);
-                    result.append(value != null ? value.toString() : "");
+                    boolean raw = valueEncoder != null && path.startsWith(RAW_PREFIX);
+                    Object value = readPath(stateData, raw ? path.substring(RAW_PREFIX.length()) : path);
+                    String text = value != null ? value.toString() : "";
+                    result.append(valueEncoder == null || raw ? text : valueEncoder.apply(text));
                     i = end + 1;
                     continue;
                 }
