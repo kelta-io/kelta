@@ -450,14 +450,11 @@ public class ChatService {
         List<MessageParam> messages = new ArrayList<>(history.size());
         for (ChatMessage msg : history) {
             if ("system".equals(msg.role())) continue;
-            MessageParam.Role role = "user".equals(msg.role())
-                    ? MessageParam.Role.USER : MessageParam.Role.ASSISTANT;
             List<ContentBlockParam> blocks = toContentBlockParams(msg);
             if (blocks.isEmpty()) continue;
-            messages.add(MessageParam.builder()
-                    .role(role)
-                    .contentOfBlockParams(blocks)
-                    .build());
+            messages.add("user".equals(msg.role())
+                    ? MessageParam.ofUserOfContentBlockParams(blocks)
+                    : MessageParam.ofAssistantOfContentBlockParams(blocks));
         }
         return messages;
     }
@@ -522,10 +519,7 @@ public class ChatService {
             ContentBlockParam p = convertPersistedBlock(b);
             if (p != null) params.add(p);
         }
-        return MessageParam.builder()
-                .role(MessageParam.Role.ASSISTANT)
-                .contentOfBlockParams(params)
-                .build();
+        return MessageParam.ofAssistantOfContentBlockParams(params);
     }
 
     private MessageParam toUserMessageParam(List<Map<String, Object>> blocks) {
@@ -534,10 +528,7 @@ public class ChatService {
             ContentBlockParam p = convertPersistedBlock(b);
             if (p != null) params.add(p);
         }
-        return MessageParam.builder()
-                .role(MessageParam.Role.USER)
-                .contentOfBlockParams(params)
-                .build();
+        return MessageParam.ofUserOfContentBlockParams(params);
     }
 
     @SuppressWarnings("unchecked")
