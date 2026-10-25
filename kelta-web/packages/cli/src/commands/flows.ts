@@ -257,7 +257,8 @@ const execute = defineCommand({
 const remove = defineCommand({
   group: 'flows',
   name: 'delete',
-  summary: 'Delete a flow (the server refuses flows that have runs)',
+  summary:
+    'Delete a flow with its execution history and step logs (refused while a run is RUNNING or WAITING)',
   dangerous: true,
   positionals: [{ name: 'flowId', description: 'Flow id', required: true }],
   examples: [{ cmd: 'kelta flows delete flow_123 --yes' }],
