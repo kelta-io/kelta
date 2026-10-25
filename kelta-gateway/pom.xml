@@ -21,10 +21,10 @@
     <properties>
         <java.version>25</java.version>
         <spring-cloud.version>2025.1.4</spring-cloud.version>
-        <protobuf.version>4.32.0</protobuf.version>
+        <protobuf.version>4.36.2</protobuf.version>
         <!-- Same version as the other modules (2.0.3+ = Docker Engine 29 support); see testing.md. -->
         <testcontainers.version>2.0.5</testcontainers.version>
-        <graalvm-sdk.version>25.0.2</graalvm-sdk.version>
+        <graalvm-sdk.version>25.0.5</graalvm-sdk.version>
         <junit-quickcheck.version>1.0</junit-quickcheck.version>
         <skipITs>true</skipITs>
     </properties>
@@ -123,17 +123,18 @@
         <dependency>
             <groupId>dev.cerbos</groupId>
             <artifactId>cerbos-sdk-java</artifactId>
-            <version>0.12.0</version>
+            <version>0.20.1</version>
         </dependency>
 
         <!-- Non-shaded gRPC Netty — Spring Cloud Gateway's GrpcSslConfigurer auto-configuration
              requires io.grpc.netty.NettyChannelBuilder which only exists in grpc-netty (not the
              shaded variant bundled by Cerbos SDK). Both artifacts coexist safely since they use
-             different package namespaces. -->
+             different package namespaces. Keep this on the gRPC version cerbos-sdk-java pulls in:
+             it also sets grpc-api/grpc-core, which grpc-netty-shaded must match. -->
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-netty</artifactId>
-            <version>1.63.0</version>
+            <version>1.83.1</version>
         </dependency>
 
         <!-- Caffeine for in-memory caching -->
@@ -218,7 +219,7 @@
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>mockwebserver</artifactId>
-            <version>5.2.1</version>
+            <version>5.5.1</version>
             <scope>test</scope>
         </dependency>
 
@@ -295,7 +296,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.2</version>
+                <version>3.6.0</version>
                 <configuration>
                     <!-- Generate XML reports for CI/CD -->
                     <useFile>true</useFile>
@@ -328,7 +329,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>3.2.5</version>
+                <version>3.6.0</version>
                 <configuration>
                     <!-- Selected by name. (A former <groups>integration</groups> filter also required
                          @Tag("integration"), which the self-contained @SpringBootTest suites never
@@ -358,7 +359,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-report-plugin</artifactId>
-                <version>3.2.5</version>
+                <version>3.6.0</version>
                 <executions>
                     <execution>
                         <id>generate-test-report</id>
@@ -378,7 +379,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.13</version>
+                <version>0.8.15</version>
                 <executions>
                     <execution>
                         <id>prepare-agent</id>
@@ -454,18 +455,19 @@
                                   static initializer) must be captured when the gateway starts, not on
                                   the build host.  grpc-netty-shaded's netty-codec-http
                                   native-image.properties put the whole shaded Netty package at build
-                                  time, so AbstractScheduledEventExecutor carried the build node's
-                                  monotonic clock.  On a node whose clock is behind the build node's,
-                                  Netty time goes negative, every deadline clamps to Long.MAX_VALUE and
-                                  "deadline - now" overflows, so every timer fires at once: Cerbos checks
-                                  failed DEADLINE_EXCEEDED / "Keepalive failed" and the gateway denied
-                                  every API call.  GraalVM moves the event-loop subclasses to run time
-                                  with it.  Netty 4.2's SystemTicker has the same pattern; today its
-                                  jars' config is excluded in favour of the reachability metadata, and
-                                  it is listed so that cannot change silently.
+                                  time, so the origin carried the build node's monotonic clock.  On a
+                                  node whose clock is behind the build node's, Netty time goes
+                                  negative, every deadline clamps to Long.MAX_VALUE and
+                                  "deadline - now" overflows, so every timer fires at once: Cerbos
+                                  checks failed DEADLINE_EXCEEDED / "Keepalive failed" and the gateway
+                                  denied every API call.  Netty 4.2 keeps the origin in SystemTicker
+                                  (it was AbstractScheduledEventExecutor in 4.1); grpc-netty-shaded
+                                  ships Netty 4.2 since grpc-java 1.83.  Reactor Netty's own 4.2 jars'
+                                  config is excluded in favour of the reachability metadata today, and
+                                  its SystemTicker is listed so that cannot change silently.
                                   NativeImageClockOriginTest enforces the list.
                                 -->
-                                <buildArg>--initialize-at-run-time=io.grpc.netty.shaded.io.netty.util.concurrent.AbstractScheduledEventExecutor,io.netty.util.concurrent.SystemTicker</buildArg>
+                                <buildArg>--initialize-at-run-time=io.grpc.netty.shaded.io.netty.util.concurrent.SystemTicker,io.netty.util.concurrent.SystemTicker</buildArg>
                             </buildArgs>
                         </configuration>
                     </plugin>
@@ -480,13 +482,13 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-report-plugin</artifactId>
-                <version>3.2.5</version>
+                <version>3.6.0</version>
             </plugin>
             
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.13</version>
+                <version>0.8.15</version>
                 <reportSets>
                     <reportSet>
                         <reports>

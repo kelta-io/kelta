@@ -57,11 +57,25 @@ class OpenSamlRuntimeHintsTest {
             assertThat(RuntimeHintsPredicates.resource().forResource(resource).test(hints))
                     .as("resource %s", resource).isTrue();
         }
-        assertThat(constructible("org.opensaml.core.xml.config.XMLObjectProviderInitializer")).isTrue();
+        // OpenSAML 5.2 moved core's Initializer provider to the impl package; the old
+        // org.opensaml.core.xml.config.XMLObjectProviderInitializer is deprecated and unlisted.
+        assertThat(constructible("org.opensaml.core.xml.config.impl.XMLObjectProviderInitializer")).isTrue();
         assertThat(constructible("org.opensaml.saml.saml2.core.impl.ResponseUnmarshaller")).isTrue();
         assertThat(constructible("org.opensaml.saml.saml2.core.impl.LogoutRequestBuilder")).isTrue();
         assertThat(constructible(
                 "org.opensaml.security.credential.criteria.impl.EvaluableEntityIDCredentialCriterion")).isTrue();
+    }
+
+    @Test
+    @DisplayName("every hard-coded OpenSAML name still exists, so an upgrade cannot drop hints silently")
+    void hardCodedNamesExist() throws Exception {
+        for (String service : OpenSamlRuntimeHints.SERVICE_INTERFACES) {
+            assertThat(loader.getResource("META-INF/services/" + service)).as("service file for %s", service).isNotNull();
+        }
+        for (String registry : OpenSamlRuntimeHints.REGISTRY_PROPERTIES) {
+            assertThat(loader.getResource(registry)).as("registry %s", registry).isNotNull();
+        }
+        assertThat(Class.forName(OpenSamlRuntimeHints.XML_OBJECT_PROVIDER_INITIALIZER, false, loader)).isNotNull();
     }
 
     @Test

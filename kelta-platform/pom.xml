@@ -28,7 +28,7 @@
         <!-- Testing -->
         <mockito.version>5.21.0</mockito.version>
         <byte-buddy.version>1.17.6</byte-buddy.version>
-        <jqwik.version>1.8.2</jqwik.version>
+        <jqwik.version>1.10.2</jqwik.version>
         <testcontainers.version>2.0.5</testcontainers.version>
     </properties>
 
@@ -60,7 +60,7 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.14.0</version>
+                    <version>3.16.0</version>
                     <configuration>
                         <source>${java.version}</source>
                         <target>${java.version}</target>
@@ -71,7 +71,7 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
-                    <version>3.5.2</version>
+                    <version>3.6.0</version>
                     <configuration>
                         <includes>
                             <include>**/*Test.java</include>

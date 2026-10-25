@@ -66,7 +66,7 @@ public class OpenSamlRuntimeHints implements RuntimeHintsRegistrar {
             "org/apache/xml/security/keys/keyresolver/implementations",
             "org/apache/xml/security/utils/resolver/implementations");
 
-    private static final String XML_OBJECT_PROVIDER_INITIALIZER =
+    static final String XML_OBJECT_PROVIDER_INITIALIZER =
             "org.opensaml.core.xml.config.AbstractXMLObjectProviderInitializer";
 
     @Override
