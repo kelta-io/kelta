@@ -67,7 +67,13 @@ Returns `{ "records": [...], "totalCount": n, "aggregations": { ... } }`. Operat
 Runs inside the tenant's schema (`search_path` is pinned, so unqualified names cannot reach other tenants).
 `maxRows` defaults to 1000 and is capped at 10 000. SELECT returns `{ records, rowCount, columns }`; DML/DDL
 returns `{ rowsAffected, success }`. Available when the worker has a datasource wired (always, in a normal
-deployment). Treat substituted values as untrusted — prefer `QUERY_RECORDS` when it can express the query.
+deployment). Prefer `QUERY_RECORDS` when it can express the query.
+
+`${...}` placeholders in `sql` are bound as query parameters, never pasted into the statement, so a
+value from the record or input cannot change the SQL. Write a placeholder where a value goes, either bare
+(`WHERE total > ${$.input.min}`) or as a whole quoted literal (`'${$.record.data.id}'`). A placeholder cannot
+name a table or column, sit inside a longer literal (write `'%' || ${$.input.q} || '%'` instead of
+`'%${$.input.q}%'`), or be the whole statement; such a step fails with a message saying so.
 
 ## Communication
 
