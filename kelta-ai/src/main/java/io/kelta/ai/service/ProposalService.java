@@ -343,10 +343,7 @@ public class ProposalService {
                             "Put long text fields (RICH_TEXT, JSON) in their own 1-column section. " +
                             "Put date/boolean/status fields in a collapsible section at the bottom. " +
                             "Use styles: DEFAULT for main sections, COLLAPSIBLE for secondary sections.",
-                            List.of(MessageParam.builder()
-                                    .role(MessageParam.Role.USER)
-                                    .content(layoutPrompt)
-                                    .build()))
+                            List.of(MessageParam.ofUser(layoutPrompt)))
                     .build();
 
             Message response = anthropicService.sendMessage(params);
