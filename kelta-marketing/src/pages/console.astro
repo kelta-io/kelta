@@ -124,7 +124,7 @@ const foundations = [
   description="The Kelta admin console (setup, security, automation, integration, experience, platform) and the end-user app runtime it generates: lists, records, dashboards, realtime, and an AI assistant."
 >
   <!-- Hero -->
-  <section class="bg-gradient-to-b from-kelta-50 to-white py-20">
+  <section class="bg-linear-to-b from-kelta-50 to-white py-20">
     <div class="mx-auto max-w-7xl px-6 text-center">
       <p class="mb-3 text-sm font-semibold uppercase tracking-wider text-cyan">Two interfaces, one platform</p>
       <h1 class="text-4xl font-extrabold text-navy md:text-5xl">Admin console &amp; app runtime</h1>
@@ -149,7 +149,7 @@ const foundations = [
             see.
           </p>
           <p class="mt-4 text-sm text-kelta-700">
-            Lives at <code class="rounded bg-gray-50 px-1 font-mono text-xs">/{'{tenant}'}/…</code>; the app at <code class="rounded bg-gray-50 px-1 font-mono text-xs">/{'{tenant}'}/app/…</code>. Setup is searchable: <kbd class="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 font-mono text-xs">⌘K</kbd>
+            Lives at <code class="rounded-sm bg-gray-50 px-1 font-mono text-xs">/{'{tenant}'}/…</code>; the app at <code class="rounded-sm bg-gray-50 px-1 font-mono text-xs">/{'{tenant}'}/app/…</code>. Setup is searchable: <kbd class="rounded-sm border border-gray-200 bg-gray-50 px-1.5 py-0.5 font-mono text-xs">⌘K</kbd>
             jumps to any of the areas below.
           </p>
         </div>
@@ -160,7 +160,7 @@ const foundations = [
 
       <div class="mt-16 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {adminAreas.map((area) => (
-          <div class="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+          <div class="rounded-xl border border-gray-100 bg-white p-6 shadow-xs">
             <div class="mb-3 flex items-center gap-3">
               <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-kelta-50 text-xl">{area.icon}</div>
               <h3 class="text-lg font-semibold text-navy">{area.title}</h3>
@@ -199,7 +199,7 @@ const foundations = [
 
       <div class="mt-16 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {appFeatures.map((f) => (
-          <div class="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+          <div class="rounded-xl border border-gray-100 bg-white p-6 shadow-xs">
             <h3 class="mb-2 text-lg font-semibold text-navy">{f.title}</h3>
             <p class="text-sm leading-relaxed text-kelta-700">{f.description}</p>
           </div>
@@ -232,7 +232,7 @@ const foundations = [
         a user — or let your AI agent do the building over MCP.
       </p>
       <div class="mt-8 flex flex-wrap justify-center gap-4">
-        <a href="/docs/getting-started/quickstart/" class="rounded-lg bg-gradient-to-r from-cyan to-blue px-8 py-3 text-base font-semibold text-white transition-all hover:shadow-lg">Quick start</a>
+        <a href="/docs/getting-started/quickstart/" class="rounded-lg bg-linear-to-r from-cyan to-blue px-8 py-3 text-base font-semibold text-white transition-all hover:shadow-lg">Quick start</a>
         <a href="/features" class="rounded-lg border border-gray-600 px-8 py-3 text-base font-semibold text-white transition-colors hover:border-cyan hover:text-cyan">All capabilities</a>
       </div>
     </div>

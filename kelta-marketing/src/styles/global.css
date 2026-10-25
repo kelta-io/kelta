@@ -1,8 +1,50 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+@config '../../tailwind.config.mjs';
+
+@theme {
+  --color-kelta-50: #f8fafc; /* Slate 50 — off-white BG */
+  --color-kelta-100: #e0f2fe;
+  --color-kelta-200: #bae6fd;
+  --color-kelta-300: #7dd3fc;
+  --color-kelta-400: #38bdf8;
+  --color-kelta-500: #06b6d4; /* Cyan — primary accent */
+  --color-kelta-600: #3b82f6; /* Blue — secondary accent */
+  --color-kelta-700: #334155; /* Slate 700 — secondary text */
+  --color-kelta-800: #1e293b;
+  --color-kelta-900: #0f172a; /* Navy — primary dark */
+  --color-kelta-950: #020617;
+
+  --color-navy: #0f172a;
+  --color-cyan: #06b6d4;
+  --color-blue: #3b82f6;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+
+  --font-sans: Inter, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
 
 @layer base {
+  /* Tailwind v3 defaults that v4 dropped (upgrade guide → "Default border color",
+     "Default placeholder color", "Buttons use the default cursor"). */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+
   html {
     scroll-behavior: smooth;
   }
@@ -11,8 +53,9 @@
   }
 }
 
-/* Documentation pages */
-@layer components {
+/* Documentation pages. In the utilities layer so these follow the typography plugin's
+   `.prose` rules (v4 emits plugin components there) and win, as they did in v3. */
+@layer utilities {
   .prose :where(pre) {
     padding: 1rem 1.25rem;
     overflow-x: auto;
