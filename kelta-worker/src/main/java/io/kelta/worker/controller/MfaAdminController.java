@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.service.SecurityAuditLogger;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -21,16 +22,21 @@ import java.util.Map;
 @RequestMapping("/api/admin/mfa")
 public class MfaAdminController {
 
+    private static final String PERMISSION = "MANAGE_USERS";
+
     private static final Logger log = LoggerFactory.getLogger(MfaAdminController.class);
 
     private final JdbcTemplate jdbcTemplate;
+    private final AdminPermissionGuard permissionGuard;
 
-    public MfaAdminController(JdbcTemplate jdbcTemplate) {
+    public MfaAdminController(JdbcTemplate jdbcTemplate, AdminPermissionGuard permissionGuard) {
         this.jdbcTemplate = jdbcTemplate;
+        this.permissionGuard = permissionGuard;
     }
 
     @GetMapping("/users/{userId}/status")
-    public ResponseEntity<?> getUserMfaStatus(@PathVariable String userId) {
+    public ResponseEntity<?> getUserMfaStatus(HttpServletRequest request, @PathVariable String userId) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
@@ -67,7 +73,8 @@ public class MfaAdminController {
     }
 
     @PostMapping("/users/{userId}/reset")
-    public ResponseEntity<?> resetUserMfa(@PathVariable String userId) {
+    public ResponseEntity<?> resetUserMfa(HttpServletRequest request, @PathVariable String userId) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
@@ -95,7 +102,8 @@ public class MfaAdminController {
     }
 
     @GetMapping("/policy")
-    public ResponseEntity<?> getMfaPolicy() {
+    public ResponseEntity<?> getMfaPolicy(HttpServletRequest request) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
@@ -110,7 +118,8 @@ public class MfaAdminController {
     }
 
     @PutMapping("/policy")
-    public ResponseEntity<?> updateMfaPolicy(@RequestBody Map<String, Object> body) {
+    public ResponseEntity<?> updateMfaPolicy(HttpServletRequest request, @RequestBody Map<String, Object> body) {
+        permissionGuard.require(request, PERMISSION);
         String tenantId = TenantContext.get();
         if (tenantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));

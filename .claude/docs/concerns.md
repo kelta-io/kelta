@@ -255,6 +255,61 @@ mailbox to a high-volume public address.
   `callerKey`. Pinned by `SystemCollectionResponseCacheChainTest` +
   `SystemCollectionResponseCacheScenarioTest`.
 
+### `/api/admin/**` — portal deny + a permission on every controller (KLT-789)
+
+**Exposure (found by code reading, not exploited):** the gateway gave `static-admin`
+(`/api/admin/**`) only the blanket `API_ACCESS` check, the seeded Portal User profile holds
+`API_ACCESS` (`TenantProvisioningHook`, `V167__portal_identity.sql`), and twelve worker
+controllers under `/api/admin/**` checked nothing further. On a tenant with portal self-sign-up
+on, any self-registered member could repoint the tenant's SMTP / From address (and so receive
+every magic link and password-reset mail — account takeover), write Cerbos custom rules onto a
+profile, create/drop unique indexes, change password and MFA policy, reset a user's MFA, read
+request logs and audit, register custom domains, and push a notification to every device.
+
+**Fix, two layers (both must stay):**
+- **Gateway:** `RouteAuthorizationFilter.decide()` denies `static-admin` with a 403
+  (`Portal users may not access admin endpoints`) when the principal's `user_type` is `PORTAL` —
+  the JWT claim, or for a PAT the owner's `platform_user.user_type` that
+  `UserIdentityResolutionFilter` stamps on the principal. No portal client (`kelta-web` portal
+  app, `kelta-modules`) calls `/api/admin`. Pinned by `RouteAuthorizationFilterTest` →
+  `PortalOnAdminTests`.
+- **Worker:** every `/api/admin/**` handler checks an explicit system permission on the caller's
+  profile — the gate the admin UI already puts on the page that calls it. Converted controllers
+  use the shared `controller/AdminPermissionGuard` (`require(request, PERMISSION)`, 403 when the
+  profile lacks it, same behaviour as the older private `requirePermission` copies). A new
+  `/api/admin/**` handler **must** do the same: the gateway deny covers portal members only, not
+  an internal user whose profile lacks the permission.
+
+| Controller | Path | Permission |
+|---|---|---|
+| `TenantEmailSettingsController` | `/api/admin/tenant/email-settings` (GET, PUT, POST `/test`) | `MANAGE_TENANTS` (KLT-789) |
+| `CustomRuleController` | `/api/admin/profiles/{profileId}/custom-rules/**` | `MANAGE_USERS` (KLT-789) |
+| `AuthorizationTestController` | `/api/admin/authorization/test` | `MANAGE_USERS` (KLT-789) |
+| `PasswordPolicyController` | `/api/admin/password-policy/**` | `MANAGE_USERS` (KLT-789) |
+| `MfaAdminController` | `/api/admin/mfa/**` | `MANAGE_USERS` (KLT-789) |
+| `EmailTemplatesController` | `/api/admin/email-templates/**` | `MANAGE_EMAIL_TEMPLATES` (KLT-789) |
+| `CompositeUniqueConstraintController` | `/api/admin/collections/{name}/unique-constraints/**` | `CUSTOMIZE_APPLICATION` (KLT-789) |
+| `SearchReindexController` | `/api/admin/search-reindex` | `CUSTOMIZE_APPLICATION` (KLT-789) |
+| `ObservabilitySettingsController` | `/api/admin/observability-settings` | `CUSTOMIZE_APPLICATION` (KLT-789) |
+| `ObservabilityController` | `/api/admin/observability/{request-logs,logs,audit}/**` | `VIEW_SETUP` (KLT-789) |
+| `TenantDomainController` | `/api/admin/domains/**` (not `/internal/domains/resolve`) | `CUSTOMIZE_APPLICATION` (KLT-789; no UI page gates it) |
+| `PushDeviceController` | `POST /api/admin/notifications` only (`/api/devices/**` stays self-scoped) | `CUSTOMIZE_APPLICATION` (KLT-789; no UI page gates it) |
+| `TenantOtlpTargetController` | `/api/admin/observability/otlp-target` | `VIEW_SETUP` |
+| `AdminInviteController` | `POST /api/admin/users/{userId}/invite` | `MANAGE_USERS` |
+| `AdminPersonalAccessTokenController` | `/api/admin/users/{id}/tokens/**` | `MANAGE_USERS` |
+| `PasswordResetAdminController` | `POST /api/admin/users/{userId}/reset-password` | `MANAGE_USERS` |
+| `PortalUserAdminController` | `POST /api/admin/users/portal-invite` | `MANAGE_USERS` |
+| `PortalAuthSettingsController` | `/api/admin/tenant/portal-auth-settings` | `MANAGE_USERS` |
+| `DelegatedAdminScopeController` | `/api/admin/delegated-admin-scopes/**` | `MANAGE_DELEGATED_ADMINS` |
+| `DelegatedUserAdminController` | `/api/admin/delegated/**` | the caller's delegated-admin scope (`DelegatedAdminService.effectiveScope`, re-read per request); `GET /me` answers any caller with its own summary |
+| `CampaignAdminController` | `/api/admin/campaigns/**` | `MANAGE_CAMPAIGNS` |
+
+Residuals: the permission is read from the caller's **profile** system permissions
+(`BootstrapRepository.findProfileSystemPermissions`), as every older admin controller already
+did — a grant held only through a permission set does not open these endpoints.
+`CustomRuleController` still takes the rule's `tenantId` from the body when present (unchanged
+here; review separately).
+
 ### Authorization gaps still open
 
 - **`POST /api/flows/{id}/execute` runs any flow for an `API_ACCESS` caller** (left open by

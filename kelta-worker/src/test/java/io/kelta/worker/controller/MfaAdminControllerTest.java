@@ -7,6 +7,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -20,13 +21,16 @@ import static org.mockito.Mockito.*;
 @WithTenant("tenant-1")
 class MfaAdminControllerTest {
 
+    private final MockHttpServletRequest adminRequest = AdminPermissionGuardFixture.request();
+
     @Mock private JdbcTemplate jdbcTemplate;
 
     private MfaAdminController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new MfaAdminController(jdbcTemplate);
+        controller = new MfaAdminController(jdbcTemplate,
+                AdminPermissionGuardFixture.granting("MANAGE_USERS"));
     }
 
     @Nested
@@ -41,7 +45,7 @@ class MfaAdminControllerTest {
             when(jdbcTemplate.queryForList(contains("user_recovery_code"), eq("user-1")))
                     .thenReturn(List.of(Map.of("cnt", 6L)));
 
-            var response = controller.getUserMfaStatus("user-1");
+            var response = controller.getUserMfaStatus(adminRequest, "user-1");
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         }
@@ -51,7 +55,7 @@ class MfaAdminControllerTest {
             when(jdbcTemplate.queryForList(contains("platform_user"), eq("user-1"), eq("tenant-1")))
                     .thenReturn(List.of());
 
-            var response = controller.getUserMfaStatus("user-1");
+            var response = controller.getUserMfaStatus(adminRequest, "user-1");
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         }
@@ -65,7 +69,7 @@ class MfaAdminControllerTest {
             when(jdbcTemplate.queryForList(contains("platform_user"), eq("user-1"), eq("tenant-1")))
                     .thenReturn(List.of(Map.of("id", "user-1")));
 
-            var response = controller.resetUserMfa("user-1");
+            var response = controller.resetUserMfa(adminRequest, "user-1");
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             verify(jdbcTemplate).update(contains("DELETE FROM user_recovery_code"), eq("user-1"));
@@ -78,7 +82,7 @@ class MfaAdminControllerTest {
             when(jdbcTemplate.queryForList(contains("platform_user"), eq("user-1"), eq("tenant-1")))
                     .thenReturn(List.of());
 
-            var response = controller.resetUserMfa("user-1");
+            var response = controller.resetUserMfa(adminRequest, "user-1");
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         }
@@ -92,16 +96,38 @@ class MfaAdminControllerTest {
             when(jdbcTemplate.update(contains("UPDATE password_policy"), eq(true), eq("tenant-1")))
                     .thenReturn(1);
 
-            var response = controller.updateMfaPolicy(Map.of("mfaRequired", true));
+            var response = controller.updateMfaPolicy(adminRequest, Map.of("mfaRequired", true));
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         }
 
         @Test
         void shouldReturn400WhenMfaRequiredMissing() {
-            var response = controller.updateMfaPolicy(Map.of());
+            var response = controller.updateMfaPolicy(adminRequest, Map.of());
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         }
+    }
+
+    @Test
+    @DisplayName("A profile without MANAGE_USERS (API_ACCESS only, like Portal User) gets 403 on every handler")
+    void deniedWithoutManageUsers() {
+        controller = new MfaAdminController(jdbcTemplate, AdminPermissionGuardFixture.apiAccessOnly());
+
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.getUserMfaStatus(adminRequest, "user-1"), "MANAGE_USERS");
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.resetUserMfa(adminRequest, "user-1"), "MANAGE_USERS");
+        AdminPermissionGuardFixture.assertForbidden(() -> controller.getMfaPolicy(adminRequest), "MANAGE_USERS");
+        AdminPermissionGuardFixture.assertForbidden(
+                () -> controller.updateMfaPolicy(adminRequest, Map.of("mfaRequired", true)), "MANAGE_USERS");
+        verifyNoInteractions(jdbcTemplate);
+    }
+
+    @Test
+    @DisplayName("A profile holding MANAGE_USERS can reset a user's MFA")
+    void allowedWithManageUsers() {
+        when(jdbcTemplate.queryForList(contains("platform_user"), eq("user-1"), eq("tenant-1")))
+                .thenReturn(List.of(Map.of("id", "user-1")));
+
+        assertThat(controller.resetUserMfa(adminRequest, "user-1").getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 }
