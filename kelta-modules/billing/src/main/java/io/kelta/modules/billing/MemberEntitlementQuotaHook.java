@@ -130,14 +130,29 @@ public class MemberEntitlementQuotaHook implements BeforeSaveHook {
             return BeforeSaveResult.ok();
         }
 
-        int limit = entitlements.intLimit(userId, limitKey, Integer.MAX_VALUE);
-        if (limit == Integer.MAX_VALUE) {
+        Object raw = entitlements.resolve(userId).values().get(limitKey);
+        if (raw == null) {
             // No such entitlement key for this member ⇒ uncapped. A tenant wanting a hard cap
             // must put the key on its DEFAULT plan.
             return BeforeSaveResult.ok();
         }
-        if (limit <= 0) {
-            return reject(rule, 0, limit);
+        if (raw instanceof Boolean included) {
+            // A boolean gate: "this feature is in the plan". Passes OR-merge, so one granting
+            // pass lifts a DEFAULT false.
+            return included ? BeforeSaveResult.ok() : reject(rule, 0, 0);
+        }
+        Long parsed = numericLimit(raw);
+        if (parsed == null) {
+            log.warn("Quota rule {} resolved to unusable value of type {} — allowing",
+                    limitKey, raw.getClass().getName());
+            return BeforeSaveResult.ok();
+        }
+        long limit = parsed;
+        if (limit < 0) {
+            return BeforeSaveResult.ok(); // negative = unlimited, no count query
+        }
+        if (limit == 0) {
+            return reject(rule, 0, 0);
         }
 
         CollectionDefinition definition = collectionRegistry.get(collectionName);
@@ -215,7 +230,22 @@ public class MemberEntitlementQuotaHook implements BeforeSaveHook {
         return true;
     }
 
-    private BeforeSaveResult reject(Map<String, Object> rule, long used, int limit) {
+    /** A Number, or a numeric string parsed the way {@code MemberEntitlements.intValue} does. */
+    private static Long numericLimit(Object raw) {
+        if (raw instanceof Number n) {
+            return n.longValue();
+        }
+        if (raw instanceof String s) {
+            try {
+                return (long) Integer.parseInt(s.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private BeforeSaveResult reject(Map<String, Object> rule, long used, long limit) {
         log.info("Rejecting create — member at quota {} ({}/{})", rule.get("limitKey"), used, limit);
         String message = str(rule.get("message"));
         if (message == null) {
