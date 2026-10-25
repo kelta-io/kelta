@@ -191,6 +191,16 @@ which forces every leg to build — so merging a change to this file redeploys e
    (`e2e-tests/tests/admin/cli-smoke.spec.ts`) can spawn the built binary entry against the
    deployed stack via the pre-issued `E2E_API_TOKEN` (env-override auth path); the spec
    self-skips when the dist is absent.
+   **Chromium:** the job runs on `k8s-runner` directly (not in the `mcr.microsoft.com/playwright`
+   image the PR `e2e` job uses) and installs Chromium with `npx playwright install --with-deps
+   chromium`. The runner image (`.github/runner/Dockerfile`, `FROM
+   ghcr.io/actions/actions-runner:latest`) reports an OS Playwright does not recognise; the ^1.50
+   line Playwright used fell back to ubuntu20.04 builds, but 1.64 dropped them and the install failed
+   hard (`Playwright does not support chromium on ubuntu20.04-x64`, PLT-808). The job therefore
+   sets `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: ubuntu24.04-x64` in its job-level `env:`, so the
+   install and `Run E2E tests` both resolve the noble build. A Playwright bump must keep that
+   override pointing at a platform the new version still ships — a PR's `ci.yml` cannot catch
+   a break here, since this job runs only after a deploy to `main`.
    Because ArgoCD rolls the worker out **asynchronously** after `deploy` commits the tag,
    this job first blocks until the `emf-worker` Deployment targets **this commit's**
    `main-<short-sha>` image and its rollout is fully complete (all pods on the new

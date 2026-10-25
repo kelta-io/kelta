@@ -1073,6 +1073,14 @@ jobs:
     if: needs.smoke-test.result == 'success'
     runs-on: k8s-runner
     timeout-minutes: 25
+    # k8s-runner is built from .github/runner/Dockerfile (FROM ghcr.io/actions/actions-runner:latest),
+    # whose OS Playwright 1.64.1 does not recognise. Older Playwright fell back to ubuntu20.04
+    # builds; 1.64 dropped them, so the fallback now fails with "Playwright does not support
+    # chromium on ubuntu20.04-x64". Pin the host platform at JOB level so both "Install Playwright
+    # browsers" and "Run E2E tests" resolve the same noble Chromium build. A Playwright bump must
+    # keep this pointing at a platform the new version still ships (ci-cd.md → e2e-test).
+    env:
+      PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: ubuntu24.04-x64
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -1094,6 +1102,10 @@ jobs:
         working-directory: e2e-tests
         run: npm ci
 
+      # Resolves Chromium for PLAYWRIGHT_HOST_PLATFORM_OVERRIDE (job env above), not the runner's
+      # detected OS: ghcr.io/actions/actions-runner:latest reports an OS Playwright 1.64.1 does
+      # not recognise, and 1.64 dropped the ubuntu20.04 fallback older versions used.
+      # --with-deps stays: dropping it would hide missing system libs until the tests crash.
       - name: Install Playwright browsers
         working-directory: e2e-tests
         run: npx playwright install --with-deps chromium
