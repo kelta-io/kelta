@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:net';
 import {
   classifyArgoCommit, parseArgoLog, buildDeployments, attachChanges, percentile,
   pairStateTransitions, runsFromAlertSeries, band, summarize, stableStringify, normalizePr, filterIncidents,
+  describeError, runSinks,
 } from './lib.mjs';
 
 const T0 = 1_757_800_000; // 2025-09-13T21:46:40Z-ish; only relative order matters
@@ -218,4 +220,60 @@ test('normalizePr picks first authored commit and flags bots', () => {
   assert.equal(pr.mergeSha, 'abc');
   assert.equal(normalizePr({ number: 1, author: { login: 'cklinker', __typename: 'User' }, commits: { nodes: [] }, createdAt: iso(1) }).authorIsBot, false);
   assert.equal(normalizePr({ number: 1, author: { login: 'foo[bot]' }, commits: { nodes: [] }, createdAt: iso(1) }).authorIsBot, true);
+});
+
+test('describeError: message alone when there is no cause', () => {
+  assert.equal(describeError(new Error('boom')), 'boom');
+  assert.equal(describeError('plain string'), 'plain string');
+});
+
+test('describeError: appends cause code and message', () => {
+  const cause = Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:3100'), { code: 'ECONNREFUSED' });
+  assert.equal(
+    describeError(new TypeError('fetch failed', { cause })),
+    'fetch failed (ECONNREFUSED connect ECONNREFUSED 10.0.0.1:3100)',
+  );
+});
+
+test('describeError: cause without a code, and a cause with only a code', () => {
+  assert.equal(describeError(new Error('fetch failed', { cause: new Error('other side closed') })), 'fetch failed (other side closed)');
+  assert.equal(describeError(new Error('fetch failed', { cause: { code: 'ENOTFOUND' } })), 'fetch failed (ENOTFOUND)');
+  assert.equal(describeError(new Error('fetch failed', { cause: 'socket hang up' })), 'fetch failed (socket hang up)');
+});
+
+test('describeError: real undici fetch failure carries its cause (best-effort, needs loopback)', async (t) => {
+  // Port 9 is on fetch's blocked-port list ("bad port"); a just-closed ephemeral port refuses instead.
+  const server = createServer();
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  const { port } = server.address();
+  await new Promise((done) => server.close(done));
+  const e = await fetch(`http://127.0.0.1:${port}`).then(() => null, (err) => err);
+  if (!e || !e.cause) return t.skip('loopback port 9 did not refuse the connection in this sandbox');
+  assert.equal(e.message, 'fetch failed');
+  assert.match(describeError(e), /^fetch failed \(E[A-Z]+ /);
+});
+
+test('runSinks: a throwing first sink does not stop the later ones', async () => {
+  const ran = [];
+  const lokiError = new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
+  const { results, errors } = await runSinks([
+    { name: 'loki', run: async () => { ran.push('loki'); throw lokiError; } },
+    { name: 'otlp', run: async () => { ran.push('otlp'); return 'pushed 3 gauges'; } },
+    { name: 'kelta', run: () => { ran.push('kelta'); return '{"ok":true}'; } },
+  ]);
+  assert.deepEqual(ran, ['loki', 'otlp', 'kelta']);
+  assert.deepEqual(results, [{ name: 'otlp', value: 'pushed 3 gauges' }, { name: 'kelta', value: '{"ok":true}' }]);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].name, 'loki');
+  assert.equal(errors[0].error, lokiError);
+});
+
+test('runSinks: every sink succeeds, in order, with no errors', async () => {
+  const { results, errors } = await runSinks([
+    { name: 'loki', run: async () => 'pushed 12 lines' },
+    { name: 'otlp', run: async () => 'pushed 3 gauges' },
+    { name: 'kelta', run: async () => '{}' },
+  ]);
+  assert.deepEqual(results.map((r) => r.name), ['loki', 'otlp', 'kelta']);
+  assert.deepEqual(errors, []);
 });
