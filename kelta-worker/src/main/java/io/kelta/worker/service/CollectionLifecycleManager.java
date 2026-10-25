@@ -162,6 +162,13 @@ public class CollectionLifecycleManager {
     private final ConcurrentHashMap<String, String> activeCollections = new ConcurrentHashMap<>();
 
     /**
+     * Maps collection ID to its {@link CollectionDefinition#registryKey()}. Teardown must
+     * unregister by this key: the bare name is shared across tenants, and unregistering by
+     * it removes whichever tenant's same-named collection the registry finds first.
+     */
+    private final ConcurrentHashMap<String, String> registryKeys = new ConcurrentHashMap<>();
+
+    /**
      * One monitor per collection ID. Initialize and refresh each read the collection from the
      * database and then register the definition; a NATS consumer and a read-after-write refresh
      * (#910) for the same collection run concurrently, and without ordering a definition read
@@ -282,12 +289,14 @@ public class CollectionLifecycleManager {
                 log.info("Skipping VIRTUAL collection '{}' (id={}) — no storage to initialize",
                         collectionName, collectionId);
                 collectionRegistry.register(definition);
+                registryKeys.put(collectionId, definition.registryKey());
                 activeCollections.put(collectionId, collectionName);
                 return;
             }
 
             // Register in local registry (makes it available to DynamicCollectionRouter)
             collectionRegistry.register(definition);
+            registryKeys.put(collectionId, definition.registryKey());
 
             if (applySchema) {
                 // Initialize storage (creates database table if needed) in the row's tenant
@@ -352,6 +361,7 @@ public class CollectionLifecycleManager {
 
             // Re-register with updated definition
             collectionRegistry.register(newDefinition);
+            registryKeys.put(collectionId, newDefinition.registryKey());
 
             // Migrate the storage schema in the row's tenant scope so the storage adapter
             // uses the correct schema
@@ -423,8 +433,9 @@ public class CollectionLifecycleManager {
      */
     public void teardownCollection(String collectionId) {
         String collectionName = activeCollections.remove(collectionId);
+        String registryKey = registryKeys.remove(collectionId);
         if (collectionName != null) {
-            collectionRegistry.unregister(collectionName);
+            collectionRegistry.unregister(registryKey != null ? registryKey : collectionName);
             if (validationRuleRegistry != null) {
                 validationRuleRegistry.unregister(collectionName);
             }

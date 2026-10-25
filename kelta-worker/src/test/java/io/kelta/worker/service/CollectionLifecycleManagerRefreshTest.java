@@ -3,7 +3,9 @@ package io.kelta.worker.service;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldType;
 import io.kelta.runtime.model.system.SystemCollectionDefinitions;
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.registry.ConcurrentCollectionRegistry;
 import io.kelta.runtime.storage.StorageAdapter;
 import io.kelta.runtime.validation.ValidationRuleRegistry;
 import io.kelta.worker.config.WorkerMetricsConfig;
@@ -175,7 +177,33 @@ class CollectionLifecycleManagerRefreshTest {
             manager.teardownCollection("coll-456");
 
             verify(validationRuleRegistry).unregister("orders");
-            verify(collectionRegistry).unregister("orders");
+            verify(collectionRegistry).unregister("tenant-abc:orders");
+        }
+
+        @Test
+        @DisplayName("Tearing down one tenant's collection leaves another tenant's same-named one registered")
+        void teardownIsTenantScoped() {
+            CollectionRegistry registry = spy(new ConcurrentCollectionRegistry());
+            CollectionLifecycleManager scoped = new CollectionLifecycleManager(
+                    registry, storageAdapter, jdbcTemplate, objectMapper);
+            Map<String, Object> rowA = buildUserRow("orders");
+            rowA.put("id", "coll-a");
+            rowA.put("tenant_id", "tenant-a");
+            Map<String, Object> rowB = buildUserRow("orders");
+            rowB.put("id", "coll-b");
+            rowB.put("tenant_id", "tenant-b");
+            mockDbForCollection("coll-a", rowA, buildFieldRows());
+            mockDbForCollection("coll-b", rowB, buildFieldRows());
+            scoped.initializeCollection("coll-b");
+            scoped.initializeCollection("coll-a");
+
+            scoped.teardownCollection("coll-a");
+
+            verify(registry).unregister("tenant-a:orders");
+            assertThat(TenantContext.callWithTenant("tenant-a", () -> registry.get("orders"))).isNull();
+            CollectionDefinition remaining = TenantContext.callWithTenant("tenant-b", () -> registry.get("orders"));
+            assertThat(remaining).isNotNull();
+            assertThat(remaining.tenantId()).isEqualTo("tenant-b");
         }
 
         @Test
