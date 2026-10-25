@@ -14,9 +14,9 @@
     "@tailwindcss/typography",
     // Imported by MergeTagNode.ts but must stay the copy @tiptap/react pulls in: a second copy breaks Node extension identity.
     "@tiptap/core",
-    // Imported by telemetry/index.ts but must stay the version the pinned @opentelemetry/sdk-trace-web pulls in.
+    // Imported by telemetry/index.ts but must stay the single copy the pinned @opentelemetry/sdk-trace-web pulls in (2.12.0); a second copy breaks the global context.
     "@opentelemetry/core",
-    // Imported by telemetry/index.ts but must stay the version the pinned @opentelemetry/instrumentation-fetch pulls in.
+    // Imported by telemetry/index.ts but must stay the single copy the pinned @opentelemetry/instrumentation-fetch pulls in (0.223.0).
     "@opentelemetry/instrumentation",
   ],
   "ignoreBinaries": [

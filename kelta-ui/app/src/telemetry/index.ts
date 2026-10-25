@@ -4,7 +4,7 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { ZoneContextManager } from '@opentelemetry/context-zone'
 import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch'
 import { XMLHttpRequestInstrumentation } from '@opentelemetry/instrumentation-xml-http-request'
-import { Resource } from '@opentelemetry/resources'
+import { resourceFromAttributes } from '@opentelemetry/resources'
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions'
 import { W3CTraceContextPropagator } from '@opentelemetry/core'
 import { registerInstrumentations } from '@opentelemetry/instrumentation'
@@ -61,7 +61,7 @@ export function initTelemetry(): void {
   const deploymentEnvironment = env?.VITE_OTEL_DEPLOYMENT_ENVIRONMENT || 'production'
   const serviceVersion = env?.VITE_APP_VERSION || 'unknown'
 
-  const resource = new Resource({
+  const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: serviceName,
     [ATTR_SERVICE_NAMESPACE]: serviceNamespace,
     [ATTR_SERVICE_VERSION]: serviceVersion,
