@@ -3,6 +3,8 @@ package io.kelta.worker.service;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.convert.ApplicationConversionService;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -18,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -98,5 +101,23 @@ class UserAccessRevocationMarkerTest {
 
         assertThat(expression).isEqualTo("${kelta.security.user-revocation-ttl:PT2H}");
         assertThat(Duration.parse("PT2H")).isGreaterThanOrEqualTo(Duration.ofHours(2));
+    }
+
+    @Test
+    @DisplayName("Spring can construct it as a bean, with the default TTL")
+    void springConstructsTheBean() {
+        // Two constructors and no @Autowired made Spring look for a no-arg one, which failed the
+        // worker's application context at startup (WorkerApplicationContextIntegrationTest).
+        try (var context = new AnnotationConfigApplicationContext()) {
+            context.getBeanFactory().setConversionService(new ApplicationConversionService());
+            context.registerBean(StringRedisTemplate.class, () -> redis);
+            context.register(UserAccessRevocationMarker.class);
+            context.refresh();
+            when(redis.opsForValue()).thenReturn(valueOps);
+
+            context.getBean(UserAccessRevocationMarker.class).markAfterCommit("t-1", "u-1");
+
+            verify(valueOps).set(anyString(), anyString(), eq(Duration.ofHours(2)));
+        }
     }
 }

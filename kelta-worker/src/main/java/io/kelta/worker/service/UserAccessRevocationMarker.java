@@ -2,6 +2,7 @@ package io.kelta.worker.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -36,6 +37,7 @@ public class UserAccessRevocationMarker {
     private final Duration ttl;
     private final Clock clock;
 
+    @Autowired
     public UserAccessRevocationMarker(StringRedisTemplate redis,
                                       @Value("${kelta.security.user-revocation-ttl:PT2H}") Duration ttl) {
         this(redis, ttl, Clock.systemUTC());
