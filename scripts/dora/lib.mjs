@@ -353,3 +353,28 @@ export function normalizePr(node) {
     commitCount: node.commits?.totalCount ?? dates.length,
   };
 }
+
+/** Error message plus its `cause` — undici's `fetch failed` keeps the real reason (ECONNREFUSED…) there. */
+export function describeError(e) {
+  const message = e?.message ?? String(e);
+  const cause = e?.cause;
+  if (cause === undefined || cause === null) return message;
+  const detail = typeof cause === 'object'
+    ? [cause.code, cause.message].filter(Boolean).join(' ')
+    : String(cause);
+  return detail ? `${message} (${detail})` : message;
+}
+
+/** Run each `{ name, run }` sink in order; one throwing does not stop the rest. */
+export async function runSinks(sinks) {
+  const results = [];
+  const errors = [];
+  for (const { name, run } of sinks) {
+    try {
+      results.push({ name, value: await run() });
+    } catch (error) {
+      errors.push({ name, error });
+    }
+  }
+  return { results, errors };
+}

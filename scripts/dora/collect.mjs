@@ -22,6 +22,7 @@ import { resolve } from 'node:path';
 import {
   WINDOWS, parseArgoLog, buildDeployments, attachChanges, pairStateTransitions,
   runsFromAlertSeries, summarize, stableStringify, normalizePr, filterIncidents,
+  describeError, runSinks,
 } from './lib.mjs';
 
 const args = parseArgs(process.argv.slice(2));
@@ -393,10 +394,10 @@ async function main() {
   let incidents = [];
   const sourceErrors = [];
   if (args['loki-url']) {
-    try { incidents.push(...await loadGrafanaStateHistory(args['loki-url'])); } catch (e) { sourceErrors.push(`loki: ${e.message}`); }
+    try { incidents.push(...await loadGrafanaStateHistory(args['loki-url'])); } catch (e) { sourceErrors.push(`loki: ${describeError(e)}`); }
   }
   if (args['mimir-url']) {
-    try { incidents.push(...await loadPrometheusAlerts(args['mimir-url'])); } catch (e) { sourceErrors.push(`mimir: ${e.message}`); }
+    try { incidents.push(...await loadPrometheusAlerts(args['mimir-url'])); } catch (e) { sourceErrors.push(`mimir: ${describeError(e)}`); }
   }
 
   const incidentFilter = args['incident-filter'] === undefined ? '^(EMF|Kelta)' : args['incident-filter'];
@@ -425,9 +426,15 @@ async function main() {
   for (const e of sourceErrors) log(`WARN ${e}`);
 
   if (args['push-loki'] && !args['loki-url']) throw new Error('--push-loki requires --loki-url');
-  if (args['push-loki']) log(`loki: pushed ${await pushLoki(args['loki-url'], report)} lines`);
-  if (args['push-otlp']) log(`otlp: pushed ${await pushOtlp(args['push-otlp'], report)} gauges`);
-  if (args['push-kelta']) log(`kelta: ${JSON.stringify(pushKelta(report))}`);
+  const sinks = [];
+  if (args['push-loki']) sinks.push({ name: 'loki', run: async () => `pushed ${await pushLoki(args['loki-url'], report)} lines` });
+  if (args['push-otlp']) sinks.push({ name: 'otlp', run: async () => `pushed ${await pushOtlp(args['push-otlp'], report)} gauges` });
+  if (args['push-kelta']) sinks.push({ name: 'kelta', run: async () => JSON.stringify(pushKelta(report)) });
+
+  const { results, errors } = await runSinks(sinks);
+  for (const r of results) log(`${r.name}: ${r.value}`);
+  for (const f of errors) console.error(`ERROR ${f.name}: ${describeError(f.error)}`);
+  if (errors.length) process.exitCode = 1;
 }
 
 main().catch((e) => { console.error(e.stack || String(e)); process.exit(1); });
