@@ -792,7 +792,14 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `POST /api/modules/kelta-billing/x/{checkout-sessions,portal-sessions}`, with byte-identical
   response shapes. They ride the platform-owned `/api/modules/**` static route, so the gateway
   applies only `API_ACCESS` and **scoping is in the handler**: every route acts on the **calling**
-  member resolved from `X-User-Id`, and none accepts a member id — there is no id to tamper with.
+  member, and none accepts a member id — there is no id to tamper with. **Every module HTTP
+  handler (`ModuleHttpController` → `dispatchRoute`) receives the platform user UUID** that
+  `CallerContextFilter` resolved (`CallerContext.current()`), never the raw `X-User-Id` header
+  (the gateway sends the caller's email there); with no resolved caller the module gets `null`.
+  Before KLT-790 billing stamped the email on Stripe, so `billing_*.userId` rows were invisible to
+  `EntitlementResolver`; the webhook now ignores a non-UUID `client_reference_id`/`metadata.userId`
+  and falls back to the stored customer mapping, and `kelta-modules/billing/VERIFICATION.md` has
+  the one-off email→UUID rewrite for existing rows.
   Checkout and portal **return URLs are validated against the credential's
   `allowedReturnOrigins`** by the module, on the semantics the deleted `ReturnUrlValidator` set:
   origin equality (a prefix check accepts `https://app.example.com.evil.test`), HTTPS off

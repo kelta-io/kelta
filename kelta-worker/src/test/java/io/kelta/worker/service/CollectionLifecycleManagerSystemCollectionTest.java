@@ -409,7 +409,7 @@ class CollectionLifecycleManagerSystemCollectionTest {
             // Then tear it down
             lifecycleManager.teardownCollection("coll-456");
 
-            verify(collectionRegistry).unregister("products");
+            verify(collectionRegistry).unregister("tenant-abc:products");
         }
     }
 }

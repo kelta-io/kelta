@@ -1,5 +1,6 @@
 package io.kelta.worker.controller;
 
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.workflow.ActionResult;
 import io.kelta.worker.module.RuntimeModuleManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +15,7 @@ import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -95,6 +97,50 @@ class ModuleHttpControllerMvcTest {
                         .header("X-Tenant-ID", "t1"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.not("nested-collection-router")));
+    }
+
+    /**
+     * The gateway puts the caller's email in {@code X-User-Id}; the rest of the platform keys
+     * members by the UUID {@code CallerContextFilter} resolves. Handing a module the header made
+     * billing stamp the email on Stripe, so a paying member's subscription row was invisible to
+     * entitlement resolution.
+     */
+    @Test
+    @DisplayName("the module receives the resolved user UUID, not the X-User-Id email")
+    void dispatchReceivesResolvedUserUuid() throws Exception {
+        CallerContext caller = new CallerContext("u-uuid", CallerContext.UserType.PORTAL,
+                false, false);
+        MockMvc withCaller = MockMvcBuilders
+                .standaloneSetup(new ModuleHttpController(providerOf(manager)))
+                .addFilter((request, response, chain) -> CallerContext.runAs(caller, () -> {
+                    try {
+                        chain.doFilter(request, response);
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                }))
+                .build();
+
+        withCaller.perform(post("/api/modules/kelta-billing/x/checkout-sessions")
+                        .header("X-Tenant-ID", "t1")
+                        .header("X-User-Id", "someone@example.com")
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isOk());
+
+        org.mockito.Mockito.verify(manager).dispatchRoute(eq("t1"), eq("kelta-billing"),
+                eq("u-uuid"), eq("POST"), eq("/checkout-sessions"), any(), any());
+    }
+
+    @Test
+    @DisplayName("with no resolved caller the module receives a null user, never the raw header")
+    void dispatchReceivesNullUserWithoutCallerContext() throws Exception {
+        mvc.perform(get("/api/modules/kelta-billing/x/plans")
+                        .header("X-Tenant-ID", "t1")
+                        .header("X-User-Id", "someone@example.com"))
+                .andExpect(status().isOk());
+
+        org.mockito.Mockito.verify(manager).dispatchRoute(eq("t1"), eq("kelta-billing"),
+                isNull(), eq("GET"), eq("/plans"), any(), any());
     }
 
     private static ObjectProvider<RuntimeModuleManager> providerOf(RuntimeModuleManager m) {
