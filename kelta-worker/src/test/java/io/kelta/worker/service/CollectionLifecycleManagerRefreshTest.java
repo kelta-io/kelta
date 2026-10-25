@@ -175,7 +175,7 @@ class CollectionLifecycleManagerRefreshTest {
             manager.teardownCollection("coll-456");
 
             verify(validationRuleRegistry).unregister("orders");
-            verify(collectionRegistry).unregister("orders");
+            verify(collectionRegistry).unregister("tenant-abc:orders");
         }
 
         @Test
