@@ -17,7 +17,6 @@ import java.net.URL;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Enumeration;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -30,22 +29,30 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Guards the gateway native image against Netty capturing its monotonic clock on the build host.
  *
  * <p>Netty measures scheduler time from an origin taken in a static initializer
- * ({@code START_TIME = System.nanoTime()}). grpc-netty-shaded (Cerbos SDK) ships
+ * ({@code START_TIME = System.nanoTime()}; {@code SystemTicker} in Netty 4.2,
+ * {@code AbstractScheduledEventExecutor} in 4.1). grpc-netty-shaded (Cerbos SDK) ships
  * {@code native-image.properties} that initialize its whole shaded Netty package at build time,
  * so the origin became the build node's {@code CLOCK_MONOTONIC}. On a node whose clock is behind
  * the build node's, Netty time is negative, every deadline clamps to {@code Long.MAX_VALUE} and
  * {@code deadline - now} overflows: every scheduled task runs at once. In production that made
  * every Cerbos check fail ({@code DEADLINE_EXCEEDED}, then {@code Keepalive failed}) and the
- * gateway denied every API call for eight hours. Netty 4.2's own jars carry the same blanket
- * flag; the native build currently excludes their config in favour of the reachability metadata,
- * which is the only reason Reactor Netty was not hit too.
+ * gateway denied every API call for eight hours. grpc-netty-shaded has shaded Netty 4.2 since
+ * grpc-java 1.83. Netty 4.2's own jars carry the same blanket flag; the native build currently
+ * excludes their config in favour of the reachability metadata, which is the only reason Reactor
+ * Netty was not hit too.
  *
  * <p>A JVM build hides this entirely: on the JVM every class is initialized at run time.
  */
 @DisplayName("Native image: Netty clock origins are captured at run time")
 class NativeImageClockOriginTest {
 
-    private static final String NETTY_JAR_MARKER = "META-INF/io.netty.versions.properties";
+    /**
+     * Every Netty jar carries a versions file; grpc-netty-shaded relocates it with the classes
+     * (since grpc-java 1.76), so a scan keyed on Netty's name alone silently skips the shaded copy.
+     */
+    private static final List<String> NETTY_JAR_MARKERS = List.of(
+            "META-INF/io.netty.versions.properties",
+            "META-INF/io.grpc.netty.shaded.io.netty.versions.properties");
     private static final String RUN_TIME_INIT = "--initialize-at-run-time=";
 
     /**
@@ -66,7 +73,7 @@ class NativeImageClockOriginTest {
         // origin — a stale entry means Netty moved its origin and the flag no longer covers it.
         assertThat(clockOrigins)
                 .as("Netty classes capturing System.nanoTime() in a static initializer")
-                .contains("io.grpc.netty.shaded.io.netty.util.concurrent.AbstractScheduledEventExecutor",
+                .contains("io.grpc.netty.shaded.io.netty.util.concurrent.SystemTicker",
                         "io.netty.util.concurrent.SystemTicker")
                 .containsAll(runTime);
 
@@ -82,8 +89,11 @@ class NativeImageClockOriginTest {
     /** Classes in every Netty jar on the classpath whose static initializer calls System.nanoTime(). */
     private static Set<String> nettyClassesReadingNanoTimeInStaticInit() throws IOException {
         Set<String> found = new TreeSet<>();
-        Enumeration<URL> markers = NativeImageClockOriginTest.class.getClassLoader().getResources(NETTY_JAR_MARKER);
-        for (URL marker : Collections.list(markers)) {
+        List<URL> markers = new ArrayList<>();
+        for (String name : NETTY_JAR_MARKERS) {
+            markers.addAll(Collections.list(NativeImageClockOriginTest.class.getClassLoader().getResources(name)));
+        }
+        for (URL marker : markers) {
             if (!(marker.openConnection() instanceof JarURLConnection connection)) {
                 continue;
             }

@@ -160,7 +160,7 @@ visual system.
 | DB | PostgreSQL | 15 (RLS, per-tenant schemas) | `docker-compose.yml` |
 | Cache | Redis | 7 | `docker-compose.yml` |
 | Messaging | NATS JetStream | 2.10 | `docker-compose.yml` |
-| Authz | Cerbos PDP | 0.40.0 (SDK 0.12.0) | `docker-compose.yml`, poms |
+| Authz | Cerbos PDP | 0.40.0 (SDK 0.20.1) | `docker-compose.yml`, poms |
 | Search/Audit | PostgreSQL (`tsvector` full-text, `pgvector` semantic, audit tables) | — | `integrations.md` |
 | AI | `anthropic-java` SDK | 3.3.0 (model via `AI_DEFAULT_MODEL`) | `kelta-ai/pom.xml`, `application.yml` |
 | Frontend | React | 19.2 | `kelta-ui/app/package.json` |

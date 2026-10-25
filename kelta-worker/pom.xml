@@ -24,8 +24,8 @@
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <protobuf.version>4.32.0</protobuf.version>
-        <aws.sdk.version>2.30.1</aws.sdk.version>
+        <protobuf.version>4.36.2</protobuf.version>
+        <aws.sdk.version>2.57.3</aws.sdk.version>
         <testcontainers.version>2.0.5</testcontainers.version>
     </properties>
 
@@ -67,12 +67,12 @@
             <dependency>
                 <groupId>com.squareup.okio</groupId>
                 <artifactId>okio</artifactId>
-                <version>3.16.1</version>
+                <version>3.18.2</version>
             </dependency>
             <dependency>
                 <groupId>com.squareup.okio</groupId>
                 <artifactId>okio-jvm</artifactId>
-                <version>3.16.1</version>
+                <version>3.18.2</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -222,7 +222,7 @@
         <dependency>
             <groupId>dev.cerbos</groupId>
             <artifactId>cerbos-sdk-java</artifactId>
-            <version>0.12.0</version>
+            <version>0.20.1</version>
         </dependency>
 
         <!-- In-memory caching for Cerbos authorization results -->
@@ -242,14 +242,14 @@
         <dependency>
             <groupId>net.coobird</groupId>
             <artifactId>thumbnailator</artifactId>
-            <version>0.4.20</version>
+            <version>0.4.21</version>
         </dependency>
 
         <!-- PDF report export (Apache-2.0) -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
-            <version>3.0.5</version>
+            <version>3.0.8</version>
         </dependency>
 
         <!-- Testing -->
@@ -347,7 +347,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.14.0</version>
+                <version>3.16.0</version>
                 <configuration>
                     <source>${java.version}</source>
                     <target>${java.version}</target>
