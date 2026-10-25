@@ -232,7 +232,7 @@ not a supported integration surface and may change without notice.
 | GET | `/api/flows/executions/{executionId}/steps` | worker | API_ACCESS | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
 | GET | `/api/flows/record-executions` | worker | API_ACCESS | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
 | GET | `/api/flows/resources` | worker | API_ACCESS | internal — Backs the flow designer's step palette: the task resources (built-in and from runtime modules) a Task state can name. |
-| POST | `/api/flows/{flowId}/execute` | worker | API_ACCESS | [automation/triggers](/docs/automation/triggers/#manual-and-api-invocation) |
+| POST | `/api/flows/{flowId}/execute` | worker | API_ACCESS; handler checks MANAGE_WORKFLOWS | [automation/triggers](/docs/automation/triggers/#manual-and-api-invocation) |
 | GET | `/api/flows/{flowId}/flow-executions` | worker | API_ACCESS | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
 | POST | `/api/flows/{flowId}/publish` | worker | API_ACCESS + flows grant or MANAGE_WORKFLOWS | [automation/flow-runs](/docs/automation/flow-runs/#versions) |
 | GET | `/api/flows/{flowId}/runs` | worker | API_ACCESS | [automation/triggers](/docs/automation/triggers/#schedules) |

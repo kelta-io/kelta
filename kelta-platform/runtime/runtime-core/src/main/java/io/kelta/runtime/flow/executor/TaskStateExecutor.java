@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Executes Task states by dispatching to the registered {@link ActionHandler}.
@@ -80,9 +81,12 @@ public class TaskStateExecutor implements StateExecutor {
                 // When Parameters are defined, resolve template expressions against
                 // the full state data and use the result as the handler config.
                 // Otherwise, fall back to serializing the post-InputPath data.
+                // Keys the handler declares unresolved keep their ${...} text; the handler
+                // resolves them from stateData itself.
                 String configJson;
                 if (task.parameters() != null && !task.parameters().isEmpty()) {
-                    Object resolved = dataResolver.resolveDeep(task.parameters(), context.stateData());
+                    Object resolved = resolveParameters(task.parameters(),
+                        handler.get().unresolvedParameterKeys(), context.stateData());
                     configJson = resolveConfigJson(resolved);
                 } else {
                     configJson = resolveConfigJson(input);
@@ -94,6 +98,7 @@ public class TaskStateExecutor implements StateExecutor {
                     .data(input)
                     .resolvedData(input)
                     .triggerDepth(context.triggerDepth())
+                    .stateData(context.stateData())
                     .build();
 
                 actionResult = handler.get().execute(actionContext);
@@ -164,6 +169,20 @@ public class TaskStateExecutor implements StateExecutor {
 
         // No catch — propagate failure
         return StateExecutionResult.failure(errorCode, errorMessage, context.stateData());
+    }
+
+    private Object resolveParameters(Map<String, Object> parameters, Set<String> unresolvedKeys,
+                                     Map<String, Object> stateData) {
+        if (unresolvedKeys == null || unresolvedKeys.isEmpty()) {
+            return dataResolver.resolveDeep(parameters, stateData);
+        }
+        Map<String, Object> resolved = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : parameters.entrySet()) {
+            resolved.put(entry.getKey(), unresolvedKeys.contains(entry.getKey())
+                ? entry.getValue()
+                : dataResolver.resolveDeep(entry.getValue(), stateData));
+        }
+        return resolved;
     }
 
     private RetryPolicy findMatchingRetry(StateDefinition.TaskState task, String errorCode) {

@@ -520,7 +520,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   | `/api/oidc-providers/**`, `/api/connected-apps/**` | writes, incl. `ConnectedAppTokenController`'s token writes | `MANAGE_CONNECTED_APPS` | `API_ACCESS` at the gateway; generic `connected-apps` reads are record-filtered in the worker |
   | `/api/scripts/**` | writes, except `POST /{id}/execute` | `MANAGE_CONNECTED_APPS` | `API_ACCESS`; record-filtered. Execute is exempt: record quick actions run scripts for end users and `ScriptExecutionController` enforces the script's `requiredPermission` |
   | `/api/email-templates/**` | writes | `MANAGE_EMAIL_TEMPLATES` | `API_ACCESS`; record-filtered |
-  | `/api/flows/**` | writes, incl. `/{id}/publish` and `/executions/{id}/cancel\|retry`, except `POST /{id}/execute` | `MANAGE_WORKFLOWS` | `API_ACCESS`; generic reads record-filtered. Execute is exempt: page actions (`runFlow`) start flows for end users (open gap — `concerns.md`) |
+  | `/api/flows/**` | writes, incl. `/{id}/publish` and `/executions/{id}/cancel\|retry`, except `POST /{id}/execute` | `MANAGE_WORKFLOWS` | `API_ACCESS`; generic reads record-filtered. Execute is exempt: page actions (`runFlow`) start flows for end users; `FlowExecutionController` admits a caller without `MANAGE_WORKFLOWS` only to a member-launchable flow (→ Flow execute authorization) |
   | `/api/approval-processes/**` | writes | `MANAGE_APPROVALS` | `API_ACCESS`; record-filtered. Submitting/deciding is `/api/approvals/**`, a separate route |
   | `/api/reports/**`, `/api/dashboards/**` | writes, incl. `PUT /api/dashboards/{name}/tree` and `POST /{id}/validate`, except `POST /api/reports/{id}/execute` and `POST /api/dashboards/{id}/data`, `/{id}/components/{cid}/data` | `MANAGE_REPORTS` | `API_ACCESS`; record-filtered. The exempt POSTs are reads by `VIEW_ANALYTICS` viewers, gated in their controllers |
 
@@ -2281,6 +2281,7 @@ controller after the mutation rather than via the BeforeSaveHook registry.
 | ChangesService (offline sync, Rec 2B) | Offline-sync changes feed: `GET /api/{collection}/_changes?since=<ISO>` returns record **deletions** since the cursor + a fresh cursor. Deletions come from `record_tombstone` (V143), written by the wildcard `RecordTombstoneHook` (after-delete, user collections only) — so the hot delete path keeps hard-delete semantics (no soft-delete). **Upserts** are fetched by the client via the normal `GET /api/{collection}?filter[updatedAt][gt]=<cursor>&sort=updatedAt` (reuses the authorized, FLS-enforced filter path). `_changes` is a literal sub-path under the collection's existing route — no new gateway route | `kelta-worker/.../service/ChangesService.java`, `.../controller/ChangesController.java`, `.../listener/RecordTombstoneHook.java` |
 
 | CollectionDeletionGuardHook | Delete guard + storage cleanup for the `collections` system collection, paired with the V181/V182 FK cascade. **Guard:** `DELETE /api/collections/{id}` is rejected 400 (a hook validation error) naming the child counts ("would permanently destroy 5 attachments, 2 reports…") unless the caller passes **`?force=true`** (the `kelta collections delete` CLI exposes this as `--force`) — the cascade destroys attachments/layouts/reports/rules/history/versions, and before V181 the broken FK was accidentally the safety net. Callers with **no HTTP request context** (flows, NATS, schedulers) cannot force and fail closed. **Storage:** `file_attachment` and `bulk_job` both carry S3 keys; the objects are deleted in **`beforeDelete`**, because a DB-level cascade removes the rows and the keys are then unrecoverable — the same constraint documented on `AttachmentCleanupHook`, which covers the parent-*record* case and never sees a collection delete. Child-count failures degrade to zero rather than re-blocking the delete (the guard is a confirmation prompt, not an authorization boundary). **Table drop:** the definition is resolved in `beforeDelete` and `StorageAdapter.dropCollection` called in `afterDelete` (the `collection` row, hence the table name, is gone once the delete commits; the stash carries the collection id so a stale `ThreadLocal` cannot drop the wrong table). `dropCollection` defaults to a **no-op** — storage the platform did not create is not ours to destroy — and is overridden by `PhysicalTableStorageAdapter` (guarded by the same `systemCollection()` check that makes `initializeCollection` skip Flyway-owned tables) and routed by `DispatchingStorageAdapter`. Not `CASCADE`: a master-detail child's FK blocks the parent drop, which is logged as a leak rather than silently destroying the child's constraint. The child FK columns are **not** uniform (`report.primary_collection_id`, `layout_related_list.related_collection_id`, `script_trigger` has no `tenant_id`) — `CollectionDeletionGuardSchemaTest` pins the map against the shipped migration DDL and fails the build on any FK to `collection(id)` left without an `ON DELETE` action | `kelta-worker/.../listener/CollectionDeletionGuardHook.java`, `db/migration/V18{1,2}__*.sql` |
+| FlowDeletionGuardHook | Delete guard for the `flows` system collection, paired with the V216 FK cascade. Before V216 `flow_execution_flow_id_fkey` had no `ON DELETE` action, so any flow that had ever run answered `DELETE /api/flows/{id}` with 409 `REFERENCED_RECORD`; now the delete takes the flow's executions with it, and their `flow_step_log` / `flow_pending_resume` rows cascade from `flow_execution(id)` (as `flow_version` does from `flow(id)`). **Guard:** while the flow has an execution in a non-terminal status — `RUNNING` or `WAITING`, the complement of `FlowExecutionData.isTerminal()` — the delete is refused with **409 `FLOW_HAS_ACTIVE_EXECUTIONS`** (`HookConflictException`, `meta.activeExecutions`), so a delete never pulls rows out from under the engine or a pending resume; a flow with only `COMPLETED`/`FAILED`/`CANCELLED` runs is deleted. Cancel the run (`POST /api/flows/executions/{id}/cancel`, `kelta flows cancel`) to unblock; a stuck `RUNNING` run unblocks once the stale-RUNNING reaper fails it, a `WAITING` one only by cancel. The count is by `flow_id` alone (no tenant predicate) to cover exactly the rows the cascade removes; it is a check-then-delete, not a lock, so an execution started between the two is cascaded. `FlowDeletionCascadeSchemaTest` reads the shipped migrations and fails on any FK to `flow(id)` or `flow_execution(id)` that does not end up `ON DELETE CASCADE`, and pins the guarded statuses to `chk_flow_status` minus the terminal ones | `kelta-worker/.../listener/FlowDeletionGuardHook.java`, `db/migration/V216__flow_execution_cascade_on_flow_delete.sql` |
 
 ### Unique constraints
 
@@ -2492,6 +2493,47 @@ that user-facing config to the `scheduled_job` table (which the
   `job_execution_log` rows (status, startedAt, completedAt, durationMs,
   errorMessage) joined via `scheduled_job` so the result is tenant-scoped.
 
+### Flow execute authorization (KLT-793)
+
+`POST /api/flows/{id}/execute` is exempt from the gateway's `flows` write check (page `runFlow`
+actions start flows for portal members, whose seeded profile holds only `API_ACCESS`), so
+`FlowExecutionController.executeFlow` authorizes it. It reads the caller's profile from
+`X-User-Profile-Id` and checks `MANAGE_WORKFLOWS` (`holdsManageWorkflows`). In order:
+
+1. Unknown flow → 404; no `definition` → 400; inactive → 409 `FLOW_INACTIVE` (a `test: true` run by a
+   `MANAGE_WORKFLOWS` caller is the only way past an inactive flow).
+2. Caller without `MANAGE_WORKFLOWS` → 403 `FLOW_NOT_LAUNCHABLE` unless the flow is
+   `flow_type = SCREEN` or its `trigger_config` jsonb has `memberLaunchable: true` (boolean `true`
+   only; a string `"true"` does not count). An author opts an `AUTOLAUNCHED` flow in with
+   `triggerConfig: {"memberLaunchable": true}`; no migration — `trigger_config` already exists.
+3. Caller without `MANAGE_WORKFLOWS` sending `state` → 403 `FLOW_STATE_OVERRIDE_FORBIDDEN`. Only
+   `body.input` is read for them, and `InitialStateBuilder.buildFromApiInvocation` builds `context`
+   (`tenantId`/`userId` from `X-Tenant-ID`/`X-User-ID`), `trigger` and no `record`; other top-level
+   body keys are ignored. A `MANAGE_WORKFLOWS` caller may still pass a pre-built `state` (replay,
+   tests); its `context` is used as sent.
+
+Pinned by `FlowExecutionControllerTest`. The read endpoints under `/api/flows/executions/**` are
+not covered by this check (`concerns.md` → Authorization gaps still open).
+
+### SQL_QUERY binds state values (KLT-793)
+
+`SQL_QUERY` never splices state into its statement. `ActionHandler.unresolvedParameterKeys()`
+(default empty) names the top-level Task `Parameters` keys `TaskStateExecutor` leaves unresolved;
+`SqlQueryActionHandler` declares `sql`, and the executor passes the whole state envelope (before
+`InputPath`) as `ActionContext.stateData`. The handler parses the template: each `${path}` becomes a
+JDBC `?` bound to `StateDataResolver.readPath(stateData, path)` as a `SqlParameterValue(Types.OTHER,
+text)` — untyped, so Postgres infers the type from the position, as it does for a literal (maps and
+lists bind as JSON text). The documented form `'${$.id}'` (a placeholder that is the whole quoted
+literal) has its quotes stripped and binds a missing value as `''`, as the old splice produced; a bare
+`${...}` with no value binds `NULL`. A literal `?` outside strings and comments is escaped as `??`
+when anything is bound; placeholders inside comments are left as text. Rejected at run time with a clear message
+(the step fails; `validate()` applies the same rules, but flow save does not call handler `validate`): a placeholder inside a larger literal
+(`'%${$.q}%'` — write `'%' || ${$.q} || '%'`), in an identifier position (after `FROM`/`JOIN`/`INTO`/
+`UPDATE`/`TABLE`/`BY`, next to a `.`, or inside double quotes), or making up the whole statement.
+Other handlers are unaffected: their parameters resolve through `resolveDeep` as before. Scope is
+still only `SET LOCAL search_path` on the application role (`concerns.md` → SQL_QUERY cross-tenant
+reach). Pinned by `SqlQueryActionHandlerTest` and `TaskStateExecutorUnresolvedParametersTest`.
+
 ### Flow step logging level (PLT-602)
 
 Every flow row carries `step_logging` (`flows.stepLogging`, V211: `VARCHAR(20) NOT NULL DEFAULT
@@ -2551,7 +2593,8 @@ its own try/catch and each bounded by `batch-size × max-batches` (`drain`):
    and locks only `FOR UPDATE OF e`; the cutoff is computed in SQL from one `now` parameter, so a
    single statement covers every window. No new index: the age predicate was never index-backed
    (it scans terminal rows by status), and the join is a PK lookup per candidate row. Deletes
-   cascade to `flow_step_log` / `flow_pending_resume`. A reaped execution enters this phase with
+   cascade to `flow_step_log` / `flow_pending_resume`. Deleting the flow itself cascades its
+   executions too (V216; refused while one is `RUNNING`/`WAITING` — `FlowDeletionGuardHook`). A reaped execution enters this phase with
    `completed_at` = reap time and ages out after its flow's window.
 3. **Purge job logs** (`job_execution_log`, no flow → always `max-age-days`).
 

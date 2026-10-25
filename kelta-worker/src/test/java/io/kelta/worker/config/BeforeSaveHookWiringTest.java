@@ -121,6 +121,7 @@ class BeforeSaveHookWiringTest {
                 "FieldLifecycleHook",
                 "FieldConfigEventPublisher"));
         m.put("flows", List.of(
+                "FlowDeletionGuardHook",
                 "FlowDefinitionValidationHook",
                 "FlowConfigEventPublisher",
                 "FlowScheduleSyncHook"));

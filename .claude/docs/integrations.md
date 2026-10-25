@@ -4,7 +4,7 @@
 
 | Service | Purpose | SDK/Version | Connection | Key Files |
 |---------|---------|------------|------------|-----------|
-| Anthropic Claude | AI assistant | `anthropic-java` 2.18.0 | API key | `kelta-ai/.../service/AnthropicService.java` |
+| Anthropic Claude | AI assistant | `anthropic-java` 3.3.0 (API version `2026-10-21`; `MessageParam` is a per-role union — build with `MessageParam.ofUser…`/`ofAssistant…`; `temperature`/`top_p`/`top_k` are rejected, so none is sent) | API key (sent as `Authorization: Bearer`) | `kelta-ai/.../service/AnthropicService.java` |
 | Cerbos | Authorization (gRPC) | `cerbos-sdk-java` 0.20.1 | `${CERBOS_HOST}:${CERBOS_GRPC_PORT:3593}` | `kelta-gateway/.../authz/cerbos/CerbosAuthorizationService.java`, `kelta-worker/.../service/CerbosAuthorizationService.java` |
 | Svix | Webhook delivery | `com.svix:svix` 1.68.0 | `${SVIX_SERVER_URL}`; on only with a non-blank `SVIX_AUTH_TOKEN` (`SvixConfig.SvixTokenConfigured`; else no publishers and `/api/svix/**` 404s) | `kelta-worker/.../listener/SvixWebhookPublisher.java`, `.../service/SvixTenantService.java` |
 | Superset | Embedded analytics | REST API | `${SUPERSET_URL}` | `kelta-worker/.../service/SupersetApiClient.java`, `kelta-ui/app/` (`@superset-ui/embedded-sdk`) |

@@ -872,7 +872,7 @@ kelta flows update flow_123 --definition @order-flow.json --retention-days defau
 
 ### `kelta flows delete <flowId>`
 
-Delete a flow (the server refuses flows that have runs) **(destructive — needs --yes off-TTY)**
+Delete a flow with its execution history and step logs (refused while a run is RUNNING or WAITING) **(destructive — needs --yes off-TTY)**
 
 ```bash
 kelta flows delete flow_123 --yes
