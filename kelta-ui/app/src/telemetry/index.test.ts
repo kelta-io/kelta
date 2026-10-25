@@ -61,12 +61,7 @@ vi.mock('@opentelemetry/core', () => ({
 }))
 
 vi.mock('@opentelemetry/resources', () => ({
-  Resource: class {
-    attributes: Record<string, unknown>
-    constructor(attributes: Record<string, unknown>) {
-      this.attributes = attributes
-    }
-  },
+  resourceFromAttributes: (attributes: Record<string, unknown>) => ({ attributes }),
 }))
 
 const startSpanMock = vi.fn()
