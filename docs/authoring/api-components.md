@@ -393,10 +393,10 @@ Hook for fetching and mutating a single resource
 
 ```ts
 function useResource<T = unknown>(resourceName: string, recordId?: string): {
-    data: NoInfer_2<T | null> | undefined;
+    data: T | null | undefined;
     isLoading: boolean;
     error: Error | null;
-    refetch: (options?: RefetchOptions) => Promise<QueryObserverResult<NoInfer_2<T | null>, Error>>;
+    refetch: (options?: RefetchOptions) => Promise<QueryObserverResult<T | null, Error>>;
     create: UseMutateAsyncFunction<T, Error, Partial<T>, unknown>;
     update: UseMutateAsyncFunction<T, Error, {
         id: string;
