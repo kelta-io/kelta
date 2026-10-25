@@ -328,6 +328,58 @@ kelta api DELETE /api/modules/kelta-billing         # uninstall; collections and
 Disable is enough to stop the module affecting anything: it removes the wildcard quota hook and
 every action handler. Uninstall deliberately leaves the collections and their rows behind.
 
+## Email → UUID rewrite of `userId` (KLT-790, one-off per tenant)
+
+Until KLT-790, `ModuleHttpController` handed module routes the raw `X-User-Id` header, which the
+gateway fills with the caller's **email**. Checkout stamped that email on Stripe
+(`client_reference_id`, `metadata[userId]`, `subscription_data[metadata][userId]`), so the webhook
+wrote it into `billing_customers.userId`, `billing_subscriptions.userId` and
+`billing_passes.userId`. `EntitlementResolver` and the quota hook look members up by **platform
+user UUID**, so those rows were invisible: a paying member resolved to the DEFAULT plan.
+
+After the fix, module routes receive the UUID, and the webhook ignores a non-UUID
+`client_reference_id` / `metadata.userId` (Stripe replays the old email on every renewal) and
+falls back to the `billing_customers` mapping by Stripe customer id. That fallback only helps once
+the mapping itself holds the UUID — so existing rows must be rewritten, **`billing_customers`
+first**. Until it is, renewal events for a legacy customer are logged
+(`maps to a non-UUID member id`) and skipped rather than written under the email.
+
+Run as a tenant admin against the tenant (`kelta-cli-as.sh <name> …` from the fleet), after the
+fix is deployed:
+
+```bash
+# 1. Every row whose userId is an email, per collection — customers FIRST.
+for c in billing_customers billing_subscriptions billing_passes; do
+  kelta api GET "/api/$c?filter[userId][contains]=%40&page[size]=200" \
+    | jq -r --arg c "$c" '.data[] | [$c, .id, .attributes.userId] | @tsv'
+done > email-rows.tsv
+
+# 2. For each row: resolve the member's platform user by email IN THE SAME TENANT, then rewrite.
+while IFS=$'\t' read -r c id email; do
+  uuid=$(kelta api GET "/api/users?filter[email][ieq]=$(jq -rn --arg e "$email" '$e|@uri')" \
+    | jq -r '.data | if length == 1 then .[0].id else empty end')
+  if [ -z "$uuid" ]; then echo "SKIP $c/$id: no unique user for $email" >&2; continue; fi
+  kelta records update "$c" "$id" --data "{\"userId\":\"$uuid\"}" --yes
+done < email-rows.tsv
+```
+
+A `SKIP` line means no single platform user has that email in the tenant (deleted member, typo);
+decide those by hand — do not guess an owner.
+
+**Done when** every collection returns zero rows:
+
+```bash
+for c in billing_customers billing_subscriptions billing_passes; do
+  printf '%s ' "$c"
+  kelta api GET "/api/$c?filter[userId][contains]=%40&page[size]=1" | jq '.data | length'
+done
+# expect: billing_customers 0 / billing_subscriptions 0 / billing_passes 0
+```
+
+Then confirm the effect, not just the data: `billing:resolve-entitlements` (or
+`GET /api/modules/kelta-billing/x/me`) as the paying member returns the paid `planCode`, not
+DEFAULT.
+
 ---
 
 # Outcome — 2026-08-31: PASSED
