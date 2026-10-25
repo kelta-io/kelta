@@ -75,7 +75,7 @@
     "react-router-dom": "^7.13.0",
     "recharts": "^3.10.1",
     "sonner": "^2.0.8",
-    "svix": "^1.88.0",
+    "svix": "^2.9.0",
     "svix-react": "^1.13.9",
     "tailwind-merge": "^3.7.0",
     "zod": "^4.6.7"

@@ -6,7 +6,7 @@
 |---------|---------|------------|------------|-----------|
 | Anthropic Claude | AI assistant | `anthropic-java` 2.18.0 | API key | `kelta-ai/.../service/AnthropicService.java` |
 | Cerbos | Authorization (gRPC) | `cerbos-sdk-java` 0.12.0 | `${CERBOS_HOST}:${CERBOS_GRPC_PORT:3593}` | `kelta-gateway/.../authz/cerbos/CerbosAuthorizationService.java`, `kelta-worker/.../service/CerbosAuthorizationService.java` |
-| Svix | Webhook delivery | `com.svix:svix` 1.68.0 | `${SVIX_SERVER_URL}`; on only with a non-blank `SVIX_AUTH_TOKEN` (`SvixConfig.SvixTokenConfigured`; else no publishers and `/api/svix/**` 404s) | `kelta-worker/.../listener/SvixWebhookPublisher.java`, `.../service/SvixTenantService.java` |
+| Svix | Webhook delivery | REST via `RestClient` (no Java SDK); admin UI: `svix` 2.9.0 + `svix-react` 1.13.9 | `${SVIX_SERVER_URL}`; on only with a non-blank `SVIX_AUTH_TOKEN` (`SvixConfig.SvixTokenConfigured`; else no publishers and `/api/svix/**` 404s) | `kelta-worker/.../listener/SvixWebhookPublisher.java`, `.../service/SvixTenantService.java` |
 | Superset | Embedded analytics | REST API | `${SUPERSET_URL}` | `kelta-worker/.../service/SupersetApiClient.java`, `kelta-ui/app/` (`@superset-ui/embedded-sdk`) |
 | AWS S3 / Garage | Object storage | `aws-sdk-s3` 2.30.1 | `${KELTA_S3_ENDPOINT}` | `kelta-worker/.../service/S3StorageService.java` (attachments); media bucket `${KELTA_MEDIA_*}` → `.../service/MediaStorageService.java` (see Media fields below) |
 | Keycloak | OIDC federation | Spring Security OAuth2 | Port 8180 (docker-compose) | `kelta-auth/.../federation/FederatedUserMapper.java` |

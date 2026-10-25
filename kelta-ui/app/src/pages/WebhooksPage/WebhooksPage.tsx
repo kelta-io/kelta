@@ -201,16 +201,16 @@ function EndpointList({ onSelect }: { onSelect: (ep: EndpointOut) => void }) {
                 {ep.disabled && <StatusBadge variant="inactive" label="Disabled" />}
               </div>
               <p className="mt-1 text-sm text-muted-foreground truncate">{ep.url}</p>
-              {ep.filterTypes && ep.filterTypes.length > 0 && (
+              {ep.eventTypes && ep.eventTypes.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
-                  {ep.filterTypes.slice(0, 3).map((t) => (
+                  {ep.eventTypes.slice(0, 3).map((t) => (
                     <Badge key={t} variant="outline" className="text-xs">
                       {t}
                     </Badge>
                   ))}
-                  {ep.filterTypes.length > 3 && (
+                  {ep.eventTypes.length > 3 && (
                     <Badge variant="outline" className="text-xs">
-                      +{ep.filterTypes.length - 3} more
+                      +{ep.eventTypes.length - 3} more
                     </Badge>
                   )}
                 </div>
@@ -320,11 +320,11 @@ function EndpointDetail({ endpoint, onBack }: { endpoint: EndpointOut; onBack: (
         <InfoCard label="URL" value={endpoint.url} />
         <InfoCard label="Status" value={endpoint.disabled ? 'Disabled' : 'Active'} />
         <InfoCard label="Created" value={new Date(endpoint.createdAt).toLocaleString()} />
-        {endpoint.filterTypes && endpoint.filterTypes.length > 0 && (
+        {endpoint.eventTypes && endpoint.eventTypes.length > 0 && (
           <div className="rounded-lg border bg-card p-4">
             <p className="kelta-field-label">Event types</p>
             <div className="mt-1 flex flex-wrap gap-1">
-              {endpoint.filterTypes.map((t) => (
+              {endpoint.eventTypes.map((t) => (
                 <Badge key={t} variant="outline" className="text-xs">
                   {t}
                 </Badge>
@@ -528,7 +528,7 @@ function CreateEndpointDialog({
       const endpointIn: EndpointIn = {
         url: endpointUrl,
         description: endpointDescription || undefined,
-        filterTypes: selectedEventTypes.length > 0 ? selectedEventTypes : undefined,
+        eventTypes: selectedEventTypes.length > 0 ? selectedEventTypes : undefined,
         channels: selectedChannels.length > 0 ? selectedChannels : undefined,
       }
       await svix.endpoint.create(appId, endpointIn)
