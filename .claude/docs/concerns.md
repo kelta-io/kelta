@@ -312,11 +312,27 @@ here; review separately).
 
 ### Authorization gaps still open
 
-- **`POST /api/flows/{id}/execute` runs any flow for an `API_ACCESS` caller** (left open by
-  PLT-656). The gateway exempts it from the `flows` write check because page actions (`runFlow`)
-  start flows for end users, and `FlowExecutionController` checks nothing itself — not even
-  `read` on the flow — and accepts a caller-built `state`. Needs a worker-side check (record read
-  on the flow, or a per-flow run permission like scripts' `requiredPermission`).
+- **Flow execution reads are `API_ACCESS`-only** (KLT-793 closed the execute half). `POST
+  /api/flows/{id}/execute` is now gated in the worker (`architecture.md` → Flow execute
+  authorization): without `MANAGE_WORKFLOWS` only a `SCREEN` or `memberLaunchable` flow starts, and
+  `state` is refused. Still open: `GET /api/flows/executions/{id}`, `/{id}/steps` and
+  `/{flowId}/flow-executions` are not writes, so the gateway stops at `API_ACCESS` and the controller
+  checks nothing — any member who learns an execution id reads its `stateData` and step snapshots
+  (a page `runFlow` with `awaitResult` polls the first, so a fix must keep the starter's own run
+  readable). A member-launchable flow also runs with its resolved actor's rights, so marking a
+  flow `memberLaunchable` is an authoring decision about what members may cause.
+- **SQL_QUERY cross-tenant reach** (open, needs a design decision — follow-up to KLT-793). The
+  handler binds state values now, but the statement itself is written by the tenant's flow author
+  and runs on the application DB role with only `SET LOCAL search_path` set, so a schema-qualified
+  name (`other_tenant.table`) can read or write another tenant's schema; DML and DDL are accepted.
+  Options: run SQL_QUERY under a per-tenant DB role pinned like the Superset roles
+  (`tenant_db_role`, V201; `SupersetDatabaseUserService`) — `kelta_pinned_tenant()` keys on
+  `session_user`, so `SET ROLE` alone is not enough — or a parser-based statement guard.
+- **SQL_QUERY nested in a `DECISION` still splices** (KLT-793 residual). `unresolvedParameterKeys`
+  applies to a Task's top-level `Parameters` only; a `SQL_QUERY` inside a `DECISION` branch's
+  `actions[].config` is resolved by `resolveDeep` with the rest of the Decision's parameters before
+  the nested handler runs, and the child `ActionContext` carries no `stateData`. Use a `Choice`
+  state and a `SQL_QUERY` Task instead (the docs already prefer `Choice`).
 - **`/api/oidc-providers` reads skip record filtering**: `CerbosRecordAuthorizationAdvice`'s own
   `isMetadataPath` matches `/api/oidc` as a raw prefix. Writes are gated (PLT-656); the client
   secret is server-only.
@@ -1040,7 +1056,8 @@ One line each; full write-ups are in git history.
 - 2026-07-05 — `POST /api/operations` skipped per-collection authorization; `checkCollectionAccess` added.
 - PLT-330 (2026-10-04) — any token (and, via the public path, anyone) could list every tenant; gateway narrowing (#1603/#1604) + self-scoped storage predicate.
 - PLT-331 (2026-10-04) — static routes for `users`/`profiles`/`collections` skipped the collection check; `COLLECTION_CHECKED_STATIC_ROUTES` + advice count correction.
-- PLT-656 (2026-10-24) — writes to `page-layouts`, `list-views`, `ui-menus`, `ui-pages`, `global-picklists`, `oidc-providers`, `email-templates`, `scripts`, `connected-apps`, `flows`, `approval-processes`, `reports` and `dashboards` ran at `API_ACCESS` (any user could create a script, flow, OIDC provider or connected app); each is now a writes-only `COLLECTION_CHECKED_STATIC_ROUTES` row with its setup page's permission as override, and generic `flows`/`connected-apps` reads get record filtering. Left out: `webhooks` (no collection behind `/api/webhooks/**` — inbound receivers that authenticate the sender). Exempt end-user actions: flow/script/report execute, dashboard data (flow execute still open, above).
+- PLT-656 (2026-10-24) — writes to `page-layouts`, `list-views`, `ui-menus`, `ui-pages`, `global-picklists`, `oidc-providers`, `email-templates`, `scripts`, `connected-apps`, `flows`, `approval-processes`, `reports` and `dashboards` ran at `API_ACCESS` (any user could create a script, flow, OIDC provider or connected app); each is now a writes-only `COLLECTION_CHECKED_STATIC_ROUTES` row with its setup page's permission as override, and generic `flows`/`connected-apps` reads get record filtering. Left out: `webhooks` (no collection behind `/api/webhooks/**` — inbound receivers that authenticate the sender). Exempt end-user actions: flow/script/report execute, dashboard data (flow execute is gated in the worker since KLT-793, below).
+- KLT-793 (2026-10-25) — any `API_ACCESS` caller (a portal member) could start any active flow through `POST /api/flows/{id}/execute` and forge `$.context.userId`/`$.record` with a body `state`; and `SQL_QUERY` spliced `${...}` state values into its statement as text. `FlowExecutionController` now admits a caller without `MANAGE_WORKFLOWS` only to a `SCREEN` or `memberLaunchable` flow and refuses its `state` (403 `FLOW_NOT_LAUNCHABLE` / `FLOW_STATE_OVERRIDE_FORBIDDEN`); `SQL_QUERY` binds each placeholder as a JDBC parameter (`architecture.md` → Flow execute authorization, SQL_QUERY binds state values). Still open: execution reads, SQL_QUERY cross-tenant reach, Decision-nested SQL (Authorization gaps still open).
 - PLT-657 (2026-10-24) — `GET /api/profiles/{id}?include=profile-system-permissions,…` returned every grant row at `API_ACCESS`, because `CerbosRecordAuthorizationAdvice` skipped metadata paths before its include filtering; `/api/profiles` responses now get `restrictIncluded` on `included[]` (denied rows dropped, no 403) while the profiles themselves stay unfiltered and `ApiPaths.METADATA_PREFIXES` (FLS/masking) is unchanged. `CerbosRecordAuthorizationAdviceTest` → profile includes.
 - 2026-10-12 (child-route-authz) — child-resource paths `/api/{parent}/{parentId}/{child}[/{childId}]` were authorized against the parent collection only; the gateway now also requires the child's own decision (parent needs `read`), and the record/field-write advices use the child collection.
 - 2026-10-12 (include-record-authz) — `CerbosRecordAuthorizationAdvice` applies each included collection's record read authorization (collection-level read, record-level rules, shares) to `included[]`, per type; a single record that is not readable carries no `included`.
