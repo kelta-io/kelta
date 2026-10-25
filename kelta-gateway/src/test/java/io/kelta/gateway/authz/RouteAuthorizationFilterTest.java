@@ -556,6 +556,121 @@ class RouteAuthorizationFilterTest {
             verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
         }
 
+        @Nested
+        @DisplayName("Portal principals on /api/admin/**")
+        class PortalOnAdminTests {
+
+            private final RouteDefinition adminRoute = new RouteDefinition("static-admin", "/api/admin/**",
+                    "http://worker:80", "admin");
+
+            private GatewayPrincipal jwtPrincipal(String userType) {
+                return new GatewayPrincipal("member@test.com", List.of(), Map.of("user_type", userType))
+                        .withProfileId("portal-profile")
+                        .withProfileName("Portal User")
+                        .withTenantId("tenant-1");
+            }
+
+            /** A PAT principal as UserIdentityResolutionFilter leaves it: owner's user_type as a claim. */
+            private GatewayPrincipal patPrincipal(String ownerUserType) {
+                return new GatewayPrincipal("member@test.com", List.of(), Map.of("pat", "true"))
+                        .withProfileId("portal-profile")
+                        .withProfileName("Portal User")
+                        .withTenantId("tenant-1")
+                        .withClaim("user_type", ownerUserType);
+            }
+
+            private MockServerWebExchange run(GatewayPrincipal principal, MockServerHttpRequest request) {
+                MockServerWebExchange exchange = MockServerWebExchange.from(request);
+                exchange.getAttributes().put(PRINCIPAL_ATTR, principal);
+                when(routeRegistry.findByPath(eq(request.getPath().value()), any())).thenReturn(Optional.of(adminRoute));
+                when(cerbosService.checkSystemPermission(principal, "API_ACCESS")).thenReturn(Mono.just(true));
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+                return exchange;
+            }
+
+            static Stream<Arguments> adminRequests() {
+                return Stream.of(
+                        Arguments.of("PUT", "/api/admin/tenant/email-settings"),
+                        Arguments.of("POST", "/api/admin/tenant/email-settings/test"),
+                        Arguments.of("POST", "/api/admin/profiles/p-1/custom-rules"),
+                        Arguments.of("GET", "/api/admin/observability/request-logs"));
+            }
+
+            @ParameterizedTest(name = "{0} {1}")
+            @MethodSource("adminRequests")
+            @DisplayName("Portal JWT holding API_ACCESS is denied 403")
+            void portalJwtIsForbidden(String method, String path) {
+                MockServerWebExchange exchange = run(jwtPrincipal("PORTAL"),
+                        MockServerHttpRequest.method(HttpMethod.valueOf(method), path).build());
+
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+                verify(filterChain, never()).filter(any());
+            }
+
+            @ParameterizedTest(name = "{0} {1}")
+            @MethodSource("adminRequests")
+            @DisplayName("PAT owned by a portal member holding API_ACCESS is denied 403")
+            void portalPatIsForbidden(String method, String path) {
+                MockServerWebExchange exchange = run(patPrincipal("PORTAL"),
+                        MockServerHttpRequest.method(HttpMethod.valueOf(method), path).build());
+
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+                verify(filterChain, never()).filter(any());
+            }
+
+            @Test
+            @DisplayName("Portal denial uses the JSON:API 403 envelope")
+            void portalDenialBodyIsJsonApi() {
+                MockServerWebExchange exchange = run(jwtPrincipal("PORTAL"),
+                        MockServerHttpRequest.put("/api/admin/tenant/email-settings").build());
+
+                assertThat(exchange.getResponse().getHeaders().getContentType())
+                        .isEqualTo(MediaType.APPLICATION_JSON);
+                StepVerifier.create(exchange.getResponse().getBodyAsString())
+                        .assertNext(body -> assertThat(body)
+                                .contains("\"status\":\"403\"")
+                                .contains("Portal users may not access admin endpoints"))
+                        .verifyComplete();
+            }
+
+            @ParameterizedTest(name = "{0} {1}")
+            @MethodSource("adminRequests")
+            @DisplayName("Internal JWT holding API_ACCESS still passes")
+            void internalJwtPasses(String method, String path) {
+                MockServerWebExchange exchange = run(jwtPrincipal("INTERNAL"),
+                        MockServerHttpRequest.method(HttpMethod.valueOf(method), path).build());
+
+                assertThat(exchange.getResponse().getStatusCode()).isNull();
+                verify(filterChain).filter(any());
+            }
+
+            @Test
+            @DisplayName("Internal-owned PAT holding API_ACCESS still passes")
+            void internalPatPasses() {
+                MockServerWebExchange exchange = run(patPrincipal("INTERNAL"),
+                        MockServerHttpRequest.put("/api/admin/tenant/email-settings").build());
+
+                assertThat(exchange.getResponse().getStatusCode()).isNull();
+                verify(filterChain).filter(any());
+            }
+
+            @Test
+            @DisplayName("A portal principal is not denied on non-admin static routes")
+            void portalOnOtherStaticRoutePasses() {
+                RouteDefinition meRoute = new RouteDefinition("static-me", "/api/me/**", "http://worker:80", "me");
+                GatewayPrincipal principal = jwtPrincipal("PORTAL");
+                MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/me/profile").build());
+                exchange.getAttributes().put(PRINCIPAL_ATTR, principal);
+                when(routeRegistry.findByPath(eq("/api/me/profile"), any())).thenReturn(Optional.of(meRoute));
+                when(cerbosService.checkSystemPermission(principal, "API_ACCESS")).thenReturn(Mono.just(true));
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                verify(filterChain).filter(any());
+            }
+        }
+
         @Test
         @DisplayName("Should forward identity headers to worker")
         void shouldForwardIdentityHeaders() {
