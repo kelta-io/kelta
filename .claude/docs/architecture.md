@@ -63,6 +63,7 @@ Order values below are the live `getOrder()` returns from source (lower runs fir
 | -100 | JwtAuthenticationFilter | Validate JWT |
 | -99 | PatAuthenticationFilter | Validate PAT (`klt_`) as JWT alternative |
 | -50 | RateLimitFilter / UserIdentityResolutionFilter | Per-**user** then per-tenant rate limit; user identity |
+| -47 | RevokedUserFilter | 401 for a JWT whose user has a `user:revoked:<tenantId>:<userId>` marker at or after the token's `iat` (deactivated/deleted user; fail-open on Redis errors) |
 | -45 | GeoEnrichmentFilter | GeoLite2 lookup of the client IP → `gateway.geo` attr, trusted `X-Geo-*` headers, `GatewayPrincipal.geoCountry` |
 | -40 | TenantIpAllowlistFilter | Per-tenant IP allowlist on `/api/**` (fail-open; `MANAGE_TENANTS` bypass) |
 | 0 | RouteAuthorizationFilter | Cerbos object-level permission check; a child-resource path is also checked against the child collection (DynamicRouteLocator then forwards to worker) |
@@ -1566,6 +1567,23 @@ still succeeds. Authorization: the shared `X-Internal-Token` (`KELTA_INTERNAL_TO
 both services), constant-time compare, refused when unset. The gateway does not route to kelta-auth;
 the ingress sends every path of the auth host to it, so that token check is the endpoint's only gate
 (`/internal/**` is `permitAll` + CSRF-exempt in kelta-auth's default chain). PATs are not affected
+(`concerns.md`).
+
+**Deactivated users' access tokens are rejected at the gateway (worker → Redis → gateway).** The
+sign-out above kills sessions and refresh tokens, but access tokens are self-contained JWTs the
+gateway checks by signature. So `UserSessionRevocationHook` also calls
+`service/UserAccessRevocationMarker`, which after commit (at once when there is no transaction)
+writes Redis `user:revoked:<tenantId>:<userId>` = the revocation time in epoch seconds, TTL
+`kelta.security.user-revocation-ttl` (`KELTA_SECURITY_USER_REVOCATION_TTL`, default `PT2H` — must
+stay above the longest access-token TTL kelta-auth issues, 1 h). Best effort: a Redis failure logs
+ERROR and the user write stands. The reader is the gateway's `auth/RevokedUserFilter` (-47, after
+`UserIdentityResolutionFilter` has put the UUID `userId` on the principal): a JWT principal whose
+`iat` is at or before the marker gets the same 401 `UNAUTHORIZED` body `JwtAuthenticationFilter`
+answers; a token issued after it (user reactivated, signed in again) passes. Skipped for public
+paths, principals without a `userId` (Guest, connected-app machine tokens) and PATs (`pat:revoked:`).
+Redis unreachable → fail open with a WARN and `kelta.gateway.auth.failures{reason=user_revocation_unchecked}`
+(refresh tokens are already revoked, so exposure stays bounded by the access-token TTL). SCIM
+deactivation/delete (`ScimUserService`) writes platform_user directly and does not write the marker
 (`concerns.md`).
 
 ### Component layering — admin app vs. plugin library
