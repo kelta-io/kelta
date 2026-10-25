@@ -63,15 +63,6 @@ updates:
       - /e2e-tests
     schedule:
       interval: weekly
-    # Playwright must move together with the E2E container image pinned in
-    # .github/workflows/ci.yml (FROM mcr.microsoft.com/playwright:vX.Y.Z-noble); Dependabot
-    # cannot bump that image, and a package-only bump fails E2E with "Executable doesn't
-    # exist" (kelta#1984: 1.58.2 -> 1.64.1). Bumped by hand/task with the image until CI
-    # derives the image tag from e2e-tests/package-lock.json.
-    ignore:
-      - dependency-name: "@playwright/test"
-      - dependency-name: "playwright"
-      - dependency-name: "playwright-core"
     open-pull-requests-limit: 5
     labels:
       - dependencies
