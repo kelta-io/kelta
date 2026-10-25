@@ -70,6 +70,10 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
 
     private static final String TENANTS_PATH = "/api/tenants";
 
+    private static final String STATIC_ADMIN_ROUTE_ID = "static-admin";
+
+    private static final String PORTAL_USER_TYPE = "PORTAL";
+
     /** Any caller-supplied filter on the tenants {@code id}: {@code filter[id]}, {@code filter[id][eq]}, … */
     private static final Pattern TENANT_ID_FILTER = Pattern.compile("(?i)^filter\\[\\s*id\\s*\\](\\[[^\\]]*\\])?$");
 
@@ -279,6 +283,14 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
         String collectionId = route.getId();
         String collectionName = route.getCollectionName();
 
+        // /api/admin/** is the tenant-administration surface. A portal member's profile carries
+        // API_ACCESS (portal sign-up seeds it), so without this deny every admin controller that
+        // checks nothing further would be open to self-signed-up members.
+        if (STATIC_ADMIN_ROUTE_ID.equals(collectionId) && isPortalPrincipal(principal)) {
+            log.warn("Portal user {} denied admin route on path: {}", principal.getUsername(), path);
+            return Mono.just(new Deny(collectionName, "Portal users may not access admin endpoints"));
+        }
+
         // A static route that fronts a real system collection (users, profiles,
         // collections — declared in RouteConfigService) is authorized against that
         // collection, so the request is refused before the worker validates its body.
@@ -435,6 +447,16 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                     "Insufficient permissions for " + mapMethodToAction(method) + " on " + route.getCollectionName());
         }
         return decision;
+    }
+
+    /**
+     * Whether the principal is a portal member: the {@code user_type} claim of its JWT, or for a
+     * PAT the owner's {@code platform_user.user_type} that {@code UserIdentityResolutionFilter}
+     * stamps onto the principal.
+     */
+    private static boolean isPortalPrincipal(GatewayPrincipal principal) {
+        return principal.getClaims().get("user_type") instanceof String userType
+                && PORTAL_USER_TYPE.equalsIgnoreCase(userType.trim());
     }
 
     private static boolean isStaticRoute(RouteDefinition route) {
