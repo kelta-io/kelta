@@ -162,6 +162,28 @@ class IdentityHeaderStripFilterTest {
     }
 
     @Test
+    @DisplayName("Should strip a client-sent X-Kelta-Client-Ip so only the gateway-resolved value reaches the worker")
+    void shouldStripClientSentClientIpHeader() {
+        MockServerHttpRequest request = MockServerHttpRequest
+                .post("/api/webhooks/mail/some-key")
+                .header("X-Kelta-Client-Ip", "203.0.113.9")
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+        final ServerWebExchange[] capturedExchange = new ServerWebExchange[1];
+        when(chain.filter(any(ServerWebExchange.class))).thenAnswer(invocation -> {
+            capturedExchange[0] = invocation.getArgument(0);
+            return Mono.empty();
+        });
+
+        StepVerifier.create(filter.filter(exchange, chain))
+                .verifyComplete();
+
+        assertThat(capturedExchange[0].getRequest().getHeaders().get("X-Kelta-Client-Ip")).isNull();
+        assertThat(filter.getOrder()).isLessThan(new ClientIpForwardingFilter(null).getOrder());
+    }
+
+    @Test
     @DisplayName("Should strip client-spoofed geo headers")
     void shouldStripSpoofedGeoHeaders() {
         MockServerHttpRequest request = MockServerHttpRequest

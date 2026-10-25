@@ -122,6 +122,29 @@ class EntitlementResolverTest {
     }
 
     @Test
+    @DisplayName("A re-subscribed member gets the new active row, not the canceled one stored first")
+    void resubscribedMemberResolvesActiveRow() {
+        // Real BillingCollections over a store that returns the oldest row first, as an unsorted
+        // query does.
+        BillingCollectionsTest.StubStore store = new BillingCollectionsTest.StubStore()
+                .rows(BillingCollections.SUBSCRIPTIONS, List.of(
+                        BillingCollectionsTest.subscription("old", "canceled",
+                                "2026-03-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+                        BillingCollectionsTest.subscription("new", "active",
+                                "2026-11-01T00:00:00Z", "2026-10-01T00:00:00Z")))
+                .rows(BillingCollections.PLANS, List.of(
+                        plan("p0", "FREE", "DEFAULT", Map.of("watches", 1)),
+                        plan("plan-old", "BASIC", "SUBSCRIPTION", Map.of("watches", 5)),
+                        plan("plan-new", "PRO", "SUBSCRIPTION", Map.of("watches", 10))));
+
+        MemberEntitlements result = new EntitlementResolver(store.collections()).resolve("u1");
+
+        assertThat(result.planCode()).isEqualTo("PRO");
+        assertThat(result.subscriptionStatus()).isEqualTo("active");
+        assertThat(result.intValue("watches", 0)).isEqualTo(10);
+    }
+
+    @Test
     @DisplayName("past_due keeps entitlements while the processor retries the card")
     void pastDueStaysEntitled() {
         // Cutting a member off mid-retry punishes a recoverable failure.

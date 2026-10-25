@@ -284,7 +284,9 @@ mailbox to a high-volume public address.
   `X-Forwarded-For` hop while `ip-allowlist.trust-forwarded-for` is on (the default). Fix: set the
   list to the ingress CIDR (and kelta-auth's). The worker trusts the gateway-stamped
   `X-Kelta-Client-Ip` like `X-User-Id`; the filter is fail-open by design — pair it with network
-  controls.
+  controls. The support-mailbox `inbound_allowed_cidrs` check (`MailboxWebhookController`) also
+  relies on it: until the trusted-proxy list is set, the header carries the ingress address and a
+  mailbox with an allowlist rejects every delivery (fail-closed).
 - **Network-level defense-in-depth (out of tree):** worker/auth/ai must be reachable only via the
   gateway — enforced by NetworkPolicy + mTLS in the cluster, not by app code. No NetworkPolicy in
   this repo; verify on the cluster.

@@ -9,6 +9,7 @@ import io.kelta.runtime.query.QueryResult;
 import io.kelta.runtime.registry.CollectionRegistry;
 
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,9 @@ public class BillingCollections {
     static final String SUBSCRIPTIONS = "billing_subscriptions";
     static final String PASSES = "billing_passes";
     static final String ENTITLEMENT_RULES = "billing_entitlement_rules";
+
+    /** Bound on the subscription rows read per member; far above what re-subscribing produces. */
+    static final int MAX_SUBSCRIPTIONS_PER_MEMBER = 50;
 
     private static final Set<String> MODULE_COLLECTIONS =
             Set.of(PLANS, CUSTOMERS, SUBSCRIPTIONS, PASSES, ENTITLEMENT_RULES);
@@ -107,8 +111,30 @@ public class BillingCollections {
 
     // ------------------------------------------------------------- Subscriptions
 
+    /**
+     * The member's current subscription. Re-subscribing creates a new Stripe subscription and so a
+     * second row, and an unsorted query returns the oldest first — so every row is read (a member
+     * has a handful) and the choice is made by {@link #currentSubscription}.
+     */
     public Optional<Map<String, Object>> findSubscriptionByUserId(String userId) {
-        return first(query(SUBSCRIPTIONS, List.of(FilterCondition.eq("userId", userId)), 1));
+        return currentSubscription(query(SUBSCRIPTIONS,
+                List.of(FilterCondition.eq("userId", userId)), MAX_SUBSCRIPTIONS_PER_MEMBER));
+    }
+
+    /**
+     * The newest entitling row (latest {@code currentPeriodEnd}, then {@code createdAt}); failing
+     * that, the newest row of any status by the same order. Missing timestamps sort oldest.
+     */
+    static Optional<Map<String, Object>> currentSubscription(List<Map<String, Object>> rows) {
+        Comparator<Map<String, Object>> newest = Comparator
+                .comparing((Map<String, Object> row) -> toInstant(row.get("currentPeriodEnd")),
+                        Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(row -> toInstant(row.get("createdAt")),
+                        Comparator.nullsFirst(Comparator.naturalOrder()));
+        Optional<Map<String, Object>> live = rows.stream()
+                .filter(EntitlementResolver::isEntitling)
+                .max(newest);
+        return live.isPresent() ? live : rows.stream().max(newest);
     }
 
     public void upsertSubscription(String userId, String planId, String stripeSubscriptionId,

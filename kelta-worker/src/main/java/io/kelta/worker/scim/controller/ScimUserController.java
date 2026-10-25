@@ -6,6 +6,7 @@ import io.kelta.worker.scim.model.ScimPatchOp;
 import io.kelta.worker.scim.model.ScimUser;
 import io.kelta.worker.scim.service.ScimUserService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,9 +16,12 @@ import org.springframework.web.bind.annotation.*;
 public class ScimUserController {
 
     private final ScimUserService scimUserService;
+    private final String publicUrl;
 
-    public ScimUserController(ScimUserService scimUserService) {
+    public ScimUserController(ScimUserService scimUserService,
+                              @Value("${kelta.scim.public-url:}") String publicUrl) {
         this.scimUserService = scimUserService;
+        this.publicUrl = publicUrl;
     }
 
     @GetMapping(produces = ScimConstants.CONTENT_TYPE_SCIM)
@@ -75,11 +79,16 @@ public class ScimUserController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * The configured public origin ({@code kelta.scim.public-url}). The request's own address is
+     * only a local-dev fallback: {@code X-Forwarded-Proto}/{@code -Host} are never read, because
+     * the gateway strips them and any client that reaches the worker directly can forge them.
+     */
     private String getBaseUrl(HttpServletRequest request) {
-        String scheme = request.getHeader("X-Forwarded-Proto");
-        if (scheme == null) scheme = request.getScheme();
-        String host = request.getHeader("X-Forwarded-Host");
-        if (host == null) host = request.getServerName() + ":" + request.getServerPort();
-        return scheme + "://" + host;
+        if (publicUrl != null && !publicUrl.isBlank()) {
+            String trimmed = publicUrl.trim();
+            return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+        }
+        return request.getScheme() + "://" + request.getServerName() + ":" + request.getServerPort();
     }
 }
