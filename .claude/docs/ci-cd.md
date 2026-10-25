@@ -525,11 +525,9 @@ marketing Playwright spec itself always runs when `E2E_MARKETING_URL` is set, re
 whether this run rebuilt the marketing image, and `e2e-test` doesn't otherwise depend on the
 `changes` job.
 
-`kelta-marketing/package.json` carries an `overrides` entry pinning `@astrojs/tailwind`'s
-`astro` peer to the installed version. The integration's declared peer range stops at Astro 5
-while the site runs Astro 6, and without the override `npm ci` fails ERESOLVE — which is why
-the image had never been built. The real fix is dropping the deprecated integration for
-Tailwind v4's `@tailwindcss/vite`; see `concerns.md`.
+The site builds Tailwind v4 through `@tailwindcss/vite` (`astro.config.mjs` → `vite.plugins`),
+with the theme in `src/styles/global.css` `@theme`; there is no Astro Tailwind integration and no
+`overrides` pin.
 
 ## CLI downloads image (kelta-cli-downloads)
 

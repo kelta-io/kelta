@@ -948,9 +948,6 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   the public values there before relying on public contributors running them.
 - **`make up` needs ~24 GB for Docker** (three concurrent `native-image` builds each size their heap
   to ~80% of the cgroup). Use `make up-jvm` unless debugging native-only behaviour.
-- **`kelta-marketing` installs only because of an `overrides` pin** (`@astrojs/tailwind@6` peer vs
-  Astro 6). Real fix: move to `@tailwindcss/vite` + CSS-first `@theme` (visual-regression risk).
-  Don't remove the override until then.
 - Multiple BOM version overrides in `kelta-worker/pom.xml` raise transitive conflict risk — audit
   on every Spring Boot bump.
 
