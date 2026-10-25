@@ -4,7 +4,7 @@ import { roadmap } from '../data/roadmap';
 ---
 
 <BaseLayout title="Roadmap" description="What's shipped, in progress, and next for Kelta — the open-source enterprise application platform.">
-  <section class="bg-gradient-to-b from-kelta-50 to-white py-20">
+  <section class="bg-linear-to-b from-kelta-50 to-white py-20">
     <div class="mx-auto max-w-7xl px-6 text-center">
       <h1 class="text-4xl font-extrabold text-navy md:text-5xl">Roadmap</h1>
       <p class="mx-auto mt-4 max-w-2xl text-lg text-kelta-700">
@@ -20,7 +20,7 @@ import { roadmap } from '../data/roadmap';
     <div class="mx-auto max-w-7xl px-6">
       <div class="grid gap-8 md:grid-cols-3">
         {roadmap.columns.map((column) => (
-          <div class={`rounded-xl border border-gray-100 border-t-4 ${column.accent} bg-white p-8 shadow-sm`}>
+          <div class={`rounded-xl border border-gray-100 border-t-4 ${column.accent} bg-white p-8 shadow-xs`}>
             <h2 class="mb-4 text-xl font-bold text-navy">{column.title}</h2>
             <ul class="space-y-3 text-sm leading-relaxed text-kelta-700">
               {column.items.map((item) => (

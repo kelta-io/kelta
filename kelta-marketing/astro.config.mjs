@@ -1,8 +1,7 @@
 import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 import { rehypeHeadingIds, unified } from '@astrojs/markdown-remark';
-import autoprefixer from 'autoprefixer';
-import tailwindcss from 'tailwindcss';
+import tailwindcss from '@tailwindcss/vite';
 import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import { fileURLToPath } from 'node:url';
 import { remarkStripLeadingH1 } from './src/docs/remark-strip-leading-h1.ts';
@@ -20,10 +19,10 @@ export default defineConfig({
   redirects: {
     '/docs/scim': '/docs/security/scim/',
   },
-  // Tailwind 3 through PostCSS — what the retired @astrojs/tailwind integration
-  // configured. Base styles come from src/styles/global.css (BaseLayout).
+  // Tailwind v4 through its Vite plugin; theme and base styles live in
+  // src/styles/global.css (BaseLayout). v4 adds vendor prefixes itself.
   vite: {
-    css: { postcss: { plugins: [tailwindcss(), autoprefixer()] } },
+    plugins: [tailwindcss()],
   },
   markdown: {
     shikiConfig: { theme: 'github-dark', wrap: false },
