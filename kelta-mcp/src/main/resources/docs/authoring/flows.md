@@ -310,6 +310,11 @@ collection).
 - `to` (required), `subject` (required unless `templateId`), `body`
   (HTML), `templateId` (an email template; its subject and body replace
   the config's).
+- `subject` and `body` are expanded once, by the handler: a `${...}`
+  inside a state value is sent as text. Each `${$.path}` value in `body`
+  is HTML-escaped; write `${raw:$.path}` to insert trusted HTML
+  unescaped. `subject` is not escaped but has line breaks removed. A
+  `=jsonata` value is used as-is, without escaping.
 - Result: `{"emailLogId", "to", "subject", "status": "QUEUED"}`. The
   email is queued, not sent synchronously.
 

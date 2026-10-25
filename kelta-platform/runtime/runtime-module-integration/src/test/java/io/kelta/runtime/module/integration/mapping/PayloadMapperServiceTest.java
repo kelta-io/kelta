@@ -6,9 +6,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -106,5 +112,33 @@ class PayloadMapperServiceTest {
     void mapToObjectRejectsScalar() {
         assertThrows(PayloadMapperException.class, () ->
             mapper.mapToObject("=42", Map.of()));
+    }
+
+    @Test
+    @DisplayName("JSONata sees a java.time.Instant in state as its ISO-8601 string")
+    void jsonataReadsInstantAsIsoString() {
+        Instant createdAt = Instant.parse("2026-10-25T05:54:15.061833Z");
+        Map<String, Object> state = Map.of("record", Map.of("createdAt", createdAt));
+
+        assertEquals("2026-10-25T05:54:15.061833Z", mapper.map("=$.record.createdAt", state));
+    }
+
+    @Test
+    @DisplayName("JSONata sees dates, decimals and UUIDs as JSON strings and numbers")
+    void jsonataReadsNonJsonTypes() {
+        UUID id = UUID.fromString("76d4fa27-63b1-436e-a311-fda842537664");
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("updatedAt", OffsetDateTime.of(2026, 10, 25, 6, 0, 0, 0, ZoneOffset.ofHours(-6)));
+        record.put("dueOn", LocalDate.of(2026, 11, 1));
+        record.put("amount", new BigDecimal("12.50"));
+        record.put("id", id);
+        record.put("tags", List.of(Instant.parse("2026-01-01T00:00:00Z")));
+        Map<String, Object> state = Map.of("record", record);
+
+        assertEquals("2026-10-25T06:00-06:00", mapper.map("=record.updatedAt", state));
+        assertEquals("2026-11-01", mapper.map("=record.dueOn", state));
+        assertEquals(25.0, ((Number) mapper.map("=record.amount * 2", state)).doubleValue());
+        assertEquals(id.toString(), mapper.map("=record.id", state));
+        assertEquals("2026-01-01T00:00:00Z", mapper.map("=record.tags[0]", state));
     }
 }

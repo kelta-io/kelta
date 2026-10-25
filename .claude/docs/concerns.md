@@ -485,6 +485,24 @@ the fix, a query-param `credentialRef` put the key in every step log's `url`; th
 not rewritten. Secrets shorter than 4 characters are masked in URLs by parameter name only, not
 scrubbed from free text.
 
+### EMAIL_ALERT escapes interpolated body values (KLT-797)
+
+`EMAIL_ALERT` declares `subject` and `body` in `unresolvedParameterKeys()`, so `TaskStateExecutor`
+leaves them to the handler, which expands each placeholder **once** against `ActionContext.stateData`
+(a `${...}` that arrives inside record data is sent as text). Defaults:
+- **body** — every `${$.path}` value is HTML-escaped (`& < > " '`). The opt-out is
+  **`${raw:$.path}`**, which inserts the value unescaped; use it only for HTML the flow author
+  controls, never for member-typed text.
+- **subject** — not HTML-escaped (a header, not HTML); CR and LF are stripped from the result.
+- Templates loaded by `templateId` follow the same rules.
+
+Not covered: a field written as `=jsonata` is used as-is — the expression builds the whole value,
+so nothing is escaped (`$.name` concatenated into HTML is raw). An `EMAIL_ALERT` nested in a
+`DECISION` branch's `actions[].config` is still resolved by `resolveDeep` before the handler runs,
+so it is expanded twice and its values are not escaped (same residual as SQL_QUERY in a
+`DECISION`, Authorization gaps still open); use a `Choice` state and an `EMAIL_ALERT` Task.
+Pinned by `EmailAlertActionHandlerTest`.
+
 ### Data masking — v2 contexts (accepted)
 
 Masking is enforced on JSON:API (`CerbosFieldSecurityAdvice` strip → mask), filter/sort probes
