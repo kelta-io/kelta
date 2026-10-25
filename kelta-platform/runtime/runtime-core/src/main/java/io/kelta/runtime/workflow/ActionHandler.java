@@ -2,6 +2,8 @@ package io.kelta.runtime.workflow;
 
 import io.kelta.runtime.flow.ActionHandlerDescriptor;
 
+import java.util.Set;
+
 /**
  * Service Provider Interface (SPI) for workflow action handlers.
  * <p>
@@ -45,6 +47,18 @@ public interface ActionHandler {
      */
     default void validate(String configJson) {
         // Default: no validation — override for strict config checking
+    }
+
+    /**
+     * Top-level {@code Parameters} keys a flow Task passes to this handler with their
+     * {@code ${...}} placeholders left unresolved. The handler resolves them itself from
+     * {@link ActionContext#stateData()}, e.g. {@code SQL_QUERY} binds each one as a JDBC
+     * parameter instead of splicing text into its statement.
+     *
+     * @return the keys to leave unresolved; empty (the default) resolves every key
+     */
+    default Set<String> unresolvedParameterKeys() {
+        return Set.of();
     }
 
     /**

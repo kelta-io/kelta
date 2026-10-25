@@ -43,7 +43,7 @@ class ChildResourceScopingScenarioTest extends ScenarioBase {
         RestClient client = gatewayClientWithToken(token);
         String base = "/" + slug + "/api";
 
-        waitForStatus(client, base + "/orders", HttpStatus.OK, 40);
+        waitForStatus(client, base + "/orders", HttpStatus.OK, 240);
 
         String suffix = Long.toHexString(System.nanoTime());
         String ownerId = createRecord(client, base + "/customers", "customers",

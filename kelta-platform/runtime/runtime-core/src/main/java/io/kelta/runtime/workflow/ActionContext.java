@@ -27,7 +27,8 @@ public record ActionContext(
     String workflowRuleId,
     String executionLogId,
     Map<String, Object> resolvedData,
-    int triggerDepth
+    int triggerDepth,
+    Map<String, Object> stateData
 ) {
 
     /**
@@ -51,6 +52,7 @@ public record ActionContext(
         private String executionLogId;
         private Map<String, Object> resolvedData;
         private int triggerDepth;
+        private Map<String, Object> stateData;
 
         public Builder tenantId(String tenantId) { this.tenantId = tenantId; return this; }
         public Builder collectionId(String collectionId) { this.collectionId = collectionId; return this; }
@@ -65,13 +67,14 @@ public record ActionContext(
         public Builder executionLogId(String executionLogId) { this.executionLogId = executionLogId; return this; }
         public Builder resolvedData(Map<String, Object> resolvedData) { this.resolvedData = resolvedData; return this; }
         public Builder triggerDepth(int triggerDepth) { this.triggerDepth = triggerDepth; return this; }
+        public Builder stateData(Map<String, Object> stateData) { this.stateData = stateData; return this; }
 
         public ActionContext build() {
             return new ActionContext(
                 tenantId, collectionId, collectionName, recordId,
                 data, previousData, changedFields, userId,
                 actionConfigJson, workflowRuleId, executionLogId, resolvedData,
-                triggerDepth
+                triggerDepth, stateData
             );
         }
     }
