@@ -3,11 +3,13 @@ package io.kelta.auth.controller;
 import io.kelta.auth.config.AuthProperties;
 import io.kelta.auth.service.AuthDomainResolver;
 import io.kelta.auth.service.PortalLoginService;
+import io.kelta.auth.session.SignInAuthentication;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
@@ -88,10 +90,10 @@ public class PortalLoginController {
 
         // Establish the authenticated session. Spring Security 6 no longer
         // saves the context implicitly — persist it to the HTTP session so the
-        // subsequent /oauth2/authorize redirect sees the authentication.
-        UsernamePasswordAuthenticationToken authentication =
-                UsernamePasswordAuthenticationToken.authenticated(
-                        userDetails, null, userDetails.getAuthorities());
+        // subsequent /oauth2/authorize redirect sees the authentication. The link
+        // is a one-time token: FACTOR_OTT dates the ID token's auth_time.
+        UsernamePasswordAuthenticationToken authentication = SignInAuthentication.authenticated(
+                userDetails, null, FactorGrantedAuthority.OTT_AUTHORITY);
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(authentication);
         SecurityContextHolder.setContext(context);

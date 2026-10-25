@@ -40,6 +40,10 @@ public class SecurityConfig {
     @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
     private String issuerUri;
 
+    /** Where the gateway reaches kelta-auth for the issuer's keys; blank = the issuer URI. */
+    @Value("${kelta.gateway.auth-service-url:}")
+    private String authServiceUrl;
+
     @Value("${CORS_ALLOWED_ORIGIN_PATTERN:}")
     private String corsAllowedOriginPattern;
 
@@ -145,6 +149,7 @@ public class SecurityConfig {
     @Bean
     public DynamicReactiveJwtDecoder jwtDecoder(io.kelta.gateway.cache.GatewayCacheManager cacheManager) {
         log.info("Gateway JWT decoder: primary issuer {} + verified tenant custom domains", issuerUri);
-        return new DynamicReactiveJwtDecoder(issuerUri, Duration.ofSeconds(jwtClockSkewSeconds), cacheManager);
+        return new DynamicReactiveJwtDecoder(
+                issuerUri, authServiceUrl, Duration.ofSeconds(jwtClockSkewSeconds), cacheManager);
     }
 }

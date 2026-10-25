@@ -14,6 +14,9 @@ import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.FactorGrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 
@@ -84,6 +87,23 @@ class PortalLoginControllerTest {
                 HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY)).isNotNull();
         // The slug, as LoginController writes — never the tenant UUID.
         assertThat(session.getAttribute("tenantId")).isEqualTo(SLUG);
+    }
+
+    @Test
+    @DisplayName("the saved authentication carries the one-time-token factor the ID token's auth_time needs (PLT-767)")
+    void sessionAuthenticationCarriesOttFactor() {
+        when(portalLoginService.verify(TOKEN)).thenReturn(Optional.of(
+                new PortalLoginService.PortalVerification(TestFixtures.userDetails(), SLUG)));
+        MockHttpSession session = new MockHttpSession();
+
+        controller.verify(TOKEN, verifyRequest(session), new MockHttpServletResponse());
+
+        SecurityContext saved = (SecurityContext) session.getAttribute(
+                HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
+        assertThat(saved.getAuthentication().getAuthorities())
+                .filteredOn(FactorGrantedAuthority.class::isInstance)
+                .extracting(GrantedAuthority::getAuthority)
+                .containsExactly(FactorGrantedAuthority.OTT_AUTHORITY);
     }
 
     @Test

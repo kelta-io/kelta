@@ -3,6 +3,7 @@ package io.kelta.auth.federation;
 import io.kelta.auth.model.KeltaUserDetails;
 import io.kelta.auth.service.WorkerClient;
 import io.kelta.auth.service.WorkerClient.OidcProviderInfo;
+import io.kelta.auth.session.SignInAuthentication;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -10,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
@@ -104,10 +106,11 @@ public class FederatedLoginSuccessHandler implements AuthenticationSuccessHandle
         KeltaUserDetails userDetails = userDetailsOpt.get();
 
         // Replace the authentication with a UsernamePasswordAuthenticationToken
-        // wrapping KeltaUserDetails so the token customizer can access it
-        UsernamePasswordAuthenticationToken platformAuth =
-                new UsernamePasswordAuthenticationToken(
-                        userDetails, null, userDetails.getAuthorities());
+        // wrapping KeltaUserDetails so the token customizer can access it. It keeps the
+        // upstream login's factor (or FACTOR_AUTHORIZATION_CODE — Spring's OIDC login
+        // provider adds none, spring-security#19140) for the ID token's auth_time.
+        UsernamePasswordAuthenticationToken platformAuth = SignInAuthentication.authenticated(
+                userDetails, authentication, FactorGrantedAuthority.AUTHORIZATION_CODE_AUTHORITY);
 
         SecurityContextHolder.getContext().setAuthentication(platformAuth);
 

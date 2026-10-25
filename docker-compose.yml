@@ -23,6 +23,9 @@
 #   inside Docker, `auth.localhost` is a network alias of kelta-auth, which listens
 #   on 8081 in the container too. The issuer must be identical on both sides: the
 #   SPA follows its discovery endpoints, and the gateway validates `iss` against it.
+#   The gateway FETCHES kelta-auth's keys over AUTH_SERVICE_URL=http://kelta-auth:8081,
+#   though: an RFC 6761 resolver maps *.localhost to loopback inside a container too
+#   (Netty's does since 4.2.14), so the alias is not a path its WebClient can use.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -238,6 +241,8 @@ services:
       NATS_URL: nats://nats:4222
       # CRITICAL: must match kelta-auth's KELTA_AUTH_ISSUER_URI exactly
       KELTA_AUTH_ISSUER_URI: http://auth.localhost:8081
+      # Where the gateway fetches the issuer's JWKS (see "Issuer URI note" above).
+      AUTH_SERVICE_URL: http://kelta-auth:8081
       WORKER_SERVICE_URL: http://kelta-worker:8080
       AI_SERVICE_URL: http://kelta-ai:8080
       # Cerbos

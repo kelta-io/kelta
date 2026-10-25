@@ -71,11 +71,13 @@ public class InternalServiceAuthConfig {
     @Bean
     public ExchangeFilterFunction internalBearerExchangeFilter(
             InternalAuthProperties internalAuth,
-            @Value("${kelta.auth.issuer-uri:${spring.security.oauth2.resourceserver.jwt.issuer-uri:}}") String issuerUri) {
+            @Value("${kelta.auth.issuer-uri:${spring.security.oauth2.resourceserver.jwt.issuer-uri:}}") String issuerUri,
+            @Value("${kelta.gateway.auth-service-url:}") String authServiceUrl) {
         if (!internalAuth.enabled()) {
             return (request, next) -> next.exchange(request);
         }
-        ReactiveOAuth2AuthorizedClientManager clientManager = authorizedClientManager(internalAuth, issuerUri);
+        ReactiveOAuth2AuthorizedClientManager clientManager =
+                authorizedClientManager(internalAuth, issuerUri, authServiceUrl);
 
         // client_credentials has no end-user principal; provide a stable
         // anonymous identity so the authorized-client cache keys on it.
@@ -111,7 +113,7 @@ public class InternalServiceAuthConfig {
      * {@code client_credentials} grant.
      */
     private static ReactiveOAuth2AuthorizedClientManager authorizedClientManager(
-            InternalAuthProperties internalAuth, String issuerUri) {
+            InternalAuthProperties internalAuth, String issuerUri, String authServiceUrl) {
         String clientId = internalAuth.clientId();
         String clientSecret = internalAuth.clientSecret();
         if (clientSecret == null || clientSecret.isBlank()) {
@@ -126,7 +128,7 @@ public class InternalServiceAuthConfig {
                             + "(kelta.auth.issuer-uri or spring.security.oauth2.resourceserver.jwt.issuer-uri).");
         }
 
-        String tokenUri = issuerUri.endsWith("/") ? issuerUri + "oauth2/token" : issuerUri + "/oauth2/token";
+        String tokenUri = tokenUri(issuerUri, authServiceUrl);
         ClientRegistration registration = ClientRegistration.withRegistrationId(CLIENT_REGISTRATION_ID)
                 .clientId(clientId)
                 .clientSecret(clientSecret)
@@ -147,5 +149,14 @@ public class InternalServiceAuthConfig {
         log.info("Registered OAuth2 client '{}' for worker /internal/** calls (token URI: {})",
                 clientId, tokenUri);
         return manager;
+    }
+
+    /**
+     * kelta-auth's token endpoint: on the auth-service URL ({@code kelta.gateway.auth-service-url})
+     * when one is set — the same network path the JWT decoder fetches keys over — else on the issuer.
+     */
+    static String tokenUri(String issuerUri, String authServiceUrl) {
+        String authBase = authServiceUrl == null || authServiceUrl.isBlank() ? issuerUri : authServiceUrl.trim();
+        return authBase.endsWith("/") ? authBase + "oauth2/token" : authBase + "/oauth2/token";
     }
 }

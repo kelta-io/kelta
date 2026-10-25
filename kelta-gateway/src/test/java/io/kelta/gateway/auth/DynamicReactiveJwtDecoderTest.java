@@ -4,6 +4,10 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import io.kelta.gateway.cache.GatewayCacheManager;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -18,6 +22,8 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
 import reactor.test.StepVerifier;
 
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPublicKey;
@@ -27,6 +33,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -270,6 +277,118 @@ class DynamicReactiveJwtDecoderTest {
         private String sign(JwtClaimsSet claims) {
             JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId("k1").build();
             return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+        }
+    }
+
+    @Nested
+    @DisplayName("JWKS location (PLT-767)")
+    class JwkSetLocationTest {
+
+        private MockWebServer authService;
+        private RSAKey signingKey;
+        private NimbusJwtEncoder encoder;
+
+        @BeforeEach
+        void setUp() throws Exception {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            KeyPair keyPair = generator.generateKeyPair();
+            signingKey = new RSAKey.Builder((RSAPublicKey) keyPair.getPublic())
+                    .privateKey(keyPair.getPrivate()).keyID("k1").build();
+            encoder = new NimbusJwtEncoder(new ImmutableJWKSet<>(new JWKSet(signingKey)));
+            authService = new MockWebServer();
+            authService.start();
+        }
+
+        @AfterEach
+        void tearDown() throws IOException {
+            authService.shutdown();
+        }
+
+        @Test
+        @DisplayName("fetches the platform issuer's keys from the auth-service URL, never from the issuer's host")
+        void fetchesPrimaryKeysFromAuthServiceUrl() throws Exception {
+            // docker-compose.yml's shape: the issuer is a *.localhost name that only a Docker
+            // network alias maps to kelta-auth. Netty 4.2.14+ resolves it to loopback without
+            // asking DNS (RFC 6761), where kelta-auth is not listening (here: a port with no
+            // listener), so fetching <iss>/oauth2/jwks failed with "Could not obtain the keys"
+            // and every bearer request through the gateway was a 500.
+            String issuer = "http://auth.localhost:" + unusedPort();
+            authService.enqueue(jwksResponse());
+            DynamicReactiveJwtDecoder d = new DynamicReactiveJwtDecoder(
+                    issuer, authService.url("/").toString(), Duration.ZERO, cacheManager);
+
+            StepVerifier.create(d.decode(accessToken(issuer)))
+                    .assertNext(jwt -> assertThat(jwt.getClaimAsString("iss")).isEqualTo(issuer))
+                    .verifyComplete();
+            RecordedRequest jwksRequest = authService.takeRequest(5, TimeUnit.SECONDS);
+            assertThat(jwksRequest).isNotNull();
+            assertThat(jwksRequest.getPath()).isEqualTo("/oauth2/jwks");
+        }
+
+        @Test
+        @DisplayName("without an auth-service URL fetches the platform issuer's keys from the issuer")
+        void fetchesPrimaryKeysFromIssuerByDefault() throws Exception {
+            String issuer = authService.url("/").toString().replaceAll("/$", "");
+            authService.enqueue(jwksResponse());
+            DynamicReactiveJwtDecoder d = new DynamicReactiveJwtDecoder(issuer, Duration.ZERO, cacheManager);
+
+            StepVerifier.create(d.decode(accessToken(issuer)))
+                    .assertNext(jwt -> assertThat(jwt.getSubject()).isEqualTo("user-1"))
+                    .verifyComplete();
+            RecordedRequest jwksRequest = authService.takeRequest(5, TimeUnit.SECONDS);
+            assertThat(jwksRequest).isNotNull();
+            assertThat(jwksRequest.getPath()).isEqualTo("/oauth2/jwks");
+        }
+
+        @Test
+        @DisplayName("the auth-service URL changes only where keys come from, not which iss is accepted")
+        void authServiceUrlIsNotAnAcceptedIssuer() {
+            String authServiceUrl = authService.url("/").toString();
+            DynamicReactiveJwtDecoder d = new DynamicReactiveJwtDecoder(
+                    INTERNAL_ISSUER, authServiceUrl, Duration.ZERO, cacheManager);
+
+            StepVerifier.create(d.decode(accessToken(authServiceUrl.replaceAll("/$", ""))))
+                    .expectErrorSatisfies(err -> assertThat(err.getMessage()).contains("not the platform issuer"))
+                    .verify();
+            assertThat(authService.getRequestCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("custom-domain issuers keep <issuer>/oauth2/jwks; a blank auth-service URL means the issuer")
+        void jwkSetUriPerIssuer() {
+            DynamicReactiveJwtDecoder withUrl = new DynamicReactiveJwtDecoder(
+                    INTERNAL_ISSUER, "http://kelta-auth:8081/", Duration.ZERO, cacheManager);
+            assertThat(withUrl.jwkSetUriFor(INTERNAL_ISSUER)).isEqualTo("http://kelta-auth:8081/oauth2/jwks");
+            assertThat(withUrl.jwkSetUriFor("https://acme.com")).isEqualTo("https://acme.com/oauth2/jwks");
+
+            DynamicReactiveJwtDecoder blank = new DynamicReactiveJwtDecoder(
+                    INTERNAL_ISSUER + "/", "  ", Duration.ZERO, cacheManager);
+            assertThat(blank.jwkSetUriFor(INTERNAL_ISSUER)).isEqualTo(INTERNAL_ISSUER + "/oauth2/jwks");
+        }
+
+        private MockResponse jwksResponse() {
+            return new MockResponse()
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(new JWKSet(signingKey.toPublicJWK()).toString());
+        }
+
+        private String accessToken(String issuer) {
+            Instant now = Instant.now();
+            JwtClaimsSet claims = JwtClaimsSet.builder()
+                    .issuer(issuer)
+                    .subject("user-1")
+                    .issuedAt(now)
+                    .expiresAt(now.plus(1, ChronoUnit.HOURS))
+                    .build();
+            JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId("k1").build();
+            return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+        }
+
+        private static int unusedPort() throws IOException {
+            try (ServerSocket socket = new ServerSocket(0)) {
+                return socket.getLocalPort();
+            }
         }
     }
 

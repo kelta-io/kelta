@@ -242,10 +242,13 @@ everywhere: inside Docker `auth.localhost` is a network alias of the kelta-auth 
 (which listens on 8081 there too), and on your machine browsers and the OS resolve any
 `*.localhost` name to loopback (RFC 6761), reaching the published port 8081. One URL on both
 sides is what lets the browser follow kelta-auth's discovery endpoints *and* the gateway accept
-the tokens it issues (it validates `iss` against this exact value). The `.run/*.run.xml` configs
-use the same value; the kelta-auth one also sets `SERVER_PORT=8081`. (Browsers and macOS resolve
-`*.localhost` themselves; a minimal Linux without `nss-myhostname`/systemd-resolved may not — add
-`127.0.0.1 auth.localhost` to `/etc/hosts` there for services you run from the IDE.)
+the tokens it issues (it validates `iss` against this exact value). The containerised gateway
+fetches kelta-auth's signing keys over `AUTH_SERVICE_URL=http://kelta-auth:8081` rather than the
+alias: Netty (4.2.14+) resolves `*.localhost` to loopback per RFC 6761 even inside a container.
+The `.run/*.run.xml` configs use the same issuer; the kelta-auth one also sets `SERVER_PORT=8081`.
+(Browsers and macOS resolve `*.localhost` themselves; a minimal Linux without
+`nss-myhostname`/systemd-resolved may not — add `127.0.0.1 auth.localhost` to `/etc/hosts` there
+for services you run from the IDE.)
 
 **Upgrading an existing dev database.** On startup the worker repairs the `default` tenant's
 baseline identity providers (`BaselineIdentityProviderReconciler`). Tenants *you* created before

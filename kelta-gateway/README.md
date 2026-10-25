@@ -60,6 +60,7 @@ spring.security.oauth2.resourceserver.jwt:
 
 kelta.gateway:
   worker-service-url: ${WORKER_SERVICE_URL:http://emf-worker:80}
+  auth-service-url: ${AUTH_SERVICE_URL:}   # kelta-auth for JWKS/token calls; empty = the issuer URI
   tenant-slug:
     enabled: ${TENANT_SLUG_ENABLED:true}
     cache-refresh-ms: 60000
@@ -146,7 +147,7 @@ in production.
 
 ## Dependencies
 
-- Java 25, Spring Boot 4.0.5, Spring Cloud 2025.1.1
+- Java 25, Spring Boot 4.0.9, Spring Cloud 2025.1.4
 - `runtime-events`, `runtime-jsonapi` (Kelta platform modules)
 - Spring Cloud Gateway, Spring WebFlux (reactive)
 - Spring Security OAuth2 Resource Server

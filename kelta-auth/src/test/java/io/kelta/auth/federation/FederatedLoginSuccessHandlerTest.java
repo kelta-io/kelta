@@ -11,6 +11,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
@@ -149,6 +151,12 @@ class FederatedLoginSuccessHandlerTest {
             KeltaUserDetails principal = (KeltaUserDetails) auth.getPrincipal();
             assertThat(principal.getEmail()).isEqualTo("user@test.com");
             assertThat(principal.getTenantId()).isEqualTo("tenant1");
+            // Spring's OIDC login provider adds no factor (spring-security#19140); the platform
+            // authentication still needs one for the ID token's auth_time (PLT-767).
+            assertThat(auth.getAuthorities())
+                    .filteredOn(FactorGrantedAuthority.class::isInstance)
+                    .extracting(GrantedAuthority::getAuthority)
+                    .containsExactly(FactorGrantedAuthority.AUTHORIZATION_CODE_AUTHORITY);
         }
 
         @Test
