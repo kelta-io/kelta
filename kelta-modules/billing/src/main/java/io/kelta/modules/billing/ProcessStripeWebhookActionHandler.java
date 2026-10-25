@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Applies verified Stripe webhooks to the module's mirrored billing collections.
@@ -42,6 +43,9 @@ public class ProcessStripeWebhookActionHandler implements ActionHandler {
 
     /** Credential holding the tenant's Stripe keys. */
     static final String CREDENTIAL_NAME = "stripe";
+
+    private static final Pattern UUID_PATTERN = Pattern.compile(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
 
     private final BillingCollections collections;
     private final CredentialResolverPort credentialResolver;
@@ -223,21 +227,40 @@ public class ProcessStripeWebhookActionHandler implements ActionHandler {
     /**
      * Resolves the platform member behind an event: the checkout's {@code client_reference_id},
      * else {@code metadata.userId} (the module stamps both), else the stored customer mapping.
+     *
+     * <p>Only a platform user UUID counts. Checkouts started before module routes received the
+     * resolved UUID stamped the caller's email, and Stripe replays that metadata on every renewal
+     * and cancellation forever; trusting it would re-key the member's rows by email, where
+     * {@link EntitlementResolver} never looks. Such a value is treated as absent so the customer
+     * mapping decides, and a mapping that is itself not a UUID resolves no one.
      */
     private String resolveUserId(String tenantId, JsonNode object) {
         String userId = text(object, "client_reference_id");
-        if (userId != null) {
+        if (isUuid(userId)) {
             return userId;
         }
         userId = text(object.path("metadata"), "userId");
-        if (userId != null) {
+        if (isUuid(userId)) {
             return userId;
         }
         String customerId = text(object, "customer");
-        return customerId == null ? null
+        String mapped = customerId == null ? null
                 : collections.findCustomerByStripeId(customerId)
                         .map(c -> String.valueOf(c.get("userId")))
                         .orElse(null);
+        if (isUuid(mapped)) {
+            return mapped;
+        }
+        if (mapped != null) {
+            log.warn("Stripe customer {} of tenant {} maps to a non-UUID member id — run the "
+                    + "email-to-UUID rewrite in the billing module's VERIFICATION.md",
+                    customerId, tenantId);
+        }
+        return null;
+    }
+
+    static boolean isUuid(String value) {
+        return value != null && UUID_PATTERN.matcher(value).matches();
     }
 
     /**

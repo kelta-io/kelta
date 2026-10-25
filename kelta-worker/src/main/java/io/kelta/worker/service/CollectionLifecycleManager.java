@@ -162,6 +162,13 @@ public class CollectionLifecycleManager {
     private final ConcurrentHashMap<String, String> activeCollections = new ConcurrentHashMap<>();
 
     /**
+     * Collection ID to its {@link CollectionDefinition#registryKey()}. Tenants share collection
+     * names ({@code orders} in two tenants), so teardown must unregister the exact key: the
+     * registry's by-name fallback removes whichever tenant's entry it meets first.
+     */
+    private final ConcurrentHashMap<String, String> registryKeys = new ConcurrentHashMap<>();
+
+    /**
      * One monitor per collection ID. Initialize and refresh each read the collection from the
      * database and then register the definition; a NATS consumer and a read-after-write refresh
      * (#910) for the same collection run concurrently, and without ordering a definition read
@@ -282,6 +289,7 @@ public class CollectionLifecycleManager {
                 log.info("Skipping VIRTUAL collection '{}' (id={}) — no storage to initialize",
                         collectionName, collectionId);
                 collectionRegistry.register(definition);
+                registryKeys.put(collectionId, definition.registryKey());
                 activeCollections.put(collectionId, collectionName);
                 return;
             }
@@ -300,6 +308,7 @@ public class CollectionLifecycleManager {
             loadAndRegisterValidationRules(collectionId, collectionName);
 
             // Track as active
+            registryKeys.put(collectionId, definition.registryKey());
             activeCollections.put(collectionId, collectionName);
 
             log.info("Successfully initialized collection '{}' (id={})", collectionName, collectionId);
@@ -423,8 +432,9 @@ public class CollectionLifecycleManager {
      */
     public void teardownCollection(String collectionId) {
         String collectionName = activeCollections.remove(collectionId);
+        String registryKey = registryKeys.remove(collectionId);
         if (collectionName != null) {
-            collectionRegistry.unregister(collectionName);
+            collectionRegistry.unregister(registryKey != null ? registryKey : collectionName);
             if (validationRuleRegistry != null) {
                 validationRuleRegistry.unregister(collectionName);
             }
