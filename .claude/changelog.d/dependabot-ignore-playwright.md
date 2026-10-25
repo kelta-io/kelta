@@ -1,0 +1,1 @@
+- 2026-10-24 chore(ci): Dependabot ignores Playwright npm packages; they move with the E2E container image pinned in ci.yml

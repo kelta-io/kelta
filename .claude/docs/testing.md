@@ -7,7 +7,7 @@
 - **AssertJ** fluent assertions
 - **Mockito** 5.21.0
 - **jqwik** 1.8.2 — property-based testing
-- **Testcontainers** 1.21.4 everywhere (`kelta-platform`, `kelta-{worker,auth,ai}`, `kelta-test-harness`) — Docker-based integration tests. **1.21.4 specifically** is required on hosts running Docker Engine 29+ (min API 1.44): earlier versions ping `/v1.32`, get a 400, and report "Could not find a valid Docker environment" — which `@Testcontainers(disabledWithoutDocker = true)` turns into a silent skip. The fix is Testcontainers' own API-version negotiation (testcontainers-java #11346, first released in 1.21.4), not a docker-java bump. Spring Boot 4.0.5's BOM would pull Testcontainers 2.0.x; each module pins 1.21.x on purpose, because 2.0 renames the modules (`postgresql` → `testcontainers-postgresql`) and moves packages — a migration of its own.
+- **Testcontainers** 2.0.5 everywhere (`kelta-platform`, `kelta-{worker,auth,ai,gateway}`, `kelta-test-harness`) — Docker-based integration tests. 2.x names every module `testcontainers-*` (`testcontainers-postgresql`, `testcontainers-junit-jupiter`) and moves container classes into per-module packages: use `org.testcontainers.postgresql.PostgreSQLContainer` (no type parameter), not the deprecated `org.testcontainers.containers.PostgreSQLContainer<?>`. Hosts running Docker Engine 29+ (min API 1.44) need Testcontainers' API-version negotiation (testcontainers-java #11346, in 2.0.3+): without it Testcontainers pings `/v1.32`, gets a 400, and reports "Could not find a valid Docker environment" — which `@Testcontainers(disabledWithoutDocker = true)` turns into a silent skip. Keep every module on the same 2.0.3+ release; the version is a `testcontainers.version` property next to each module's `testcontainers-bom` import.
 - **MockWebServer** — HTTP service mocks
 - **Awaitility** — async assertions
 
@@ -28,7 +28,7 @@ they are **skipped**, not failed. In CI that is caught by `scripts/ci/assert-int
 which fails the job when an `*IntegrationTest` suite skipped every test; CI also sets
 `TESTCONTAINERS_RYUK_DISABLED=true`, since Ryuk is unreachable on the k8s-runner's shared daemon and
 Testcontainers otherwise reports Docker as unavailable. (Docker Engine 29+ needs Testcontainers
-1.21.4, which every module pins.) kelta-gateway is different: its pom excludes `*IntegrationTest`
+2.0.3+; every module is on 2.0.5.) kelta-gateway is different: its pom excludes `*IntegrationTest`
 from surefire and runs them through failsafe under `-Pintegration-tests`, which CI's `test-java`
 passes for gateway only (`matrix.mvn_args`). Its `@SpringBootTest` suites extend
 `integration/GatewayContainers`, which starts real Redis and NATS (JetStream) and wires them in via
@@ -39,6 +39,18 @@ test's response. After adding routes to `RouteRegistry` directly, call `RouteRef
 `CachingRouteLocator` does not see registry changes otherwise. (kelta-auth's
 `BaselineAdminPasswordIntegrationTest` migrates its database from kelta-worker's real migration
 directory via a `filesystem:` Flyway location, so it needs the whole repo checked out.)
+
+**Whole-worker context test.** `WorkerApplicationContextIntegrationTest` (kelta-worker) boots the
+full `WorkerApplication` context (`@SpringBootTest`, random port, profile `context-it` →
+`src/test/resources/application-context-it.yml`) on Postgres, Redis and NATS containers, with
+Flyway running the real migrations, and asserts the context loaded and that
+`GET /api/profiles?filter[name][eq]=System Administrator` answers 200 with the seeded profile.
+Cerbos (gRPC client + admin sync service) is `@MockitoBean`; Svix, Superset, S3, SMTP and the
+pollers are off in the profile. It also keeps the component scan off `target/test-classes`, because
+other tests nest router stand-in `@RestController`s that would collide with
+`DynamicCollectionRouter`. Run it with
+`mvn -f kelta-worker/pom.xml verify -Dtest=WorkerApplicationContextIntegrationTest` (skipped without
+Docker). A wiring change that breaks pod start breaks this test.
 
 **kelta-auth HTTP sessions in tests.** A flow test that needs real session behaviour (cookie,
 session id, `sid`, the OIDC `SessionRegistry`) puts Spring Session's `SessionRepositoryFilter` in
@@ -275,6 +287,10 @@ Every new feature needs one. When a test drives a flow via `POST /api/flows/{id}
 or the `execute_flow` MCP tool, remember the **double-wrap** rule (`{ "input": { ... } }`) —
 see `integrations.md` → Flows. MCP tools are tested at the unit level with WireMock JSON-path
 matchers asserting the on-the-wire JSON:API body (see `conventions.md` → MCP tools).
+**Guard:** `ToolTestCoverageGuardTest` (kelta-mcp) scans `io.kelta.mcp.tool` for every concrete
+`AdminTool`/`UserTool` and fails when one has no `<ClassName>Test` under `src/test/java`, so a
+new tool cannot merge without its wire test. Use the same shape (classpath scan + name match,
+plus a planted-violation case proving the guard fires) for any "every X has a test" rule.
 
 **The same suite runs post-deploy against production** (`build-and-publish-containers.yml` →
 E2E, `app.kelta.io`, the `default` tenant). A spec must never persist a change to a tenant-wide
@@ -547,6 +563,28 @@ them: it must resolve every `{{var}}` and send exactly `baseline.txt` calls.
 `ci/mcp-replay-compare.test.sh` pins the threshold. To regenerate the fixture and baseline after a
 platform change that makes the build cheaper (or a template change): see "Replaying the build in
 CI" in `examples/templates/applicant-tracking/BUILD-LOG.md`.
+
+## Template install and round-trip checks (CI)
+
+The `templates` job (**Template Install Check**, details in `ci-cd.md`) installs every
+`examples/templates/*/` into one fresh tenant on a HEAD-built stack, then makes two idempotency
+assertions (KLT-666):
+
+- **Second apply** (`ci/templates-install-check.sh`): after `install.sh` and the seed-count check,
+  each template's `metadata.json` is applied again (`kelta metadata apply metadata.json --yes
+  --output json`); it must exit 0 with `created` 0 and `failed` 0, else the items not `SKIPPED`
+  are printed and the run fails once every template was tried. The sandbox install gets the same
+  second apply.
+- **`Template round-trip check`** step (`ci/templates-roundtrip-check.sh`, runs after a failed
+  install step too): per template, `kelta metadata export --collections …` from the tenant,
+  apply to a new empty sandbox, re-export, normalise both with
+  `ci/templates-roundtrip-normalise.jq` (ids and timestamps) and diff. Package types listed in
+  `ci/templates-roundtrip-exclusions.txt` (`<TYPE> <task> [why]`; a line without a task fails the
+  check) are dropped from both and printed — empty today; add a line only with the follow-up task
+  that removes it.
+
+Both scripts' tests (`ci/templates-install-check.test.ts`, `ci/templates-roundtrip-check.test.ts`)
+run in the job's runner image and in `test-ci-scripts`.
 
 ## Upgrade test (CI)
 

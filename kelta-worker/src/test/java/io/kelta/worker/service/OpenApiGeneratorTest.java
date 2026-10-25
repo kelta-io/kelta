@@ -123,7 +123,7 @@ class OpenApiGeneratorTest {
 
         Map<String, Object> components = (Map<String, Object>) spec.get("components");
         Map<String, Object> securitySchemes = (Map<String, Object>) components.get("securitySchemes");
-        assertThat(securitySchemes).containsKey("bearerAuth");
+        assertThat(securitySchemes).containsKeys("bearerAuth", "patAuth");
     }
 
     @Test

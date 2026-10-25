@@ -88,7 +88,7 @@ jobs:
       workflows: ${{ steps.resolved.outputs.workflows }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -124,7 +124,7 @@ jobs:
 
       - name: Filter paths
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: .github/path-filters.yml
           base: ${{ steps.base.outputs.base }}
@@ -182,11 +182,11 @@ jobs:
 
       - name: Checkout code
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
@@ -205,7 +205,7 @@ jobs:
 
       - name: Cache Maven dependencies
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
@@ -241,10 +241,10 @@ jobs:
     runs-on: k8s-runner
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
@@ -259,7 +259,7 @@ jobs:
           cp ci/maven-settings.xml ~/.m2/settings.xml
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
@@ -275,7 +275,7 @@ jobs:
       - name: Upload test results
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-test-results-runtime
           path: kelta-platform/runtime/*/target/surefire-reports/
@@ -295,15 +295,15 @@ jobs:
         working-directory: kelta-web
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Cache npm dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('kelta-web/package-lock.json') }}
@@ -414,11 +414,11 @@ jobs:
 
       - name: Checkout code
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to Harbor
         if: (matrix.changed == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'workflow_dispatch' || inputs.push_images)
@@ -440,7 +440,7 @@ jobs:
 
       - name: Build and push ${{ matrix.service }}
         if: matrix.changed == 'true' || needs.changes.outputs.workflows == 'true'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -523,14 +523,14 @@ jobs:
     runs-on: k8s-runner
     steps:
       - name: Checkout ArgoCD repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: cklinker/homelab-argo
           token: ${{ secrets.ARGOCD_REPO_TOKEN }}
           path: homelab-argo
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: emf-src
 
@@ -1017,7 +1017,7 @@ jobs:
       # DORA: the release is live and healthy — stamp merge→healthy for this SHA
       # (scripts/dora/README.md). Best-effort: the script always exits 0.
       - name: Checkout (DORA emitter)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           sparse-checkout: scripts/dora
           fetch-depth: 1
@@ -1041,12 +1041,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout EMF (for rollback script)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: emf
 
       - name: Checkout homelab-argo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: cklinker/homelab-argo
           token: ${{ secrets.ARGOCD_REPO_TOKEN }}
@@ -1075,15 +1075,15 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Cache npm dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: e2e-npm-${{ runner.os }}-${{ hashFiles('e2e-tests/package-lock.json') }}
@@ -1222,7 +1222,7 @@ jobs:
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-test-results
           path: |
@@ -1232,7 +1232,7 @@ jobs:
 
       - name: Upload trace files
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-traces
           path: e2e-tests/test-results/**/*.zip
@@ -1252,7 +1252,7 @@ jobs:
       # a bug task into the tracker tenant from the run URL and these uploaded logs.
       - name: Upload failing pod logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bug-context
           path: _bug-context/*.log

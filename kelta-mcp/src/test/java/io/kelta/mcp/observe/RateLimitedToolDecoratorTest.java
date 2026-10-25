@@ -2,12 +2,12 @@ package io.kelta.mcp.observe;
 
 import io.kelta.mcp.auth.RequestPatHolder;
 import io.kelta.mcp.config.McpProperties;
+import io.kelta.mcp.tool.Schemas;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
-import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.junit.jupiter.api.AfterEach;
@@ -44,7 +44,7 @@ class RateLimitedToolDecoratorTest {
         Tool tool = Tool.builder()
                 .name("stub")
                 .description("test")
-                .inputSchema(new JsonSchema("object", Map.of(), List.of(), false, null, null))
+                .inputSchema(Schemas.empty())
                 .build();
         return SyncToolSpecification.builder()
                 .tool(tool)

@@ -22,8 +22,8 @@
         <java.version>25</java.version>
         <spring-cloud.version>2025.1.4</spring-cloud.version>
         <protobuf.version>4.32.0</protobuf.version>
-        <!-- Same pin as the other modules (1.21.4 = Docker Engine 29 support); see testing.md. -->
-        <testcontainers.version>1.21.4</testcontainers.version>
+        <!-- Same version as the other modules (2.0.3+ = Docker Engine 29 support); see testing.md. -->
+        <testcontainers.version>2.0.5</testcontainers.version>
         <graalvm-sdk.version>25.0.2</graalvm-sdk.version>
         <junit-quickcheck.version>1.0</junit-quickcheck.version>
         <skipITs>true</skipITs>
@@ -110,7 +110,7 @@
         <dependency>
             <groupId>net.logstash.logback</groupId>
             <artifactId>logstash-logback-encoder</artifactId>
-            <version>8.0</version>
+            <version>9.0</version>
         </dependency>
 
         <!-- OpenTelemetry auto-configuration with OTLP exporters -->
@@ -146,7 +146,7 @@
         <dependency>
             <groupId>com.maxmind.db</groupId>
             <artifactId>maxmind-db</artifactId>
-            <version>3.1.1</version>
+            <version>4.2.0</version>
         </dependency>
 
         <!-- Jackson 3 for JSON processing -->
@@ -190,7 +190,7 @@
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
 

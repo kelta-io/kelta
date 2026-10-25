@@ -66,3 +66,8 @@ kelta sdk types -o kelta-types.ts
 ```
 
 or programmatically with `generateTypesFromUrl` / `generateTypesFromSpec`. Regenerate after schema changes.
+
+## Full API reference
+
+Every export of `@kelta/sdk` with its TypeScript signature and doc summary, generated from the package source:
+[@kelta/sdk — API Reference](/docs/reference/api-sdk/).

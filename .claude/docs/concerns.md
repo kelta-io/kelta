@@ -276,14 +276,17 @@ mailbox to a high-volume public address.
   service layer, so `CerbosFieldWriteSecurityAdvice` doesn't run; the boundary is `MANAGE_DATA` +
   RLS + validation/hooks. Revisit if either is exposed to a lower-privilege role. Merge is never
   auto-invoked by a flow.
-- **Tenant IP allowlist / client IP trust — open until the deploy sets
-  `KELTA_SECURITY_TRUSTED_PROXIES` (PLT-341).** With `kelta.security.trusted-proxies` unset,
-  `TenantIpAllowlistFilter` allows a request when **any** IP in the chain matches, so a non-admin
-  bypasses the allowlist with `X-Forwarded-For: <allowed IP>`, and audit/geo/rate limits/
-  `login_history.source_ip` use the client-controlled leftmost hop. Fix: set the list to the
-  ingress CIDR (and kelta-auth's), then flip the default to strict once quickstart/compose set it.
-  The worker trusts the gateway-stamped `X-Kelta-Client-Ip` like `X-User-Id`; the filter is
-  fail-open by design — pair it with network controls.
+- **Client IP trust — open until the deploy sets `KELTA_SECURITY_TRUSTED_PROXIES` (PLT-341).**
+  The allowlist bypass is closed (PLT-693): with `kelta.security.trusted-proxies` unset,
+  `TenantIpAllowlistFilter` judges the socket peer only (`ClientIpResolver.allowlistCandidates`),
+  so behind an ingress a restricted tenant's non-admins are refused until the list is set. Still
+  open: audit/geo/rate limits/`login_history.source_ip` use the client-controlled leftmost
+  `X-Forwarded-For` hop while `ip-allowlist.trust-forwarded-for` is on (the default). Fix: set the
+  list to the ingress CIDR (and kelta-auth's). The worker trusts the gateway-stamped
+  `X-Kelta-Client-Ip` like `X-User-Id`; the filter is fail-open by design — pair it with network
+  controls. The support-mailbox `inbound_allowed_cidrs` check (`MailboxWebhookController`) also
+  relies on it: until the trusted-proxy list is set, the header carries the ingress address and a
+  mailbox with an allowlist rejects every delivery (fail-closed).
 - **Network-level defense-in-depth (out of tree):** worker/auth/ai must be reachable only via the
   gateway — enforced by NetworkPolicy + mTLS in the cluster, not by app code. No NetworkPolicy in
   this repo; verify on the cluster.
@@ -292,10 +295,20 @@ mailbox to a high-volume public address.
   match; anonymous requests never get a header-claimed tenant; client headers are always stripped
   and `HeaderTransformationFilter` re-adds the settled values (`architecture.md` → Tenant
   resolution rules; pinned by `TenantHeaderTrustTest`). No in-repo client relies on the header to
-  reach a tenant. Residual: on a URL tenant a JWT with no `tenant_id` claim is accepted
-  (`DynamicReactiveJwtDecoder` ignores its `tenantId` argument); a PAT on a slug-less URL with no
-  header runs with no forwarded tenant; kelta-auth's `SessionController`/`SmsAuthController` read
-  `X-Tenant-ID` themselves outside this chain.
+  reach a tenant. Residual: a PAT on a slug-less URL with no header runs with no forwarded
+  tenant; kelta-auth's `SessionController`/`SmsAuthController` read `X-Tenant-ID` themselves
+  outside this chain. (A JWT with no `tenant_id` claim is no longer accepted on a URL tenant —
+  PLT-707, entry below.)
+- **Every gateway tenant route requires a JWT `tenant_id` claim; refresh tokens are not bearer
+  tokens** (PLT-707). `JwtAuthenticationFilter` rejects a JWT with a blank `tenant_id` (401,
+  `missing_tenant_claim`) whatever the tenant source, and one naming another tenant
+  (`tenant_mismatch`); `DynamicReactiveJwtDecoder.bearerTokenValidator` rejects a
+  `token_type=refresh` JWT (kelta-auth's direct-login refresh token, same signing key). kelta-auth's
+  `KeltaTokenCustomizer` refuses to mint a tenant-less access token (`access_denied`). The one
+  exception: a `client_credentials` token of an internal service client
+  (`kelta.auth.internal-clients`, registered by `InternalClientRegistrar` with the `internal`
+  scope) is platform-scoped and carries no `tenant_id` — it calls the worker's `/internal/**`
+  directly and never reaches a gateway tenant route. Don't add a tenant-less token type.
 - **Own-record rules and Guest (KLT-377/378):** the worker fails closed (401
   `CALLER_UNRESOLVED`) when an email `X-User-Id` resolves to no user; a non-email, non-UUID
   identity binds no `CallerContext`; Guest binds the nil UUID as INTERNAL, so under `ALL` it sees
@@ -318,8 +331,11 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
 - **Support mode on `WatchController`** writes as the named member only after the `MANAGE_DATA`
   check; any new support write path must keep that order.
 - **Full-text search** — `SearchIndexService` queries `search_index` with a tenant-only predicate,
-  so `/api/_search` can return a foreign record's id + `display_value`. Semantic search *is*
-  scoped. Keep sensitive data out of an owner-scoped collection's display field.
+  but `/api/_search` hits are authorized per collection and record
+  (`CerbosRecordAuthorizationAdvice.readableSearchHits`, PLT-695): an owner-scoped collection with
+  `ownerScopeReads` (or one with record-variant rules) has its hits re-loaded through the
+  `QueryEngine`, so a foreign record's id + `display_value` is dropped. A new reader of
+  `search_index` must do the same.
 - **Realtime** — invalidation-only, but every subscriber still learns collection + id.
 - **Cross-pod window on an ownership change** — other pods keep the previous definition until they
   consume `kelta.config.collection.changed`. Enable ownership before members write, or accept the lag.
@@ -329,21 +345,18 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
 
 ### Credentials and sessions
 
-- **PAT `lastUsedAt` is never written.** No path updates `user_api_token.last_used_at`;
-  `requestCount` is the only liveness signal. Cheapest fix: a throttled write from the
-  fire-and-forget path that bumps `pat-usage:<hash>`. Any "revoke unused keys" job must not key
-  off `lastUsedAt`.
-- **Deactivating a user does not invalidate its PATs.** The gateway builds the principal from the
-  Redis-cached `pat:<hash>`; the `status = 'ACTIVE'` check lives only in the worker's
-  `/validate/{hash}` fallback on a miss. There is no admin revoke endpoint
-  (`AdminPersonalAccessTokenController` only mints). Fix either way: on status change delete or
-  revoke every `pat:<hash>` for the user, and add `DELETE /api/admin/users/{id}/tokens/{tokenId}`.
-  Immediate kill switch until then: remove `API_ACCESS` from the profile. (Deactivation does end
-  the user's kelta-auth sessions and refresh tokens — `UserSessionRevocationHook`; PATs are separate.)
-- **PAT grace cache** (`PatAuthenticationFilter`, 5 min, serves validated PATs during worker
-  outages; revocation is always checked first; `kelta.gateway.pat-grace-ttl-seconds`) is an
-  unbounded `ConcurrentHashMap`: entries past the TTL are skipped on read but never removed (one
-  per distinct PAT hash per pod, forever). Switch to a size-bounded Caffeine cache.
+- **Deactivated users' PATs — Redis-dependent revoke** (PLT-689 residual). `UserSessionRevocationHook`
+  revokes every live PAT when a user leaves `ACTIVE` or is deleted (rows marked revoked, `pat:<hash>`
+  dropped, `pat:revoked:<hash>` written). A Redis failure there is logged and does not undo the
+  database revoke, so the gateway can keep accepting a still-cached `pat:<hash>` until it expires —
+  remove `API_ACCESS` from the profile if that log line appears. Reactivating a user does not
+  restore revoked tokens.
+- **PAT grace cache** (`PatAuthenticationFilter`, PLT-694) serves the last accepted PAT JSON when
+  Redis misses and the worker validation call fails. Bounded Caffeine cache
+  (`kelta.gateway.pat-grace-max-entries`, default 10,000; `expireAfterWrite`
+  `kelta.gateway.pat-grace-ttl-seconds`, default 300), written only after the token is accepted
+  (never for expired, unparseable or cross-tenant tokens; a grace hit doesn't re-arm the TTL).
+  Revocation is checked first and a revoked hit evicts the entry.
 - **Platform admin first boot (PLT-343).** `BaselineAdminPasswordInitializer` swaps the baseline
   hash for `KELTA_BOOTSTRAP_ADMIN_PASSWORD` or a generated one with forced change. Residual: a
   generated password is in the first boot's kelta-auth log (shipped to Loki) until changed —
@@ -408,11 +421,12 @@ between history rows and an under-privileged caller; treat changes to either as 
 
 ### Data growth
 
-- **`record_version` has no retention.** With `collection.track_history` on, every
-  create/update/delete writes a full jsonb snapshot. Revisit before production-scale tenants
-  enable it broadly (per-record cap, age-based purge). v1 limits: DELETED version's `changed_by`
-  is the last updater (no principal reaches `QueryEngine.delete`); historical lookup ids render
-  raw.
+- **`record_version` — `RecordVersionRetentionSweep` is DRY-RUN by default**
+  (`kelta.record-version.retention.dry-run:true`), so until an environment arms it every
+  create/update/delete on a `track_history` collection still adds a full jsonb snapshot forever.
+  Armed, the age window (`max-age-days`, 365) can remove every version of a record unchanged for
+  longer than that. v1 limits: DELETED version's `changed_by` is the last updater (no principal
+  reaches `QueryEngine.delete`); historical lookup ids render raw.
 - **`oauth2_authorization` retention (`AuthorizationRetentionSweep`, kelta-auth)** deletes a row
   once every token it holds expired more than `grace` ago (default 1 day), hourly, on every
   replica (batched `FOR UPDATE SKIP LOCKED`). It leaves rows holding no token at all (an
@@ -486,9 +500,10 @@ feature would do this and publish the event.
   kelta-auth leaves it optional (no service, federation and TOTP-secret encryption off). The
   `sms`/`push` gates use `havingValue` and are unaffected.
 - `kelta.{worker,gateway,auth}.internal-auth.enabled` (default off): flipping on + removing is a
-  security change needing the gateway client-credentials path verified first. It is declared in
-  no `application*.yml`, so on a native image an env-var-only flip is silently ignored — declare it
-  as `${…:false}` first (Dependency Risks → frozen conditions).
+  security change needing the gateway client-credentials path verified first. Each service declares
+  it in `application.yml` (`KELTA_WORKER_INTERNAL_AUTH_ENABLED`, `KELTA_GATEWAY_INTERNAL_AUTH_ENABLED`,
+  `KELTA_AUTH_INTERNAL_AUTH_ENABLED`) and binds it to a typed `InternalAuthProperties` record read when the beans are built — no `@ConditionalOnProperty`,
+  so an env-var flip holds on the native gateway/auth images too (PLT-692).
 
 **Large files needing decomposition** (line counts measured 2026-10-22):
 
@@ -577,7 +592,7 @@ sub-resource variant; it is now ~860 lines of HTTP surface plus package-private 
 (`RecordWritePipeline`, `JsonApiIncludeResolver`, `RecordTenantScope`, `CollectionResolver`,
 `RecordETag`), the pure `router/jsonapi` serializers and the `SubResourceAuthorizer` SPI the
 sub-resource routes consult — see `architecture.md` → Worker Layers.
-- **Change behaviour only with a golden diff.** `DynamicCollectionRouterGoldenTest` pins 106 cases
+- **Change behaviour only with a golden diff.** `DynamicCollectionRouterGoldenTest` pins 114 cases
   (status, headers, body and the ordered storage/cache/user-resolver call log), and
   `DynamicCollectionRouterRequestMappingTest` pins every mapping attribute and public signature
   (worker controllers call the handlers directly; the advices depend on the return types). A
@@ -722,9 +737,6 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   controllers are authorized only by the controller itself (so governor-limit reads now need
   `VIEW_SETUP`, the setup page's gate, and signing-key writes re-check `MANAGE_CREDENTIALS` in the
   worker). Still open:
-  - `/api/_search` items are checked as records of `_search`, so search is empty without
-    VIEW_ALL_DATA. The advice is its only per-record check — fix by checking each item against
-    its own `type`, never by exempting it.
   - `ModuleHttpController` passes module output through; a module route returning
     `{"data": {"id": …}}` is filtered as `modules` records (latent — no module does today).
 - **Cerbos `collectionId` keying:** the `collection` policy is UUID-keyed (gateway passes the
@@ -863,11 +875,14 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   backlog). If flows stop after a deploy, grep worker logs for `SUB-90016` first.
 - **GeoLite2 license key rides the download URL** — wrap any log/exception that could contain it in
   `GeoIpDatabaseManager.redact(...)`.
-- **Homelab-bound builds.** `Dockerfile.jvm` files take `BASE_REGISTRY`/`MAVEN_MIRROR` (homelab
-  defaults; `docker-compose.jvm.yml` overrides to Docker Hub + Central). Still homelab-bound: native
-  `Dockerfile`s (`make up`, production), the JVM `kelta-ai`/`kelta-mcp` `Dockerfile`s (production;
-  `kelta-mcp`'s also builds the CI compose stack) and `docker/bootstrap/Dockerfile` (`make seed`) —
-  fix before relying on public contributors building them.
+- **Homelab-bound build defaults.** Every Dockerfile takes its registry/mirror as build args
+  with homelab defaults (KLT-705): `BASE_REGISTRY` (public `docker.io/library`), `MAVEN_MIRROR`
+  (`central`), `MAVEN_DIST_URL` on the native `kelta-{worker,auth,gateway}/Dockerfile` and
+  `kelta-worker/Dockerfile.migrate` (`https://repo.maven.apache.org/maven2`), `BUN_IMAGE` on
+  `kelta-cli-downloads/Dockerfile` (`oven/bun:1.2.19`); table in `README.md`. Only
+  `docker-compose.jvm.yml` passes the public values, so `make up` and `make seed`
+  (`docker-compose.build.yml`, no args) still need `harbor.rzware.com`/`nexus.rzware.com` — pass
+  the public values there before relying on public contributors running them.
 - **`make up` needs ~24 GB for Docker** (three concurrent `native-image` builds each size their heap
   to ~80% of the cgroup). Use `make up-jvm` unless debugging native-only behaviour.
 - **`kelta-marketing` installs only because of an `overrides` pin** (`@astrojs/tailwind@6` peer vs
@@ -915,11 +930,6 @@ its own change with a full compose run.
 
 ## Test Coverage Gaps
 
-- **No worker Spring-context test** — bean-wiring bugs compile, pass unit tests and fail at pod
-  start. **A `@Component` with a second (test) constructor needs `@Autowired` on the production
-  one**; a second bean of an injected type needs `@Primary` or qualifiers. Copy
-  `PushProviderWiringTest` (`ApplicationContextRunner` over the beans involved). A whole-worker
-  context test is still owed.
 - **Harness Cerbos is allow-all** — object/record policy deny paths are verified only by
   `CerbosGeneratedPolicyIT` against generated goldens; geo rules and `/api/operations` denies only
   on a live stack.
@@ -928,14 +938,7 @@ its own change with a full compose run.
   deprecate (`SchemaMigrationEngineDeprecateIntegrationTest`, skipped without Docker); ADD and
   ALTER TYPE have no Postgres scenario. The destructive path has unit tests +
   `SchemaMigrationScenarioTest`.
-- SQL filter operator mappings (`SqlQueryBuilder`, runtime-core) are tested only through the
-  adapter (`PhysicalTableStorageAdapterTest` filter-operator cases on H2; `ISNULL`/`IN` on real
-  Postgres for temporal fields only).
 - `FederatedUserMapper` — happy path only; group→profile permutations not covered.
-- **MCP tools without a test:** `DeleteLayoutTool`, `UpdateLayoutTool`, `UpdateFlowTool`,
-  `MaterializeApiCollectionTool`, `DescribeApiTool`, `GetRecordTool`, `SearchTool`. Every MCP tool
-  should assert its on-the-wire JSON:API body with WireMock JSON-path matchers
-  (`CreateValidationRuleToolTest` is the pattern).
 - **Page-builder action runtime** (`runtime/executeAction.ts`) is covered only by Vitest with mocked
   `apiClient`/router/toast, except `createRecord` (button `onClick` and form widget) and `showToast`
   from a form `onSubmit`: `e2e-tests/tests/page-builder-v2.spec.ts` (runs in every PR's E2E job)
@@ -992,10 +995,16 @@ One line each; full write-ups are in git history.
 - Fail-fast HMAC secrets — visit and campaign signing keys defaulted to values published in this repo; now required.
 - 2026-07-02 audit (power controllers on bare `API_ACCESS`) — data export gated on `VIEW_ALL_DATA`; bulk writes on `MANAGE_DATA` (2026-07-04); reports/dashboards on `VIEW_ANALYTICS` (2026-07-08); every `PackageController` endpoint on `CUSTOMIZE_APPLICATION` (V158).
 - Older: Superset SQL injection hardening; gateway actuator requires JWT except health/info; `/internal/**` JWT auth (flag-gated); schema-name sanitization in `SchemaLifecycleModule`.
+- 2026-10-24 (#1851) — PLT-692: `kelta.{worker,gateway,auth}.internal-auth.enabled` was declared in no `application.yml` and gated by `@ConditionalOnProperty`, so an env-var flip was ignored on native images; now declared per service and read at run time through `InternalAuthProperties`. `InternalAuthPropertiesTest` (worker, gateway, auth).
+- 2026-10-24 (#1849) — PLT-695: `/api/_search` hits were checked as records of `_search` (search empty without VIEW_ALL_DATA) and could return a foreign owner-scoped record's id + `display_value`; each hit is now authorized against its own collection and record (`CerbosRecordAuthorizationAdvice.readableSearchHits`, owner-scoped/record-variant hits re-loaded through the `QueryEngine`). `SearchControllerTest`, `CerbosRecordAuthorizationAdviceTest`.
+- 2026-10-24 (#1852) — PLT-707: on a URL tenant the gateway accepted a JWT with no `tenant_id` claim, and a direct-login refresh token authenticated as a bearer token; `JwtAuthenticationFilter` now requires the claim on every tenant route, `DynamicReactiveJwtDecoder.bearerTokenValidator` rejects `token_type=refresh`, and `KeltaTokenCustomizer` never mints a tenant-less access token (internal `client_credentials` clients excepted). `JwtAuthenticationFilterTest`, `DynamicReactiveJwtDecoderTest`, `KeltaTokenCustomizerTest`.
+- 2026-10-24 (#1853) — PLT-693: without `kelta.security.trusted-proxies` a non-admin bypassed the tenant IP allowlist with `X-Forwarded-For: <allowed IP>`; the allowlist now judges only the socket peer in that mode (audit/geo/rate-limit IP trust stays open, above). `TenantIpAllowlistFilterTest`, `ClientIpResolverTest`.
+- 2026-10-24 (#1887) — PLT-694: the gateway PAT grace cache was an unbounded `ConcurrentHashMap` that never removed expired entries; now a size-bounded Caffeine cache (`kelta.gateway.pat-grace-max-entries`), success-only, evicted on revocation. `PatAuthenticationFilterTest`.
+- 2026-10-24 (#1933) — PLT-689: deactivating or deleting a user left its PATs live and there was no admin revoke; `UserSessionRevocationHook` revokes them, and `GET /api/admin/users/{id}/tokens` / `DELETE /api/admin/users/{id}/tokens/{tokenId}` (`MANAGE_USERS`, audited `PAT_ADMIN_REVOKED`) list and revoke a user's tokens (Redis residual above). `UserSessionRevocationHookTest`, `AdminPersonalAccessTokenControllerTest`.
 
 **Bugs**
 - KLT-745 (2026-10-24) — a collection turning `active=false` kept its gateway route until the next bootstrap (`CollectionChangedPayload.active` was a primitive, so hooks that never set it sent `false`); the flag is now a nullable `Boolean` omitted when unset, `CollectionConfigEventPublisher` no longer defaults it to `true`, and `ConfigEventListener` removes the route on UPDATED with `active:false`. `ConfigEventListenerTest` (`shouldRemoveRouteWhenCollectionDeactivated`, `deactivationRemovesRouteFromRegistry`, `routeStaysRegisteredWhenUpdatedEventCarriesNoActiveKey`), `CollectionChangedPayloadTest$ActiveJson`, `CollectionConfigEventPublisherTest` (`deactivatedCollectionPublishesActiveFalse`, `otherPublishersSendNoActiveKey`).
-- KLT-700 / KLT-740 (2026-10-24) — the router divergences `DynamicCollectionRouterGoldenTest` had pinned as-is are fixed (KLT-700): the read-only `403` carries `code` + `meta.requestId`, a cached system-collection get-by-id and the child get-by-id send `ETag`, and child update/delete enforce `If-Match`. `POST /api/operations` now geo-stamps `captureGeo` collections like the router (KLT-740, shared `GeoStamping`), its last behavioural divergence. `AtomicOperationExecutorTest`, `AtomicOperationsControllerTest`.
+- KLT-700 / KLT-740 (2026-10-24) — the router divergences `DynamicCollectionRouterGoldenTest` had pinned as-is are fixed (KLT-700): the read-only `403` carries `code` + `meta.requestId`, a cached system-collection get-by-id and the child get-by-id send `ETag`, and child update/delete enforce `If-Match`. `POST /api/operations` now geo-stamps `captureGeo` collections like the router (KLT-740, shared `GeoStamping`), its last behavioural divergence. `RouterGoldenErrorShapeTest`, `AtomicOperationExecutorTest`, `AtomicOperationsControllerTest`. (#1876, #1894)
 - KLT-739 (2026-10-24) — adding a VECTOR field to an existing collection failed with `type "vector" does not exist`: only table creation enabled pgvector. `SchemaMigrationEngine.ensureVectorExtension` is now shared by `CollectionTableDdl` and the `migrateSchema`/destructive add-or-retype paths (same actionable error when `CREATE EXTENSION` is refused). `SchemaMigrationEngineVectorIntegrationTest`.
 - KLT-739 (2026-10-24) — owner-scoped reads filter on `ownerField`, but its column was never indexed; `CollectionTableDdl` and `migrateSchema` (when `ownerField` is set or changed) now emit `CREATE INDEX IF NOT EXISTS idx_owner_<table>_<column>`. `OwnerColumnIndexIntegrationTest`.
 - KLT-500 (2026-10-10) — records written through atomic operations (`POST /api/operations`: `kelta records bulk`, the MCP `seed_records` tool) carried `createdBy`/`updatedBy` = `null` while single-record writes carried the user id (CRM template `BUILD-LOG.md` error #12); `AtomicOperationsController` now stamps both. Moved here from the `docs/authoring/mcp-admin-coverage.md` follow-ups (KLT-734).
@@ -1045,8 +1054,11 @@ One line each; full write-ups are in git history.
 - 2026-10-06 — an object-store outage during JAR load quarantined every runtime module; quarantine was sticky (startup loads only `ACTIVE`), so modules stayed off ~5 days until re-enabled by hand. Load failures now classified by phase; transient ones retry with backoff instead of quarantining, and re-enable reloads on running pods (#1725, #1779 — no manual status flip or restart). Lesson: transient infra errors must never be terminal.
 - 2026-07-11 — chat/video subjects had no JetStream streams; 2026-07-12 — durable consumer config drift took down worker subscriptions.
 - Older: federated users stuck PENDING_ACTIVATION; password reset sent no email; `EmptyResultDataAccessException` and null `reset_token_expires_at` in `PasswordController`.
+- 2026-10-24 (#1875) — KLT-686: `record_version` had no retention; `RecordVersionRetentionSweep` prunes by age (`kelta.record-version.retention.max-age-days`) and an opt-in per-record cap, dry-run by default (open item in Data growth). `RecordVersionRetentionSweepTest`, `RecordVersionRetentionIntegrationTest`.
+- 2026-10-24 (#1879) — KLT-703: PAT `lastUsedAt` was never written; the gateway calls `POST /internal/tokens/{hash}/last-used` at most once per token per window and `InternalPatUsageController` runs a conditional UPDATE (`architecture.md` → PAT last-used). `PatAuthenticationFilterTest`, `InternalPatUsageControllerIntegrationTest`.
 
 **Tech debt / test infrastructure**
+- KLT-749 (2026-10-24) — no worker Spring-context test: bean-wiring bugs compiled, passed unit tests and failed only at pod start. `WorkerApplicationContextIntegrationTest` boots the whole `WorkerApplication` context on Testcontainers Postgres/Redis/NATS (Flyway on, Cerbos `@MockitoBean`) and serves `GET /api/profiles`. Narrow bean-level wiring still belongs in an `ApplicationContextRunner` test (`PushProviderWiringTest`); a `@Component` with a second (test) constructor needs `@Autowired` on the production one.
 - KLT-741 (2026-10-24) — gateway rate-limit window semantics were mocked (no test reached a 429, window expiry or a shared counter on real Redis); `RateLimitWindowIntegrationTest` drives `RateLimitFilter` over real `RedisRateLimiter`s (`GatewayContainers`): N allowed then a JSON:API 429 with `Retry-After`, reopening after expiry, one budget across two connection factories.
 - #1815 (2026-10-19) — kelta-gateway integration tests never ran (failsafe needed `-Pintegration-tests`, which CI never passed, plus `@Tag("integration")`); ten dead suites targeting a pre-Kelta stack deleted, the five live suites (27 tests) run in `test-java` on `k8s-runner-integration` over `GatewayContainers` (real Redis + NATS).
 - 2026-10-12 — `SystemCollectionDefinitions.java` (~3,400 lines, the biggest merge hotspot) split into 17 per-section `<Area>SystemCollections` classes in `model/system/` plus `SystemCollectionBuilders`; it keeps only `all()` / `byName()` / `SYSTEM_TENANT_ID`.
@@ -1067,3 +1079,5 @@ One line each; full write-ups are in git history.
 - 2026-08-31 — a rejected module reported success via stub handlers; quarantine.
 - `StripeApiClient`, `FcmPushProvider`, `ApnsPushProvider` unstartable (multi-constructor `@Component`); `PushProviderWiringTest`.
 - Test-harness: runtime-core storage tests build H2 with `DATABASE_TO_LOWER=TRUE` to match Postgres identifier folding.
+- 2026-10-23 (#1848) — KLT-667: `DeleteLayoutTool`, `UpdateLayoutTool`, `UpdateFlowTool`, `MaterializeApiCollectionTool`, `DescribeApiTool`, `GetRecordTool` and `SearchTool` had no test; each now has a WireMock wire test (`<Tool>Test`), and tool arguments are type-checked centrally (`ArgumentTypeValidatingToolDecoratorTest`).
+- 2026-10-24 (#1877) — KLT-701: nothing stopped an MCP tool shipping without a test, and `SqlQueryBuilder` operator mappings were tested only through the adapter; `ToolTestCoverageGuardTest` fails on any `AdminTool`/`UserTool` without a `<ClassName>Test`, `SqlQueryBuilderTest` pins every `FilterOperator`'s SQL and `SqlQueryBuilderFilterOperatorIntegrationTest` what it selects on Postgres.

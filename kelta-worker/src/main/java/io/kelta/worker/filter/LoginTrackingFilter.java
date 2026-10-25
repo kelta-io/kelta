@@ -408,18 +408,13 @@ public class LoginTrackingFilter extends OncePerRequestFilter {
     /**
      * The client address to record. Prefers {@value #CLIENT_IP_HEADER}, which the gateway
      * resolves through its trusted-proxy rules and overwrites on every request (any
-     * client-supplied copy is stripped). The {@code X-Forwarded-For} fallback only applies
-     * to requests that did not come through the gateway; its left-most hop is
-     * client-controlled.
+     * client-supplied copy is stripped). {@code X-Forwarded-For} is never read: the gateway
+     * strips it, and on a request that skipped the gateway its every hop is client-controlled.
      */
     static String extractClientIp(HttpServletRequest request) {
         String gatewayResolved = request.getHeader(CLIENT_IP_HEADER);
         if (gatewayResolved != null && !gatewayResolved.isBlank()) {
             return gatewayResolved.trim();
-        }
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
         }
         return request.getRemoteAddr();
     }

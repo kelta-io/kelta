@@ -65,7 +65,7 @@ of any collection, system collections included. See [Collections](/docs/data-mod
 
 ## OpenAPI and Swagger UI
 
-Each tenant has a generated OpenAPI 3 document covering CRUD on every collection it contains:
+Each tenant has a generated OpenAPI 3 document covering every collection it contains:
 
 | | |
 |---|---|
@@ -74,8 +74,19 @@ Each tenant has a generated OpenAPI 3 document covering CRUD on every collection
 | MCP `describe_api` / `kelta://openapi.json` | the same document for agents |
 | `kelta sdk types` | TypeScript types generated from it |
 
-The document covers collection CRUD only — flows, approvals, batch operations and admin endpoints are described
-on these pages, not in the spec.
+What the document describes:
+
+- **Server URL** — `servers[0].url` ends in your tenant slug (`https://<host>/<tenant-slug>`), and paths are
+  written `/api/...`, so a client generated from it calls `https://<host>/<tenant-slug>/api/<collection>`.
+- **Authentication** — two HTTP bearer schemes, either of which authorizes a call: `bearerAuth` (a sign-in JWT)
+  and `patAuth` (a personal access token, the `klt_`-prefixed value, sent as `Authorization: Bearer klt_...`).
+- **Operations** — list, get, create, update and delete per collection (read-only collections list and get
+  only), `POST /api/operations` for [batch operations](#batch-operations), and, for each collection that can be
+  listed, `GET /api/<collection>/aggregate` and `GET /api/<collection>/latest`
+  ([aggregates and the latest value](/docs/api/querying/#aggregates-and-the-latest-value)).
+
+The document validates with standard OpenAPI tooling (swagger-parser), so code generators accept it as is.
+Flows, approvals, bulk jobs and admin endpoints are described on these pages, not in the spec.
 
 ## Batch operations
 

@@ -1,0 +1,2159 @@
+[ {
+  "name" : "ping",
+  "title" : "Ping (admin)",
+  "description" : "Returns 'pong'. Smoke test that the admin MCP endpoint is reachable.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : { },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "add_field",
+  "title" : "Add Field",
+  "description" : "Add a field to an existing collection. Wraps POST /api/fields with a JSON:API body, translating friendly type aliases (text, number, picklist, …) into the native uppercase enum and assembling per-type payload (fieldTypeConfig for picklists, referenceCollectionId relationship + relationshipName for lookups).",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection the field belongs to. Resolved to collectionId via lookup unless collectionId is provided."
+      },
+      "collectionId" : {
+        "type" : "string",
+        "description" : "Optional UUID of the collection — bypasses the name lookup."
+      },
+      "fieldName" : {
+        "type" : "string",
+        "description" : "Field name (camelCase recommended)."
+      },
+      "displayName" : {
+        "type" : "string",
+        "description" : "Optional human-readable label shown in the admin UI."
+      },
+      "type" : {
+        "type" : "string",
+        "description" : "Field type alias. Mapped to the native uppercase enum: text|string→STRING, longText→STRING, number|integer→INTEGER, decimal|double→DOUBLE, long→LONG, boolean→BOOLEAN, date→DATE, datetime→DATETIME, picklist→PICKLIST, multiPicklist→MULTI_PICKLIST, reference|lookup→LOOKUP, masterDetail→MASTER_DETAIL, json→JSON, currency→CURRENCY, percent→PERCENT, url→URL, email→EMAIL, phone→PHONE, autoNumber→AUTO_NUMBER, externalId→EXTERNAL_ID, encrypted→ENCRYPTED, geolocation→GEOLOCATION, array→ARRAY, richText→RICH_TEXT, vector→VECTOR. Every uppercase FieldType enum name is also accepted verbatim."
+      },
+      "required" : {
+        "type" : "boolean",
+        "description" : "Whether the field is required (default false).",
+        "default" : false
+      },
+      "unique" : {
+        "type" : "boolean",
+        "description" : "Whether values must be unique (default false). Sent as uniqueConstraint.",
+        "default" : false
+      },
+      "indexed" : {
+        "type" : "boolean",
+        "description" : "Whether the column has a database index (default false).",
+        "default" : false
+      },
+      "searchable" : {
+        "type" : "boolean",
+        "description" : "Whether the field is indexed for full-text search (default false).",
+        "default" : false
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "Optional description shown in the admin UI."
+      },
+      "defaultValue" : {
+        "type" : [ "string", "number", "boolean", "null" ],
+        "description" : "Optional default value. Pass it in the field's native JSON type — e.g. true for booleans, 360 for numbers, \"hello\" for strings. The platform coerces and stores it according to the field type."
+      },
+      "validation" : {
+        "type" : "object",
+        "description" : "Optional validation config (regex, min/max, etc.) — shape depends on the field type.",
+        "additionalProperties" : true
+      },
+      "referenceCollectionId" : {
+        "type" : "string",
+        "description" : "UUID of the target collection for reference/lookup fields."
+      },
+      "referenceCollection" : {
+        "type" : "string",
+        "description" : "(Legacy) Target collection name for reference/lookup fields. Resolved via name lookup."
+      },
+      "relationshipName" : {
+        "type" : "string",
+        "description" : "Human-readable relationship name for reference/lookup fields."
+      },
+      "relationshipType" : {
+        "type" : "string",
+        "description" : "Relationship semantics for reference/lookup fields: \"LOOKUP\" (default) or \"MASTER_DETAIL\"."
+      },
+      "picklistSourceId" : {
+        "type" : "string",
+        "description" : "UUID of the global picklist for picklist/multiPicklist fields. Omit with picklistSourceType FIELD."
+      },
+      "picklistSourceType" : {
+        "type" : "string",
+        "description" : "Source of picklist values: \"GLOBAL\" (default, needs picklistSourceId) or \"FIELD\" (values owned by this field — add them afterwards with apply_field_picklist)."
+      },
+      "maskingType" : {
+        "type" : "string",
+        "description" : "Optional data masking for string-typed fields: FULL, LAST4, EMAIL, or CUSTOM (NONE clears). Users whose profile lacks unmask rights see the value redacted."
+      },
+      "maskingChar" : {
+        "type" : "string",
+        "description" : "Optional single character used for masked positions (default •)."
+      },
+      "maskingCustomPattern" : {
+        "type" : "string",
+        "description" : "Pattern for maskingType=CUSTOM: '#' reveals a character, any other char is shown literally, right-aligned."
+      }
+    },
+    "required" : [ "fieldName", "type" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "add_picklist_value",
+  "title" : "Add Picklist Value",
+  "description" : "Append a value to an existing global picklist. Wraps POST /api/picklist-values with picklistSourceType=GLOBAL and picklistSourceId set to the picklist's UUID. Accepts the picklist by name or UUID; names are resolved first.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "picklist" : {
+        "type" : "string",
+        "description" : "Picklist name or id (UUID). Names are resolved via GET /api/global-picklists?filter[name][EQ]=... before the value is created."
+      },
+      "value" : {
+        "type" : "string",
+        "description" : "Stored value (e.g. \"OPEN\")."
+      },
+      "label" : {
+        "type" : "string",
+        "description" : "Display label (e.g. \"Open\")."
+      },
+      "color" : {
+        "type" : "string",
+        "description" : "Hex color used when the value is rendered as a badge, e.g. \"#22C55E\"."
+      },
+      "sortOrder" : {
+        "type" : "integer",
+        "description" : "Display order. Defaults to 0 if omitted."
+      },
+      "isActive" : {
+        "type" : "boolean",
+        "description" : "Whether the value is active. Defaults to true.",
+        "default" : true
+      },
+      "isDefault" : {
+        "type" : "boolean",
+        "description" : "Whether the value is the picklist default. Defaults to false.",
+        "default" : false
+      }
+    },
+    "required" : [ "picklist", "value", "label" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "apply_collection",
+  "title" : "Apply Collection",
+  "description" : "Create-or-update a collection with its fields, field-scoped picklist values and display field in one call, keyed on name (fields on fieldName). Idempotent: a second identical call reports {\"action\":\"unchanged\"} for the collection and every field; a changed attribute reports \"updated\" with the changed keys and PATCHes only that record. Fields not named in the call are left alone — nothing is deleted. Example: {\"name\":\"deals\",\"displayName\":\"Deals\",\"fields\":[{\"fieldName\":\"title\",\"type\":\"text\",\"required\":true},{\"fieldName\":\"stage\",\"type\":\"picklist\",\"values\":[{\"value\":\"OPEN\",\"label\":\"Open\"}]}],\"displayFieldName\":\"title\"}. A field that fails is reported with its error next to the ones that succeeded. Replaces create_collection + add_field + apply_field_picklist + update_collection.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Collection name — identifies the collection (e.g. \"projects\")."
+      },
+      "displayName" : {
+        "type" : "string",
+        "description" : "Human-readable label for the collection (e.g. \"Projects\"). Omit to leave it alone."
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "Description shown in the admin UI. Omit to leave it alone."
+      },
+      "tenantScoped" : {
+        "type" : "boolean",
+        "description" : "Whether records are tenant-scoped. Omit to leave it alone (default true on create).",
+        "default" : true
+      },
+      "fields" : {
+        "type" : "array",
+        "description" : "Fields to create or update, in order. Accepts every add_field argument (displayName, indexed, defaultValue, referenceCollection, ...). Fields not listed are left alone.",
+        "items" : {
+          "type" : "object",
+          "properties" : {
+            "fieldName" : {
+              "type" : "string",
+              "description" : "Field name — identifies the field within the collection."
+            },
+            "type" : {
+              "type" : "string",
+              "description" : "text|number|decimal|boolean|date|datetime|picklist|multiPicklist|reference|masterDetail|json|... (same aliases as add_field)."
+            },
+            "required" : {
+              "type" : "boolean",
+              "description" : "Whether a value is required.",
+              "default" : false
+            },
+            "unique" : {
+              "type" : "boolean",
+              "description" : "Whether values must be unique.",
+              "default" : false
+            },
+            "description" : {
+              "type" : "string",
+              "description" : "Optional description."
+            },
+            "values" : {
+              "type" : "array",
+              "description" : "picklist/multiPicklist only: the field's own values (picklistSourceType FIELD), in display order — sortOrder is each value's position.",
+              "items" : {
+                "type" : "object",
+                "properties" : {
+                  "value" : {
+                    "type" : "string",
+                    "description" : "Stored value (e.g. \"OPEN\")."
+                  },
+                  "label" : {
+                    "type" : "string",
+                    "description" : "Display label (e.g. \"Open\")."
+                  },
+                  "color" : {
+                    "type" : "string",
+                    "description" : "Hex color used when rendered as a badge, e.g. \"#22C55E\"."
+                  },
+                  "description" : {
+                    "type" : "string",
+                    "description" : "Optional description."
+                  }
+                },
+                "additionalProperties" : false
+              }
+            },
+            "prune" : {
+              "type" : "boolean",
+              "description" : "With values: deactivate the field's other active values absent from the list.",
+              "default" : false
+            }
+          },
+          "required" : [ "fieldName", "type" ],
+          "additionalProperties" : true
+        }
+      },
+      "displayFieldName" : {
+        "type" : "string",
+        "description" : "Name of the field used as each record's display label (one of fields, or an existing field)."
+      }
+    },
+    "required" : [ "name" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "apply_dashboard",
+  "title" : "Apply Dashboard",
+  "description" : "Create-or-update a dashboard and its components in one call, keyed on name (dashboard) and title (each component). Idempotent: applying the identical body twice reports {\"action\":\"unchanged\",...} for the dashboard and every component on the second call. Every component is validated (unknown collection/field/operator, non-aggregatable rollup/formula field, or a grid position outside columnCount) before anything is written — an invalid component fails the whole call with a structured error pointing at /components/<index>/<field> and writes nothing. Example: {\"name\":\"Sales Overview\",\"columnCount\":3,\"components\":[{\"title\":\"Total Deals\",\"componentType\":\"metric\",\"columnPosition\":1,\"rowPosition\":1,\"config\":{\"collectionName\":\"deals\",\"aggregateField\":\"amount\",\"aggregateType\":\"SUM\"}},{\"title\":\"Deals by Stage\",\"componentType\":\"chart\",\"columnPosition\":2,\"rowPosition\":1,\"columnSpan\":2,\"config\":{\"collectionName\":\"deals\",\"groupByField\":\"stage\",\"chartType\":\"bar\"}},{\"title\":\"Recent Deals\",\"componentType\":\"table\",\"columnPosition\":1,\"rowPosition\":2,\"columnSpan\":3,\"config\":{\"collectionName\":\"deals\",\"fields\":[\"name\",\"amount\",\"stage\"]}}]} builds a metric, a chart and a table widget. Wraps GET+POST/PATCH(/DELETE) /api/dashboards and /api/dashboard-components plus a dry-run POST /api/dashboards/{id}/validate.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Dashboard name — unique within tenant."
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "Optional dashboard description."
+      },
+      "accessLevel" : {
+        "type" : "string",
+        "description" : "Who may open the dashboard: PRIVATE, PUBLIC or HIDDEN."
+      },
+      "columnCount" : {
+        "type" : "integer",
+        "description" : "Width of the dashboard grid in columns.",
+        "minimum" : 1
+      },
+      "components" : {
+        "type" : "array",
+        "description" : "Widgets in this dashboard, matched by title. sortOrder is derived from array position, not taken from input. Any existing component not listed here is reported as \"stale\", or deleted when prune:true.",
+        "items" : {
+          "type" : "object",
+          "properties" : {
+            "title" : {
+              "type" : "string",
+              "description" : "Widget title — components are matched on this within the dashboard across repeated applies."
+            },
+            "componentType" : {
+              "type" : "string",
+              "description" : "Widget renderer: metric, chart, table or recent."
+            },
+            "columnPosition" : {
+              "type" : "integer",
+              "description" : "1-based grid column the widget starts at.",
+              "minimum" : 1
+            },
+            "rowPosition" : {
+              "type" : "integer",
+              "description" : "1-based grid row the widget starts at.",
+              "minimum" : 1
+            },
+            "columnSpan" : {
+              "type" : "integer",
+              "description" : "How many grid columns the widget spans (default 1).",
+              "minimum" : 1
+            },
+            "rowSpan" : {
+              "type" : "integer",
+              "description" : "How many grid rows the widget spans (default 1).",
+              "minimum" : 1
+            },
+            "config" : {
+              "type" : "object",
+              "description" : "Widget settings: target collection, aggregate, filters, chart style. Checked by DashboardComponentValidator before anything is written — see kelta://docs/dashboards. Ids inside config.filters are the caller's to resolve; there is no token syntax.",
+              "additionalProperties" : true
+            },
+            "report" : {
+              "type" : "string",
+              "description" : "Name of an existing saved report backing this widget. Omit when config names a collection directly — reportId is optional."
+            }
+          },
+          "additionalProperties" : false
+        }
+      },
+      "prune" : {
+        "type" : "boolean",
+        "description" : "Hard-delete any existing component absent from this call's components array. Omitted or false reports those components as \"stale\" and leaves them in place.",
+        "default" : false
+      }
+    },
+    "required" : [ "name", "components" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "apply_field_picklist",
+  "title" : "Apply Field Picklist",
+  "description" : "Create-or-update the field-scoped values of a picklist field (values owned by the field, picklistSourceType=FIELD, instead of a global picklist). Create the field first with add_field {\"type\":\"picklist\",\"picklistSourceType\":\"FIELD\"} (no picklistSourceId), then call this with {\"collectionName\":\"deals\",\"fieldName\":\"stage\",\"values\":[{\"value\":\"OPEN\",\"label\":\"Open\"}]}. Idempotent: a second identical call reports every value \"unchanged\". Wraps GET /api/fields and GET+POST/PATCH /api/picklist-values.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection that owns the picklist field."
+      },
+      "collectionId" : {
+        "type" : "string",
+        "description" : "Optional UUID of the collection — bypasses the name lookup."
+      },
+      "fieldName" : {
+        "type" : "string",
+        "description" : "Name of an existing picklist or multiPicklist field."
+      },
+      "values" : {
+        "type" : "array",
+        "description" : "Values in display order — sortOrder is derived from each value's position in this list.",
+        "items" : {
+          "type" : "object",
+          "properties" : {
+            "value" : {
+              "type" : "string",
+              "description" : "Stored value (e.g. \"OPEN\")."
+            },
+            "label" : {
+              "type" : "string",
+              "description" : "Display label (e.g. \"Open\")."
+            },
+            "color" : {
+              "type" : "string",
+              "description" : "Hex color used when rendered as a badge, e.g. \"#22C55E\"."
+            },
+            "description" : {
+              "type" : "string",
+              "description" : "Optional description."
+            }
+          },
+          "additionalProperties" : false
+        }
+      },
+      "prune" : {
+        "type" : "boolean",
+        "description" : "Deactivate (isActive=false) any existing active value of the field whose \"value\" is absent from this call's values list. Omitted or false leaves them active.",
+        "default" : false
+      }
+    },
+    "required" : [ "fieldName", "values" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "apply_layout",
+  "title" : "Apply Layout",
+  "description" : "Apply a page layout's full structure (sections, field placements, related lists) in one call. Idempotent: applying the identical body twice reports created=0, updated=0, deleted=0 on the second call. Anything not listed in sections/relatedLists is removed — this replaces the layout's structure, it does not patch it. Example: {\"collectionName\":\"projects\",\"name\":\"Main\",\"sections\":[{\"heading\":\"Overview\",\"columns\":2,\"fields\":[{\"name\":\"name\"},{\"name\":\"owner\"},{\"name\":\"status\"}]}]} places name/owner/status at columns 0,1,0. To restructure an existing layout, pass its layoutId instead of collectionName. Deprecates create_layout.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "layoutId" : {
+        "type" : "string",
+        "description" : "Existing layout id (UUID). Omit to address the layout by collectionName + name instead — that path creates the layout if it doesn't exist yet."
+      },
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection this layout displays. Required when layoutId is omitted."
+      },
+      "name" : {
+        "type" : "string",
+        "description" : "Layout name."
+      },
+      "layoutType" : {
+        "type" : "string",
+        "description" : "Layout type (default DETAIL, only used on create)."
+      },
+      "isDefault" : {
+        "type" : "boolean",
+        "description" : "Whether this is the default layout for the collection.",
+        "default" : false
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "Layout description."
+      },
+      "headerConfig" : {
+        "type" : "object",
+        "description" : "Header block configuration.",
+        "additionalProperties" : true
+      },
+      "sections" : {
+        "type" : "array",
+        "description" : "Sections in display order. Any existing section/field/related-list not listed here is deleted — the body is the whole desired layout, not a patch.",
+        "items" : {
+          "type" : "object",
+          "properties" : {
+            "heading" : {
+              "type" : "string",
+              "description" : "Section heading — sections are matched on this across repeated applies."
+            },
+            "columns" : {
+              "type" : "integer",
+              "description" : "Column count (1-4, default 2).",
+              "minimum" : 1,
+              "maximum" : 4
+            },
+            "collapsed" : {
+              "type" : "boolean",
+              "description" : "Collapsed by default.",
+              "default" : false
+            },
+            "fields" : {
+              "type" : "array",
+              "description" : "Field placements in display order.",
+              "items" : {
+                "type" : "object",
+                "properties" : {
+                  "name" : {
+                    "type" : "string",
+                    "description" : "Field name on the collection."
+                  },
+                  "column" : {
+                    "type" : "integer",
+                    "description" : "0-based column within the section. Omit to auto-assign left-to-right (index % columns).",
+                    "minimum" : 0
+                  },
+                  "label" : {
+                    "type" : "string",
+                    "description" : "Label override for this placement."
+                  },
+                  "helpText" : {
+                    "type" : "string",
+                    "description" : "Help text override for this placement."
+                  },
+                  "readOnly" : {
+                    "type" : "boolean",
+                    "description" : "Read-only on this layout.",
+                    "default" : false
+                  },
+                  "required" : {
+                    "type" : "boolean",
+                    "description" : "Required on this layout.",
+                    "default" : false
+                  }
+                },
+                "additionalProperties" : false
+              }
+            }
+          },
+          "additionalProperties" : false
+        }
+      },
+      "relatedLists" : {
+        "type" : "array",
+        "description" : "Related lists shown on this layout. Omit the key entirely to leave existing related lists untouched; an empty array removes them all.",
+        "items" : {
+          "type" : "object",
+          "properties" : {
+            "collection" : {
+              "type" : "string",
+              "description" : "Related collection name."
+            },
+            "relationshipField" : {
+              "type" : "string",
+              "description" : "Lookup field on the related collection that points back at this layout's collection."
+            },
+            "displayColumns" : {
+              "type" : "object",
+              "description" : "Array of field names on the related collection shown as columns.",
+              "additionalProperties" : true
+            },
+            "sortField" : {
+              "type" : "string",
+              "description" : "Field name to sort the related list by."
+            },
+            "sortDirection" : {
+              "type" : "string",
+              "description" : "ASC or DESC."
+            },
+            "rowLimit" : {
+              "type" : "integer",
+              "description" : "Max rows shown (default 10).",
+              "minimum" : 1
+            }
+          },
+          "additionalProperties" : false
+        }
+      }
+    },
+    "required" : [ "sections" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "apply_listview",
+  "title" : "Apply List View",
+  "description" : "Create-or-update a saved list view, keyed on (collectionName, name). Idempotent: applying the identical body twice reports {\"action\":\"unchanged\",\"id\":...} on the second call; changing one field reports {\"action\":\"updated\",\"changed\":[...]}. Example: {\"collectionName\":\"projects\",\"name\":\"Open by owner\",\"columns\":[\"name\",\"owner\",\"status\"],\"filters\":[{\"field\":\"status\",\"operator\":\"in\",\"value\":[\"OPEN\",\"PENDING\"]}],\"sort\":\"-createdAt\",\"rowLimit\":25}. viewType (TABLE|KANBAN|CALENDAR|GALLERY) and typeConfig are compared and written only when supplied. Wraps GET+POST/PATCH /api/list-views. Deprecates create_listview for setup scripts that re-run.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection the list view applies to."
+      },
+      "name" : {
+        "type" : "string",
+        "description" : "List view name — identifies the view together with collectionName."
+      },
+      "columns" : {
+        "type" : "array",
+        "description" : "Field names shown as columns, in display order.",
+        "items" : {
+          "type" : "string"
+        }
+      },
+      "filters" : {
+        "type" : "array",
+        "description" : "Filter conditions ANDed together. Always written as given — omit entirely for \"no filters\" (this tool applies the view's whole shape, it does not patch individual filters in).",
+        "items" : {
+          "type" : "object",
+          "properties" : {
+            "field" : {
+              "type" : "string",
+              "description" : "Field name to filter on."
+            },
+            "operator" : {
+              "type" : "string",
+              "description" : "Filter operator (eq, neq, gt, lt, gte, lte, in, contains, isnull, ...). Validated and canonicalized server-side."
+            },
+            "value" : {
+              "description" : "Filter value. For \"in\", pass an array (or a comma-separated string)."
+            }
+          },
+          "additionalProperties" : false
+        }
+      },
+      "sort" : {
+        "type" : "string",
+        "description" : "Sort field, '-' prefix for descending, e.g. \"-createdAt\". Omit to leave the current sort alone."
+      },
+      "rowLimit" : {
+        "type" : "integer",
+        "description" : "Maximum rows rendered. Omit to leave the current value alone."
+      },
+      "visibility" : {
+        "type" : "string",
+        "description" : "PRIVATE, PUBLIC or GROUP. Omit to leave the current value alone."
+      },
+      "isDefault" : {
+        "type" : "boolean",
+        "description" : "Whether this is the default view for the collection+visibility. Omit to leave the current value alone.",
+        "default" : false
+      },
+      "viewType" : {
+        "type" : "string",
+        "description" : "Renderer: TABLE, KANBAN, CALENDAR or GALLERY (case-insensitive). Omit to leave the current value alone."
+      },
+      "typeConfig" : {
+        "type" : "object",
+        "description" : "Settings for the chosen renderer, e.g. {\"kanban\":{\"laneField\":\"status\",\"cardFields\":[\"title\"]}}. Omit to leave the current value alone; an empty object {} clears it.",
+        "additionalProperties" : true
+      }
+    },
+    "required" : [ "collectionName", "name", "columns" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "apply_menu",
+  "title" : "Apply Menu",
+  "description" : "Create-or-update a UI menu (\"app\") and its items/groups in one call, keyed on name (menu) and (menu, parent, label) for each item. Idempotent: applying the identical body twice reports {\"action\":\"unchanged\",...} for the menu and every item on the second call. An item with a non-empty \"children\" array is a group header (dropdown); each child's parentId resolves to the group's id. Example: {\"name\":\"Main\",\"items\":[{\"label\":\"Reports\",\"children\":[{\"label\":\"Sales\",\"path\":\"/reports/sales-id\"}]},{\"label\":\"Tasks\",\"path\":\"/resources/tasks\"}]} creates a \"Reports\" group whose child \"Sales\" gets parentId set to the group's id, plus a top-level \"Tasks\" item. path is validated against the nav grammar (/resources/<collection>[?query], /p/<slug> or /app/p/<slug>, /dashboards/<id> or /app/dashboards/<id>, /reports/<id> or /app/reports/<id>, /chat or /app/chat (see navTabs.ts / kelta://docs/ui-menus)) before anything is written — an invalid path fails the whole call with a structured error. Wraps GET+POST/PATCH(/DELETE) /api/ui-menus and /api/ui-menu-items.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Menu name — the app's identity (unique within tenant)."
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "Optional menu description."
+      },
+      "icon" : {
+        "type" : "string",
+        "description" : "Switcher icon for this app."
+      },
+      "isDefault" : {
+        "type" : "boolean",
+        "description" : "Whether this is the default app.",
+        "default" : false
+      },
+      "active" : {
+        "type" : "boolean",
+        "description" : "Whether the app is shown in the end-user shell.",
+        "default" : true
+      },
+      "items" : {
+        "type" : "array",
+        "description" : "Menu items/groups in display order — displayOrder is derived from position, not taken from input. Any existing item not listed here (matched on label within its parent) is reported as \"stale\", or deleted when prune:true.",
+        "items" : {
+          "type" : "object",
+          "properties" : {
+            "label" : {
+              "type" : "string",
+              "description" : "Display label."
+            },
+            "path" : {
+              "type" : "string",
+              "description" : "Route this item navigates to. Omit for a group header (an item with children and no path). Must match the nav grammar: /resources/<collection>[?query], /p/<slug> or /app/p/<slug>, /dashboards/<id> or /app/dashboards/<id>, /reports/<id> or /app/reports/<id>, /chat or /app/chat (see navTabs.ts / kelta://docs/ui-menus)."
+            },
+            "icon" : {
+              "type" : "string",
+              "description" : "Icon name rendered beside the label."
+            },
+            "children" : {
+              "type" : "array",
+              "description" : "Child items rendered as a dropdown under this group header. Nesting is one level deep — a child cannot itself have children.",
+              "items" : {
+                "type" : "object",
+                "properties" : {
+                  "label" : {
+                    "type" : "string",
+                    "description" : "Display label."
+                  },
+                  "path" : {
+                    "type" : "string",
+                    "description" : "Route this item navigates to. Omit for a group header. Must match the nav grammar: /resources/<collection>[?query], /p/<slug> or /app/p/<slug>, /dashboards/<id> or /app/dashboards/<id>, /reports/<id> or /app/reports/<id>, /chat or /app/chat (see navTabs.ts / kelta://docs/ui-menus)."
+                  },
+                  "icon" : {
+                    "type" : "string",
+                    "description" : "Icon name rendered beside the label."
+                  }
+                },
+                "additionalProperties" : false
+              }
+            }
+          },
+          "additionalProperties" : false
+        }
+      },
+      "prune" : {
+        "type" : "boolean",
+        "description" : "Hard-delete any existing item absent from this call's tree. Omitted or false reports those items as \"stale\" and leaves them in place.",
+        "default" : false
+      }
+    },
+    "required" : [ "name", "items" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "apply_metadata",
+  "title" : "Apply Metadata Package",
+  "description" : "Install a metadata package into this tenant: its metadata items, then its seed records section (the same import `kelta metadata apply` runs). Pass the package JSON export_metadata returned; preview it first with diff_metadata. Returns created/updated/skipped/failed counts and per-item results. Example: {\"package\":{...},\"conflictMode\":\"overwrite\"}. Wraps POST /api/packages/import.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "package" : {
+        "type" : [ "object", "string" ],
+        "description" : "The metadata package document, as returned by export_metadata (a JSON object, or the same JSON as a string).",
+        "additionalProperties" : true
+      },
+      "dryRun" : {
+        "type" : "boolean",
+        "description" : "Validate the package without writing anything.",
+        "default" : false
+      },
+      "conflictMode" : {
+        "type" : "string",
+        "description" : "On an item that already exists: skip (default) or overwrite. Seed records are always skipped.",
+        "enum" : [ "skip", "overwrite" ]
+      }
+    },
+    "required" : [ "package" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "apply_page",
+  "title" : "Apply Page",
+  "description" : "Create-or-update a custom UI page (screen builder), keyed on path (falling back to slug). Idempotent: applying the identical body twice reports {\"action\":\"unchanged\",...} on the second call; changing config (or another attribute) reports {\"action\":\"updated\",\"changed\":[...]} naming only the keys that differ. config is dry-run through POST /api/ui-pages/validate before anything is written — an unknown widget type or other invalid config fails the whole call with a structured error (JSON Pointer from the validate response) and writes nothing. Minimal example — a heading plus a repeater over a data source: {\"name\":\"Accounts\",\"path\":\"/accounts\",\"config\":{\"schemaVersion\":2,\"dataSources\":[{\"name\":\"accounts\",\"collection\":\"accounts\",\"mode\":\"list\",\"limit\":50}],\"components\":[{\"id\":\"h1\",\"type\":\"heading\",\"props\":{\"text\":\"Accounts\",\"level\":\"h2\"}},{\"id\":\"r1\",\"type\":\"repeater\",\"props\":{\"source\":{\"$bind\":\"data.accounts\"}},\"children\":[{\"id\":\"t1\",\"type\":\"text\",\"props\":{\"content\":\"{{ item.name }}\"}}]}]}}. Wraps GET+POST/PATCH /api/ui-pages plus a dry-run POST /api/ui-pages/validate.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Human-readable page name."
+      },
+      "path" : {
+        "type" : "string",
+        "description" : "Route the page is served at, e.g. \"/accounts\". The natural key this call upserts by (falls back to slug when path itself doesn't match an existing row)."
+      },
+      "slug" : {
+        "type" : "string",
+        "description" : "URL-safe identifier. Auto-derived from name/path when omitted on create; also used as a fallback match key if path changed since the last apply."
+      },
+      "title" : {
+        "type" : "string",
+        "description" : "Browser and header title."
+      },
+      "config" : {
+        "type" : "object",
+        "description" : "JSON page definition: components, dataSources, variables, access, isHomePage. Checked by POST /api/ui-pages/validate before anything is written — see kelta://docs/ui-pages. Example (heading + repeater over a data source): {\"schemaVersion\":2,\"dataSources\":[{\"name\":\"accounts\",\"collection\":\"accounts\",\"mode\":\"list\",\"limit\":50}],\"components\":[{\"id\":\"h1\",\"type\":\"heading\",\"props\":{\"text\":\"Accounts\",\"level\":\"h2\"}},{\"id\":\"r1\",\"type\":\"repeater\",\"props\":{\"source\":{\"$bind\":\"data.accounts\"}},\"children\":[{\"id\":\"t1\",\"type\":\"text\",\"props\":{\"content\":\"{{ item.name }}\"}}]}]}",
+        "additionalProperties" : true
+      },
+      "published" : {
+        "type" : "boolean",
+        "description" : "Whether the page is live for end users.",
+        "default" : false
+      },
+      "active" : {
+        "type" : "boolean",
+        "description" : "Whether the record is active.",
+        "default" : true
+      }
+    },
+    "required" : [ "name", "path" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "apply_picklist",
+  "title" : "Apply Picklist",
+  "description" : "Create-or-update a global picklist and its values in one call, keyed on name (picklist) and (picklist, value) for each entry. Idempotent: applying the identical body twice reports {\"action\":\"unchanged\",...} for both the picklist and every value on the second call. Example: {\"name\":\"Stage\",\"values\":[{\"value\":\"OPEN\",\"label\":\"Open\",\"color\":\"#22C55E\"},{\"value\":\"CLOSED\",\"label\":\"Closed\",\"color\":\"#EF4444\"}],\"prune\":true} writes both values with sortOrder 0 and 1 and deactivates any other active value already on the picklist. Wraps GET+POST/PATCH /api/global-picklists and /api/picklist-values. Deprecates create_picklist for setup scripts that re-run.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Picklist name (unique within tenant)."
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "Optional picklist description."
+      },
+      "values" : {
+        "type" : "array",
+        "description" : "Picklist values in display order — sortOrder is derived from each value's position in this list, not taken from input.",
+        "items" : {
+          "type" : "object",
+          "properties" : {
+            "value" : {
+              "type" : "string",
+              "description" : "Stored value (e.g. \"OPEN\")."
+            },
+            "label" : {
+              "type" : "string",
+              "description" : "Display label (e.g. \"Open\")."
+            },
+            "color" : {
+              "type" : "string",
+              "description" : "Hex color used when rendered as a badge, e.g. \"#22C55E\"."
+            },
+            "description" : {
+              "type" : "string",
+              "description" : "Optional description."
+            }
+          },
+          "additionalProperties" : false
+        }
+      },
+      "prune" : {
+        "type" : "boolean",
+        "description" : "Deactivate (isActive=false) any existing active value whose \"value\" is absent from this call's values list. Omitted or false leaves them active.",
+        "default" : false
+      }
+    },
+    "required" : [ "name", "values" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "create_collection",
+  "title" : "Create Collection",
+  "description" : "Create a new collection definition, optionally with an initial set of fields. The collection is created first; each field is then created in order. Returns a summary with the new collection id and per-field success/failure.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Collection name (e.g. \"projects\"). Used as the URL slug — keep it kebab-cased or single-word."
+      },
+      "displayName" : {
+        "type" : "string",
+        "description" : "Optional human-readable label for the collection itself (e.g. \"Projects\"). Distinct from displayFieldName."
+      },
+      "displayFieldName" : {
+        "type" : "string",
+        "description" : "Optional name of an existing field on this collection used as the per-record display label (e.g. \"name\"). Distinct from displayName."
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "Optional description shown in the admin UI."
+      },
+      "tenantScoped" : {
+        "type" : "boolean",
+        "description" : "Whether records are tenant-scoped (default true). Only set false for shared system data.",
+        "default" : true
+      },
+      "fields" : {
+        "type" : "array",
+        "description" : "Optional initial field set. Each entry will be POSTed to /api/fields after the collection is created.",
+        "items" : {
+          "type" : "object",
+          "description" : "{\"fieldName\":\"...\",\"type\":\"text|number|boolean|date|datetime|reference|picklist|...\",\"required\":bool,\"unique\":bool,\"description\":\"...\"}",
+          "additionalProperties" : true
+        }
+      }
+    },
+    "required" : [ "name" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "create_flow",
+  "title" : "Create Flow",
+  "description" : "Create a new automation flow. Wraps POST /api/flows. The definition payload is opaque to this tool — pass the flow-engine JSON directly.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Flow name (unique within tenant)."
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "Optional description."
+      },
+      "flowType" : {
+        "type" : "string",
+        "description" : "Flow type: RECORD_TRIGGERED, SCHEDULED, AUTOLAUNCHED, or SCREEN. Legacy alias \"triggerType\" is also accepted."
+      },
+      "triggerConfig" : {
+        "type" : "object",
+        "description" : "Trigger-specific config (e.g. {\"collectionName\":\"orders\"} for RECORD_TRIGGERED, {\"cron\":\"0 * * * *\"} for SCHEDULED).",
+        "additionalProperties" : true
+      },
+      "definition" : {
+        "type" : "object",
+        "description" : "Flow JSON definition: nodes, edges, conditions, actions. Shape is flow-engine specific.",
+        "additionalProperties" : true
+      },
+      "active" : {
+        "type" : "boolean",
+        "description" : "Whether the flow is active on creation (default false).",
+        "default" : false
+      },
+      "runAsUserId" : {
+        "type" : "string",
+        "description" : "User UUID stamped as createdBy/updatedBy on records this flow writes when no user started the run (cron/NATS/webhook). Defaults to the flow owner."
+      },
+      "stepLogging" : {
+        "type" : "string",
+        "description" : "Step-log level: FULL (default; every step with input/output snapshots), ERRORS_ONLY (every step, snapshots only for a failed step — recommended for high-frequency or high-volume flows) or NONE (only a failed step's row)."
+      },
+      "retentionDays" : {
+        "type" : "integer",
+        "description" : "Days a finished run and its step logs are kept before the retention sweep deletes them (1-3650). Omit to use the platform-wide window (60 days by default).",
+        "minimum" : 1,
+        "maximum" : 3650
+      }
+    },
+    "required" : [ "name", "flowType", "definition" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "create_layout",
+  "title" : "Create Layout",
+  "description" : "[DEPRECATED — use apply_layout instead] Build a complete page layout in one call: layout + sections + fields per section. Field entries reference fields by fieldName. Delegates to apply_layout under the hood; apply_layout also supports related lists, a layout header, and idempotent restructuring of an existing layout by id.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Layout name (unique within collection)."
+      },
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection this layout displays."
+      },
+      "isDefault" : {
+        "type" : "boolean",
+        "description" : "Whether this is the default layout for the collection.",
+        "default" : false
+      },
+      "sections" : {
+        "type" : "array",
+        "description" : "Sections in display order. Each section contains its own field list.",
+        "items" : {
+          "type" : "object",
+          "description" : "{\"sectionName\":\"...\",\"columns\":1-4,\"fields\":[{...}]}",
+          "properties" : {
+            "sectionName" : {
+              "type" : "string",
+              "description" : "Section heading."
+            },
+            "columns" : {
+              "type" : "integer",
+              "description" : "Column count (1-4, default 2).",
+              "minimum" : 1,
+              "maximum" : 4
+            },
+            "fields" : {
+              "type" : "array",
+              "description" : "Fields in display order within this section.",
+              "items" : {
+                "type" : "object",
+                "description" : "{\"fieldName\":\"...\",\"columnNumber\":0|1|2 (0-based),\"readOnly\":bool,\"required\":bool,\"labelOverride\":\"...\"}",
+                "additionalProperties" : true
+              }
+            }
+          },
+          "additionalProperties" : true
+        }
+      }
+    },
+    "required" : [ "name", "collectionName", "sections" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "create_listview",
+  "title" : "Create List View",
+  "description" : "Create a saved list view (column set + filter + sort) for a collection. Wraps POST /api/list-views.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection the list view applies to."
+      },
+      "name" : {
+        "type" : "string",
+        "description" : "List view name (unique within collection)."
+      },
+      "displayedFields" : {
+        "type" : "string",
+        "description" : "Comma-separated field names to show as columns, in display order."
+      },
+      "filter" : {
+        "type" : "object",
+        "description" : "Optional saved-filter expression in JSON:API filter shape, e.g. {\"status\":{\"EQ\":\"OPEN\"}}.",
+        "additionalProperties" : true
+      },
+      "sort" : {
+        "type" : "string",
+        "description" : "Default sort field, '-' prefix for descending, e.g. \"-createdAt\"."
+      },
+      "isDefault" : {
+        "type" : "boolean",
+        "description" : "Whether this is the default list view.",
+        "default" : false
+      },
+      "visibility" : {
+        "type" : "string",
+        "description" : "PRIVATE (default) or PUBLIC."
+      },
+      "rowLimit" : {
+        "type" : "integer",
+        "description" : "Maximum rows rendered: one of 10, 25, 50 (default) or 100.",
+        "minimum" : 10,
+        "maximum" : 100
+      },
+      "viewType" : {
+        "type" : "string",
+        "description" : "Renderer everyone opening this view gets: TABLE (default), KANBAN, CALENDAR or GALLERY."
+      },
+      "typeConfig" : {
+        "type" : "object",
+        "description" : "Settings for the chosen renderer, e.g. {\"kanban\":{\"laneField\":\"status\",\"cardFields\":[\"title\"]}}.",
+        "additionalProperties" : true
+      }
+    },
+    "required" : [ "collectionName", "name", "displayedFields" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "create_picklist",
+  "title" : "Create Picklist",
+  "description" : "Create a global picklist with its initial values. The picklist is created first via POST /api/global-picklists; each value is then POSTed to /api/picklist-values with picklistSourceType=GLOBAL and picklistSourceId set to the new picklist's UUID.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Picklist name (unique within tenant)."
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "Optional description."
+      },
+      "values" : {
+        "type" : "array",
+        "description" : "Initial picklist values, in display order.",
+        "items" : {
+          "type" : "object",
+          "description" : "{\"value\":\"...\",\"label\":\"...\",\"sortOrder\":number,\"isActive\":bool,\"isDefault\":bool}",
+          "additionalProperties" : true
+        }
+      }
+    },
+    "required" : [ "name", "values" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "create_unique_constraint",
+  "title" : "Create Unique Constraint",
+  "description" : "Create a composite unique constraint on a collection. Enforced at the Postgres level via CREATE UNIQUE INDEX, so duplicate inserts return a 409 Conflict. Use this for multi-column uniqueness like Availability(title, provider, region) or Season(show, seasonNumber); single-column uniqueness is better expressed via add_field.unique.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection name (e.g. \"availabilities\"). The collection must already exist."
+      },
+      "fieldNames" : {
+        "type" : "array",
+        "description" : "Field names (in collection schema order) participating in the constraint. Provide 2+ for a composite constraint, e.g. [\"title\", \"provider\", \"region\"].",
+        "items" : {
+          "type" : "string"
+        },
+        "minItems" : 1
+      }
+    },
+    "required" : [ "collectionName", "fieldNames" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "create_validation_rule",
+  "title" : "Create Validation Rule",
+  "description" : "Create a validation rule on a collection. The record is rejected at create/update time when errorConditionFormula evaluates TRUE. To test related records, reference a ROLLUP_SUMMARY field of the collection in the formula: it is computed from the child rows at write time (a client-supplied value is ignored), e.g. AND(state = \"closed\", openTasks > 0) with openTasks a filtered COUNT rollup. Wraps POST /api/validation-rules.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection the rule applies to."
+      },
+      "name" : {
+        "type" : "string",
+        "description" : "Rule name (unique within collection)."
+      },
+      "errorConditionFormula" : {
+        "type" : "string",
+        "description" : "Formula describing the ERROR condition: the record is REJECTED when this evaluates true. Reference fields by attribute name; functions like AND(), OR(), NOT(), ISBLANK() are available. Example: AND(NOT(ISBLANK(amountMin)), NOT(ISBLANK(amountMax)), amountMax < amountMin)."
+      },
+      "expression" : {
+        "type" : "string",
+        "description" : "(Deprecated) Boolean expression that must hold for the record to be valid. Wrapped as NOT(expression) into errorConditionFormula. Prefer errorConditionFormula."
+      },
+      "errorMessage" : {
+        "type" : "string",
+        "description" : "Error message shown to the user when the rule rejects the record."
+      },
+      "errorField" : {
+        "type" : "string",
+        "description" : "Optional field name the error is attributed to in API responses and forms."
+      },
+      "evaluateOn" : {
+        "type" : "string",
+        "description" : "When the rule runs: CREATE, UPDATE, or CREATE_AND_UPDATE (default)."
+      },
+      "severity" : {
+        "type" : "string",
+        "description" : "ERROR (default, blocks the save) or WARNING."
+      },
+      "active" : {
+        "type" : "boolean",
+        "description" : "Whether the rule is active (default true).",
+        "default" : true
+      }
+    },
+    "required" : [ "collectionName", "name", "errorMessage" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "dashboard_data",
+  "title" : "Dashboard Data",
+  "description" : "Execute a dashboard's widgets and return their data as the worker computes it (read-only). Example: {\"dashboard\":\"Sales Overview\",\"body\":{\"timeRange\":\"LAST_30_DAYS\"}}. Wraps POST /api/dashboards/{id}/data (the name is resolved to the id first).",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "dashboard" : {
+        "type" : "string",
+        "description" : "Dashboard name or id."
+      },
+      "body" : {
+        "type" : "object",
+        "description" : "Optional runtime parameters, e.g. {\"timeRange\":\"LAST_30_DAYS\"}.",
+        "additionalProperties" : true
+      }
+    },
+    "required" : [ "dashboard" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "deactivate_picklist_value",
+  "title" : "Deactivate Picklist Value",
+  "description" : "Mark a picklist value inactive so it no longer appears in pickers but existing records keep their stored value. Wraps PATCH /api/picklist-values/{id} with isActive=false. Use update_picklist_value to re-activate or to change other attributes.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Picklist value id (UUID)."
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "delete_collection",
+  "title" : "Delete Collection",
+  "description" : "Delete a collection definition and all of its records. Wraps DELETE /api/collections/{id}. Irreversible — every record in the collection is dropped along with the schema. Accepts either the collection name or a UUID; names are looked up first.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collection" : {
+        "type" : "string",
+        "description" : "Collection name (e.g. \"projects\") or id (UUID). Names are resolved to ids via GET /api/collections?filter[name][EQ]=... before the delete is issued."
+      }
+    },
+    "required" : [ "collection" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "delete_flow",
+  "title" : "Delete Flow",
+  "description" : "Delete an automation flow. Wraps DELETE /api/flows/{id}. Flows with recorded run history may be rejected by the gateway — that error is surfaced as-is. Accepts either the flow UUID or name; names are resolved first.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Flow id (UUID) or name. Names are resolved via GET /api/flows?filter[name][EQ]=... before the delete is issued."
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "delete_layout",
+  "title" : "Delete Layout",
+  "description" : "Delete a page layout and (cascade) its sections and field assignments. Wraps DELETE /api/page-layouts/{id}. Does NOT delete the underlying field definitions on the collection.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Layout id (UUID)."
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "delete_listview",
+  "title" : "Delete List View",
+  "description" : "Delete a saved list view. Wraps DELETE /api/list-views/{id}.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "List view id (UUID)."
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "delete_picklist",
+  "title" : "Delete Picklist",
+  "description" : "Delete a global picklist. Wraps DELETE /api/global-picklists/{id}. Cascades to its picklist-values. Accepts either the picklist name or a UUID; names are looked up first.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "picklist" : {
+        "type" : "string",
+        "description" : "Picklist name or id (UUID). Names are resolved via GET /api/global-picklists?filter[name][EQ]=... before the delete is issued."
+      }
+    },
+    "required" : [ "picklist" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "delete_unique_constraint",
+  "title" : "Delete Unique Constraint",
+  "description" : "Drop a composite unique constraint from a collection. Wraps DELETE /api/admin/collections/{name}/unique-constraints/{indexName}. Use list_unique_constraints to find the indexName first.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection name (e.g. \"availabilities\")."
+      },
+      "indexName" : {
+        "type" : "string",
+        "description" : "Index name of the constraint to drop (e.g. \"uniq_availabilities_title_provider\"). Use list_unique_constraints to find it."
+      }
+    },
+    "required" : [ "collectionName", "indexName" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "delete_validation_rule",
+  "title" : "Delete Validation Rule",
+  "description" : "Delete a validation rule by id. Wraps DELETE /api/validation-rules/{id}. Use list_validation_rules to find the rule id first.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Validation rule id (UUID)."
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "diff_metadata",
+  "title" : "Diff Metadata Package",
+  "description" : "Preview the changes a metadata package would make to this tenant, without writing anything (the same preview `kelta metadata diff` prints). Pass the package JSON export_metadata returned. Wraps POST /api/packages/import/preview.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "package" : {
+        "type" : [ "object", "string" ],
+        "description" : "The metadata package document, as returned by export_metadata (a JSON object, or the same JSON as a string).",
+        "additionalProperties" : true
+      }
+    },
+    "required" : [ "package" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "export_metadata",
+  "title" : "Export Metadata",
+  "description" : "Export this tenant's metadata as a package and return the package JSON as text (the same document `kelta metadata export` writes to a file). Seed records are never exported. Pass the result to diff_metadata to preview it against a tenant or apply_metadata to install it. Example: {\"collections\":[\"deals\",\"accounts\"],\"exclude\":[\"dashboard\"]}. Wraps POST /api/packages/export.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Package name (default: the tenant slug)."
+      },
+      "version" : {
+        "type" : "string",
+        "description" : "Package version (default: 1.0.0)."
+      },
+      "collections" : {
+        "type" : "array",
+        "description" : "Collection names: export only these, with their validation rules, page layouts, list views, record-triggered flows, global picklists and the dashboards with a widget on them. Omit for the whole tenant.",
+        "items" : {
+          "type" : "string"
+        }
+      },
+      "exclude" : {
+        "type" : "array",
+        "description" : "Item types to leave out: list-view, dashboard, flow, page-layout, validation-rule, ui-page, ui-menu (or the package type names LIST_VIEW, DASHBOARD, ...).",
+        "items" : {
+          "type" : "string"
+        }
+      }
+    },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "get_picklist",
+  "title" : "Get Picklist",
+  "description" : "Fetch a global picklist with its values. Wraps GET /api/global-picklists/{id}?include=picklist-values. Accepts either the picklist name or a UUID.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "picklist" : {
+        "type" : "string",
+        "description" : "Picklist name or id (UUID). Names are resolved via GET /api/global-picklists?filter[name][EQ]=... first."
+      }
+    },
+    "required" : [ "picklist" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "import_api_spec",
+  "title" : "Import API Spec",
+  "description" : "Import an external OpenAPI 3.x spec into the platform's API spec library. Operations are parsed and indexed so flows can call them. Wraps POST /api/api-specs/import. Returns a diff of added/changed/removed operations.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Display name for the imported spec."
+      },
+      "raw" : {
+        "type" : "string",
+        "description" : "OpenAPI spec as raw JSON or YAML text."
+      },
+      "sourceUrl" : {
+        "type" : "string",
+        "description" : "Optional source URL the spec was downloaded from."
+      }
+    },
+    "required" : [ "name", "raw" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "list_flows",
+  "title" : "List Flows",
+  "description" : "List automation flows. Wraps GET /api/flows. With a name filter (filter[name][EQ]=…) this is the idempotent existence check that setup scripts use before deciding whether to create_flow.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Optional exact-match filter on flow name. Omit to list all flows in the tenant."
+      },
+      "pageSize" : {
+        "type" : "integer",
+        "description" : "Page size (default 200, max 200).",
+        "minimum" : 1,
+        "maximum" : 200
+      }
+    },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "list_listviews",
+  "title" : "List List Views",
+  "description" : "List saved list views for a collection. Wraps GET /api/list-views?filter[collectionId][eq]={id}. Use before create_listview to check whether a view already exists.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection name or id (UUID) whose list views to return."
+      },
+      "pageSize" : {
+        "type" : "integer",
+        "description" : "Page size (default 200, max 200).",
+        "minimum" : 1,
+        "maximum" : 200
+      }
+    },
+    "required" : [ "collectionName" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "list_picklists",
+  "title" : "List Picklists",
+  "description" : "List global picklists. Wraps GET /api/global-picklists. With a name filter (filter[name][EQ]=…) this is the idempotent existence check that setup scripts use before deciding whether to create_picklist.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "name" : {
+        "type" : "string",
+        "description" : "Optional exact-match filter on picklist name. Omit to list all global picklists in the tenant."
+      },
+      "pageSize" : {
+        "type" : "integer",
+        "description" : "Page size (default 200, max 200).",
+        "minimum" : 1,
+        "maximum" : 200
+      }
+    },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "list_unique_constraints",
+  "title" : "List Unique Constraints",
+  "description" : "List composite unique constraints on a collection. Wraps GET /api/admin/collections/{name}/unique-constraints. Each entry includes the indexName needed to call delete_unique_constraint.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection name (e.g. \"availabilities\"). Returns all composite unique constraints on that collection."
+      }
+    },
+    "required" : [ "collectionName" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "list_validation_rules",
+  "title" : "List Validation Rules",
+  "description" : "List validation rules, optionally filtered by collection. Wraps GET /api/validation-rules with an optional filter[collectionId][EQ]=… query param. Use this to check existing rules before create_validation_rule.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Collection name to filter by. Resolves the name to its id before querying. Omit to list all validation rules in the tenant."
+      },
+      "pageSize" : {
+        "type" : "integer",
+        "description" : "Page size (default 200, max 200).",
+        "minimum" : 1,
+        "maximum" : 200
+      }
+    },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "materialize_api_collection",
+  "title" : "Materialize API Collection",
+  "description" : "Create an external-rest virtual collection from an imported OpenAPI GET operation. Fields are derived from the operation's response schema; the collection is served live from the external API through the standard JSON:API surface (no physical table). Requires a spec imported via import_api_spec.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "specId" : {
+        "type" : "string",
+        "description" : "ID of the imported API spec (from import_api_spec)."
+      },
+      "operationId" : {
+        "type" : "string",
+        "description" : "syntheticOpId of the GET operation to back the collection."
+      },
+      "collectionName" : {
+        "type" : "string",
+        "description" : "Name for the new collection — lowercase, ^[a-z][a-z0-9_]*$."
+      },
+      "displayName" : {
+        "type" : "string",
+        "description" : "Optional display name."
+      },
+      "dataPath" : {
+        "type" : "string",
+        "description" : "Optional JSON path to the row array in the response (defaults to the inferred path)."
+      },
+      "idAttribute" : {
+        "type" : "string",
+        "description" : "Optional response attribute to use as the record id (defaults to 'id' or the first field)."
+      },
+      "credentialRef" : {
+        "type" : "string",
+        "description" : "Optional credential-vault reference for authenticating to the external API."
+      }
+    },
+    "required" : [ "specId", "operationId", "collectionName" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "remove_field",
+  "title" : "Remove Field",
+  "description" : "Remove a field from a collection. Wraps DELETE /api/fields/{id}. The field's data on existing records is dropped — irreversible.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Field id (UUID)."
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "seed_records",
+  "title" : "Seed Records",
+  "description" : "Bulk-create records in this tenant from plain attribute objects (e.g. a template's seed file), resolving reference fields from a parent's natural key. Example: {\"collection\":\"contacts\",\"records\":[{\"email\":\"a@example.com\",\"account\":\"Northwind\"}],\"references\":{\"account\":\"accounts.name\"}}. Wraps POST /api/operations in batches of 100 (each atomic). Not idempotent: a second call creates the records again, or fails on a unique field.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collection" : {
+        "type" : "string",
+        "description" : "Collection name to create the records in."
+      },
+      "records" : {
+        "type" : "array",
+        "description" : "Records to create, in order (1-1000).",
+        "items" : {
+          "type" : "object",
+          "description" : "Attribute object of one record, keyed by field name.",
+          "additionalProperties" : true
+        },
+        "minItems" : 1,
+        "maxItems" : 1000
+      },
+      "references" : {
+        "type" : "object",
+        "description" : "Optional natural-key resolution for reference fields: {\"<field>\": \"<parentCollection>.<keyField>\"}. Each record's <field> value is replaced by the id of the parent record whose <keyField> equals it. Seed parents before children.",
+        "additionalProperties" : {
+          "type" : "string"
+        }
+      }
+    },
+    "required" : [ "collection", "records" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : false,
+    "idempotentHint" : false,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "update_collection",
+  "title" : "Update Collection",
+  "description" : "Update a collection's metadata (display name, display field, description, tenant-scoping). PATCHes /api/collections/{id} — only supplied fields change.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Collection id (UUID) or name."
+      },
+      "displayName" : {
+        "type" : "string",
+        "description" : "New human-readable label for the collection itself (e.g. \"Projects\"). Distinct from displayFieldName."
+      },
+      "displayFieldName" : {
+        "type" : "string",
+        "description" : "New name of an existing field on this collection used as the per-record display label. Distinct from displayName."
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "New description."
+      },
+      "tenantScoped" : {
+        "type" : "boolean",
+        "description" : "New tenant-scoped flag.",
+        "default" : true
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "update_field",
+  "title" : "Update Field",
+  "description" : "Update a field's mutable attributes. Wraps PATCH /api/fields/{id}. Note: changing field type or fieldName is generally rejected by the platform — drop+recreate is the path for those.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Field id (UUID)."
+      },
+      "required" : {
+        "type" : "boolean",
+        "description" : "New required flag.",
+        "default" : false
+      },
+      "unique" : {
+        "type" : "boolean",
+        "description" : "New unique flag.",
+        "default" : false
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "New description."
+      },
+      "defaultValue" : {
+        "type" : [ "string", "number", "boolean", "null" ],
+        "description" : "New default value. Pass it in the field's native JSON type — e.g. true for booleans, 360 for numbers, \"hello\" for strings."
+      },
+      "validation" : {
+        "type" : "object",
+        "description" : "New validation config.",
+        "additionalProperties" : true
+      },
+      "maskingType" : {
+        "type" : "string",
+        "description" : "Set data masking (string-typed fields): FULL, LAST4, EMAIL, CUSTOM, or NONE to remove it."
+      },
+      "maskingChar" : {
+        "type" : "string",
+        "description" : "Optional single character used for masked positions (default •)."
+      },
+      "maskingCustomPattern" : {
+        "type" : "string",
+        "description" : "Pattern for maskingType=CUSTOM: '#' reveals a character, any other char is shown literally, right-aligned."
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "update_flow",
+  "title" : "Update Flow",
+  "description" : "Update an existing flow's metadata, definition, or active state. Wraps PATCH /api/flows/{id}. Toggling \"active\" enables or disables the trigger without redeploying the definition.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Flow id (UUID)."
+      },
+      "name" : {
+        "type" : "string",
+        "description" : "New flow name."
+      },
+      "description" : {
+        "type" : "string",
+        "description" : "New description."
+      },
+      "triggerConfig" : {
+        "type" : "object",
+        "description" : "New trigger config.",
+        "additionalProperties" : true
+      },
+      "definition" : {
+        "type" : "object",
+        "description" : "New flow definition.",
+        "additionalProperties" : true
+      },
+      "active" : {
+        "type" : "boolean",
+        "description" : "Active flag — toggles enable/disable.",
+        "default" : false
+      },
+      "runAsUserId" : {
+        "type" : "string",
+        "description" : "User UUID stamped as createdBy/updatedBy on records this flow writes when no user started the run (cron/NATS/webhook). Empty string clears it (falls back to owner)."
+      },
+      "stepLogging" : {
+        "type" : "string",
+        "description" : "Step-log level: FULL (default; every step with input/output snapshots), ERRORS_ONLY (every step, snapshots only for a failed step — recommended for high-frequency or high-volume flows) or NONE (only a failed step's row)."
+      },
+      "retentionDays" : {
+        "type" : "integer",
+        "description" : "Days a finished run and its step logs are kept before the retention sweep deletes them (1-3650). 0 clears the override (the platform-wide window applies again).",
+        "minimum" : 0,
+        "maximum" : 3650
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "update_layout",
+  "title" : "Update Layout",
+  "description" : "Update a page layout's metadata (name, default flag, record type). PATCHes /api/page-layouts/{id}. To restructure sections or fields, use delete_layout + create_layout — full section replacement isn't supported in a single tool call.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Layout id (UUID)."
+      },
+      "name" : {
+        "type" : "string",
+        "description" : "New name."
+      },
+      "isDefault" : {
+        "type" : "boolean",
+        "description" : "New default-for-collection flag.",
+        "default" : false
+      },
+      "recordTypeName" : {
+        "type" : "string",
+        "description" : "New record type assignment."
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "update_listview",
+  "title" : "Update List View",
+  "description" : "Update a saved list view's name, columns, filter, or sort. Wraps PATCH /api/list-views/{id}.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "List view id (UUID)."
+      },
+      "name" : {
+        "type" : "string",
+        "description" : "New list view name."
+      },
+      "displayedFields" : {
+        "type" : "string",
+        "description" : "New comma-separated field names to show as columns, in display order."
+      },
+      "filter" : {
+        "type" : "object",
+        "description" : "New saved-filter expression in JSON:API filter shape, e.g. {\"status\":{\"EQ\":\"OPEN\"}}. Pass an empty object {} to clear all filters.",
+        "additionalProperties" : true
+      },
+      "sort" : {
+        "type" : "string",
+        "description" : "New default sort field, '-' prefix for descending, e.g. \"-createdAt\"."
+      },
+      "isDefault" : {
+        "type" : "boolean",
+        "description" : "New default-for-collection flag.",
+        "default" : false
+      },
+      "visibility" : {
+        "type" : "string",
+        "description" : "PRIVATE or PUBLIC."
+      },
+      "rowLimit" : {
+        "type" : "integer",
+        "description" : "New maximum rows rendered: one of 10, 25, 50 or 100.",
+        "minimum" : 10,
+        "maximum" : 100
+      },
+      "viewType" : {
+        "type" : "string",
+        "description" : "Renderer everyone opening this view gets: TABLE, KANBAN, CALENDAR or GALLERY."
+      },
+      "typeConfig" : {
+        "type" : "object",
+        "description" : "Settings for the chosen renderer, e.g. {\"kanban\":{\"laneField\":\"status\",\"cardFields\":[\"title\"]}}. Pass an empty object {} to clear them.",
+        "additionalProperties" : true
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "update_picklist_value",
+  "title" : "Update Picklist Value",
+  "description" : "Update a picklist value's mutable attributes. Wraps PATCH /api/picklist-values/{id}. Only the supplied fields are sent — to deactivate a value, prefer deactivate_picklist_value.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Picklist value id (UUID)."
+      },
+      "value" : {
+        "type" : "string",
+        "description" : "New stored value."
+      },
+      "label" : {
+        "type" : "string",
+        "description" : "New display label."
+      },
+      "color" : {
+        "type" : "string",
+        "description" : "New hex color used when the value is rendered as a badge, e.g. \"#22C55E\"."
+      },
+      "sortOrder" : {
+        "type" : "integer",
+        "description" : "New display order."
+      },
+      "isActive" : {
+        "type" : "boolean",
+        "description" : "New active flag.",
+        "default" : true
+      },
+      "isDefault" : {
+        "type" : "boolean",
+        "description" : "New default flag.",
+        "default" : false
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "update_validation_rule",
+  "title" : "Update Validation Rule",
+  "description" : "Update a validation rule's mutable attributes. Wraps PATCH /api/validation-rules/{id}. Only the fields you supply are sent — omitted fields are left unchanged. Remember: errorConditionFormula is an ERROR condition — the record is REJECTED when it evaluates TRUE.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "id" : {
+        "type" : "string",
+        "description" : "Validation rule id (UUID)."
+      },
+      "name" : {
+        "type" : "string",
+        "description" : "New rule name."
+      },
+      "errorConditionFormula" : {
+        "type" : "string",
+        "description" : "New error condition formula — record is REJECTED when this evaluates TRUE."
+      },
+      "errorMessage" : {
+        "type" : "string",
+        "description" : "New error message shown to the user."
+      },
+      "errorField" : {
+        "type" : "string",
+        "description" : "Field to attribute the error to (pass an empty string to clear)."
+      },
+      "evaluateOn" : {
+        "type" : "string",
+        "description" : "When to run: CREATE, UPDATE, or CREATE_AND_UPDATE."
+      },
+      "severity" : {
+        "type" : "string",
+        "description" : "ERROR or WARNING."
+      },
+      "active" : {
+        "type" : "boolean",
+        "description" : "Active flag.",
+        "default" : true
+      }
+    },
+    "required" : [ "id" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : false,
+    "destructiveHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "validate_dashboard",
+  "title" : "Validate Dashboard",
+  "description" : "Check a dashboard's widget configs (unknown collection/field/operator, non-aggregatable field, grid position outside columnCount) without writing anything; returns {\"valid\":...,\"components\":[{\"errors\":[...]}]} as the worker reports it. Example: {\"dashboard\":\"Sales Overview\"}. Wraps POST /api/dashboards/{id}/validate (the name is resolved to the id first).",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "dashboard" : {
+        "type" : "string",
+        "description" : "Dashboard name or id."
+      },
+      "body" : {
+        "type" : "object",
+        "description" : "Optional request body, e.g. {\"components\":[...]} to validate unsaved widgets. Omit to validate the dashboard's saved components.",
+        "additionalProperties" : true
+      }
+    },
+    "required" : [ "dashboard" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "get_collection_schema",
+  "title" : "Get Collection Schema",
+  "description" : "Return the full schema for a collection: metadata + all field definitions (type, required, enum values, references, systemMaintained) plus its validation rules by default. PICKLIST and MULTI_PICKLIST fields carry picklistValues — the active values, each {value, label, isDefault, sortOrder}, in sortOrder — so write one of those values instead of guessing. Wraps GET /api/collections/{name}/schema, and — when includeRules is true — GET /api/validation-rules for that collection. Use this before constructing a query or create_record call to know what attributes are available; a systemMaintained field is set by flows only, and a create or update that sets or changes it returns 400. Example: {\"collection\": \"accounts\"} returns accounts' fields with types/enums and its active validation rules.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "collection" : {
+        "type" : "string",
+        "description" : "Collection name or ID (e.g. \"accounts\" or a UUID). Looked up via /api/collections."
+      },
+      "includeRules" : {
+        "type" : "boolean",
+        "description" : "Also fetch and embed the collection's validation rules (default true).",
+        "default" : true
+      }
+    },
+    "required" : [ "collection" ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+}, {
+  "name" : "list_collections",
+  "title" : "List Collections",
+  "description" : "List all collections available in the current tenant. Returns JSON:API formatted list with collection metadata. Use this to discover what data is available before querying.",
+  "inputSchema" : {
+    "type" : "object",
+    "properties" : {
+      "includeSystem" : {
+        "type" : "boolean",
+        "description" : "Include system collections (users, fields, layouts, etc.). Default true.",
+        "default" : true
+      }
+    },
+    "required" : [ ],
+    "additionalProperties" : false
+  },
+  "annotations" : {
+    "readOnlyHint" : true,
+    "idempotentHint" : true,
+    "openWorldHint" : true
+  }
+} ]

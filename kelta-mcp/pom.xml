@@ -24,7 +24,7 @@
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <mcp-sdk.version>1.1.2</mcp-sdk.version>
+        <mcp-sdk.version>2.1.0</mcp-sdk.version>
         <wiremock.version>3.10.0</wiremock.version>
     </properties>
 
@@ -57,7 +57,7 @@
         <dependency>
             <groupId>net.logstash.logback</groupId>
             <artifactId>logstash-logback-encoder</artifactId>
-            <version>8.0</version>
+            <version>9.0</version>
         </dependency>
 
         <!-- OpenTelemetry auto-configuration with OTLP exporters -->

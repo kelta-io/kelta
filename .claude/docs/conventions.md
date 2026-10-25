@@ -125,6 +125,14 @@ fall back to `VALIDATION_FAILED`. Codes returned today:
   `UiPageConfigHook` (unknown field/column/operator, bad grid position, unknown
   widget type, etc).
 
+### Security on/off flags on a native service
+A security flag on kelta-gateway or kelta-auth (native images) is read at **run time**: declare it
+in `application.yml` as `${ENV_VAR:default}`, bind it to a typed `@ConfigurationProperties` record
+and branch where the beans are built — never `@ConditionalOnProperty`, which the native build
+freezes, so an env-var flip is silently ignored. Reference: `InternalAuthProperties` +
+`InternalServiceAuthConfig` (gateway), `InternalWorkerClientConfig` (auth),
+`InternalEndpointSecurityConfig` (worker, same shape).
+
 ### Javadoc
 - Required for public classes and methods
 - Include `@param`, `@returns`, `@throws`
@@ -193,6 +201,14 @@ Gateway code that needs the caller's address calls `ClientIpResolver.resolve(exc
 `X-Forwarded-For` split; `ClientIpResolverTest` fails the build if a gateway class mentions
 `"X-Forwarded-For"` / `"X-Real-IP"`. Services behind the gateway read the gateway-stamped
 `X-Kelta-Client-Ip` header (stripped inbound, set by `ClientIpForwardingFilter`), not XFF.
+**Worker code never reads `X-Forwarded-For`, `X-Forwarded-Proto` or `X-Forwarded-Host`**: Spring
+Cloud Gateway strips them before proxying (no `trusted-proxies` configured), and on any path that
+skips the gateway they are client-forged. The client IP comes from `X-Kelta-Client-Ip`, falling
+back to `getRemoteAddr()` (`MailboxWebhookController.clientIp`); a public URL comes from
+configuration, falling back to the request's own scheme/host/port only for local dev
+(`kelta.scim.public-url` ← `KELTA_PUBLIC_URL` in `ScimUserController`/`ScimGroupController`).
+The gateway-set identity headers `X-Forwarded-User/-Groups/-Roles` are Kelta's own, re-stamped by
+`IdentityHeaderForwardingFilter`, and are fine to read.
 kelta-auth, which has its own ingress, keeps a behaviourally identical copy of the rule in
 `PortalPublicRateLimitFilter`. Range lists are CIDRs or bare IPs parsed literal-only (no DNS).
 
@@ -466,6 +482,22 @@ required fields) means regenerating the page in the same PR** — run that test 
 `-Dkelta.docs.write=true` (command in `testing.md` → Generated reference: system collections). Never
 hand-edit the page.
 
+## Package API reference pages
+
+`docs/authoring/api-{sdk,components,plugin-sdk,formula}.md` (published at `/docs/reference/api-*/`)
+list every export of each `kelta-web/packages/<pkg>/src/index.ts` with its signature and first
+doc-comment paragraph, rendered with the TypeScript compiler API by
+`kelta-web/scripts/gen-api-reference.mjs`. **Changing a package's public exports, a signature or the
+first TSDoc paragraph means running `npm run gen:api-reference` in `kelta-web` in the same PR**;
+`kelta-web/scripts/apiReference.test.ts` fails on a stale page. Never hand-edit them.
+
+The rule for every generated reference page: it lives in `docs/authoring/`, starts with a
+`GENERATED … do not edit by hand` comment, is registered in `kelta-marketing/src/docs/externalMeta.ts`,
+and carries a freshness test that compares the committed file to a fresh render. It is
+**site-only** — the CLI and MCP embed only the topics listed in `AUTHORING_DOCS`
+(`kelta-web/packages/cli/src/docsgen/authoringDocs.ts`), and generated references
+(`endpoints.md`, `system-collections.md`, `api-*.md`) stay out of it.
+
 ## TypeScript
 
 ### Naming
@@ -562,6 +594,7 @@ MCP admin tools expose camelCase, lowercase-friendly argument names to LLM calle
 
 - **Field types**: accept friendly aliases (`text`, `number`, `picklist`, `lookup`, …) and map to the uppercase `FieldType` enum the worker expects. Centralise the mapping in `FieldBodyBuilder.resolveNativeType` so `add_field` and `create_collection`'s nested field array stay in sync.
 - **Per-type payload**: picklist fields need `attributes.fieldTypeConfig = {picklistSourceType, picklistSourceId}`; reference/lookup fields need `relationships.referenceCollectionId.data.id` + `attributes.relationshipName` (and optional `relationshipType`). Build these in the same helper so the on-the-wire shape can be unit-tested with WireMock JSON path matchers.
+- **Argument types are validated centrally**: `ArgumentTypeValidatingToolDecorator` (wired for every tool in `McpServerConfig`) checks each argument against the top-level `type` in the tool's `inputSchema` and returns a 400 `INVALID_ARGUMENT_TYPE` result (`McpErrorMapper.badRequest`) before the tool runs. Tools must not coerce a wrong-typed argument (e.g. parse a number sent as a string); declare the type in `inputSchema` instead.
 - **ID resolution**: accept either a UUID (`collectionId`, `referenceCollectionId`, `picklistSourceId`) or a friendly name (`collectionName`, `referenceCollection`) and resolve names via `GET /api/collections?filter[name][eq]=…`. UUIDs match `FieldBodyBuilder.UUID_PATTERN`; anything else triggers the lookup.
 
 ### Idempotent create-or-update (`apply_*` tools)
@@ -594,7 +627,7 @@ not "leave alone" — same as `apply_layout`'s existing whole-tree-replace contr
 
 A non-2xx gateway response maps to `CallToolResult.isError = true` with **both** the
 existing human-readable `TextContent` **and** `structuredContent = {status, errors:[...]}`
-(MCP SDK 1.1.2 `CallToolResult.builder().structuredContent(...)`) — `errors` is the
+(MCP SDK 2.1.0 `CallToolResult.builder().structuredContent(...)`) — `errors` is the
 gateway's own JSON:API error array (see "JSON:API error response shape" above), parsed and
 re-emitted verbatim so a calling agent can branch on `errors[0].code` /
 `errors[0].source.pointer` instead of parsing the prose message. A body that isn't a

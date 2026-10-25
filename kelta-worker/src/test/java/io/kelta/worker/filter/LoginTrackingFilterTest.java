@@ -288,13 +288,13 @@ class LoginTrackingFilterTest {
     }
 
     @Test
-    void shouldExtractClientIpFromXForwardedForHeader() {
+    void shouldIgnoreXForwardedForWithoutGatewayHeader() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Forwarded-For", "203.0.113.50, 70.41.3.18, 150.172.238.178");
         request.setRemoteAddr("127.0.0.1");
 
         String ip = LoginTrackingFilter.extractClientIp(request);
-        assertEquals("203.0.113.50", ip);
+        assertEquals("127.0.0.1", ip);
     }
 
     @Test
@@ -317,13 +317,13 @@ class LoginTrackingFilterTest {
     }
 
     @Test
-    void shouldFallBackToForwardedForWhenGatewayHeaderBlank() {
+    void shouldFallBackToRemoteAddrNotForwardedForWhenGatewayHeaderBlank() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Kelta-Client-Ip", "  ");
         request.addHeader("X-Forwarded-For", "203.0.113.50");
         request.setRemoteAddr("127.0.0.1");
 
-        assertEquals("203.0.113.50", LoginTrackingFilter.extractClientIp(request));
+        assertEquals("127.0.0.1", LoginTrackingFilter.extractClientIp(request));
     }
 
     @Test
