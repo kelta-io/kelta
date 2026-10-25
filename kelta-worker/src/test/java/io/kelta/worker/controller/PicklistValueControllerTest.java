@@ -5,6 +5,7 @@ import io.kelta.runtime.storage.UniqueConstraintViolationException;
 import io.kelta.worker.filter.TenantContextFilter;
 import io.kelta.worker.repository.PicklistValueRepository;
 import io.kelta.worker.service.PicklistValueCreationService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import java.util.Map;
 import java.util.UUID;
@@ -115,6 +117,17 @@ class PicklistValueControllerTest {
                 .standaloneSetup(new PicklistValueController(service, router), new RouterStub())
                 .addFilters(new TenantContextFilter())
                 .build();
+    }
+
+    /**
+     * {@link #fieldValueViolationIsNotRewritten} lets the exception escape {@code MockMvc.perform},
+     * which then never restores {@link RequestContextHolder}: the POST (X-Tenant-ID tenant-1) stays
+     * bound to the test thread, and {@code TenantAwareDataSource} refuses every later platform
+     * connection on it — e.g. Flyway in {@code WorkerApplicationContextIntegrationTest}.
+     */
+    @AfterEach
+    void unbindRequest() {
+        RequestContextHolder.resetRequestAttributes();
     }
 
     private ResultActions addValue(String sourceType, String value) throws Exception {
