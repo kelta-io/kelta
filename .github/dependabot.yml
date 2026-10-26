@@ -64,6 +64,16 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # ESLint 10 waits for eslint-plugin-jsx-a11y (latest 6.10.2 peers on eslint <=9; PLT-815,
+    # 2026-10-25). A lone @eslint/js 10 bump breaks npm install (kelta#2027). Remove these
+    # entries when jsx-a11y ships ESLint 10 support.
+    ignore:
+      - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@eslint/js"
+        update-types:
+          - "version-update:semver-major"
     labels:
       - dependencies
     groups:

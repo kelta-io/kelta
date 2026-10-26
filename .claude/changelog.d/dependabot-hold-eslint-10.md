@@ -1,0 +1,1 @@
+- 2026-10-26 chore(ci): Dependabot holds ESLint / @eslint/js majors until eslint-plugin-jsx-a11y supports ESLint 10 (PLT-815)
