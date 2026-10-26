@@ -16,17 +16,17 @@ export default defineConfig({
         '**/*.property.test.ts',
         '**/*.property.test.tsx',
       ],
-      rollupTypes: true,
+      bundleTypes: true,
     }),
   ],
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/index.ts'),
+      entry: resolve(import.meta.dirname, 'src/index.ts'),
       name: 'KeltaPluginSdk',
       formats: ['es', 'cjs'],
       fileName: (format) => `index.${format === 'es' ? 'js' : 'cjs'}`,
     },
-    rollupOptions: {
+    rolldownOptions: {
       external: ['react', 'react-dom', 'react/jsx-runtime', 'react-router-dom', '@kelta/sdk'],
       output: {
         globals: {
