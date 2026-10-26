@@ -5,10 +5,16 @@ import io.kelta.runtime.flow.StateDataResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 /**
  * Resolves a payload template against the current flow state. Used by
@@ -27,6 +33,10 @@ import java.util.Map;
  *       so existing {@code ${$.path}} placeholders keep working.</li>
  *   <li>Object values and array elements recurse.</li>
  * </ol>
+ *
+ * <p>JSONata only accepts JSON types, so the state is converted first:
+ * {@code java.time} values, {@link Date}, UUIDs and enums become strings (ISO-8601 for
+ * dates and times), {@link BigDecimal}/{@link BigInteger} become numbers.
  *
  * <p>JSONata expressions are pre-compiled per call (the dashjoin runtime is
  * already cached internally). Compilation errors surface as
@@ -82,6 +92,23 @@ public class PayloadMapperService {
                 + " but an object was expected");
     }
 
+    /**
+     * Resolves a single string template: {@code =jsonata} is evaluated, otherwise each
+     * {@code ${$.path}} value is passed through {@code valueEncoder} (see
+     * {@link StateDataResolver#resolveTemplate(String, Map, UnaryOperator)} for the
+     * {@code ${raw:$.path}} opt-out).
+     */
+    public Object mapTemplate(String template, Map<String, Object> stateData,
+                              UnaryOperator<String> valueEncoder) {
+        if (template == null) {
+            return null;
+        }
+        if (template.startsWith("=")) {
+            return evalJsonata(template.substring(1), stateData);
+        }
+        return dataResolver.resolveTemplate(template, stateData, valueEncoder);
+    }
+
     // -----------------------------------------------------------------------
 
     private Object mapString(String s, Map<String, Object> stateData) {
@@ -119,11 +146,55 @@ public class PayloadMapperService {
     private Object evalJsonata(String expression, Map<String, Object> stateData) {
         try {
             Jsonata expr = Jsonata.jsonata(expression);
-            return expr.evaluate(stateData);
+            return expr.evaluate(toJsonTypes(stateData));
         } catch (Exception e) {
             log.debug("JSONata expression failed: '{}': {}", expression, e.getMessage());
             throw new PayloadMapperException(
                 "JSONata expression failed: " + e.getMessage(), e);
         }
+    }
+
+    static Object toJsonTypes(Object value) {
+        if (value == null || value instanceof String || value instanceof Boolean
+                || value instanceof Integer || value instanceof Long || value instanceof Double) {
+            return value;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                out.put(String.valueOf(entry.getKey()), toJsonTypes(entry.getValue()));
+            }
+            return out;
+        }
+        if (value instanceof Collection<?> collection) {
+            List<Object> out = new ArrayList<>(collection.size());
+            for (Object item : collection) {
+                out.add(toJsonTypes(item));
+            }
+            return out;
+        }
+        if (value instanceof Object[] array) {
+            return toJsonTypes(Arrays.asList(array));
+        }
+        if (value instanceof BigInteger big) {
+            return big.bitLength() < Long.SIZE ? (Object) big.longValue() : (Object) big.doubleValue();
+        }
+        if (value instanceof BigDecimal || value instanceof Float) {
+            return ((Number) value).doubleValue();
+        }
+        if (value instanceof Short || value instanceof Byte) {
+            return ((Number) value).intValue();
+        }
+        if (value instanceof java.sql.Date || value instanceof java.sql.Time) {
+            return value.toString();
+        }
+        if (value instanceof Date date) {
+            return date.toInstant().toString();
+        }
+        if (value instanceof Enum<?> e) {
+            return e.name();
+        }
+        // TemporalAccessor (Instant, OffsetDateTime, LocalDate, ...) prints ISO-8601; UUID its canonical form
+        return value.toString();
     }
 }

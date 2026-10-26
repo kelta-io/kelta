@@ -1,5 +1,6 @@
 package io.kelta.runtime.module.integration.handlers;
 
+import io.kelta.runtime.flow.StateDataResolver;
 import io.kelta.runtime.module.integration.mapping.PayloadMapperException;
 import io.kelta.runtime.module.integration.mapping.PayloadMapperService;
 import io.kelta.runtime.module.integration.spi.EmailService;
@@ -13,7 +14,9 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Action handler that sends an email notification.
@@ -31,6 +34,20 @@ import java.util.Optional;
  * <p>When a {@code templateId} is provided, the handler loads the email template
  * and uses its subject/body. Otherwise, the subject/body from the config are used.
  *
+ * <p><b>Placeholders.</b> The flow engine passes {@code subject} and {@code body}
+ * unresolved ({@link #unresolvedParameterKeys()}); the handler expands them exactly once
+ * against the flow state, so a {@code ${...}} that arrives inside state data is sent as
+ * text, never expanded. Template subjects/bodies follow the same rule.
+ * <ul>
+ *   <li>{@code body}: each {@code ${$.path}} value is HTML-escaped
+ *       ({@code & < > " '}). Write {@code ${raw:$.path}} to insert a value unescaped —
+ *       only for trusted HTML, never member-typed text.</li>
+ *   <li>{@code subject}: values are not HTML-escaped (it is a header, not HTML); CR and
+ *       LF are stripped from the result so a value cannot inject headers.</li>
+ *   <li>A field starting with {@code =} is a JSONata expression; its result is used
+ *       as-is, without escaping.</li>
+ * </ul>
+ *
  * <p>Uses {@link EmailService} SPI to look up templates and queue emails.
  *
  * @since 1.0.0
@@ -38,6 +55,7 @@ import java.util.Optional;
 public class EmailAlertActionHandler implements ActionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(EmailAlertActionHandler.class);
+    private static final Set<String> UNRESOLVED_KEYS = Set.of("subject", "body");
 
     private final ObjectMapper objectMapper;
     private final EmailService emailService;
@@ -51,12 +69,18 @@ public class EmailAlertActionHandler implements ActionHandler {
                                     PayloadMapperService payloadMapper) {
         this.objectMapper = objectMapper;
         this.emailService = emailService;
-        this.payloadMapper = payloadMapper;
+        this.payloadMapper = payloadMapper != null ? payloadMapper
+            : new PayloadMapperService(new StateDataResolver(objectMapper));
     }
 
     @Override
     public String getActionTypeKey() {
         return "EMAIL_ALERT";
+    }
+
+    @Override
+    public Set<String> unresolvedParameterKeys() {
+        return UNRESOLVED_KEYS;
     }
 
     @Override
@@ -94,22 +118,14 @@ public class EmailAlertActionHandler implements ActionHandler {
                 return ActionResult.failure("Email 'subject' is required");
             }
 
-            // PR 5: pass subject + body through the payload mapper so users
-            // can write ${$.path} placeholders or =jsonata expressions in
-            // either field. Falls back to the unresolved string when the
-            // mapper isn't wired (legacy installs).
-            if (payloadMapper != null) {
-                Map<String, Object> stateData = mappingState(context);
-                try {
-                    Object subjectMapped = payloadMapper.map(subject, stateData);
-                    if (subjectMapped instanceof String s) subject = s;
-                    if (body != null) {
-                        Object bodyMapped = payloadMapper.map(body, stateData);
-                        if (bodyMapped instanceof String s) body = s;
-                    }
-                } catch (PayloadMapperException e) {
-                    return ActionResult.failure("Mapper.Failure: " + e.getMessage());
-                }
+            Map<String, Object> stateData = mappingState(context);
+            try {
+                subject = stripLineBreaks(Objects.toString(
+                    payloadMapper.mapTemplate(subject, stateData, value -> value), ""));
+                body = Objects.toString(
+                    payloadMapper.mapTemplate(body, stateData, EmailAlertActionHandler::escapeHtml), null);
+            } catch (PayloadMapperException e) {
+                return ActionResult.failure("Mapper.Failure: " + e.getMessage());
             }
 
             String emailLogId = emailService.queueEmail(
@@ -133,9 +149,29 @@ public class EmailAlertActionHandler implements ActionHandler {
     }
 
     private Map<String, Object> mappingState(ActionContext context) {
-        Map<String, Object> base = context.resolvedData() != null
-            ? context.resolvedData() : context.data();
+        Map<String, Object> base = context.stateData() != null ? context.stateData()
+            : context.resolvedData() != null ? context.resolvedData() : context.data();
         return base != null ? base : new HashMap<>();
+    }
+
+    static String escapeHtml(String value) {
+        StringBuilder out = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '&' -> out.append("&amp;");
+                case '<' -> out.append("&lt;");
+                case '>' -> out.append("&gt;");
+                case '"' -> out.append("&quot;");
+                case '\'' -> out.append("&#39;");
+                default -> out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    private static String stripLineBreaks(String value) {
+        return value.replace("\r", "").replace("\n", "");
     }
 
     @Override
