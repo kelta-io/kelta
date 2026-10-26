@@ -24,7 +24,7 @@ type Advisory = { ids: string[]; score?: string; label?: string; labelOn?: strin
  */
 function tree(
   perTarget: Record<string, Advisory[]>,
-  opts: { components?: number; scannerExit?: number; agent?: string } = {}
+  opts: { components?: number; scannerExit?: number; agent?: string; aiDockerfile?: string } = {}
 ) {
   const root = mkdtempSync(join(tmpdir(), 'java-audit-'));
   mkdirSync(join(root, 'ci'));
@@ -33,7 +33,9 @@ function tree(
     const components = Array.from({ length: opts.components ?? 3 }, (_, i) => ({ purl: `pkg:maven/x/y${i}@1` }));
     writeFileSync(join(root, `kelta-${svc}`, 'target', `${svc}.cdx.json`), JSON.stringify({ components }));
   }
-  if (opts.agent) {
+  if (opts.aiDockerfile !== undefined) {
+    writeFileSync(join(root, 'kelta-ai', 'Dockerfile'), opts.aiDockerfile);
+  } else if (opts.agent) {
     writeFileSync(
       join(root, 'kelta-ai', 'Dockerfile'),
       `RUN curl -fL -o opentelemetry-javaagent.jar \\\n    https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${opts.agent}/opentelemetry-javaagent.jar\n`
@@ -194,6 +196,56 @@ describe('java-dependency-audit', () => {
     assert.match(r.out, /NEW\s+GHSA-agent\s+critical \| io\.opentelemetry\.javaagent:opentelemetry-javaagent@1\.0/);
     const sbom = JSON.parse(readFileSync(join(root, 'target', 'java-audit', 'otel-javaagent.cdx.json'), 'utf8'));
     assert.equal(sbom.components[0].purl, 'pkg:maven/io.opentelemetry.javaagent/opentelemetry-javaagent@2.25.0');
+  });
+
+  const AGENT_URL = 'https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download';
+
+  it('resolves an ARG-style agent version through the ARG default', () => {
+    const root = tree({}, { aiDockerfile: `ARG OTEL_AGENT_VERSION=2.26.1\nRUN curl -fL -o a.jar ${AGENT_URL}/v\${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar\n` });
+    baseline(root, {});
+    const r = run(root);
+    assert.equal(r.status, 0, r.out);
+    const sbom = JSON.parse(readFileSync(join(root, 'target', 'java-audit', 'otel-javaagent.cdx.json'), 'utf8'));
+    assert.equal(sbom.components[0].version, '2.26.1');
+  });
+
+  it('fails when an ARG-style agent version has no default', () => {
+    const root = tree({}, { aiDockerfile: `RUN curl -fL -o a.jar ${AGENT_URL}/v$OTEL_AGENT_VERSION/opentelemetry-javaagent.jar\n` });
+    baseline(root, {});
+    const r = run(root);
+    assert.notEqual(r.status, 0);
+    assert.match(r.out, /no "ARG OTEL_AGENT_VERSION=<version>" default/);
+  });
+
+  it('fails when a Dockerfile uses the agent in a form it cannot read, instead of dropping the target', () => {
+    const root = tree({}, { aiDockerfile: 'COPY vendor/opentelemetry-javaagent.jar /app/\nENV JAVA_OPTS="-javaagent:/app/opentelemetry-javaagent.jar"\n' });
+    baseline(root, {});
+    const r = run(root);
+    assert.notEqual(r.status, 0);
+    assert.match(r.out, /references the OpenTelemetry agent but no pinned version/);
+  });
+
+  it('ignores a commented-out agent reference', () => {
+    const root = tree({}, { aiDockerfile: '# no -javaagent:/app/opentelemetry-javaagent.jar here on purpose\n' });
+    baseline(root, {});
+    assert.equal(run(root).status, 0);
+  });
+
+  it('reports the advisories of a target no longer scanned as resolved', () => {
+    const root = tree({});
+    baseline(root, { 'otel-javaagent': { 'GHSA-agent': 'critical | x' } });
+    const r = run(root);
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /resolved GHSA-agent\s+\(otel-javaagent is no longer scanned/);
+  });
+
+  it('counts a missing reason once per id, not once per target', () => {
+    const root = tree({ worker: [{ ids: ['GHSA-both'], score: '7.5' }], auth: [{ ids: ['GHSA-both'], score: '7.5' }] });
+    baseline(root, { worker: { 'GHSA-both': 'high | x' }, auth: { 'GHSA-both': 'high | x' } }, {});
+    const r = run(root);
+    assert.equal(r.status, 1);
+    assert.equal(r.out.match(/NO REASON GHSA-both/g)?.length, 1);
+    assert.match(r.out, /FAIL: 1 baselined advisory/);
   });
 
   it('skips the agent target when no Dockerfile pins an agent', () => {

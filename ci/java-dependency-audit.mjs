@@ -10,7 +10,9 @@
  *      (osv-scanner's own pom resolver cannot do this: it fails on the io.kelta SNAPSHOTs.)
  *   2. The OpenTelemetry Java agent, which some images download in their Dockerfile and run
  *      in-process with -javaagent, is outside every Maven classpath. Every version pinned in a
- *      service Dockerfile is written into one more SBOM, target "otel-javaagent".
+ *      kelta-<svc>/Dockerfile{,.jvm} GitHub-release URL — literal, or an ARG with a default — is
+ *      written into one more SBOM, target "otel-javaagent". A Dockerfile that references the
+ *      agent in any other form fails the check rather than dropping the target.
  *   3. osv-scanner checks every component of each SBOM against osv.dev (Maven ecosystem).
  * Out of scope: base images, the JRE and OS packages.
  *
@@ -64,16 +66,43 @@ function writeServiceSbom(svc) {
   if (!existsSync(sbomPath(svc))) throw new Error(`No SBOM written for ${svc}: ${sbomPath(svc)}`)
 }
 
-const AGENT_URL = /opentelemetry-java-instrumentation\/releases\/download\/v([0-9][^/\s]*)\/opentelemetry-javaagent\.jar/g
+// The release-download URL; the version may be literal (v2.25.0) or an ARG (v${OTEL_VERSION}).
+const AGENT_URL =
+  /opentelemetry-java-instrumentation\/releases\/download\/v(\$\{?\w+\}?|[0-9][^/\s]*)\/opentelemetry-javaagent\.jar/g
 
-/** Every OpenTelemetry agent version a service Dockerfile downloads, as a synthetic SBOM. */
+/** Pinned version for one URL match: literal, or the ARG's default declared in the same file. */
+function agentVersion(raw, dockerfile) {
+  if (!raw.startsWith('$')) return raw
+  const name = raw.replace(/[${}]/g, '')
+  const arg = new RegExp(`^\\s*ARG\\s+${name}=["']?([^"'\\s]+)`, 'm').exec(dockerfile)
+  return arg ? arg[1] : null
+}
+
+/**
+ * Every OpenTelemetry agent version a service Dockerfile downloads, as a synthetic SBOM. Fails
+ * closed: a Dockerfile that mentions the agent but yields no resolvable version would otherwise
+ * make the target vanish and the job pass.
+ */
 function writeAgentSbom() {
   const versions = new Set()
   for (const svc of SERVICES) {
     for (const name of ['Dockerfile', 'Dockerfile.jvm']) {
       const file = join(ROOT, `kelta-${svc}`, name)
       if (!existsSync(file)) continue
-      for (const m of readFileSync(file, 'utf8').matchAll(AGENT_URL)) versions.add(m[1])
+      const text = readFileSync(file, 'utf8')
+      const found = []
+      for (const m of text.matchAll(AGENT_URL)) {
+        const version = agentVersion(m[1], text)
+        if (!version) {
+          throw new Error(`kelta-${svc}/${name}: agent URL uses ${m[1]} but no "ARG ${m[1].replace(/[${}]/g, '')}=<version>" default is declared`)
+        }
+        found.push(version)
+      }
+      // A download or -javaagent the pattern did not recognise (other URL, local copy, …).
+      if (found.length === 0 && /opentelemetry-javaagent[^\n]*\.jar/.test(text.replace(/^\s*#.*$/gm, ''))) {
+        throw new Error(`kelta-${svc}/${name} references the OpenTelemetry agent but no pinned version could be read — teach ci/java-dependency-audit.mjs the new form`)
+      }
+      found.forEach((v) => versions.add(v))
     }
   }
   const components = [...versions].sort().map((v) => ({
@@ -207,7 +236,14 @@ const reasons = baselineFile._reasons ?? {}
 
 let newCount = 0
 let fixedCount = 0
-let unexplained = 0
+const unexplained = new Set()
+for (const t of Object.keys(baseline).filter((t) => !TARGETS.includes(t))) {
+  // A target no longer scanned (e.g. the agent removed from every image): its advisories are gone.
+  for (const id of Object.keys(baseline[t])) {
+    fixedCount++
+    console.log(`  resolved ${id}  (${t} is no longer scanned; was: ${baseline[t][id]})`)
+  }
+}
 for (const t of TARGETS) {
   const known = baseline[t] ?? {}
   const current = scans[t].found
@@ -228,8 +264,8 @@ for (const t of TARGETS) {
     console.log(`  resolved ${id}  (was: ${known[id]})`)
   }
   for (const id of Object.keys(known)) {
-    if (!reasons[id]) {
-      unexplained++
+    if (!reasons[id] && !unexplained.has(id)) {
+      unexplained.add(id)
       console.error(`  NO REASON ${id} is baselined without a line in _reasons`)
     }
   }
@@ -241,7 +277,7 @@ if (fixedCount) {
       '  node ci/java-dependency-audit.mjs --update'
   )
 }
-if (newCount || unexplained) {
+if (newCount || unexplained.size) {
   if (newCount) {
     console.error(
       `\nFAIL: ${newCount} new high/critical advisory(ies) in shipped Java.\n` +
@@ -250,8 +286,8 @@ if (newCount || unexplained) {
         '(On a PR that does not touch dependencies, this means an advisory was just published.)'
     )
   }
-  if (unexplained) {
-    console.error(`\nFAIL: ${unexplained} baselined advisory(ies) have no line in _reasons.`)
+  if (unexplained.size) {
+    console.error(`\nFAIL: ${unexplained.size} baselined advisory(ies) have no line in _reasons.`)
   }
   process.exit(1)
 }

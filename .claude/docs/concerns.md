@@ -130,8 +130,8 @@ inbound routing by `email_from_address`, and kelta-auth slug→id lookups (`Tena
   above the job still says 33).
 - **FIXED — Java dependencies were unscanned.** OWASP dependency-check never ran (blocked on an
   `NVD_API_KEY` the NVD API rejects). `dependency-audit-java` now scans each service's shipped
-  classpath — a Maven-resolved CycloneDX SBOM — and the OpenTelemetry Java agent the Dockerfiles
-  download, with OSV-Scanner, no API key, as a delta gate against `ci/java-audit-baseline.json`
+  classpath — a Maven-resolved CycloneDX SBOM — and the OpenTelemetry Java agent version pinned in
+  the service Dockerfiles (fails closed if it cannot read one), with OSV-Scanner, no API key, as a delta gate against `ci/java-audit-baseline.json`
   (`ci-cd.md`). Baseline when it landed: **5** advisories, all with known fixes —
   **the OpenTelemetry agent 2.25.0 in the kelta-ai and kelta-mcp images (1 critical: RMI
   deserialization RCE, GHSA-xw7x-h9fj-p2c7, exploitable only with a reachable RMI/JMX port;
