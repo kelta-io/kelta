@@ -212,8 +212,8 @@ class FlowWebhookControllerTest {
                 .andExpect(status().isOk());
 
         Map<String, Object> state = startedState();
-        assertThat(section(state, "input")).containsExactlyEntriesOf(Map.of("List-Unsubscribe", "One-Click"));
-        assertThat(section(state, "query")).containsExactlyEntriesOf(Map.of("u", "42"));
+        assertThat(section(state, "input")).isEqualTo(Map.of("List-Unsubscribe", "One-Click"));
+        assertThat(section(state, "query")).isEqualTo(Map.of("u", "42"));
     }
 
     @Test
@@ -296,7 +296,7 @@ class FlowWebhookControllerTest {
                 .andExpect(status().isOk());
 
         assertThat(section(startedState(), "query"))
-                .containsExactlyEntriesOf(Map.of("token", "t1", "email", "a@b.com"));
+                .isEqualTo(Map.of("token", "t1", "email", "a@b.com"));
     }
 
     @Test
