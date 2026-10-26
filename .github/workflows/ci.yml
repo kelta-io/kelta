@@ -69,6 +69,7 @@ jobs:
       any_java: ${{ steps.filter.outputs.any_java }}
       integration: ${{ steps.filter.outputs.integration }}
       maven_build: ${{ steps.filter.outputs.maven_build }}
+      java_audit: ${{ steps.filter.outputs.java_audit }}
       e2e: ${{ steps.filter.outputs.e2e }}
       runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
       quickstart: ${{ steps.filter.outputs.quickstart }}
@@ -1658,6 +1659,88 @@ jobs:
         run: node ci/dependency-audit.mjs
 
   # ===========================================================================
+  # Java dependency audit: the services' SHIPPED classpaths (compile + runtime scope) against
+  # osv.dev. Maven resolves each service into a CycloneDX SBOM, osv-scanner checks the SBOMs,
+  # and ci/java-dependency-audit.mjs fails on high/critical advisories not in
+  # ci/java-audit-baseline.json — the same delta gate as the npm audit above. Needs no API key
+  # (the OWASP dependency-check attempt, #1471, died waiting on an NVD key).
+  # Also runs on the weekly schedule: advisories are published without any code change here.
+  # ===========================================================================
+  dependency-audit-java:
+    name: Dependency Audit (Java)
+    needs: changes
+    runs-on: k8s-runner
+    if: >-
+      needs.changes.outputs.any_java == 'true' || needs.changes.outputs.java_audit == 'true'
+      || needs.changes.outputs.maven_build == 'true' || needs.changes.outputs.workflows == 'true'
+      || github.event_name == 'schedule'
+    env:
+      OSV_SCANNER_VERSION: '2.7.0'
+      # sha256 of osv-scanner_linux_amd64 from the release's osv-scanner_SHA256SUMS
+      OSV_SCANNER_SHA256: '160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v6
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Maven
+        run: |
+          if ! command -v mvn &> /dev/null; then
+            curl -fsSL https://archive.apache.org/dist/maven/maven-3/${{ env.MAVEN_VERSION }}/binaries/apache-maven-${{ env.MAVEN_VERSION }}-bin.tar.gz | tar xz -C /opt
+            echo "/opt/apache-maven-${{ env.MAVEN_VERSION }}/bin" >> "$GITHUB_PATH"
+          fi
+          mkdir -p ~/.m2
+          cp ci/maven-settings.xml ~/.m2/settings.xml
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-
+
+      - name: Clean stale Kelta artifacts
+        run: rm -rf ~/.m2/repository/io/kelta
+
+      - name: Build runtime modules
+        run: mvn clean install -DskipTests -f kelta-platform/pom.xml -pl runtime/runtime-core,runtime/runtime-events,runtime/runtime-messaging-nats,runtime/runtime-jsonapi,runtime/runtime-module-core,runtime/runtime-module-integration,runtime/runtime-module-schema -am -B
+
+      # The binary, pinned and checksum-verified: the runner's remote Docker daemon cannot
+      # bind-mount the workspace, so the osv-scanner container image is not an option here.
+      - name: Install osv-scanner ${{ env.OSV_SCANNER_VERSION }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  $RUNNER_TEMP/bin/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/osv-scanner"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Audit shipped Java dependencies
+        run: node ci/java-dependency-audit.mjs
+
+      - name: Upload SBOMs
+        continue-on-error: true
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-sboms
+          path: kelta-*/target/*.cdx.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ===========================================================================
   # Lint the workflow files themselves.
   #
   # Added after a `secrets` context in an `if:` condition broke this whole file:
@@ -1852,13 +1935,13 @@ jobs:
 
   quality-gate:
     name: Quality Gate
-    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, mcp-replay, upgrade, worker-image-is-jvm, dependency-audit, lint-workflows, test-ci-scripts, test-dora]
+    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, mcp-replay, upgrade, worker-image-is-jvm, dependency-audit, dependency-audit-java, lint-workflows, test-ci-scripts, test-dora]
     if: always()
     runs-on: k8s-runner
     steps:
       - name: Check job results
         run: |
-          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart templates mcp-replay upgrade worker-image-is-jvm dependency-audit lint-workflows test-ci-scripts test-dora; do
+          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart templates mcp-replay upgrade worker-image-is-jvm dependency-audit dependency-audit-java lint-workflows test-ci-scripts test-dora; do
             case "${job}" in
               test-java)         result="${{ needs.test-java.result }}" ;;
               test-runtime)      result="${{ needs.test-runtime.result }}" ;;
@@ -1873,6 +1956,7 @@ jobs:
               upgrade)           result="${{ needs.upgrade.result }}" ;;
               worker-image-is-jvm) result="${{ needs.worker-image-is-jvm.result }}" ;;
               dependency-audit)  result="${{ needs.dependency-audit.result }}" ;;
+              dependency-audit-java) result="${{ needs.dependency-audit-java.result }}" ;;
               lint-workflows)    result="${{ needs.lint-workflows.result }}" ;;
               test-ci-scripts)   result="${{ needs.test-ci-scripts.result }}" ;;
               test-dora)         result="${{ needs.test-dora.result }}" ;;

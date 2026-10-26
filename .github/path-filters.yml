@@ -86,6 +86,12 @@ any_java:
 maven_build: &maven_build
   - 'ci/maven-settings.xml'
 
+# Java dependency audit (job "dependency-audit-java"): its script and baseline. Service poms are
+# covered by any_java, which the job also accepts, and it runs on the weekly schedule.
+java_audit:
+  - 'ci/java-dependency-audit.mjs'
+  - 'ci/java-audit-baseline.json'
+
 # Cross-service integration tests (kelta-test-harness, job "integration-tests") and the
 # test-java job it needs. Everything any_java matches (repeated, not spliced: the filter action
 # flattens only one level of anchors), plus the harness itself and the Maven settings. Kept apart
