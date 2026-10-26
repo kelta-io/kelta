@@ -1073,14 +1073,9 @@ jobs:
     if: needs.smoke-test.result == 'success'
     runs-on: k8s-runner
     timeout-minutes: 25
-    # k8s-runner is built from .github/runner/Dockerfile (FROM ghcr.io/actions/actions-runner:latest),
-    # whose OS Playwright 1.64.1 does not recognise. Older Playwright fell back to ubuntu20.04
-    # builds; 1.64 dropped them, so the fallback now fails with "Playwright does not support
-    # chromium on ubuntu20.04-x64". Pin the host platform at JOB level so both "Install Playwright
-    # browsers" and "Run E2E tests" resolve the same noble Chromium build. A Playwright bump must
-    # keep this pointing at a platform the new version still ships (ci-cd.md → e2e-test).
-    env:
-      PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: ubuntu24.04-x64
+    # Playwright runs inside mcr.microsoft.com/playwright:v<version>-noble, never on the host:
+    # k8s-runner (.github/runner/Dockerfile) has focal apt sources, so `playwright install
+    # --with-deps` cannot get the noble system libs a current Chromium needs (ci-cd.md → e2e-test).
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -1098,18 +1093,6 @@ jobs:
           restore-keys: |
             e2e-npm-${{ runner.os }}-
 
-      - name: Install dependencies
-        working-directory: e2e-tests
-        run: npm ci
-
-      # Resolves Chromium for PLAYWRIGHT_HOST_PLATFORM_OVERRIDE (job env above), not the runner's
-      # detected OS: ghcr.io/actions/actions-runner:latest reports an OS Playwright 1.64.1 does
-      # not recognise, and 1.64 dropped the ubuntu20.04 fallback older versions used.
-      # --with-deps stays: dropping it would hide missing system libs until the tests crash.
-      - name: Install Playwright browsers
-        working-directory: e2e-tests
-        run: npx playwright install --with-deps chromium
-
       # The CLI smoke spec (tests/admin/cli-smoke.spec.ts) spawns the built CLI
       # against the deployed stack. Build it here (formula+sdk first — the CLI
       # consumes @kelta/sdk's dist); the spec self-skips when the dist is absent.
@@ -1119,6 +1102,35 @@ jobs:
           npm ci
           npm run build -w packages/formula -w packages/sdk
           npm run build -w packages/cli
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Bake e2e-tests (with its node_modules) and the built kelta-web tree into the noble
+      # Playwright image, as ci.yml's `e2e` job does, instead of bind-mounting the workspace:
+      # the Docker daemon is not guaranteed to see the runner's filesystem. The CLI specs
+      # resolve `../../[../]kelta-web/packages/cli/dist/index.js` from /work/tests, i.e.
+      # /kelta-web, the same relative path they use on a checkout.
+      - name: Build Playwright runner image (tests + CLI baked in)
+        run: |
+          # Image tag from @playwright/test in e2e-tests/package-lock.json, so the browsers
+          # always match the installed package (same rule as ci.yml → e2e).
+          PLAYWRIGHT_VERSION=$(jq -r '.packages["node_modules/@playwright/test"].version' e2e-tests/package-lock.json)
+          if [ -z "$PLAYWRIGHT_VERSION" ] || [ "$PLAYWRIGHT_VERSION" = "null" ]; then
+            echo "::error::no @playwright/test version in e2e-tests/package-lock.json"
+            exit 1
+          fi
+          echo "Playwright runner base image: mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
+          docker buildx build --load -t "kelta-e2e-postdeploy:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --build-arg PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" -f - . <<'DOCKERFILE'
+          ARG PLAYWRIGHT_VERSION
+          FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
+          WORKDIR /work
+          COPY e2e-tests/package.json e2e-tests/package-lock.json ./
+          RUN npm ci
+          COPY e2e-tests/ .
+          COPY kelta-web /kelta-web
+          DOCKERFILE
 
       # Deploys are GitOps: the pipeline bumps the kustomize image tag and ArgoCD rolls the
       # worker out ASYNCHRONOUSLY. Until every worker pod is the new revision the gateway
@@ -1207,9 +1219,9 @@ jobs:
             done
           done
 
-      - name: Run E2E tests
-        timeout-minutes: 18
-        working-directory: e2e-tests
+      # Secrets reach the container through an --env-file under $RUNNER_TEMP (read by the
+      # docker client), never on the command line or in the log.
+      - name: Write E2E runner environment
         env:
           E2E_BASE_URL: https://app.kelta.io
           E2E_MARKETING_URL: https://kelta.io
@@ -1230,7 +1242,45 @@ jobs:
           E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
           E2E_SERVICE_CLIENT_ID: ${{ secrets.E2E_SERVICE_CLIENT_ID }}
           E2E_SERVICE_CLIENT_SECRET: ${{ secrets.E2E_SERVICE_CLIENT_SECRET }}
-        run: npx playwright test
+        run: |
+          umask 077
+          {
+            echo "CI=true"
+            for name in E2E_BASE_URL E2E_MARKETING_URL E2E_API_BASE_URL E2E_TENANT_SLUG \
+              E2E_AUTH_BASE_URL E2E_AUTH_DIRECT_LOGIN_URL E2E_API_TOKEN E2E_AUTHENTIK_URL \
+              E2E_CLIENT_ID E2E_OIDC_PROVIDER_ID E2E_TEST_USERNAME E2E_TEST_PASSWORD \
+              E2E_SERVICE_CLIENT_ID E2E_SERVICE_CLIENT_SECRET; do
+              printf '%s=%s\n' "$name" "${!name}"
+            done
+          } > "$RUNNER_TEMP/e2e-postdeploy.env"
+
+      - name: Run E2E tests
+        id: playwright
+        timeout-minutes: 18
+        run: |
+          CONTAINER="kelta-e2e-postdeploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "$CONTAINER" 2>/dev/null || true
+          docker run --name "$CONTAINER" \
+            --env-file "$RUNNER_TEMP/e2e-postdeploy.env" \
+            "kelta-e2e-postdeploy:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            npx playwright test
+
+      # The upload steps below read e2e-tests/playwright-report and e2e-tests/test-results,
+      # so copy them out of the container even when the tests failed or the step timed out.
+      - name: Copy Playwright reports out of container
+        if: always() && steps.playwright.outcome != 'skipped'
+        run: |
+          CONTAINER="kelta-e2e-postdeploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p e2e-tests/playwright-report e2e-tests/test-results
+          docker cp "$CONTAINER":/work/playwright-report/. e2e-tests/playwright-report/ 2>/dev/null || true
+          docker cp "$CONTAINER":/work/test-results/. e2e-tests/test-results/ 2>/dev/null || true
+          docker rm -f "$CONTAINER" || true
+
+      - name: Remove Playwright runner image and environment
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/e2e-postdeploy.env"
+          docker image rm "kelta-e2e-postdeploy:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" 2>/dev/null || true
 
       - name: Upload test report
         if: always()

@@ -191,16 +191,25 @@ which forces every leg to build — so merging a change to this file redeploys e
    (`e2e-tests/tests/admin/cli-smoke.spec.ts`) can spawn the built binary entry against the
    deployed stack via the pre-issued `E2E_API_TOKEN` (env-override auth path); the spec
    self-skips when the dist is absent.
-   **Chromium:** the job runs on `k8s-runner` directly (not in the `mcr.microsoft.com/playwright`
-   image the PR `e2e` job uses) and installs Chromium with `npx playwright install --with-deps
-   chromium`. The runner image (`.github/runner/Dockerfile`, `FROM
-   ghcr.io/actions/actions-runner:latest`) reports an OS Playwright does not recognise; the ^1.50
-   line Playwright used fell back to ubuntu20.04 builds, but 1.64 dropped them and the install failed
-   hard (`Playwright does not support chromium on ubuntu20.04-x64`, PLT-808). The job therefore
-   sets `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: ubuntu24.04-x64` in its job-level `env:`, so the
-   install and `Run E2E tests` both resolve the noble build. A Playwright bump must keep that
-   override pointing at a platform the new version still ships — a PR's `ci.yml` cannot catch
-   a break here, since this job runs only after a deploy to `main`.
+   **Chromium:** the specs run inside `mcr.microsoft.com/playwright:v<version>-noble`, not on the
+   `k8s-runner` host. `<version>` is read with `jq` from
+   `.packages["node_modules/@playwright/test"].version` in `e2e-tests/package-lock.json` (the
+   step fails with `::error::` when it is missing), the same rule as the PR `e2e` job. Like that
+   job, it bakes `e2e-tests` (with `npm ci`) and the host-built `kelta-web` tree (at `/kelta-web`,
+   so the CLI specs' relative `kelta-web/packages/cli/dist` path still resolves) into a runner
+   image with `docker buildx build --load`, rather than bind-mounting the workspace. The `E2E_*`
+   values and secrets reach the container through an `--env-file` under `$RUNNER_TEMP`; after
+   the run `playwright-report/` and `test-results/` are `docker cp`'d back into `e2e-tests/` for
+   the upload steps, and the container, image and env file are removed.
+   **Why not the host:** the runner image (`.github/runner/Dockerfile`, `FROM
+   ghcr.io/actions/actions-runner:latest`) has **focal** apt sources. Playwright 1.64 dropped its
+   ubuntu20.04 builds (PLT-808), and PLT-808's workaround (`PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:
+   ubuntu24.04-x64`) made `npx playwright install --with-deps chromium` ask apt for the noble
+   package names (`libasound2t64`, `libglib2.0-0t64`, `fonts-unifont`, …), which focal does not
+   have — apt exited 100 with `Unable to locate package` on every `main` deploy (PLT-818).
+   Dropping `--with-deps` would only move the failure to Chromium launch (a noble build on
+   focal's glibc). Rebuilding the runner on a newer base would also fix it, but needs a runner
+   rollout in the cluster.
    Because ArgoCD rolls the worker out **asynchronously** after `deploy` commits the tag,
    this job first blocks until the `emf-worker` Deployment targets **this commit's**
    `main-<short-sha>` image and its rollout is fully complete (all pods on the new
