@@ -178,6 +178,9 @@ workflows:
 # ci/endpoint-index.ts is listed: the controller mappings, the gateway route table and path lists,
 # the system-collection names, kelta-auth's permitAll list, the permission names, and the docs pages
 # the index is published as and links to. A new mapping cannot land without a regenerated index.
+# The docs checks ride the same job: ci/doc-http-paths.test.ts reads every METHOD /api/... in the
+# docs and the READMEs, and ci/doc-error-codes.test.ts reads errors.md against the codes emitted in
+# the doc-error-codes.ts SOURCE_ROOTS, so a docs-only or a code-only change re-runs both.
 ci_scripts:
   - 'ci/**'
   - 'scripts/ci/**'
@@ -194,6 +197,15 @@ ci_scripts:
   - 'docs/authoring/**'
   - 'kelta-marketing/src/content/docs/**'
   - 'kelta-marketing/src/docs/externalMeta.ts'
+  - 'docs/**'
+  - '**/README.md'
+  - 'kelta-gateway/src/main/java/**'
+  - 'kelta-worker/src/main/java/**'
+  - 'kelta-ai/src/main/java/**'
+  - 'kelta-auth/src/main/java/**'
+  - 'kelta-platform/runtime/runtime-core/src/main/java/**'
+  - 'kelta-platform/runtime/runtime-jsonapi/src/main/java/**'
+  - 'kelta-platform/runtime/runtime-module-schema/src/main/java/**'
 
 # DORA collector (node --test, no build).
 dora:
