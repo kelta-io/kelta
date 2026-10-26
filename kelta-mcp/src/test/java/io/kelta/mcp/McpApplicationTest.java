@@ -14,12 +14,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.TestPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import javax.sql.DataSource;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Set;
@@ -71,6 +73,16 @@ class McpApplicationTest {
     @Autowired
     @Qualifier("adminTransportProvider")
     private HttpServletStatelessServerTransportProvider adminTransport;
+
+    @Autowired
+    private ApplicationContext context;
+
+    @Test
+    void startsWithoutADataSource() {
+        // kelta-mcp has no database. It booted only because runtime-core's packaged
+        // application.properties supplied a spring.datasource.url; that default is gone.
+        assertThat(context.getBeanNamesForType(DataSource.class)).isEmpty();
+    }
 
     @Test
     void bothMcpServersAreWired() {

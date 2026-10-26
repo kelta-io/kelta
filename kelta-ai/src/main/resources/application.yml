@@ -9,17 +9,19 @@ spring:
   application:
     name: kelta-ai
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/kelta_control_plane}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/kelta}
     username: ${SPRING_DATASOURCE_USERNAME:kelta}
     password: ${SPRING_DATASOURCE_PASSWORD:kelta}
     driver-class-name: org.postgresql.Driver
     hikari:
       connection-init-sql: SET app.current_tenant_id = ''
-      maximum-pool-size: ${DB_POOL_MAX:15}
-      minimum-idle: ${DB_POOL_MIN_IDLE:3}
-      connection-timeout: ${DB_POOL_CONNECTION_TIMEOUT_MS:5000}
-      idle-timeout: ${DB_POOL_IDLE_TIMEOUT_MS:600000}
-      max-lifetime: ${DB_POOL_MAX_LIFETIME_MS:1800000}
+      # Defaults are the values runtime-core's packaged application.properties forced until KLT-838
+      # (a jar's .properties outranks this .yml), so DB_POOL_* only took effect from then on.
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      connection-timeout: ${DB_POOL_CONNECTION_TIMEOUT_MS:20000}
+      idle-timeout: ${DB_POOL_IDLE_TIMEOUT_MS:300000}
+      max-lifetime: ${DB_POOL_MAX_LIFETIME_MS:1200000}
       leak-detection-threshold: ${DB_POOL_LEAK_DETECTION_MS:30000}
       pool-name: kelta-ai-pool
   flyway:
@@ -54,7 +56,7 @@ management:
         include: health,info,metrics
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
       probes:
         enabled: true
     metrics:
