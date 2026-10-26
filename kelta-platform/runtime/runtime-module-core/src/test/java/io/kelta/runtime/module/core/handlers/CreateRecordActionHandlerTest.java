@@ -1,15 +1,24 @@
 package io.kelta.runtime.module.core.handlers;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.validation.FieldError;
+import io.kelta.runtime.validation.ValidationException;
+import io.kelta.runtime.validation.ValidationResult;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionResult;
 import tools.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -31,6 +40,23 @@ class CreateRecordActionHandlerTest {
             created.put("id", "test-id-001");
             return created;
         });
+    }
+
+    private ch.qos.logback.classic.Logger handlerLogger;
+    private ListAppender<ILoggingEvent> logAppender;
+
+    @BeforeEach
+    void attachLogAppender() {
+        handlerLogger = (ch.qos.logback.classic.Logger)
+            org.slf4j.LoggerFactory.getLogger(CreateRecordActionHandler.class);
+        logAppender = new ListAppender<>();
+        logAppender.start();
+        handlerLogger.addAppender(logAppender);
+    }
+
+    @AfterEach
+    void detachLogAppender() {
+        handlerLogger.detachAppender(logAppender);
     }
 
     @Test
@@ -165,6 +191,76 @@ class CreateRecordActionHandlerTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> recordData = (Map<String, Object>) result.outputData().get("recordData");
         assertFalse(recordData.containsKey("createdBy"));
+    }
+
+    @Test
+    @DisplayName("Should log flow coordinates and field names, never values, on a validation failure")
+    void shouldLogFlowCoordinatesOnValidationFailure() {
+        when(registry.get("orders")).thenReturn(mock(CollectionDefinition.class));
+        doThrow(new ValidationException(ValidationResult.failure(List.of(
+                FieldError.enumViolation("status", List.of("active", "paused", "deprecated")),
+                FieldError.reference("customer_id", "customers", "cust-secret-42")))))
+            .when(queryEngine).create(any(), any());
+
+        String config = """
+            {"targetCollectionName": "orders", "fieldMappings": [
+                {"targetField": "status", "value": "bogus-status"},
+                {"targetField": "customer_id", "value": "cust-secret-42"},
+                {"targetField": "name", "sourceField": "name"}
+            ]}
+            """;
+        ActionContext ctx = ActionContext.builder()
+            .tenantId("tenant-7").userId(null)
+            .data(Map.of("name", "Private Person"))
+            .actionConfigJson(config).workflowRuleId("flow-9").executionLogId("exec-3").build();
+
+        ActionResult result = handler.execute(ctx);
+        assertFalse(result.successful());
+
+        List<ILoggingEvent> errors = logAppender.list.stream()
+            .filter(e -> e.getLevel() == Level.ERROR).toList();
+        assertEquals(1, errors.size());
+        String line = errors.get(0).getFormattedMessage();
+        assertTrue(line.contains("Failed to execute create record action"), line);
+        assertTrue(line.contains("tenantId=tenant-7"), line);
+        assertTrue(line.contains("flowId=flow-9"), line);
+        assertTrue(line.contains("executionId=exec-3"), line);
+        assertTrue(line.contains("targetCollection=orders"), line);
+        assertTrue(line.contains("status"), line);
+        assertTrue(line.contains("customer_id"), line);
+        assertNull(errors.get(0).getThrowableProxy(),
+            "the exception message embeds values, so it must not be attached");
+
+        for (ILoggingEvent event : logAppender.list) {
+            String message = event.getFormattedMessage();
+            assertFalse(message.contains("bogus-status"), message);
+            assertFalse(message.contains("cust-secret-42"), message);
+            assertFalse(message.contains("Private Person"), message);
+        }
+    }
+
+    @Test
+    @DisplayName("Should log flow coordinates and the error on a non-validation failure")
+    void shouldLogFlowCoordinatesOnOtherFailure() {
+        when(registry.get("orders")).thenReturn(mock(CollectionDefinition.class));
+        doThrow(new IllegalStateException("connection reset"))
+            .when(queryEngine).create(any(), any());
+
+        String config = """
+            {"targetCollectionName": "orders", "fieldMappings": [{"targetField": "name", "value": "x"}]}
+            """;
+        ActionResult result = handler.execute(makeContext(config));
+        assertFalse(result.successful());
+
+        ILoggingEvent error = logAppender.list.stream()
+            .filter(e -> e.getLevel() == Level.ERROR).findFirst().orElseThrow();
+        String line = error.getFormattedMessage();
+        assertTrue(line.contains("tenantId=t1"), line);
+        assertTrue(line.contains("flowId=wf1"), line);
+        assertTrue(line.contains("executionId=log1"), line);
+        assertTrue(line.contains("targetCollection=orders"), line);
+        assertTrue(line.contains("error=connection reset"), line);
+        assertNotNull(error.getThrowableProxy());
     }
 
     private ActionContext makeContext(String config) {
