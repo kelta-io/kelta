@@ -8,6 +8,26 @@ spring:
       enabled: true
   application:
     name: kelta-mcp
+  # kelta-mcp reads no database and no Redis, but runtime-core puts HikariCP, the Postgres driver
+  # and Lettuce on its classpath, so Spring Boot auto-configures a DataSource (plus the db health
+  # contributor) and a Redis connection factory. Until KLT-750 these values came from
+  # runtime-core's jar-packaged application.properties; without a URL the DataSource cannot pick
+  # a driver and the context fails to start. Neither is connected until something asks.
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/kelta}
+    username: ${SPRING_DATASOURCE_USERNAME:kelta}
+    password: ${SPRING_DATASOURCE_PASSWORD:kelta}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 20000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
   lifecycle:
     timeout-per-shutdown-phase: 30s
 
@@ -24,7 +44,7 @@ management:
         include: health,info,metrics
   endpoint:
     health:
-      show-details: always
+      show-details: when_authorized
       probes:
         enabled: true
     metrics:
