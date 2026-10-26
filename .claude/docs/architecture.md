@@ -2551,6 +2551,31 @@ actions start flows for portal members, whose seeded profile holds only `API_ACC
 Pinned by `FlowExecutionControllerTest`. The read endpoints under `/api/flows/executions/**` are
 not covered by this check (`concerns.md` → Authorization gaps still open).
 
+### Inbound flow webhooks (KLT-798)
+
+`/api/webhooks/{flowId}` (`FlowWebhookController`, `GET` + `POST`) is an unauthenticated gateway
+path (all methods, `/api/webhooks` IP rate-limit bucket); the worker authenticates the sender itself.
+Per-flow settings live in `trigger_config.webhook` (jsonb, no migration) and are parsed by
+`FlowWebhookPolicy` (`methods`, `bodies`, `secret`, `response`). Absent block = POST, JSON body, no
+secret, JSON:API `flow-executions` reply. Checks, in order, all before a run starts:
+
+1. Unknown flow → 404; not `AUTOLAUNCHED` / inactive / no definition → 400.
+2. Invalid `webhook` block → 403. `GET` in `methods` or `form` in `bodies` without a `secret` is
+   invalid (a browser or mail client can send them without the caller's intent).
+3. Method not in `methods` → 405 (+ `Allow`); body content type not in `bodies` → 415.
+4. With a `secret`: `X-Kelta-Webhook-Secret` header, or `sig` = hex HMAC-SHA256 over the other
+   decoded query parameters sorted by name then value, `k=v` joined with `&`; constant-time compare
+   (`MessageDigest.isEqual`); else 401. Neither is logged.
+
+Initial state (`InitialStateBuilder.buildFromWebhook`): `input` = JSON object or form fields
+(strings; repeated → list; form fields come from the servlet parameter map minus the query
+string's values), `query` = decoded query parameters without `sig` (same string/list shape),
+`headers` = `content-type` + `user-agent` only. `response` (`{status 2xx, body ≤ 4 KB,
+contentType text/plain|text/html|application/json}` or `{redirect: absolute http(s)}` → 303) replaces
+the success reply only; an invalid one falls back to the default. Pinned by
+`FlowWebhookControllerTest` / `FlowWebhookPolicyTest`. The secret is plain flow metadata
+(`concerns.md` → Flow webhook secrets).
+
 ### SQL_QUERY binds state values (KLT-793)
 
 `SQL_QUERY` never splices state into its statement. `ActionHandler.unresolvedParameterKeys()`
