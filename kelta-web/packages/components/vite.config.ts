@@ -16,7 +16,7 @@ export default defineConfig({
         '**/*.property.test.ts',
         '**/*.property.test.tsx',
       ],
-      rollupTypes: true,
+      bundleTypes: true,
     }),
   ],
   build: {
@@ -25,14 +25,14 @@ export default defineConfig({
       // is kept separate (not re-exported from index) so LiveKit stays out of the
       // base bundle — the app eagerly imports the barrel but lazy-imports `./video`.
       entry: {
-        index: resolve(__dirname, 'src/index.ts'),
-        video: resolve(__dirname, 'src/video.ts'),
+        index: resolve(import.meta.dirname, 'src/index.ts'),
+        video: resolve(import.meta.dirname, 'src/video.ts'),
       },
       name: 'KeltaComponents',
       formats: ['es', 'cjs'],
       fileName: (format, entryName) => `${entryName}.${format === 'es' ? 'js' : 'cjs'}`,
     },
-    rollupOptions: {
+    rolldownOptions: {
       external: [
         'react',
         'react-dom',

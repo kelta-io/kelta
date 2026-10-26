@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Mock } from 'vitest';
 import type { AxiosInstance } from 'axios';
 import { AdminClient } from './AdminClient';
 import type { CreateBulkJobRequest } from './types';
@@ -15,9 +16,9 @@ const createMockAxios = () =>
 describe('AdminClient bulkJobs', () => {
   let axios: AxiosInstance;
   let client: AdminClient;
-  let mockPost: ReturnType<typeof vi.fn>;
-  let mockGet: ReturnType<typeof vi.fn>;
-  let mockPatch: ReturnType<typeof vi.fn>;
+  let mockPost: Mock;
+  let mockGet: Mock;
+  let mockPatch: Mock;
 
   const jobResponse = {
     data: {
@@ -39,9 +40,9 @@ describe('AdminClient bulkJobs', () => {
   beforeEach(() => {
     axios = createMockAxios();
     client = new AdminClient(axios);
-    mockPost = axios.post as ReturnType<typeof vi.fn>;
-    mockGet = axios.get as ReturnType<typeof vi.fn>;
-    mockPatch = axios.patch as ReturnType<typeof vi.fn>;
+    mockPost = axios.post as Mock;
+    mockGet = axios.get as Mock;
+    mockPatch = axios.patch as Mock;
   });
 
   describe('create()', () => {
@@ -155,7 +156,7 @@ describe('AdminClient tenants.inviteAdmin', () => {
   it('POSTs the email as a plain body to the tenant admin-invite endpoint', async () => {
     const axios = createMockAxios();
     const client = new AdminClient(axios);
-    const mockPost = axios.post as ReturnType<typeof vi.fn>;
+    const mockPost = axios.post as Mock;
     const invite = { status: 'INVITED', tenantId: 't1', userId: 'u1', email: 'owner@example.com' };
     mockPost.mockResolvedValue({ data: invite });
 
@@ -172,7 +173,7 @@ describe('AdminClient tenants.bootstrapToken', () => {
   it('POSTs expiresIn and userId to the tenant bootstrap-token endpoint', async () => {
     const axios = createMockAxios();
     const client = new AdminClient(axios);
-    const mockPost = axios.post as ReturnType<typeof vi.fn>;
+    const mockPost = axios.post as Mock;
     const minted = {
       token: 'klt_abc',
       tokenPrefix: 'klt_abc',
@@ -195,7 +196,7 @@ describe('AdminClient tenants.bootstrapToken', () => {
   it('sends an empty body when no options are given, so the server defaults apply', async () => {
     const axios = createMockAxios();
     const client = new AdminClient(axios);
-    const mockPost = axios.post as ReturnType<typeof vi.fn>;
+    const mockPost = axios.post as Mock;
     mockPost.mockResolvedValue({ data: {} });
 
     await client.tenants.bootstrapToken('t1');
@@ -207,12 +208,12 @@ describe('AdminClient tenants.bootstrapToken', () => {
 describe('AdminClient users.invitePortal', () => {
   let axios: AxiosInstance;
   let client: AdminClient;
-  let mockPost: ReturnType<typeof vi.fn>;
+  let mockPost: Mock;
 
   beforeEach(() => {
     axios = createMockAxios();
     client = new AdminClient(axios);
-    mockPost = axios.post as ReturnType<typeof vi.fn>;
+    mockPost = axios.post as Mock;
   });
 
   it('POSTs the invite as a plain (non-JSON:API) body and returns the result', async () => {
@@ -242,12 +243,12 @@ describe('AdminClient users.invitePortal', () => {
 describe('AdminClient users.tokens.create', () => {
   let axios: AxiosInstance;
   let client: AdminClient;
-  let mockPost: ReturnType<typeof vi.fn>;
+  let mockPost: Mock;
 
   beforeEach(() => {
     axios = createMockAxios();
     client = new AdminClient(axios);
-    mockPost = axios.post as ReturnType<typeof vi.fn>;
+    mockPost = axios.post as Mock;
   });
 
   it('POSTs to the admin-on-behalf-of mint endpoint for the target user', async () => {
@@ -292,7 +293,7 @@ describe('AdminClient users.tokens.list / revoke', () => {
       createdAt: '2026-10-01T00:00:00Z',
       expiresAt: '2026-12-30T00:00:00Z',
     };
-    const mockGet = axios.get as ReturnType<typeof vi.fn>;
+    const mockGet = axios.get as Mock;
     mockGet.mockResolvedValue({ data: { data: [token] } });
 
     const result = await client.users.tokens.list('user-1');
@@ -302,7 +303,7 @@ describe('AdminClient users.tokens.list / revoke', () => {
   });
 
   it("DELETEs the target user's token", async () => {
-    const mockDelete = axios.delete as ReturnType<typeof vi.fn>;
+    const mockDelete = axios.delete as Mock;
     mockDelete.mockResolvedValue({ data: { status: 'revoked', tokenId: 'tok-1' } });
 
     await client.users.tokens.revoke('user-1', 'tok-1');
@@ -314,9 +315,9 @@ describe('AdminClient users.tokens.list / revoke', () => {
 describe('AdminClient recordTypes', () => {
   let axios: AxiosInstance;
   let client: AdminClient;
-  let mockGet: ReturnType<typeof vi.fn>;
-  let mockPost: ReturnType<typeof vi.fn>;
-  let mockPatch: ReturnType<typeof vi.fn>;
+  let mockGet: Mock;
+  let mockPost: Mock;
+  let mockPatch: Mock;
 
   const recordTypeResponse = (attributes: Record<string, unknown>) => ({
     data: {
@@ -337,9 +338,9 @@ describe('AdminClient recordTypes', () => {
   beforeEach(() => {
     axios = createMockAxios();
     client = new AdminClient(axios);
-    mockGet = axios.get as ReturnType<typeof vi.fn>;
-    mockPost = axios.post as ReturnType<typeof vi.fn>;
-    mockPatch = axios.patch as ReturnType<typeof vi.fn>;
+    mockGet = axios.get as Mock;
+    mockPost = axios.post as Mock;
+    mockPatch = axios.patch as Mock;
   });
 
   it('reads isActive and mirrors it onto the deprecated active alias', async () => {

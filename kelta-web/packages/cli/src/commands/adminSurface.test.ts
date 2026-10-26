@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AxiosError, AxiosHeaders } from 'axios';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { mapError, toErrorPayload } from '../errors.js';
 import type { CommandContext, RegisteredCommand } from '../registry/types.js';
 import { auditCommands } from './audit.js';
@@ -23,11 +24,11 @@ import { validationCommands } from './validation.js';
 const CID = '11111111-2222-3333-4444-555555555555';
 
 interface FakeAxios {
-  get: ReturnType<typeof vi.fn>;
-  post: ReturnType<typeof vi.fn>;
-  patch: ReturnType<typeof vi.fn>;
-  put: ReturnType<typeof vi.fn>;
-  delete: ReturnType<typeof vi.fn>;
+  get: Mock;
+  post: Mock;
+  patch: Mock;
+  put: Mock;
+  delete: Mock;
 }
 
 function fakeAxios(getRoutes: Record<string, unknown> = {}): FakeAxios {
