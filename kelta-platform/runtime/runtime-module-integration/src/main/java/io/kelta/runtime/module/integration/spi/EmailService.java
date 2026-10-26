@@ -15,6 +15,9 @@ import java.util.Optional;
  */
 public interface EmailService {
 
+    /** {@code email_log.source} of mail sent by a flow ({@code EMAIL_ALERT}). */
+    String FLOW_SOURCE = "WORKFLOW";
+
     /**
      * Retrieves an email template by ID.
      *
@@ -36,6 +39,23 @@ public interface EmailService {
      */
     String queueEmail(String tenantId, String to, String subject, String body,
                       String source, String sourceId);
+
+    /**
+     * Queues a flow-sent email with per-action delivery options ({@code EMAIL_ALERT}).
+     *
+     * <p>A non-transactional send is checked against the tenant's suppression list and, when
+     * the recipient opted out, is recorded but not delivered; otherwise it carries RFC 8058
+     * one-click {@code List-Unsubscribe} headers. The default implementation ignores the
+     * options and delegates to {@link #queueEmail(String, String, String, String, String, String)},
+     * so implementations without a suppression list keep compiling and keep sending.
+     *
+     * @param options delivery options; {@code null} means {@link FlowMailOptions#DEFAULT}
+     * @return the email log id and whether the recipient was suppressed
+     */
+    default QueuedEmail queueEmail(String tenantId, String to, String subject, String body,
+                                   String source, String sourceId, FlowMailOptions options) {
+        return QueuedEmail.queued(queueEmail(tenantId, to, subject, body, source, sourceId));
+    }
 
     /**
      * Looks up a template by stable {@code templateKey} (tenant override or
@@ -100,4 +120,33 @@ public interface EmailService {
      * @param bodyHtml the template HTML body
      */
     record EmailTemplate(String subject, String bodyHtml) {}
+
+    /**
+     * Per-send options of a flow email.
+     *
+     * @param transactional {@code true} (the default) for mail the recipient must receive —
+     *                      password resets, receipts: no unsubscribe headers, no suppression
+     *                      check. {@code false} for mail a recipient may opt out of.
+     * @param replyTo       a single address for {@code Reply-To}, or {@code null}
+     */
+    record FlowMailOptions(boolean transactional, String replyTo) {
+        public static final FlowMailOptions DEFAULT = new FlowMailOptions(true, null);
+    }
+
+    /**
+     * Outcome of queuing a flow email.
+     *
+     * @param emailLogId the {@code email_log} row id
+     * @param suppressed {@code true} when the recipient is on the tenant's suppression list
+     *                   and nothing was sent
+     */
+    record QueuedEmail(String emailLogId, boolean suppressed) {
+        public static QueuedEmail queued(String emailLogId) {
+            return new QueuedEmail(emailLogId, false);
+        }
+
+        public static QueuedEmail suppressed(String emailLogId) {
+            return new QueuedEmail(emailLogId, true);
+        }
+    }
 }

@@ -173,6 +173,105 @@ class EmailAlertActionHandlerTest {
         assertEquals("Re: <${$.secret}>", queuedSubject());
     }
 
+    @Test
+    @DisplayName("validate() accepts transactional and replyTo, including a run-time placeholder")
+    void validateAcceptsDeliveryOptions() {
+        assertDoesNotThrow(() -> handler.validate("""
+            {"to": "a@example.com", "subject": "s", "transactional": false, "replyTo": "help@example.com"}
+            """));
+        assertDoesNotThrow(() -> handler.validate("""
+            {"to": "a@example.com", "subject": "s", "transactional": true, "replyTo": "${$.input.owner}"}
+            """));
+        assertDoesNotThrow(() -> handler.validate("""
+            {"to": "a@example.com", "subject": "s", "replyTo": "first.last+tag@mail.example.co.uk"}
+            """));
+    }
+
+    @Test
+    @DisplayName("validate() rejects a non-boolean transactional")
+    void validateRejectsNonBooleanTransactional() {
+        for (String value : List.of("\"false\"", "0", "\"yes\"", "{}")) {
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> handler.validate(
+                "{\"to\": \"a@example.com\", \"subject\": \"s\", \"transactional\": " + value + "}"));
+            assertTrue(e.getMessage().contains("transactional"), e.getMessage());
+        }
+    }
+
+    @Test
+    @DisplayName("validate() rejects an unparseable or multi-address replyTo")
+    void validateRejectsBadReplyTo() {
+        for (String value : List.of("not-an-address", "a@example.com, b@example.com", "Help <help@example.com>",
+                "help@example.com\\r\\nBcc: x@example.com", "help@", "@example.com", "help@example", "help@example..com", "help@.example.com", "12")) {
+            String quoted = value.equals("12") ? value : "\"" + value + "\"";
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> handler.validate(
+                "{\"to\": \"a@example.com\", \"subject\": \"s\", \"replyTo\": " + quoted + "}"),
+                value);
+            assertTrue(e.getMessage().contains("replyTo"), e.getMessage());
+        }
+    }
+
+    @Test
+    @DisplayName("An action without delivery options is queued through the original call, unchanged")
+    void defaultOptionsUseOriginalCall() {
+        when(emailService.queueEmail(anyString(), anyString(), anyString(), anyString(), anyString(), anyString()))
+            .thenReturn("email-1");
+
+        handler.execute(makeContext("""
+            {"to": "user@example.com", "subject": "Hi", "body": "x", "transactional": true}
+            """));
+
+        verify(emailService).queueEmail("t1", "user@example.com", "Hi", "x", "WORKFLOW", "wf1");
+        verify(emailService, never()).queueEmail(anyString(), anyString(), anyString(), anyString(),
+            anyString(), anyString(), any(EmailService.FlowMailOptions.class));
+    }
+
+    @Test
+    @DisplayName("transactional=false and replyTo are passed to the email service")
+    void passesDeliveryOptions() {
+        when(emailService.queueEmail(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(),
+                any(EmailService.FlowMailOptions.class)))
+            .thenReturn(EmailService.QueuedEmail.queued("email-9"));
+
+        ActionResult result = handler.execute(makeContext("""
+            {"to": "user@example.com", "subject": "News", "body": "x",
+             "transactional": false, "replyTo": "help@example.com"}
+            """));
+
+        assertTrue(result.successful(), result.errorMessage());
+        assertEquals("QUEUED", result.outputData().get("status"));
+        assertEquals("email-9", result.outputData().get("emailLogId"));
+        verify(emailService).queueEmail("t1", "user@example.com", "News", "x", "WORKFLOW", "wf1",
+            new EmailService.FlowMailOptions(false, "help@example.com"));
+    }
+
+    @Test
+    @DisplayName("A suppressed recipient is a successful step with status SUPPRESSED")
+    void suppressedRecipientIsNotAFailure() {
+        when(emailService.queueEmail(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(),
+                any(EmailService.FlowMailOptions.class)))
+            .thenReturn(EmailService.QueuedEmail.suppressed("email-s"));
+
+        ActionResult result = handler.execute(makeContext("""
+            {"to": "user@example.com", "subject": "News", "body": "x", "transactional": false}
+            """));
+
+        assertTrue(result.successful(), result.errorMessage());
+        assertEquals("SUPPRESSED", result.outputData().get("status"));
+        assertEquals("email-s", result.outputData().get("emailLogId"));
+    }
+
+    @Test
+    @DisplayName("A replyTo that resolves to an invalid address at run time fails the step without sending")
+    void invalidResolvedReplyToFails() {
+        ActionResult result = handler.execute(makeContext("""
+            {"to": "user@example.com", "subject": "Hi", "body": "x", "replyTo": "not an address"}
+            """));
+
+        assertFalse(result.successful());
+        assertTrue(result.errorMessage().contains("replyTo"));
+        verifyNoInteractions(emailService);
+    }
+
     private StateExecutionResult runAsFlowTask(Map<String, Object> parameters, Map<String, Object> state) {
         when(emailService.queueEmail(anyString(), anyString(), anyString(), anyString(), anyString(), any()))
             .thenReturn("email-1");

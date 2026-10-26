@@ -10,6 +10,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.Locale;
 import java.util.Optional;
 
 /**
@@ -22,6 +23,11 @@ import java.util.Optional;
  * Verification recomputes the MAC and compares in constant time. The recipient id alone then
  * resolves the tenant, campaign, and email from {@code email_campaign_recipient} — nothing
  * sensitive is encoded in the URL.
+ *
+ * <p><b>Address tokens</b> ({@link #signAddress}) authenticate the flow-mail unsubscribe link,
+ * where there is no recipient row to look up: the tenant id and the lower-cased address travel
+ * in the payload, and the MAC covers them behind the {@value #ADDRESS_DOMAIN} prefix. Because
+ * campaign tokens MAC the bare payload, neither kind verifies as the other.
  */
 @Service
 public class TrackingTokenService {
@@ -30,6 +36,8 @@ public class TrackingTokenService {
     private static final String HMAC_ALGO = "HmacSHA256";
     private static final Base64.Encoder B64 = Base64.getUrlEncoder().withoutPadding();
     private static final Base64.Decoder B64D = Base64.getUrlDecoder();
+    static final String ADDRESS_DOMAIN = "email-unsub:v1:";
+    private static final char ADDRESS_SEPARATOR = '\n';
 
     private final byte[] secret;
 
@@ -56,6 +64,47 @@ public class TrackingTokenService {
      * @return the recipient id if the signature is valid, else empty
      */
     public Optional<String> verify(String token) {
+        return verifyPayload(token, "");
+    }
+
+    /**
+     * Signs a tenant-scoped email address into an unsubscribe token for flow mail.
+     *
+     * @param tenantId the tenant whose suppression list the token writes to
+     * @param email    the recipient; lower-cased before signing
+     * @return an opaque URL-safe token
+     */
+    public String signAddress(String tenantId, String email) {
+        if (tenantId == null || tenantId.isBlank() || email == null || email.isBlank()) {
+            throw new IllegalArgumentException("tenantId and email are required");
+        }
+        if (tenantId.indexOf(ADDRESS_SEPARATOR) >= 0 || email.indexOf(ADDRESS_SEPARATOR) >= 0) {
+            throw new IllegalArgumentException("tenantId and email must not contain a line break");
+        }
+        String payload = tenantId + ADDRESS_SEPARATOR + email.strip().toLowerCase(Locale.ROOT);
+        return B64.encodeToString(payload.getBytes(StandardCharsets.UTF_8))
+                + "." + B64.encodeToString(hmac(ADDRESS_DOMAIN + payload));
+    }
+
+    /**
+     * Verifies an address token from {@link #signAddress}.
+     *
+     * @return the tenant and address if the signature is valid, else empty
+     */
+    public Optional<SignedAddress> verifyAddress(String token) {
+        return verifyPayload(token, ADDRESS_DOMAIN).flatMap(payload -> {
+            int sep = payload.indexOf(ADDRESS_SEPARATOR);
+            if (sep <= 0 || sep == payload.length() - 1) {
+                return Optional.empty();
+            }
+            return Optional.of(new SignedAddress(payload.substring(0, sep), payload.substring(sep + 1)));
+        });
+    }
+
+    /** A tenant id and lower-cased email address recovered from a verified address token. */
+    public record SignedAddress(String tenantId, String email) {}
+
+    private Optional<String> verifyPayload(String token, String domain) {
         if (token == null || token.isBlank()) {
             return Optional.empty();
         }
@@ -64,13 +113,13 @@ public class TrackingTokenService {
             return Optional.empty();
         }
         try {
-            String recipientId = new String(B64D.decode(token.substring(0, dot)), StandardCharsets.UTF_8);
+            String payload = new String(B64D.decode(token.substring(0, dot)), StandardCharsets.UTF_8);
             byte[] presented = B64D.decode(token.substring(dot + 1));
-            byte[] expected = hmac(recipientId);
+            byte[] expected = hmac(domain + payload);
             if (!MessageDigest.isEqual(expected, presented)) {
                 return Optional.empty();
             }
-            return Optional.of(recipientId);
+            return Optional.of(payload);
         } catch (IllegalArgumentException e) {
             // Malformed base64 — treat as an invalid token, not a server error.
             log.debug("Rejected malformed tracking token");

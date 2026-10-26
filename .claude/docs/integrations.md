@@ -882,6 +882,15 @@ unsubscribe/suppression list).
   can't be poisoned and unsubscribes can't be forged. Bodies get the open pixel appended, `href`s
   rewritten through the click redirect, and an unsubscribe footer (`${unsubscribeUrl}` merge var).
   The click redirect only forwards to `http(s)` URLs (open-redirect guard).
+- **Flow mail opt-out** — `EMAIL_ALERT` with `transactional: false` goes through
+  `EmailService.queueEmail(..., FlowMailOptions)`: `DefaultEmailService` checks the same
+  `email_suppression` list (suppressed ⇒ `email_log.status = SUPPRESSED`, nothing sent) and adds
+  `List-Unsubscribe` / `List-Unsubscribe-Post: List-Unsubscribe=One-Click` pointing at
+  `/api/track/email-unsubscribe` (`EmailUnsubscribeController`, address token from
+  `TrackingTokenService.signAddress`). Transactional flow mail (the default) skips both. Every
+  `SmtpEmailProvider` send now stamps `Message-ID` on the From domain and, when a tenant From is
+  relayed by the platform SMTP, `Sender: <platform from-address>`. Author doc:
+  `docs/authoring/flows.md` → `EMAIL_ALERT`.
 - **Spam controls** — the suppression list is checked before every send; the daily
   `campaignEmailsPerDay` governor limit (`TenantTierQuotas`) caps volume; a configurable
   `send-rate-per-second` throttle paces delivery. Config lives under `kelta.campaigns.*`
