@@ -1074,8 +1074,9 @@ jobs:
     runs-on: k8s-runner
     timeout-minutes: 25
     # Playwright runs inside mcr.microsoft.com/playwright:v<version>-noble, never on the host:
-    # k8s-runner (.github/runner/Dockerfile) has focal apt sources, so `playwright install
-    # --with-deps` cannot get the noble system libs a current Chromium needs (ci-cd.md → e2e-test).
+    # k8s-runner (.github/runner/Dockerfile) has focal apt sources, so Playwright's host
+    # dependency install cannot get the noble system libs a current Chromium needs
+    # (ci-cd.md → e2e-test; guarded by ci/e2e-test-job.test.ts).
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
