@@ -236,6 +236,15 @@ directly or through other flows, therefore stops after ten hops.
 
 Submits the triggering record; see [Approval processes](/docs/automation/approvals/).
 
+### `ANONYMIZE_USER`
+
+```jsonc
+{ "userId": "${$.input.userId}" }   // required
+```
+
+Erases a user's personal data and keeps the user's id; the step fails unless the flow's user holds `MANAGE_USERS`.
+Result: `{"userId", "alreadyAnonymized"}`. What is erased and kept: [Anonymizing a user](/docs/security/users-and-groups/#anonymizing-a-user).
+
 ## Rejected at save
 
 These handlers never did their work. Saving a flow (create or update) with a Task whose `Resource` is one of them —

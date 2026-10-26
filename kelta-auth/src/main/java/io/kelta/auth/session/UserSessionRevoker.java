@@ -14,10 +14,12 @@ import org.springframework.stereotype.Component;
 import java.security.Principal;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Signs a user out: ends the user's HTTP sessions and deletes the user's OAuth2 authorizations,
@@ -47,6 +49,9 @@ import java.util.Optional;
 public class UserSessionRevoker {
 
     private static final Logger log = LoggerFactory.getLogger(UserSessionRevoker.class);
+
+    /** Email and username from the row, plus the ones the caller knew (deleted or anonymized user). */
+    private static final int MAX_LOGIN_NAMES = 4;
 
     private final FindByIndexNameSessionRepository<? extends Session> sessions;
     private final OAuth2AuthorizationService authorizations;
@@ -91,10 +96,11 @@ public class UserSessionRevoker {
      * the user's OAuth2 authorizations — after an administrator reset the user's password,
      * deactivated or removed the account. Nothing is kept.
      *
-     * <p>The login names are read from the user's row. When the row no longer exists (the user
-     * was deleted), {@code knownLoginNames} supplies them; they only select candidate rows, each
-     * of which is still removed only when its stored principal is this tenant's user. A user id
-     * that belongs to another tenant is left alone.
+     * <p>The login names are read from the user's row, and {@code knownLoginNames} are added to
+     * them: a deleted user has no row, and an anonymized user's row no longer holds the email and
+     * username the authorizations were issued under. Names only select candidate rows, each of
+     * which is still removed only when its stored principal is this tenant's user. A user id that
+     * belongs to another tenant is left alone.
      */
     public Result signOutEverywhere(String tenantId, String userId, Collection<String> knownLoginNames) {
         if (tenantId == null || tenantId.isBlank() || userId == null || userId.isBlank()) {
@@ -108,8 +114,10 @@ public class UserSessionRevoker {
         }
         // Sessions are indexed by tenant + user id and authorizations are checked against both,
         // so nothing outside this tenant's user is touched even when the row cannot be read.
-        List<String> loginNames = account.map(Account::loginNames)
-                .orElseGet(() -> knownLoginNames == null ? List.of() : List.copyOf(knownLoginNames));
+        List<String> loginNames = new ArrayList<>(account.map(Account::loginNames).orElse(List.of()));
+        if (knownLoginNames != null) {
+            loginNames.addAll(knownLoginNames);
+        }
         int ended = endSessions(tenantId, userId, null);
         int revoked = revokeAuthorizations(tenantId, userId, loginNames);
         log.info("Signed user {} (tenant {}) out everywhere: ended {} session(s), revoked {} authorization(s)",
@@ -171,16 +179,18 @@ public class UserSessionRevoker {
         List<String> names = loginNames.stream()
                 .filter(name -> name != null && !name.isBlank())
                 .distinct()
-                .limit(2)
+                .limit(MAX_LOGIN_NAMES)
                 .toList();
         if (names.isEmpty()) {
             return 0;
         }
-        List<String> ids;
+        Set<String> ids = new LinkedHashSet<>();
         try {
-            ids = jdbcTemplate.queryForList(
-                    "SELECT id FROM oauth2_authorization WHERE lower(principal_name) IN (lower(?), lower(?))",
-                    String.class, names.getFirst(), names.getLast());
+            for (int i = 0; i < names.size(); i += 2) {
+                ids.addAll(jdbcTemplate.queryForList(
+                        "SELECT id FROM oauth2_authorization WHERE lower(principal_name) IN (lower(?), lower(?))",
+                        String.class, names.get(i), names.get(Math.min(i + 1, names.size() - 1))));
+            }
         } catch (RuntimeException e) {
             log.error("Could not revoke the authorizations of user {} (tenant {}): {}",
                     userId, tenantId, e.getMessage(), e);

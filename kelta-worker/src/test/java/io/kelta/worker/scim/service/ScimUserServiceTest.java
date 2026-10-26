@@ -117,6 +117,26 @@ class ScimUserServiceTest {
     }
 
     @Test
+    @DisplayName("an anonymized user reads as 404, so SCIM PUT/PATCH/DELETE cannot reactivate or rename them")
+    @SuppressWarnings("unchecked")
+    void anonymizedUserIsNotFound() {
+        when(jdbcTemplate.query(contains("pu.status <> 'ANONYMIZED'"), any(RowMapper.class), eq(TENANT_ID),
+                eq("anon-1"))).thenReturn(Collections.emptyList());
+        when(jdbcTemplate.update(contains("status <> 'ANONYMIZED'"), eq(TENANT_ID), eq("anon-1"))).thenReturn(0);
+
+        assertThatThrownBy(() -> service.patchUser(TENANT_ID, "anon-1", patch("active", true), BASE_URL))
+                .isInstanceOf(ScimException.class)
+                .satisfies(ex -> assertThat(((ScimException) ex).getHttpStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+        assertThatThrownBy(() -> service.replaceUser(TENANT_ID, "anon-1", new ScimUser(), BASE_URL))
+                .isInstanceOf(ScimException.class);
+        assertThatThrownBy(() -> service.deleteUser(TENANT_ID, "anon-1"))
+                .isInstanceOf(ScimException.class)
+                .satisfies(ex -> assertThat(((ScimException) ex).getHttpStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+        verify(jdbcTemplate, never()).update(contains("SET status = ?"), any(), any(), any());
+        verify(jdbcTemplate, never()).update(contains("COALESCE"), any(Object[].class));
+    }
+
+    @Test
     @DisplayName("deleteUser throws 404 for unknown user")
     void deleteUserNotFound() {
         when(jdbcTemplate.update(anyString(), eq(TENANT_ID), eq("no-such-id")))

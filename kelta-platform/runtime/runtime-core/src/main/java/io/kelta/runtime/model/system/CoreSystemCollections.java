@@ -79,8 +79,9 @@ public final class CoreSystemCollections {
                 .withDescription("Family name."))
             .addField(FieldDefinition.requiredString("status", 20)
                 .withDefault("ACTIVE")
-                .withEnumValues(List.of("ACTIVE", "INACTIVE", "LOCKED", "PENDING_ACTIVATION"))
-                .withDescription("Account state: ACTIVE, INACTIVE, LOCKED or PENDING_ACTIVATION."))
+                .withEnumValues(List.of("ACTIVE", "INACTIVE", "LOCKED", "PENDING_ACTIVATION", "ANONYMIZED"))
+                .withDescription("Account state: ACTIVE, INACTIVE, LOCKED, PENDING_ACTIVATION or ANONYMIZED "
+                    + "(personal data erased, terminal; set only by POST /api/admin/users/{id}/anonymize)."))
             .addField(FieldDefinition.string("locale", 10).withDefault("en_US")
                 .withDescription("Locale code (e.g. en_US)."))
             .addField(FieldDefinition.string("timezone", 50).withDefault("UTC")

@@ -122,8 +122,9 @@ in, cookie name `kelta_auth_session`, `SameSite`, `cookie-secure`). `session/`:
   every other session of the user (index key tenant + user id; the session the change was made in
   is kept) and deletes the user's `oauth2_authorization` rows, so earlier refresh tokens answer
   `invalid_grant`. `signOutEverywhere(tenantId, userId, loginNames)` does the same with nothing
-  kept, for kelta-worker's internal call (below); it ignores a user id of another tenant and takes
-  the login names from the caller only when the user row is gone. `oauth2_authorization` rows carry
+  kept, for kelta-worker's internal call (below); it ignores a user id of another tenant and adds
+  the caller's login names to the row's (a deleted user has no row; an anonymized user's row no
+  longer holds the names its tokens were issued under). `oauth2_authorization` rows carry
   only the login name as `principal_name` (looked up via `lower(principal_name)`, indexed by worker
   V210), so it reads candidates back through the authorization service and deletes only rows whose
   stored `KeltaUserDetails` has the same tenant + id. Never fails the request (the change is
@@ -212,7 +213,7 @@ e2e `tests/auth/forgot-password.spec.ts` (Mailpit).
 `POST /internal/tenants/{tenantId}/users/{userId}/revoke-sessions`
 (`controller/InternalSessionRevocationController`), optional body `{"loginNames": [...]}`: calls
 `UserSessionRevoker.signOutEverywhere`. kelta-worker's `AuthSessionRevocationClient` calls it after
-an admin password reset, deactivation or removal. Authenticated only by `X-Internal-Token` =
+an admin password reset, deactivation, anonymization or removal. Authenticated only by `X-Internal-Token` =
 `kelta.internal.token` (`KELTA_INTERNAL_TOKEN`, same value as the worker), compared in constant
 time; no token configured ⇒ every call 403. The ingress sends every path of the auth host here,
 so that check is the only gate: `/internal/**` is `permitAll` and CSRF-exempt in

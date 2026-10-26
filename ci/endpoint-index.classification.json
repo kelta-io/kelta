@@ -46,6 +46,7 @@
     "DELETE /api/admin/users/{id}/tokens/{tokenId}": { "docs": "/docs/security/personal-access-tokens/#list-and-revoke" },
     "POST /api/admin/users/{userId}/invite": { "docs": "/docs/security/users-and-groups/#inviting-users" },
     "POST /api/admin/users/portal-invite": { "docs": "/docs/security/users-and-groups/#inviting-users" },
+    "POST /api/admin/users/{id}/anonymize": { "docs": "/docs/security/users-and-groups/#anonymizing-a-user" },
     "POST /api/admin/users/{userId}/reset-password": { "docs": "/docs/security/mfa-and-password-policy/#password-policy" },
     "* /api/admin/password-policy/**": { "docs": "/docs/security/mfa-and-password-policy/#password-policy" },
     "* /api/admin/mfa/policy": { "docs": "/docs/security/mfa-and-password-policy/#requiring-mfa-for-a-tenant" },

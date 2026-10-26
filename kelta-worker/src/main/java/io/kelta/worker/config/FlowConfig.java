@@ -20,8 +20,11 @@ import io.kelta.runtime.workflow.module.KeltaModule;
 import io.kelta.runtime.workflow.module.ModuleContext;
 import io.kelta.runtime.workflow.module.ModuleRegistry;
 import io.kelta.worker.flow.JdbcFlowStore;
+import io.kelta.worker.handler.AnonymizeUserActionHandler;
 import io.kelta.worker.handler.SubmitForApprovalActionHandler;
+import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.ApprovalService;
+import io.kelta.worker.service.UserAnonymizationService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.nats.client.impl.Headers;
 import io.nats.client.impl.NatsMessage;
@@ -314,6 +317,23 @@ public class FlowConfig {
             ObjectMapper objectMapper) {
         SubmitForApprovalActionHandler handler =
                 new SubmitForApprovalActionHandler(approvalService, objectMapper);
+        actionHandlerRegistry.register(handler);
+        return handler;
+    }
+
+    // ---------------------------------------------------------------------------
+    // User anonymization action handler
+    // ---------------------------------------------------------------------------
+
+    @Bean
+    public AnonymizeUserActionHandler anonymizeUserActionHandler(
+            ActionHandlerRegistry actionHandlerRegistry,
+            UserAnonymizationService anonymizationService,
+            BootstrapRepository bootstrapRepository,
+            JdbcTemplate jdbcTemplate,
+            ObjectMapper objectMapper) {
+        AnonymizeUserActionHandler handler = new AnonymizeUserActionHandler(
+                anonymizationService, bootstrapRepository, jdbcTemplate, objectMapper);
         actionHandlerRegistry.register(handler);
         return handler;
     }
