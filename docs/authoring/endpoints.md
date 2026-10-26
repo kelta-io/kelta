@@ -49,7 +49,7 @@ it before routing.
 `internal` marks an endpoint only the platform's own admin UI or services call; it is reachable, but
 not a supported integration surface and may change without notice.
 
-**401** public endpoints: **309** linked to docs, **29** internal,
+**402** public endpoints: **310** linked to docs, **29** internal,
 **63** not yet documented.
 
 ## Endpoints
