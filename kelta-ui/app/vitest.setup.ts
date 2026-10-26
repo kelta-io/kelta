@@ -1,9 +1,21 @@
 import '@testing-library/jest-dom'
+import type { TestingLibraryMatchers } from '@testing-library/jest-dom/matchers'
 import { cleanup, configure } from '@testing-library/react'
 import { afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { setupServer } from 'msw/node'
 import { http, HttpResponse } from 'msw'
 import { mockAxios } from './src/test/testUtils'
+
+// ─── jest-dom matcher types ─────────────────────────────────────────────────
+// Vitest 5 no longer reads custom matchers from the global `jest.Matchers`
+// interface, which is where `@testing-library/jest-dom`'s types put them, and
+// jest-dom 7's own `/vitest` entry still augments the one-parameter v4
+// `Assertion<T>`. Augment v5's `Matchers<R, T>` so `toBeInTheDocument()` & co.
+// type-check on `expect(...)`, `.resolves` and asymmetric matchers alike.
+declare module 'vitest' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-empty-object-type
+  interface Matchers<R, T> extends TestingLibraryMatchers<unknown, R> {}
+}
 
 // ─── Async utility timeout ──────────────────────────────────────────────────
 // Testing Library's default asyncUtilTimeout is 1000ms, inherited by every waitFor
