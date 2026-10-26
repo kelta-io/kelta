@@ -50,7 +50,7 @@ no default (the service fails to start, or the feature stays off). Defaults that
 | Variable | Default | Meaning |
 |---|---|---|
 | `SPRING_DATASOURCE_URL` / `USERNAME` / `PASSWORD` | local | PostgreSQL |
-| `DB_POOL_MAX` / `MIN_IDLE` / `CONNECTION_TIMEOUT_MS` / `IDLE_TIMEOUT_MS` / `MAX_LIFETIME_MS` / `LEAK_DETECTION_MS` | `30` / `5` / `5000` / `600000` / `1800000` / `30000` | Connection pool |
+| `DB_POOL_MAX` / `MIN_IDLE` / `CONNECTION_TIMEOUT_MS` / `IDLE_TIMEOUT_MS` / `MAX_LIFETIME_MS` / `LEAK_DETECTION_MS` | `10` / `5` / `20000` / `300000` / `1200000` / `30000` | Connection pool |
 | `SPRING_FLYWAY_ENABLED` | `false` | Run migrations at startup (compose) — Kubernetes uses the `migrate` profile |
 | `KELTA_SCHEMA_BOOTSTRAP_ENABLED` | `false` | Apply collection DDL at pod startup; leave off where a migrate Job runs |
 | `SPRING_DATA_REDIS_HOST` / `PORT` | local | Redis |
@@ -80,7 +80,7 @@ no default (the service fails to start, or the feature stays off). Defaults that
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DB_URL` / `DB_USERNAME` / `DB_PASSWORD`, `DB_POOL_*` | local, `DB_POOL_MAX` `15` | PostgreSQL |
+| `DB_URL` / `DB_USERNAME` / `DB_PASSWORD`, `DB_POOL_*` | local, `DB_POOL_MAX` `10` | PostgreSQL |
 | `REDIS_HOST` / `REDIS_PORT` | local | Sessions and caches |
 | `WORKER_SERVICE_URL` | local | Internal user lookup |
 | `UI_BASE_URL` | `http://localhost:5173` | Where to send users after login |

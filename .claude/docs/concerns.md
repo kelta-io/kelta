@@ -815,9 +815,15 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   checks `information_schema.columns` first: an already-dropped column skips the `COMMENT ON
   COLUMN` with one INFO line, the `DEPRECATE_COLUMN` history row is still recorded, and the other
   migrations in the call still run. Security — not auto-merged.
-- **runtime-core's jar-packaged `application.properties` becomes config for worker/ai/mcp/auth.**
-  Never put operational settings there (it once forced JDBC DEBUG = 92% of all log volume); it
-  still ships datasource/Hikari/Redis/actuator values each service must override.
+- **runtime-core's jar-packaged `application.properties` becomes config for worker/ai/mcp/auth**
+  and **outranks their own `application.yml`** (a `.properties` beats a `.yml` in the same
+  `classpath:/` location; only env vars, system properties and profile files beat it). Never put
+  operational settings there (it once forced JDBC DEBUG = 92% of all log volume). Its datasource,
+  Hikari, Redis and actuator defaults are gone since KLT-838: until then they silently replaced
+  every service's yml pool sizes and `show-details`, so `DB_POOL_*` (except leak detection) did
+  nothing. Each service's yml now carries those former values as its defaults, kelta-mcp excludes
+  `DataSourceAutoConfiguration` (it has no database), and `EffectiveConnectionDefaultsTest`
+  (kelta-auth) pins the result. Only `kelta.query.*` remains.
 - **Never give a signing key a default** — `VisitTokenService`, `CampaignProperties`, the bot
   challenge HMAC (when the challenge is enabled), `KELTA_MAILBOX_VERP_SECRET` and the worker's
   `KELTA_ENCRYPTION_KEY` fail startup when unset. A `log.warn` is not a control.
@@ -1021,8 +1027,10 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 
 ## Postgres max_connections sizing
 
-Per-pod Hikari max (`DB_POOL_MAX`): worker 30, auth 15, ai 15. The gateway and kelta-mcp hold no
-DB pool; the migrate PreSync Job sets no pool override, so it inherits the worker's 30; Cerbos
+Per-pod Hikari max (`DB_POOL_MAX`) defaults to 10 in worker, auth and ai: the value runtime-core's
+packaged properties forced on all three until KLT-838, whatever their yml said. The table budgets
+for `DB_POOL_MAX` raised to 30 (worker) / 15 (auth, ai). The gateway and kelta-mcp hold no DB pool;
+the migrate PreSync Job sets no pool override, so it gets the worker's value; Cerbos
 (Postgres storage driver) uses its driver default. Nothing in the reference deployment pools in
 front of the services (no PgBouncer), though `TenantAwareDataSource` is transaction-pool safe
 (below).
