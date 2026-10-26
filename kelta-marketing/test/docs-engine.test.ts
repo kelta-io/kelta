@@ -209,7 +209,8 @@ describe('docs content', () => {
   const sourcePages = [...localPages, ...authoringPages()];
 
   // Links in local pages and docs/authoring/*.md must reach a page that exists and, when they
-  // carry a #fragment (same-page or /docs/...#x), an id that page renders.
+  // carry a #fragment (same-page or /docs/...#x), an id that page renders. It renders every
+  // docs page: ~3.6s on an idle box, past vitest's 5s default on a busy runner.
   it('links only to docs pages and anchors that exist', async () => {
     const cliPages = Object.keys(externalMeta)
       .filter((k) => !k.startsWith('authoring/'))
@@ -230,8 +231,9 @@ describe('docs content', () => {
       }
     }
     expect(broken).toEqual([]);
-  });
+  }, 30_000);
 
+  // Parses every docs page too: ~1.2s idle, near the 5s default on a busy runner.
   it('has only valid JSON in ```json blocks (use ```jsonc for annotated examples)', () => {
     const invalid: string[] = [];
     for (const page of sourcePages) {
@@ -248,7 +250,7 @@ describe('docs content', () => {
       }
     }
     expect(invalid).toEqual([]);
-  });
+  }, 30_000);
 });
 
 describe('SCIM discovery contract', () => {
