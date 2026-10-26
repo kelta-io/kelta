@@ -50,6 +50,7 @@ class RollupValidationRuleTest {
     private static final String RULE_MESSAGE = "Close or cancel the open tasks first";
     private static final String CLOSE_RULE = "AND(state = \"closed\", openTasks > 0)";
     private static final String PROJECT_ID = "p1";
+    private static final String TENANT = "tenant-1";
 
     private JdbcTemplate jdbcTemplate;
     private StorageAdapter storageAdapter;
@@ -100,6 +101,7 @@ class RollupValidationRuleTest {
         return new CollectionDefinitionBuilder()
                 .name("projects")
                 .displayName("Projects")
+                .tenantId(TENANT)
                 .addField(new FieldDefinitionBuilder().name("state").type(FieldType.STRING).build())
                 .addField(new FieldDefinitionBuilder()
                         .name("openTasks")
@@ -136,7 +138,7 @@ class RollupValidationRuleTest {
             rules.add(new ValidationRuleDefinition("rule_" + i, formulas[i], RULE_MESSAGE,
                     "state", "CREATE_AND_UPDATE", true));
         }
-        ruleRegistry.register("projects", rules);
+        ruleRegistry.register(TENANT, "projects", rules);
     }
 
     private void insertTask(String status, double hours) {

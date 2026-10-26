@@ -303,7 +303,7 @@ public class DefaultQueryEngine implements QueryEngine {
 
         // Evaluate custom validation rules (formula-based)
         if (customValidationRuleEngine != null) {
-            customValidationRuleEngine.evaluate(definition.name(),
+            customValidationRuleEngine.evaluate(definition,
                     withRollupsForValidation(definition, recordData, OperationType.CREATE),
                     OperationType.CREATE);
         }
@@ -424,7 +424,7 @@ public class DefaultQueryEngine implements QueryEngine {
         // Custom (formula) rules may reference sibling fields, so they still see
         // the merged record — plus any rollup summary a rule reads, computed now.
         if (customValidationRuleEngine != null) {
-            customValidationRuleEngine.evaluate(definition.name(),
+            customValidationRuleEngine.evaluate(definition,
                     withRollupsForValidation(definition, mergedData, OperationType.UPDATE),
                     OperationType.UPDATE);
         }
@@ -999,7 +999,7 @@ public class DefaultQueryEngine implements QueryEngine {
         if (rollups.isEmpty()) {
             return data;
         }
-        Set<String> referenced = customValidationRuleEngine.referencedFields(definition.name(), operationType);
+        Set<String> referenced = customValidationRuleEngine.referencedFields(definition, operationType);
         Map<String, Object> ruleData = data;
         for (FieldDefinition rollup : rollups) {
             if (!referenced.contains(rollup.name())) {
