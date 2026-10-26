@@ -27,6 +27,7 @@
     "POST /api/picklist-values": { "docs": "/docs/data-model/picklists-and-record-types/#values" },
     "DELETE /api/global-picklists/{id}": { "docs": "/docs/cli/commands/#kelta-picklists-delete-picklist" },
     "* /api/api-specs/**": { "docs": "/docs/data-model/external-collections/#option-a--import-an-openapi-spec-and-materialize" },
+    "GET /api/api-operations/search": { "docs": "/docs/data-model/external-collections/#option-a--import-an-openapi-spec-and-materialize" },
     "* /api/attachments/**": { "docs": "/docs/data-model/search-and-attachments/#attachments" },
     "GET /api/files/**": { "docs": "/docs/data-model/search-and-attachments/#attachments" },
     "GET /api/images/**": { "docs": "/docs/data-model/search-and-attachments/#image-transforms" },

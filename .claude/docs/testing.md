@@ -459,7 +459,7 @@ change to the script skipped its tests and broke it.
 
 ## Docs checks
 
-The published docs (`kelta-marketing/src/content/docs/**` plus `docs/authoring/*.md`) have three
+The published docs (`kelta-marketing/src/content/docs/**` plus `docs/authoring/*.md`) have six
 static checks; all run without a stack.
 
 - **SDK snippet type-check** — `cd kelta-web && npm run check:doc-snippets`
@@ -496,6 +496,32 @@ static checks; all run without a stack.
   `FlowGenerationService` prompt's "Available resources:" block and `docs/authoring/flows.md` →
   "All accepted resources" list exactly that set (the failure names missing/extra keys). A new
   handler key or a newly retired one needs both lists updated.
+- **`METHOD /api/...` paths** — `ci/doc-http-paths.test.ts` (`node --test`, job `test-ci-scripts`;
+  the `ci_scripts` path filter lists the docs, `docs/**`, every `README.md` and the mapping
+  sources). Every `GET|POST|PUT|PATCH|DELETE` followed by a URL with `/api/` in an inline code span
+  (a span may wrap), a fenced block line (HTTP request lines, `kelta api …`) or a `curl` command
+  (`\` continuations joined; method from `-X`, else `POST` with a body flag, else `GET`) in
+  `kelta-marketing/src/content/docs/**`, `docs/**` and every `README.md` outside `node_modules` and
+  `.claude` must resolve to a mapping from `ci/endpoint-index.ts`'s `collect()` (the same parse
+  that writes `docs/authoring/endpoints.md`, `DynamicCollectionRouter` included). Scheme, host,
+  query and a one-segment slug prefix (`/{tenantSlug}/api/...`, `/acme/api/...`) are dropped;
+  `{id}`, `:id`, `<id>` and `$ID` are variables; a concrete segment matches a mapping variable,
+  except that a collection route (`/api/{collectionName}/...`) does not take a statically routed
+  second segment that is not a system collection. A failure reads `file:line  METHOD /path`. Fix
+  the doc; when prose deliberately shows a path nothing serves, add
+  `{file, method, path, reason}` to `ci/doc-http-paths.exclusions.json` (path as written, after
+  host and query) — an entry without a reason, or one that matches no occurrence, fails.
+- **`api/errors.md` codes** — `ci/doc-error-codes.test.ts` (same job and filter, which also lists
+  every source root the extractor reads). The `Code` column of `## Codes` (several codes per cell
+  allowed, `—` for none) is checked both ways against the codes emitted in the `SOURCE_ROOTS` of
+  `ci/doc-error-codes.ts`: a documented code nothing emits fails, as does an emitted code the
+  table lacks. The header comment of `ci/doc-error-codes.ts` lists the scope and the emitter
+  shapes it reads (a `"code"` map key, a `"code": "…"` member in a JSON string, an argument to a
+  parameter named `code` — `errorResponse(…)`, `new JsonApiError(…)`, `new ValidationError(…)` —
+  and `FieldError`'s `constraint`); a run-time-derived code (the 3-argument
+  `JsonApiResponseBuilder.error`, the gateway's `HttpStatus` fallback) is out of scope. To leave an
+  emitted code out of the table, add it to `SKIPPED` in that file with the reason no HTTP client
+  can see it; a skip without a reason, one nothing emits, or one the table documents fails.
 
 **Runnable blocks (`runnable` fence marker).** A shell block whose fence info string carries the
 word `runnable` — ```` ```bash runnable ```` — is *executed* against a live stack, not just

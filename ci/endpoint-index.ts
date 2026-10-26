@@ -101,7 +101,7 @@ export function maskJava(src: string): { code: string; masked: string } {
 }
 
 /** Index of the bracket closing the one at `open` (same kind), scanning `masked`. */
-function matchBracket(masked: string, open: number): number {
+export function matchBracket(masked: string, open: number): number {
   const opener = masked[open];
   const closer = opener === '(' ? ')' : opener === '{' ? '}' : ']';
   let depth = 0;
@@ -118,7 +118,7 @@ function skipSpace(s: string, i: number): number {
 }
 
 /** Splits `s` on top-level commas, ignoring commas inside brackets and string literals. */
-function splitTopLevel(s: string, masked: string): string[] {
+export function splitTopLevel(s: string, masked: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
@@ -450,7 +450,7 @@ export function parseYamlList(yml: string, key: string): string[] {
 
 export function parseSystemCollections(sources: string[]): Set<string> {
   const names = new Set<string>();
-  for (const src of sources) for (const m of src.matchAll(/\bsystemBuilder\(\s*"([^"]+)"/g)) names.add(m[1]);
+  for (const src of sources) for (const m of src.matchAll(/\b(?:readOnlySystemBuilder|systemBuilder)\(\s*"([^"]+)"/g)) names.add(m[1]);
   return names;
 }
 
@@ -734,7 +734,7 @@ export function brokenDocsLinks(entries: Record<string, Classification>, pages: 
 // Collecting and rendering
 // ---------------------------------------------------------------------------------------------
 
-function javaFiles(dir: string): string[] {
+export function javaFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
   const out: string[] = [];
   for (const name of readdirSync(dir).sort()) {

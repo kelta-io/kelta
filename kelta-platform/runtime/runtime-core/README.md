@@ -99,13 +99,13 @@ The `DynamicCollectionRouter` automatically exposes REST endpoints:
 
 ```bash
 # List products with pagination and filtering
-GET /api/collections/products?page[number]=1&page[size]=20&filter[category][eq]=Electronics
+GET /api/products?page[number]=1&page[size]=20&filter[category][eq]=Electronics
 
 # Get a single product
-GET /api/collections/products/{id}
+GET /api/products/{id}
 
 # Create a product
-POST /api/collections/products
+POST /api/products
 Content-Type: application/json
 {
   "sku": "WIDGET-001",
@@ -115,14 +115,14 @@ Content-Type: application/json
 }
 
 # Update a product
-PUT /api/collections/products/{id}
+PUT /api/products/{id}
 Content-Type: application/json
 {
   "price": 34.99
 }
 
 # Delete a product
-DELETE /api/collections/products/{id}
+DELETE /api/products/{id}
 ```
 
 ## Query Parameters

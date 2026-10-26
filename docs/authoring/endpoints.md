@@ -49,7 +49,7 @@ it before routing.
 `internal` marks an endpoint only the platform's own admin UI or services call; it is reachable, but
 not a supported integration surface and may change without notice.
 
-**399** public endpoints: **307** linked to docs, **29** internal,
+**400** public endpoints: **308** linked to docs, **29** internal,
 **63** not yet documented.
 
 ## Endpoints
@@ -146,6 +146,7 @@ not a supported integration surface and may change without notice.
 | GET | `/api/ai/usage` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |
 | GET | `/api/alerts/latency` | worker | API_ACCESS | undocumented |
 | POST | `/api/analytics/events` | worker | API_ACCESS | undocumented |
+| GET | `/api/api-operations/search` | worker | API_ACCESS + collection grant | [data-model/external-collections](/docs/data-model/external-collections/#option-a--import-an-openapi-spec-and-materialize) |
 | POST | `/api/api-specs/import` | worker | API_ACCESS + collection grant | [data-model/external-collections](/docs/data-model/external-collections/#option-a--import-an-openapi-spec-and-materialize) |
 | GET | `/api/api-specs/library` | worker | API_ACCESS + collection grant | [data-model/external-collections](/docs/data-model/external-collections/#option-a--import-an-openapi-spec-and-materialize) |
 | POST | `/api/api-specs/validate` | worker | API_ACCESS + collection grant | [data-model/external-collections](/docs/data-model/external-collections/#option-a--import-an-openapi-spec-and-materialize) |
@@ -458,4 +459,4 @@ not a supported integration surface and may change without notice.
 
 ## Not routed
 
-23 worker mappings are reached by no gateway route and are not public.
+22 worker mappings are reached by no gateway route and are not public.
