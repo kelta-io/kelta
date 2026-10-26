@@ -135,6 +135,8 @@ evaluated against it:
   `body.input`, so the HTTP and MCP callers double-wrap
   (`{"input": {"customerId": "…"}}`); `kelta flows execute <flowId> --input`
   adds the outer wrap for you.
+- `$.query.<key>` — a webhook start's query parameters (`$.headers`
+  holds its `content-type` and `user-agent`).
 - `$.context.*` — always present.
 
 **`${…}` substitution.** Inside a Task's `Parameters`, any string
