@@ -48,11 +48,13 @@ class SetupAuditActionScenarioTest extends ScenarioBase {
     /**
      * Every action string reaching SetupAuditService.log today:
      * AuditBeforeSaveHook (CREATED/UPDATED/DELETED), MetadataPromotionService (UPDATED),
-     * CredentialResolverImpl (CREDENTIAL_RESOLVE). ACTIVATED/DEACTIVATED are permitted by
+     * CredentialResolverImpl (CREDENTIAL_RESOLVE), UserAnonymizationService (ANONYMIZED, V217).
+     * ACTIVATED/DEACTIVATED are permitted by
      * the constraint and asserted here so narrowing it later fails loudly.
      */
     private static final List<String> ACTIONS_WRITTEN_BY_THE_CODEBASE = List.of(
-            "CREATED", "UPDATED", "DELETED", "ACTIVATED", "DEACTIVATED", "CREDENTIAL_RESOLVE");
+            "CREATED", "UPDATED", "DELETED", "ACTIVATED", "DEACTIVATED", "CREDENTIAL_RESOLVE",
+            "ANONYMIZED");
 
     @Test
     @DisplayName("every audit verb the code writes is actually accepted and readable back")

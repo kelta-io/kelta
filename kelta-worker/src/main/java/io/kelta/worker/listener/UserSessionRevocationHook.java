@@ -2,11 +2,13 @@ package io.kelta.worker.listener;
 
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveResult;
+import io.kelta.runtime.workflow.HookConflictException;
 import io.kelta.worker.controller.PersonalAccessTokenController;
 import io.kelta.worker.controller.PersonalAccessTokenController.LiveToken;
 import io.kelta.worker.service.AuthSessionRevocationClient;
 import io.kelta.worker.service.SecurityAuditLogger;
 import io.kelta.worker.service.UserAccessRevocationMarker;
+import io.kelta.worker.service.UserAnonymizationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -36,7 +38,14 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>A deleted user's row is gone when kelta-auth handles the call, so the login names kelta-auth
  * needs to find the user's tokens are read in {@link #beforeDelete} and handed over in
- * {@link #afterDelete}. The same goes for the PATs, whose rows the delete cascades away.
+ * {@link #afterDelete}. The same goes for the PATs, whose rows the delete cascades away. An
+ * anonymized user's row no longer carries those names either: {@link UserAnonymizationService}
+ * hands them over through {@link UserAnonymizationService#priorLoginNames()}.
+ *
+ * <p>{@code ANONYMIZED} is terminal: {@link #beforeUpdate} answers 409 to a write that moves an
+ * anonymized user to another status or gives them an email, and to one that sets
+ * {@code ANONYMIZED} anywhere but inside {@link UserAnonymizationService} (which scrubs the
+ * personal data first).
  */
 @Component
 public class UserSessionRevocationHook implements BeforeSaveHook {
@@ -44,6 +53,8 @@ public class UserSessionRevocationHook implements BeforeSaveHook {
     private static final Logger log = LoggerFactory.getLogger(UserSessionRevocationHook.class);
 
     static final String ACTIVE = "ACTIVE";
+    static final String ANONYMIZED = UserAnonymizationService.ANONYMIZED;
+    static final String CONFLICT_CODE = "USER_ANONYMIZED";
     static final String AUDIT_ACTOR = "system";
     /** Pending deletes whose names have been read; a delete that fails leaves its entry behind. */
     private static final int MAX_PENDING_DELETES = 1000;
@@ -76,11 +87,39 @@ public class UserSessionRevocationHook implements BeforeSaveHook {
     }
 
     @Override
+    public BeforeSaveResult beforeUpdate(String id, Map<String, Object> record, Map<String, Object> previous,
+                                         String tenantId) {
+        Object status = record.get("status");
+        Object before = previous == null ? null : previous.get("status");
+        if (ANONYMIZED.equals(before)) {
+            if (status != null && !ANONYMIZED.equals(status)) {
+                throw new HookConflictException(CONFLICT_CODE, "status",
+                        "An anonymized user cannot be given another status", Map.of("userId", id));
+            }
+            Object email = record.get("email");
+            if (email != null && !email.toString().isBlank() && !email.equals(previous.get("email"))) {
+                throw new HookConflictException(CONFLICT_CODE, "email",
+                        "An anonymized user cannot be given an email address", Map.of("userId", id));
+            }
+        } else if (ANONYMIZED.equals(status) && UserAnonymizationService.priorLoginNames().isEmpty()) {
+            throw new HookConflictException(CONFLICT_CODE, "status",
+                    "Anonymize a user with POST /api/admin/users/{id}/anonymize, which also erases their "
+                            + "personal data", Map.of("userId", id));
+        }
+        return BeforeSaveResult.ok();
+    }
+
+    @Override
     public void afterUpdate(String id, Map<String, Object> record, Map<String, Object> previous, String tenantId) {
         Object status = record == null ? null : record.get("status");
         Object before = previous == null ? null : previous.get("status");
         if (status != null && !ACTIVE.equals(status) && !Objects.equals(status, before)) {
-            authClient.revokeAfterCommit(tenantId, id);
+            List<String> priorNames = UserAnonymizationService.priorLoginNames().orElse(List.of());
+            if (priorNames.isEmpty()) {
+                authClient.revokeAfterCommit(tenantId, id);
+            } else {
+                authClient.revokeAfterCommit(tenantId, id, priorNames);
+            }
             accessRevocation.markAfterCommit(tenantId, id);
             try {
                 tokens.revokeAllUserTokens(tenantId, id, AUDIT_ACTOR,

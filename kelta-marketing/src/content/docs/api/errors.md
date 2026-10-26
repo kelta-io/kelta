@@ -71,6 +71,7 @@ Several problems in one request produce several entries (one per field).
 | `FLOW_INACTIVE` | 409 | `POST /api/flows/{id}/execute` on an inactive flow (a `test: true` run by a `MANAGE_WORKFLOWS` holder is exempt) |
 | `FLOW_HAS_ACTIVE_EXECUTIONS` | 409 | delete of a flow with running or waiting executions; `meta.activeExecutions` |
 | `DEFAULT_VIEW_EXISTS` | 409 | a second default list view for the same collection and visibility; `meta.existingId` |
+| `USER_ANONYMIZED` | 409 | a `users` update that moves an anonymized user to another status or gives them an email, or sets `status: ANONYMIZED` outside [anonymize](/docs/security/users-and-groups/#anonymizing-a-user); `meta.userId` |
 | `ENVIRONMENT_NAME_CONFLICT`, `EMPTY_SANDBOX_REFRESH` | 409 | a sandbox environment name already in use, or a refresh with nothing to copy |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | the `Content-Type` is not one the endpoint accepts |
 | `VALIDATION_RULE_FAILED` | 422 | a collection validation rule rejected the record; `source.pointer` names its error field |

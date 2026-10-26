@@ -82,7 +82,7 @@ public class ScimUserService {
     public ScimUser getUser(String tenantId, String userId, String baseUrl) {
         String sql = "SELECT pu.id, pu.email, pu.username, pu.first_name, pu.last_name, "
                 + "pu.status, pu.locale, pu.timezone, pu.manager_id, pu.created_at, pu.updated_at "
-                + "FROM platform_user pu WHERE pu.tenant_id = ? AND pu.id = ?";
+                + "FROM platform_user pu WHERE pu.tenant_id = ? AND pu.id = ? AND pu.status <> 'ANONYMIZED'";
         List<ScimUser> users = jdbcTemplate.query(sql, (rs, rowNum) -> mapUser(rs, baseUrl),
                 tenantId, userId);
         if (users.isEmpty()) {
@@ -199,10 +199,11 @@ public class ScimUserService {
 
     @Transactional
     public void deleteUser(String tenantId, String userId) {
-        // Soft delete: set status to INACTIVE
+        // Soft delete: set status to INACTIVE. An anonymized user is gone for SCIM (getUser too):
+        // ANONYMIZED is terminal, and these writes bypass the users hook that enforces it.
         int rows = jdbcTemplate.update(
                 "UPDATE platform_user SET status = 'INACTIVE', updated_at = NOW() "
-                        + "WHERE tenant_id = ? AND id = ?",
+                        + "WHERE tenant_id = ? AND id = ? AND status <> 'ANONYMIZED'",
                 tenantId, userId);
         if (rows == 0) {
             throw new ScimException(HttpStatus.NOT_FOUND, "User " + userId + " not found");
