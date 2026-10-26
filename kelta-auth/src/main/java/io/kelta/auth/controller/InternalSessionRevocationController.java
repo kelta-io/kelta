@@ -25,7 +25,8 @@ import java.util.regex.Pattern;
  * the user's OAuth2 authorizations ({@link UserSessionRevoker#signOutEverywhere}).
  *
  * <p>{@code POST /internal/tenants/{tenantId}/users/{userId}/revoke-sessions}, optional JSON body
- * {@code {"loginNames": ["…"]}} (used only when the user row no longer exists). Authenticated by
+ * {@code {"loginNames": ["…"]}} (added to the names on the user's row: a deleted user has no row, an
+ * anonymized user's row no longer carries the names its tokens were issued under). Authenticated by
  * the shared {@code kelta.internal.token} ({@code KELTA_INTERNAL_TOKEN}) in {@code X-Internal-Token},
  * compared in constant time; with no token configured every call is refused. The ingress routes
  * every path of the auth host to this service, so this check is the endpoint's only gate — the

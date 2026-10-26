@@ -459,6 +459,28 @@ Owner scoping is enforced in `PhysicalTableStorageAdapter` (reads) and `OwnerSco
   the key and ends the auth session. Not done: server-side revoke on logout (public client has no
   client auth to `/oauth2/revoke`), refresh-token family revocation on reuse, DPoP binding.
 
+### User anonymization does not erase everything (KLT-817, accepted)
+
+`UserAnonymizationService` (`architecture.md` → User anonymization) scrubs the `platform_user` row and
+deletes the credential/MFA/preference/device rows, but personal data about the user survives in:
+
+- **Audit rows that embed old values.** `setup_audit_trail` rows written by `AuditBeforeSaveHook` for
+  earlier `users` writes hold the whole record as it was (email, names); `field_history` and
+  `record_version` rows hold old values of any audited field; `login_history` keeps source IPs and
+  user agents. They are kept on purpose — the audit trail must survive erasure — and age out only
+  under their own retention. The anonymize's own audit row carries no PII.
+- **Tenant data.** Records the user created, owns or is named in (a `contacts` row, chat messages,
+  support-mailbox messages, attachments) are not touched; the tenant erases those (e.g. in the same
+  flow, before the `ANONYMIZE_USER` step).
+- **Events and logs already emitted.** Earlier `kelta.record.changed.*` events (KELTA_RECORDS
+  retention), Loki logs (emails appear in auth and email-delivery logs), `email_log` rows, the
+  Cerbos/search indexes until their next refresh, and database backups / PITR snapshots keep old
+  values until they expire.
+- **kelta-auth state.** `oauth2_authorization` rows are found by login name; the old names are passed
+  to kelta-auth (`UserSessionRevoker` adds them to the row's), so a failed call (ERROR log) leaves
+  refresh tokens issued under the old email alive, as for any deactivation. An SSO sign-in with the
+  old email later JIT-provisions a new, unrelated user.
+
 ### Outbound requests to tenant-supplied URLs
 
 `OutboundUrlGuard` + `OutboundHttpClient` (runtime-core `io.kelta.runtime.outbound`) refuse

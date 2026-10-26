@@ -1567,7 +1567,7 @@ record leaves `ACTIVE` or is deleted (`listener/UserSessionRevocationHook` — g
 `/api/operations`, CSV import, delegated `updateUser`), or SCIM deactivates/deletes a user
 (`ScimUserService`), the worker's `service/AuthSessionRevocationClient` calls kelta-auth's
 `POST /internal/tenants/{tenantId}/users/{userId}/revoke-sessions` (body `{"loginNames": [...]}`,
-sent for a deleted user) → `UserSessionRevoker.signOutEverywhere`: every session of that tenant's
+sent for a deleted or anonymized user and added to the names on the row) → `UserSessionRevoker.signOutEverywhere`: every session of that tenant's
 user ends (none kept) and every refresh token is revoked. The call runs after the transaction commits
 (at once when there is none), over the JDK `HttpClient` with a 2 s connect / 5 s response timeout and
 redirects off, to `kelta.auth.internal-url` (`KELTA_AUTH_INTERNAL_URL`, kelta-auth's in-cluster
@@ -2403,6 +2403,42 @@ gateway's blanket `API_ACCESS`), and **rate-limited per tenant** (`≤ MAX_SENDS
 `to` is already resolved by the caller (the FE reads `SendEmailConfig.recipientField` off
 the record it is showing); `mergeContext` feeds `${var}` substitution. Sends are tagged
 `source = "QUICK_ACTION"` in `email_log` and audit-logged to `security.audit`.
+
+### User anonymization (KLT-817)
+
+`POST /api/admin/users/{id}/anonymize` (`PortalUserAdminController`, `MANAGE_USERS` via its
+`requirePermission`; 400 for the caller's own id) and the flow action `ANONYMIZE_USER`
+(`handler/AnonymizeUserActionHandler`, registered in `FlowConfig`; the step fails unless the flow's
+actor is an active user whose profile grants `MANAGE_USERS` — flows carry no HTTP identity, so
+`IdentityCollectionGuardHook` does not judge them) both call
+`service/UserAnonymizationService.anonymize(tenantId, userId, actorId)`. It refuses the `system` user
+(400), answers 404 for a user the tenant does not have, and returns without writing for an
+`ANONYMIZED` user (read under `SELECT … FOR UPDATE`, so a concurrent second call waits and then
+returns). Otherwise, in one transaction:
+
+1. JDBC scrub of `platform_user`: `email = deleted+<id>@invalid`; `username`, `first_name`,
+   `last_name`, `phone_number`, `email_verification_token`/`_expires_at` cleared; `settings = {}`;
+   `email_verified`/`mfa_enabled` false. It runs **first** and over JDBC: the next write's record-change
+   event and `AuditBeforeSaveHook` row are built from the stored row, so they never carry the old
+   values (and `UserLifecycleHook`'s email pattern would refuse the dot-less `@invalid` domain).
+2. `status = ANONYMIZED` through `QueryEngine` on `users`, inside a `ScopedValue` holding the old
+   email/username (`UserAnonymizationService.priorLoginNames()`). `UserSessionRevocationHook` fires as
+   for any status leaving `ACTIVE` (kelta-auth sign-out, PATs, gateway `user:revoked` marker) and
+   passes those names to kelta-auth, which adds them to the row's — the refresh tokens were issued
+   under the old email.
+3. Deletes `user_credential`, `user_totp_secret`, `user_recovery_code`, `user_ui_preference`,
+   `portal_login_token`, `push_device` rows; revokes any PAT the hook missed.
+4. One `setup_audit_trail` row, action `ANONYMIZED` (V217 adds the verb), naming actor, tenant and
+   target id; `new_value` is `{"status":"ANONYMIZED"}`.
+
+The id is kept, so records the user created, updated or owns are untouched. `ANONYMIZED` is terminal:
+`UserSessionRevocationHook.beforeUpdate` answers 409 `USER_ANONYMIZED` to a write that moves the user
+to another status or gives them an email, and to `status: ANONYMIZED` set outside the service.
+SCIM writes `platform_user` over JDBC, past that hook, so `ScimUserService` reads an anonymized user as
+404 (GET/PUT/PATCH/DELETE). Every
+kelta-auth sign-in path requires `status = 'ACTIVE'`, and the paths that do not (password change,
+reset token, baseline-admin check) join `user_credential`, which is gone. What is not erased:
+`concerns.md` → Security Considerations.
 
 ### User invitation flow
 

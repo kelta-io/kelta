@@ -1,10 +1,18 @@
 package io.kelta.worker.listener;
 
+import io.kelta.runtime.model.system.CoreSystemCollections;
+import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.router.GlobalExceptionHandler;
 import io.kelta.runtime.router.UserIdResolver;
+import io.kelta.runtime.workflow.HookConflictException;
 import io.kelta.worker.controller.PersonalAccessTokenController;
 import io.kelta.worker.service.AuthSessionRevocationClient;
 import io.kelta.worker.service.SecurityAuditLogger;
+import io.kelta.worker.service.SetupAuditService;
 import io.kelta.worker.service.UserAccessRevocationMarker;
+import io.kelta.worker.service.UserAnonymizationService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -22,11 +30,17 @@ import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -266,5 +280,111 @@ class UserSessionRevocationHookTest {
 
         verify(client).revokeAfterCommit("t-1", "u-1");
         verify(client).revokeAfterCommit("t-1", "u-1", List.of());
+    }
+
+    // ------------------------------------------------------------------ anonymize (KLT-817)
+
+    /**
+     * The real {@link UserAnonymizationService} over a {@link QueryEngine} stub that runs this hook
+     * the way {@code DefaultQueryEngine.update} does (before-update, then after-update), with the
+     * user row already scrubbed by the service's JDBC write.
+     */
+    private UserAnonymizationService anonymizationServiceOverThisHook() {
+        QueryEngine queryEngine = mock(QueryEngine.class);
+        CollectionRegistry registry = mock(CollectionRegistry.class);
+        when(registry.get("users")).thenReturn(CoreSystemCollections.users());
+        when(jdbc.queryForList(contains("FOR UPDATE"), eq(String.class), eq("u-1"), eq("t-1")))
+                .thenReturn(List.of("ACTIVE"));
+        when(queryEngine.getById(any(), eq("u-1"))).thenReturn(Optional.of(Map.of(
+                "id", "u-1", "tenantId", "t-1", "email", "a@example.test", "username", "ann",
+                "status", "ACTIVE")));
+        when(queryEngine.update(any(), eq("u-1"), anyMap())).thenAnswer(inv -> {
+            Map<String, Object> patch = new HashMap<>(inv.getArgument(2));
+            Map<String, Object> previous = Map.of("id", "u-1", "tenantId", "t-1",
+                    "email", "deleted+u-1@invalid", "status", "ACTIVE");
+            assertThat(hook.beforeUpdate("u-1", patch, previous, "t-1").isSuccess()).isTrue();
+            Map<String, Object> written = new HashMap<>(previous);
+            written.putAll(patch);
+            hook.afterUpdate("u-1", written, previous, "t-1");
+            return Optional.of(written);
+        });
+        return new UserAnonymizationService(queryEngine, registry, jdbc, tokens, mock(SetupAuditService.class));
+    }
+
+    @Test
+    @DisplayName("an anonymize signs the user out of kelta-auth under their old login names, revokes their PATs and writes the user:revoked marker")
+    void anonymizeTriggersEveryRevocation() {
+        userHoldsTokens(Map.of("id", "tok-1", "token_hash", "hash-1"));
+        Set<String> revokedRows = ConcurrentHashMap.newKeySet();
+        when(jdbc.update(contains(REVOKE), any(), any(), anyString(), eq("t-1")))
+                .thenAnswer(inv -> revokedRows.add(inv.getArgument(3)) ? 1 : 0);
+        when(redis.opsForValue()).thenReturn(valueOps);
+        long before = Instant.now().getEpochSecond();
+
+        UserAnonymizationService.Result result = anonymizationServiceOverThisHook().anonymize("t-1", "u-1", "admin-1");
+
+        assertThat(result.alreadyAnonymized()).isFalse();
+        // kelta-auth session + refresh-token revocation, with the names the tokens were issued under
+        verify(client).revokeAfterCommit("t-1", "u-1", List.of("a@example.test", "ann"));
+        // PAT revocation: row marked revoked, gateway cache dropped, revocation key written
+        assertThat(revokedRows).containsExactly("tok-1");
+        verify(redis).delete("pat:hash-1");
+        verify(valueOps).set("pat:revoked:hash-1", "revoked", Duration.ofDays(366));
+        // gateway marker rejecting access tokens issued before now
+        assertMarkerWrittenSince(before);
+        assertThat(UserAnonymizationService.priorLoginNames()).as("bound only during the write").isEmpty();
+    }
+
+    @Test
+    @DisplayName("an anonymized user cannot be moved to another status (409 USER_ANONYMIZED)")
+    void anonymizedStatusIsTerminal() {
+        Map<String, Object> previous = Map.of("status", "ANONYMIZED", "email", "deleted+u-1@invalid");
+
+        for (String status : List.of("ACTIVE", "INACTIVE", "LOCKED", "PENDING_ACTIVATION")) {
+            HookConflictException conflict = catchThrowableOfType(HookConflictException.class,
+                    () -> hook.beforeUpdate("u-1", new HashMap<>(Map.of("status", status)), previous, "t-1"));
+            assertThat(conflict).as(status).isNotNull();
+            assertThat(conflict.getCode()).isEqualTo("USER_ANONYMIZED");
+            assertThat(conflict.getFieldName()).isEqualTo("status");
+        }
+        HookConflictException conflict = catchThrowableOfType(HookConflictException.class,
+                () -> hook.beforeUpdate("u-1", new HashMap<>(Map.of("status", "ACTIVE")), previous, "t-1"));
+        assertThat(new GlobalExceptionHandler().handleHookConflict(conflict, mock(HttpServletRequest.class))
+                .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    @DisplayName("an anonymized user cannot be given a new email (409 USER_ANONYMIZED)")
+    void anonymizedUserKeepsThePlaceholderEmail() {
+        Map<String, Object> previous = Map.of("status", "ANONYMIZED", "email", "deleted+u-1@invalid");
+
+        assertThatThrownBy(() -> hook.beforeUpdate("u-1",
+                new HashMap<>(Map.of("email", "back@example.test")), previous, "t-1"))
+                .isInstanceOfSatisfying(HookConflictException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo("USER_ANONYMIZED");
+                    assertThat(e.getFieldName()).isEqualTo("email");
+                });
+    }
+
+    @Test
+    @DisplayName("other writes to an anonymized user, and a full-record round-trip, still pass")
+    void anonymizedUserOtherWrites() {
+        Map<String, Object> previous = Map.of("status", "ANONYMIZED", "email", "deleted+u-1@invalid");
+
+        assertThat(hook.beforeUpdate("u-1", new HashMap<>(Map.of("locale", "fr_FR")), previous, "t-1")
+                .isSuccess()).isTrue();
+        assertThat(hook.beforeUpdate("u-1", new HashMap<>(Map.of("status", "ANONYMIZED",
+                "email", "deleted+u-1@invalid")), previous, "t-1").isSuccess()).isTrue();
+    }
+
+    @Test
+    @DisplayName("status ANONYMIZED cannot be set outside the anonymize service, which erases the personal data")
+    void anonymizedOnlyThroughTheService() {
+        assertThatThrownBy(() -> hook.beforeUpdate("u-1", new HashMap<>(Map.of("status", "ANONYMIZED")),
+                Map.of("status", "ACTIVE", "email", "a@example.test"), "t-1"))
+                .isInstanceOfSatisfying(HookConflictException.class,
+                        e -> assertThat(e.getCode()).isEqualTo("USER_ANONYMIZED"));
+        assertThat(hook.beforeUpdate("u-1", new HashMap<>(Map.of("status", "INACTIVE")),
+                Map.of("status", "ACTIVE"), "t-1").isSuccess()).isTrue();
     }
 }
