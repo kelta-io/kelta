@@ -317,8 +317,55 @@ collection).
   is HTML-escaped; write `${raw:$.path}` to insert trusted HTML
   unescaped. `subject` is not escaped but has line breaks removed. A
   `=jsonata` value is used as-is, without escaping.
-- Result: `{"emailLogId", "to", "subject", "status": "QUEUED"}`. The
-  email is queued, not sent synchronously.
+- `transactional` (boolean, default `true`) — `true` for mail the
+  recipient must receive (password resets, receipts, alerts); `false`
+  for mail a recipient may opt out of (digests, announcements). Any
+  other value fails validation.
+- `replyTo` — one address for the `Reply-To` header. A list, a display
+  name (`Help <help@example.com>`) or an unparseable value fails
+  validation; a `${...}` placeholder is checked once it resolves.
+- Result: `{"emailLogId", "to", "subject", "status"}`. `status` is
+  `QUEUED` (the email is queued, not sent synchronously) or `SUPPRESSED`.
+
+Headers on every `EMAIL_ALERT`:
+
+- `From` — the tenant's from-address (`tenant.email_from_address` /
+  `email_from_name`) when set, else the platform's.
+- `Sender` — the platform from-address, only when `From` is a tenant
+  address relayed by the platform SMTP server (no tenant SMTP
+  credential). Absent otherwise.
+- `Message-ID` — `<uuid@domain-of-From>`, on the From domain.
+- `Auto-Submitted: auto-generated` (RFC 3834).
+- `Reply-To` — `replyTo`, when given.
+
+`transactional: true` adds nothing else and never checks the
+suppression list. `transactional: false` first checks the tenant's
+suppression list (`email_suppression`, per tenant, case-insensitive):
+a suppressed recipient is not sent to, the step still succeeds with
+`status: "SUPPRESSED"`, and the `email_log` row has status
+`SUPPRESSED`. Otherwise the email carries RFC 8058 one-click
+unsubscribe:
+
+```
+List-Unsubscribe: <https://<tracking-base-url>/api/track/email-unsubscribe?t=<token>>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+The token is an HMAC (`kelta.campaigns.tracking-secret`) over the
+tenant id and the lower-cased address; it cannot be used as a campaign
+tracking token, or the other way round. There is no `mailto:` form.
+The endpoint is public (no login):
+
+- `POST /api/track/email-unsubscribe?t=<token>` — what mail providers
+  call on one-click. Adds the address to the tenant's suppression list
+  (`reason: UNSUBSCRIBE`, no campaign) and returns 200; repeating it
+  returns 200 and changes nothing. A bad token returns 400.
+- `GET /api/track/email-unsubscribe?t=<token>` — a confirmation page
+  whose button sends the POST. It never writes, because link scanners
+  fetch every link in a message.
+
+The same suppression list stops campaign sends, and a campaign
+unsubscribe stops non-transactional flow mail.
 
 ### `CALL_API`
 

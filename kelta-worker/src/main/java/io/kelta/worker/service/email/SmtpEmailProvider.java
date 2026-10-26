@@ -3,6 +3,7 @@ package io.kelta.worker.service.email;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.mail.MessagingException;
+import jakarta.mail.Session;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
@@ -15,7 +16,9 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 
 import java.io.UnsupportedEncodingException;
 import java.time.Duration;
+import java.util.Locale;
 import java.util.Properties;
+import java.util.UUID;
 
 /**
  * SMTP-based email provider using Jakarta Mail (RFC 5321).
@@ -24,6 +27,12 @@ import java.util.Properties;
  * and supports per-tenant SMTP configuration overrides. Tenant-specific
  * {@link JavaMailSender} instances are cached (Caffeine, 5-min TTL, max 100 entries)
  * to avoid creating new SMTP connections per email.
+ *
+ * <p><b>Sender identity.</b> {@code From} is the tenant's from-address when set, else the
+ * platform's. When a tenant From goes out through the <em>platform</em> SMTP relay, the message
+ * also carries {@code Sender: <platform from-address>} (RFC 5322 3.6.2) — the mailbox actually
+ * transmitting it. {@code Message-ID} is generated on the domain of the From address, so it
+ * aligns with the identity the recipient's provider authenticates.
  *
  * @since 1.0.0
  */
@@ -65,13 +74,17 @@ public class SmtpEmailProvider implements EmailProvider {
             // is built against the session that will transmit it. Falling back to the
             // platform sender only matters for JavaMailSender implementations that are
             // not JavaMailSenderImpl, which in practice means test doubles.
-            MimeMessage mimeMessage = sender instanceof JavaMailSenderImpl impl
-                    ? impl.createMimeMessage()
-                    : platformMailSender.createMimeMessage();
+            Session session = sender instanceof JavaMailSenderImpl impl
+                    ? impl.getSession()
+                    : platformMailSender.createMimeMessage().getSession();
+            MimeMessage mimeMessage = new FromDomainMimeMessage(session, domainOf(fromAddress));
 
             MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
             helper.setTo(message.to());
             helper.setFrom(new InternetAddress(fromAddress, fromName));
+            if (sendsTenantFromViaPlatform(tenantSettings, fromAddress)) {
+                mimeMessage.setSender(new InternetAddress(platformFromAddress));
+            }
             helper.setSubject(message.subject());
 
             applyHeaders(mimeMessage, helper, message.headers());
@@ -91,8 +104,9 @@ public class SmtpEmailProvider implements EmailProvider {
             sender.send(mimeMessage);
 
             // Read the id back rather than assigning one: saveChanges() — which send()
-            // invokes — regenerates Message-ID unconditionally, so anything set before
-            // this point is already gone. This is the only moment the real value exists.
+            // invokes — regenerates Message-ID unconditionally (FromDomainMimeMessage only
+            // chooses its domain), so anything set before this point is already gone.
+            // This is the only moment the real value exists.
             return SendResult.sent(readMessageId(mimeMessage));
 
         } catch (MailAuthenticationException e) {
@@ -163,6 +177,56 @@ public class SmtpEmailProvider implements EmailProvider {
     }
 
     /**
+     * True when a tenant's own From address is relayed by the platform SMTP server — the one
+     * case where the author (From) and the transmitting mailbox differ and {@code Sender} says so.
+     */
+    private boolean sendsTenantFromViaPlatform(TenantEmailSettings tenantSettings, String fromAddress) {
+        return tenantSettings != null
+                && tenantSettings.hasFromOverride()
+                && !tenantSettings.hasSmtpOverride()
+                && platformFromAddress != null
+                && !platformFromAddress.equalsIgnoreCase(fromAddress);
+    }
+
+    /** The domain part of an address, lower-cased; {@code null} when it has none. */
+    static String domainOf(String address) {
+        if (address == null) {
+            return null;
+        }
+        int at = address.lastIndexOf('@');
+        if (at < 0 || at == address.length() - 1) {
+            return null;
+        }
+        String domain = address.substring(at + 1).strip().toLowerCase(Locale.ROOT);
+        return domain.matches("[a-z0-9.-]+") ? domain : null;
+    }
+
+    /**
+     * A {@link MimeMessage} whose generated {@code Message-ID} is {@code <uuid@from-domain>}
+     * rather than Jakarta Mail's default, which is derived from the local host name — a pod
+     * name nobody can authenticate. Falls back to the default when the From address has no
+     * usable domain.
+     */
+    static final class FromDomainMimeMessage extends MimeMessage {
+
+        private final String domain;
+
+        FromDomainMimeMessage(Session session, String domain) {
+            super(session);
+            this.domain = domain;
+        }
+
+        @Override
+        protected void updateMessageID() throws MessagingException {
+            if (domain == null) {
+                super.updateMessageID();
+                return;
+            }
+            setHeader("Message-ID", "<" + UUID.randomUUID() + "@" + domain + ">");
+        }
+    }
+
+    /**
      * Returns the SMTP host used for a given tenant settings (for audit trail).
      */
     public String resolveSmtpHost(TenantEmailSettings tenantSettings) {
@@ -172,7 +236,8 @@ public class SmtpEmailProvider implements EmailProvider {
         return platformMailSender instanceof JavaMailSenderImpl impl ? impl.getHost() : "platform-default";
     }
 
-    private JavaMailSender resolveSender(TenantEmailSettings tenantSettings) {
+    // Package-private so a test can substitute the per-tenant sender without an SMTP server.
+    JavaMailSender resolveSender(TenantEmailSettings tenantSettings) {
         if (tenantSettings == null || !tenantSettings.hasSmtpOverride()) {
             return platformMailSender;
         }
