@@ -20,6 +20,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 
 /**
  * Manages the lifecycle of collections on this worker.
@@ -315,7 +317,7 @@ public class CollectionLifecycleManager {
             }
 
             // Load and register validation rules from DB
-            loadAndRegisterValidationRules(collectionId, definition);
+            loadAndRegisterValidationRules(collectionId, definition, true);
 
             // Track as active
             registeredDefinitions.put(collectionId, definition);
@@ -388,7 +390,7 @@ public class CollectionLifecycleManager {
             });
 
             // Refresh validation rules
-            loadAndRegisterValidationRules(collectionId, newDefinition);
+            loadAndRegisterValidationRules(collectionId, newDefinition, false);
 
         } catch (Exception e) {
             log.error("Failed to refresh collection '{}' (id={}): {}",
@@ -970,13 +972,19 @@ public class CollectionLifecycleManager {
      * Loads a collection's validation rules from the database and registers them under the
      * tenant whose writes they govern — never under the bare collection name, which another
      * tenant's collection can share. See {@link ValidationRuleRegistry}.
+     *
+     * <p>A failed load fails closed: the rules registered before stay in force, and a collection
+     * whose rules never loaded is marked unavailable so its writes are refused.
+     *
+     * @param firstLoad {@code true} from initialize, {@code false} from refresh
      */
-    private void loadAndRegisterValidationRules(String collectionId, CollectionDefinition definition) {
+    private void loadAndRegisterValidationRules(String collectionId, CollectionDefinition definition,
+                                                boolean firstLoad) {
         if (validationRuleRegistry == null) {
             return;
         }
         if (definition.systemCollection()) {
-            loadSystemCollectionValidationRules(collectionId, definition.name());
+            loadSystemCollectionValidationRules(collectionId, definition.name(), firstLoad);
         } else {
             loadTenantCollectionValidationRules(collectionId, definition);
         }
@@ -996,83 +1004,123 @@ public class CollectionLifecycleManager {
             return;
         }
         String boundTenantId = TenantContext.get();
-        if (boundTenantId != null && !boundTenantId.isBlank() && !boundTenantId.equals(ownerTenantId)) {
-            // RLS hides the owner's rows from another tenant's connection: reloading here would
-            // replace the owner's rules with an empty set.
-            log.warn("Not reloading validation rules of collection '{}' (id={}) owned by tenant '{}' "
-                    + "while tenant '{}' is bound", collectionName, collectionId, ownerTenantId, boundTenantId);
+        boolean otherTenantBound = boundTenantId != null && !boundTenantId.isBlank()
+                && !boundTenantId.equals(ownerTenantId);
+
+        List<ValidationRuleDefinition> rules;
+        try {
+            // RLS hides the owner's rows from another tenant's connection, so read them unbound;
+            // the query names the owner either way.
+            rules = toValidationRules(otherTenantBound
+                    ? queryOffTenantScope(SELECT_TENANT_VALIDATION_RULES, collectionId, ownerTenantId)
+                    : jdbcTemplate.queryForList(SELECT_TENANT_VALIDATION_RULES, collectionId, ownerTenantId));
+        } catch (Exception e) {
+            boolean kept = validationRuleRegistry.markLoadFailed(ownerTenantId, collectionName);
+            log.error("Failed to load validation rules for collection '{}' (id={}) of tenant '{}'; {}",
+                    collectionName, collectionId, ownerTenantId,
+                    kept ? "keeping the previously loaded rules"
+                            : "no rules were ever loaded, so writes to it are refused until they load", e);
             return;
         }
 
-        try {
-            List<ValidationRuleDefinition> rules = new ArrayList<>();
-            for (Map<String, Object> row : jdbcTemplate.queryForList(
-                    SELECT_TENANT_VALIDATION_RULES, collectionId, ownerTenantId)) {
-                ValidationRuleDefinition rule = toValidationRule(row);
-                if (rule != null) {
-                    rules.add(rule);
-                }
-            }
-
-            validationRuleRegistry.register(ownerTenantId, collectionName, rules);
-            long activeCount = rules.stream().filter(ValidationRuleDefinition::active).count();
-            log.info("Registered {} validation rules ({} active) for collection '{}' of tenant '{}'",
-                    rules.size(), activeCount, collectionName, ownerTenantId);
-
-        } catch (Exception e) {
-            log.warn("Failed to load validation rules for collection '{}' of tenant '{}': {}",
-                    collectionName, ownerTenantId, e.getMessage());
-            validationRuleRegistry.register(ownerTenantId, collectionName, List.of());
-        }
+        validationRuleRegistry.register(ownerTenantId, collectionName, rules);
+        long activeCount = rules.stream().filter(ValidationRuleDefinition::active).count();
+        log.info("Registered {} validation rules ({} active) for collection '{}' of tenant '{}'",
+                rules.size(), activeCount, collectionName, ownerTenantId);
     }
 
     /**
      * A system collection has one definition for every tenant, but each rule row on it belongs
      * to the tenant that wrote it and governs only that tenant's writes, so its rules are
-     * registered per rule tenant. With a tenant bound (a NATS refresh for that tenant's rule
-     * change, an on-demand load inside a request) RLS shows only that tenant's rows, so only that
-     * tenant's set is replaced; with none bound (startup bootstrap) every tenant's rows are read
-     * and the collection's rule sets are replaced as a whole.
+     * registered per rule tenant.
+     *
+     * <p>A first load (initialize, including an on-demand load inside one tenant's request)
+     * always reads every tenant's rows and replaces the collection's rule sets as a whole — see
+     * {@link #queryAllTenantsValidationRules}. A refresh with a tenant bound (a NATS refresh for
+     * that tenant's rule change) sees only that tenant's rows under RLS, so it replaces only that
+     * tenant's set; one with none bound, or one of a collection whose every-tenant load never
+     * succeeded, reloads every tenant.
      */
-    private void loadSystemCollectionValidationRules(String collectionId, String collectionName) {
+    private void loadSystemCollectionValidationRules(String collectionId, String collectionName, boolean firstLoad) {
         String boundTenantId = TenantContext.get();
-        boolean tenantBound = boundTenantId != null && !boundTenantId.isBlank();
+        boolean tenantRefresh = !firstLoad && boundTenantId != null && !boundTenantId.isBlank()
+                && validationRuleRegistry.isSystemCollectionLoaded(collectionName);
+        if (tenantRefresh) {
+            List<ValidationRuleDefinition> rules;
+            try {
+                rules = toValidationRules(jdbcTemplate.queryForList(
+                        SELECT_TENANT_VALIDATION_RULES, collectionId, boundTenantId));
+            } catch (Exception e) {
+                log.error("Failed to reload validation rules of tenant '{}' for system collection '{}' (id={}); "
+                        + "keeping the previously loaded rules", boundTenantId, collectionName, collectionId, e);
+                return;
+            }
+            validationRuleRegistry.registerSystemCollectionRules(collectionName, boundTenantId, rules);
+            log.info("Registered {} validation rules of tenant '{}' for system collection '{}'",
+                    rules.size(), boundTenantId, collectionName);
+            return;
+        }
+
+        Map<String, List<ValidationRuleDefinition>> rulesByTenant = new HashMap<>();
         try {
-            if (tenantBound) {
-                List<ValidationRuleDefinition> rules = new ArrayList<>();
-                for (Map<String, Object> row : jdbcTemplate.queryForList(
-                        SELECT_TENANT_VALIDATION_RULES, collectionId, boundTenantId)) {
-                    ValidationRuleDefinition rule = toValidationRule(row);
-                    if (rule != null) {
-                        rules.add(rule);
-                    }
+            for (Map<String, Object> row : queryAllTenantsValidationRules(collectionId)) {
+                String ruleTenantId = (String) row.get("tenant_id");
+                ValidationRuleDefinition rule = toValidationRule(row);
+                if (ruleTenantId == null || ruleTenantId.isBlank() || rule == null) {
+                    continue;
                 }
-                validationRuleRegistry.registerSystemCollectionRules(collectionName, boundTenantId, rules);
-                log.info("Registered {} validation rules of tenant '{}' for system collection '{}'",
-                        rules.size(), boundTenantId, collectionName);
-            } else {
-                Map<String, List<ValidationRuleDefinition>> rulesByTenant = new HashMap<>();
-                for (Map<String, Object> row : jdbcTemplate.queryForList(SELECT_VALIDATION_RULES, collectionId)) {
-                    String ruleTenantId = (String) row.get("tenant_id");
-                    ValidationRuleDefinition rule = toValidationRule(row);
-                    if (ruleTenantId == null || ruleTenantId.isBlank() || rule == null) {
-                        continue;
-                    }
-                    rulesByTenant.computeIfAbsent(ruleTenantId, t -> new ArrayList<>()).add(rule);
-                }
-                validationRuleRegistry.registerSystemCollectionRules(collectionName, rulesByTenant);
-                log.info("Registered validation rules of {} tenant(s) for system collection '{}'",
-                        rulesByTenant.size(), collectionName);
+                rulesByTenant.computeIfAbsent(ruleTenantId, t -> new ArrayList<>()).add(rule);
             }
         } catch (Exception e) {
-            log.warn("Failed to load validation rules for system collection '{}': {}",
-                    collectionName, e.getMessage());
-            if (tenantBound) {
-                validationRuleRegistry.registerSystemCollectionRules(collectionName, boundTenantId, List.of());
-            } else {
-                validationRuleRegistry.registerSystemCollectionRules(collectionName, Map.of());
+            boolean kept = validationRuleRegistry.markSystemCollectionLoadFailed(collectionName);
+            log.error("Failed to load validation rules for system collection '{}' (id={}, bound tenant '{}'); {}",
+                    collectionName, collectionId, boundTenantId,
+                    kept ? "keeping the previously loaded rules"
+                            : "no rules were ever loaded, so writes to it are refused until they load", e);
+            return;
+        }
+        validationRuleRegistry.registerSystemCollectionRules(collectionName, rulesByTenant);
+        log.info("Registered validation rules of {} tenant(s) for system collection '{}'",
+                rulesByTenant.size(), collectionName);
+    }
+
+    /** Every tenant's rule rows on a collection, read unbound — see {@link #queryOffTenantScope}. */
+    private List<Map<String, Object>> queryAllTenantsValidationRules(String collectionId) throws Exception {
+        if (TenantContext.get() == null) {
+            return jdbcTemplate.queryForList(SELECT_VALIDATION_RULES, collectionId);
+        }
+        return queryOffTenantScope(SELECT_VALIDATION_RULES, collectionId);
+    }
+
+    /**
+     * Runs a query on an <em>unbound</em> connection, which RLS answers with every tenant's rows
+     * ({@code admin_bypass}). A {@link ScopedValue} binding cannot be undone in place, so the
+     * query runs on a fresh virtual thread, which inherits neither the tenant scope nor the
+     * request (see {@code TenantAwareDataSource}). Only for metadata reads whose SQL, or whose
+     * caller, scopes the rows itself.
+     */
+    private List<Map<String, Object>> queryOffTenantScope(String sql, Object... args) throws Exception {
+        FutureTask<List<Map<String, Object>>> query = new FutureTask<>(() -> jdbcTemplate.queryForList(sql, args));
+        Thread.ofVirtual().name("validation-rule-load").start(query);
+        try {
+            return query.get();
+        } catch (ExecutionException e) {
+            throw e.getCause() instanceof Exception cause ? cause : e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        }
+    }
+
+    private static List<ValidationRuleDefinition> toValidationRules(List<Map<String, Object>> rows) {
+        List<ValidationRuleDefinition> rules = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            ValidationRuleDefinition rule = toValidationRule(row);
+            if (rule != null) {
+                rules.add(rule);
             }
         }
+        return rules;
     }
 
     /** Removes exactly this collection's rules: its owner's, or every tenant's on a system collection. */
