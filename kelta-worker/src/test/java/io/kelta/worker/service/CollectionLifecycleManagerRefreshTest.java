@@ -94,7 +94,8 @@ class CollectionLifecycleManagerRefreshTest {
                 .thenReturn(List.of(row));
         when(jdbcTemplate.queryForList(contains("FROM field WHERE"), eq(collectionId)))
                 .thenReturn(fieldRows);
-        when(jdbcTemplate.queryForList(contains("FROM validation_rule"), eq(collectionId)))
+        when(jdbcTemplate.queryForList(contains("FROM validation_rule"), eq(collectionId),
+                eq(row.get("tenant_id"))))
                 .thenReturn(List.of());
     }
 
@@ -174,7 +175,7 @@ class CollectionLifecycleManagerRefreshTest {
 
             manager.teardownCollection("coll-456");
 
-            verify(validationRuleRegistry).unregister("orders");
+            verify(validationRuleRegistry).unregister("tenant-abc", "orders");
             verify(collectionRegistry).unregister("tenant-abc:orders");
         }
 
@@ -184,7 +185,7 @@ class CollectionLifecycleManagerRefreshTest {
             manager.teardownCollection("unknown-id");
 
             verify(collectionRegistry, never()).unregister(anyString());
-            verify(validationRuleRegistry, never()).unregister(anyString());
+            verify(validationRuleRegistry, never()).unregister(anyString(), anyString());
         }
     }
 
@@ -358,12 +359,13 @@ class CollectionLifecycleManagerRefreshTest {
                     .thenReturn(List.of(collRow));
             when(jdbcTemplate.queryForList(contains("FROM field WHERE"), eq("coll-456")))
                     .thenReturn(buildFieldRows());
-            when(jdbcTemplate.queryForList(contains("FROM validation_rule"), eq("coll-456")))
+            when(jdbcTemplate.queryForList(contains("FROM validation_rule"), eq("coll-456"),
+                    eq("tenant-abc")))
                     .thenReturn(List.of(ruleRow));
 
             manager.initializeCollection("coll-456");
 
-            verify(validationRuleRegistry).register(eq("products"), argThat(rules ->
+            verify(validationRuleRegistry).register(eq("tenant-abc"), eq("products"), argThat(rules ->
                     rules.size() == 1 && "RequireName".equals(rules.get(0).name())));
         }
 
@@ -375,12 +377,13 @@ class CollectionLifecycleManagerRefreshTest {
                     .thenReturn(List.of(collRow));
             when(jdbcTemplate.queryForList(contains("FROM field WHERE"), eq("coll-456")))
                     .thenReturn(buildFieldRows());
-            when(jdbcTemplate.queryForList(contains("FROM validation_rule"), eq("coll-456")))
+            when(jdbcTemplate.queryForList(contains("FROM validation_rule"), eq("coll-456"),
+                    eq("tenant-abc")))
                     .thenThrow(new RuntimeException("DB error"));
 
             manager.initializeCollection("coll-456");
 
-            verify(validationRuleRegistry).register(eq("products"), eq(List.of()));
+            verify(validationRuleRegistry).register(eq("tenant-abc"), eq("products"), eq(List.of()));
         }
     }
 }

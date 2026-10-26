@@ -687,7 +687,7 @@ class DefaultQueryEngineTest {
             engineWithRules.create(testCollection, inputData);
 
             verify(customRuleEngine).evaluate(
-                    eq("products"), any(), eq(OperationType.CREATE));
+                    eq(testCollection), any(), eq(OperationType.CREATE));
         }
 
         @Test
@@ -701,7 +701,7 @@ class DefaultQueryEngineTest {
                     .thenReturn(io.kelta.runtime.validation.ValidationResult.success());
             doThrow(new RecordValidationException(List.of(
                     new ValidationError("positive_price", "Price must be positive", "price"))))
-                    .when(customRuleEngine).evaluate(eq("products"), any(), eq(OperationType.CREATE));
+                    .when(customRuleEngine).evaluate(eq(testCollection), any(), eq(OperationType.CREATE));
 
             assertThrows(RecordValidationException.class, () ->
                     engineWithRules.create(testCollection, inputData));
@@ -730,7 +730,7 @@ class DefaultQueryEngineTest {
             engineWithRules.update(testCollection, id, updateData);
 
             verify(customRuleEngine).evaluate(
-                    eq("products"), any(), eq(OperationType.UPDATE));
+                    eq(testCollection), any(), eq(OperationType.UPDATE));
         }
 
         @Test
@@ -750,7 +750,7 @@ class DefaultQueryEngineTest {
                     .thenReturn(io.kelta.runtime.validation.ValidationResult.success());
             doThrow(new RecordValidationException(List.of(
                     new ValidationError("positive_price", "Price must be positive", "price"))))
-                    .when(customRuleEngine).evaluate(eq("products"), any(), eq(OperationType.UPDATE));
+                    .when(customRuleEngine).evaluate(eq(testCollection), any(), eq(OperationType.UPDATE));
 
             assertThrows(RecordValidationException.class, () ->
                     engineWithRules.update(testCollection, id, updateData));

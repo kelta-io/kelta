@@ -107,10 +107,18 @@ public class CollectionLifecycleManager {
             LIMIT 1
             """;
 
+    /** Every tenant's active rules on a collection (RLS permitting) — system collections only. */
     private static final String SELECT_VALIDATION_RULES = """
-            SELECT name, error_condition_formula, error_message, error_field,
+            SELECT tenant_id, name, error_condition_formula, error_message, error_field,
                    evaluate_on, active, severity
             FROM validation_rule WHERE collection_id = ? AND active = true
+            """;
+
+    /** One tenant's active rules on a collection. */
+    private static final String SELECT_TENANT_VALIDATION_RULES = """
+            SELECT tenant_id, name, error_condition_formula, error_message, error_field,
+                   evaluate_on, active, severity
+            FROM validation_rule WHERE collection_id = ? AND tenant_id = ? AND active = true
             """;
 
     private static final String SELECT_TENANT_SLUG = """
@@ -162,11 +170,13 @@ public class CollectionLifecycleManager {
     private final ConcurrentHashMap<String, String> activeCollections = new ConcurrentHashMap<>();
 
     /**
-     * Collection ID to its {@link CollectionDefinition#registryKey()}. Tenants share collection
-     * names ({@code orders} in two tenants), so teardown must unregister the exact key: the
-     * registry's by-name fallback removes whichever tenant's entry it meets first.
+     * Collection ID to the definition this worker registered for it. Tenants share collection
+     * names ({@code orders} in two tenants), so teardown must remove exactly this collection's
+     * entries: its {@link CollectionDefinition#registryKey()} from the collection registry (whose
+     * by-name fallback removes whichever tenant's entry it meets first) and its owner's rules
+     * from the validation rule registry.
      */
-    private final ConcurrentHashMap<String, String> registryKeys = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CollectionDefinition> registeredDefinitions = new ConcurrentHashMap<>();
 
     /**
      * One monitor per collection ID. Initialize and refresh each read the collection from the
@@ -289,7 +299,7 @@ public class CollectionLifecycleManager {
                 log.info("Skipping VIRTUAL collection '{}' (id={}) — no storage to initialize",
                         collectionName, collectionId);
                 collectionRegistry.register(definition);
-                registryKeys.put(collectionId, definition.registryKey());
+                registeredDefinitions.put(collectionId, definition);
                 activeCollections.put(collectionId, collectionName);
                 return;
             }
@@ -305,10 +315,10 @@ public class CollectionLifecycleManager {
             }
 
             // Load and register validation rules from DB
-            loadAndRegisterValidationRules(collectionId, collectionName);
+            loadAndRegisterValidationRules(collectionId, definition);
 
             // Track as active
-            registryKeys.put(collectionId, definition.registryKey());
+            registeredDefinitions.put(collectionId, definition);
             activeCollections.put(collectionId, collectionName);
 
             log.info("Successfully initialized collection '{}' (id={})", collectionName, collectionId);
@@ -361,6 +371,7 @@ public class CollectionLifecycleManager {
 
             // Re-register with updated definition
             collectionRegistry.register(newDefinition);
+            registeredDefinitions.put(collectionId, newDefinition);
 
             // Migrate the storage schema in the row's tenant scope so the storage adapter
             // uses the correct schema
@@ -377,7 +388,7 @@ public class CollectionLifecycleManager {
             });
 
             // Refresh validation rules
-            loadAndRegisterValidationRules(collectionId, collectionName);
+            loadAndRegisterValidationRules(collectionId, newDefinition);
 
         } catch (Exception e) {
             log.error("Failed to refresh collection '{}' (id={}): {}",
@@ -432,11 +443,11 @@ public class CollectionLifecycleManager {
      */
     public void teardownCollection(String collectionId) {
         String collectionName = activeCollections.remove(collectionId);
-        String registryKey = registryKeys.remove(collectionId);
+        CollectionDefinition definition = registeredDefinitions.remove(collectionId);
         if (collectionName != null) {
-            collectionRegistry.unregister(registryKey != null ? registryKey : collectionName);
-            if (validationRuleRegistry != null) {
-                validationRuleRegistry.unregister(collectionName);
+            collectionRegistry.unregister(definition != null ? definition.registryKey() : collectionName);
+            if (validationRuleRegistry != null && definition != null) {
+                unregisterValidationRules(definition);
             }
             log.info("Torn down collection '{}' (id={})", collectionName, collectionId);
         } else {
@@ -956,46 +967,138 @@ public class CollectionLifecycleManager {
     }
 
     /**
-     * Loads validation rules from the database and registers them.
+     * Loads a collection's validation rules from the database and registers them under the
+     * tenant whose writes they govern — never under the bare collection name, which another
+     * tenant's collection can share. See {@link ValidationRuleRegistry}.
      */
-    private void loadAndRegisterValidationRules(String collectionId, String collectionName) {
+    private void loadAndRegisterValidationRules(String collectionId, CollectionDefinition definition) {
         if (validationRuleRegistry == null) {
+            return;
+        }
+        if (definition.systemCollection()) {
+            loadSystemCollectionValidationRules(collectionId, definition.name());
+        } else {
+            loadTenantCollectionValidationRules(collectionId, definition);
+        }
+    }
+
+    /**
+     * A tenant-owned collection's rules are its owner's rule rows only. The query names the
+     * owner, so a row another tenant pointed at this collection ID is never loaded, whichever
+     * tenant (or none, at bootstrap) is bound.
+     */
+    private void loadTenantCollectionValidationRules(String collectionId, CollectionDefinition definition) {
+        String collectionName = definition.name();
+        String ownerTenantId = definition.tenantId();
+        if (ownerTenantId == null || ownerTenantId.isBlank()) {
+            log.warn("Collection '{}' (id={}) has no owning tenant; its validation rules are not loaded",
+                    collectionName, collectionId);
+            return;
+        }
+        String boundTenantId = TenantContext.get();
+        if (boundTenantId != null && !boundTenantId.isBlank() && !boundTenantId.equals(ownerTenantId)) {
+            // RLS hides the owner's rows from another tenant's connection: reloading here would
+            // replace the owner's rules with an empty set.
+            log.warn("Not reloading validation rules of collection '{}' (id={}) owned by tenant '{}' "
+                    + "while tenant '{}' is bound", collectionName, collectionId, ownerTenantId, boundTenantId);
             return;
         }
 
         try {
-            List<Map<String, Object>> ruleRows = jdbcTemplate.queryForList(
-                    SELECT_VALIDATION_RULES, collectionId);
-
             List<ValidationRuleDefinition> rules = new ArrayList<>();
-            for (Map<String, Object> row : ruleRows) {
-                String name = (String) row.get("name");
-                String formula = (String) row.get("error_condition_formula");
-                String errorMessage = (String) row.get("error_message");
-                String errorField = (String) row.get("error_field");
-                String evaluateOn = (String) row.get("evaluate_on");
-                boolean active = Boolean.TRUE.equals(row.get("active"));
-                String severity = (String) row.get("severity");
-
-                if (name != null && formula != null && errorMessage != null) {
-                    rules.add(new ValidationRuleDefinition(
-                            name, formula, errorMessage, errorField,
-                            evaluateOn != null ? evaluateOn : "CREATE_AND_UPDATE",
-                            active,
-                            severity != null ? severity : ValidationRuleDefinition.SEVERITY_ERROR));
+            for (Map<String, Object> row : jdbcTemplate.queryForList(
+                    SELECT_TENANT_VALIDATION_RULES, collectionId, ownerTenantId)) {
+                ValidationRuleDefinition rule = toValidationRule(row);
+                if (rule != null) {
+                    rules.add(rule);
                 }
             }
 
-            validationRuleRegistry.register(collectionName, rules);
+            validationRuleRegistry.register(ownerTenantId, collectionName, rules);
             long activeCount = rules.stream().filter(ValidationRuleDefinition::active).count();
-            log.info("Registered {} validation rules ({} active) for collection '{}'",
-                    rules.size(), activeCount, collectionName);
+            log.info("Registered {} validation rules ({} active) for collection '{}' of tenant '{}'",
+                    rules.size(), activeCount, collectionName, ownerTenantId);
 
         } catch (Exception e) {
-            log.warn("Failed to load validation rules for collection '{}': {}",
-                    collectionName, e.getMessage());
-            validationRuleRegistry.register(collectionName, List.of());
+            log.warn("Failed to load validation rules for collection '{}' of tenant '{}': {}",
+                    collectionName, ownerTenantId, e.getMessage());
+            validationRuleRegistry.register(ownerTenantId, collectionName, List.of());
         }
+    }
+
+    /**
+     * A system collection has one definition for every tenant, but each rule row on it belongs
+     * to the tenant that wrote it and governs only that tenant's writes, so its rules are
+     * registered per rule tenant. With a tenant bound (a NATS refresh for that tenant's rule
+     * change, an on-demand load inside a request) RLS shows only that tenant's rows, so only that
+     * tenant's set is replaced; with none bound (startup bootstrap) every tenant's rows are read
+     * and the collection's rule sets are replaced as a whole.
+     */
+    private void loadSystemCollectionValidationRules(String collectionId, String collectionName) {
+        String boundTenantId = TenantContext.get();
+        boolean tenantBound = boundTenantId != null && !boundTenantId.isBlank();
+        try {
+            if (tenantBound) {
+                List<ValidationRuleDefinition> rules = new ArrayList<>();
+                for (Map<String, Object> row : jdbcTemplate.queryForList(
+                        SELECT_TENANT_VALIDATION_RULES, collectionId, boundTenantId)) {
+                    ValidationRuleDefinition rule = toValidationRule(row);
+                    if (rule != null) {
+                        rules.add(rule);
+                    }
+                }
+                validationRuleRegistry.registerSystemCollectionRules(collectionName, boundTenantId, rules);
+                log.info("Registered {} validation rules of tenant '{}' for system collection '{}'",
+                        rules.size(), boundTenantId, collectionName);
+            } else {
+                Map<String, List<ValidationRuleDefinition>> rulesByTenant = new HashMap<>();
+                for (Map<String, Object> row : jdbcTemplate.queryForList(SELECT_VALIDATION_RULES, collectionId)) {
+                    String ruleTenantId = (String) row.get("tenant_id");
+                    ValidationRuleDefinition rule = toValidationRule(row);
+                    if (ruleTenantId == null || ruleTenantId.isBlank() || rule == null) {
+                        continue;
+                    }
+                    rulesByTenant.computeIfAbsent(ruleTenantId, t -> new ArrayList<>()).add(rule);
+                }
+                validationRuleRegistry.registerSystemCollectionRules(collectionName, rulesByTenant);
+                log.info("Registered validation rules of {} tenant(s) for system collection '{}'",
+                        rulesByTenant.size(), collectionName);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load validation rules for system collection '{}': {}",
+                    collectionName, e.getMessage());
+            if (tenantBound) {
+                validationRuleRegistry.registerSystemCollectionRules(collectionName, boundTenantId, List.of());
+            } else {
+                validationRuleRegistry.registerSystemCollectionRules(collectionName, Map.of());
+            }
+        }
+    }
+
+    /** Removes exactly this collection's rules: its owner's, or every tenant's on a system collection. */
+    private void unregisterValidationRules(CollectionDefinition definition) {
+        if (definition.systemCollection()) {
+            validationRuleRegistry.unregisterSystemCollection(definition.name());
+        } else if (definition.tenantId() != null && !definition.tenantId().isBlank()) {
+            validationRuleRegistry.unregister(definition.tenantId(), definition.name());
+        }
+    }
+
+    /** Maps a {@code validation_rule} row, or returns null when a required column is missing. */
+    private static ValidationRuleDefinition toValidationRule(Map<String, Object> row) {
+        String name = (String) row.get("name");
+        String formula = (String) row.get("error_condition_formula");
+        String errorMessage = (String) row.get("error_message");
+        if (name == null || formula == null || errorMessage == null) {
+            return null;
+        }
+        String evaluateOn = (String) row.get("evaluate_on");
+        String severity = (String) row.get("severity");
+        return new ValidationRuleDefinition(
+                name, formula, errorMessage, (String) row.get("error_field"),
+                evaluateOn != null ? evaluateOn : "CREATE_AND_UPDATE",
+                Boolean.TRUE.equals(row.get("active")),
+                severity != null ? severity : ValidationRuleDefinition.SEVERITY_ERROR);
     }
 
     // =========================================================================
