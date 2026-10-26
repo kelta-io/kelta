@@ -99,19 +99,11 @@ public class InitialStateBuilder {
     }
 
     /**
-     * Builds initial state from a scheduled execution.
-     *
-     * @param triggerConfig the flow's trigger config (may contain inputData)
-     * @param tenantId      the tenant ID
-     * @param flowId        the flow being executed
-     * @param executionId   the execution ID
-     * @return the initial state envelope
-     */
-    /**
      * Builds initial state from an incoming webhook request.
      *
-     * @param payload     the webhook request body
+     * @param payload     the webhook request body (JSON object, or form fields)
      * @param headers     selected headers from the webhook request
+     * @param query       the decoded query parameters, signature excluded
      * @param tenantId    the tenant ID
      * @param flowId      the flow being executed
      * @param executionId the execution ID
@@ -119,6 +111,7 @@ public class InitialStateBuilder {
      */
     public Map<String, Object> buildFromWebhook(Map<String, Object> payload,
                                                   Map<String, String> headers,
+                                                  Map<String, Object> query,
                                                   String tenantId,
                                                   String flowId, String executionId) {
         Map<String, Object> state = new LinkedHashMap<>();
@@ -129,6 +122,7 @@ public class InitialStateBuilder {
 
         state.put("input", payload != null ? payload : Map.of());
         state.put("headers", headers != null ? headers : Map.of());
+        state.put("query", query != null ? query : Map.of());
 
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("tenantId", tenantId);

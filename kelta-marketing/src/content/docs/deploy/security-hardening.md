@@ -10,7 +10,7 @@ order: 70
 | Path | Service | Protection |
 |---|---|---|
 | `/actuator/health/*` | all | per-IP limit |
-| `/api/webhooks/{flowId}` | gateway → worker | the flow id is the secret; per-IP limit; no signature check |
+| `/api/webhooks/{flowId}` | gateway → worker | the flow id is the secret unless the flow sets `triggerConfig.webhook.secret` (header or signed query); per-IP limit |
 | `/api/modules/webhooks/{tenantId}/{moduleId}` | gateway → worker | the module verifies the signature; per-IP limit |
 | `/api/webhooks/mail/**` | gateway → worker | inbound mail (optional feature); per-IP limit |
 | `/api/webhooks/ses` | gateway → worker | Amazon SNS signature on bounce and complaint notifications |

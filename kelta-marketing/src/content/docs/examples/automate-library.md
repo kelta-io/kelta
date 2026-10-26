@@ -153,9 +153,9 @@ kelta records get books 3232b8a4-efd0-4dc6-a9cb-cf0caffa5e8a --output table
 ## 3. The inbound webhook, with a key
 
 An `AUTOLAUNCHED` flow can be started by `POST /api/webhooks/{flowId}` **without** Kelta credentials
-([Inbound webhooks](/docs/automation/triggers/#inbound-webhooks)): the flow id in the URL is the shared secret, and
-there is no signature check. For a scanner on a shelf that is not enough, so the flow itself requires a second shared
-key in the body and refuses to act without it.
+([Inbound webhooks](/docs/automation/triggers/#inbound-webhooks)): the flow id in the URL is the shared secret
+unless the flow sets a `triggerConfig.webhook.secret`. This example shows the in-flow alternative: the flow itself
+requires a second shared key in the body and refuses to act without it.
 
 Save as `return-scanner.json`, with your own long random value in place of `<redacted>`:
 

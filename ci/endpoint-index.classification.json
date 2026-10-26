@@ -75,6 +75,7 @@
 
     "POST /api/flows/{flowId}/execute": { "docs": "/docs/automation/triggers/#manual-and-api-invocation" },
     "GET /api/flows/{flowId}/webhook-url": { "docs": "/docs/automation/triggers/#inbound-webhooks" },
+    "GET /api/webhooks/{flowId}": { "docs": "/docs/automation/triggers/#inbound-webhooks" },
     "POST /api/webhooks/{flowId}": { "docs": "/docs/automation/triggers/#inbound-webhooks" },
     "GET /api/flows/{flowId}/schedule": { "docs": "/docs/automation/triggers/#schedules" },
     "GET /api/flows/{flowId}/runs": { "docs": "/docs/automation/triggers/#schedules" },
