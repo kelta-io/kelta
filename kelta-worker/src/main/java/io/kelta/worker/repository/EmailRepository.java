@@ -154,6 +154,17 @@ public class EmailRepository {
     }
 
     /**
+     * Updates the email log status to SUPPRESSED: the recipient is on the tenant's
+     * suppression list, so nothing was sent.
+     */
+    public void markSuppressed(String logId) {
+        jdbcTemplate.update(
+                "UPDATE email_log SET status = 'SUPPRESSED', error_message = ? WHERE id = ?",
+                "Recipient is on the suppression list", logId
+        );
+    }
+
+    /**
      * Updates the email log status to FAILED with error details.
      */
     public void markFailed(String logId, String errorMessage, String smtpHost) {

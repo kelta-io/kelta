@@ -49,7 +49,7 @@ it before routing.
 `internal` marks an endpoint only the platform's own admin UI or services call; it is reachable, but
 not a supported integration surface and may change without notice.
 
-**400** public endpoints: **308** linked to docs, **29** internal,
+**402** public endpoints: **310** linked to docs, **29** internal,
 **63** not yet documented.
 
 ## Endpoints
@@ -366,6 +366,8 @@ not a supported integration surface and may change without notice.
 | POST | `/api/tenants/{id}/admin-invite` | worker | API_ACCESS + MANAGE_TENANTS | [platform/tenants](/docs/platform/tenants/#administering-tenants) |
 | POST | `/api/tenants/{id}/bootstrap-token` | worker | API_ACCESS + MANAGE_TENANTS | [platform/tenants](/docs/platform/tenants/#bootstrap-token) |
 | GET | `/api/track/click` | worker | none (unauthenticated) | [platform/messaging](/docs/platform/messaging/#campaigns) |
+| GET | `/api/track/email-unsubscribe` | worker | none (unauthenticated) | [platform/messaging](/docs/platform/messaging/#campaigns) |
+| POST | `/api/track/email-unsubscribe` | worker | none (unauthenticated) | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | GET | `/api/track/open` | worker | none (unauthenticated) | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | GET | `/api/track/unsubscribe` | worker | none (unauthenticated) | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | POST | `/api/track/unsubscribe` | worker | none (unauthenticated) | [platform/messaging](/docs/platform/messaging/#campaigns) |

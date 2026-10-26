@@ -2,8 +2,11 @@ package io.kelta.worker.service.email;
 
 import io.kelta.runtime.credential.ResolvedCredential;
 import io.kelta.runtime.module.integration.spi.EmailService;
+import io.kelta.worker.config.CampaignProperties;
 import io.kelta.worker.repository.EmailRepository;
 import io.kelta.worker.repository.EmailRepository.TenantEmailConfigRow;
+import io.kelta.worker.repository.EmailSuppressionRepository;
+import io.kelta.worker.service.campaign.TrackingTokenService;
 import io.kelta.worker.service.credential.CredentialResolver;
 import io.kelta.worker.util.WithTenant;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +31,8 @@ class DefaultEmailServiceTest {
     private EmailProvider emailProvider;
     private EmailRepository emailRepository;
     private CredentialResolver credentialResolver;
+    private EmailSuppressionRepository suppressionRepository;
+    private TrackingTokenService tokenService;
     private DefaultEmailService service;
 
     @BeforeEach
@@ -35,9 +40,13 @@ class DefaultEmailServiceTest {
         emailProvider = mock(EmailProvider.class);
         emailRepository = mock(EmailRepository.class);
         credentialResolver = mock(CredentialResolver.class);
+        suppressionRepository = mock(EmailSuppressionRepository.class);
+        tokenService = new TrackingTokenService(new CampaignProperties(
+                true, 15000, 5, 20, 50000, "https://api.example.com", "unit-test-secret"));
         service = new DefaultEmailService(
                 emailProvider, emailRepository, credentialResolver,
-                "noreply@kelta.io", "Kelta Platform", true);
+                "noreply@kelta.io", "Kelta Platform", true,
+                suppressionRepository, tokenService, "https://api.example.com");
     }
 
     @Nested
@@ -77,11 +86,40 @@ class DefaultEmailServiceTest {
         }
 
         @Test
+        @DisplayName("Non-flow sources carry no flow headers; flow mail carries Auto-Submitted")
+        void flowSourceAddsAutoSubmitted() throws Exception {
+            when(emailRepository.createEmailLog(anyString(), anyString(), anyString(), anyString(), any()))
+                    .thenReturn("log-1");
+            org.mockito.ArgumentCaptor<EmailMessage> sent = org.mockito.ArgumentCaptor.forClass(EmailMessage.class);
+
+            service.queueEmail("t1", "user@test.com", "Reset", "<p>x</p>", "PASSWORD_RESET", null);
+            service.queueEmail("t1", "user@test.com", "Alert", "<p>x</p>", EmailService.FLOW_SOURCE, "flow-1");
+
+            verify(emailProvider, times(2)).sendAndReport(sent.capture(), any());
+            assertThat(sent.getAllValues().get(0).headers().isEmpty()).isTrue();
+            assertThat(sent.getAllValues().get(1).headers().autoSubmitted()).isEqualTo("auto-generated");
+            assertThat(sent.getAllValues().get(1).headers().listUnsubscribe()).isNull();
+            verifyNoInteractions(suppressionRepository);
+        }
+
+        @Test
+        @DisplayName("A replyTo that is not one valid address is refused before anything is logged")
+        void rejectsInvalidReplyTo() {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.queueEmail(
+                    "t1", "user@test.com", "S", "B", EmailService.FLOW_SOURCE, null,
+                    new EmailService.FlowMailOptions(false, "a@example.com, b@example.com")))
+                    .isInstanceOf(IllegalArgumentException.class);
+            verify(emailRepository, never()).createEmailLog(anyString(), anyString(), anyString(), anyString(), any());
+            verifyNoInteractions(emailProvider);
+        }
+
+        @Test
         @DisplayName("Should return dummy ID and skip delivery when disabled")
         void shouldSkipWhenDisabled() {
             DefaultEmailService disabledService = new DefaultEmailService(
                     emailProvider, emailRepository, credentialResolver,
-                    "noreply@kelta.io", "Kelta Platform", false);
+                    "noreply@kelta.io", "Kelta Platform", false,
+                    suppressionRepository, tokenService, "https://api.example.com");
 
             String logId = disabledService.queueEmail("t1", "user@test.com", "Subject", "Body", "TEST", null);
 
