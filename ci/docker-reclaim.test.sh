@@ -162,7 +162,7 @@ assert_not_called "image rm axllent/mailpit:latest" "unlabelled → old compose 
 assert_not_called "image rm pgvector/pgvector:pg15" "unlabelled → old compose image pgvector/pgvector:pg15 kept"
 assert_not_called "image rm redis:7-alpine" "unlabelled → old compose image redis:7-alpine kept"
 assert_not_called "image rm curlimages/curl:8.11.0" "unlabelled → old workflow helper image kept"
-grep -qF "kept axllent/mailpit:latest (referenced by compose or a workflow)" "$TMP/out.log" || { echo "FAIL: keep not reported" >&2; cat "$TMP/out.log" >&2; exit 1; }
+grep -qF "kept axllent/mailpit:latest (referenced by compose, a workflow or a Testcontainers test)" "$TMP/out.log" || { echo "FAIL: keep not reported" >&2; cat "$TMP/out.log" >&2; exit 1; }
 echo "PASS: unlabelled → kept compose image reported"
 assert_called "image rm redis:6-alpine" "unlabelled → unreferenced tag of a kept image removed"
 assert_called "image rm tpl-0-1-kelta-worker:latest" "unlabelled → old non-compose image's first tag removed"
@@ -183,7 +183,7 @@ mkdir "$TMP/empty-root"
 run_reclaim DOCKER_RECLAIM_ROOT="$TMP/empty-root"
 assert_eq "$STATUS" "0" "no keep-list → exit code"
 assert_not_called "image rm someone/tool:1.0" "no keep-list → tagged image kept"
-grep -qF "::warning::docker-reclaim: no compose or workflow images found" "$TMP/out.log" || { echo "FAIL: expected warning" >&2; cat "$TMP/out.log" >&2; exit 1; }
+grep -qF "::warning::docker-reclaim: no compose, workflow or Testcontainers images found" "$TMP/out.log" || { echo "FAIL: expected warning" >&2; cat "$TMP/out.log" >&2; exit 1; }
 echo "PASS: no keep-list → warning emitted"
 assert_called "image prune --force --filter until=24h --filter label!=io.kelta.ci.loaded-at" "no keep-list → dangling prune still runs"
 rm -rf "$TMP"
@@ -204,6 +204,63 @@ FAKE_FAIL="image inspect" run_reclaim
 assert_eq "$STATUS" "0" "inspect fails → exit code"
 assert_not_called "image rm someone/tool:1.0" "inspect fails → image kept"
 assert_called "buildx prune --builder kelta-ci --force --keep-storage 20gb" "inspect fails → builder still trimmed"
+rm -rf "$TMP"
+
+# Case 11 (PLT-835): the images this checkout's Testcontainers tests start are kept too.
+# Testcontainers skips its pull when the image is local, so removing one before it creates the
+# container failed the job ("No such image: postgres:15-alpine" in `Test auth`).
+new_fake
+OLD=$(( $(date +%s) - 25 * 3600 ))
+{
+  echo "sha-pg15a|$OLD|postgres:15-alpine"
+  echo "sha-pg15|$OLD|postgres:15"
+  echo "sha-nats|$OLD|nats:2.10-alpine"
+  echo "sha-cerbos|$OLD|ghcr.io/cerbos/cerbos:0.42.0"
+  echo "sha-nowhere|$OLD|someone/nowhere:1.0"
+} > "$TMP/unlabelled"
+run_reclaim
+assert_eq "$STATUS" "0" "testcontainers → exit code"
+for ref in postgres:15-alpine postgres:15 redis:7-alpine nats:2.10-alpine ghcr.io/cerbos/cerbos:0.42.0; do
+  grep -E "^docker-reclaim: keeping .* referenced images: " "$TMP/out.log" | tr ' ' '\n' | grep -qxF -- "$ref" \
+    || { echo "FAIL: testcontainers → keep-list lacks $ref" >&2; cat "$TMP/out.log" >&2; exit 1; }
+  echo "PASS: testcontainers → keep-list names $ref"
+done
+assert_not_called "image rm postgres:15-alpine" "testcontainers → old unused postgres:15-alpine kept"
+assert_not_called "image rm postgres:15" "testcontainers → old unused postgres:15 kept"
+assert_not_called "image rm nats:2.10-alpine" "testcontainers → old unused nats:2.10-alpine kept"
+assert_not_called "image rm ghcr.io/cerbos/cerbos:0.42.0" "testcontainers → old unused cerbos:0.42.0 kept"
+assert_called "image rm someone/nowhere:1.0" "testcontainers → old image named nowhere still removed"
+rm -rf "$TMP"
+
+# Case 12: each Java shape is read on its own (no compose or workflow files): a parse(...)
+# literal, a constructor literal and an IMAGE constant; untagged literals and other strings are not.
+new_fake
+OLD=$(( $(date +%s) - 25 * 3600 ))
+mkdir -p "$TMP/root/svc/src/test/java/x" "$TMP/root/node_modules/pkg"
+cat > "$TMP/root/svc/src/test/java/x/ShapesTest.java" <<'JAVA'
+class ShapesTest {
+    private static final String CERBOS_IMAGE = "acme/cerbos:9.9.9";
+    static final PostgreSQLContainer PG = new PostgreSQLContainer("acme/postgres:15");
+    static final GenericContainer<?> R = new GenericContainer<>(DockerImageName.parse("acme/redis:7-alpine"));
+    static final GenericContainer<?> W = serviceContainer("acme/untagged");
+    void t() { redis.delete("pat:abc123"); }
+}
+JAVA
+echo 'class Vendored { Object c = new GenericContainer<>("acme/vendored:1.0"); }' > "$TMP/root/node_modules/pkg/Vendored.java"
+{
+  echo "sha-a|$OLD|acme/cerbos:9.9.9"
+  echo "sha-b|$OLD|acme/postgres:15"
+  echo "sha-c|$OLD|acme/redis:7-alpine"
+  echo "sha-d|$OLD|acme/vendored:1.0"
+  echo "sha-e|$OLD|pat:abc123"
+} > "$TMP/unlabelled"
+run_reclaim DOCKER_RECLAIM_ROOT="$TMP/root"
+assert_eq "$STATUS" "0" "java shapes → exit code"
+assert_not_called "image rm acme/cerbos:9.9.9" "java shapes → IMAGE constant kept"
+assert_not_called "image rm acme/postgres:15" "java shapes → Container constructor literal kept"
+assert_not_called "image rm acme/redis:7-alpine" "java shapes → DockerImageName.parse literal kept"
+assert_called "image rm acme/vendored:1.0" "java shapes → node_modules not scanned"
+assert_called "image rm pat:abc123" "java shapes → non-image string literal not kept"
 rm -rf "$TMP"
 
 echo "All docker-reclaim tests passed."

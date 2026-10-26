@@ -22,6 +22,12 @@
 #     images are removed one tag at a time, skipping a keep-list of every `image:` named in the
 #     checkout's docker-compose*.yml and every `docker pull`/`FROM` image in its workflows (plus
 #     DOCKER_RECLAIM_KEEP). With no keep-list to read, tagged unlabelled images are all kept;
+#   - Testcontainers images are kept the same way: the keep-list also takes every `name:tag`
+#     literal the checkout's Java sources pass to `DockerImageName.parse(...)` or a
+#     `...Container(...)` constructor, or assign to an `...IMAGE = "..."` constant. Testcontainers
+#     finds the image locally, skips its pull and then creates the container, and a concurrent
+#     job's reclaim on the shared daemon deleted the image in between (PLT-835: "No such image:
+#     postgres:15-alpine" in `Test auth`);
 #   - builder prune keeps cache younger than DOCKER_RECLAIM_AGE, so builds stay warm;
 #   - buildx prune on the persistent builder trims it to DOCKER_RECLAIM_BUILDER_KEEP,
 #     least recently used first, and buildkit never deletes records an active build holds.
@@ -78,14 +84,18 @@ normalize_ref() {
   echo "$ref"
 }
 
-# Every image the compose files and the workflows name, one per line. `${VAR:-default}` is
-# read as its default, which is what CI runs with.
+# Every image the compose files, the workflows and the Testcontainers tests name, one per line.
+# `${VAR:-default}` is read as its default, which is what CI runs with.
 keep_list() {
   local ref
   {
     cat "$ROOT"/docker-compose*.yml 2>/dev/null | sed -nE 's/^[[:space:]]*image:[[:space:]]*["'\'']?([^"'\''[:space:]]+).*/\1/p'
     cat "$ROOT"/.github/workflows/*.yml 2>/dev/null | grep -v '^[[:space:]]*#' \
       | sed -nE -e 's/.*docker pull[[:space:]]+([^[:space:]]+).*/\1/p' -e 's/^[[:space:]]*FROM[[:space:]]+([^[:space:]]+).*/\1/p'
+    grep -rhE --include='*.java' --exclude-dir={node_modules,target,.git} \
+      'DockerImageName\.parse\("|Container(<>)?\("|IMAGE[[:space:]]*=[[:space:]]*"' "$ROOT" 2>/dev/null \
+      | sed -nE -e 's/.*(DockerImageName\.parse|Container(<>)?)\("([^"]+:[^"]+)".*/\3/p' \
+        -e 's/.*IMAGE[[:space:]]*=[[:space:]]*"([^"]+:[^"]+)".*/\1/p'
     for ref in $EXTRA_KEEP; do echo "$ref"; done
   } | sed -E 's/\$\{[A-Za-z_][A-Za-z0-9_]*:-([^}]*)\}/\1/g' \
     | grep -E '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$' \
@@ -100,7 +110,7 @@ reclaim_unlabelled() {
   max="$(age_seconds "$AGE" 2>/dev/null)" || { echo "::warning::docker-reclaim: cannot age images by '${AGE}', keeping tagged images"; return; }
   keep="$(keep_list)"
   if [[ -z "$keep" ]]; then
-    echo "::warning::docker-reclaim: no compose or workflow images found under ${ROOT}, keeping every tagged unlabelled image"
+    echo "::warning::docker-reclaim: no compose, workflow or Testcontainers images found under ${ROOT}, keeping every tagged unlabelled image"
     return
   fi
   echo "docker-reclaim: keeping $(wc -l <<< "$keep") referenced images: $(tr '\n' ' ' <<< "$keep")"
@@ -114,7 +124,7 @@ reclaim_unlabelled() {
     [[ ${#refs[@]} -gt 0 ]] || refs=("$id")
     for ref in "${refs[@]}"; do
       if grep -qxF -- "$(normalize_ref "$ref")" <<< "$keep"; then
-        echo "docker-reclaim: kept ${ref} (referenced by compose or a workflow)"
+        echo "docker-reclaim: kept ${ref} (referenced by compose, a workflow or a Testcontainers test)"
         continue
       fi
       echo "+ docker image rm ${ref}"

@@ -100,6 +100,14 @@ keep-list of every `image:` in the checkout's `docker-compose*.yml` and every `d
 `DOCKER_RECLAIM_KEEP`). With no keep-list to read, it keeps every tagged unlabelled image and
 prints a `::warning::`. A new compose service or workflow helper image is kept automatically.
 
+Testcontainers images are on the keep-list too (PLT-835, run 40274511009: `Test auth` →
+`No such image: postgres:15-alpine`). Testcontainers finds an image locally, skips its pull and
+then creates the container; a concurrent job's reclaim on the shared daemon deleted the image in
+that window. The keep-list scans the checkout's `*.java` sources (not `node_modules`/`target`) for
+`name:tag` literals passed to `DockerImageName.parse(...)` or a `...Container(...)` constructor, or
+assigned to an `...IMAGE = "..."` constant — so a new Testcontainers image is kept automatically
+as long as it is written in one of those shapes.
+
 Not covered: the released `ghcr.io/kelta-io/*` images that `quickstart`/`upgrade` *pull* carry
 no label and an old `Created`. If one is pruned before `up`, compose pulls it again (only a
 prune landing inside `up`'s own image-check → create window could still fail it).
