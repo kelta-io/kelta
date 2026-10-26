@@ -428,6 +428,18 @@ mvn -f kelta-platform/pom.xml -pl runtime/runtime-core test -Dtest=SystemCollect
 
 It runs in the `test-runtime` job; the `runtime` path filter lists the page, so a hand edit is checked too.
 
+## CI path filters
+
+**Every test job's path filter must match its module's own build file (`pom.xml`, `package.json`,
+lockfile), the shared build inputs it reads (`ci/maven-settings.xml` for every Maven job) and, for
+`integration-tests` and the `test-java` job it needs, `kelta-test-harness/**`.** The `integration`
+filter in `.github/path-filters.yml` is `any_java` plus the harness and the Maven settings; it is
+kept apart from `any_java` because `build-and-publish-containers.yml` builds images from that one.
+kelta#1928 bumped Testcontainers in the harness `pom.xml` only, no filter listed the harness,
+Integration Tests skipped, and the broken harness merged. `ci/path-filters.test.ts` (job
+`test-ci-scripts`) parses the filters file and each ci.yml job's `if:` and asserts those paths
+trigger the job; add a case there when you add a test job or a build input.
+
 ## CI script tests
 
 **A `ci/` script's tests live next to it as `ci/<name>.test.ts` or `ci/<name>.test.sh`.** The
