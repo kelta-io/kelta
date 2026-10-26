@@ -1,14 +1,23 @@
 package io.kelta.runtime.module.core.handlers;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.validation.FieldError;
+import io.kelta.runtime.validation.ValidationException;
+import io.kelta.runtime.validation.ValidationResult;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionResult;
 import tools.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -23,6 +32,71 @@ class UpdateRecordActionHandlerTest {
     private final CollectionRegistry registry = mock(CollectionRegistry.class);
     private final QueryEngine queryEngine = mock(QueryEngine.class);
     private final UpdateRecordActionHandler handler = new UpdateRecordActionHandler(objectMapper, registry, queryEngine);
+
+    private ch.qos.logback.classic.Logger handlerLogger;
+    private ListAppender<ILoggingEvent> logAppender;
+
+    @BeforeEach
+    void attachLogAppender() {
+        handlerLogger = (ch.qos.logback.classic.Logger)
+            org.slf4j.LoggerFactory.getLogger(UpdateRecordActionHandler.class);
+        logAppender = new ListAppender<>();
+        logAppender.start();
+        handlerLogger.addAppender(logAppender);
+    }
+
+    @AfterEach
+    void detachLogAppender() {
+        handlerLogger.detachAppender(logAppender);
+    }
+
+    @Test
+    @DisplayName("Should log flow coordinates, record id and field names, never values, on a validation failure")
+    void shouldLogFlowCoordinatesOnValidationFailure() {
+        CollectionDefinition collDef = mock(CollectionDefinition.class);
+        when(registry.get("orders")).thenReturn(collDef);
+        when(queryEngine.update(eq(collDef), eq("rec-5"), anyMap()))
+            .thenThrow(new ValidationException(ValidationResult.failure(List.of(
+                FieldError.enumViolation("status", List.of("active", "paused", "deprecated")),
+                FieldError.reference("customer_id", "customers", "cust-secret-42")))));
+
+        String config = """
+            {"targetCollectionName": "orders", "recordId": "rec-5", "updates": [
+                {"field": "status", "value": "bogus-status"},
+                {"field": "customer_id", "value": "cust-secret-42"},
+                {"field": "reviewer", "sourceField": "name"}
+            ]}
+            """;
+        ActionContext ctx = ActionContext.builder()
+            .tenantId("tenant-7")
+            .data(Map.of("name", "Private Person"))
+            .actionConfigJson(config).workflowRuleId("flow-9").executionLogId("exec-3").build();
+
+        ActionResult result = handler.execute(ctx);
+        assertFalse(result.successful());
+
+        List<ILoggingEvent> errors = logAppender.list.stream()
+            .filter(e -> e.getLevel() == Level.ERROR).toList();
+        assertEquals(1, errors.size());
+        String line = errors.get(0).getFormattedMessage();
+        assertTrue(line.contains("Failed to execute update record action"), line);
+        assertTrue(line.contains("tenantId=tenant-7"), line);
+        assertTrue(line.contains("flowId=flow-9"), line);
+        assertTrue(line.contains("executionId=exec-3"), line);
+        assertTrue(line.contains("targetCollection=orders"), line);
+        assertTrue(line.contains("recordId=rec-5"), line);
+        assertTrue(line.contains("status"), line);
+        assertTrue(line.contains("customer_id"), line);
+        assertNull(errors.get(0).getThrowableProxy(),
+            "the exception message embeds values, so it must not be attached");
+
+        for (ILoggingEvent event : logAppender.list) {
+            String message = event.getFormattedMessage();
+            assertFalse(message.contains("bogus-status"), message);
+            assertFalse(message.contains("cust-secret-42"), message);
+            assertFalse(message.contains("Private Person"), message);
+        }
+    }
 
     @Test
     @DisplayName("Should have correct action type key")

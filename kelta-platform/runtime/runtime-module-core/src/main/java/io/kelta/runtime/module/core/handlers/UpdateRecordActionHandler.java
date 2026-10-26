@@ -3,6 +3,8 @@ package io.kelta.runtime.module.core.handlers;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.validation.FieldError;
+import io.kelta.runtime.validation.ValidationException;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandler;
 import io.kelta.runtime.workflow.ActionResult;
@@ -56,11 +58,13 @@ public class UpdateRecordActionHandler implements ActionHandler {
 
     @Override
     public ActionResult execute(ActionContext context) {
+        String targetCollectionName = null;
+        String targetRecordId = null;
         try {
             Map<String, Object> config = objectMapper.readValue(
                 context.actionConfigJson(), new TypeReference<>() {});
 
-            String targetCollectionName = resolveCollectionName(config);
+            targetCollectionName = resolveCollectionName(config);
             if (targetCollectionName == null) {
                 return ActionResult.failure("Target collection name or ID is required");
             }
@@ -70,7 +74,7 @@ public class UpdateRecordActionHandler implements ActionHandler {
                 return ActionResult.failure("Target collection not found: " + targetCollectionName);
             }
 
-            String targetRecordId = resolveRecordId(config, context);
+            targetRecordId = resolveRecordId(config, context);
             if (targetRecordId == null || targetRecordId.isBlank()) {
                 return ActionResult.failure("Could not resolve target record ID");
             }
@@ -121,7 +125,18 @@ public class UpdateRecordActionHandler implements ActionHandler {
                 "record", updatedRecord.get()
             ));
         } catch (Exception e) {
-            log.error("Failed to execute update record action: {}", e.getMessage(), e);
+            String validation = validationSummary(e);
+            if (validation != null) {
+                log.error("Failed to execute update record action: tenantId={}, flowId={}, executionId={}, "
+                        + "targetCollection={}, recordId={}, {}",
+                    context.tenantId(), context.workflowRuleId(), context.executionLogId(),
+                    targetCollectionName, targetRecordId, validation);
+            } else {
+                log.error("Failed to execute update record action: tenantId={}, flowId={}, executionId={}, "
+                        + "targetCollection={}, recordId={}, error={}",
+                    context.tenantId(), context.workflowRuleId(), context.executionLogId(),
+                    targetCollectionName, targetRecordId, e.getMessage(), e);
+            }
             return ActionResult.failure(e);
         }
     }
@@ -143,6 +158,23 @@ public class UpdateRecordActionHandler implements ActionHandler {
         } catch (Exception e) {
             throw new IllegalArgumentException("Invalid config JSON: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Summarises a validation failure as field names and constraints only — never the messages,
+     * which can embed submitted values (e.g. a reference error names the missing id).
+     * Returns {@code null} when {@code e} is not caused by a {@link ValidationException}.
+     */
+    private static String validationSummary(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof ValidationException ve) {
+                List<FieldError> errors = ve.getValidationResult() != null
+                    ? ve.getValidationResult().errors() : List.of();
+                return "fields=" + errors.stream().map(FieldError::fieldName).distinct().toList()
+                    + ", constraints=" + errors.stream().map(FieldError::constraint).distinct().toList();
+            }
+        }
+        return null;
     }
 
     private String resolveCollectionName(Map<String, Object> config) {
