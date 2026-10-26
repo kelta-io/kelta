@@ -3,6 +3,8 @@ package io.kelta.worker.config;
 import io.kelta.runtime.context.TenantPropagatingExecutors;
 import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.worker.repository.EmailRepository;
+import io.kelta.worker.repository.EmailSuppressionRepository;
+import io.kelta.worker.service.campaign.TrackingTokenService;
 import io.kelta.worker.service.credential.CredentialResolver;
 import io.kelta.worker.service.email.DefaultEmailService;
 import io.kelta.worker.service.email.EmailProvider;
@@ -58,10 +60,14 @@ public class EmailConfig {
             ObjectProvider<CredentialResolver> credentialResolverProvider,
             @Value("${kelta.email.from-address:noreply@kelta.io}") String fromAddress,
             @Value("${kelta.email.from-name:Kelta Platform}") String fromName,
-            @Value("${kelta.email.enabled:true}") boolean enabled) {
+            @Value("${kelta.email.enabled:true}") boolean enabled,
+            EmailSuppressionRepository suppressionRepository,
+            TrackingTokenService trackingTokenService,
+            CampaignProperties campaignProperties) {
         return new DefaultEmailService(emailProvider, emailRepository,
                 credentialResolverProvider.getIfAvailable(),
-                fromAddress, fromName, enabled);
+                fromAddress, fromName, enabled,
+                suppressionRepository, trackingTokenService, campaignProperties.trackingBaseUrl());
     }
 
     /**

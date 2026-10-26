@@ -3,13 +3,19 @@ package io.kelta.worker.service.email;
 import io.kelta.runtime.module.integration.spi.EmailService;
 import io.kelta.worker.repository.EmailRepository;
 import io.kelta.worker.repository.EmailRepository.TenantEmailConfigRow;
+import io.kelta.worker.repository.EmailSuppressionRepository;
+import io.kelta.worker.service.campaign.TrackingTokenService;
 import io.kelta.worker.service.credential.CredentialNotFoundException;
 import io.kelta.worker.service.credential.CredentialResolver;
 import io.kelta.worker.service.credential.ResolutionContext;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -33,12 +39,23 @@ import java.util.regex.Pattern;
  * <p>Delivery is asynchronous via {@code @Async("emailExecutor")} to avoid
  * blocking the caller. Failures are logged but never raised back to the caller.
  *
+ * <p><b>Flow mail</b> (source {@value EmailService#FLOW_SOURCE}, and every send through
+ * {@link #queueEmail(String, String, String, String, String, String, FlowMailOptions)})
+ * carries {@code Auto-Submitted: auto-generated} and the action's {@code Reply-To}. A
+ * non-transactional flow send is checked against {@code email_suppression} first — a
+ * suppressed recipient gets an {@code email_log} row with status {@code SUPPRESSED} and no
+ * mail — and otherwise carries RFC 8058 one-click {@code List-Unsubscribe} pointing at
+ * {@code /api/track/email-unsubscribe} with a signed address token. Only the HTTPS form is
+ * sent: the platform has no inbound address that processes {@code mailto:} unsubscribes.
+ *
  * @since 1.0.0
  */
 public class DefaultEmailService implements EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultEmailService.class);
     private static final Pattern VAR_PATTERN = Pattern.compile("\\$\\{([a-zA-Z0-9_.]+)\\}");
+    static final String UNSUBSCRIBE_PATH = "/api/track/email-unsubscribe";
+    private static final String AUTO_GENERATED = "auto-generated";
 
     private final EmailProvider emailProvider;
     private final EmailRepository emailRepository;
@@ -46,19 +63,28 @@ public class DefaultEmailService implements EmailService {
     private final String platformFromAddress;
     private final String platformFromName;
     private final boolean enabled;
+    private final EmailSuppressionRepository suppressionRepository;
+    private final TrackingTokenService tokenService;
+    private final String trackingBaseUrl;
 
     public DefaultEmailService(EmailProvider emailProvider,
                                EmailRepository emailRepository,
                                CredentialResolver credentialResolver,
                                String platformFromAddress,
                                String platformFromName,
-                               boolean enabled) {
+                               boolean enabled,
+                               EmailSuppressionRepository suppressionRepository,
+                               TrackingTokenService tokenService,
+                               String trackingBaseUrl) {
         this.emailProvider = emailProvider;
         this.emailRepository = emailRepository;
         this.credentialResolver = credentialResolver;
         this.platformFromAddress = platformFromAddress;
         this.platformFromName = platformFromName;
         this.enabled = enabled;
+        this.suppressionRepository = suppressionRepository;
+        this.tokenService = tokenService;
+        this.trackingBaseUrl = trackingBaseUrl;
     }
 
     @Override
@@ -84,10 +110,69 @@ public class DefaultEmailService implements EmailService {
             return UUID.randomUUID().toString();
         }
 
+        EmailHeaders headers = FLOW_SOURCE.equals(source)
+                ? flowHeaders(tenantId, to, FlowMailOptions.DEFAULT)
+                : EmailHeaders.none();
+        return logAndSend(tenantId, to, subject, body, source, sourceId, headers);
+    }
+
+    @Override
+    public QueuedEmail queueEmail(String tenantId, String to, String subject, String body,
+                                  String source, String sourceId, FlowMailOptions options) {
+        FlowMailOptions opts = options != null ? options : FlowMailOptions.DEFAULT;
+        if (!enabled) {
+            log.warn("Email delivery disabled — skipping email to {} with subject '{}'", to, subject);
+            return QueuedEmail.queued(UUID.randomUUID().toString());
+        }
+        // Built before the suppression check so an invalid replyTo fails the step whether or
+        // not this particular recipient opted out.
+        EmailHeaders headers = flowHeaders(tenantId, to, opts);
+        if (!opts.transactional() && suppressionRepository.isSuppressed(tenantId, to)) {
+            String logId = emailRepository.createEmailLog(tenantId, to, subject, source, sourceId);
+            emailRepository.markSuppressed(logId);
+            log.info("Email suppressed: logId={}, tenant={}, recipient is on the suppression list",
+                    logId, tenantId);
+            return QueuedEmail.suppressed(logId);
+        }
+        return QueuedEmail.queued(logAndSend(tenantId, to, subject, body, source, sourceId, headers));
+    }
+
+    private String logAndSend(String tenantId, String to, String subject, String body,
+                              String source, String sourceId, EmailHeaders headers) {
         String logId = emailRepository.createEmailLog(tenantId, to, subject, source, sourceId);
         TenantEmailSettings tenantSettings = resolveTenantSettings(tenantId);
-        sendAsync(logId, to, subject, body, tenantSettings);
+        sendAsync(logId, to, subject, body, tenantSettings, java.util.List.of(), headers);
         return logId;
+    }
+
+    /**
+     * Headers of a flow send: always {@code Auto-Submitted} (RFC 3834) and the action's
+     * {@code Reply-To}; for non-transactional mail also RFC 8058 one-click unsubscribe.
+     */
+    private EmailHeaders flowHeaders(String tenantId, String to, FlowMailOptions options) {
+        String replyTo = singleAddress(options.replyTo());
+        if (options.transactional()) {
+            return new EmailHeaders(replyTo, null, null, AUTO_GENERATED, null, null, Map.of());
+        }
+        return new EmailHeaders(replyTo, null, null, AUTO_GENERATED, null,
+                "<" + unsubscribeUrl(tenantId, to) + ">",
+                Map.of("List-Unsubscribe-Post", "List-Unsubscribe=One-Click"));
+    }
+
+    private String unsubscribeUrl(String tenantId, String to) {
+        return trackingBaseUrl + UNSUBSCRIBE_PATH + "?t="
+                + URLEncoder.encode(tokenService.signAddress(tenantId, to), StandardCharsets.UTF_8);
+    }
+
+    private static String singleAddress(String address) {
+        if (address == null || address.isBlank()) {
+            return null;
+        }
+        try {
+            return new InternetAddress(address.strip(), true).getAddress();
+        } catch (AddressException e) {
+            throw new IllegalArgumentException("replyTo is not a single valid email address", e);
+        }
     }
 
     @Override
@@ -184,9 +269,8 @@ public class DefaultEmailService implements EmailService {
      * runtime module for a capability only the mailbox needs.
      *
      * <p><b>Callers are responsible for checking the suppression list.</b> This method does
-     * not, because {@link #queueEmail} does not, and diverging here would mean the same
-     * repository has one rule for replies and another for everything else. See the class
-     * javadoc note on suppression.
+     * not, matching the plain {@link #queueEmail(String, String, String, String, String, String)};
+     * only a non-transactional flow send checks the list itself.
      *
      * @return a future completing with what the provider stamped on the message, notably
      *         the {@code Message-ID} needed to match the recipient's eventual reply back
@@ -226,6 +310,13 @@ public class DefaultEmailService implements EmailService {
                           TenantEmailSettings tenantSettings,
                           java.util.List<EmailAttachment> attachments) {
         doSend(logId, to, subject, body, tenantSettings, attachments, EmailHeaders.none());
+    }
+
+    @Async("emailExecutor")
+    public void sendAsync(String logId, String to, String subject, String body,
+                          TenantEmailSettings tenantSettings,
+                          java.util.List<EmailAttachment> attachments, EmailHeaders headers) {
+        doSend(logId, to, subject, body, tenantSettings, attachments, headers);
     }
 
     /**

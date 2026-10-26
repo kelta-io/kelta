@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Action handler that sends an email notification.
@@ -27,7 +28,9 @@ import java.util.Set;
  *   "to": "recipient@example.com",
  *   "subject": "Order Confirmed",
  *   "body": "Your order has been confirmed.",
- *   "templateId": "optional-template-id"
+ *   "templateId": "optional-template-id",
+ *   "transactional": true,
+ *   "replyTo": "support@example.com"
  * }
  * </pre>
  *
@@ -48,6 +51,13 @@ import java.util.Set;
  *       as-is, without escaping.</li>
  * </ul>
  *
+ * <p><b>Delivery mode.</b> {@code transactional} (boolean, default {@code true}) marks mail
+ * the recipient must receive — no unsubscribe headers, no suppression check. With
+ * {@code false} the email service skips a recipient the tenant has on its suppression list
+ * (the result's {@code status} is {@code SUPPRESSED}, which is not a failure) and adds
+ * RFC 8058 one-click {@code List-Unsubscribe} headers. {@code replyTo} is one address for
+ * the {@code Reply-To} header. An action that sets neither is queued exactly as before.
+ *
  * <p>Uses {@link EmailService} SPI to look up templates and queue emails.
  *
  * @since 1.0.0
@@ -56,6 +66,10 @@ public class EmailAlertActionHandler implements ActionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(EmailAlertActionHandler.class);
     private static final Set<String> UNRESOLVED_KEYS = Set.of("subject", "body");
+    /** One bare addr-spec: no display name, no list, no whitespace or control characters. */
+    private static final String ATOM = "[^\\s\\p{Cntrl}@<>()\\[\\],;:\"\\\\]+";
+    private static final Pattern SINGLE_ADDRESS =
+        Pattern.compile("^" + ATOM + "@" + ATOM + "\\." + ATOM + "$");
 
     private final ObjectMapper objectMapper;
     private final EmailService emailService;
@@ -128,19 +142,36 @@ public class EmailAlertActionHandler implements ActionHandler {
                 return ActionResult.failure("Mapper.Failure: " + e.getMessage());
             }
 
-            String emailLogId = emailService.queueEmail(
-                context.tenantId(), to, subject, body != null ? body : "",
-                "WORKFLOW", context.workflowRuleId()
-            );
+            EmailService.FlowMailOptions options;
+            try {
+                options = new EmailService.FlowMailOptions(
+                    transactional(config.get("transactional")), replyTo(config.get("replyTo"), true));
+            } catch (IllegalArgumentException e) {
+                return ActionResult.failure(e.getMessage());
+            }
 
-            log.info("Email alert queued: to={}, subject='{}', workflowRule={}",
-                to, subject, context.workflowRuleId());
+            EmailService.QueuedEmail queued;
+            if (options.equals(EmailService.FlowMailOptions.DEFAULT)) {
+                queued = EmailService.QueuedEmail.queued(emailService.queueEmail(
+                    context.tenantId(), to, subject, body != null ? body : "",
+                    EmailService.FLOW_SOURCE, context.workflowRuleId()
+                ));
+            } else {
+                queued = emailService.queueEmail(
+                    context.tenantId(), to, subject, body != null ? body : "",
+                    EmailService.FLOW_SOURCE, context.workflowRuleId(), options
+                );
+            }
+
+            String status = queued.suppressed() ? "SUPPRESSED" : "QUEUED";
+            log.info("Email alert {}: to={}, subject='{}', workflowRule={}",
+                status.toLowerCase(), to, subject, context.workflowRuleId());
 
             return ActionResult.success(Map.of(
-                "emailLogId", emailLogId,
+                "emailLogId", queued.emailLogId(),
                 "to", to,
                 "subject", subject,
-                "status", "QUEUED"
+                "status", status
             ));
         } catch (Exception e) {
             log.error("Failed to execute email alert action: {}", e.getMessage(), e);
@@ -170,6 +201,43 @@ public class EmailAlertActionHandler implements ActionHandler {
         return out.toString();
     }
 
+    private static boolean transactional(Object value) {
+        if (value == null) {
+            return true;
+        }
+        if (value instanceof Boolean flag) {
+            return flag;
+        }
+        throw new IllegalArgumentException("Config 'transactional' must be a boolean");
+    }
+
+    /**
+     * Returns the single {@code replyTo} address, or {@code null} when absent.
+     *
+     * @param resolved {@code false} at design-time validation, where a placeholder or
+     *                 JSONata expression is accepted because it only resolves at run time
+     */
+    private static String replyTo(Object value, boolean resolved) {
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof String address)) {
+            throw new IllegalArgumentException("Config 'replyTo' must be a single email address");
+        }
+        String trimmed = address.strip();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if (!resolved && (trimmed.contains("${") || trimmed.startsWith("="))) {
+            return trimmed;
+        }
+        if (!SINGLE_ADDRESS.matcher(trimmed).matches()) {
+            throw new IllegalArgumentException(
+                "Config 'replyTo' must be a single email address, got: " + stripLineBreaks(trimmed));
+        }
+        return trimmed;
+    }
+
     private static String stripLineBreaks(String value) {
         return value.replace("\r", "").replace("\n", "");
     }
@@ -191,6 +259,9 @@ public class EmailAlertActionHandler implements ActionHandler {
                         "Config must contain 'subject' when no templateId is provided");
                 }
             }
+
+            transactional(config.get("transactional"));
+            replyTo(config.get("replyTo"), false);
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {

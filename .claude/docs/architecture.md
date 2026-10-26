@@ -998,6 +998,14 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   The endpoint resolves its own tenant from the verified token and records events under
   `TenantContext.withTenant`. Campaign management itself is a normal `/api/admin/campaigns`
   endpoint gated in-controller on `MANAGE_CAMPAIGNS` (the DB-lookup pattern above).
+  Flow-mail opt-out is a sibling on the same public segment: `EmailUnsubscribeController` at
+  `/api/track/email-unsubscribe` (no new route or allowlist entry — `/api/track` covers it) is the
+  RFC 8058 `List-Unsubscribe` target of non-transactional `EMAIL_ALERT` mail. Its token is a
+  `TrackingTokenService.signAddress` **address token** (tenant id + lower-cased email, MAC'd behind
+  an `email-unsub:v1:` domain prefix, so it never verifies as a campaign recipient token or vice
+  versa); `POST` writes `email_suppression` (`UNSUBSCRIBE`, no campaign) idempotently under the
+  token's tenant, `GET` only renders a confirm form (link scanners prefetch GETs), and a bad token
+  is a generic 400.
   Either list is guarded by `PublicSurfaceTest`, which reads the **shipped** `application.yml`
   and asserts the allowlist equals a reviewed set — widening it must also edit that test.
   Entries match whole path segments (`PublicPathMatcher.matches`): `/api/track` covers
