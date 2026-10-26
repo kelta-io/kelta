@@ -7,13 +7,13 @@ export default defineConfig({
     dts({
       include: ['src/**/*.ts'],
       exclude: ['**/*.test.ts', '**/*.spec.ts', '**/*.property.test.ts'],
-      rollupTypes: false,
+      bundleTypes: false,
     }),
   ],
   build: {
     lib: {
       entry: {
-        index: resolve(__dirname, 'src/index.ts'),
+        index: resolve(import.meta.dirname, 'src/index.ts'),
       },
       name: 'KeltaFormula',
       formats: ['es', 'cjs'],
