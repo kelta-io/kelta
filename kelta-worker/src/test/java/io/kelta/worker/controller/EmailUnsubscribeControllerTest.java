@@ -95,7 +95,8 @@ class EmailUnsubscribeControllerTest {
 
         mvc.perform(get("/api/track/email-unsubscribe").param("t", token))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("<form method=\"post\" action=\"email-unsubscribe?t=" + token)))
+                .andExpect(content().string(containsString("<form method=\"post\">")))
+                .andExpect(content().string(not(containsString(token))))
                 .andExpect(content().string(not(containsString("You have been unsubscribed"))));
 
         assertThat(suppressions.addCalls).isZero();

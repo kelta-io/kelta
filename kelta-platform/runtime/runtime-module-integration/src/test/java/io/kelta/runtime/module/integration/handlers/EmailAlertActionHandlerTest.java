@@ -182,6 +182,9 @@ class EmailAlertActionHandlerTest {
         assertDoesNotThrow(() -> handler.validate("""
             {"to": "a@example.com", "subject": "s", "transactional": true, "replyTo": "${$.input.owner}"}
             """));
+        assertDoesNotThrow(() -> handler.validate("""
+            {"to": "a@example.com", "subject": "s", "replyTo": "first.last+tag@mail.example.co.uk"}
+            """));
     }
 
     @Test
@@ -198,7 +201,7 @@ class EmailAlertActionHandlerTest {
     @DisplayName("validate() rejects an unparseable or multi-address replyTo")
     void validateRejectsBadReplyTo() {
         for (String value : List.of("not-an-address", "a@example.com, b@example.com", "Help <help@example.com>",
-                "help@example.com\\r\\nBcc: x@example.com", "help@", "@example.com", "12")) {
+                "help@example.com\\r\\nBcc: x@example.com", "help@", "@example.com", "help@example", "help@example..com", "help@.example.com", "12")) {
             String quoted = value.equals("12") ? value : "\"" + value + "\"";
             IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> handler.validate(
                 "{\"to\": \"a@example.com\", \"subject\": \"s\", \"replyTo\": " + quoted + "}"),

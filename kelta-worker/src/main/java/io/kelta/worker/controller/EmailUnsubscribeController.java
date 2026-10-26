@@ -15,8 +15,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 /**
@@ -58,10 +56,11 @@ public class EmailUnsubscribeController {
         if (tokenService.verifyAddress(token).isEmpty()) {
             return invalid();
         }
-        String action = "email-unsubscribe?t=" + URLEncoder.encode(token, StandardCharsets.UTF_8);
+        // No action attribute: the form posts back to this exact URL, query string included,
+        // so the request token is never echoed into the page.
         return noStore(HttpStatus.OK, page("Unsubscribe",
                 "<p style=\"color:#555\">Stop receiving these emails?</p>"
-                        + "<form method=\"post\" action=\"" + action + "\">"
+                        + "<form method=\"post\">"
                         + "<button type=\"submit\">Unsubscribe</button></form>"));
     }
 
@@ -76,7 +75,7 @@ public class EmailUnsubscribeController {
             TenantContextUtils.withTenant(a.tenantId(),
                     () -> suppressionRepository.add(a.tenantId(), a.email(), REASON, null, null));
         } catch (Exception e) {
-            log.warn("Failed to record flow-mail unsubscribe for tenant {}: {}", a.tenantId(), e.getMessage());
+            log.warn("Failed to record flow-mail unsubscribe", e);
             return noStore(HttpStatus.SERVICE_UNAVAILABLE, page("Try again later",
                     "<p style=\"color:#555\">We could not process your request. Please try again later.</p>"));
         }

@@ -68,8 +68,10 @@ public class EmailAlertActionHandler implements ActionHandler {
     private static final Set<String> UNRESOLVED_KEYS = Set.of("subject", "body");
     /** One bare addr-spec: no display name, no list, no whitespace or control characters. */
     private static final String ATOM = "[^\\s\\p{Cntrl}@<>()\\[\\],;:\"\\\\]+";
+    /** A domain label: an atom without dots, so the dot-separated domain cannot backtrack. */
+    private static final String LABEL = "[^\\s\\p{Cntrl}@<>()\\[\\],;:\"\\\\.]+";
     private static final Pattern SINGLE_ADDRESS =
-        Pattern.compile("^" + ATOM + "@" + ATOM + "\\." + ATOM + "$");
+        Pattern.compile("^" + ATOM + "@" + LABEL + "(?:\\." + LABEL + ")+$");
 
     private final ObjectMapper objectMapper;
     private final EmailService emailService;
