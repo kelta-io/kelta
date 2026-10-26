@@ -3,10 +3,11 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  # Weekly backstop for the templates and mcp-replay jobs alone: on a schedule the path filter
-  # is skipped, so every job gated on a filter output skips and only `templates` and
-  # `mcp-replay` (which also accept `schedule`) run, alongside the unconditional
-  # worker-image-is-jvm check and the gate.
+  # Weekly backstop for the templates, mcp-replay and dependency-audit-java jobs alone: on a
+  # schedule the path filter is skipped, so every job gated on a filter output skips and only
+  # those three (which also accept `schedule`) run, alongside the unconditional
+  # worker-image-is-jvm check and the gate. dependency-audit-java is there because advisories are
+  # published without any code change here.
   schedule:
     - cron: '17 6 * * 1'
   workflow_dispatch:
@@ -88,7 +89,8 @@ jobs:
           fetch-depth: 0
 
       # A baseline-regeneration dispatch runs the e2e job only, and a scheduled run the
-      # templates and mcp-replay jobs only: with no filter outputs every other job skips.
+      # templates, mcp-replay and dependency-audit-java jobs only: with no filter outputs every
+      # other job skips.
       - name: Filter paths
         id: filter
         if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.update_snapshots_ref == '')
@@ -1659,17 +1661,20 @@ jobs:
         run: node ci/dependency-audit.mjs
 
   # ===========================================================================
-  # Java dependency audit: the services' SHIPPED classpaths (compile + runtime scope) against
-  # osv.dev. Maven resolves each service into a CycloneDX SBOM, osv-scanner checks the SBOMs,
-  # and ci/java-dependency-audit.mjs fails on high/critical advisories not in
-  # ci/java-audit-baseline.json — the same delta gate as the npm audit above. Needs no API key
-  # (the OWASP dependency-check attempt, #1471, died waiting on an NVD key).
-  # Also runs on the weekly schedule: advisories are published without any code change here.
+  # Java dependency audit: the services' SHIPPED classpaths (compile + runtime scope) plus the
+  # OpenTelemetry Java agent their Dockerfiles download, against osv.dev. Maven resolves each
+  # service into a CycloneDX SBOM, osv-scanner checks the SBOMs, and ci/java-dependency-audit.mjs
+  # fails on high/critical advisories not in ci/java-audit-baseline.json (each with a written
+  # reason) — the same delta gate as the npm audit above. Needs no API key (the OWASP
+  # dependency-check attempt, #1471, died waiting on an NVD key).
+  # Also runs on the weekly schedule: advisories are published without any code change here, so
+  # a red result on a PR that does not touch dependencies means one was just published.
   # ===========================================================================
   dependency-audit-java:
     name: Dependency Audit (Java)
     needs: changes
     runs-on: k8s-runner
+    timeout-minutes: 30
     if: >-
       needs.changes.outputs.any_java == 'true' || needs.changes.outputs.java_audit == 'true'
       || needs.changes.outputs.maven_build == 'true' || needs.changes.outputs.workflows == 'true'
@@ -1733,10 +1738,12 @@ jobs:
       - name: Upload SBOMs
         continue-on-error: true
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-sboms
-          path: kelta-*/target/*.cdx.json
+          path: |
+            kelta-*/target/*.cdx.json
+            target/java-audit/*.cdx.json
           if-no-files-found: ignore
           retention-days: 14
 
