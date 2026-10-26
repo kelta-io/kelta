@@ -1,8 +1,10 @@
 package io.kelta.runtime.validation;
 
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.formula.FormulaAst;
 import io.kelta.runtime.formula.FormulaException;
 import io.kelta.runtime.formula.FormulaParser;
+import io.kelta.runtime.model.CollectionDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,6 +23,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link ValidationRuleEvaluator}. If any rule's formula evaluates to
  * {@code true}, the record is considered invalid and a
  * {@link RecordValidationException} is thrown.
+ *
+ * <p>Rules are tenant-scoped (see {@link ValidationRuleRegistry}): a write is checked only
+ * against the rules of the tenant it belongs to, never against another tenant's rules for a
+ * same-named collection.
  *
  * <p>This is called by {@code DefaultQueryEngine} after field-level
  * validation and before persistence.
@@ -49,12 +55,12 @@ public class CustomValidationRuleEngine {
      * A formula that does not parse contributes nothing; {@link #evaluate} skips
      * such a rule anyway.
      *
-     * @param collectionName the collection name
-     * @param operationType  the operation type (CREATE or UPDATE)
+     * @param definition    the collection being written
+     * @param operationType the operation type (CREATE or UPDATE)
      * @return the referenced field names, empty when no rule applies
      */
-    public Set<String> referencedFields(String collectionName, OperationType operationType) {
-        List<ValidationRuleDefinition> rules = ruleRegistry.getActiveRules(collectionName);
+    public Set<String> referencedFields(CollectionDefinition definition, OperationType operationType) {
+        List<ValidationRuleDefinition> rules = rulesFor(definition);
         if (rules.isEmpty()) {
             return Set.of();
         }
@@ -108,17 +114,19 @@ public class CustomValidationRuleEngine {
      * Evaluates all active validation rules for the given collection and
      * operation type against the record data.
      *
-     * @param collectionName the collection name
-     * @param recordData     the record's field values
-     * @param operationType  the operation type (CREATE or UPDATE)
+     * @param definition    the collection being written
+     * @param recordData    the record's field values
+     * @param operationType the operation type (CREATE or UPDATE)
      * @throws RecordValidationException if any rules are violated
      */
-    public void evaluate(String collectionName, Map<String, Object> recordData,
+    public void evaluate(CollectionDefinition definition, Map<String, Object> recordData,
                          OperationType operationType) {
-        List<ValidationRuleDefinition> rules = ruleRegistry.getActiveRules(collectionName);
+        List<ValidationRuleDefinition> rules = rulesFor(definition);
         if (rules.isEmpty()) {
             return;
         }
+
+        String collectionName = definition.name();
 
         String opType = operationType.name();
         List<ValidationError> errors = new ArrayList<>();
@@ -153,5 +161,24 @@ public class CustomValidationRuleEngine {
         if (!errors.isEmpty()) {
             throw new RecordValidationException(errors);
         }
+    }
+
+    /**
+     * The active rules that govern a write to {@code definition}:
+     * <ul>
+     *   <li>a tenant-owned collection: its owner's rules, by the definition's own
+     *       {@code tenantId} — the collection registry resolved this definition for the caller's
+     *       tenant, so this is the caller's collection;</li>
+     *   <li>a system collection (one definition shared by every tenant): the rules the writing
+     *       tenant, from {@link TenantContext}, defined on it.</li>
+     * </ul>
+     * A write with no tenant to attribute it to gets no rules. Every rule is tenant-authored, so
+     * there is no tenant-less rule set to fall back to.
+     */
+    private List<ValidationRuleDefinition> rulesFor(CollectionDefinition definition) {
+        if (definition.systemCollection()) {
+            return ruleRegistry.getActiveSystemCollectionRules(TenantContext.get(), definition.name());
+        }
+        return ruleRegistry.getActiveRules(definition.tenantId(), definition.name());
     }
 }
