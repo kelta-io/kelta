@@ -24,7 +24,7 @@ Every execution starts with this envelope and every JSONPath in the definition i
 | Record change | `type: RECORD_CHANGE`, `changeType`, `collectionName`, `timestamp` | `record` |
 | API / manual | `type: API_INVOCATION` | `input` |
 | Scheduled | `type: SCHEDULED` | `input` (= `triggerConfig.inputData`) |
-| Webhook | `type: WEBHOOK` | `input`, `headers` |
+| Webhook | `type: WEBHOOK` | `input`, `headers`, `query` |
 | NATS message | `type: NATS_MESSAGE`, `subject`, `topic` | `input` |
 
 `context` is always present.

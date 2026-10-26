@@ -485,6 +485,18 @@ the fix, a query-param `credentialRef` put the key in every step log's `url`; th
 not rewritten. Secrets shorter than 4 characters are masked in URLs by parameter name only, not
 scrubbed from free text.
 
+### Flow webhook secrets are readable flow metadata (KLT-798)
+
+`triggerConfig.webhook.secret` (the per-flow secret `FlowWebhookPolicy` checks on
+`/api/webhooks/{flowId}`) is stored in plain text in `flow.trigger_config` and returned by every
+flow read — the flows API, MCP, exports, package/promotion copies. Anyone who can read flow metadata
+can sign webhook calls. Follow-up: make it write-only (a server-only column or a `credentialRef`) and
+redact it from flow reads. Also open: signed `sig` links never expire (a flow must sign and check its
+own expiry parameter), the form body is not covered by `sig`, and there is no formula/flow HMAC
+helper, so a tenant computes signed links outside Kelta. A configured `response` body with
+`text/html` is tenant-authored HTML served unauthenticated on the tenant host (sent with
+`X-Content-Type-Options: nosniff`).
+
 ### EMAIL_ALERT escapes interpolated body values (KLT-797)
 
 `EMAIL_ALERT` declares `subject` and `body` in `unresolvedParameterKeys()`, so `TaskStateExecutor`
