@@ -206,7 +206,11 @@ which forces every leg to build — so merging a change to this file redeploys e
    ubuntu20.04 builds (PLT-808), and PLT-808's workaround (`PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:
    ubuntu24.04-x64`) made `npx playwright install --with-deps chromium` ask apt for the noble
    package names (`libasound2t64`, `libglib2.0-0t64`, `fonts-unifont`, …), which focal does not
-   have — apt exited 100 with `Unable to locate package` on every `main` deploy (PLT-818).
+   have — apt exited 100 with `Unable to locate package` on every `main` deploy (PLT-818;
+   re-filed as PLT-825). No PR check runs this job, so nothing caught it before merge:
+   `ci/e2e-test-job.test.ts` (run by `test-ci-scripts`) now fails a PR whose `e2e-test` job sets
+   `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE`, runs `--with-deps`/`playwright install`, or stops taking
+   the noble image tag from `e2e-tests/package-lock.json`.
    Dropping `--with-deps` would only move the failure to Chromium launch (a noble build on
    focal's glibc). Rebuilding the runner on a newer base would also fix it, but needs a runner
    rollout in the cluster.
