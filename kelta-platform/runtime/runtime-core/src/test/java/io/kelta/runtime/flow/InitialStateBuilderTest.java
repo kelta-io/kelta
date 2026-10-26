@@ -281,7 +281,7 @@ class InitialStateBuilderTest {
         Map<String, String> headers = Map.of("content-type", "application/json");
 
         Map<String, Object> state = builder.buildFromWebhook(
-                payload, headers, "tenant-1", "flow-1", "exec-1");
+                payload, headers, Map.of(), "tenant-1", "flow-1", "exec-1");
 
         @SuppressWarnings("unchecked")
         Map<String, Object> trigger = (Map<String, Object>) state.get("trigger");
@@ -294,7 +294,7 @@ class InitialStateBuilderTest {
         Map<String, String> headers = Map.of("content-type", "application/json", "user-agent", "TestAgent");
 
         Map<String, Object> state = builder.buildFromWebhook(
-                payload, headers, "tenant-1", "flow-1", "exec-1");
+                payload, headers, Map.of(), "tenant-1", "flow-1", "exec-1");
 
         @SuppressWarnings("unchecked")
         Map<String, Object> input = (Map<String, Object>) state.get("input");
@@ -310,7 +310,7 @@ class InitialStateBuilderTest {
     @Test
     void buildFromWebhookHandlesNullPayloadAndHeaders() {
         Map<String, Object> state = builder.buildFromWebhook(
-                null, null, "tenant-1", "flow-1", "exec-1");
+                null, null, null, "tenant-1", "flow-1", "exec-1");
 
         @SuppressWarnings("unchecked")
         Map<String, Object> input = (Map<String, Object>) state.get("input");
@@ -324,9 +324,36 @@ class InitialStateBuilderTest {
     }
 
     @Test
+    void buildFromWebhookPutsQueryBesideUnchangedHeaders() {
+        Map<String, String> headers = Map.of("content-type", "application/json", "user-agent", "TestAgent");
+        Map<String, Object> query = Map.of("a", "1", "tag", java.util.List.of("x", "y"));
+
+        Map<String, Object> state = builder.buildFromWebhook(
+                Map.of("orderId", "ord-123"), headers, query, "tenant-1", "flow-1", "exec-1");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stateQuery = (Map<String, Object>) state.get("query");
+        assertEquals("1", stateQuery.get("a"));
+        assertEquals(java.util.List.of("x", "y"), stateQuery.get("tag"));
+        assertEquals(headers, state.get("headers"));
+        assertEquals(Map.of("orderId", "ord-123"), state.get("input"));
+    }
+
+    @Test
+    void buildFromWebhookDefaultsQueryToEmpty() {
+        Map<String, Object> state = builder.buildFromWebhook(
+                Map.of(), Map.of(), null, "tenant-1", "flow-1", "exec-1");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> query = (Map<String, Object>) state.get("query");
+        assertNotNull(query);
+        assertTrue(query.isEmpty());
+    }
+
+    @Test
     void buildFromWebhookContainsContext() {
         Map<String, Object> state = builder.buildFromWebhook(
-                Map.of(), Map.of(), "tenant-1", "flow-1", "exec-1");
+                Map.of(), Map.of(), Map.of(), "tenant-1", "flow-1", "exec-1");
 
         @SuppressWarnings("unchecked")
         Map<String, Object> context = (Map<String, Object>) state.get("context");
@@ -367,11 +394,12 @@ class InitialStateBuilderTest {
         assertTrue(schedState.containsKey("context"));
 
         Map<String, Object> webhookState = builder.buildFromWebhook(
-                Map.of(), Map.of(), "tenant-1", "flow-1", "exec-1");
-        assertEquals(4, webhookState.size());
+                Map.of(), Map.of(), Map.of(), "tenant-1", "flow-1", "exec-1");
+        assertEquals(5, webhookState.size());
         assertTrue(webhookState.containsKey("trigger"));
         assertTrue(webhookState.containsKey("input"));
         assertTrue(webhookState.containsKey("headers"));
+        assertTrue(webhookState.containsKey("query"));
         assertTrue(webhookState.containsKey("context"));
     }
 }

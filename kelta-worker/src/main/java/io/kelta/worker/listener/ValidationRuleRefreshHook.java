@@ -6,6 +6,7 @@ import io.kelta.runtime.event.EventFactory;
 import io.kelta.runtime.event.PlatformEvent;
 import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.workflow.BeforeSaveHook;
+import io.kelta.runtime.workflow.BeforeSaveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * After-save hook for the "validation-rules" system collection that broadcasts
@@ -26,7 +28,8 @@ import java.util.Map;
  *
  * <p>Without this hook, changes to validation rules (create, activate,
  * deactivate, edit formula, delete) would only take effect after a full
- * pod restart.
+ * pod restart. A delete passes no record to {@code afterDelete}, so the rule's
+ * collection is looked up in {@code beforeDelete}, while the row still exists.
  *
  * @since 1.0.0
  */
@@ -39,8 +42,18 @@ public class ValidationRuleRefreshHook implements BeforeSaveHook {
             SELECT name, tenant_id FROM collection WHERE id = ? LIMIT 1
             """;
 
+    static final String SELECT_RULE_COLLECTION_ID = """
+            SELECT collection_id FROM validation_rule WHERE id = ?
+            """;
+
+    /** Bounds {@link #pendingDeletes} should deletes whose {@code afterDelete} never runs pile up. */
+    private static final int MAX_PENDING_DELETES = 1000;
+
     private final PlatformEventPublisher eventPublisher;
     private final JdbcTemplate jdbcTemplate;
+
+    /** Rule ID to its collection ID, captured before the rule row is deleted. */
+    private final Map<String, String> pendingDeletes = new ConcurrentHashMap<>();
 
     public ValidationRuleRefreshHook(PlatformEventPublisher eventPublisher,
                                       JdbcTemplate jdbcTemplate) {
@@ -71,15 +84,29 @@ public class ValidationRuleRefreshHook implements BeforeSaveHook {
     }
 
     @Override
+    public BeforeSaveResult beforeDelete(String id, String tenantId) {
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(SELECT_RULE_COLLECTION_ID, id);
+            if (!rows.isEmpty() && rows.get(0).get("collection_id") != null) {
+                if (pendingDeletes.size() >= MAX_PENDING_DELETES) {
+                    pendingDeletes.clear();
+                }
+                pendingDeletes.put(id, String.valueOf(rows.get(0).get("collection_id")));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to resolve collection of deleted validation rule {}: {}", id, e.getMessage());
+        }
+        return BeforeSaveResult.ok();
+    }
+
+    @Override
     public void afterDelete(String id, String tenantId) {
-        // On delete, the record data isn't available, so we can't easily get
-        // the collectionId. Query all validation rules' parent collections
-        // and broadcast for each. In practice, this is rare and acceptable.
-        log.info("Validation rule deleted (id={}), broadcasting refresh", id);
-        // We don't have the collectionId from a delete, but the previous data
-        // isn't passed to afterDelete. Publish a generic refresh by querying
-        // the remaining rules' collections. For simplicity, we skip the broadcast
-        // on delete — the collection-level teardown/refresh handles this case.
+        String collectionId = pendingDeletes.remove(id);
+        if (collectionId == null) {
+            log.warn("No collection captured for deleted validation rule {}, cannot broadcast refresh", id);
+            return;
+        }
+        publishCollectionChanged(collectionId, tenantId);
     }
 
     private void publishCollectionChanged(Map<String, Object> record, String tenantId) {
@@ -88,6 +115,10 @@ public class ValidationRuleRefreshHook implements BeforeSaveHook {
             log.warn("Validation rule record missing collectionId, cannot broadcast refresh");
             return;
         }
+        publishCollectionChanged(collectionId, tenantId);
+    }
+
+    private void publishCollectionChanged(String collectionId, String tenantId) {
 
         // Look up the collection name for the event payload
         String collectionName = resolveCollectionName(collectionId);

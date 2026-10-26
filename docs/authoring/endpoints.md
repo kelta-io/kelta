@@ -49,7 +49,7 @@ it before routing.
 `internal` marks an endpoint only the platform's own admin UI or services call; it is reachable, but
 not a supported integration surface and may change without notice.
 
-**403** public endpoints: **311** linked to docs, **29** internal,
+**404** public endpoints: **312** linked to docs, **29** internal,
 **63** not yet documented.
 
 ## Endpoints
@@ -383,6 +383,7 @@ not a supported integration surface and may change without notice.
 | GET | `/api/watches/{id}/alerts` | worker | API_ACCESS | undocumented |
 | POST | `/api/webhooks/mail/{mailboxKey}` | worker | none (unauthenticated) | undocumented |
 | POST | `/api/webhooks/ses` | worker | none (unauthenticated) | [platform/messaging](/docs/platform/messaging/#email) |
+| GET | `/api/webhooks/{flowId}` | worker | none (unauthenticated) | [automation/triggers](/docs/automation/triggers/#inbound-webhooks) |
 | POST | `/api/webhooks/{flowId}` | worker | none (unauthenticated) | [automation/triggers](/docs/automation/triggers/#inbound-webhooks) |
 | GET | `/api/wins` | worker | API_ACCESS; handler checks MANAGE_DATA / VIEW_ALL_DATA | undocumented |
 | POST | `/api/wins` | worker | API_ACCESS | undocumented |

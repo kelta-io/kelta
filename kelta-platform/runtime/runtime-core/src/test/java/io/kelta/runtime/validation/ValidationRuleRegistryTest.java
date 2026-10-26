@@ -235,4 +235,101 @@ class ValidationRuleRegistryTest {
             assertEquals(List.of("system_rule"), names(registry.getActiveSystemCollectionRules(TENANT_A, "users")));
         }
     }
+
+    @Nested
+    @DisplayName("Failed loads (fail closed)")
+    class FailedLoads {
+
+        @Test
+        @DisplayName("a failed load keeps a tenant collection's previously registered rules")
+        void failedLoadKeepsPreviousTenantRules() {
+            registry.register(TENANT, "orders", List.of(rule("cap")));
+
+            assertTrue(registry.markLoadFailed(TENANT, "orders"));
+            assertEquals(List.of("cap"), names(registry.getActiveRules(TENANT, "orders")));
+        }
+
+        @Test
+        @DisplayName("a previously loaded empty rule set is kept, not marked unavailable")
+        void failedLoadKeepsPreviousEmptySet() {
+            registry.register(TENANT, "orders", List.of());
+
+            assertTrue(registry.markLoadFailed(TENANT, "orders"));
+            assertTrue(registry.getActiveRules(TENANT, "orders").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a tenant collection that never loaded is unavailable until a load succeeds")
+        void neverLoadedTenantCollectionIsUnavailable() {
+            assertFalse(registry.markLoadFailed(TENANT, "orders"));
+
+            var ex = assertThrows(ValidationRuleRegistry.RulesUnavailableException.class,
+                    () -> registry.getActiveRules(TENANT, "orders"));
+            assertEquals(503, ex.getStatusCode().value());
+            assertTrue(registry.getActiveRules(TENANT_B, "orders").isEmpty(),
+                    "another tenant's same-named collection is unaffected");
+
+            registry.register(TENANT, "orders", List.of(rule("cap")));
+            assertEquals(List.of("cap"), names(registry.getActiveRules(TENANT, "orders")));
+        }
+
+        @Test
+        @DisplayName("unregistering clears the unavailable state")
+        void unregisterClearsUnavailable() {
+            registry.markLoadFailed(TENANT, "orders");
+            registry.unregister(TENANT, "orders");
+
+            assertTrue(registry.getActiveRules(TENANT, "orders").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a failed load keeps every tenant's rules on a loaded system collection")
+        void failedLoadKeepsSystemCollectionRules() {
+            registry.registerSystemCollectionRules("users", Map.of(TENANT_A, List.of(rule("a")), TENANT_B, List.of(rule("b"))));
+
+            assertTrue(registry.markSystemCollectionLoadFailed("users"));
+            assertEquals(List.of("a"), names(registry.getActiveSystemCollectionRules(TENANT_A, "users")));
+            assertEquals(List.of("b"), names(registry.getActiveSystemCollectionRules(TENANT_B, "users")));
+        }
+
+        @Test
+        @DisplayName("a system collection loaded with no rules counts as loaded")
+        void emptySystemLoadCountsAsLoaded() {
+            registry.registerSystemCollectionRules("users", Map.of());
+
+            assertTrue(registry.isSystemCollectionLoaded("users"));
+            assertTrue(registry.markSystemCollectionLoadFailed("users"));
+            assertTrue(registry.getActiveSystemCollectionRules(TENANT_A, "users").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a system collection that never loaded is unavailable to every tenant until a full load")
+        void neverLoadedSystemCollectionIsUnavailable() {
+            assertFalse(registry.isSystemCollectionLoaded("users"));
+            assertFalse(registry.markSystemCollectionLoadFailed("users"));
+
+            assertThrows(ValidationRuleRegistry.RulesUnavailableException.class,
+                    () -> registry.getActiveSystemCollectionRules(TENANT_A, "users"));
+            registry.registerSystemCollectionRules("users", TENANT_A, List.of(rule("a")));
+            assertThrows(ValidationRuleRegistry.RulesUnavailableException.class,
+                    () -> registry.getActiveSystemCollectionRules(TENANT_B, "users"),
+                    "one tenant's reload does not stand in for the others");
+
+            registry.registerSystemCollectionRules("users", Map.of(TENANT_B, List.of(rule("b"))));
+            assertTrue(registry.isSystemCollectionLoaded("users"));
+            assertEquals(List.of("b"), names(registry.getActiveSystemCollectionRules(TENANT_B, "users")));
+        }
+
+        @Test
+        @DisplayName("unregistering a system collection clears its loaded and unavailable state")
+        void unregisterSystemCollectionClearsState() {
+            registry.registerSystemCollectionRules("users", Map.of());
+            registry.unregisterSystemCollection("users");
+            assertFalse(registry.isSystemCollectionLoaded("users"));
+
+            registry.markSystemCollectionLoadFailed("users");
+            registry.unregisterSystemCollection("users");
+            assertTrue(registry.getActiveSystemCollectionRules(TENANT_A, "users").isEmpty());
+        }
+    }
 }

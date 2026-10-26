@@ -507,6 +507,18 @@ the fix, a query-param `credentialRef` put the key in every step log's `url`; th
 not rewritten. Secrets shorter than 4 characters are masked in URLs by parameter name only, not
 scrubbed from free text.
 
+### Flow webhook secrets are readable flow metadata (KLT-798)
+
+`triggerConfig.webhook.secret` (the per-flow secret `FlowWebhookPolicy` checks on
+`/api/webhooks/{flowId}`) is stored in plain text in `flow.trigger_config` and returned by every
+flow read — the flows API, MCP, exports, package/promotion copies. Anyone who can read flow metadata
+can sign webhook calls. Follow-up: make it write-only (a server-only column or a `credentialRef`) and
+redact it from flow reads. Also open: signed `sig` links never expire (a flow must sign and check its
+own expiry parameter), the form body is not covered by `sig`, and there is no formula/flow HMAC
+helper, so a tenant computes signed links outside Kelta. A configured `response` body with
+`text/html` is tenant-authored HTML served unauthenticated on the tenant host (sent with
+`X-Content-Type-Options: nosniff`).
+
 ### EMAIL_ALERT escapes interpolated body values (KLT-797)
 
 `EMAIL_ALERT` declares `subject` and `body` in `unresolvedParameterKeys()`, so `TaskStateExecutor`
@@ -1071,7 +1083,8 @@ its own change with a full compose run.
 One line each; full write-ups are in git history.
 
 **Security**
-- 2026-10-25 (KLT-790) — deleting a collection unregistered it from each pod's `ConcurrentCollectionRegistry` by bare name, whose fallback removes the first entry with that name in any tenant: deleting tenant A's `orders` could drop tenant B's, so B's `/api/orders` 404'd on that pod until restart (the likely cause of the PR #2011 `ChildResourceScopingScenarioTest` failure: `/orders` never answered 200 in its 20 s wait). `CollectionLifecycleManager.teardownCollection` now unregisters the definition's `registryKey()`. `CollectionLifecycleManagerTeardownTest`. `ValidationRuleRegistry` is still keyed by bare name.
+- 2026-10-26 (PLT-826) — validation-rule reloads failed open: a DB error while loading a collection's rules registered an empty set (validation off until the next reload), deleting a rule broadcast nothing (other pods kept enforcing it), and a system collection first loaded inside one tenant's request registered only that tenant's rules (the rest went unvalidated until an unbound reload). Now a failed load keeps the previous rules (`ValidationRuleRegistry.markLoadFailed`/`markSystemCollectionLoadFailed`) and a collection whose rules never loaded refuses writes with 503 (`RulesUnavailableException`) until a load succeeds; `ValidationRuleRefreshHook` captures the rule's `collection_id` in `beforeDelete` and publishes the same `collection.changed` event on delete; `CollectionLifecycleManager` initialize (and a refresh of a never-fully-loaded system collection) reads every tenant's rules, off the bound `ScopedValue` scope on a fresh virtual thread so RLS selects `admin_bypass`, while a tenant-bound refresh still replaces only that tenant's set; a tenant-owned collection loaded while another tenant is bound reads its owner's rules the same way instead of skipping the load. `CollectionLifecycleManagerValidationRuleLoadFailureTest`, `ValidationRuleRefreshHookTest`, `ValidationRuleRegistryTest`. Still open: a delete whose `beforeDelete` lookup fails is logged and not broadcast (other pods keep the rule until the collection's next refresh).
+- 2026-10-25 (KLT-790) — deleting a collection unregistered it from each pod's `ConcurrentCollectionRegistry` by bare name, whose fallback removes the first entry with that name in any tenant: deleting tenant A's `orders` could drop tenant B's, so B's `/api/orders` 404'd on that pod until restart (the likely cause of the PR #2011 `ChildResourceScopingScenarioTest` failure: `/orders` never answered 200 in its 20 s wait). `CollectionLifecycleManager.teardownCollection` now unregisters the definition's `registryKey()`. `CollectionLifecycleManagerTeardownTest`. `ValidationRuleRegistry` was keyed by bare name too; resolved by kelta#2046 (keyed by tenant).
 - 2026-10-12 (password-change-sign-out) — changing a password in kelta-auth (`/auth/password/change`, email-link `/auth/password/reset`, forced `/change-password`) now ends the user's other HTTP sessions and revokes their OAuth2 authorizations (refresh tokens), scoped by tenant + user id (`UserSessionRevoker`); `/auth/password/change` resolves the signed-in user by tenant + id instead of by email. `PasswordChangeSignOutFlowTest`, `SharedHttpSessionIntegrationTest`.
 - 2026-10-12 (gateway-cache-caller-key) — vary the system-collection response cache by caller: the gateway cache key now carries a caller fingerprint and the lookup runs after `RouteAuthorizationFilter`, so every read is authorized and answered for its own caller (`SystemCollectionResponseCaptureFilter` stores, `SystemCollectionResponseCacheFilter` looks up).
 - 2026-10-12 (span-body-redaction) — the gateway recorded JSON request/response bodies as span attributes unredacted; both gateway and worker now use the shared `SensitiveBodyRedactor` (runtime-jsonapi: secret-named keys at any depth, PAT/JWT-shaped values, redact before truncate, no content captured for non-JSON/invalid JSON or `credentials` paths). Bodies captured before the fix remain in trace storage until retention expires.
