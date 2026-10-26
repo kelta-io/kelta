@@ -80,6 +80,27 @@ any_java:
   - 'kelta-ai/**'
   - 'kelta-mcp/**'
 
+# Shared Maven build input — every Maven job copies it to ~/.m2/settings.xml, so a change to
+# it re-runs the Java test jobs (test-java, test-runtime, test-runtime-modules, integration-tests).
+# Not in *runtime or any_java: build-and-publish-containers.yml reads those to decide image builds.
+maven_build: &maven_build
+  - 'ci/maven-settings.xml'
+
+# Cross-service integration tests (kelta-test-harness, job "integration-tests") and the
+# test-java job it needs. Everything any_java matches (repeated, not spliced: the filter action
+# flattens only one level of anchors), plus the harness itself and the Maven settings. Kept apart
+# from any_java so a harness-only change does not build and publish service images.
+# ci/path-filters.test.ts checks that each test job's build files match its filter.
+integration:
+  - *runtime
+  - 'kelta-gateway/**'
+  - 'kelta-worker/**'
+  - 'kelta-auth/**'
+  - 'kelta-ai/**'
+  - 'kelta-mcp/**'
+  - 'kelta-test-harness/**'
+  - *maven_build
+
 # E2E tests — run on any backend, frontend, or e2e suite change.
 e2e:
   - *runtime
@@ -105,6 +126,7 @@ e2e:
 runtime_modules:
   - *runtime
   - 'kelta-modules/**'
+  - *maven_build
 
 # Quickstart smoke test — anything that could break "clone → docker compose up →
 # create first collection" for a first-time user.
@@ -134,6 +156,8 @@ templates:
   - 'examples/templates/**'
   - 'ci/templates-install-check.*'
   - 'kelta-web/packages/cli/**'
+  - 'kelta-web/package.json'
+  - 'kelta-web/package-lock.json'
   - 'kelta-worker/src/main/java/io/kelta/worker/controller/PackageController.java'
   - 'kelta-worker/src/main/java/io/kelta/worker/service/PackageService.java'
   - 'kelta-worker/src/main/java/io/kelta/worker/service/PackageImportService.java'
@@ -148,6 +172,9 @@ mcp_replay:
   - 'kelta-mcp/**'
   - 'examples/templates/**'
   - 'kelta-web/packages/cli/src/mcp/**'
+  - 'kelta-web/packages/cli/package.json'
+  - 'kelta-web/package.json'
+  - 'kelta-web/package-lock.json'
   - 'ci/mcp-replay.*'
   - 'ci/mcp-replay-compare.*'
   - '.github/path-filters.yml'
@@ -181,8 +208,10 @@ workflows:
 # The docs checks ride the same job: ci/doc-http-paths.test.ts reads every METHOD /api/... in the
 # docs and the READMEs, and ci/doc-error-codes.test.ts reads errors.md against the codes emitted in
 # the doc-error-codes.ts SOURCE_ROOTS, so a docs-only or a code-only change re-runs both.
+# ci/path-filters.test.ts reads this file, so it is listed too.
 ci_scripts:
   - 'ci/**'
+  - '.github/path-filters.yml'
   - 'scripts/ci/**'
   - 'kelta-*/src/main/java/**/controller/**'
   - 'kelta-*/src/main/java/**/*Controller.java'
