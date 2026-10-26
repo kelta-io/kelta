@@ -370,8 +370,8 @@ class CollectionLifecycleManagerRefreshTest {
         }
 
         @Test
-        @DisplayName("Should register empty rules on DB error")
-        void registersEmptyOnError() {
+        @DisplayName("Should mark the load failed, never register an empty set, on DB error")
+        void marksLoadFailedOnError() {
             Map<String, Object> collRow = buildUserRow("products");
             when(jdbcTemplate.queryForList(contains("FROM collection WHERE id"), eq("coll-456")))
                     .thenReturn(List.of(collRow));
@@ -383,7 +383,8 @@ class CollectionLifecycleManagerRefreshTest {
 
             manager.initializeCollection("coll-456");
 
-            verify(validationRuleRegistry).register(eq("tenant-abc"), eq("products"), eq(List.of()));
+            verify(validationRuleRegistry).markLoadFailed("tenant-abc", "products");
+            verify(validationRuleRegistry, never()).register(anyString(), anyString(), anyList());
         }
     }
 }
