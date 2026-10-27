@@ -123,11 +123,12 @@ inbound routing by `email_from_address`, and kelta-auth slug→id lookups (`Tena
 
 ### Dependency vulnerability scanning
 
-- **npm** is gated by `dependency-audit` in `quality-gate`, diffing against
-  `ci/npm-audit-baseline.json`. **The baseline is debt, not an allowlist**: 9 entries
-  (2 `kelta-web`, 7 `kelta-ui/app`, regenerated in #1605) — `react-router` highs plus one
-  `@tiptap/core` ReDoS. Refresh this count whenever the baseline moves (the `ci.yml` comment
-  above the job still says 33).
+- **FIXED (PLT-854) — npm baseline is empty.** `dependency-audit` in `quality-gate` diffs
+  against `ci/npm-audit-baseline.json`, which now lists **0** advisories for both `kelta-web` and
+  `kelta-ui/app` (`react-router`/`react-router-dom` on 7.18.4 in both; `@tiptap/core` 3.32.0 is
+  outside GHSA-j95f-988m-3j2f's revised `< 3.30.5` range). Any new high/critical production
+  advisory now fails CI. **The baseline is debt, not an allowlist** — fix rather than re-add, and
+  refresh this note if an entry ever lands (the `ci.yml` comment above the job still says 33).
 - **FIXED — Java dependencies were unscanned.** OWASP dependency-check never ran (blocked on an
   `NVD_API_KEY` the NVD API rejects). `dependency-audit-java` now scans each service's shipped
   classpath — a Maven-resolved CycloneDX SBOM — and the OpenTelemetry Java agent version pinned in
