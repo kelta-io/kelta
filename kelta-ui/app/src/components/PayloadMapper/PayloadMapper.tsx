@@ -63,6 +63,7 @@ export function PayloadMapper({
   // When the consumer hands us a new value (e.g., loaded from the server),
   // reset our local bindings.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
     setBindings(deserializeMapping(value ?? {}, targetPaths))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(value), JSON.stringify(targetPaths)])

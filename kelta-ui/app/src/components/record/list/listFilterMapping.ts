@@ -60,13 +60,11 @@ export function listFiltersToExpression(filters: FilterCondition[]): FilterExpre
   if (filters.length === 0) return null
   return {
     logic: 'AND',
-    filters: filters.map(
-      (f): FilterClause => ({
-        field: f.field,
-        op: LIST_TO_BUILDER[f.operator] ?? 'equals',
-        value: f.value,
-      })
-    ),
+    filters: filters.map((f): FilterClause => ({
+      field: f.field,
+      op: LIST_TO_BUILDER[f.operator] ?? 'equals',
+      value: f.value,
+    })),
   }
 }
 

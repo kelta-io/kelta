@@ -98,6 +98,7 @@ export function useRecentRecords(userId: string): UseRecentRecordsReturn {
 
   // Reload when the workspace or user changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
     setRecords(loadRecords(scope, userId))
   }, [scope, userId])
 

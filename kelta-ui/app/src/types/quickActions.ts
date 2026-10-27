@@ -15,12 +15,7 @@
  * The type of quick action determines the UI behavior.
  */
 export type QuickActionType =
-  | 'create_related'
-  | 'update_field'
-  | 'run_script'
-  | 'log_activity'
-  | 'send_email'
-  | 'custom'
+  'create_related' | 'update_field' | 'run_script' | 'log_activity' | 'send_email' | 'custom'
 
 /**
  * Where the quick action can appear.

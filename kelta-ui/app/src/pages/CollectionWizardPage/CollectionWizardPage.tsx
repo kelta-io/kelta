@@ -250,6 +250,7 @@ export function CollectionWizardPage({
   // Initialize profile permissions when profiles are loaded
   useMemo(() => {
     if (profiles.length > 0 && profilePermissions.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-render -- existing one-shot init; refactor tracked as follow-up to PLT-854
       setProfilePermissions(
         profiles.map((p: { id: string; name: string }) => ({
           profileId: p.id,

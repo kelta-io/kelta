@@ -22,8 +22,7 @@ export interface VideoToken {
 
 /** The subject a video token is minted for. */
 export type VideoTokenTarget =
-  | { kind: 'appointment'; id: string }
-  | { kind: 'conversation'; id: string }
+  { kind: 'appointment'; id: string } | { kind: 'conversation'; id: string }
 
 function tokenPath(target: VideoTokenTarget): string {
   return target.kind === 'appointment'

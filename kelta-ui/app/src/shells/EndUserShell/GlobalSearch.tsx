@@ -122,15 +122,13 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps): React.R
         const data = (response as { data?: Array<Record<string, unknown>> })?.data
         if (!Array.isArray(data)) return []
 
-        return data.map(
-          (item): SearchResult => ({
-            id: String(item.id),
-            collectionName: String(item.collectionName),
-            collectionLabel:
-              collectionLabelMap[String(item.collectionName)] || String(item.collectionName),
-            displayValue: String(item.displayValue || item.id),
-          })
-        )
+        return data.map((item): SearchResult => ({
+          id: String(item.id),
+          collectionName: String(item.collectionName),
+          collectionLabel:
+            collectionLabelMap[String(item.collectionName)] || String(item.collectionName),
+          displayValue: String(item.displayValue || item.id),
+        }))
       } catch {
         return []
       }

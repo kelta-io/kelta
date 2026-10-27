@@ -32,10 +32,7 @@ export interface NatsTriggerConfig {
 }
 
 export type TriggerConfig =
-  | RecordTriggerConfig
-  | ScheduledTriggerConfig
-  | AutolaunchedTriggerConfig
-  | NatsTriggerConfig
+  RecordTriggerConfig | ScheduledTriggerConfig | AutolaunchedTriggerConfig | NatsTriggerConfig
 
 // ---------------------------------------------------------------------------
 // Retry & Catch Rules

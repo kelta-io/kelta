@@ -65,12 +65,7 @@ export interface ConnectionTestResult {
 }
 
 export type PromotionStatus =
-  | 'PENDING'
-  | 'APPROVED'
-  | 'IN_PROGRESS'
-  | 'COMPLETED'
-  | 'FAILED'
-  | 'ROLLED_BACK'
+  'PENDING' | 'APPROVED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'ROLLED_BACK'
 
 export type PromotionType = 'FULL' | 'SELECTIVE'
 

@@ -228,6 +228,7 @@ export function AppContextProvider({ children }: AppContextProviderProps): React
   // Writes happen inside the updaters, not in a persist effect, so a scope
   // change can never copy one workspace's state into another's key.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
     setRecentItems(loadRecentItems(scope))
     setFavorites(loadFavorites(scope))
   }, [scope])

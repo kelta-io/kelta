@@ -75,6 +75,7 @@ export function useFavorites(userId: string): UseFavoritesReturn {
 
   // Reload when userId changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
     setItems(loadFavorites(userId))
   }, [userId])
 

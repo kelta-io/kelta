@@ -305,6 +305,7 @@ export function ResourceDetailPage({
 
   // Left section-nav entries (layout sections only — the admin field grid has no anchors)
   const sectionNavItems = useMemo(
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- compiler skips this memo; existing code, follow-up to PLT-854
     () =>
       layout?.sections && schema?.fields
         ? resolveSectionNavItems(layout.sections, schema.fields)
@@ -624,8 +625,7 @@ export function ResourceDetailPage({
           const displayLabel = fieldDisplayMap?.[recordId] ?? recordId
           // Get target collection from relationship data or lookup map
           const relData = resource?.[`_rel_${field.name}`] as
-            | { type: string; id: string }
-            | undefined
+            { type: string; id: string } | undefined
           const targetCollection = relData?.type ?? lookupTargetNameMap?.[field.name]
           return (
             <span className="font-mono">

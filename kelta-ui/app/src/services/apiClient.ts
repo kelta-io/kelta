@@ -589,8 +589,7 @@ export class ApiClient {
       const response = await this.axios.get(url)
       const items = unwrapJsonApiList<T>(response.data)
       const meta = (response.data as Record<string, unknown>)?.metadata as
-        | Record<string, number>
-        | undefined
+        Record<string, number> | undefined
       return {
         content: items,
         totalElements: meta?.totalCount ?? items.length,

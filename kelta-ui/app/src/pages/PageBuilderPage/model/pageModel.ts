@@ -14,13 +14,7 @@ export interface Binding {
 }
 
 export type PropValue =
-  | string
-  | number
-  | boolean
-  | null
-  | Binding
-  | PropValue[]
-  | { [key: string]: PropValue }
+  string | number | boolean | null | Binding | PropValue[] | { [key: string]: PropValue }
 
 /** Narrowing guard: is this prop value a binding object rather than a literal? */
 export function isBinding(value: unknown): value is Binding {
