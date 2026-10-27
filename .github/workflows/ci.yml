@@ -47,6 +47,13 @@ env:
   # set the retry flags explicitly so every `mvn` call picks them up.
   MAVEN_OPTS: "-Dmaven.wagon.http.retryHandler.count=10 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true -Daether.connector.http.retryHandler.count=10"
 
+# Fork guard. Every job here runs on a self-hosted runner, so no job may run code from a
+# fork's pull request. Each job's `if:` is (or is AND-ed with, its original condition kept in
+# parentheses) exactly:
+#   github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+# Actions has no job-level anchors, so it is repeated per job; quality-gate's always() is
+# wrapped too, or it alone would still run. ci/workflow-fork-guard.ts fails a PR-triggered
+# self-hosted job without it. A maintainer re-runs a fork's change from a kelta-io/kelta branch.
 jobs:
   # ===========================================================================
   # Detect which paths changed in this PR so downstream jobs can skip work
@@ -54,6 +61,7 @@ jobs:
   # ===========================================================================
   changes:
     name: Detect Changes
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: k8s-runner
     outputs:
       runtime: ${{ steps.filter.outputs.runtime }}
@@ -155,7 +163,7 @@ jobs:
             runner: k8s-runner
     # The integration filter, not any_java: integration-tests needs this job, so a harness-only
     # change must not skip it. Its matrix entries still skip per service via matrix.changed.
-    if: needs.changes.outputs.integration == 'true' || needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.integration == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Skip if unchanged
         if: matrix.changed != 'true' && needs.changes.outputs.workflows != 'true'
@@ -259,7 +267,7 @@ jobs:
     name: Test Runtime Modules
     needs: changes
     runs-on: k8s-runner-integration   # Testcontainers ITs — see test-java
-    if: needs.changes.outputs.runtime == 'true' || needs.changes.outputs.maven_build == 'true' || needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.runtime == 'true' || needs.changes.outputs.maven_build == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -327,7 +335,7 @@ jobs:
     name: Test Runtime Modules (installable)
     needs: changes
     runs-on: k8s-runner
-    if: needs.changes.outputs.runtime_modules == 'true' || needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.runtime_modules == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -395,7 +403,7 @@ jobs:
   test-frontend:
     name: Test Frontend
     needs: changes
-    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.sdk_docs == 'true' || needs.changes.outputs.cli_docs == 'true' || needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.sdk_docs == 'true' || needs.changes.outputs.cli_docs == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner
     defaults:
       run:
@@ -513,7 +521,7 @@ jobs:
   integration-tests:
     name: Integration Tests
     needs: [changes, test-java]
-    if: needs.changes.outputs.integration == 'true' || needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.integration == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner-integration
     timeout-minutes: 20
     steps:
@@ -636,8 +644,9 @@ jobs:
     name: E2E Tests
     needs: changes
     if: >-
-      needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
-      || (github.event_name == 'workflow_dispatch' && inputs.update_snapshots_ref != '')
+      (needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
+      || (github.event_name == 'workflow_dispatch' && inputs.update_snapshots_ref != ''))
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner-integration
     timeout-minutes: 45
     # Per-branch concurrency: cancel an in-flight run when the PR is updated.
@@ -930,7 +939,7 @@ jobs:
   quickstart:
     name: Quickstart Smoke Test
     needs: changes
-    if: needs.changes.outputs.quickstart == 'true' || needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.quickstart == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner-integration
     timeout-minutes: 20
     concurrency:
@@ -1098,8 +1107,9 @@ jobs:
     name: Template Install Check
     needs: changes
     if: >-
-      needs.changes.outputs.templates == 'true' || needs.changes.outputs.workflows == 'true'
-      || github.event_name == 'schedule'
+      (needs.changes.outputs.templates == 'true' || needs.changes.outputs.workflows == 'true'
+      || github.event_name == 'schedule')
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner-integration
     timeout-minutes: 50
     concurrency:
@@ -1241,8 +1251,9 @@ jobs:
     name: MCP Replay Call Count
     needs: changes
     if: >-
-      needs.changes.outputs.mcp_replay == 'true' || needs.changes.outputs.workflows == 'true'
-      || github.event_name == 'schedule'
+      (needs.changes.outputs.mcp_replay == 'true' || needs.changes.outputs.workflows == 'true'
+      || github.event_name == 'schedule')
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner-integration
     timeout-minutes: 45
     concurrency:
@@ -1403,7 +1414,7 @@ jobs:
   upgrade:
     name: Upgrade last release to HEAD
     needs: changes
-    if: needs.changes.outputs.upgrade == 'true' || needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.upgrade == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner-integration
     timeout-minutes: 35
     concurrency:
@@ -1602,6 +1613,7 @@ jobs:
   # ===========================================================================
   worker-image-is-jvm:
     name: Worker image is JVM
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: k8s-runner
     steps:
       - uses: actions/checkout@v7
@@ -1645,7 +1657,7 @@ jobs:
     name: Dependency Audit (npm)
     needs: changes
     runs-on: k8s-runner
-    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -1676,9 +1688,10 @@ jobs:
     runs-on: k8s-runner
     timeout-minutes: 30
     if: >-
-      needs.changes.outputs.any_java == 'true' || needs.changes.outputs.java_audit == 'true'
+      (needs.changes.outputs.any_java == 'true' || needs.changes.outputs.java_audit == 'true'
       || needs.changes.outputs.maven_build == 'true' || needs.changes.outputs.workflows == 'true'
-      || github.event_name == 'schedule'
+      || github.event_name == 'schedule')
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     env:
       OSV_SCANNER_VERSION: '2.7.0'
       # sha256 of osv-scanner_linux_amd64 from the release's osv-scanner_SHA256SUMS
@@ -1772,7 +1785,7 @@ jobs:
     name: Lint Workflows
     needs: changes
     runs-on: k8s-runner
-    if: needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -1817,7 +1830,7 @@ jobs:
     name: Test CI Scripts
     needs: changes
     runs-on: k8s-runner
-    if: needs.changes.outputs.ci_scripts == 'true' || needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.ci_scripts == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     timeout-minutes: 10
     steps:
       - name: Checkout code
@@ -1896,7 +1909,7 @@ jobs:
     name: Test Marketing Site
     needs: changes
     runs-on: k8s-runner
-    if: needs.changes.outputs.marketing == 'true' || needs.changes.outputs.workflows == 'true'
+    if: (needs.changes.outputs.marketing == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     defaults:
       run:
         working-directory: kelta-marketing
@@ -1926,7 +1939,7 @@ jobs:
     name: DORA collector tests
     needs: changes
     runs-on: k8s-runner
-    if: needs.changes.outputs.dora == 'true'
+    if: (needs.changes.outputs.dora == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -1943,7 +1956,7 @@ jobs:
   quality-gate:
     name: Quality Gate
     needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, mcp-replay, upgrade, worker-image-is-jvm, dependency-audit, dependency-audit-java, lint-workflows, test-ci-scripts, test-dora]
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner
     steps:
       - name: Check job results

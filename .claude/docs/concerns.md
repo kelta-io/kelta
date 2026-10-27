@@ -145,6 +145,22 @@ inbound routing by `email_from_address`, and kelta-auth slug→id lookups (`Tena
 - **Rule** (third occurrence of a configured-but-never-run tool): when adding any checker, verify
   a job runs it *and* that its failure exit code reaches a gate, in both directions.
 
+### Fork pull requests skip the self-hosted CI (PLT-851)
+
+Every `ci.yml` job runs on a self-hosted pool (`k8s-runner`, `k8s-runner-integration`) inside the
+cluster, and kelta-io/kelta is public: a fork's PR code on those pods is arbitrary code in the
+cluster. So every `ci.yml` job's `if:` is, or ANDs in, `github.event_name != 'pull_request' ||
+github.event.pull_request.head.repo.full_name == github.repository` (`quality-gate`'s `always()`
+included). A fork PR gets no `ci.yml` run; a maintainer re-runs it from a kelta-io/kelta branch
+(`CONTRIBUTING.md`). `ci/workflow-fork-guard.ts` (run by `ci/workflow-fork-guard.test.ts` in
+`test-ci-scripts`) fails any PR-triggered job on a self-hosted label without the guard, and any
+workflow that uses `pull_request_target`. Limits:
+- **A skipped required check counts as passing.** `Quality Gate` shows skipped on a fork PR, so
+  the human merge — not CI — is what stops untested fork code reaching `main`.
+- The check reads each workflow file alone: a self-hosted job in a reusable workflow
+  (`workflow_call`) called from a PR workflow is not followed. A runner from any expression other
+  than `matrix.<key>` with literal values is treated as self-hosted (fails closed).
+
 ### No malware scanning (support mailbox makes strangers the upload source)
 
 There is no ClamAV, scanning sidecar or third-party scanner. `mailbox_attachment.scan_status` is
