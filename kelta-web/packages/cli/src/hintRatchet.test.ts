@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
  * `new CliError(` sites under src/ whose arguments carry no `hint`. Lower this
  * when you add hints; never raise it — give the new error a hint instead.
  */
-const RECORDED_SITES_WITHOUT_HINT = 74;
+const RECORDED_SITES_WITHOUT_HINT = 73;
 
 const SRC = fileURLToPath(new URL('.', import.meta.url));
 
