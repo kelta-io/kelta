@@ -67,6 +67,7 @@ gitleaks to prevent accidental secret commits.
    cd kelta-web && npm run lint && npm run typecheck && npm run test:coverage
    ```
 4. Commit with the DCO sign-off (see below) and open a PR. CI runs automatically.
+   Fork PRs do not run the self-hosted CI (`ci.yml`); a maintainer re-runs the full suite from a branch in kelta-io/kelta.
 
 ---
 

@@ -1,0 +1,18 @@
+# A pull-request workflow whose runner comes from the matrix; one entry is self-hosted.
+name: Fixture matrix unguarded
+
+on: [pull_request, workflow_dispatch]
+
+jobs:
+  test:
+    name: Test ${{ matrix.service }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - service: gateway
+            runner: ubuntu-latest
+          - service: worker
+            runner: k8s-runner-integration
+    steps:
+      - run: echo test

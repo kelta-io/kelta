@@ -1,0 +1,20 @@
+# A pull-request workflow whose self-hosted job keeps only its path condition: fork PR code
+# would run on k8s-runner. The GitHub-hosted job beside it needs no guard.
+name: Fixture self-hosted unguarded
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build
+    runs-on: k8s-runner   # self-hosted pool
+    if: needs.changes.outputs.web == 'true'
+    steps:
+      - run: echo build
+
+  hosted:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hosted
