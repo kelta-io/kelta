@@ -178,6 +178,7 @@ export function SearchModal({ open, onClose }: SearchModalProps): React.ReactEle
   // Focus input when opened
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
       setQuery('')
       setActiveIndex(0)
       setRecordResults([])
@@ -188,6 +189,7 @@ export function SearchModal({ open, onClose }: SearchModalProps): React.ReactEle
   // Debounced record search using centralized search endpoint
   useEffect(() => {
     if (!query.trim() || query.trim().length < 3) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
       setRecordResults([])
       setSearching(false)
       return
@@ -279,6 +281,7 @@ export function SearchModal({ open, onClose }: SearchModalProps): React.ReactEle
 
   // Reset active index when results change
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
     setActiveIndex(0)
   }, [results.length])
 

@@ -105,9 +105,7 @@ const REFRESH_LOCK_NAME = 'kelta-auth-token-refresh'
  *               is nothing to refresh with. Only this outcome ends the session.
  */
 type RefreshResult =
-  | { status: 'ok'; tokens: StoredTokens }
-  | { status: 'transient' }
-  | { status: 'terminal' }
+  { status: 'ok'; tokens: StoredTokens } | { status: 'transient' } | { status: 'terminal' }
 
 // Module-level state for refresh deduplication and failure tracking.
 // Shared across all callers within the same page load.
@@ -559,6 +557,7 @@ export function AuthProvider({
       const result = await refreshAccessToken()
       if (result.status === 'ok') {
         // Schedule the next refresh after this one succeeds
+        // eslint-disable-next-line react-hooks/immutability -- self-rescheduling timer runs after declaration; follow-up to PLT-854
         scheduleTokenRefresh()
       } else if (result.status === 'transient' && getStoredTokens()?.refreshToken) {
         const backoff = Math.min(
@@ -1163,4 +1162,5 @@ export function useOptionalAuth(): AuthContextValue | undefined {
 }
 
 // Export the context for testing purposes
+// eslint-disable-next-line react-refresh/only-export-components -- dev fast-refresh only; split file in a follow-up to PLT-854
 export { AuthContext }

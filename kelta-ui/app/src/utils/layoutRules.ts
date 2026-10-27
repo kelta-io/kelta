@@ -60,8 +60,7 @@ export function dtoToLayoutRule(dto: LayoutRuleDto, tenantId: string): LayoutRul
     case 'TRANSFORM': {
       const t = (body.transform as { type?: string; formula?: string }) ?? {}
       let transform:
-        | { type: 'upper' | 'lower' | 'trim' | 'titleCase' }
-        | { type: 'formula'; formula: string }
+        { type: 'upper' | 'lower' | 'trim' | 'titleCase' } | { type: 'formula'; formula: string }
       if (t.type === 'formula') {
         transform = { type: 'formula', formula: String(t.formula ?? '') }
       } else if (

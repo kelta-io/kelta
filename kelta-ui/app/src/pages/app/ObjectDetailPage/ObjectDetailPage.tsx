@@ -403,6 +403,7 @@ export function ObjectDetailPage(): React.ReactElement {
 
   // Left section-nav entries (layout sections only — the fallback body has no anchors)
   const sectionNavItems = useMemo(
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- compiler skips this memo; existing code, follow-up to PLT-854
     () => (layout?.sections ? resolveSectionNavItems(layout.sections, fields) : []),
     [layout?.sections, fields]
   )

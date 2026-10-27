@@ -123,11 +123,12 @@ inbound routing by `email_from_address`, and kelta-auth slug→id lookups (`Tena
 
 ### Dependency vulnerability scanning
 
-- **npm** is gated by `dependency-audit` in `quality-gate`, diffing against
-  `ci/npm-audit-baseline.json`. **The baseline is debt, not an allowlist**: 9 entries
-  (2 `kelta-web`, 7 `kelta-ui/app`, regenerated in #1605) — `react-router` highs plus one
-  `@tiptap/core` ReDoS. Refresh this count whenever the baseline moves (the `ci.yml` comment
-  above the job still says 33).
+- **FIXED (PLT-854) — npm baseline is empty.** `dependency-audit` in `quality-gate` diffs
+  against `ci/npm-audit-baseline.json`, which now lists **0** advisories for both `kelta-web` and
+  `kelta-ui/app` (`react-router`/`react-router-dom` on 7.18.4 in both; `@tiptap/core` 3.32.0 is
+  outside GHSA-j95f-988m-3j2f's revised `< 3.30.5` range). Any new high/critical production
+  advisory now fails CI. **The baseline is debt, not an allowlist** — fix rather than re-add, and
+  refresh this note if an entry ever lands (the `ci.yml` comment above the job still says 33).
 - **FIXED — Java dependencies were unscanned.** OWASP dependency-check never ran (blocked on an
   `NVD_API_KEY` the NVD API rejects). `dependency-audit-java` now scans each service's shipped
   classpath — a Maven-resolved CycloneDX SBOM — and the OpenTelemetry Java agent version pinned in
@@ -948,6 +949,13 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   in `kelta-ui/app`, no per-keystroke typing, and no real-timer windows in assertions (resolve a
   test-owned deferred instead — `testing.md` → Component Testing). Still open: give the frontend
   job its own runner or serialize it against the native builds.
+- **`kelta-ui/app` lint and `format:check` are gated only by `verify.sh`, not CI** (open).
+  `test-frontend` runs knip, typecheck and tests for `kelta-ui/app` but never `npm run lint` or
+  `format:check`, so main drifted red on both until PLT-854 cleared it so its verify could pass:
+  a prettier reformat plus 21 per-line `eslint-disable-next-line` comments (each with a reason,
+  each naming PLT-854) on existing React Compiler findings from `eslint-plugin-react-hooks` 7.1.1
+  (`set-state-in-effect`, `preserve-manual-memoization`, `refs`, `immutability`,
+  `only-export-components`). Burn those down with real refactors and add the two steps to CI.
 - **Post-merge image bump lives in two places:** this repo's `build-and-publish-containers.yml`
   deploy job is authoritative for `emf` images; the RZWare fleet (`rzware-ceo`, `agents/worker/`)
   runs its own overlay-discovery bump for other repos.

@@ -1057,8 +1057,7 @@ export function PageBuilderPage({
   // recursive patch/delete handlers above.
   const selectedComponent: PageComponent | null = selectedComponentId
     ? ((findNode(components as ModelPageComponent[], selectedComponentId)?.node as
-        | PageComponent
-        | undefined) ?? null)
+        PageComponent | undefined) ?? null)
     : null
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const isPublishing = publishMutation.isPending || unpublishMutation.isPending

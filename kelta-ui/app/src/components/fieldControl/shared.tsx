@@ -70,6 +70,7 @@ export function makeInlineEdit(
 
     // Reset the draft if the upstream value changes.
     useEffect(() => {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
       setDraft(value)
     }, [value])
 

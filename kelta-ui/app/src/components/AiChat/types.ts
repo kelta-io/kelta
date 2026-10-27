@@ -20,13 +20,7 @@ export interface ChatMessage {
 }
 
 type AiProposalType =
-  | 'collection'
-  | 'layout'
-  | 'add_fields'
-  | 'update_field'
-  | 'remove_field'
-  | 'picklist'
-  | 'ui_page'
+  'collection' | 'layout' | 'add_fields' | 'update_field' | 'remove_field' | 'picklist' | 'ui_page'
 
 export interface AiProposal {
   id: string

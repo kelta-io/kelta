@@ -152,6 +152,7 @@ export function PluginProvider({
    * Requirement 12.2: Support custom field renderers via ComponentRegistry
    */
   const registerFieldRenderer = useCallback(
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- compiler skips this memo; existing code, follow-up to PLT-854
     (type: string, renderer: ComponentType<FieldRendererProps>) => {
       setFieldRenderers((prev) => {
         const next = new Map(prev)
@@ -174,6 +175,7 @@ export function PluginProvider({
    * Requirement 12.3: Support custom page components via ComponentRegistry
    */
   const registerPageComponent = useCallback(
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- compiler skips this memo; existing code, follow-up to PLT-854
     (name: string, component: ComponentType<PageComponentProps>) => {
       setPageComponents((prev) => {
         const next = new Map(prev)

@@ -30,6 +30,7 @@ export function usePinnedSetup(tenantSlug: string): UsePinnedSetup {
   const [pinned, setPinned] = useState<string[]>(() => readPinned(tenantSlug))
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
     setPinned(readPinned(tenantSlug))
   }, [tenantSlug])
 

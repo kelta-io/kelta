@@ -1,19 +1,8 @@
 {
   "_comment": "Known high/critical advisories in PRODUCTION npm deps, accepted as a backlog so CI can gate NEW ones. This is debt to burn down, not an allowlist to grow. Regenerate with: node ci/dependency-audit.mjs --update",
-  "_generated": "2026-10-24",
+  "_generated": "2026-10-27",
   "packages": {
-    "kelta-web": {
-      "GHSA-chx6-hx7r-mcp5": "high | react-router | React Router: Unauthenticated Denial of Service via Inefficient Route Matching",
-      "GHSA-qwww-vcr4-c8h2": "high | react-router | React Router: RSC Mode CSRF Bypass Allows Action Execution Before 400 Response"
-    },
-    "kelta-ui/app": {
-      "GHSA-j95f-988m-3j2f": "high | @tiptap/core | Tiptap: Quadratic ReDoS in block and inline Markdown attribute parsing",
-      "GHSA-49rj-9fvp-4h2h": "high | react-router | React Router's vendored turbo-stream v2 allows arbitrary constructor invocation via TYPE_ERROR deser",
-      "GHSA-8646-j5j9-6r62": "high | react-router | React Router vulnerable to XSS in unstable RSC redirect handling via javascript: redirect targets",
-      "GHSA-8x6r-g9mw-2r78": "high | react-router | React Router vulnerable to DoS via unbounded path expansion in __manifest endpoint",
-      "GHSA-rxv8-25v2-qmq8": "high | react-router | React Router vulnerable to Denial of Service via reflected user input in single-fetch",
-      "GHSA-chx6-hx7r-mcp5": "high | react-router | React Router: Unauthenticated Denial of Service via Inefficient Route Matching",
-      "GHSA-qwww-vcr4-c8h2": "high | react-router | React Router: RSC Mode CSRF Bypass Allows Action Execution Before 400 Response"
-    }
+    "kelta-web": {},
+    "kelta-ui/app": {}
   }
 }

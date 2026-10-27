@@ -72,7 +72,7 @@
     "react-dom": "^19.2.0",
     "react-hook-form": "^7.71.1",
     "react-markdown": "^10.1.0",
-    "react-router-dom": "^7.13.0",
+    "react-router-dom": "^7.18.4",
     "recharts": "^3.10.1",
     "sonner": "^2.0.8",
     "svix": "^2.9.0",

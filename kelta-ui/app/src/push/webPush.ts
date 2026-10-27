@@ -33,11 +33,7 @@ export type WebPushStatus =
   | 'default'
 
 export type EnableResult =
-  | 'subscribed'
-  | 'denied'
-  | 'unsupported'
-  | 'needs-install'
-  | 'not-configured'
+  'subscribed' | 'denied' | 'unsupported' | 'needs-install' | 'not-configured'
 
 const SERVICE_WORKER_URL = '/sw.js'
 

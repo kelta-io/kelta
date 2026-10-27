@@ -303,8 +303,7 @@ function setupAxiosMocks(overrides: Record<string, unknown> = {}) {
       }
       // postResource wraps body as { data: { type, attributes: { collectionId, targetVersion } } }
       const wrappedBody = body as
-        | { data?: { attributes?: { collectionId?: string; targetVersion?: number } } }
-        | undefined
+        { data?: { attributes?: { collectionId?: string; targetVersion?: number } } } | undefined
       const attrs = wrappedBody?.data?.attributes
       const collection = attrs
         ? mockCollections.find((c) => c.id === attrs.collectionId)

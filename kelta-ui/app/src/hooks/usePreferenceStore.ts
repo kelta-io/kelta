@@ -91,6 +91,7 @@ export function usePreferenceValue<T>(
     },
   })
   if (data?.row) {
+    // eslint-disable-next-line react-hooks/refs -- caches the fetched row id; follow-up to PLT-854
     rowIdRef.current = data.row.id
   }
 

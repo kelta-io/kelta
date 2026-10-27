@@ -182,6 +182,7 @@ const PERMISSION_CATEGORIES: PermissionCategory[] = [
  * needs to offer a permission — e.g. the page-builder per-page "Access" field (slice 1h). Derived from
  * {@link PERMISSION_CATEGORIES} so adding a permission updates both at once.
  */
+// eslint-disable-next-line react-refresh/only-export-components -- dev fast-refresh only; split file in a follow-up to PLT-854
 export const SYSTEM_PERMISSIONS: { name: string; label: string }[] = PERMISSION_CATEGORIES.flatMap(
   (category) => category.permissions.map((p) => ({ name: p.name, label: p.label }))
 )

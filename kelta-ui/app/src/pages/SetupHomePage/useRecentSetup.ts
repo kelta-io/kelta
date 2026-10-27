@@ -41,6 +41,7 @@ export function useRecentSetup(tenantSlug: string): UseRecentSetup {
   const [recent, setRecent] = useState<RecentEntry[]>(() => readRecent(tenantSlug))
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
     setRecent(readRecent(tenantSlug))
   }, [tenantSlug])
 

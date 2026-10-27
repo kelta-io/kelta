@@ -12,15 +12,7 @@ import { Image, FileText, Video, Music, Code, Table, Archive, File } from 'lucid
  * Category of a file based on its MIME type.
  */
 type FileCategory =
-  | 'image'
-  | 'pdf'
-  | 'video'
-  | 'audio'
-  | 'text'
-  | 'code'
-  | 'spreadsheet'
-  | 'archive'
-  | 'other'
+  'image' | 'pdf' | 'video' | 'audio' | 'text' | 'code' | 'spreadsheet' | 'archive' | 'other'
 
 /**
  * Information about a file type for display purposes.

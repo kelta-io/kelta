@@ -320,6 +320,7 @@ export function PluginsPage({ testId = 'plugins-page' }: PluginsPageProps): Reac
 
   React.useEffect(() => {
     const loadedPluginIds = plugins.filter((p) => p.status === 'loaded').map((p) => p.plugin.id)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing sync-from-prop/storage effect; refactor tracked as follow-up to PLT-854
     setEnabledPlugins(new Set(loadedPluginIds))
   }, [plugins])
 

@@ -115,8 +115,7 @@ function unwrapMenusWithItems(body: unknown): Record<string, unknown>[] {
     let menuId = attrs.menuId as string | undefined
     if (!menuId) {
       const rels = resource.relationships as
-        | Record<string, { data?: { id?: string } | null }>
-        | undefined
+        Record<string, { data?: { id?: string } | null }> | undefined
       menuId = rels?.menuId?.data?.id as string | undefined
     }
     if (!menuId) continue
@@ -125,8 +124,7 @@ function unwrapMenusWithItems(body: unknown): Record<string, unknown>[] {
 
     // Also flatten any other relationship IDs into the item
     const rels = resource.relationships as
-      | Record<string, { data?: { id?: string } | null }>
-      | undefined
+      Record<string, { data?: { id?: string } | null }> | undefined
     if (rels) {
       for (const [key, rel] of Object.entries(rels)) {
         if (item[key] === undefined) {
