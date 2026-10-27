@@ -949,6 +949,13 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   in `kelta-ui/app`, no per-keystroke typing, and no real-timer windows in assertions (resolve a
   test-owned deferred instead — `testing.md` → Component Testing). Still open: give the frontend
   job its own runner or serialize it against the native builds.
+- **`kelta-ui/app` lint and `format:check` are gated only by `verify.sh`, not CI** (open).
+  `test-frontend` runs knip, typecheck and tests for `kelta-ui/app` but never `npm run lint` or
+  `format:check`, so main drifted red on both until PLT-854 cleared it so its verify could pass:
+  a prettier reformat plus 21 per-line `eslint-disable-next-line` comments (each with a reason,
+  each naming PLT-854) on existing React Compiler findings from `eslint-plugin-react-hooks` 7.1.1
+  (`set-state-in-effect`, `preserve-manual-memoization`, `refs`, `immutability`,
+  `only-export-components`). Burn those down with real refactors and add the two steps to CI.
 - **Post-merge image bump lives in two places:** this repo's `build-and-publish-containers.yml`
   deploy job is authoritative for `emf` images; the RZWare fleet (`rzware-ceo`, `agents/worker/`)
   runs its own overlay-discovery bump for other repos.
