@@ -1,12 +1,50 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { RegisteredCommand } from '../registry/types.js';
 import { AUTHORING_DOCS } from '../docsgen/authoringDocs.js';
+import { AGENT_GUIDE } from '../docsgen/agentGuide.js';
+import { CliError, EXIT } from '../errors.js';
 import { docsCommands } from './docs.js';
 
 const def = docsCommands[0] as RegisteredCommand;
 
-async function run(topic: string) {
-  return def.handler(undefined as never, def.input.parse({ topic }) as never);
+async function run(topic?: string) {
+  return def.handler(
+    undefined as never,
+    def.input.parse(topic === undefined ? {} : { topic }) as never
+  );
+}
+
+const authoringDir = fileURLToPath(new URL('../../../../../docs/authoring/', import.meta.url));
+
+function authoringDoc(topic: string): string {
+  return readFileSync(`${authoringDir}${topic}.md`, 'utf-8');
+}
+
+function firstHeading(text: string): string {
+  const line = text.split('\n').find((l) => l.startsWith('# ')) ?? '';
+  return line.slice(2).trim();
+}
+
+/** `agent` plus every docs/authoring/*.md, each mapped to its H1. */
+function expectedListing(): Record<string, string> {
+  const expected: Record<string, string> = { agent: firstHeading(AGENT_GUIDE) };
+  for (const name of readdirSync(authoringDir).filter((n) => n.endsWith('.md'))) {
+    const topic = name.slice(0, -'.md'.length);
+    expected[topic] = firstHeading(authoringDoc(topic));
+  }
+  return expected;
+}
+
+function parseListing(text: string): Record<string, string> {
+  return Object.fromEntries(
+    text.split('\n').map((line) => {
+      const separator = line.indexOf(' — ');
+      return [line.slice(0, separator), line.slice(separator + ' — '.length)];
+    })
+  );
 }
 
 describe('kelta docs', () => {
@@ -32,6 +70,38 @@ describe('kelta docs', () => {
     expect(section).toContain('is system-maintained\n  and cannot be written through the API');
     expect(section).toContain('re-sends the value already stored');
     expect(section).toContain('--system-maintained');
+  });
+
+  it('`kelta docs` with no topic lists every topic with its H1 as the summary', async () => {
+    const result = await run();
+    const listing = parseListing(result.text ?? '');
+    expect(listing).toEqual(expectedListing());
+    expect(listing['api-access']).toBe('PAT-Based Read-Only API Access');
+    expect(Object.keys(listing)).toEqual(Object.keys(listing).sort());
+  });
+
+  it('`kelta docs list` prints the same listing', async () => {
+    const result = await run('list');
+    expect(parseListing(result.text ?? '')).toEqual(expectedListing());
+    expect(result.text).toBe((await run()).text);
+  });
+
+  it('`kelta docs api-access` prints docs/authoring/api-access.md', async () => {
+    const result = await run('api-access');
+    expect(result.text).toBe(authoringDoc('api-access'));
+  });
+
+  it('`kelta docs nosuch` is a usage error pointing at `kelta docs list`', async () => {
+    const error: unknown = await run('nosuch').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CliError);
+    expect(error).toMatchObject({ code: 'INVALID_ARGUMENTS', exitCode: EXIT.USAGE });
+    expect(EXIT.USAGE).toBe(2);
+    expect((error as CliError).hint).toContain('kelta docs list');
+  });
+
+  it('`kelta docs agent` prints the agent guide', async () => {
+    const result = await run('agent');
+    expect(result.text).toBe(AGENT_GUIDE);
   });
 
   it('an unknown topic is rejected with a usage error listing the valid topics', async () => {

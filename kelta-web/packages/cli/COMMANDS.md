@@ -1444,11 +1444,15 @@ kelta api GET '/api/customers?page[size]=5'
 kelta api PATCH /api/customers/rec_123 --data '{"data":{"type":"customers","id":"rec_123","attributes":{"status":"active"}}}' --yes
 ```
 
-### `kelta docs <topic>`
+### `kelta docs [topic]`
 
-Print a reference doc: the agent guide, or a metadata-authoring topic
+Print a reference doc (the agent guide or an authoring topic), or list every topic
 
 ```bash
+# List every doc topic
+kelta docs list
+# Same as `kelta docs list`
+kelta docs
 # Print the agent guide
 kelta docs agent
 ```

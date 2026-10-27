@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { allCommands } from '../registry/registry.js';
 import { buildManifest } from '../registry/manifest.js';
@@ -29,23 +29,18 @@ describe('generated docs freshness', () => {
     expect(committed('COMMANDS.md')).toBe(renderCommandsMd(buildManifest(allCommands)));
   });
 
-  it('embeds every tri-published authoring topic', () => {
-    expect(Object.keys(AUTHORING_DOCS).sort()).toEqual(
-      [
-        'dashboards',
-        'flows',
-        'jsonapi',
-        'list-views',
-        'packages',
-        'page-layouts',
-        'ui-menus',
-        'ui-pages',
-      ].sort()
-    );
+  it('embeds every docs/authoring/*.md — run `npm run gen:docs` when this fails', () => {
+    const topics = readdirSync(
+      fileURLToPath(new URL('../../../../../docs/authoring/', import.meta.url))
+    )
+      .filter((name) => name.endsWith('.md'))
+      .map((name) => name.slice(0, -'.md'.length))
+      .sort();
+    expect(Object.keys(AUTHORING_DOCS)).toEqual(topics);
   });
 
   it.each(Object.keys(AUTHORING_DOCS))(
-    'authoringDocs.ts["%s"] matches docs/authoring/%s.md — keep the embedded copy in sync',
+    'authoringDocs.ts["%s"] matches docs/authoring/%s.md — run `npm run gen:docs` when this fails',
     (topic) => {
       expect(AUTHORING_DOCS[topic]).toBe(repoRoot(`docs/authoring/${topic}.md`));
     }
