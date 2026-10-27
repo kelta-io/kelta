@@ -128,13 +128,20 @@ inbound routing by `email_from_address`, and kelta-auth slug→id lookups (`Tena
   (2 `kelta-web`, 7 `kelta-ui/app`, regenerated in #1605) — `react-router` highs plus one
   `@tiptap/core` ReDoS. Refresh this count whenever the baseline moves (the `ci.yml` comment
   above the job still says 33).
-- **Java dependencies are still unscanned.** OWASP dependency-check is blocked on the
-  `NVD_API_KEY` secret (`NvdApiException: Invalid API Key`). Follow-up: regenerate the key, then
-  land the job (dependency-check 12.2.2, `-DnvdMaxRetryCount=10 -DnvdApiDelay=4000`), or use
-  `-DnvdDatafeedUrl` to drop the API-key dependency. The plugin sits only in
-  `kelta-platform/pom.xml` `<pluginManagement>` (10.0.4); its `suppressionFile` resolves under
-  `kelta-platform/` while `dependency-check-suppressions.xml` (still the untouched template) is at
-  the repo root — fix the path when landing the job.
+- **FIXED — Java dependencies were unscanned.** OWASP dependency-check never ran (blocked on an
+  `NVD_API_KEY` the NVD API rejects). `dependency-audit-java` now scans each service's shipped
+  classpath — a Maven-resolved CycloneDX SBOM — and the OpenTelemetry Java agent version pinned in
+  the service Dockerfiles (fails closed if it cannot read one), with OSV-Scanner, no API key, as a delta gate against `ci/java-audit-baseline.json`
+  (`ci-cd.md`). Baseline when it landed: **5** advisories, all with known fixes —
+  **the OpenTelemetry agent 2.25.0 in the kelta-ai and kelta-mcp images (1 critical: RMI
+  deserialization RCE, GHSA-xw7x-h9fj-p2c7, exploitable only with a reachable RMI/JMX port;
+  fixed in 2.26.1)**, `bcprov-jdk18on` 1.84 in kelta-auth (1 critical + 1 high, fixed in
+  1.85) and `httpcore5`/`httpcore5-h2` 5.3.6, managed by Spring Boot, in kelta-auth and
+  kelta-worker (2 high, fixed in 5.4.3). Burn them down — the agent with a Dockerfile URL bump,
+  the others with version overrides plus the auth SAML/federation and worker HTTP-client
+  tests — then `--update`. Not covered: base images, the JRE and OS packages. The dormant dependency-check
+  plugin (`kelta-platform/pom.xml` `<pluginManagement>`) and the untouched
+  `dependency-check-suppressions.xml` template can be deleted.
 - **Rule** (third occurrence of a configured-but-never-run tool): when adding any checker, verify
   a job runs it *and* that its failure exit code reaches a gate, in both directions.
 

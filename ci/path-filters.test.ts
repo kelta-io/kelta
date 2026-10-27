@@ -181,6 +181,17 @@ describe('frontend and other test jobs', () => {
     ['test-dora', 'scripts/dora/lib.mjs'],
     ['test-ci-scripts', 'ci/path-filters.test.ts'],
     ['test-ci-scripts', '.github/path-filters.yml'],
+    // The Java dependency audit resolves every service's shipped classpath: a pom change anywhere
+    // in it, the shared Maven settings, or its own script/baseline must re-run it.
+    ['dependency-audit-java', 'kelta-worker/pom.xml'],
+    ['dependency-audit-java', 'kelta-auth/pom.xml'],
+    ['dependency-audit-java', 'kelta-platform/runtime/runtime-core/pom.xml'],
+    ['dependency-audit-java', 'ci/maven-settings.xml'],
+    ['dependency-audit-java', 'ci/java-dependency-audit.mjs'],
+    ['dependency-audit-java', 'ci/java-audit-baseline.json'],
+    // ...and the Dockerfiles that pin the OpenTelemetry Java agent it scans.
+    ['dependency-audit-java', 'kelta-ai/Dockerfile'],
+    ['dependency-audit-java', 'kelta-mcp/Dockerfile'],
   ];
   for (const [job, path] of ownBuildFiles) {
     it(`${path} runs ${job}`, () => assert.ok(triggers(path, job)));

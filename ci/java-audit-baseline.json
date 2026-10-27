@@ -1,0 +1,29 @@
+{
+  "_comment": "Known high/critical advisories in the Java the services ship, accepted as a backlog so CI can gate NEW ones. Debt to burn down, not an allowlist to grow. Every id needs a written line in _reasons (the check fails without one). Regenerate with: node ci/java-dependency-audit.mjs --update",
+  "_generated": "2026-10-26",
+  "_reasons": {
+    "GHSA-9pwp-9qqc-pr26": "bcprov-jdk18on 1.84 (kelta-auth, via the SAML/OpenSAML stack). Fixed in 1.85; upgrading is a dependency override on kelta-auth that needs its SAML/federation tests \u2014 tracked as a follow-up to the PR that added this gate.",
+    "GHSA-qp49-qgx5-5m26": "Same artifact and fix as GHSA-9pwp-9qqc-pr26 (bcprov-jdk18on >= 1.85).",
+    "GHSA-hf6x-8p5f-cgmf": "httpcore5 5.3.6, managed by Spring Boot 4.0.9 (kelta-auth, kelta-worker). Fixed in 5.4.3; overriding a Boot-managed version needs the worker/auth HTTP client paths re-tested \u2014 follow-up, or taken with the next Spring Boot patch that moves it.",
+    "GHSA-v3jc-474w-2wm6": "httpcore5-h2 5.3.6 \u2014 same origin and fix as GHSA-hf6x-8p5f-cgmf (>= 5.4.3).",
+    "GHSA-xw7x-h9fj-p2c7": "OpenTelemetry Java agent 2.25.0, downloaded into the kelta-ai and kelta-mcp images and run with -javaagent (found by this gate's agent target). Exploitable only if an RMI/JMX endpoint on the instrumented JVM is network-reachable. Fixed in 2.26.1: bump the agent URL in kelta-ai/Dockerfile and kelta-mcp/Dockerfile \u2014 tracked as the immediate follow-up PR."
+  },
+  "services": {
+    "gateway": {},
+    "worker": {
+      "GHSA-hf6x-8p5f-cgmf": "high | org.apache.httpcomponents.core5:httpcore5@5.3.6 | Apache HttpComponents Core HTTP/1 header parsing can cause memory-exhaustion denial of service",
+      "GHSA-v3jc-474w-2wm6": "high | org.apache.httpcomponents.core5:httpcore5-h2@5.3.6 | Apache HttpComponents Core: HPackDecoder Unlimited Header List Size Before SETTINGS ACK"
+    },
+    "auth": {
+      "GHSA-9pwp-9qqc-pr26": "critical | org.bouncycastle:bcprov-jdk18on@1.84 | Bouncy Castle: Name Constraints bypass via trailing dot in rfc822Name and URI",
+      "GHSA-qp49-qgx5-5m26": "high | org.bouncycastle:bcprov-jdk18on@1.84 | Bouncy Castle: Lazy ASN.1 sequence forcing resets nesting-depth guard",
+      "GHSA-hf6x-8p5f-cgmf": "high | org.apache.httpcomponents.core5:httpcore5@5.3.6 | Apache HttpComponents Core HTTP/1 header parsing can cause memory-exhaustion denial of service",
+      "GHSA-v3jc-474w-2wm6": "high | org.apache.httpcomponents.core5:httpcore5-h2@5.3.6 | Apache HttpComponents Core: HPackDecoder Unlimited Header List Size Before SETTINGS ACK"
+    },
+    "ai": {},
+    "mcp": {},
+    "otel-javaagent": {
+      "GHSA-xw7x-h9fj-p2c7": "critical | io.opentelemetry.javaagent:opentelemetry-javaagent@2.25.0 | OpenTelemetry: Unsafe Deserialization in RMI Instrumentation may Lead to Remote Code Execution"
+    }
+  }
+}
