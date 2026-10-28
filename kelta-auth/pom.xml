@@ -22,6 +22,7 @@
         <java.version>25</java.version>
         <skipITs>true</skipITs>
         <testcontainers.version>2.0.5</testcontainers.version>
+        <guava.version>33.7.2-jre</guava.version>
     </properties>
 
     <dependencyManagement>
@@ -33,6 +34,13 @@
                 <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- Override Guava to clear GHSA-xxph-c9ww-hj94 (fixed in 33.7.2). OpenSAML
+                 (opensaml-saml-api 5.2.3) brings 33.0.0-jre transitively. -->
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
