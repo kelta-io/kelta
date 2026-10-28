@@ -41,7 +41,8 @@ were created with; change them in Superset if the address moves.
 
 ### Cerbos SDK on native images
 
-`cerbos-sdk-java` is gRPC + protobuf (`protobuf.version` is pinned in the gateway and worker poms).
+`cerbos-sdk-java` is gRPC + protobuf (`protobuf.version` is pinned in the gateway and worker poms,
+as is `guava.version`: gRPC's own Guava 33.6.0 carries GHSA-xxph-c9ww-hj94).
 Both native profiles initialize protobuf and the Cerbos/`build.buf.validate` generated code at build
 time, so descriptor reflection runs on the build host. The gateway's `ProtobufInitOrderFeature`
 fixes the order those classes initialize in, because protobuf fails if `JavaFeaturesProto` goes

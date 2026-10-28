@@ -25,6 +25,7 @@
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <protobuf.version>4.36.2</protobuf.version>
+        <guava.version>33.7.2-jre</guava.version>
         <aws.sdk.version>2.57.3</aws.sdk.version>
         <testcontainers.version>2.0.5</testcontainers.version>
     </properties>
@@ -73,6 +74,14 @@
                 <groupId>com.squareup.okio</groupId>
                 <artifactId>okio-jvm</artifactId>
                 <version>3.18.2</version>
+            </dependency>
+            <!-- Override Guava to clear GHSA-xxph-c9ww-hj94 (fixed in 33.7.2). The Cerbos SDK's
+                 gRPC (grpc-protobuf) brings 33.6.0-android transitively; -jre is the JVM flavour
+                 of the same release. -->
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

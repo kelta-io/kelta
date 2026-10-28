@@ -1,0 +1,1 @@
+- 2026-10-27 fix(gateway,worker,auth): pin Guava 33.7.2-jre to clear GHSA-xxph-c9ww-hj94 (high, published 2026-10-27; affects 4.0–33.7.1) — gRPC brought 33.6.0-android into gateway and worker, OpenSAML 33.0.0-jre into auth; the `Dependency Audit (Java)` job, and with it `Quality Gate`, failed on every Java PR (guava-33.7.2)
