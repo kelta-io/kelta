@@ -775,6 +775,7 @@ export function ObjectDetailPage(): React.ReactElement {
   return (
     <RecordShell
       variant="enduser"
+      collectionName={collectionName}
       isLoading={isLoading}
       statusSlot={statusSlot}
       className={cn('space-y-6 p-6', inspect.enabled && 'kelta-inspect')}

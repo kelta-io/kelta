@@ -34,6 +34,7 @@ import { useRecordMutation } from '@/hooks/useRecordMutation'
 import { useCollectionPermissions, type ObjectPermissions } from '@/hooks/useCollectionPermissions'
 import { useSystemPermissions } from '@/hooks/useSystemPermissions'
 import { usePicklistDisplayMaps, type PicklistDisplayMaps } from '@/hooks/usePicklistOptions'
+import { useRealtimeCollection } from '@/realtime'
 import { isStaleWriteError } from '@/services/apiClient'
 import { runBulkUpdate } from '@/utils/bulkUpdate'
 import { buildLookupLabels } from '@/utils/lookupDisplayField'
@@ -353,6 +354,8 @@ export function useRecordListModel({
     enabled: !!schema,
     include: includeParam,
   })
+  // Live list: record.changed for this collection invalidates the records query, nav or not.
+  useRealtimeCollection(collectionName)
 
   // Lookup labels from the included resources, labelled by the target's display field.
   const lookupDisplayMap = useMemo(

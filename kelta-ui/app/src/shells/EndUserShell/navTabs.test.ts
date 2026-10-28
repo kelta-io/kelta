@@ -6,6 +6,7 @@ import {
   activeMenus,
   buildNavTabs,
   menuItemToTab,
+  navCollections,
   parseResourcePath,
   resolveActiveMenu,
 } from './navTabs'
@@ -298,5 +299,47 @@ describe('submenu groups (nested menu items)', () => {
       label: 'Chat',
     })
     expect(menuItemToTab({ id: 'c3', label: 'Nope', path: '/chatter' })).toBeNull()
+  })
+})
+
+describe('navCollections', () => {
+  it('includes the collections inside groups, in nav order, without duplicates', () => {
+    const menus: MenuConfig[] = [
+      {
+        id: 'm1',
+        name: 'app',
+        items: [
+          { id: 'p1', label: 'Home', path: '/p/home' },
+          {
+            id: 'g1',
+            label: 'Catalog',
+            children: [
+              { id: 'c1', label: 'Facilities', path: '/resources/facilities' },
+              { id: 'c2', label: 'Photos', path: '/resources/photos' },
+            ],
+          },
+          { id: 'c3', label: 'Members', path: '/resources/users' },
+          {
+            id: 'g2',
+            label: 'Ops',
+            children: [
+              { id: 'c4', label: 'Health', path: '/resources/poller-health' },
+              { id: 'c5', label: 'Staff', path: '/resources/users?view=shared:v1' },
+              { id: 'd1', label: 'Dashboard', path: '/dashboards/d1' },
+            ],
+          },
+        ],
+      },
+    ]
+    expect(navCollections(buildNavTabs(menus))).toEqual([
+      'facilities',
+      'photos',
+      'users',
+      'poller-health',
+    ])
+  })
+
+  it('is empty when the nav has no collection tabs', () => {
+    expect(navCollections(buildNavTabs(undefined))).toEqual([])
   })
 })

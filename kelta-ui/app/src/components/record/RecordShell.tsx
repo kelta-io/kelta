@@ -21,6 +21,7 @@ import React from 'react'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { cn } from '@/lib/utils'
 import { RecordStackProvider } from '@/context/RecordStackContext'
+import { useRealtimeCollection } from '@/realtime'
 
 type RecordShellVariant = 'enduser' | 'admin'
 
@@ -29,6 +30,12 @@ export interface RecordShellProps {
    *  provides the record stack (`RecordStackProvider`) to everything rendered inside, so
    *  shared components' record links stay in this stack, and is exposed as `data-variant`. */
   variant: RecordShellVariant
+  /**
+   * The record's collection. While the shell is mounted the realtime socket stays subscribed
+   * to it, so a change made elsewhere (another user, a flow) refreshes the open record even
+   * when the collection is not in the nav menu.
+   */
+  collectionName?: string
   /** Render only the loading state. Takes precedence over everything. */
   isLoading?: boolean
   /**
@@ -64,6 +71,7 @@ export interface RecordShellProps {
 
 export function RecordShell({
   variant,
+  collectionName,
   isLoading,
   statusSlot,
   breadcrumb,
@@ -77,6 +85,8 @@ export function RecordShell({
   className,
   'data-testid': testId = 'record-shell',
 }: RecordShellProps): React.ReactElement {
+  useRealtimeCollection(collectionName)
+
   if (isLoading) {
     return (
       <div
