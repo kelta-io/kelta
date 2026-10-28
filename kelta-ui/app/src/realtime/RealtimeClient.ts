@@ -70,7 +70,8 @@ export class RealtimeClient {
   private readonly options: Required<Pick<RealtimeClientOptions, 'urlFactory' | 'onEvent'>> &
     RealtimeClientOptions
   private socket: WebSocket | null = null
-  private subscriptions = new Set<string>()
+  // collection → refcount; subscribed collections re-subscribe on every (re)connect.
+  private subscriptions = new Map<string, number>()
   // resource → listeners; joined resources re-join on every (re)connect.
   private presenceListeners = new Map<string, Set<PresenceListener>>()
   // conversationId → refcount; joined conversations re-join on every (re)connect.
@@ -83,17 +84,31 @@ export class RealtimeClient {
     this.options = options
   }
 
-  /** Idempotent: registers the collection and sends subscribe when the socket is open. */
+  /**
+   * Subscribe to a collection's record.changed events. Ref-counted so the provider's nav
+   * subscriptions and a page's own (useRealtimeCollection) share one server subscription:
+   * the first ref sends subscribe, and a page leaving cannot drop a nav collection. Past
+   * MAX_SUBSCRIPTIONS distinct collections the call is ignored (and so is its unsubscribe).
+   */
   subscribe(collection: string): void {
-    if (this.subscriptions.has(collection)) return
-    if (this.subscriptions.size >= MAX_SUBSCRIPTIONS) return
-    this.subscriptions.add(collection)
-    this.send({ action: 'subscribe', collection })
+    const count = this.subscriptions.get(collection) ?? 0
+    if (count === 0) {
+      if (this.subscriptions.size >= MAX_SUBSCRIPTIONS) return
+      this.send({ action: 'subscribe', collection })
+    }
+    this.subscriptions.set(collection, count + 1)
   }
 
+  /** Release one ref; the last one sends unsubscribe. */
   unsubscribe(collection: string): void {
-    if (!this.subscriptions.delete(collection)) return
-    this.send({ action: 'unsubscribe', collection })
+    const count = this.subscriptions.get(collection) ?? 0
+    if (count === 0) return
+    if (count === 1) {
+      this.subscriptions.delete(collection)
+      this.send({ action: 'unsubscribe', collection })
+    } else {
+      this.subscriptions.set(collection, count - 1)
+    }
   }
 
   /**
@@ -169,7 +184,7 @@ export class RealtimeClient {
     socket.onopen = () => {
       this.reconnectAttempts = 0
       // Re-establish every registered subscription on each (re)connect.
-      for (const collection of this.subscriptions) {
+      for (const collection of this.subscriptions.keys()) {
         socket.send(JSON.stringify({ action: 'subscribe', collection }))
       }
       for (const resource of this.presenceListeners.keys()) {

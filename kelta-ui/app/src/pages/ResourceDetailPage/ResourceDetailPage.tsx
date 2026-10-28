@@ -753,6 +753,7 @@ export function ResourceDetailPage({
   return (
     <RecordShell
       variant="admin"
+      collectionName={collectionName}
       data-testid={testId}
       className="p-6 max-lg:p-4 max-md:p-2"
       breadcrumb={

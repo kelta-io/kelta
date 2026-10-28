@@ -1,13 +1,21 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { RecordShell } from './RecordShell'
 import { useRecordStack } from '@/context/RecordStackContext'
+import { useRealtimeCollection } from '@/realtime'
+
+vi.mock('@/realtime', () => ({ useRealtimeCollection: vi.fn() }))
 
 function StackProbe() {
   return <span data-testid="stack">{useRecordStack()}</span>
 }
 
 describe('RecordShell', () => {
+  it('subscribes the realtime socket to the record collection, even while loading', () => {
+    render(<RecordShell variant="enduser" collectionName="orders" isLoading body={<div />} />)
+    expect(useRealtimeCollection).toHaveBeenCalledWith('orders')
+  })
+
   it('renders only the loading state when isLoading', () => {
     render(
       <RecordShell

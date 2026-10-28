@@ -241,6 +241,11 @@ consumers therefore NEVER write pushed `data` into caches — on `record.changed
 the matching React Query keys (`src/realtime/invalidation.ts` is the canonical mapping) and
 let the refetch go through the authorized JSON:API path where per-viewer authz applies.
 
+A view that must stay live subscribes its collection with `useRealtimeCollection(name)`
+(`src/realtime/`). Subscriptions are ref-counted in `RealtimeClient`, so a view releasing its
+ref never drops one the provider holds for the nav. `RecordShell` (via its `collectionName`
+prop) and `useRecordListModel` already do this — don't re-subscribe from a page.
+
 ### Conversation-scoped socket events (chat)
 
 Chat events do NOT use the tenant-wide collection broadcast — that would leak conversation
