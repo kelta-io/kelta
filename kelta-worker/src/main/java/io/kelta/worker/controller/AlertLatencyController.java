@@ -24,7 +24,7 @@ import java.util.Set;
 /**
  * Read-only alert delivery latency summary for the caller's tenant.
  *
- * <p>{@code GET /api/alerts/latency?since=<ISO-8601>&channel=<push|email|sms>} returns the sample
+ * <p>{@code GET /api/alerts/latency?since=<ISO-8601>&channel=<push|email|sms|webhook>} returns the sample
  * count and p50/p90 of {@code alert_delivery.sent_at - alert.created_at} in seconds, for alerts
  * created at or after {@code since} (default: seven days ago). The latency definition and
  * percentile method live in {@link AlertLatencySummary}, shared with the
@@ -43,7 +43,7 @@ import java.util.Set;
 @RequestMapping("/api/alerts")
 public class AlertLatencyController {
 
-    static final Set<String> CHANNELS = Set.of("push", "email", "sms");
+    static final Set<String> CHANNELS = Set.of("push", "email", "sms", "webhook");
     static final Duration DEFAULT_WINDOW = Duration.ofDays(7);
     static final String VIEW_ANALYTICS = "VIEW_ANALYTICS";
     static final Set<String> LATENCY_READ = Set.of(
@@ -108,7 +108,7 @@ public class AlertLatencyController {
         }
         if (!CHANNELS.contains(channel)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "channel must be one of push, email, sms");
+                    "channel must be one of push, email, sms, webhook");
         }
         return channel;
     }

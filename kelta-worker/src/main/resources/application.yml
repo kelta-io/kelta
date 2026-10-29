@@ -85,7 +85,7 @@ kelta:
     required: true
   # Outbound fetches of tenant-supplied URLs (OIDC discovery, OpenAPI spec import, flow
   # HTTP_CALLOUT/CALL_API/OUTBOUND_MESSAGE, external-rest collections, OAuth 2.0 credential token
-  # URLs, Web Push) refuse non-public addresses (loopback, RFC 1918, link-local/metadata, CGNAT,
+  # URLs, Web Push, the availability-alert webhook) refuse non-public addresses (loopback, RFC 1918, link-local/metadata, CGNAT,
   # ULA…). List comma-separated CIDRs here only for ranges that legitimately host such targets,
   # e.g. a self-hosted identity provider or an in-cluster service a flow calls. kelta-auth reads
   # the same variable for its OIDC discovery and federated login.
@@ -114,6 +114,11 @@ kelta:
   # own scheme/host/port, which is only right for local dev. X-Forwarded-Proto/-Host are never read.
   scim:
     public-url: ${KELTA_PUBLIC_URL:}
+  # Availability-alert webhook channel: the URL used when a tenant has no settings.alerts.webhookUrl.
+  # The POST goes through the outbound guard, so an in-cluster receiver needs its CIDR in
+  # KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS. Blank = such deliveries fail as "webhook URL not configured".
+  alerts:
+    webhook-url: ${KELTA_ALERTS_WEBHOOK_URL:}
   # SMS delivery (MFA verification codes + availability alerts). The default provider only
   # logs; set provider=twilio and the twilio.* secret to send for real (consumer-alerting
   # slice 10). Selecting twilio without the secret still boots — sends fail as FAILED deliveries.

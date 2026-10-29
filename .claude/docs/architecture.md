@@ -917,6 +917,15 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   recorded by `AlertDispatchService` once per SENT delivery. Returns
   `{data:{count,p50Seconds,p90Seconds,since,channel}}`; `since` defaults to now − 7d; percentiles
   are interpolated (`percentile_cont`-equivalent). Detail: `specs/_archive/consumer-alerting/4-availability-matcher.md` §9.
+- **Alert webhook channel**: a watch whose resolved channels include `webhook` gets one JSON
+  `POST` (`alertId`, `watchId`, `targetId`, `slotKey`, `eventTime` = `alert.created_at`,
+  `dispatchTime`) from `WebhookAlertSender`, called by `AlertDispatchService` like any other
+  channel. URL: the tenant's `settings.alerts.webhookUrl` (`tenant.settings` JSONB), else
+  `kelta.alerts.webhook-url` (`KELTA_ALERTS_WEBHOOK_URL`); none ⇒ FAILED `webhook URL not
+  configured` (watches are not refused). The call goes through `OutboundHttpClient` with the
+  `OutboundUrlGuard` bean (3 s connect / 5 s deadline, no redirects, no retries); non-2xx, timeout
+  or guard refusal ⇒ FAILED with the reason, 2xx ⇒ SENT and timed under `channel=webhook`. Not in
+  `BILLABLE_CHANNELS`; a tenant gating channels must list `webhook` in its `channels` entitlement.
 - **Member win API + ticker** (consumer-alerting slices 9, K-8): `/api/wins/**` is a static route
   (`API_ACCESS` only; scoping in `WinController`). `POST /api/wins`, `GET /api/wins` and
   `GET /api/wins/{id}` are self-only (owner from `X-User-Id`) with the same
