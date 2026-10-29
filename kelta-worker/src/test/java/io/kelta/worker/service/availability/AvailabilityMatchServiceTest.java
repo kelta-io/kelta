@@ -126,6 +126,27 @@ class AvailabilityMatchServiceTest {
         }
 
         @Test
+        @DisplayName("a poller's report on a synthetic target is dropped before state is recorded")
+        void pollerReportOnSyntheticTargetDropped() {
+            when(targetRepository.findBySourceAndExternalId(TENANT, "recgov", "site-1"))
+                    .thenReturn(Optional.of(new WatchTarget(TARGET_ID, TENANT, "recgov", "site-1",
+                            "Site A", "campground", "{}", true, true)));
+
+            assertThat(service.process(TENANT, event("OPEN", null, null))).isEmpty();
+            assertThat(service.process(TENANT, event("OPEN", null, null),
+                    AvailabilityMatchService.Origin.POLLER)).isEmpty();
+            verifyNoInteractions(stateRepository, watchRepository, alertRepository);
+        }
+
+        @Test
+        @DisplayName("the injector never drives a real target")
+        void injectorOnRealTargetDropped() {
+            assertThat(service.process(TENANT, event("OPEN", null, null),
+                    AvailabilityMatchService.Origin.INJECTOR)).isEmpty();
+            verifyNoInteractions(stateRepository, watchRepository, alertRepository);
+        }
+
+        @Test
         @DisplayName("no transition stops before the watch query — the volume killer")
         void noTransitionStopsEarly() {
             // Most polls report an already-open or still-closed slot. Everything

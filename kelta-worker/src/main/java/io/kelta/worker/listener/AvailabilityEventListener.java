@@ -31,6 +31,10 @@ import java.util.Map;
  * envelope. It is parsed defensively as {@link JsonNode}; because no payload
  * record crosses NATS here, this adds no native reflect-config surface.
  *
+ * <p>A poller's report on a {@code synthetic} target is dropped by the matcher before any
+ * state is recorded: only the admin injector ({@code SyntheticAvailabilityService}) drives a
+ * synthetic target, through {@link #process} with the {@code INJECTOR} origin.
+ *
  * <p>After fanout, a compact summary is republished onto
  * {@code kelta.trigger.<tenantId>.availability} so tenant flows (digests, tickers,
  * custom automations) can react — deliberately <b>after</b> the hot path, so a
@@ -78,24 +82,39 @@ public class AvailabilityEventListener {
                 return;
             }
 
-            List<AvailabilityMatchService.ClaimedAlert> claimed =
-                    matchService.process(tenantId, event);
-            if (claimed.isEmpty()) {
-                return; // no transition, no matching watch, or all deduped
-            }
-
-            for (AvailabilityMatchService.ClaimedAlert alert : claimed) {
-                // dispatch() never throws; one member's failed delivery must not
-                // abandon the rest of the fanout.
-                dispatchService.dispatch(tenantId, alert);
-            }
-
-            bridgeToFlows(tenantId, event, claimed);
+            process(tenantId, event, AvailabilityMatchService.Origin.POLLER);
         } catch (Exception e) {
             // Swallow: a poison message must not wedge the subscription.
             log.error("Failed to process availability event on {}: {}",
                     subject, e.getMessage(), e);
         }
+    }
+
+    /**
+     * Matches one observation, delivers every alert it claims, then bridges a summary to tenant
+     * flows. The NATS path calls this with {@link AvailabilityMatchService.Origin#POLLER}; the
+     * admin synthetic-event injector calls it with {@code INJECTOR}, so both run the same
+     * match → dispatch → bridge code.
+     *
+     * @return the alerts newly claimed — empty when the slot did not just open, no watch
+     *         matched, every match was deduped, or the target does not belong to {@code origin}
+     */
+    public List<AvailabilityMatchService.ClaimedAlert> process(
+            String tenantId, AvailabilityEvent event, AvailabilityMatchService.Origin origin) {
+        List<AvailabilityMatchService.ClaimedAlert> claimed =
+                matchService.process(tenantId, event, origin);
+        if (claimed.isEmpty()) {
+            return claimed; // no transition, no matching watch, or all deduped
+        }
+
+        for (AvailabilityMatchService.ClaimedAlert alert : claimed) {
+            // dispatch() never throws; one member's failed delivery must not
+            // abandon the rest of the fanout.
+            dispatchService.dispatch(tenantId, alert);
+        }
+
+        bridgeToFlows(tenantId, event, claimed);
+        return claimed;
     }
 
     /**
@@ -148,6 +167,7 @@ public class AvailabilityEventListener {
             summary.put("windowEnd", event.windowEnd() == null
                     ? null : event.windowEnd().toString());
             summary.put("matchedWatches", claimed.size());
+            summary.put("synthetic", first.target().synthetic());
 
             // A plain Map, not a payload record — nothing new to register in the
             // native reflect-config (the presence-event precedent).

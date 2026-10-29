@@ -72,6 +72,7 @@
     "* /api/track/**": { "docs": "/docs/platform/messaging/#campaigns" },
     "* /api/devices/**": { "docs": "/docs/platform/messaging/#push" },
     "POST /api/admin/notifications": { "docs": "/docs/platform/messaging/#push" },
+    "POST /api/admin/availability/synthetic-events": { "docs": "/docs/platform/messaging/#synthetic-events" },
 
     "POST /api/flows/{flowId}/execute": { "docs": "/docs/automation/triggers/#manual-and-api-invocation" },
     "GET /api/flows/{flowId}/webhook-url": { "docs": "/docs/automation/triggers/#inbound-webhooks" },

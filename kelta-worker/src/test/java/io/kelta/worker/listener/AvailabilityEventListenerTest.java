@@ -2,8 +2,12 @@ package io.kelta.worker.listener;
 
 import io.kelta.runtime.event.PlatformEvent;
 import io.kelta.runtime.event.PlatformEventPublisher;
+import io.kelta.worker.repository.AlertRepository;
+import io.kelta.worker.repository.AvailabilityStateRepository;
 import io.kelta.worker.repository.Watch;
+import io.kelta.worker.repository.WatchRepository;
 import io.kelta.worker.repository.WatchTarget;
+import io.kelta.worker.repository.WatchTargetRepository;
 import io.kelta.worker.service.availability.AlertDispatchService;
 import io.kelta.worker.service.availability.AvailabilityEvent;
 import io.kelta.worker.service.availability.AvailabilityMatchService;
@@ -16,10 +20,14 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
+import static io.kelta.worker.service.availability.AvailabilityMatchService.Origin.INJECTOR;
+import static io.kelta.worker.service.availability.AvailabilityMatchService.Origin.POLLER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -44,7 +52,7 @@ class AvailabilityEventListenerTest {
         listener = new AvailabilityEventListener(matchService, dispatchService,
                 eventPublisher, new ObjectMapper());
 
-        when(matchService.process(anyString(), any())).thenReturn(List.of());
+        when(matchService.process(anyString(), any(), eq(POLLER))).thenReturn(List.of());
     }
 
     private static String body() {
@@ -165,7 +173,7 @@ class AvailabilityEventListenerTest {
         @DisplayName("dispatches every claimed alert under the subject's tenant")
         void dispatchesClaimedAlerts() {
             var first = claimed();
-            when(matchService.process(anyString(), any())).thenReturn(List.of(first, first));
+            when(matchService.process(anyString(), any(), eq(POLLER))).thenReturn(List.of(first, first));
 
             listener.handleAvailabilityEvent(SUBJECT, body());
 
@@ -180,7 +188,7 @@ class AvailabilityEventListenerTest {
         @Test
         @DisplayName("publishes a compact summary to the flow-trigger namespace")
         void publishesTriggerBridge() {
-            when(matchService.process(anyString(), any())).thenReturn(List.of(claimed()));
+            when(matchService.process(anyString(), any(), eq(POLLER))).thenReturn(List.of(claimed()));
 
             listener.handleAvailabilityEvent(SUBJECT, body());
 
@@ -207,7 +215,7 @@ class AvailabilityEventListenerTest {
         @Test
         @DisplayName("a poison message is swallowed so the subscription is not wedged")
         void poisonMessageSwallowed() {
-            when(matchService.process(anyString(), any()))
+            when(matchService.process(anyString(), any(), eq(POLLER)))
                     .thenThrow(new IllegalStateException("boom"));
 
             // Must not propagate: an exception here would keep redelivering.
@@ -217,13 +225,88 @@ class AvailabilityEventListenerTest {
         @Test
         @DisplayName("a bridge failure does not undo an alert that already went out")
         void bridgeFailureIsSwallowed() {
-            when(matchService.process(anyString(), any())).thenReturn(List.of(claimed()));
+            when(matchService.process(anyString(), any(), eq(POLLER))).thenReturn(List.of(claimed()));
             org.mockito.Mockito.doThrow(new IllegalStateException("nats down"))
                     .when(eventPublisher).publish(anyString(), any());
 
             listener.handleAvailabilityEvent(SUBJECT, body());
 
             verify(dispatchService).dispatch(anyString(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Synthetic targets")
+    class SyntheticTargets {
+
+        private WatchTargetRepository targetRepository;
+        private WatchRepository watchRepository;
+        private AvailabilityStateRepository stateRepository;
+        private AlertRepository alertRepository;
+        private AvailabilityEventListener realMatcherListener;
+
+        @BeforeEach
+        void setUp() {
+            targetRepository = mock(WatchTargetRepository.class);
+            watchRepository = mock(WatchRepository.class);
+            stateRepository = mock(AvailabilityStateRepository.class);
+            alertRepository = mock(AlertRepository.class);
+            AvailabilityMatchService realMatcher = new AvailabilityMatchService(targetRepository,
+                    watchRepository, stateRepository, alertRepository, new ObjectMapper(), true, 30);
+            realMatcherListener = new AvailabilityEventListener(realMatcher, dispatchService,
+                    eventPublisher, new ObjectMapper());
+        }
+
+        private void targetIs(boolean synthetic) {
+            when(targetRepository.findBySourceAndExternalId("tenant-1", "recgov", "site-1"))
+                    .thenReturn(Optional.of(new WatchTarget("target-1", "tenant-1", "recgov",
+                            "site-1", "Site A", null, "{}", true, synthetic)));
+        }
+
+        @Test
+        @DisplayName("a poller-reported event for a synthetic target is dropped before matching")
+        void pollerEventForSyntheticTargetIsDropped() {
+            targetIs(true);
+
+            realMatcherListener.handleAvailabilityEvent(SUBJECT, body());
+
+            // No state recorded, no watch looked up, nothing claimed or sent.
+            verifyNoInteractions(stateRepository, watchRepository, alertRepository,
+                    dispatchService, eventPublisher);
+        }
+
+        @Test
+        @DisplayName("the same event for a real target is matched")
+        void pollerEventForRealTargetIsMatched() {
+            targetIs(false);
+            when(stateRepository.record(anyString(), anyString(), anyString(), anyString(),
+                    any(), any(), any(), any()))
+                    .thenReturn(new AvailabilityStateRepository.Transition(false, "ep-1", "OPEN"));
+
+            realMatcherListener.handleAvailabilityEvent(SUBJECT, body());
+
+            verify(stateRepository).record(eq("tenant-1"), eq("target-1"), eq("2026-08-14"),
+                    eq("OPEN"), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("the injector origin drives a synthetic target but never a real one")
+        void injectorOriginOnlyDrivesSyntheticTargets() {
+            AvailabilityEvent event = listener.parse(body(), "recgov");
+            targetIs(false);
+
+            assertThat(realMatcherListener.process("tenant-1", event, INJECTOR)).isEmpty();
+            verifyNoInteractions(stateRepository);
+
+            targetIs(true);
+            when(stateRepository.record(anyString(), anyString(), anyString(), anyString(),
+                    any(), any(), any(), any()))
+                    .thenReturn(new AvailabilityStateRepository.Transition(false, "ep-1", "OPEN"));
+
+            realMatcherListener.process("tenant-1", event, INJECTOR);
+
+            verify(stateRepository).record(eq("tenant-1"), eq("target-1"), eq("2026-08-14"),
+                    eq("OPEN"), any(), any(), any(), any());
         }
     }
 }

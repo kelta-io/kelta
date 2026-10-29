@@ -64,6 +64,7 @@ Several problems in one request produce several entries (one per field).
 | `NOT_FOUND` | 404 | record or route not found (or not visible) |
 | `COLLECTION_NOT_FOUND` | 404 | unknown collection |
 | `TENANT_NOT_FOUND` | 404 | the tenant slug in the path does not resolve |
+| `TARGET_NOT_FOUND` | 404 | [`POST /api/admin/availability/synthetic-events`](/docs/platform/messaging/#synthetic-events) names a watch target that does not exist in the tenant |
 | `METHOD_NOT_ALLOWED` | 405 | the endpoint does not support the HTTP method |
 | `UNIQUE_VIOLATION` | 409 | unique-constraint violation; one entry per field of the constraint |
 | `STALE_WRITE` | 409 | stale `If-Match`: the record changed since you read it |
@@ -74,6 +75,7 @@ Several problems in one request produce several entries (one per field).
 | `USER_ANONYMIZED` | 409 | a `users` update that moves an anonymized user to another status or gives them an email, or sets `status: ANONYMIZED` outside [anonymize](/docs/security/users-and-groups/#anonymizing-a-user); `meta.userId` |
 | `ENVIRONMENT_NAME_CONFLICT`, `EMPTY_SANDBOX_REFRESH` | 409 | a sandbox environment name already in use, or a refresh with nothing to copy |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | the `Content-Type` is not one the endpoint accepts |
+| `TARGET_NOT_SYNTHETIC` | 422 | [`POST /api/admin/availability/synthetic-events`](/docs/platform/messaging/#synthetic-events) names a real, polled watch target |
 | `VALIDATION_RULE_FAILED` | 422 | a collection validation rule rejected the record; `source.pointer` names its error field |
 | `TOO_MANY_OPERATIONS`, `OPERATION_FAILED` | 422 | `POST /api/operations` over the operation limit, or one operation failed (`source.pointer` is `/atomic:operations/<n>`) and the batch rolled back |
 | `RATE_LIMIT_EXCEEDED` | 429 | tenant quota or per-user share used up; carries `Retry-After` and `X-RateLimit-*` headers — body below, details in [Rate limits](/docs/api/rate-limits/#handling-429) |

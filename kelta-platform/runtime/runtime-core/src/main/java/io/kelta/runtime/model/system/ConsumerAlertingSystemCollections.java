@@ -32,6 +32,9 @@ public final class ConsumerAlertingSystemCollections {
      *
      * <p>{@code metadata} is opaque per-source extras (upstream ids, grouping,
      * optional geo) — the platform stores and returns it without interpreting it.
+     *
+     * <p>{@code synthetic} marks a test target: only the admin availability-event injector drives
+     * it, so a canary exercises the real match → dispatch path without a provider poll.
      */
     public static CollectionDefinition watchTargets() {
         return systemBuilder("watch-targets", "Watch Targets", "watch_target")
@@ -51,6 +54,9 @@ public final class ConsumerAlertingSystemCollections {
                 .withDescription("Free-form JSON metadata."))
             .addField(FieldDefinition.bool("active", true)
                 .withDescription("Whether the record is active; inactive rows are ignored by the runtime."))
+            .addField(FieldDefinition.bool("synthetic", false)
+                .withDescription("Test target driven only by the admin synthetic-event injector; "
+                    + "pollers never list it and their reports for it are dropped."))
             .build();
     }
 

@@ -28,7 +28,9 @@ import java.util.Optional;
  * <ol>
  *   <li><b>Resolve the target.</b> An unknown {@code (source, externalId)} is
  *       dropped quietly — a poller may legitimately cover targets no tenant has
- *       registered, and that is not an error.</li>
+ *       registered, and that is not an error. So is a poller's report on a
+ *       {@code synthetic} target, which only the admin injector drives
+ *       ({@link Origin}).</li>
  *   <li><b>Record the observation and read the transition.</b> If the slot did
  *       not just open, stop. <b>This is the volume killer</b>: the overwhelming
  *       majority of polls report no change, and everything below it is skipped
@@ -87,10 +89,30 @@ public class AvailabilityMatchService {
     }
 
     /**
-     * Processes one observation and returns the alerts newly claimed by it —
+     * Who reported an observation. A synthetic target is driven only by the admin injector, so
+     * the origin decides which targets an observation may touch.
+     */
+    public enum Origin {
+        /** An external poller, over NATS. May only drive real (non-synthetic) targets. */
+        POLLER,
+        /** The admin synthetic-event injector. May only drive synthetic targets. */
+        INJECTOR
+    }
+
+    /**
+     * Processes one poller-reported observation and returns the alerts newly claimed by it —
      * empty for the common "nothing changed" case.
      */
     public List<ClaimedAlert> process(String tenantId, AvailabilityEvent event) {
+        return process(tenantId, event, Origin.POLLER);
+    }
+
+    /**
+     * Processes one observation from {@code origin}. An observation whose target does not
+     * belong to that origin (a poller reporting on a synthetic target, or the injector on a
+     * real one) is dropped before any state is recorded.
+     */
+    public List<ClaimedAlert> process(String tenantId, AvailabilityEvent event, Origin origin) {
         if (!enabled || tenantId == null || tenantId.isBlank() || event == null) {
             return List.of();
         }
@@ -109,6 +131,13 @@ public class AvailabilityMatchService {
                 return List.of();
             }
             WatchTarget resolved = target.get();
+            if (resolved.synthetic() != (origin == Origin.INJECTOR)) {
+                // A synthetic target's state is driven only by the injector, and the
+                // injector never drives a real one.
+                log.debug("Dropping {} observation for {} target {} in tenant {}", origin,
+                        resolved.synthetic() ? "synthetic" : "real", resolved.id(), tenantId);
+                return List.of();
+            }
 
             AvailabilityStateRepository.Transition transition = stateRepository.record(
                     tenantId, resolved.id(), event.slotKey(),
