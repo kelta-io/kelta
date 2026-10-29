@@ -41,6 +41,7 @@ class AlertLatencyIntegrationTest {
 
     static final String TENANT_A = "aaaaaaaa-0000-0000-0000-000000000001";
     static final String TENANT_B = "bbbbbbbb-0000-0000-0000-000000000001";
+    static final String TENANT_C = "cccccccc-0000-0000-0000-000000000001";
     static final Instant T0 = Instant.parse("2026-08-01T12:00:00Z");
 
     static JdbcTemplate jdbc;
@@ -81,6 +82,9 @@ class AlertLatencyIntegrationTest {
         String b1 = alert(TENANT_B, T0);
         delivery(b1, "push", "SENT", T0.plusSeconds(500));
         delivery(b1, "email", "SENT", T0.plusSeconds(900));
+
+        // Tenant C: a webhook delivery, which the widened alert_delivery_channel_check must accept.
+        delivery(alert(TENANT_C, T0), "webhook", "SENT", T0.plusSeconds(3));
     }
 
     private static String alert(String tenantId, Instant createdAt) {
@@ -135,5 +139,16 @@ class AlertLatencyIntegrationTest {
         AlertLatencySummary email = summaryFor(TENANT_A, "email");
         assertThat(email.count()).isEqualTo(1);
         assertThat(email.p50Seconds()).isEqualTo(10.0);
+    }
+
+    @Test
+    @DisplayName("a SENT webhook delivery is stored and counted, filtered or not")
+    void webhookDeliveryIsCounted() {
+        AlertLatencySummary webhook = summaryFor(TENANT_C, "webhook");
+        assertThat(webhook.count()).isEqualTo(1);
+        assertThat(webhook.p50Seconds()).isEqualTo(3.0);
+
+        assertThat(summaryFor(TENANT_C, null).count()).isEqualTo(1);
+        assertThat(summaryFor(TENANT_A, "webhook").count()).isZero();
     }
 }

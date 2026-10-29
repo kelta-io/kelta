@@ -1,6 +1,6 @@
 ---
 title: Email, SMS and push configuration
-description: Platform SMTP and per-tenant overrides, email templates and the transactional send endpoint, SMS via Twilio, and push through FCM, APNs and browser Web Push.
+description: Platform SMTP and per-tenant overrides, email templates and the transactional send endpoint, SMS via Twilio, push through FCM, APNs and browser Web Push, and availability-alert channels including webhooks.
 section: platform
 order: 50
 ---
@@ -88,3 +88,49 @@ subscribers can coexist:
 
 Web Push is implemented on JDK cryptography (RFC 8291/8188/8292) without third-party libraries. Live verification
 against real browsers is owed; treat it as functional-but-unproven in production until you have tested it.
+
+## Availability alert channels
+
+An availability alert is delivered over each channel its watch asks for, narrowed to the member's `channels`
+entitlement when the tenant gates channels (a tenant that gates must list every channel it offers, including
+`webhook`). With no `channels` entitlement the tenant is not gating, and every free channel is delivered.
+
+| Channel | Delivery | Billable |
+|---|---|---|
+| `push` | the member's registered devices (see Push) | no |
+| `email` | the `availability.alert` email template to the member's address | no |
+| `sms` | the member's phone number (see SMS); only ever sent on an affirmative entitlement | yes |
+| `webhook` | a JSON `POST` to the tenant's webhook URL | no |
+
+Each delivery is recorded as `SENT` or `FAILED` with a reason; there are no retries. `GET /api/alerts/latency`
+accepts `?channel=push|email|sms|webhook`.
+
+### Webhook
+
+The body is:
+
+```json
+{
+  "alertId": "…",
+  "watchId": "…",
+  "targetId": "…",
+  "slotKey": "2026-08-14",
+  "eventTime": "2026-08-01T12:00:00Z",
+  "dispatchTime": "2026-08-01T12:00:01.234Z"
+}
+```
+
+`eventTime` is when the alert was created (the opening was detected); `dispatchTime` is when the worker sent the
+request. Any `2xx` answer records the delivery `SENT`; anything else records `FAILED` with the HTTP status.
+
+| | |
+|---|---|
+| Tenant setting | `alerts.webhookUrl` in the tenant's `settings` JSON, e.g. `{"alerts": {"webhookUrl": "https://hooks.example.com/alerts"}}` |
+| Fallback | `KELTA_ALERTS_WEBHOOK_URL` (worker), used for every tenant without its own URL — for self-hosted installs |
+| No URL | the delivery records `FAILED` with `webhook URL not configured`; watches are still accepted |
+| Timeouts | 3 s to connect, 5 s for the whole request; redirects are not followed |
+
+The URL is checked by the same outbound guard as other tenant-supplied URLs: it must resolve to a public address.
+A receiver on a private network (an in-cluster service, an RFC 1918 host) is refused — recorded `FAILED` with
+`webhook URL refused: the host resolves to a non-public address` — unless the operator lists its range in
+`KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` on the worker (comma-separated CIDRs).

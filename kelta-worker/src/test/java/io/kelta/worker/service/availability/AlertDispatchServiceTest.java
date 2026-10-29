@@ -49,6 +49,7 @@ class AlertDispatchServiceTest {
     private DefaultPushService pushService;
     private EmailService emailService;
     private SmsProvider smsProvider;
+    private WebhookAlertSender webhookSender;
     private EntitlementService entitlementService;
     private JdbcTemplate jdbcTemplate;
     private SimpleMeterRegistry meterRegistry;
@@ -60,11 +61,12 @@ class AlertDispatchServiceTest {
         pushService = mock(DefaultPushService.class);
         emailService = mock(EmailService.class);
         smsProvider = mock(SmsProvider.class);
+        webhookSender = mock(WebhookAlertSender.class);
         entitlementService = mock(EntitlementService.class);
         jdbcTemplate = mock(JdbcTemplate.class);
         meterRegistry = new SimpleMeterRegistry();
         service = new AlertDispatchService(deliveryRepository, pushService, emailService,
-                smsProvider, entitlementService, jdbcTemplate, new ObjectMapper(), meterRegistry);
+                smsProvider, webhookSender, entitlementService, jdbcTemplate, new ObjectMapper(), meterRegistry);
 
         when(entitlementService.listLimit(anyString(), anyString(), anyString()))
                 .thenReturn(List.of("push", "email"));
@@ -285,6 +287,61 @@ class AlertDispatchServiceTest {
 
             verify(deliveryRepository).markSent(eq("delivery-push"), any());
             verify(deliveryRepository, never()).markFailed(anyString(), anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("Webhook channel")
+    class Webhook {
+
+        @BeforeEach
+        void entitleWebhook() {
+            when(entitlementService.listLimit(anyString(), anyString(), anyString()))
+                    .thenReturn(List.of("webhook"));
+        }
+
+        @Test
+        @DisplayName("a webhook delivery is sent, marked SENT and timed under channel=webhook")
+        void webhookSent() {
+            ArgumentCaptor<Instant> dispatchTime = ArgumentCaptor.forClass(Instant.class);
+
+            service.dispatch(TENANT, alert("[\"webhook\"]"));
+
+            verify(webhookSender).send(eq(TENANT), any(), dispatchTime.capture());
+            assertThat(dispatchTime.getValue()).isAfterOrEqualTo(ALERT_CREATED_AT);
+            verify(deliveryRepository).markSent(eq("delivery-webhook"), any());
+            assertThat(meterRegistry.find(AlertDispatchService.LATENCY_METRIC)
+                    .tags("tenant", TENANT, "channel", "webhook").timer().count()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("a webhook failure is recorded FAILED with its reason and is not timed")
+        void webhookFailureRecorded() {
+            doThrow(new IllegalStateException("webhook returned HTTP 503"))
+                    .when(webhookSender).send(anyString(), any(), any());
+
+            service.dispatch(TENANT, alert("[\"webhook\"]"));
+
+            verify(deliveryRepository).markFailed("delivery-webhook", "webhook returned HTTP 503");
+            verify(deliveryRepository, never()).markSent(anyString(), any());
+            assertThat(meterRegistry.find(AlertDispatchService.LATENCY_METRIC)
+                    .tags("channel", "webhook").timer()).isNull();
+        }
+
+        @Test
+        @DisplayName("webhook is not billable and never reaches the SMS provider or email service")
+        void webhookIsNotBillable() {
+            assertThat(AlertDispatchService.BILLABLE_CHANNELS).doesNotContain("webhook");
+            // Ungated tenant: a free channel survives, a billable one would be dropped.
+            when(entitlementService.listLimit(anyString(), anyString(), anyString()))
+                    .thenReturn(List.of());
+            assertThat(service.resolveChannels(TENANT, alert("[\"webhook\"]")))
+                    .containsExactly("webhook");
+
+            service.dispatch(TENANT, alert("[\"webhook\"]"));
+
+            verify(webhookSender).send(eq(TENANT), any(), any());
+            verifyNoInteractions(smsProvider, emailService, pushService);
         }
     }
 

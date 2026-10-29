@@ -46,6 +46,10 @@ import java.util.Set;
  * number on file records a FAILED SMS delivery, exactly like a stale push token — never a
  * rollback.
  *
+ * <p>{@code webhook} POSTs the alert as JSON to the tenant's configured URL through
+ * {@link WebhookAlertSender} (guarded outbound call, explicit timeout, no retries). It is free to
+ * deliver, so it is not in {@link #BILLABLE_CHANNELS}.
+ *
  * <p>Every SENT delivery records {@value #LATENCY_METRIC} (tags {@code tenant}, {@code channel}),
  * measured from the alert's {@code created_at} as defined by {@link AlertLatencySummary} — the
  * same definition {@code GET /api/alerts/latency} reports, so the metric and the endpoint agree.
@@ -59,6 +63,7 @@ public class AlertDispatchService {
     static final String CHANNEL_PUSH = "push";
     static final String CHANNEL_EMAIL = "email";
     static final String CHANNEL_SMS = "sms";
+    static final String CHANNEL_WEBHOOK = "webhook";
 
     /** Timer of detection → delivery latency per SENT delivery. */
     static final String LATENCY_METRIC = "kelta_alert_delivery_latency_seconds";
@@ -90,6 +95,7 @@ public class AlertDispatchService {
     private final DefaultPushService pushService;
     private final EmailService emailService;
     private final SmsProvider smsProvider;
+    private final WebhookAlertSender webhookSender;
     private final EntitlementService entitlementService;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -99,6 +105,7 @@ public class AlertDispatchService {
                                 DefaultPushService pushService,
                                 EmailService emailService,
                                 SmsProvider smsProvider,
+                                WebhookAlertSender webhookSender,
                                 EntitlementService entitlementService,
                                 JdbcTemplate jdbcTemplate,
                                 ObjectMapper objectMapper,
@@ -107,6 +114,7 @@ public class AlertDispatchService {
         this.pushService = pushService;
         this.emailService = emailService;
         this.smsProvider = smsProvider;
+        this.webhookSender = webhookSender;
         this.entitlementService = entitlementService;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
@@ -193,6 +201,7 @@ public class AlertDispatchService {
                 String sms = title + " — " + describeWindow(alert) + " just opened. Book now.";
                 smsProvider.send(new SmsMessage(phone, sms));
             }
+            case CHANNEL_WEBHOOK -> webhookSender.send(tenantId, alert, Instant.now());
             default -> throw new IllegalArgumentException("unknown channel: " + channel);
         }
     }

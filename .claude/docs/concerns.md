@@ -512,7 +512,10 @@ non-public targets (loopback, RFC 1918, link-local/metadata, CGNAT, ULA, embedde
 unless `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` lists them, re-validate every redirect hop, and bound
 each fetch with deadlines and a body cap. Used by OIDC discovery (worker and kelta-auth), OpenAPI
 spec import/validate, the `HTTP_CALLOUT` / `CALL_API` / `OUTBOUND_MESSAGE` flow handlers,
-external-rest collections, OAuth 2.0 credential token URLs and Web Push delivery; kelta-auth's
+external-rest collections, OAuth 2.0 credential token URLs, Web Push delivery and the
+availability-alert `webhook` channel (`WebhookAlertSender` — the URL is tenant-supplied via
+`settings.alerts.webhookUrl`, so an in-cluster receiver is refused until its CIDR is
+allow-listed; never loosen the guard for it); kelta-auth's
 federated login applies the same guard through `OidcLoginHttp` (table in `integrations.md`). New
 code that fetches a tenant- or admin-supplied URL from inside the cluster should go through
 `OutboundHttpClient`.
